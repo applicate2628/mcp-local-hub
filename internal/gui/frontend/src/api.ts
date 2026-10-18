@@ -63,6 +63,61 @@ export interface APIError extends Error {
   body: unknown;
 }
 
+export interface ClientEntryRemovalResult {
+  operation: "remove-client-entry";
+  server: string;
+  client: string;
+  outcome: "removed" | "absent" | "refused" | "failed" | "applied-unverified" | "rollback-conflict";
+  effective_absent: boolean;
+  code: string;
+  receipt?: { version: 1; before_token: string; after_token: string; source_count: number };
+}
+
+export class ClientEntryRemovalError extends Error {
+  constructor(message: string, readonly code: string, readonly status: number, readonly outcome?: string) {
+    super(message);
+    this.name = "ClientEntryRemovalError";
+  }
+}
+
+export async function removeClientEntry(server: string, client: string, sourceToken: string): Promise<ClientEntryRemovalResult> {
+  if (!server.trim() || !client.trim() || !sourceToken.trim()) {
+    throw new ClientEntryRemovalError("Removal selection is incomplete. Refresh and select the entry again.", "REMOVAL_SELECTION_INVALID", 0);
+  }
+  const resp = await fetch("/api/client-entry/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply: true, server, client, source_token: sourceToken }),
+  });
+  let body: unknown;
+  try {
+    body = await resp.json();
+  } catch {
+    throw new ClientEntryRemovalError(`Removal outcome was not confirmed (HTTP ${resp.status}). Refresh before retrying.`, "REMOVAL_RESPONSE_UNVERIFIED", resp.status);
+  }
+  const row = body !== null && typeof body === "object" && !Array.isArray(body)
+    ? body as Record<string, unknown> : null;
+  if (row?.operation !== "remove-client-entry" || row.server !== server || row.client !== client) {
+    const code = typeof row?.code === "string" ? row.code : "REMOVAL_RESPONSE_UNVERIFIED";
+    const detail = typeof row?.error === "string" ? row.error : "response did not confirm the selected entry";
+    throw new ClientEntryRemovalError(`HTTP ${resp.status}: ${detail}. Refresh before retrying.`, code, resp.status);
+  }
+  const receipt = row.receipt !== null && typeof row.receipt === "object" && !Array.isArray(row.receipt)
+    ? row.receipt as Record<string, unknown> : null;
+  if (resp.status === 200 && (row.outcome === "removed" || row.outcome === "absent") &&
+    row.effective_absent === true && row.code === "REMOVAL_SETTLED" && receipt?.version === 1 &&
+    receipt.before_token === sourceToken && typeof receipt.after_token === "string" && receipt.after_token.trim().length > 0 &&
+    Number.isSafeInteger(receipt.source_count) && (receipt.source_count as number) > 0) {
+    return row as unknown as ClientEntryRemovalResult;
+  }
+  if (resp.status === 200) {
+    throw new ClientEntryRemovalError("Removal outcome was not confirmed: invalid settled row or receipt. Refresh before retrying.", "REMOVAL_RESPONSE_UNVERIFIED", resp.status);
+  }
+  const code = typeof row.code === "string" ? row.code : "REMOVAL_RESPONSE_UNVERIFIED";
+  const outcome = typeof row.outcome === "string" ? row.outcome : "unverified";
+  throw new ClientEntryRemovalError(`${outcome} [${code}] (HTTP ${resp.status}). Refresh before retrying.`, code, resp.status, outcome);
+}
+
 function makeAPIError(status: number, code: string | undefined, message: string, body: unknown): APIError {
   const err = new Error(message) as APIError;
   err.code = code;
@@ -1109,39 +1164,111 @@ export async function cleanupOrphans(): Promise<CleanupOrphansResult> {
   return (await resp.json()) as CleanupOrphansResult;
 }
 
-// SupervisorRestartResult mirrors gui.supervisorRestartResponse: the
-// per-step outcome of read-lock → kill → spawn. `per_step_error` is
-// keyed by step name ("read_lock", "kill", "spawn") with empty/absent
-// values meaning "step succeeded".
+export type SupervisorRestartOutcome = "restarted" | "pending" | "refused" | "failed";
+
+export interface SupervisorRestartGeneration {
+  pid: number;
+  started_at: string;
+}
+
+// SupervisorRestartResult mirrors the actual additive gui supervisor restart
+// DTO. Optional completion fields keep older responses representable; the
+// shared projection below treats those responses as unconfirmed.
 export interface SupervisorRestartResult {
   killed_pid: number;
   killed: boolean;
   spawned_pid: number;
   spawned: boolean;
   per_step_error?: Record<string, string>;
+  outcome?: SupervisorRestartOutcome;
+  ready?: boolean;
+  original_generation?: SupervisorRestartGeneration;
+  selected_generation?: SupervisorRestartGeneration;
+  original_settled?: boolean;
+  phase?: string;
+  transfer_committed?: boolean;
+  transferred?: boolean;
+  original_child_disposition?: string;
+  namespace_disposition?: string;
+  code?: string;
 }
 
-// restartSupervisor posts to /api/supervisor/restart. The handler
-// always returns 200 — partial-failure cases are signalled via
-// `spawned: false` + per_step_error keys so the UI can render a
-// "kill ok, spawn failed: …" status without parsing a non-2xx body.
+export interface SupervisorRestartFeedback {
+  kind: "ok" | "error";
+  text: string;
+}
+
+// This is the one presentation projection used by both restart screens. The
+// backend owns native completion qualification; the UI trusts only its known
+// positive outcome with explicit readiness and no acquired safe failures.
+export function projectSupervisorRestartFeedback(
+  result: SupervisorRestartResult,
+): SupervisorRestartFeedback {
+  const stepErrors = Object.entries(result.per_step_error ?? {}).filter(
+    ([, message]) => message.trim().length > 0,
+  );
+  const code = result.code || null;
+  const confirmed = result.outcome === "restarted"
+    && result.ready === true
+    && code === null
+    && stepErrors.length === 0;
+
+  const outcomeLabel = result.outcome === "pending"
+    ? "Supervisor restart is pending."
+    : result.outcome === "refused"
+      ? "Supervisor restart was refused."
+      : result.outcome === "failed"
+        ? "Supervisor restart failed."
+        : result.outcome === "restarted"
+          ? confirmed
+            ? "Supervisor restart confirmed."
+            : "Supervisor restart could not be confirmed."
+          : "Supervisor restart outcome is unconfirmed.";
+
+  const effects: string[] = [];
+  if (result.killed) effects.push(`killed PID ${result.killed_pid}`);
+  if (result.spawned) effects.push(`spawned PID ${result.spawned_pid}`);
+  if (effects.length === 0) effects.push("no process effect reported");
+  const details = [
+    code ? `Code: ${code}` : null,
+    ...stepErrors.map(([step, message]) => `${step}: ${message}`),
+  ].filter((detail): detail is string => detail !== null);
+  return {
+    kind: confirmed ? "ok" : "error",
+    text: [outcomeLabel, effects.join(", "), ...details].join(" "),
+  };
+}
+
+// restartSupervisor posts to /api/supervisor/restart and preserves the
+// producer's lifecycle facts. Older responses without outcome/readiness
+// remain representable but are shown as unconfirmed by the shared projection.
 export async function restartSupervisor(): Promise<SupervisorRestartResult> {
   const resp = await fetch("/api/supervisor/restart", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
   if (!resp.ok) {
-    let body: { error?: string; code?: string } | null = null;
+    let body: { code?: string } | null = null;
     try {
-      body = (await resp.json()) as { error?: string; code?: string };
+      body = (await resp.json()) as { code?: string };
     } catch {
       // non-JSON
     }
-    const msg = body?.error ?? resp.statusText ?? "unknown";
-    const code = body?.code ?? `HTTP_${resp.status}`;
-    throw new Error(`/api/supervisor/restart [${code}]: ${msg}`);
+    const code = typeof body?.code === "string" ? body.code : `HTTP_${resp.status}`;
+    throw new Error(`/api/supervisor/restart [${code}]: HTTP ${resp.status}`);
   }
-  return (await resp.json()) as SupervisorRestartResult;
+  let result: unknown;
+  try {
+    result = await resp.json();
+  } catch (cause) {
+    const error = new Error("/api/supervisor/restart [INVALID_JSON]: response was not valid JSON");
+    (error as Error & { cause?: unknown }).cause = cause;
+    throw error;
+  }
+  if (result === null || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("/api/supervisor/restart [INVALID_RESPONSE]: expected a JSON object");
+  }
+  return result as SupervisorRestartResult;
 }
 
 // GuiRestartResult mirrors gui.guiSelfRestartResponse: the outcome of
@@ -1435,6 +1562,16 @@ export class ManifestHashMismatchError extends Error {
     super(message);
     this.name = "ManifestHashMismatchError";
   }
+}
+
+// getManifestView reads the server specification for a read-only preview.
+export async function getManifestView(name: string): Promise<{ yaml: string }> {
+  const path = `/api/manifest/view?name=${encodeURIComponent(name)}`;
+  const payload = await fetchOrThrow<{ yaml?: unknown }>(path, "object");
+  if (typeof payload.yaml !== "string") {
+    throw new Error(`${path}: expected string yaml`);
+  }
+  return { yaml: payload.yaml };
 }
 
 // getManifest reads the named manifest from disk and returns the YAML

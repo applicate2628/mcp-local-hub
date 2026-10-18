@@ -42,6 +42,7 @@ var (
 	ErrRunStoreOwned      = errors.New("SONNET_RUN_STORE_OWNED")
 	ErrRunStoreInvalid    = errors.New("SONNET_RUN_STORE_INVALID")
 	ErrShutdownIncomplete = errors.New("SONNET_SHUTDOWN_INCOMPLETE")
+	errRunOwnerClosed     = errors.New("SONNET_RUN_OWNER_CLOSED")
 )
 
 type State string
@@ -165,25 +166,25 @@ type record struct {
 	clearActive                                            func()                    `json:"-"`
 }
 type Server struct {
-	server         *mcp.Server
-	root           string
-	locator        func() (Product, error)
-	driver         Driver
-	mu             sync.Mutex
-	next           int
-	runs           map[string]*record
-	keys           map[string]string
-	lease          *flock.Flock
-	initErr        error
-	closed         bool
-	workers        int
-	workersChanged chan struct{}
-	snapshotWriter func(string, []byte) error
-	snapshotOutput func(string) (map[string]OutputFile, error)
-	markActive     func(string) (func(), error)
-	removeWork     func(string) error
-	afterCopy      func()
-	beforeOutput   func() // test barrier; set before starting workers
+	server          *mcp.Server
+	root            string
+	locator         func() (Product, error)
+	driver          Driver
+	mu              sync.Mutex
+	next            int
+	runs            map[string]*record
+	keys            map[string]string
+	lease           *flock.Flock
+	initErr         error
+	closed          bool
+	inFlight        int
+	inFlightChanged chan struct{}
+	snapshotWriter  func(string, []byte) error
+	snapshotOutput  func(string) (map[string]OutputFile, error)
+	markActive      func(string) (func(), error)
+	removeWork      func(string) error
+	afterCopy       func()
+	beforeOutput    func() // test barrier; set before starting workers
 }
 
 func NewServer(c Config) *Server {
@@ -194,7 +195,7 @@ func NewServer(c Config) *Server {
 	if c.Locator == nil {
 		c.Locator = productLocator(c)
 	}
-	s := &Server{root: root, locator: c.Locator, driver: c.Driver, runs: map[string]*record{}, keys: map[string]string{}, workersChanged: make(chan struct{}), snapshotWriter: durableWrite}
+	s := &Server{root: root, locator: c.Locator, driver: c.Driver, runs: map[string]*record{}, keys: map[string]string{}, inFlightChanged: make(chan struct{}), snapshotWriter: durableWrite}
 	s.initStore()
 	return s
 }
@@ -308,9 +309,16 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	}
 	if s.closed {
 		s.mu.Unlock()
-		return StartResponse{}, errors.New("SONNET_RUN_OWNER_CLOSED")
+		return StartResponse{}, errRunOwnerClosed
 	}
+	s.inFlight++
 	s.mu.Unlock()
+	transferred := false
+	defer func() {
+		if !transferred {
+			s.settleInFlight()
+		}
+	}()
 	if req.TimeoutSeconds <= 0 || req.TimeoutSeconds > maxTimeoutSeconds {
 		return StartResponse{}, fmt.Errorf("SONNET_PROJECT_INVALID: timeout_seconds must be 1..%d", maxTimeoutSeconds)
 	}
@@ -319,6 +327,10 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		return StartResponse{}, err
 	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return StartResponse{}, errRunOwnerClosed
+	}
 	if req.IdempotencyKey != "" {
 		if id := s.keys[req.IdempotencyKey]; id != "" {
 			r := s.runs[id]
@@ -333,7 +345,7 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		}
 	}
 	s.mu.Unlock()
-	// Durable replays depend on their recorded request, not current product discovery.
+	// Only a new execution requires current product discovery.
 	p, err := s.locator()
 	if err != nil {
 		if stableFailureID(err) != "SONNET_INTERNAL_ERROR" {
@@ -343,6 +355,12 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	}
 	if !p.Available || p.Path == "" {
 		return StartResponse{}, errors.New("SONNET_PRODUCT_NOT_FOUND")
+	}
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return StartResponse{}, errRunOwnerClosed
 	}
 	work, sourceHash, copiedHash, admission, err := s.copyProject(req.ProjectRoot, req.ProjectFile)
 	if err != nil {
@@ -361,10 +379,8 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Close may have released the store lease while the project was copied.
-	// Revalidate admission under the same lock used for worker registration.
 	if s.closed {
-		return StartResponse{}, s.cleanupPreTransferWork(work, errors.New("SONNET_RUN_OWNER_CLOSED"))
+		return StartResponse{}, s.cleanupPreTransferWork(work, errRunOwnerClosed)
 	}
 	if req.IdempotencyKey != "" {
 		if id := s.keys[req.IdempotencyKey]; id != "" {
@@ -405,7 +421,7 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		cancel()
 		return StartResponse{}, fmt.Errorf("SONNET_RUN_STORE_INVALID: persist prepared record: %w", err)
 	}
-	s.workers++
+	transferred = true
 	go s.run(workerCtx, r, p.Path)
 	return startFrom(r), nil
 }
@@ -476,14 +492,7 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 		if r.clearActive != nil {
 			r.clearActive()
 		}
-		s.mu.Lock()
-		s.workers--
-		s.signalWorkersChangedLocked()
-		closed := s.closed
-		s.mu.Unlock()
-		if closed {
-			_ = s.releaseLeaseWhenWorkersSettled()
-		}
+		s.settleInFlight()
 	}()
 	s.mu.Lock()
 	r.State = StateRunning
@@ -691,20 +700,20 @@ func (s *Server) Close(ctx context.Context) error {
 		}
 	}
 	s.mu.Unlock()
-	if err := s.waitWorkers(ctx); err != nil {
+	if err := s.waitInFlight(ctx); err != nil {
 		return err
 	}
-	return s.releaseLeaseWhenWorkersSettled()
+	return s.releaseLeaseWhenSettled()
 }
 
-func (s *Server) waitWorkers(ctx context.Context) error {
+func (s *Server) waitInFlight(ctx context.Context) error {
 	for {
 		s.mu.Lock()
-		if s.workers == 0 {
+		if s.inFlight == 0 {
 			s.mu.Unlock()
 			return nil
 		}
-		changed := s.workersChanged
+		changed := s.inFlightChanged
 		s.mu.Unlock()
 		select {
 		case <-changed:
@@ -714,9 +723,16 @@ func (s *Server) waitWorkers(ctx context.Context) error {
 	}
 }
 
-func (s *Server) signalWorkersChangedLocked() {
-	close(s.workersChanged)
-	s.workersChanged = make(chan struct{})
+func (s *Server) settleInFlight() {
+	s.mu.Lock()
+	s.inFlight--
+	close(s.inFlightChanged)
+	s.inFlightChanged = make(chan struct{})
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		_ = s.releaseLeaseWhenSettled()
+	}
 }
 func terminal(v State) bool {
 	return v == StateCompleted || v == StateCompletedNonzero || v == StateTimedOut || v == StateForceCancelled || v == StateFailed || v == StateHostLost
@@ -941,10 +957,10 @@ func expiredRecordlessWorkspace(workspace, name string, cutoff time.Time) bool {
 	return err == nil
 }
 
-func (s *Server) releaseLeaseWhenWorkersSettled() error {
+func (s *Server) releaseLeaseWhenSettled() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.closed || s.workers != 0 || s.lease == nil {
+	if !s.closed || s.inFlight != 0 || s.lease == nil {
 		return nil
 	}
 	if err := s.lease.Unlock(); err != nil {
@@ -1389,7 +1405,7 @@ func stableFailureID(err error) string {
 	if err == nil {
 		return "SONNET_INTERNAL_ERROR"
 	}
-	for _, known := range []error{ErrIdempotencyConflict, ErrResultPending, ErrForceRequired, ErrUnknownRun, ErrRunStoreOwned, ErrRunStoreInvalid, ErrShutdownIncomplete} {
+	for _, known := range []error{ErrIdempotencyConflict, errRunOwnerClosed, ErrResultPending, ErrForceRequired, ErrUnknownRun, ErrRunStoreOwned, ErrRunStoreInvalid, ErrShutdownIncomplete} {
 		if errors.Is(err, known) {
 			return known.Error()
 		}

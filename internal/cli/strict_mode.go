@@ -154,7 +154,7 @@ type strictModeBreadcrumb struct {
 }
 
 // StrictModeDeps holds the injected dependencies the strict-mode CLI
-// consumes. Production callers fill only StateDir + IntentPath +
+// consumes. Production callers supply StateDir + GUISettingsPath + IntentPath +
 // BreadcrumbPath + AutostartBackend; PromptOperator defaults to a
 // stdin-reading function.
 //
@@ -164,6 +164,14 @@ type StrictModeDeps struct {
 	// StateDir is the absolute path to the mcphub state directory,
 	// used for migration.lock + --once.lock + breadcrumb resolution.
 	StateDir string
+
+	// GUISettingsPath binds the existing GUI-control settings owner. Production
+	// supplies api.SettingsPath; fixtures must supply their isolated settings.
+	GUISettingsPath string
+
+	// EnableAutorun is the positive, explicit Windows autostart enable request.
+	// Ordinary strict-mode and recovery preserve the current boot preference.
+	EnableAutorun bool
 
 	// IntentPath is the absolute path to supervisor-intent.json. The
 	// directory must already exist (production: created by Task 1.1
@@ -265,6 +273,7 @@ func defaultStrictModeDeps() (StrictModeDeps, error) {
 	}
 	return StrictModeDeps{
 		StateDir:         stateDir,
+		GUISettingsPath:  api.SettingsPath(),
 		IntentPath:       filepath.Join(stateDir, "supervisor-intent.json"),
 		BreadcrumbPath:   filepath.Join(stateDir, "strict-mode-mutation-incomplete.json"),
 		AutostartBackend: backend,
@@ -494,7 +503,7 @@ func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, 
 	}
 
 	// Step 2: install/update shim with new strict_mode flag.
-	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired, OwnerMode: desiredOwnerMode}); err != nil {
+	if err := projectAutostartWithGUIControl(deps, deps.EnableAutorun, autostart.Options{StrictMode: desired, OwnerMode: desiredOwnerMode}); err != nil {
 		// Revert step 1.
 		if revertErr := writeAutostartPolicyIntent(deps, originalStrict, originalOwnerMode); revertErr != nil {
 			// Both writes failed — overwrite the in-progress breadcrumb with
@@ -973,12 +982,24 @@ func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps Str
 			return result
 		}
 	}
-	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: target, OwnerMode: targetOwnerMode}); err != nil {
+	if err := projectAutostartWithGUIControl(deps, false, autostart.Options{StrictMode: target, OwnerMode: targetOwnerMode}); err != nil {
 		result.err = errors.Join(result.err, fmt.Errorf("shim enable: %w", err))
 		return result
 	}
 	result.converged = true
 	return result
+}
+
+// Only final shim admission holds settings. No intent access or rollback may
+// run in this callback: managed attachment already owns intent -> settings.
+// Each projection observes the latest policy, including a newer explicit OFF.
+func projectAutostartWithGUIControl(deps StrictModeDeps, enable bool, opts autostart.Options) error {
+	return withAutostartGUIControl(deps, enable, func(control *api.GUIOwnerControl) error {
+		if control != nil && control.AutorunEnabled != nil && !*control.AutorunEnabled {
+			return autostart.ProjectAutorunDisabled(control.AutorunEnabled, deps.AutostartBackend, opts)
+		}
+		return deps.AutostartBackend.Enable(opts)
+	})
 }
 
 func strictModeAppliedIntentError(deps StrictModeDeps, err error) bool {

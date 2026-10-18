@@ -1,6 +1,7 @@
 package cbuild
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -272,5 +274,84 @@ func TestCmakeCleanPurgeRefusesNonDirectoryTarget(t *testing.T) {
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "project(contents)\n" {
 		t.Errorf("non-directory target changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestExecutionResultsRetainRawTailInMCPChannels(t *testing.T) {
+	const tail = "unrecognized output\r\nsecond line\n"
+	for _, tc := range []struct {
+		name   string
+		result any
+		want   string
+	}{
+		{"configure", configureResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
+		{"build", buildResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
+		{"test", testResult{}, `{"success":false,"exit_code":0,"total":0,"passed":0,"failed":0,"tests":null,"wall_ms":0,"raw_tail":""}`},
+		{"workflow", workflowResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
+		{"clean", cleanResult{}, `{"success":false,"purged":false,"raw_tail":""}`},
+		{"vcpkg_install", vcpkgInstallResult{}, `{"success":false,"exit_code":0,"installed":null,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
+		{"vcpkg_list", vcpkgListResult{}, `{"success":false,"exit_code":0,"packages":null,"raw_tail":""}`},
+		{"vcpkg_search", vcpkgSearchResult{}, `{"success":false,"exit_code":0,"query":"","packages":null,"raw_tail":""}`},
+		{"nonempty", buildResult{Success: true, BuiltTargets: []string{"example"}, WallMs: 12, RawTail: tail}, `{"success":true,"exit_code":0,"diagnostics":null,"built_targets":["example"],"wall_ms":12,"raw_tail":"unrecognized output\r\nsecond line\n"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var want map[string]any
+			if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+				t.Fatal(err)
+			}
+			check := func(channel string, encoded []byte) {
+				t.Helper()
+				var got map[string]any
+				if err := json.Unmarshal(encoded, &got); err != nil {
+					t.Fatalf("%s decode: %v", channel, err)
+				}
+				value, present := got["raw_tail"]
+				if _, isString := value.(string); !present || !isString {
+					t.Fatalf("%s raw_tail = %#v, present = %v; want a present string", channel, value, present)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("%s fields = %#v, want %#v", channel, got, want)
+				}
+			}
+			domain, err := json.Marshal(tc.result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check("domain", domain)
+
+			tool := &funcTool{name: "result", handler: func(context.Context, json.RawMessage) (any, error) {
+				return tc.result, nil
+			}}
+			server := mcp.NewServer("test", "0", []mcp.Tool{tool})
+			request := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"result","arguments":{}}}` + "\n"
+			var output bytes.Buffer
+			if err := server.Serve(context.Background(), strings.NewReader(request), &output); err != nil {
+				t.Fatalf("Serve: %v", err)
+			}
+			var response struct {
+				JSONRPC string          `json:"jsonrpc"`
+				ID      int             `json:"id"`
+				Error   json.RawMessage `json:"error"`
+				Result  struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+					IsError           bool            `json:"isError"`
+					StructuredContent json.RawMessage `json:"structuredContent"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+				t.Fatalf("response decode: %v", err)
+			}
+			if response.JSONRPC != "2.0" || response.ID != 1 || len(response.Error) != 0 || response.Result.IsError {
+				t.Fatalf("unexpected response: %s", output.Bytes())
+			}
+			if len(response.Result.Content) != 1 || response.Result.Content[0].Type != "text" {
+				t.Fatalf("unexpected content: %+v", response.Result.Content)
+			}
+			check("text", []byte(response.Result.Content[0].Text))
+			check("structuredContent", response.Result.StructuredContent)
+		})
 	}
 }

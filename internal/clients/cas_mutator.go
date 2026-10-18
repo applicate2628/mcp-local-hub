@@ -266,16 +266,7 @@ func (m *directCleanupMutator) CleanupDirectEntryAtomically(
 		if validationErr := invokeDirectCleanupRevalidate(revalidate, DirectCleanupPostBackupPreRemove); validationErr != nil {
 			return validationErr
 		}
-		removedBytes, removeErr := removeEntryPhysical(configBytes, liveToken)
-		if removeErr != nil {
-			return fmt.Errorf("%w: remove cleanup target %q: %v", ErrCASConflict, target.identity.Name, removeErr)
-		}
-		if afterToken, stillPresent, verifyErr := extractEntryPhysicalToken(m.client.Client, removedBytes, target.identity.Name); verifyErr != nil {
-			return fmt.Errorf("%w: verify cleanup splice for %q: %v", ErrCASConflict, target.identity.Name, verifyErr)
-		} else if stillPresent || afterToken != nil {
-			return fmt.Errorf("%w: cleanup splice retained target %q", ErrCASConflict, target.identity.Name)
-		}
-		if writeErr := writeConfigFileWith(m.writer, m.client.Client.ConfigPath(), removedBytes); writeErr != nil {
+		if writeErr := writePhysicalRemoval(m.client.Client, m.writer, configBytes, liveToken); writeErr != nil {
 			return writeErr
 		}
 		if validationErr := invokeDirectCleanupRevalidate(revalidate, DirectCleanupPostRemove); validationErr != nil {
@@ -337,39 +328,7 @@ func (r *directCleanupReceipt) restoreUnderLock() error {
 	if _, ok := r.mutator.client.Client.(CASEntryMutator); !ok {
 		return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCleanupRestoreConflict, r.mutator.client.Client.Name())
 	}
-	configBytes, readErr := r.mutator.client.readConfigBytesForLockedOperation()
-	if readErr != nil {
-		return fmt.Errorf("%w: read current target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
-	}
-	currentToken, present, extractErr := extractEntryPhysicalToken(r.mutator.client.Client, configBytes, r.target.identity.Name)
-	if extractErr != nil {
-		return fmt.Errorf("%w: classify current target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, extractErr)
-	}
-	if present {
-		if entryPhysicalTokensEqual(currentToken, r.target.physicalToken) {
-			return nil
-		}
-		return fmt.Errorf("%w: target %q contains foreign state", ErrCleanupRestoreConflict, r.target.identity.Name)
-	}
-	restoredConfig, restoreErr := restoreEntryPhysical(configBytes, r.target.physicalToken)
-	if restoreErr != nil {
-		return fmt.Errorf("%w: restore cleanup target %q: %v", ErrCleanupRestoreConflict, r.target.identity.Name, restoreErr)
-	}
-	if writeErr := writeConfigFileWith(r.mutator.writer, r.mutator.client.Client.ConfigPath(), restoredConfig); writeErr != nil {
-		return fmt.Errorf("restore cleanup target %q: %w", r.target.identity.Name, writeErr)
-	}
-	restoredBytes, readErr := r.mutator.client.readConfigBytesForLockedOperation()
-	if readErr != nil {
-		return fmt.Errorf("%w: verify restored target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
-	}
-	restoredToken, restored, extractErr := extractEntryPhysicalToken(r.mutator.client.Client, restoredBytes, r.target.identity.Name)
-	if extractErr != nil {
-		return fmt.Errorf("%w: verify restored target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, extractErr)
-	}
-	if !restored || !entryPhysicalTokensEqual(restoredToken, r.target.physicalToken) {
-		return fmt.Errorf("%w: restored target %q does not match the captured original", ErrCleanupRestoreConflict, r.target.identity.Name)
-	}
-	return nil
+	return (&physicalEntryInverse{client: r.mutator.client, writer: r.mutator.writer, token: r.target.physicalToken}).restoreUnderLock()
 }
 
 // Compile-time proof that every adopt-reachable adapter carries the CAS method

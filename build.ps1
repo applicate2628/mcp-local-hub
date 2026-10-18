@@ -29,12 +29,13 @@ param(
     [string]$OutputDirectory = "bin",
     [string]$ReleaseVersion,
     [string]$ReleaseCommit,
-    [string]$ReleaseBuildDate
+    [string]$ReleaseBuildDate,
+    [string]$SourceSnapshotPath
 )
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.4.37"
+$version = "0.4.41"
 try { $commit = (git -C $PSScriptRoot rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -102,6 +103,32 @@ if ($versionCore.Count -ne 3 -or @($versionCore | Where-Object { $_ -notmatch '^
 }
 
 $outDir = $OutputDirectory
+$publisherSource = $null
+function Get-VerifiedPublisherSourceInput {
+    # Root's full Source/table/helper preflight precedes this helper compilation.
+    # This script selects no source files and never serializes the epoch body.
+    Push-Location -LiteralPath $PSScriptRoot
+    try {
+        $rows = @(& go run ./tools/windows-product-validate --source-snapshot $SourceSnapshotPath --source-root $PSScriptRoot)
+        if ($LASTEXITCODE -ne 0 -or $rows.Count -ne 1) { throw "PUBLISHER_SOURCE_TABLE_INVALID: verifier failed" }
+        $row = $rows[0] | ConvertFrom-Json
+        if ($row.schema -cne "windows-publisher-source-input-v1" -or
+            [string]$row.source_epoch -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$row.source_snapshot_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            [int]$row.file_count -le 0) { throw "PUBLISHER_SOURCE_TABLE_INVALID: verifier output" }
+        return $row
+    } finally { Pop-Location }
+}
+if (-not [string]::IsNullOrEmpty($SourceSnapshotPath)) {
+    if ($TestStateIsolatedProduct) { throw "PUBLISHER_SOURCE_TABLE_INVALID: test product cannot issue prepared source" }
+    $SourceSnapshotPath = [IO.Path]::GetFullPath($SourceSnapshotPath)
+    $sourcePrefix = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $outputAbsolute = [IO.Path]::GetFullPath($outDir)
+    if ($outputAbsolute.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase) -or $outputAbsolute.TrimEnd([IO.Path]::DirectorySeparatorChar) -ceq $sourcePrefix.TrimEnd([IO.Path]::DirectorySeparatorChar)) {
+        throw "PUBLISHER_SOURCE_TABLE_INVALID: output must be outside Source"
+    }
+    $publisherSource = Get-VerifiedPublisherSourceInput
+}
 $contractPath = Join-Path $PSScriptRoot "windows-product-artifacts.json"
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
 if ($contract.schemaVersion -ne 2 -or @($contract.artifacts).Count -ne 1 -or
@@ -120,6 +147,9 @@ $artifacts = @(
             $flags += "-X main.version=$version"
             $flags += "-X main.commit=$commit"
             $flags += "-X main.buildDate=$buildDate"
+            if ($null -ne $publisherSource) {
+                $flags += "-X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=$($publisherSource.source_epoch)"
+            }
         }
         if ($artifact.subsystem -eq 2) {
             $flags += "-H windowsgui"
@@ -133,6 +163,11 @@ $artifacts = @(
                 SpecialBuild = "mcphub-role-v1;role=$($artifact.role)"
                 InternalName = "mcphub"
                 OriginalFilename = [string]$artifact.filename
+            }
+            if ($null -ne $publisherSource) {
+                $originalComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
+                if ($originalComments.Contains("mcphub-source-v1;sha256=")) { throw "PUBLISHER_SOURCE_TABLE_INVALID: template already stamped" }
+                $versionInfo.Comments = $originalComments + [char]10 + "mcphub-source-v1;sha256=$($publisherSource.source_epoch)"
             }
         }
         [ordered]@{
@@ -188,6 +223,9 @@ $admissionCommand = [ordered]@{
     )
 }
 $retiredOutputFiles = @("mcphub-windowless.exe", "mcphub-pe-admit.exe")
+if ($null -ne $publisherSource) {
+    $admissionCommand.argv += @("--expected-source-epoch", [string]$publisherSource.source_epoch)
+}
 $buildTags = @()
 if ($TestStateIsolatedProduct) {
     $buildTags = @("test_state_path_env")
@@ -206,6 +244,13 @@ $plan = [ordered]@{
     identityManifest = $identityManifest
     admissionCommand = $admissionCommand
     retiredOutputFiles = $retiredOutputFiles
+}
+if ($null -ne $publisherSource) {
+    $plan.publisherSource = [ordered]@{
+        source_epoch = [string]$publisherSource.source_epoch
+        source_snapshot_sha256 = [string]$publisherSource.source_snapshot_sha256
+        file_count = [int]$publisherSource.file_count
+    }
 }
 
 if ($PrintPlanJson) {
@@ -238,6 +283,9 @@ $priorGOFLAGS = $env:GOFLAGS
 if ($TestStateIsolatedProduct) {
     $env:GOFLAGS = ""
 }
+$builderPrimaryError = $null
+$builderPrimaryExitCode = $null
+$builderPrimaryExitStage = $null
 try {
     New-Item -ItemType Directory -Force -Path $resourceScratch | Out-Null
     $templatePath = Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json"
@@ -270,7 +318,11 @@ try {
         $generatedResources += $resourcePath
         Write-Host "==> Generating VERSIONINFO role=$($artifact.role)"
         & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 @resourceGeneratorArgs -o $resourcePath $resourceJson
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($LASTEXITCODE -ne 0) {
+            $builderPrimaryExitCode = [int]$LASTEXITCODE
+            $builderPrimaryExitStage = "version-resource"
+            exit $LASTEXITCODE
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
@@ -289,18 +341,106 @@ try {
         $buildArgs += @("-o", $outFile, $artifact.source)
         Write-Host "==> Building role=$($artifact.role) subsystem=$($artifact.subsystem) metadata=$($artifact.productMetadata) -> $outFile"
         & go @buildArgs
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($LASTEXITCODE -ne 0) {
+            $builderPrimaryExitCode = [int]$LASTEXITCODE
+            $builderPrimaryExitStage = "product-build"
+            exit $LASTEXITCODE
+        }
     }
+} catch {
+    $builderPrimaryError = $_
+    throw
 } finally {
-    if ($hadGOOS) { $env:GOOS = $priorGOOS } else { Remove-Item Env:GOOS -ErrorAction SilentlyContinue }
-    if ($hadGOARCH) { $env:GOARCH = $priorGOARCH } else { Remove-Item Env:GOARCH -ErrorAction SilentlyContinue }
-    if ($TestStateIsolatedProduct) {
-        if ($hadGOFLAGS) { $env:GOFLAGS = $priorGOFLAGS } else { Remove-Item Env:GOFLAGS -ErrorAction SilentlyContinue }
+    $builderCleanupErrors = [Collections.Generic.List[Exception]]::new()
+    try {
+        if ($hadGOOS) { $env:GOOS = $priorGOOS } elseif (Test-Path Env:GOOS) { Remove-Item Env:GOOS -ErrorAction Stop }
+    } catch { $builderCleanupErrors.Add($_.Exception) }
+    try {
+        if ($hadGOARCH) { $env:GOARCH = $priorGOARCH } elseif (Test-Path Env:GOARCH) { Remove-Item Env:GOARCH -ErrorAction Stop }
+    } catch { $builderCleanupErrors.Add($_.Exception) }
+    try {
+        if ($TestStateIsolatedProduct) {
+            if ($hadGOFLAGS) { $env:GOFLAGS = $priorGOFLAGS } elseif (Test-Path Env:GOFLAGS) { Remove-Item Env:GOFLAGS -ErrorAction Stop }
+        }
+    } catch { $builderCleanupErrors.Add($_.Exception) }
+
+    # This original builder owns only its declared syso files and the private
+    # resource JSON directory. An error in one target never skips another.
+    $cleanupTargets = @(
+        foreach ($ownedResource in $generatedResources) { @{ Path = $ownedResource; Directory = $false } }
+        @{ Path = $resourceScratch; Directory = $true }
+    )
+    foreach ($cleanupTarget in $cleanupTargets) {
+        $cleanupAbsolute = $null
+        try {
+            $sourceAbsolute = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
+            $cleanupAbsolute = [IO.Path]::GetFullPath([string]$cleanupTarget.Path)
+            $sourcePrefix = $sourceAbsolute + [IO.Path]::DirectorySeparatorChar
+            if (-not $cleanupAbsolute.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "PUBLISHER_SOURCE_TABLE_INVALID: cleanup target outside owned Source" }
+            if ($cleanupTarget.Directory) {
+                $scratchParent = Join-Path $sourceAbsolute ".scratch"
+                if (-not [string]::Equals([IO.Path]::GetDirectoryName($cleanupAbsolute), $scratchParent, [StringComparison]::OrdinalIgnoreCase) -or
+                    [IO.Path]::GetFileName($cleanupAbsolute) -cnotmatch ('^windows-versioninfo-' + $PID + '-[0-9a-f]{32}$')) { throw "PUBLISHER_SOURCE_TABLE_INVALID: cleanup directory is not original resource scratch" }
+            } else {
+                $knownResource = $false
+                foreach ($artifact in $productArtifacts) {
+                    $expectedResource = [IO.Path]::GetFullPath((Join-Path (Join-Path $sourceAbsolute ($artifact.source -replace '^\./', '')) "zz_product_versioninfo.syso"))
+                    if ([string]::Equals($cleanupAbsolute, $expectedResource, [StringComparison]::OrdinalIgnoreCase)) { $knownResource = $true }
+                }
+                if (-not $knownResource) { throw "PUBLISHER_SOURCE_TABLE_INVALID: unregistered resource cleanup target" }
+            }
+            # Inspect every existing absolute path component before any removal;
+            # a missing component is absence, an inspection error is refusal.
+            $componentPath = [IO.Path]::GetPathRoot($cleanupAbsolute)
+            $componentTail = $cleanupAbsolute.Substring($componentPath.Length)
+            $components = @($componentTail.Split([IO.Path]::DirectorySeparatorChar, [StringSplitOptions]::RemoveEmptyEntries))
+            $inspectPaths = @($componentPath)
+            foreach ($component in $components) { $componentPath = Join-Path $componentPath $component; $inspectPaths += $componentPath }
+            foreach ($inspectPath in $inspectPaths) {
+                if (-not (Test-Path -LiteralPath $inspectPath -ErrorAction Stop)) { break }
+                $entry = Get-Item -LiteralPath $inspectPath -Force -ErrorAction Stop
+                if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "PUBLISHER_SOURCE_TABLE_INVALID: linked cleanup path" }
+            }
+            if (Test-Path -LiteralPath $cleanupAbsolute -ErrorAction Stop) {
+                $entry = Get-Item -LiteralPath $cleanupAbsolute -Force -ErrorAction Stop
+                if ([bool]$entry.PSIsContainer -ne [bool]$cleanupTarget.Directory) { throw "PUBLISHER_SOURCE_TABLE_INVALID: cleanup target type changed" }
+                if ($cleanupTarget.Directory) {
+                    # The existing generator writes no nested directories here.
+                    # Refuse unknown leaves rather than deleting foreign data.
+                    foreach ($child in @(Get-ChildItem -LiteralPath $cleanupAbsolute -Force -ErrorAction Stop)) {
+                        if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint -or $child.PSIsContainer) { throw "PUBLISHER_SOURCE_TABLE_INVALID: unknown or linked scratch descendant" }
+                        $knownJSON = $false
+                        foreach ($artifact in $productArtifacts) {
+                            if ([string]::Equals($child.FullName, (Join-Path $cleanupAbsolute "$($artifact.role).json"), [StringComparison]::OrdinalIgnoreCase)) { $knownJSON = $true }
+                        }
+                        if (-not $knownJSON) { throw "PUBLISHER_SOURCE_TABLE_INVALID: unowned scratch leaf" }
+                    }
+                    Remove-Item -LiteralPath $cleanupAbsolute -Recurse -Force -ErrorAction Stop
+                } else { Remove-Item -LiteralPath $cleanupAbsolute -Force -ErrorAction Stop }
+            }
+        } catch { $builderCleanupErrors.Add($_.Exception) }
+        # Receive residue independently even when the one removal attempt fails.
+        if ($null -ne $cleanupAbsolute) {
+            try {
+                if (Test-Path -LiteralPath $cleanupAbsolute -ErrorAction Stop) { throw "PUBLISHER_SOURCE_TABLE_INVALID: owned generated output remains" }
+            } catch { $builderCleanupErrors.Add($_.Exception) }
+        }
     }
-    foreach ($resourcePath in $generatedResources) {
-        Remove-Item -LiteralPath $resourcePath -Force -ErrorAction SilentlyContinue
+    if ($builderCleanupErrors.Count -gt 0) {
+        $builderAllErrors = [Collections.Generic.List[Exception]]::new()
+        if ($null -ne $builderPrimaryError) { $builderAllErrors.Add($builderPrimaryError.Exception) }
+        if ($null -ne $builderPrimaryExitCode) { $builderAllErrors.Add([Exception]::new("Marked builder native exit $builderPrimaryExitStage=$builderPrimaryExitCode")) }
+        foreach ($cleanupError in $builderCleanupErrors) { $builderAllErrors.Add($cleanupError) }
+        throw [AggregateException]::new("PUBLISHER_SOURCE_TABLE_INVALID: generated cleanup incomplete", [Exception[]]$builderAllErrors)
     }
-    Remove-Item -LiteralPath $resourceScratch -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if ($null -ne $publisherSource) {
+    $afterSource = Get-VerifiedPublisherSourceInput
+    if ($afterSource.source_epoch -cne $publisherSource.source_epoch -or
+        $afterSource.source_snapshot_sha256 -cne $publisherSource.source_snapshot_sha256 -or
+        [int]$afterSource.file_count -ne [int]$publisherSource.file_count) { throw "PUBLISHER_SOURCE_EPOCH_MISMATCH: postcompile Source" }
+    Write-Host ("publisherSource=" + ($plan.publisherSource | ConvertTo-Json -Compress))
 }
 
 $candidate = $productArtifacts[0].output -replace '/', [IO.Path]::DirectorySeparatorChar

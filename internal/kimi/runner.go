@@ -46,8 +46,10 @@ type RunOutput struct {
 }
 
 type Failure struct {
-	ID    string
-	cause error
+	ID               string
+	cause            error
+	primaryFailureID string
+	cleanupFailures  []string
 }
 
 func (f *Failure) Error() string {
@@ -66,8 +68,10 @@ func (f *Failure) Unwrap() error {
 
 func (f *Failure) JSON() []byte {
 	payload, _ := json.Marshal(struct {
-		FailureID string `json:"failure_id"`
-	}{FailureID: f.ID})
+		FailureID        string   `json:"failure_id"`
+		PrimaryFailureID string   `json:"primary_failure_id,omitempty"`
+		CleanupFailures  []string `json:"cleanup_failures,omitempty"`
+	}{FailureID: f.ID, PrimaryFailureID: f.primaryFailureID, CleanupFailures: f.cleanupFailures})
 	return payload
 }
 
@@ -127,10 +131,33 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 	if err != nil {
 		return RunOutput{}, newFailure("E_KIMI_RECEIPT_INVALID", err)
 	}
+	var runErr error
+	var runCtx context.Context
 	defer func() {
 		if cleanupErr := deps.removeAll(receiptDir); cleanupErr != nil {
-			output = RunOutput{}
-			retErr = newFailure("E_KIMI_CLEANUP_FAILED", cleanupErr)
+			var causes []error
+			primaryID := ""
+			cleanupFailures := []string{"receipt_directory"}
+			if retErr != nil {
+				causes = append(causes, retErr)
+				var prior *Failure
+				if errors.As(retErr, &prior) {
+					if prior.ID == "E_KIMI_CLEANUP_FAILED" {
+						primaryID = prior.primaryFailureID
+						cleanupFailures = append(append([]string(nil), prior.cleanupFailures...), "receipt_directory")
+					} else {
+						primaryID = prior.ID
+					}
+				}
+			} else if runErr != nil {
+				causes = append(causes, runErr)
+				primaryID = runFailureID(runCtx, ctx)
+			}
+			causes = append(causes, cleanupErr)
+			failure := newFailure("E_KIMI_CLEANUP_FAILED", errors.Join(causes...))
+			failure.primaryFailureID = primaryID
+			failure.cleanupFailures = cleanupFailures
+			retErr = failure
 		}
 	}()
 
@@ -149,33 +176,63 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(request.TimeoutSeconds)*time.Second)
 	defer cancel()
-	runErr := deps.runContained(runCtx, cmd, process.ContainedStreamOptions{CleanupTimeout: cleanupTimeout, Stderr: io.Discard}, func(reader io.Reader) error {
+	runErr = deps.runContained(runCtx, cmd, process.ContainedStreamOptions{CleanupTimeout: cleanupTimeout, Stderr: io.Discard}, func(reader io.Reader) error {
 		_, err := io.Copy(io.Discard, reader)
 		return err
 	})
 
 	var contained *process.ContainedRunError
-	if errors.As(runErr, &contained) && (contained.CleanupCause != nil || errors.Is(runErr, process.ErrCleanupTimeout)) {
-		return RunOutput{}, newFailure("E_KIMI_CLEANUP_FAILED", runErr)
+	if errors.As(runErr, &contained) && (contained.CleanupCause != nil || (contained.Stage == process.ContainedStageCleanup && contained.Cause != nil) || errors.Is(runErr, process.ErrCleanupTimeout)) {
+		failure := newFailure("E_KIMI_CLEANUP_FAILED", runErr)
+		failure.cleanupFailures = []string{"contained_process"}
+		if contained.Cause != nil && (contained.Stage != process.ContainedStageCleanup || contained.CleanupCause != nil) {
+			failure.primaryFailureID = runFailureID(runCtx, ctx)
+		}
+		return RunOutput{}, failure
 	}
+	selectedFailureID := ""
+	var selectedCause error
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-		return RunOutput{}, newFailure("E_KIMI_TIMEOUT", runCtx.Err())
+		selectedFailureID = "E_KIMI_TIMEOUT"
+		selectedCause = runCtx.Err()
+	} else if ctx.Err() != nil {
+		selectedFailureID = "E_KIMI_CANCELLED"
+		selectedCause = ctx.Err()
+	} else {
+		record, readErr := readReceiptFile(receiptPath)
+		if readErr == nil {
+			receipt, parseErr := parseProviderReceipt(record, request.Effort, request.Role, request.CapabilityChoice)
+			if parseErr == nil {
+				return RunOutput{Receipt: receipt}, nil
+			}
+			selectedFailureID = "E_KIMI_RECEIPT_INVALID"
+			selectedCause = parseErr
+		} else if runErr != nil {
+			selectedFailureID = "E_KIMI_RUN_FAILED"
+			selectedCause = runErr
+		} else {
+			selectedFailureID = "E_KIMI_RECEIPT_INVALID"
+			selectedCause = readErr
+		}
+	}
+	if runErr != nil && selectedFailureID != "E_KIMI_RUN_FAILED" && !errors.Is(selectedCause, runErr) {
+		if errors.Is(runErr, selectedCause) {
+			selectedCause = runErr
+		} else {
+			selectedCause = errors.Join(selectedCause, runErr)
+		}
+	}
+	return RunOutput{}, newFailure(selectedFailureID, selectedCause)
+}
+
+func runFailureID(runCtx, ctx context.Context) string {
+	if runCtx != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		return "E_KIMI_TIMEOUT"
 	}
 	if ctx.Err() != nil {
-		return RunOutput{}, newFailure("E_KIMI_CANCELLED", ctx.Err())
+		return "E_KIMI_CANCELLED"
 	}
-	record, readErr := readReceiptFile(receiptPath)
-	if readErr == nil {
-		receipt, parseErr := parseProviderReceipt(record, request.Effort, request.Role, request.CapabilityChoice)
-		if parseErr != nil {
-			return RunOutput{}, newFailure("E_KIMI_RECEIPT_INVALID", parseErr)
-		}
-		return RunOutput{Receipt: receipt}, nil
-	}
-	if runErr != nil {
-		return RunOutput{}, newFailure("E_KIMI_RUN_FAILED", runErr)
-	}
-	return RunOutput{}, newFailure("E_KIMI_RECEIPT_INVALID", readErr)
+	return "E_KIMI_RUN_FAILED"
 }
 
 func buildWrapperArgs(wrapper, receipt, capabilityFile string, request RunRequest) []string {

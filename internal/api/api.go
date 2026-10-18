@@ -21,17 +21,22 @@ import (
 // API is the orchestration handle held by cli and gui. Methods are safe for
 // concurrent use unless noted otherwise.
 //
-// Lifecycle: the CLI layer creates one API per process via NewAPI. The GUI
-// layer currently constructs a fresh API inside every real adapter (see
-// internal/gui/server.go's realManifestCreator / realManifestGetter /
-// realManifestEditor / realManifestValidator / realDemigrater). This is
-// safe today because newEventBus (internal/api/events.go) returns an empty
-// struct — no goroutine, no background resource. When EventBus is populated
-// (Task 22 per events.go's source comment), the GUI adapters should be
-// refactored to share one API handle via the Server struct.
+// Lifecycle: install/adopt compositions retain their API through terminal
+// CloseStdioBridgeAdmissions. The GUI uses its long-lived Server API for these
+// resource-owning operations. Other resource-free adapters may construct fresh
+// handles; NewAPI itself starts no background work.
 type API struct {
-	state *State
-	bus   *EventBus
+	projectServicePreparationFactory *projectServicePreparationFactory
+	preparedSerenaMu                 sync.Mutex
+	preparedSerenaOwner              *PreparedSerenaRuntimeOwner
+	serenaPreparationAssembly        SerenaPreparationAssembly
+	serenaPreparationPublication     *PreparedSerenaPublicationOwner
+	state                            *State
+	bus                              *EventBus
+
+	// Original provisional children and in-flight acquisition reservations are
+	// owned by this handle, including cleanup refusals after an operation returns.
+	stdioBridgeAdmissions stdioBridgeAdmissionCustody
 
 	// Read-only dependency seams for the explicit test-leftover preview command.
 	// Production leaves them nil and PreviewTestLeftovers selects the canonical
@@ -121,8 +126,8 @@ type healthCache struct {
 
 // NewAPI constructs a fresh API with an initialized state and event bus.
 // Cheap: allocates the State struct + daemon map + EventBus struct header,
-// no background resources. See the API type doc for the per-process vs
-// per-request lifecycle caveat.
+// no background resources. Resource-owning compositions close the handle at
+// their explicit terminal boundary.
 func NewAPI() *API {
 	return &API{
 		state:     &State{Daemons: make(map[string]DaemonStatus)},

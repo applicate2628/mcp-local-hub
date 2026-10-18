@@ -230,14 +230,20 @@ func TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing(t *testing.T) 
 // supervisor-intent.json.
 // ---------------------------------------------------------------------------
 
-// migrateSerenaTestEnv redirects every state/registry/home resolution into a
-// fresh per-test temp tree and installs a fake canonical mcphub binary so the
-// real api.Preflight (LookPath + ensureCanonicalMcphubPresent) passes for the
-// in-memory dynamic-pool manifest (which carries command: go). Returns the
-// resolved state dir (where supervisor-intent.json lands) and the manifest-
-// override dir (seed serena/manifest.yaml under it).
-func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
+type migrateSerenaTestEnvOptions struct {
+	canonicalRuntimeFixture bool
+}
+
+// migrateSerenaTestEnv redirects state, registry and home resolution into a
+// fresh per-test tree and creates an inert canonical file. Omitted options
+// preserve default runtime-product selection; canonicalRuntimeFixture selects
+// this constructor's file through the restore-bound API test seam. Returns the
+// resolved state directory and manifest override directory.
+func migrateSerenaTestEnv(t *testing.T, opts ...migrateSerenaTestEnvOptions) (stateDir, manifestDir string) {
 	t.Helper()
+	if len(opts) > 1 {
+		t.Fatal("migrateSerenaTestEnv accepts at most one options value")
+	}
 	root := t.TempDir()
 	// Hardened (single-user-safe) supervisor state dir, mirroring production's
 	// owner-only %LOCALAPPDATA%, so the migrate's gated WriteStateFileAtomic
@@ -247,12 +253,12 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// r9 reverted that absent-strict over-reach (an absent intent now relaxes
 	// regardless of broadening), so the hardened root is REDUNDANT for the
 	// strict verdict — retained as the correct production-mirroring posture.
-	// manifestDir/home stay plain (they are not gated by the supervisor
-	// state-file pipeline).
+	// HOME must satisfy the client-parent gate before any descendants are
+	// created. Only manifestDir stays plain, outside the state-file pipeline.
 	stateDir = apitest.HardenedTempDir(t)
 	manifestDir = filepath.Join(root, "manifests")
-	home := filepath.Join(root, "home")
-	for _, d := range []string{manifestDir, home} {
+	home := apitest.HardenedDir(t, filepath.Join(root, "home"))
+	for _, d := range []string{manifestDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -309,10 +315,10 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// (internal/clients/config_path_sandbox_audit.go).
 	neutralizeClientConfigPathEnv(t, home)
 
-	// Install a fake canonical mcphub at <home>/.local/bin/mcphub[.exe] so
-	// ensureCanonicalMcphubPresent (os.Stat) passes inside the real install.
+	// Create the inert canonical fixture at <home>/.local/bin/mcphub[.exe].
+	// Opted-in downstream install tests select it through the existing test seam.
 	canonicalDir := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(canonicalDir, 0o755); err != nil {
+	if err := api.SecureCreateParentDirForConfigLock(canonicalDir); err != nil {
 		t.Fatalf("mkdir canonical dir: %v", err)
 	}
 	canonicalName := "mcphub"
@@ -322,7 +328,54 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	if err := os.WriteFile(filepath.Join(canonicalDir, canonicalName), []byte(""), 0o755); err != nil {
 		t.Fatalf("write fake canonical mcphub: %v", err)
 	}
+	if len(opts) == 1 && opts[0].canonicalRuntimeFixture {
+		restoreCanonical := api.SetTestCanonicalMcphubPath(filepath.Join(canonicalDir, canonicalName))
+		t.Cleanup(restoreCanonical)
+	}
+	// Create the resolved registry parent before callers seed its payload.
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("resolve registry path: %v", err)
+	}
+	if err := api.SecureCreateParentDirForConfigLock(filepath.Dir(regPath)); err != nil {
+		t.Fatalf("create registry parent: %v", err)
+	}
 	return stateDir, manifestDir
+}
+
+func TestMigrateSerenaTestEnv_CanonicalFixtureSelectionRestoresBaseline(t *testing.T) {
+	baseline := filepath.Join(t.TempDir(), "canonical-baseline")
+	if err := os.WriteFile(baseline, []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreBaseline := api.SetTestCanonicalMcphubPath(baseline)
+	t.Cleanup(restoreBaseline)
+
+	t.Run("omitted", func(t *testing.T) {
+		migrateSerenaTestEnv(t)
+		got, err := api.RuntimeMcphubExecutable()
+		if err != nil || got != baseline {
+			t.Fatalf("omitted canonical fixture selection = %q, %v; want baseline %q", got, err, baseline)
+		}
+	})
+	if got, err := api.RuntimeMcphubExecutable(); err != nil || got != baseline {
+		t.Fatalf("after omitted child canonical selection = %q, %v; want baseline %q", got, err, baseline)
+	}
+
+	t.Run("opt-in", func(t *testing.T) {
+		migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
+		want := filepath.Join(os.Getenv("HOME"), ".local", "bin", api.MCPHubBinaryName())
+		got, err := api.RuntimeMcphubExecutable()
+		if err != nil || got != want || got == baseline {
+			t.Fatalf("opt-in canonical fixture selection = %q, %v; want owned fixture %q distinct from baseline %q", got, err, want, baseline)
+		}
+		if info, err := os.Stat(got); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("selected owned canonical fixture is not present as a regular file: %v", err)
+		}
+	})
+	if got, err := api.RuntimeMcphubExecutable(); err != nil || got != baseline {
+		t.Fatalf("after opt-in child canonical selection = %q, %v; want restored baseline %q", got, err, baseline)
+	}
 }
 
 // seedSerenaManifest writes a serena/manifest.yaml into the override dir with
@@ -693,7 +746,7 @@ func TestMigrateSerena_Malformed_Errors(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	reconcileInvoked := false
@@ -762,7 +815,7 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	manifestPath := seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {

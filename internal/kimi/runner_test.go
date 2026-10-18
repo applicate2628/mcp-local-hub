@@ -196,15 +196,223 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 	})
 	t.Run("cleanup", func(t *testing.T) {
 		deps := base
-		deps.runContained = func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
-			return errors.New("synthetic run failure")
+		primaryErr := errors.New("synthetic run failure")
+		cleanupErr := errors.New("synthetic cleanup failure")
+		var args []string
+		deps.command = func(name string, values ...string) *exec.Cmd {
+			args = append([]string(nil), values...)
+			return exec.Command(name, values...)
 		}
-		deps.removeAll = func(string) error { return errors.New("synthetic cleanup failure") }
-		_, err := runWithDependencies(context.Background(), req, deps)
+		deps.runContained = func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "acquired result")), 0o600); err != nil {
+				return err
+			}
+			return primaryErr
+		}
+		deps.removeAll = func(string) error { return cleanupErr }
+		output, err := runWithDependencies(context.Background(), req, deps)
 		if failureID(err) != "E_KIMI_CLEANUP_FAILED" {
 			t.Fatalf("error = %v", err)
 		}
+		if output.Receipt.Payload == "" || !strings.Contains(output.Receipt.Payload, `"resultText":"acquired result"`) {
+			t.Fatalf("acquired receipt was not retained (payload_present=%t)", output.Receipt.Payload != "")
+		}
+		if !errors.Is(err, primaryErr) || !errors.Is(err, cleanupErr) {
+			t.Fatalf("joined causes = %v", err)
+		}
+		var failure *Failure
+		if !errors.As(err, &failure) || failure == nil {
+			t.Fatalf("cleanup failure metadata missing: %#v", err)
+		}
+		if string(failure.JSON()) != `{"failure_id":"E_KIMI_CLEANUP_FAILED","primary_failure_id":"E_KIMI_RUN_FAILED","cleanup_failures":["receipt_directory"]}` {
+			t.Fatalf("cleanup failure JSON = %s", failure.JSON())
+		}
 	})
+}
+
+func TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure(t *testing.T) {
+	root := t.TempDir()
+	prompt := filepath.Join(root, "prompt.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(root, ".agents", "skills", "lead", "scripts", "invoke-kimi-prompt.py")
+	if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{wrapper, filepath.Join(filepath.Dir(wrapper), "provider_prompt.py"), filepath.Join(root, "python.exe")} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receiptBase := t.TempDir()
+	var args []string
+	base := runnerDependencies{
+		homeDir:  func() (string, error) { return root, nil },
+		lookPath: func(string) (string, error) { return filepath.Join(root, "python.exe"), nil },
+		command: func(name string, values ...string) *exec.Cmd {
+			args = append([]string(nil), values...)
+			return exec.Command(name, values...)
+		},
+		mkdirTemp: func(_, pattern string) (string, error) { return os.MkdirTemp(receiptBase, pattern) },
+		removeAll: os.RemoveAll,
+	}
+	req := RunRequest{Topic: "topic", PromptFile: prompt, Cwd: root, TaskClass: "review", Role: "external-reviewer", Effort: "high", TimeoutSeconds: 1, CapabilityChoice: CapabilityChoice{Kind: "none"}}
+
+	t.Run("receipt only with directory cleanup failure", func(t *testing.T) {
+		cleanupErr := errors.New("synthetic directory cleanup failure")
+		runCalls := 0
+		deps := base
+		deps.runContained = func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			runCalls++
+			return os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "acquired result")), 0o600)
+		}
+		deps.removeAll = func(string) error { return cleanupErr }
+		output, err := runWithDependencies(context.Background(), req, deps)
+		if output.Receipt.Payload == "" || !strings.Contains(output.Receipt.Payload, `"resultText":"acquired result"`) {
+			t.Fatalf("acquired receipt was not retained (payload_present=%t)", output.Receipt.Payload != "")
+		}
+		if failureID(err) != "E_KIMI_CLEANUP_FAILED" || !errors.Is(err, cleanupErr) {
+			t.Fatalf("cleanup failure = %v", err)
+		}
+		if runCalls != 1 {
+			t.Fatalf("contained run calls = %d", runCalls)
+		}
+		var failure *Failure
+		if !errors.As(err, &failure) || failure == nil {
+			t.Fatalf("cleanup failure metadata missing: %#v", err)
+		}
+		if string(failure.JSON()) != `{"failure_id":"E_KIMI_CLEANUP_FAILED","cleanup_failures":["receipt_directory"]}` {
+			t.Fatalf("cleanup failure JSON = %s", failure.JSON())
+		}
+	})
+
+	t.Run("primary plus contained cleanup and directory cleanup", func(t *testing.T) {
+		primaryErr := errors.New("synthetic contained primary failure")
+		containedCleanupErr := errors.New("synthetic contained cleanup failure")
+		directoryCleanupErr := errors.New("synthetic directory cleanup failure")
+		runCalls := 0
+		deps := base
+		deps.runContained = func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			runCalls++
+			if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "must remain unacquired")), 0o600); err != nil {
+				return err
+			}
+			code := 17
+			return &process.ContainedRunError{Stage: process.ContainedStageWait, Cause: primaryErr, ExitCode: &code, CleanupStage: process.ContainedStageCleanup, CleanupCause: containedCleanupErr}
+		}
+		deps.removeAll = func(string) error { return directoryCleanupErr }
+		output, err := runWithDependencies(context.Background(), req, deps)
+		if output.Receipt.Payload != "" {
+			t.Fatal("unsettled receipt was acquired")
+		}
+		if failureID(err) != "E_KIMI_CLEANUP_FAILED" || !errors.Is(err, primaryErr) || !errors.Is(err, containedCleanupErr) || !errors.Is(err, directoryCleanupErr) {
+			t.Fatalf("failure/cause chain = %v", err)
+		}
+		if runCalls != 1 {
+			t.Fatalf("contained run calls = %d", runCalls)
+		}
+		var contained *process.ContainedRunError
+		if !errors.As(err, &contained) || contained.ExitCode == nil || *contained.ExitCode != 17 {
+			t.Fatalf("contained outcome was not retained: %#v", contained)
+		}
+		var failure *Failure
+		if !errors.As(err, &failure) || failure == nil {
+			t.Fatalf("cleanup failure metadata missing: %#v", err)
+		}
+		if string(failure.JSON()) != `{"failure_id":"E_KIMI_CLEANUP_FAILED","primary_failure_id":"E_KIMI_RUN_FAILED","cleanup_failures":["contained_process","receipt_directory"]}` {
+			t.Fatalf("cleanup failure JSON = %s", failure.JSON())
+		}
+	})
+
+	t.Run("cleanup-only stage cause", func(t *testing.T) {
+		containedCleanupErr := errors.New("synthetic cleanup-only failure")
+		deps := base
+		deps.runContained = func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "must remain unacquired")), 0o600); err != nil {
+				return err
+			}
+			return &process.ContainedRunError{Stage: process.ContainedStageCleanup, Cause: containedCleanupErr}
+		}
+		deps.removeAll = os.RemoveAll
+		output, err := runWithDependencies(context.Background(), req, deps)
+		if output.Receipt.Payload != "" || failureID(err) != "E_KIMI_CLEANUP_FAILED" || !errors.Is(err, containedCleanupErr) {
+			t.Fatalf("cleanup-only result retained payload=%t failure_id=%s", output.Receipt.Payload != "", failureID(err))
+		}
+		var failure *Failure
+		if !errors.As(err, &failure) || failure == nil {
+			t.Fatalf("cleanup-only metadata missing: %#v", err)
+		}
+		if string(failure.JSON()) != `{"failure_id":"E_KIMI_CLEANUP_FAILED","cleanup_failures":["contained_process"]}` {
+			t.Fatalf("cleanup-only JSON = %s", failure.JSON())
+		}
+	})
+}
+
+func TestRunWithDependenciesRetainsParseRunAndCleanupCauses(t *testing.T) {
+	root := t.TempDir()
+	prompt := filepath.Join(root, "prompt.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(root, ".agents", "skills", "lead", "scripts", "invoke-kimi-prompt.py")
+	if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{wrapper, filepath.Join(filepath.Dir(wrapper), "provider_prompt.py"), filepath.Join(root, "python.exe")} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receiptBase := t.TempDir()
+	var args []string
+	runCause := errors.New("synthetic contained run cause")
+	cleanupCause := errors.New("synthetic directory cleanup cause")
+	directoryCleanupFailure := error(cleanupCause)
+	code := 23
+	contained := &process.ContainedRunError{Stage: process.ContainedStageWait, Cause: runCause, ExitCode: &code}
+	deps := runnerDependencies{
+		homeDir:  func() (string, error) { return root, nil },
+		lookPath: func(string) (string, error) { return filepath.Join(root, "python.exe"), nil },
+		command: func(name string, values ...string) *exec.Cmd {
+			args = append([]string(nil), values...)
+			return exec.Command(name, values...)
+		},
+		runContained: func(_ context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte("NOT_A_VALID_RECEIPT\n"), 0o600); err != nil {
+				return err
+			}
+			return contained
+		},
+		mkdirTemp: func(_, pattern string) (string, error) { return os.MkdirTemp(receiptBase, pattern) },
+		removeAll: func(path string) error {
+			if directoryCleanupFailure != nil {
+				return directoryCleanupFailure
+			}
+			return os.RemoveAll(path)
+		},
+	}
+	req := RunRequest{Topic: "topic", PromptFile: prompt, Cwd: root, TaskClass: "review", Role: "external-reviewer", Effort: "high", TimeoutSeconds: 1, CapabilityChoice: CapabilityChoice{Kind: "none"}}
+	output, err := runWithDependencies(context.Background(), req, deps)
+	if output.Receipt.Payload != "" {
+		t.Fatal("invalid receipt produced output")
+	}
+	if failureID(err) != "E_KIMI_CLEANUP_FAILED" || !errors.Is(err, errReceiptInvalid) || !errors.Is(err, runCause) || !errors.Is(err, cleanupCause) {
+		t.Fatalf("failure identity or cause chain was lost: failure_id=%s", failureID(err))
+	}
+	var gotContained *process.ContainedRunError
+	if !errors.As(err, &gotContained) || gotContained != contained || gotContained.ExitCode == nil || *gotContained.ExitCode != code {
+		t.Fatal("original contained outcome or exit code was not retained")
+	}
+
+	directoryCleanupFailure = nil
+	output, err = runWithDependencies(context.Background(), req, deps)
+	if output.Receipt.Payload != "" || failureID(err) != "E_KIMI_RECEIPT_INVALID" || !errors.Is(err, errReceiptInvalid) || !errors.Is(err, runCause) {
+		t.Fatalf("parse/run causes were not retained without directory cleanup failure: failure_id=%s payload_present=%t", failureID(err), output.Receipt.Payload != "")
+	}
+	if errors.Is(err, cleanupCause) || !errors.As(err, &gotContained) || gotContained != contained || gotContained.ExitCode == nil || *gotContained.ExitCode != code {
+		t.Fatal("no-cleanup failure duplicated cleanup or lost the original contained outcome")
+	}
 }
 
 func argumentValue(args []string, flag string) string {

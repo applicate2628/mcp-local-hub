@@ -2,7 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1165,5 +1168,240 @@ func TestPreviewSerenaIntentRepairFromRegistry_ReportsWithoutWriting(t *testing.
 	}
 	if got := readIntent(t, intentPath); !got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
 		t.Errorf("orphan key %q not appended by the real repair following a preview", orphanKey)
+	}
+}
+
+// Targeted producer refusals use real file/registry/singleton owners. The
+// preparation assembly below returns an original controlled failure; it does
+// not manufacture a ready record, runtime binding or consumer invocation.
+func targetedSerenaRepairFixture(t *testing.T) (string, ReconcileTarget, *SupervisorLock) {
+	t.Helper()
+	root := apitest.HardenedTempDir(t)
+	restore := SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	regPath := filepath.Join(root, "workspaces.yaml")
+	previous := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previous })
+	workspace := filepath.Join(root, "workspace")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	row := WorkspaceEntry{WorkspaceKey: WorkspaceKey(workspace), WorkspacePath: workspace,
+		TaskName: strings.TrimPrefix(SerenaTaskNameForWorkspace(workspace), `\`), Language: SerenaLanguageSentinel,
+		Backend: SerenaServerName, Port: 9150, RegisteredAt: time.Date(2026, 10, 15, 1, 2, 3, 0, time.UTC)}
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	putErr := reg.PutSerena(row)
+	if putErr == nil {
+		putErr = reg.Save()
+	}
+	if err = errors.Join(putErr, unlock()); err != nil {
+		t.Fatal(err)
+	}
+	seedIntent(t, &SupervisorIntentFile{Version: 1, IntentGeneration: 15})
+	lock, err := AcquireSupervisorLock(filepath.Join(root, "supervisor.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lock.Release)
+	return root, ReconcileTarget{WorkspaceKey: row.WorkspaceKey, WorkspacePath: row.WorkspacePath,
+		TaskName: row.TaskName, RegisteredAt: row.RegisteredAt.Format(time.RFC3339Nano), ExpectedPort: row.Port}, lock
+}
+
+func TestTargetedSerenaRepair_OriginalOwnerAndTargetRefusalsPreserveBytes(t *testing.T) {
+	root, target, lock := targetedSerenaRepairFixture(t)
+	path := filepath.Join(root, supervisorIntentFileLeaf)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTargetedReconcileTimeout)
+	defer cancel()
+	foreignRoot := apitest.HardenedTempDir(t)
+	foreign, err := AcquireSupervisorLock(filepath.Join(foreignRoot, "supervisor.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(foreign.Release)
+	quiet, err := AcquireSupervisorLockQuiet(filepath.Join(foreignRoot, "quiet.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(quiet.Release)
+	badTarget := target
+	badTarget.ExpectedPort++
+	cases := []struct {
+		name     string
+		owner    *SupervisorLock
+		selected ReconcileTarget
+	}{
+		{"missing", nil, target}, {"zero", &SupervisorLock{}, target},
+		{"foreign-root", foreign, target}, {"quiet", quiet, target}, {"target-generation", lock, badTarget},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, invocation, cause := NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, tc.owner, tc.selected, true)
+			if cause == nil || result.Outcome != SerenaIntentRepairOutcomeError || invocation != nil {
+				t.Fatal("invalid owner/target reached preparation")
+			}
+		})
+	}
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	_, invocation, cause := NewAPI().ReconcileSerenaIntentForSupervisor(canceled, root, lock, target, true)
+	if !errors.Is(cause, context.Canceled) || invocation != nil {
+		t.Fatal("canceled input acquired a consumer")
+	}
+	result, invocation, cause := NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, false)
+	if cause != nil || invocation != nil || result.Repaired != 0 || len(result.Deferred) != 1 {
+		t.Fatal("preview promised prepared readiness or changed classification")
+	}
+	lock.Release()
+	_, invocation, cause = NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, true)
+	if cause == nil || invocation != nil {
+		t.Fatal("released singleton admitted preparation")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("refusal/preview changed intent")
+	}
+}
+
+type failingTargetedSerenaAssembly struct {
+	t      *testing.T
+	root   string
+	target ReconcileTarget
+	cause  error
+	calls  int
+}
+
+func (f *failingTargetedSerenaAssembly) QualificationPort() PreparedSerenaQualificationPort {
+	f.t.Fatal("failed input acquisition reached package qualification")
+	return nil
+}
+func (f *failingTargetedSerenaAssembly) PrepareInputs(ctx context.Context, manifest *config.ServerManifest, rawSHA string, tasks []string, _ *SerenaPreparationPolicyV1) (SerenaPreparationInputs, error) {
+	f.calls++
+	if manifest == nil || manifest.DaemonTemplate == nil || !preparedSerenaDigest(rawSHA) || len(tasks) != 1 || tasks[0] != canonicalIntentTaskKey(f.target.TaskName) {
+		f.t.Fatal("producer lost selected source/task")
+	}
+	registryPath, err := DefaultRegistryPath()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	unlock, held, err := NewRegistry(registryPath).TryLock()
+	if err != nil || !held {
+		f.t.Fatal("preparation ran under registry exclusion")
+	}
+	if err = unlock(); err != nil {
+		f.t.Fatal(err)
+	}
+	release, held, err := tryLockSupervisorIntent(filepath.Join(f.root, supervisorIntentFileLeaf))
+	if err != nil || !held {
+		f.t.Fatal("preparation ran under intent exclusion")
+	}
+	if err = release(); err != nil {
+		f.t.Fatal(err)
+	}
+	return SerenaPreparationInputs{}, f.cause
+}
+
+func TestTargetedSerenaRepair_OriginalPreparationFailureAfterUnlockedCapture(t *testing.T) {
+	root, target, lock := targetedSerenaRepairFixture(t)
+	manifestDir := filepath.Join(root, "catalog", SerenaServerName)
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	image, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the original input failure is under test. No package/provider or
+	// synthetic ready authority is issued by this deterministic fixture.
+	raw := "name: serena\nkind: global\ntransport: stdio-bridge\ncommand: '" + image + "'\nbase_args: [--from, 'git+https://example.invalid/serena@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', serena, start-mcp-server]\nenv: {}\nclient_bindings: []\n"
+	if err = os.WriteFile(filepath.Join(manifestDir, "manifest.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", filepath.Dir(manifestDir))
+	oldImage := testCanonicalMcphubPathOverride
+	testCanonicalMcphubPathOverride = image
+	t.Cleanup(func() { testCanonicalMcphubPathOverride = oldImage })
+	cause := errors.New("controlled original preparation input refusal")
+	assembly := &failingTargetedSerenaAssembly{t: t, root: root, target: target, cause: cause}
+	a := NewAPIWithSerenaPreparation(assembly)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTargetedReconcileTimeout)
+	defer cancel()
+	path := filepath.Join(root, supervisorIntentFileLeaf)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, invocation, err := a.ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, true)
+	if !errors.Is(err, cause) || assembly.calls != 1 || invocation != nil || result.Outcome != SerenaIntentRepairOutcomeError || result.Repaired != 0 {
+		t.Fatalf("original producer cause/receiving lost: calls=%d result=%+v cause=%v", assembly.calls, result, err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || !bytes.Equal(before, after) {
+		t.Fatal("failed preparation published intent")
+	}
+}
+
+func TestTargetedSerenaRepair_RepeatLegacyAndPendingRemainDistinct(t *testing.T) {
+	root, target, lock := targetedSerenaRepairFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTargetedReconcileTimeout)
+	defer cancel()
+	path := filepath.Join(root, supervisorIntentFileLeaf)
+	descriptor := healthySerenaDaemon(t, target.WorkspacePath, target.ExpectedPort)
+	seedIntent(t, &SupervisorIntentFile{Version: 1, IntentGeneration: 15, Daemons: []SupervisorDaemon{descriptor}})
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, invocation, err := NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, true)
+	if err != nil || invocation != nil || result.Repaired != 0 || len(result.Deferred) != 0 {
+		t.Fatal("matching metadata repeat attempted preparation")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("metadata repeat rewrote intent")
+	}
+	descriptor.RuntimeSpec = nil
+	seedIntent(t, &SupervisorIntentFile{Version: 1, IntentGeneration: 15, Daemons: []SupervisorDaemon{descriptor}})
+	result, invocation, err = NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, true)
+	if err != nil || invocation != nil || result.Repaired != 0 || len(result.Deferred) != 1 {
+		t.Fatal("legacy occupied task was treated as missing")
+	}
+	registryPath, err := DefaultRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(registryPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadErr := reg.Load()
+	if loadErr == nil {
+		row, ok := reg.GetSerena(target.WorkspaceKey)
+		if !ok {
+			loadErr = errors.New("original target row disappeared")
+		}
+		row.PendingSerenaRemoval = true
+		if loadErr == nil {
+			loadErr = reg.PutSerena(row)
+		}
+		if loadErr == nil {
+			loadErr = reg.Save()
+		}
+	}
+	if err = errors.Join(loadErr, unlock()); err != nil {
+		t.Fatal(err)
+	}
+	_, invocation, err = NewAPI().ReconcileSerenaIntentForSupervisor(ctx, root, lock, target, true)
+	if err == nil || invocation != nil {
+		t.Fatal("pending removal admitted preparation")
 	}
 }

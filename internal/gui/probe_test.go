@@ -42,6 +42,25 @@ func TestProcessIdentityClose_CachesNativeFailureOnce(t *testing.T) {
 	}
 }
 
+func TestProcessIdentityWait_RequiresOriginalObservationAndContext(t *testing.T) {
+	var absent *ProcessIdentity
+	if _, err := absent.Wait(context.Background()); !errors.Is(err, ErrProcessExitStatusUnavailable) {
+		t.Fatalf("nil identity Wait: %v", err)
+	}
+	identity := ProcessIdentity{}
+	if _, err := identity.Wait(nil); err == nil {
+		t.Fatal("nil context accepted")
+	}
+	if _, err := identity.Wait(context.Background()); !errors.Is(err, ErrProcessExitStatusUnavailable) {
+		t.Fatalf("unretained identity Wait: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := identity.Wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled observation: %v", err)
+	}
+}
+
 // TestProcessID_SelfAlive verifies the current test process is reported
 // as alive with a non-empty image path, an argv that includes "test"
 // (the Go test binary's name pattern), and a non-zero start time.

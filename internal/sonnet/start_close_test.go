@@ -66,16 +66,15 @@ func TestStartRejectsPostCopyHandoffAfterClose(t *testing.T) {
 			if got := countRunWorkspaces(t, storeRoot); got != 1 {
 				t.Fatalf("copied workspaces=%d, want one", got)
 			}
-			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			closeCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
-			if err := s.Close(closeCtx); err != nil {
-				t.Fatal(err)
+			if err := s.Close(closeCtx); !errors.Is(err, ErrShutdownIncomplete) {
+				t.Fatalf("Close while copying: %v", err)
 			}
-			// Prove another owner can acquire the store before the late handoff.
-			next := NewServer(testConfig(storeRoot, &fakeDriver{}))
-			defer next.Close(context.Background())
-			if next.initErr != nil {
-				t.Fatalf("replacement owner failed: %v", next.initErr)
+			// Master accounts for pre-transfer copies as in-flight work.
+			blocked := NewServer(testConfig(storeRoot, &fakeDriver{}))
+			if !errors.Is(blocked.initErr, ErrRunStoreOwned) {
+				t.Fatalf("replacement acquired lease before copy settled: %v", blocked.initErr)
 			}
 			unblock()
 			var result concurrentStartResult
@@ -87,11 +86,19 @@ func TestStartRejectsPostCopyHandoffAfterClose(t *testing.T) {
 			if result.err == nil || !strings.Contains(result.err.Error(), "SONNET_RUN_OWNER_CLOSED") {
 				t.Fatalf("late Start error=%v, want closed-owner refusal", result.err)
 			}
+			if err := s.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			next := NewServer(testConfig(storeRoot, &fakeDriver{}))
+			defer next.Close(context.Background())
+			if next.initErr != nil {
+				t.Fatalf("replacement owner after settlement: %v", next.initErr)
+			}
 			if result.response != (StartResponse{}) {
 				t.Fatalf("refused Start returned a receipt: %+v", result.response)
 			}
 			s.mu.Lock()
-			runs, keys, workers, generation := len(s.runs), len(s.keys), s.workers, s.next
+			runs, keys, workers, generation := len(s.runs), len(s.keys), s.inFlight, s.next
 			s.mu.Unlock()
 			if runs != 0 || keys != 0 || workers != 0 || generation != 0 {
 				t.Fatalf("late admission changed state: runs=%d keys=%d workers=%d next=%d", runs, keys, workers, generation)

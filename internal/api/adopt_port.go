@@ -2,6 +2,10 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -282,4 +286,181 @@ func adoptPortBindable(port int) bool {
 	}
 	_ = ln.Close()
 	return true
+}
+
+type adoptPortInventoryObservation struct {
+	used    map[int]bool
+	reads   []manifestSourceReadAttempt
+	intent  *SupervisorIntentFile
+	guiPort int
+	cause   error
+}
+
+type adoptPortInventoryFailure struct {
+	observation *adoptPortInventoryObservation
+	cause       error
+}
+
+func (e *adoptPortInventoryFailure) Error() string { return "GRAPHIFY_PORT_INVENTORY_UNAVAILABLE" }
+func (e *adoptPortInventoryFailure) Unwrap() error { return e.cause }
+
+// Definition uses the same inventory and port-range owners with observed
+// acquisition. Ordinary allocation retains its existing tolerant policy above.
+func collectUsedAdoptPortsObserved() (observation *adoptPortInventoryObservation, resultErr error) {
+	observation = &adoptPortInventoryObservation{used: map[int]bool{}}
+	defer func() {
+		if resultErr != nil {
+			observation.cause = resultErr
+			resultErr = &adoptPortInventoryFailure{observation: observation, cause: resultErr}
+		}
+	}()
+	dir, err := adoptManifestDirFn()
+	if err != nil {
+		return observation, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return observation, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name(), "manifest.yaml")
+		read := readManifestSourceAttempt("disk", path)
+		observation.reads = append(observation.reads, read)
+		if err := errors.Join(read.readError, read.closeError); err != nil {
+			return observation, err
+		}
+		if err := collectManifestPortsObserved(read.bytes, observation.used); err != nil {
+			return observation, err
+		}
+	}
+	embeddedNames, err := embeddedManifestNamesObserved()
+	if err != nil {
+		return observation, err
+	}
+	for _, name := range embeddedNames {
+		read := readManifestSourceAttempt("embedded", name+"/manifest.yaml")
+		observation.reads = append(observation.reads, read)
+		if err := errors.Join(read.readError, read.closeError); err != nil {
+			return observation, err
+		}
+		if err := collectManifestPortsObserved(read.bytes, observation.used); err != nil {
+			return observation, err
+		}
+	}
+	stateDir, err := daemonStateDirReadOnly()
+	if err != nil {
+		return observation, err
+	}
+	intent, err := ReadSupervisorIntent(joinStateFilePath(stateDir, supervisorIntentFileLeaf))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return observation, err
+	}
+	observation.intent = intent
+	if intent != nil {
+		for _, row := range intent.Daemons {
+			markUsedAdoptPort(row.Port, observation.used)
+		}
+	}
+	rawPort, err := NewAPI().SettingsGet("gui_server.port")
+	if err != nil {
+		return observation, err
+	}
+	observation.guiPort, err = strconv.Atoi(strings.TrimSpace(rawPort))
+	if err != nil || observation.guiPort < 0 || observation.guiPort > 65535 {
+		return observation, errors.Join(err, errors.New("GRAPHIFY_PORT_SETTINGS_INVALID"))
+	}
+	markUsedAdoptPort(observation.guiPort, observation.used)
+	return observation, nil
+}
+
+func collectManifestPortsObserved(data []byte, used map[int]bool) error {
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	for _, daemon := range m.Daemons {
+		markUsedAdoptPort(daemon.Port, used)
+	}
+	collectPortPool(m.PortPool, used)
+	if m.DaemonTemplate != nil {
+		collectPortPool(m.DaemonTemplate.PortPool, used)
+	}
+	return nil
+}
+
+func (o *adoptPortInventoryObservation) fingerprint() (string, error) {
+	if o == nil || o.cause != nil || o.used == nil {
+		return "", errors.New("GRAPHIFY_PORT_INVENTORY_UNQUALIFIED")
+	}
+	material, err := json.Marshal(struct {
+		Reads []struct {
+			Source  string
+			Content string
+		}
+		Intent  *SupervisorIntentFile
+		GUIPort int
+	}{Reads: func() []struct {
+		Source  string
+		Content string
+	} {
+		var rows []struct {
+			Source  string
+			Content string
+		}
+		for _, read := range o.reads {
+			rows = append(rows, struct {
+				Source  string
+				Content string
+			}{read.path, ManifestHashContent(read.bytes)})
+		}
+		return rows
+	}(), Intent: o.intent, GUIPort: o.guiPort})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(material)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+type adoptPortProbeObservation struct {
+	port           int
+	listener       net.Listener
+	acquireError   error
+	closeAttempted bool
+	closeDefined   bool
+	closeError     error
+}
+
+type adoptPortProbeFailure struct {
+	observation adoptPortProbeObservation
+	cause       error
+}
+
+func (e *adoptPortProbeFailure) Error() string { return "GRAPHIFY_PORT_PROBE_UNQUALIFIED" }
+func (e *adoptPortProbeFailure) Unwrap() error { return e.cause }
+
+func adoptPortBindableObserved(port int) (observation adoptPortProbeObservation, resultErr error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	return finishAdoptPortProbeObserved(port, listener, err)
+}
+
+func finishAdoptPortProbeObserved(port int, listener net.Listener, acquireErr error) (observation adoptPortProbeObservation, resultErr error) {
+	observation.port, observation.acquireError = port, acquireErr
+	if listener == nil {
+		if acquireErr == nil {
+			acquireErr = errors.New("port probe original listener unavailable")
+		}
+		return observation, &adoptPortProbeFailure{observation: observation, cause: acquireErr}
+	}
+	observation.listener = listener
+	observation.closeAttempted = true
+	observation.closeError = listener.Close()
+	observation.closeDefined = true
+	if cause := errors.Join(acquireErr, observation.closeError); cause != nil {
+		return observation, &adoptPortProbeFailure{observation: observation, cause: cause}
+	}
+	return observation, nil
 }

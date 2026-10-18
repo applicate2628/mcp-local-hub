@@ -25,9 +25,11 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -1214,118 +1216,46 @@ func TestSuperviseCommand_ReaperFailureDoesNotBlockStartup(t *testing.T) {
 	}
 }
 
-// TestSuperviseCommand_SweepsOldBinariesOnStartup pins the P3 wiring: every
-// supervisor startup runs the rename-aside retention sweep, and the sweep is
-// non-fatal so normal startup still reaches the graceful test-exit path.
-func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
-	tmpHome := apitest.HardenedTempDir(t)
-	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
-
-	defer setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+// Ordinary startup has no binary-aside deletion authority. The legacy
+// post-handoff caller remains independently covered in install_upgrade_test.go.
+func TestSuperviseCommand_StartupPreservesBinaryAsides(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	defer setReaperFnForTest(func(context.Context, ReaperDeps) (ReaperResult, error) {
 		return ReaperResult{}, nil
 	})()
-
-	sweepCalled := make(chan string, 1)
-	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
-		sweepCalled <- dir
-		return nil
-	})
-	defer cleanupSweep()
-
-	exitCh := make(chan struct{}, 1)
-	cleanupExit := setSuperviseTestExitCh(exitCh)
-	defer cleanupExit()
-
-	cmd := newSuperviseCmd()
-	cmd.SetArgs([]string{"--no-ipc"})
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Execute() }()
-
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("resolve test executable: %v", err)
-	}
-	wantDir := filepath.Dir(exe)
-
-	select {
-	case gotDir := <-sweepCalled:
-		if gotDir != wantDir {
-			t.Fatalf("sweep dir = %s, want executable dir %s", gotDir, wantDir)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("runSupervise did not call SweepOldBinaries on startup")
-	}
-
-	exitCh <- struct{}{}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("supervise exited with err after startup sweep: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("supervise did not exit on test-exit signal within 3s")
-	}
-}
-
-func TestSuperviseCommand_SkipsOldBinarySweepWhenExecutableUnavailable(t *testing.T) {
-	tmpHome := apitest.HardenedTempDir(t)
-	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
-
-	defer setSupervisorExecutableFnForTest(func() (string, error) {
-		return "", errors.New("executable unavailable")
-	})()
-
-	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
-		return ReaperResult{}, nil
-	})
-	defer cleanupReaper()
-
 	var sweepCalls atomic.Int32
-	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+	defer setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
 		sweepCalls.Add(1)
-		return nil
-	})
-	defer cleanupSweep()
-
+		return errors.New("startup must never invoke this competing deleter")
+	})()
+	// Seven controlled prior/baseline leaves exceed the existing legacy keep5;
+	// their aged encoded names exercise both old deletion criteria.
+	before := make(map[string][]byte)
+	for i := 0; i < 7; i++ {
+		path := filepath.Join(stateDir, fmt.Sprintf("mcphub.exe.old-200001%02dT000000Z", i+1))
+		payload := []byte(fmt.Sprintf("original-prior-or-baseline-%d", i))
+		if err := os.WriteFile(path, payload, 0600); err != nil {
+			t.Fatal(err)
+		}
+		before[path] = payload
+	}
 	exitCh := make(chan struct{}, 1)
-	cleanupExit := setSuperviseTestExitCh(exitCh)
-	defer cleanupExit()
-
+	exitCh <- struct{}{}
+	defer setSuperviseTestExitCh(exitCh)()
 	cmd := newSuperviseCmd()
 	cmd.SetArgs([]string{"--no-ipc"})
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Execute() }()
-
-	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		select {
-		case err := <-done:
-			t.Fatalf("supervise exited before startup after executable lookup failure: %v", err)
-		default:
-		}
-		if data, err := os.ReadFile(eventsPath); err == nil && strings.Contains(string(data), `"event":"supervisor-start"`) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("supervise did not reach startup after executable lookup failure")
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
 	}
-
-	exitCh <- struct{}{}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("supervise exited with err after executable lookup failure: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	if sweepCalls.Load() != 0 {
+		t.Fatal("ordinary startup entered binary-aside cleanup")
 	}
-	if got := sweepCalls.Load(); got != 0 {
-		t.Fatalf("SweepOldBinaries calls = %d, want 0 when executable lookup fails", got)
+	for path, expected := range before {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, expected) {
+			t.Fatal("ordinary startup changed a preserved prior/baseline")
+		}
 	}
 }
 

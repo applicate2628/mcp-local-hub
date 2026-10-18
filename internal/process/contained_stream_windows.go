@@ -3,21 +3,46 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 type windowsContainedChild struct {
-	cmd      *exec.Cmd
-	job      *Job
-	process  windows.Handle
-	thread   windows.Handle
-	original containedJobOriginal
+	attributeClose                    ProcThreadAttributeListCloseObservation
+	cmd                               *exec.Cmd
+	job                               *Job
+	process                           windows.Handle
+	thread                            windows.Handle
+	original                          containedJobOriginal
+	memberSource                      *originalMemberSource
+	rootWaitEntered, rootWaitReturned bool
+	observed                          bool
+	creationTime                      string
+	creationFILETIME                  uint64
+	creationError                     error
+	threadCloseAttempted              bool
+	threadCloseError                  error
+	processCloseAttempted             bool
+	processCloseError                 error
+	jobCloseAttempted                 bool
+	jobCloseError                     error
+	wrapperOwned                      bool
+	wrapperCloseAttempted             bool
+	wrapperCloseError                 error
+	waitStarted                       atomic.Bool
+	waitFinished                      atomic.Bool
+	inheritedCloseError               error
+	inheritedCloseAttempts            int
+	inheritedHandles                  []originalInheritedHandle
+	attributeOwner                    *procThreadAttributeListObserved
 }
 
 func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
@@ -57,7 +82,7 @@ func (c *windowsContainedChild) start(
 	stdin containedInputFile,
 	stdout containedWriteFile,
 	stderr containedWriteFile,
-) error {
+) (retErr error) {
 	if c == nil || c.job == nil || c.job.Handle() == 0 || cmd == nil || c.cmd != cmd {
 		return fixedContainedError(ContainedStageContainment, errors.New("invalid Windows containment"))
 	}
@@ -98,11 +123,17 @@ func (c *windowsContainedChild) start(
 		}
 	}
 
-	attrList, err := windows.NewProcThreadAttributeList(2)
+	attrList, err := newProcThreadAttributeListObserved(2)
+	if attrList != nil {
+		defer func() {
+			var closeErr error
+			c.attributeClose, closeErr = attrList.CloseObserved()
+			retErr = errors.Join(retErr, closeErr)
+		}()
+	}
 	if err != nil {
 		return fixedContainedError(ContainedStageContainment, err)
 	}
-	defer attrList.Delete()
 
 	jobHandle := c.job.Handle()
 	if err := attrList.Update(
@@ -132,7 +163,7 @@ func (c *windowsContainedChild) start(
 			StdOutput: stdHandles[1],
 			StdErr:    stdHandles[2],
 		},
-		ProcThreadAttributeList: attrList.List(),
+		ProcThreadAttributeList: (*windows.ProcThreadAttributeList)(attrList.List()),
 	}
 
 	var pi windows.ProcessInformation
@@ -153,8 +184,28 @@ func (c *windowsContainedChild) start(
 	}
 	c.process = pi.Process
 	c.thread = pi.Thread
+	if c.observed && pi.Process != 0 {
+		c.original = containedJobOriginal{job: c.job, handle: pi.Process, pid: pi.ProcessId, atCreate: true}
+		var created, exited, kernel, user windows.Filetime
+		c.creationError = windows.GetProcessTimes(pi.Process, &created, &exited, &kernel, &user)
+		if c.creationError == nil {
+			if created.HighDateTime == 0 && created.LowDateTime == 0 {
+				c.creationError = errors.New("original creation time unavailable")
+			} else {
+				c.creationTime = time.Unix(0, created.Nanoseconds()).UTC().Format(time.RFC3339Nano)
+				c.creationFILETIME = uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+			}
+		}
+	}
 	if pi.Thread != 0 {
-		if err := windows.CloseHandle(pi.Thread); err == nil {
+		if c.observed {
+			c.threadCloseAttempted = true
+		}
+		err := windows.CloseHandle(pi.Thread)
+		if c.observed {
+			c.threadCloseError = err
+		}
+		if err == nil {
 			c.thread = 0
 		}
 	}
@@ -172,8 +223,22 @@ func containedWindowsCreationFlags() uint32 {
 }
 
 func (c *windowsContainedChild) wait() containedWaitResult {
+	if c != nil && c.memberSource != nil {
+		g := c.memberSource.gate
+		g.mu.Lock()
+		if c.rootWaitEntered {
+			g.mu.Unlock()
+			return containedWaitResult{err: errors.New("original root waiter already entered")}
+		}
+		c.rootWaitEntered = true
+		g.mu.Unlock()
+		defer func() { g.mu.Lock(); c.rootWaitReturned = true; g.mu.Unlock() }()
+	}
 	if c == nil || c.process == 0 {
 		return containedWaitResult{err: errors.New("invalid Windows process handle")}
+	}
+	if c.observed {
+		c.waitStarted.Store(true)
 	}
 	event, err := windows.WaitForSingleObject(c.process, windows.INFINITE)
 	if err != nil {
@@ -181,6 +246,9 @@ func (c *windowsContainedChild) wait() containedWaitResult {
 	}
 	if event != uint32(windows.WAIT_OBJECT_0) {
 		return containedWaitResult{err: errors.New("unexpected process wait result")}
+	}
+	if c.observed {
+		c.waitFinished.Store(true)
 	}
 	var code uint32
 	if err := windows.GetExitCodeProcess(c.process, &code); err != nil {
@@ -197,12 +265,52 @@ func (c *windowsContainedChild) terminate(timeoutMs uint32) error {
 }
 
 func (c *windowsContainedChild) close() error {
+	if c != nil && c.memberSource != nil {
+		permit, err := c.memberSource.gate.beginTerminal(nil)
+		if err != nil {
+			return err
+		}
+		defer permit.finish()
+		return c.closeOriginalWithPermit(permit)
+	}
+	return c.closeOriginalWithPermit(nil)
+}
+func (c *windowsContainedChild) closeOriginalWithPermit(permit *originalMemberTerminalPermit) error {
+	if err := c.originalMemberCloseReady(permit); err != nil {
+		return err
+	}
 	if c == nil {
 		return nil
 	}
 	var out error
+	if c.observed {
+		waitPending := c.waitStarted.Load() && !c.waitFinished.Load()
+		if waitPending {
+			out = errors.Join(out, errors.New("original root wait pending"))
+		}
+		if !waitPending && c.wrapperOwned && c.cmd != nil && c.cmd.Process != nil && !c.wrapperCloseAttempted {
+			c.wrapperCloseAttempted = true
+			c.wrapperCloseError = c.cmd.Process.Release()
+		}
+		_ = c.closeContainedJobBackstopWithPermit(permit)
+		if !waitPending && c.process != 0 && !c.processCloseAttempted {
+			c.processCloseAttempted = true
+			c.processCloseError = windows.CloseHandle(c.process)
+			if c.processCloseError == nil {
+				c.process = 0
+			}
+		}
+		if c.thread != 0 && !c.threadCloseAttempted {
+			c.threadCloseAttempted = true
+			c.threadCloseError = windows.CloseHandle(c.thread)
+			if c.threadCloseError == nil {
+				c.thread = 0
+			}
+		}
+		return errors.Join(out, c.jobCloseError, c.processCloseError, c.threadCloseError, c.wrapperCloseError, c.inheritedSettlementError(), c.attributeClose.Error)
+	}
 	if c.job != nil {
-		out = errors.Join(out, c.job.Close())
+		out = errors.Join(out, c.job.closeWithMemberPermit(permit))
 	}
 	if c.process != 0 {
 		handle := c.process
@@ -214,5 +322,144 @@ func (c *windowsContainedChild) close() error {
 		c.thread = 0
 		out = errors.Join(out, windows.CloseHandle(handle))
 	}
-	return out
+	return errors.Join(out, c.attributeClose.Error)
+}
+
+func (c *windowsContainedChild) prepareContainedObservation() { c.observed = true }
+func (c *windowsContainedChild) containedCreated() bool {
+	return c.original.atCreate && c.original.handle != 0 && c.original.handle != windows.InvalidHandle && c.original.pid != 0
+}
+func (c *windowsContainedChild) containedStartLive(ctx context.Context) (bool, error) {
+	if c != nil && c.memberSource != nil {
+		exit, err := c.memberSource.gate.enterQuery(nil)
+		if err != nil {
+			return false, err
+		}
+		defer exit()
+	}
+	if !c.attributeClose.Complete() {
+		return false, errors.Join(c.attributeClose.Error, errors.New("original attribute allocation closure unavailable"))
+	}
+	if err := creatorClosureContext(ctx); err != nil {
+		return false, err
+	}
+	if !c.containedCreated() {
+		return false, ErrContainmentUnavailable
+	}
+	if _, err := c.containedRootIdentity(); err != nil {
+		return false, err
+	}
+	member, err := jobMemberFromHandle(c.original.handle, c.job)
+	if err != nil || !member {
+		return false, errors.Join(err, errors.New("original child Job membership unavailable"))
+	}
+	status, err := windows.WaitForSingleObject(c.original.handle, 0)
+	if err != nil {
+		return false, err
+	}
+	if status == uint32(windows.WAIT_TIMEOUT) {
+		return true, nil
+	}
+	if status == uint32(windows.WAIT_OBJECT_0) {
+		return false, nil
+	}
+	return false, errors.New("unexpected original live wait result")
+}
+func (c *windowsContainedChild) closeContainedJobBackstop() error {
+	if c != nil && c.memberSource != nil {
+		permit, err := c.memberSource.gate.beginTerminal(nil)
+		if err != nil {
+			return err
+		}
+		defer permit.finish()
+		return c.closeContainedJobBackstopWithPermit(permit)
+	}
+	return c.closeContainedJobBackstopWithPermit(nil)
+}
+func (c *windowsContainedChild) closeContainedJobBackstopWithPermit(permit *originalMemberTerminalPermit) error {
+	if c != nil && c.memberSource != nil {
+		if err := permit.validate(c.memberSource.gate); err != nil {
+			return err
+		}
+	}
+	if c.job != nil && !c.jobCloseAttempted {
+		c.jobCloseAttempted = true
+		c.jobCloseError = c.job.closeWithMemberPermit(permit)
+	}
+	return c.jobCloseError
+}
+func (c *windowsContainedChild) containedRootIdentity() (ContainedRootIdentity, error) {
+	v := ContainedRootIdentity{Known: c.original.atCreate && c.original.pid != 0 && c.creationTime != "" && c.creationError == nil, PID: int(c.original.pid), StartedAt: c.creationTime, NativeBirthFILETIME: c.creationFILETIME}
+	if !v.Known {
+		return v, errors.Join(c.creationError, errors.New("contained original identity unavailable"))
+	}
+	return v, nil
+}
+func (c *windowsContainedChild) settleContained(ctx context.Context, natural bool) (ContainedNativeSnapshot, error) {
+	if c != nil && c.memberSource != nil {
+		permit, owned, err := c.job.enterMemberTerminal(ctx)
+		if err != nil {
+			return ContainedNativeSnapshot{}, err
+		}
+		if owned {
+			defer permit.finish()
+		}
+		ctx = withOriginalMemberTerminalPermit(ctx, permit)
+	}
+	var v ContainedNativeSnapshot
+	if c != nil {
+		v.RootIdentity, _ = c.containedRootIdentity()
+	}
+	if err := creatorClosureContext(ctx); err != nil {
+		return v, err
+	}
+	if c == nil || c.job == nil || c.job.Handle() == 0 {
+		return v, ErrContainmentUnavailable
+	}
+	if c.process == 0 {
+		if c.memberSource != nil {
+			permit, err := originalMemberPermitFromContext(ctx, c.memberSource.gate)
+			if err != nil {
+				return v, err
+			}
+			if err := permit.markNativeEntry(ctx); err != nil {
+				return v, err
+			}
+		}
+		accounting, err := c.job.queryAccounting()
+		v.AccountingKnown = err == nil
+		v.InitialTotal = accounting.TotalProcesses
+		v.FinalActive = accounting.ActiveProcesses
+		v.NoChildKnown = err == nil && accounting.TotalProcesses == 0 && accounting.ActiveProcesses == 0
+		if !v.NoChildKnown {
+			return v, errors.Join(err, errors.New("contained no-child release unproved"))
+		}
+		v.TerminalAction = string(creatorTerminalNotRequested)
+		return v, nil
+	}
+	original := c.original
+	original.required = true
+	var observation jobTerminationObservation
+	var err error
+	if natural {
+		observation, err = c.job.completeCreatorAfterExit(ctx, original)
+	} else {
+		deadline, _ := ctx.Deadline()
+		ms := time.Until(deadline).Milliseconds()
+		if ms <= 0 {
+			return v, context.DeadlineExceeded
+		}
+		if ms > int64(^uint32(0)) {
+			ms = int64(^uint32(0))
+		}
+		observation, err = c.job.observeCurrentJob(uint32(ms), original, ctx, true)
+	}
+	v.TerminalAction = string(observation.terminalAction)
+	v.MembersExited = observation.ObservedCurrentMembersExited
+	v.AccountingKnown = observation.native.InitialAccountingKnown && observation.native.FinalAccountingKnown
+	v.InitialTotal = observation.native.InitialTotal
+	v.FinalActive = observation.native.FinalActive
+	v.CapturedMemberPIDs = append([]uint32(nil), observation.native.CapturedMemberPIDs...)
+	v.Error = errors.Join(err, observation.terminalActionErr, c.creationError, c.attributeClose.Error)
+	return v, v.Error
 }

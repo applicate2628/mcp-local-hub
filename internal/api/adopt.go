@@ -40,6 +40,7 @@ func AdoptSupportedClients() []string {
 
 // AdoptOpts describes an unmanaged direct stdio entry to absorb into mcphub.
 type AdoptOpts struct {
+	Context           context.Context
 	EntryName         string
 	Client            string
 	ManifestName      string
@@ -67,6 +68,8 @@ type AdoptOpts struct {
 
 // AdoptPlan is the side-effect-free preview returned by BuildAdoptPlan.
 type AdoptPlan struct {
+	ProjectService                  *ProjectServicePlanInfo `json:"project_service,omitempty"`
+	projectService                  *projectServicePlan
 	EntryName                       string
 	SourceClient                    string
 	ManifestName                    string
@@ -130,6 +133,7 @@ type ProviderAdoptPreview struct {
 }
 
 type ExecuteAdoptOpts struct {
+	Context         context.Context
 	SymlinkConsents []ResolvedSymlinkConsent
 	// LeaseOwner is an in-process composition dependency. Nil binds the
 	// platform production owner; no command, HTTP request, configuration, or
@@ -141,7 +145,7 @@ type ExecuteAdoptOpts struct {
 	ReceivingVerifier AdoptReceivingVerifier
 	result            *AdoptExecutionResultV1
 	providerDeps      providerTransactionDeps
-	installFn         func(*API, InstallOpts) error
+	installFn         func(context.Context, *API, InstallOpts) error
 }
 
 // AdoptExecutionResultV1 carries only settlements returned by the owning
@@ -155,26 +159,57 @@ type AdoptExecutionResultV1 struct {
 const codexGlobalWriteTargetDisplay = "codex global config"
 
 var (
+	// These input errors contain no caller-supplied duration or private data.
+	ErrCodexSharedStdioActionBudgetRequired = errors.New("H6_ACTION_BUDGET_REQUIRED: supply --action-timeout with a positive Go duration or a finite action context")
+	ErrCodexSharedStdioActionBudgetInvalid  = errors.New("H6_ACTION_BUDGET_INVALID: action timeout must be a positive Go duration")
 	ErrProjectAdoptSourcePreimageUnexpected = errors.New("PROJECT_ADOPT_SOURCE_PREIMAGE_UNEXPECTED")
 	ErrProjectAdoptRepeatStateInconsistent  = errors.New("PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT")
 )
 
-// AdoptReceivingVerifier verifies the durable manifest/intent/client/provenance
-// receipt after an adopt transaction commits and before its lease settles.
-type AdoptReceivingVerifier func(*API, *AdoptPlan, *AdoptProvenanceRecord) error
-
-func (opts ExecuteAdoptOpts) verifyReceivers(a *API, plan *AdoptPlan, rec *AdoptProvenanceRecord) error {
-	if opts.ReceivingVerifier != nil {
-		return opts.ReceivingVerifier(a, plan, rec)
+// ResolveCodexSharedStdioActionContext is the sole action-duration input owner.
+// Ingress owns the returned cancel; subordinate operations inherit this context
+// without deriving another action allowance.
+func ResolveCodexSharedStdioActionContext(parent context.Context, actionTimeout *string) (context.Context, context.CancelFunc, error) {
+	if parent == nil {
+		return nil, nil, ErrCodexSharedStdioActionBudgetRequired
 	}
-	return adoptReceivingVerifierFn(a, plan, rec)
+	if err := parent.Err(); err != nil {
+		return nil, nil, err
+	}
+	if actionTimeout != nil {
+		duration, err := time.ParseDuration(*actionTimeout)
+		if err != nil || duration <= 0 {
+			return nil, nil, ErrCodexSharedStdioActionBudgetInvalid
+		}
+		ctx, cancel := context.WithTimeout(parent, duration)
+		return ctx, cancel, nil
+	}
+	deadline, ok := parent.Deadline()
+	if !ok {
+		return nil, nil, ErrCodexSharedStdioActionBudgetRequired
+	}
+	if !time.Now().Before(deadline) {
+		return nil, nil, context.DeadlineExceeded
+	}
+	return parent, func() {}, nil
 }
 
-func (opts ExecuteAdoptOpts) install(a *API, installOpts InstallOpts) error {
-	if opts.installFn != nil {
-		return opts.installFn(a, installOpts)
+// AdoptReceivingVerifier verifies the durable manifest/intent/client/provenance
+// receipt after an adopt transaction commits and before its lease settles.
+type AdoptReceivingVerifier func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error
+
+func (opts ExecuteAdoptOpts) verifyReceivers(ctx context.Context, a *API, plan *AdoptPlan, rec *AdoptProvenanceRecord) error {
+	if opts.ReceivingVerifier != nil {
+		return opts.ReceivingVerifier(ctx, a, plan, rec)
 	}
-	return a.installWithAdoptLeaseHeld(context.Background(), installOpts, nil)
+	return adoptReceivingVerifierFn(ctx, a, plan, rec)
+}
+
+func (opts ExecuteAdoptOpts) install(ctx context.Context, a *API, installOpts InstallOpts) error {
+	if opts.installFn != nil {
+		return opts.installFn(ctx, a, installOpts)
+	}
+	return a.installWithAdoptLeaseHeld(ctx, installOpts, nil)
 }
 
 // AdoptStageError is the closed transaction outcome returned by the apply
@@ -225,12 +260,12 @@ var adoptReceivingVerifierFn = verifyAdoptReceivers
 // facts as a substitute for this current-generation MCP settlement.
 var adoptReadinessVerifierFn = verifyAdoptReadiness
 
-func verifyAdoptReadiness(a *API, taskNames []string) error {
-	_, err := a.awaitReadinessForTasks(context.Background(), taskNames, nil, false)
+func verifyAdoptReadiness(ctx context.Context, a *API, taskNames []string) error {
+	_, err := a.awaitReadinessForTasks(ctx, taskNames, nil, false)
 	return err
 }
 
-func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanceRecord) error {
+func verifyAdoptReceivers(ctx context.Context, a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanceRecord) error {
 	manifestDir, err := adoptPlanManifestDir(plan)
 	if err != nil {
 		return newAdoptStageError("manifest-verify", "committed_unverified", fmt.Errorf("resolve manifest root: %w", err))
@@ -281,7 +316,7 @@ func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanc
 	if !intentFound {
 		return newAdoptStageError("intent-task-verify", "committed_unverified", fmt.Errorf("supervisor intent has no daemon for manifest %q", plan.ManifestName))
 	}
-	if err := adoptReadinessVerifierFn(a, taskNames); err != nil {
+	if err := adoptReadinessVerifierFn(ctx, a, taskNames); err != nil {
 		return newAdoptStageError("daemon-readiness", "committed_unverified", err)
 	}
 	expectedURL := fmt.Sprintf("http://127.0.0.1:%d%s", plan.Port, adoptDefaultURLPath)
@@ -289,6 +324,9 @@ func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanc
 		return err
 	}
 	rec, found, err := ReadAdoptProvenance(plan.ManifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if err != nil || !found || rec.OperationState != AdoptOperationStateAdopted {
 		return newAdoptStageError("provenance-receipt", "committed_unverified", fmt.Errorf("adopted provenance receipt is missing or uncommitted"))
 	}
@@ -423,8 +461,16 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 			return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, existsErr)
 		}
 		rec, found, readErr := ReadAdoptProvenance(manifestName)
+		if rec != nil && rec.ProjectService != nil {
+			return nil, errGraphifyServiceOperationRequired
+		}
 		if readErr != nil {
 			return nil, ErrProjectAdoptRepeatStateInconsistent
+		}
+		if found && adoptRecordHasSharedStdioTarget(*rec) {
+			if _, _, err := ResolveCodexSharedStdioActionContext(opts.Context, nil); err != nil {
+				return nil, err
+			}
 		}
 		if exists || found {
 			if !found || !projectAdoptRecordMatchesIdentity(rec, opts.CodexProjectSourceRoot, identitySHA256, entryName, manifestName) {
@@ -779,6 +825,25 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if plan == nil {
 		return fmt.Errorf("adopt plan is nil")
 	}
+	if plan.projectService != nil {
+		return a.executeProjectServicePlan(plan, w, opts)
+	}
+	if plan.ProjectService != nil {
+		return errors.New("PROJECT_SERVICE_PLAN_UNISSUED_OR_FOREIGN")
+	}
+	// Legacy execution retains its original lifetime. Only the explicit shared
+	// target consumes the finite action context, before GC, lease or effects.
+	actionCtx := context.Background()
+	for _, target := range plan.clientTargets {
+		if target.configTarget != nil && target.configTarget.Kind == adoptClientConfigTargetKindCodexSharedStdio {
+			var err error
+			actionCtx, _, err = ResolveCodexSharedStdioActionContext(opts.Context, nil)
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
 	if w == nil {
 		w = io.Discard
 	}
@@ -839,6 +904,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			stage = "existing-state-inconsistent"
 			commitState = "committed_unverified"
 			rec, found, err := ReadAdoptProvenance(plan.ManifestName)
+			if rec != nil && rec.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
+			}
 			if err != nil {
 				return fmt.Errorf("read existing adopt provenance: %w", err)
 			}
@@ -848,8 +916,8 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			if err := validateAdoptRepeatState(plan, rec); err != nil {
 				return err
 			}
-			if err := opts.verifyReceivers(a, plan, rec); err != nil {
-				return fmt.Errorf("existing adopted receiver state does not match its durable receipt")
+			if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
+				return fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err)
 			}
 			return nil
 		}
@@ -974,7 +1042,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			providerRec = updated
 		}
 		stage = "install"
-		if err := opts.install(a, installOpts); err != nil {
+		if err := opts.install(actionCtx, a, installOpts); err != nil {
 			var committedUnverified *InstallCommittedUnverifiedError
 			if errors.As(err, &committedUnverified) {
 				providerManagedInstalled = plan.providerSource != nil
@@ -1097,7 +1165,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			emitAdoptProvenanceCommitFailed(rec.ManifestName)
 			return err
 		}
-		if err := opts.verifyReceivers(a, plan, rec); err != nil {
+		if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
 			return err
 		}
 		return nil
@@ -1305,6 +1373,9 @@ func (plan *AdoptPlan) ValidateProjectSourcePreimageToken(supplied string) error
 	if plan.projectRepeat != nil {
 		projectMarkers++
 	}
+	if plan.projectService != nil {
+		projectMarkers++
+	}
 	if projectMarkers == 1 {
 		if _, ok := decodeLowerProjectAdoptSHA256(plan.projectSourcePreimageToken); !ok {
 			return clients.ErrCodexProjectSourceChanged
@@ -1334,10 +1405,9 @@ func (plan *AdoptPlan) hasCodexTransportRelocation() bool {
 		(plan.projectSource != nil || plan.targetEntryName("codex-cli") != plan.EntryName)
 }
 
-// Compare roots through the same owner used to derive project fingerprints;
-// raw Windows path spelling is not an additional ownership discriminator.
+// Compare roots using the canonical owner of project fingerprints.
 func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, projectIdentitySHA256, entryName, manifestName string) bool {
-	if rec == nil || rec.ManifestName != manifestName || rec.SourceClient != "codex-cli" || rec.SourceEntryName != entryName || rec.ProviderSource != nil {
+	if rec == nil || rec.ManifestName != manifestName || rec.SourceClient != "codex-cli" || rec.SourceEntryName != entryName || rec.ProviderSource != nil || rec.ProjectService != nil {
 		return false
 	}
 	matches := 0
@@ -1357,7 +1427,7 @@ func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, 
 }
 
 func (a *API) buildProjectAdoptRepeatPlan(opts AdoptOpts, rec *AdoptProvenanceRecord, manifestDir string) (*AdoptPlan, error) {
-	if rec == nil || rec.OperationState != AdoptOperationStateAdopted || rec.ProviderSource != nil {
+	if rec == nil || rec.OperationState != AdoptOperationStateAdopted || rec.ProviderSource != nil || rec.ProjectService != nil {
 		return nil, ErrProjectAdoptRepeatStateInconsistent
 	}
 	manifestBytes, err := os.ReadFile(filepath.Join(manifestDir, rec.ManifestName, "manifest.yaml"))

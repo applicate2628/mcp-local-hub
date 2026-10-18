@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
-import { restartSupervisor } from "../../api";
+import { projectSupervisorRestartFeedback, restartSupervisor } from "../../api";
 import type { ConfigSettingDTO, SettingsSnapshot } from "../../lib/settings-types";
 import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
 import { SectionFooter } from "./SectionAppearance";
@@ -203,7 +203,7 @@ export function SectionAdvanced({
     }
   }
 
-  // "Restart supervisor now" — the corp-managed autorun toggle needs a
+  // "Restart supervisor now" — the state-read compatibility toggle needs a
   // supervisor restart for the new env value to reach the running
   // supervisor (see relaxMsg above). This reuses the Dashboard's
   // restartSupervisor() helper (POST /api/supervisor/restart) so operators
@@ -223,14 +223,7 @@ export function SectionAdvanced({
     setSupRestartMsg(null);
     try {
       const res = await restartSupervisor();
-      if (res.spawned) {
-        setSupRestartMsg({ kind: "ok", text: "Supervisor restart requested." });
-      } else {
-        const detail = res.per_step_error
-          ? Object.entries(res.per_step_error).map(([k, v]) => `${k}: ${v}`).join("; ")
-          : "supervisor did not respawn";
-        setSupRestartMsg({ kind: "error", text: `Restart incomplete: ${detail}` });
-      }
+      setSupRestartMsg(projectSupervisorRestartFeedback(res));
     } catch (e: any) {
       setSupRestartMsg({ kind: "error", text: e?.message ?? "Restart failed" });
     } finally {
@@ -246,7 +239,7 @@ export function SectionAdvanced({
       section="advanced"
       title="Advanced"
       infoTipLabel="About this section"
-      infoTip="Configure the supervisor-managed MCP front port and use power-user actions: open the app-data folder on disk, export a configuration bundle, toggle autorun on corp-managed Windows hosts (the MCPHUB_ALLOW_UNHARDENED_STATE_READ env var), restart the supervisor, and diagnose the single-instance lock."
+      infoTip="Configure the supervisor-managed MCP front port and use power-user actions: open the app-data folder on disk, export a configuration bundle, configure state-read compatibility on managed Windows hosts, restart the supervisor, and diagnose the single-instance lock."
       subtitle="MCP front daemon and power-user actions."
     >
       {portDef ? (
@@ -312,11 +305,11 @@ export function SectionAdvanced({
       {err ? <p class="mt-2 text-sm text-app-danger" role="alert">Could not open folder: {err}</p> : null}
 
       <div class="mt-5">
-        <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">Autorun on corp-managed Windows</h3>
+        <h3 class="m-0 mb-1 text-xs font-semibold uppercase tracking-wide text-app-muted">State-read compatibility</h3>
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
           <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for="advanced-state-relax-toggle">
-            Autorun on corp-managed Windows (sets MCPHUB_ALLOW_UNHARDENED_STATE_READ)
-            <InfoTip text="Required on corp-managed Windows hosts whose %LOCALAPPDATA% inherits a Domain Users / Authenticated Users ACE that you cannot remove. Without this, mcphub's supervisor crashes at logon-trigger startup with 'insecure parent directory' and the Dashboard shows 'Failed to load' with no daemons. When enabled, mcphub writes the user-scope MCPHUB_ALLOW_UNHARDENED_STATE_READ=1 env var to the Windows registry (HKCU\\Environment); Task-Scheduler-spawned mcphub processes inherit it at every logon, so the autostart pipeline actually works. Leave off on single-user dev machines where this isn't needed." />
+            Allow state reads on managed Windows
+            <InfoTip text="Allows mcphub to read its state on managed Windows hosts whose app-data folder inherits broad permissions that you cannot remove. Enable only when startup reports an insecure parent directory. This relaxes the state-read permission check; it does not enable or disable startup at sign-in or automatic recovery. Leave off when this compatibility setting is not needed. Restart mcphub after changing it." />
           </label>
           <input
             id="advanced-state-relax-toggle"

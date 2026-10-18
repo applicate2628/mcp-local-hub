@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,6 +18,240 @@ func tmpSettings(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "gui-preferences.yaml")
+}
+
+type guiStopAdmissionContext struct {
+	context.Context
+	checked chan struct{}
+	once    sync.Once
+}
+
+func (ctx *guiStopAdmissionContext) Err() error {
+	err := ctx.Context.Err()
+	ctx.once.Do(func() { close(ctx.checked) })
+	return err
+}
+
+func TestGUIStopCancellationAfterSettingsWaitCannotCommit(t *testing.T) {
+	path := tmpSettings(t)
+	caller, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &guiStopAdmissionContext{Context: caller, checked: make(chan struct{})}
+	type received struct {
+		result GUIOwnerControlResult
+		err    error
+	}
+	done := make(chan received, 1)
+	settingsMu.Lock()
+	go func() {
+		result, err := NewAPI().RecordGUIStopIn(ctx, path, strings.Repeat("d", 64), "cli-quit")
+		done <- received{result, err}
+	}()
+	// The initial actual context check observed nil, but the genuine settings
+	// owner is unavailable. Cancel before allowing final semantic admission.
+	<-ctx.checked
+	cancel()
+	settingsMu.Unlock()
+	got := <-done
+	if got.result.Applied || got.result.NewlyStopped || !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("late commit=%#v %v", got.result, got.err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("canceled request wrote intent: %v", err)
+	}
+}
+
+func TestGUIAutomaticAdmissionRetainsPostAdmissionReleaseFailure(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	lockPath := SettingsPath() + ".lock"
+	previousUnlock := flockUnlockFn
+	releaseCause := errors.New("controlled post-admission release failure")
+	var owned *flock.Flock
+	flockUnlockFn = func(lock *flock.Flock) error {
+		if lock.Path() == lockPath {
+			owned = lock
+			return releaseCause
+		}
+		return previousUnlock(lock)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if owned != nil {
+			if err := owned.Unlock(); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := owned.Close(); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+	admissions := 0
+	err := NewAPI().AdmitGUIAutomaticStart(func() error { admissions++; return nil })
+	var outcome *GUIAutomaticStartError
+	if admissions != 1 || !errors.As(err, &outcome) || !outcome.Admitted || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+		t.Fatalf("lost original admission: calls=%d error=%v", admissions, err)
+	}
+}
+
+func TestGUIOwnerControlPreservesLegacyOffAndUnrelatedSettings(t *testing.T) {
+	path := tmpSettings(t)
+	a := NewAPI()
+	if err := a.WithGUIOwnerControlIn(path, func(c GUIOwnerControl) error {
+		if c.RunDesired != GUIRunRunning || c.AutorunEnabled != nil {
+			t.Fatalf("legacy = %#v", c)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("read created settings: %v", err)
+	}
+	if err := mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw["foreign.synthetic"] = "keep"
+		raw[GUIAutorunEnabledKey] = "false"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generation := strings.Repeat("a", 64)
+	stopped, err := a.RecordGUIStopIn(context.Background(), path, generation, "tray-quit")
+	if err != nil || !stopped.Applied || !stopped.NewlyStopped || stopped.Control.AutorunEnabled == nil || *stopped.Control.AutorunEnabled {
+		t.Fatalf("stop=%#v err=%v", stopped, err)
+	}
+	replayed, err := a.RecordGUIStopIn(context.Background(), path, generation, "tray-quit-and-stop-all")
+	if err != nil || !replayed.Applied || replayed.NewlyStopped || !equalGUIOwnerControl(replayed.Control, stopped.Control) {
+		t.Fatalf("replay=%#v err=%v", replayed, err)
+	}
+	for _, key := range []string{GUIRunDesiredKey, GUIAutorunEnabledKey, GUIStopCauseKey, GUIStopGenerationKey} {
+		if err := a.SettingsSetIn(path, key, "running"); err == nil {
+			t.Fatalf("generic edit admitted %s", key)
+		}
+	}
+	if _, err := a.ResumeGUIOwnerIn(path, GUIOwnerControl{RunDesired: GUIRunRunning}); !errors.Is(err, ErrGUIControlConflict) {
+		t.Fatalf("stale resume = %v", err)
+	}
+	resumed, err := a.ResumeGUIOwnerIn(path, stopped.Control)
+	if err != nil || !resumed.Applied || resumed.Control.RunDesired != GUIRunRunning || resumed.Control.StopCause != "" || resumed.Control.StopGeneration != "" || resumed.Control.AutorunEnabled == nil || *resumed.Control.AutorunEnabled {
+		t.Fatalf("resume=%#v err=%v", resumed, err)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil || raw["foreign.synthetic"] != "keep" {
+		t.Fatalf("unrelated lost: %v %#v", err, raw)
+	}
+	if err := mutateRawSettingsMapLocked(path, func(raw map[string]string) error { raw[GUIRunDesiredKey] = ""; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if err := a.WithGUIOwnerControlIn(path, func(GUIOwnerControl) error { called = true; return nil }); err == nil || called {
+		t.Fatalf("malformed value admitted: %v", err)
+	}
+}
+
+func TestGUIOwnerControlFinalAdmissionSerializesWithQuit(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	a := NewAPI()
+	entered, release, launchDone, stopDone := make(chan struct{}), make(chan struct{}), make(chan error, 1), make(chan error, 1)
+	go func() { launchDone <- a.AdmitGUIAutomaticStart(func() error { close(entered); <-release; return nil }) }()
+	<-entered
+	go func() {
+		_, err := a.RecordGUIStop(context.Background(), strings.Repeat("b", 64), "cli-quit")
+		stopDone <- err
+	}()
+	close(release)
+	if err := <-launchDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if err := a.AdmitGUIAutomaticStart(func() error { called = true; return nil }); !errors.Is(err, ErrGUIStoppedByUser) || called {
+		t.Fatalf("stale launch admitted: %v", err)
+	}
+}
+
+func TestGUIStopNewlyStoppedFactSerializesAndPreservesAutorun(t *testing.T) {
+	path := tmpSettings(t)
+	if err := mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw[GUIAutorunEnabledKey] = "true"
+		raw["foreign.synthetic"] = "keep"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	type received struct {
+		result GUIOwnerControlResult
+		err    error
+	}
+	done := make(chan received, 2)
+	for range 2 {
+		go func() {
+			result, err := NewAPI().RecordGUIStopIn(context.Background(), path, "", "cli-quit-and-stop-all")
+			done <- received{result, err}
+		}()
+	}
+	newTransitions := 0
+	for range 2 {
+		got := <-done
+		if got.err != nil || !got.result.Applied || got.result.Control.AutorunEnabled == nil || !*got.result.Control.AutorunEnabled || !got.result.Control.GUIStopIncludesDaemons() {
+			t.Errorf("received stop=%#v err=%v", got.result, got.err)
+		}
+		if got.result.NewlyStopped {
+			newTransitions++
+		}
+	}
+	if newTransitions != 1 {
+		t.Errorf("received new transitions=%d, want one", newTransitions)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil || raw[GUIAutorunEnabledKey] != "true" || raw["foreign.synthetic"] != "keep" {
+		t.Fatalf("retained settings=%#v err=%v", raw, err)
+	}
+}
+
+func TestGUIStopRetainsNewlyStoppedFactAfterReleaseFailure(t *testing.T) {
+	path := tmpSettings(t)
+	lockPath := path + ".lock"
+	previousUnlock := flockUnlockFn
+	releaseCause := errors.New("controlled post-stop release failure")
+	var owned *flock.Flock
+	flockUnlockFn = func(lock *flock.Flock) error {
+		if lock.Path() == lockPath {
+			owned = lock
+			return releaseCause
+		}
+		return previousUnlock(lock)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if owned != nil {
+			if err := owned.Unlock(); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := owned.Close(); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+	result, err := NewAPI().RecordGUIStopIn(context.Background(), path, "", "cli-quit-and-stop-all")
+	if !result.Applied || !result.NewlyStopped || !result.Control.GUIStopIncludesDaemons() || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+		t.Fatalf("lost received transition=%#v err=%v", result, err)
+	}
+	refused, later := NewAPI().RecordGUIStopIn(context.Background(), path, "", "cli-quit-and-stop-all")
+	if refused.Applied || refused.NewlyStopped || !errors.Is(later, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("release-unconfirmed replay=%#v err=%v", refused, later)
+	}
 }
 
 func TestSettingsWritersFailBeforeSettingsMuOnPoison(t *testing.T) {
@@ -113,8 +348,70 @@ func TestSettings_DefaultsResolve(t *testing.T) {
 	if all["appearance.theme"] != "system" {
 		t.Errorf("expected default 'system', got %q", all["appearance.theme"])
 	}
+	if all[PruneIdleHoursSettingKey] != "168" {
+		t.Errorf("expected default idle-prune threshold 168 hours (7 days), got %q", all[PruneIdleHoursSettingKey])
+	}
 	if _, has := all["advanced.open_app_data_folder"]; has {
 		t.Error("action keys must not appear in SettingsList output")
+	}
+}
+
+func TestSettings_PruneIdleHoursExplicitValues(t *testing.T) {
+	a := &API{}
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "zero disables", value: "0"},
+		{name: "custom threshold", value: "72"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := tmpSettings(t)
+			if err := a.SettingsSetIn(path, PruneIdleHoursSettingKey, tc.value); err != nil {
+				t.Fatalf("SettingsSetIn(%s): %v", tc.value, err)
+			}
+			all, err := a.SettingsListIn(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if all[PruneIdleHoursSettingKey] != tc.value {
+				t.Fatalf("persisted value = %q, want %q", all[PruneIdleHoursSettingKey], tc.value)
+			}
+		})
+	}
+}
+
+func TestSettings_PruneIdleHoursInvalidPersistedValueFails(t *testing.T) {
+	a := &API{}
+	for _, tc := range []struct {
+		name      string
+		yaml      string
+		wantCause string
+	}{
+		{name: "empty", yaml: `""`, wantCause: "not an integer"},
+		{name: "non-numeric", yaml: `"many"`, wantCause: "not an integer"},
+		{name: "negative", yaml: `"-1"`, wantCause: "below min 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := tmpSettings(t)
+			seeded := []byte(PruneIdleHoursSettingKey + ": " + tc.yaml + "\n")
+			seedSettingsFile(t, path, seeded)
+			_, err := a.SettingsListIn(path)
+			if err == nil || !strings.Contains(err.Error(), PruneIdleHoursSettingKey) {
+				t.Fatalf("SettingsListIn error = %v, want visible error naming %s", err, PruneIdleHoursSettingKey)
+			}
+			cause := errors.Unwrap(err)
+			if cause == nil || !strings.Contains(cause.Error(), tc.wantCause) {
+				t.Fatalf("SettingsListIn cause = %v, want validator error containing %q", cause, tc.wantCause)
+			}
+			if err := a.SettingsSetIn(path, PruneIdleHoursSettingKey, "0"); err != nil {
+				t.Fatalf("SettingsSetIn must repair the invalid persisted value: %v", err)
+			}
+			all, err := a.SettingsListIn(path)
+			if err != nil || all[PruneIdleHoursSettingKey] != "0" {
+				t.Fatalf("repaired setting = %q, err = %v; want 0 and no error", all[PruneIdleHoursSettingKey], err)
+			}
+		})
 	}
 }
 
@@ -384,7 +681,7 @@ func TestSettings_MigratesLegacyKeys(t *testing.T) {
 	// happens transparently on first read and is persisted on next write.
 	a := &API{}
 	path := tmpSettings(t)
-	seeded := []byte("theme: dark\nshell: bash\ndefault-home: /home/old\n")
+	seeded := []byte("theme: dark\nshell: bash\ndefault-home: /home/example/legacy-home\n")
 	seedSettingsFile(t, path, seeded)
 	// SettingsListIn should expose the legacy values under canonical keys.
 	all, err := a.SettingsListIn(path)
@@ -397,8 +694,8 @@ func TestSettings_MigratesLegacyKeys(t *testing.T) {
 	if all["appearance.shell"] != "bash" {
 		t.Errorf("expected appearance.shell=bash from legacy shell key, got %q", all["appearance.shell"])
 	}
-	if all["appearance.default_home"] != "/home/old" {
-		t.Errorf("expected appearance.default_home=/home/old from legacy default-home key, got %q", all["appearance.default_home"])
+	if all["appearance.default_home"] != "/home/example/legacy-home" {
+		t.Errorf("expected appearance.default_home=/home/example/legacy-home from legacy default-home key, got %q", all["appearance.default_home"])
 	}
 	// Trigger a write of an unrelated key — should persist migration.
 	if err := a.SettingsSetIn(path, "appearance.density", "compact"); err != nil {

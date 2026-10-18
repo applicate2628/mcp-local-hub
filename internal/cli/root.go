@@ -105,6 +105,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	)
 	addGrouped(root, groupRuntime,
 		newGuiCmd(),
+		newQuitCmd(),
 		newStatusCmd(),
 		newRestartCmd(),
 		newStopCmd(),

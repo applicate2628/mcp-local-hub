@@ -343,6 +343,15 @@ type ClientBinding struct {
 // on a non-remote-http transport gets rejected even though Go's
 // decoded value is the zero form.
 func ParseManifest(r io.Reader) (*ServerManifest, error) {
+	return ParseManifestWithEnvironment(r, os.LookupEnv)
+}
+
+// ParseManifestWithEnvironment uses the same parser and expansion rules with
+// one operation's captured environment. It does not alter process environment.
+func ParseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool)) (*ServerManifest, error) {
+	if lookup == nil {
+		return nil, fmt.Errorf("manifest environment lookup is required")
+	}
 	raw, readErr := io.ReadAll(r)
 	if readErr != nil {
 		return nil, fmt.Errorf("read manifest: %w", readErr)
@@ -395,12 +404,12 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 	}
 	var missing []string
 	for i, a := range m.BaseArgs {
-		expanded, miss := expandEnvCrossPlatform(a, false)
+		expanded, miss := expandEnvCrossPlatformWithEnvironment(a, false, lookup)
 		m.BaseArgs[i] = expanded
 		missing = append(missing, miss...)
 	}
 	for k, v := range m.Env {
-		expanded, miss := expandEnvCrossPlatform(v, true)
+		expanded, miss := expandEnvCrossPlatformWithEnvironment(v, true, lookup)
 		m.Env[k] = expanded
 		for _, name := range miss {
 			missing = append(missing, k+":"+name)
@@ -414,7 +423,7 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 		if m.Daemons[i].Cwd == "" {
 			continue
 		}
-		expanded, miss := expandEnvCrossPlatform(m.Daemons[i].Cwd, false)
+		expanded, miss := expandEnvCrossPlatformWithEnvironment(m.Daemons[i].Cwd, false, lookup)
 		m.Daemons[i].Cwd = expanded
 		for _, name := range miss {
 			missing = append(missing, fmt.Sprintf("daemons[%d].cwd:%s", i, name))
@@ -477,6 +486,10 @@ func ParseCatalogFields(r io.Reader) (CatalogFields, error) {
 // manifest works under bash, cmd.exe, and PowerShell without dual
 // templating. Both unset → the name is reported as missing.
 func expandEnvCrossPlatform(s string, preserveEnvColonRefs bool) (string, []string) {
+	return expandEnvCrossPlatformWithEnvironment(s, preserveEnvColonRefs, os.LookupEnv)
+}
+
+func expandEnvCrossPlatformWithEnvironment(s string, preserveEnvColonRefs bool, lookup func(string) (string, bool)) (string, []string) {
 	var missing []string
 	expanded := os.Expand(s, func(name string) string {
 		if strings.HasPrefix(name, "env:") && len(name) > len("env:") {
@@ -485,16 +498,16 @@ func expandEnvCrossPlatform(s string, preserveEnvColonRefs bool) (string, []stri
 			}
 			name = strings.TrimPrefix(name, "env:")
 		}
-		if v := os.Getenv(name); v != "" {
+		if v, _ := lookup(name); v != "" {
 			return v
 		}
 		if name == "HOME" {
-			if v := os.Getenv("USERPROFILE"); v != "" {
+			if v, _ := lookup("USERPROFILE"); v != "" {
 				return v
 			}
 		}
 		if name == "USERPROFILE" {
-			if v := os.Getenv("HOME"); v != "" {
+			if v, _ := lookup("HOME"); v != "" {
 				return v
 			}
 		}

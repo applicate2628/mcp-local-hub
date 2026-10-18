@@ -455,6 +455,11 @@ func installAuditTaskNamesOrOverride(m *config.ServerManifest, daemonFilter stri
 // contract (the watchdog still gets the intent file update, which is
 // the load-bearing record).
 func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFilter string, w io.Writer) {
+	_ = a.recordInstallIntentPostSuccessReceived(m, daemonFilter, w)
+}
+
+func (a *API) recordInstallIntentPostSuccessReceived(m *config.ServerManifest, daemonFilter string, w io.Writer) error {
+	var resultErr error
 	now := time.Now().UTC()
 	for _, tn := range installAuditTaskNames(m, daemonFilter) {
 		// Codex deep-sec PR #135 Finding 1: WriteDaemonIntent normalizes
@@ -473,6 +478,7 @@ func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFil
 		// suppressed — same net effect as the E1 running-tombstone the merge
 		// loop dropped, applied directly to the sole stop source.
 		if err := a.WriteStopIntent(canonical, intent, auditWhoMcphubInstall); err != nil {
+			resultErr = errors.Join(resultErr, err)
 			// Log + continue: install already happened. A missing stop
 			// entry is treated as Desired=running per the bootstrap policy,
 			// so a write failure here just loses the explicit re-enable
@@ -482,6 +488,7 @@ func (a *API) recordInstallIntentPostSuccess(m *config.ServerManifest, daemonFil
 			}
 		}
 	}
+	return resultErr
 }
 
 // ---------------------------------------------------------------------------

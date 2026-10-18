@@ -12,32 +12,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newCleanupAggressiveCmdReal builds `mcphub cleanup aggressive` — the
-// Phase H.1 operator-confirmed override that kills the live-rooted
-// MCP-stdio processes the default safe sweep (`mcphub cleanup`)
-// correctly refuses to touch.
-//
-// Motivation (serena-unified plan §H, 2026-05-20 operational evidence):
-// a single live client (e.g. codex) spawns N internal subagents that
-// each spawn their own stdio MCP children which are never reaped on
-// subagent finish. They are NOT orphans (the ancestor — the live
-// client — is alive), so the default sweep spares them; they
-// accumulate (the 1×N×M fleet-multiplier). This subcommand lets the
-// operator reclaim that accumulation under one explicit scope.
-//
-// Safety contract (spec H.1):
-//   - REQUIRES exactly one scope: --client <name> OR --root-pid <pid>.
-//   - Dry-run preview is MANDATORY: the first invocation (no token)
-//     prints the candidate list with per-PID match-source and a
-//     confirmation token, and kills NOTHING.
-//   - The kill invocation passes --confirm-aggressive-token <token>;
-//     the token is recomputed from a FRESH snapshot and must still
-//     match (the candidate set is bound to the token). A stale token
-//     (set changed since preview) is rejected and a new preview prints.
-//   - Dangerous classes (cmd/conhost/pwsh/powershell/chrome) are
-//     excluded by default; --include-class <name> opts one back in with
-//     a stderr warning.
-//   - mcphub.exe daemon descendants are ALWAYS spared (no bypass).
+// newCleanupAggressiveCmdReal builds the explicit-scope aggressive command.
+// On Windows the API refuses both preview and apply because creator retirement
+// authority is not established. Confirmation and class opt-ins cannot enable it.
 func newCleanupAggressiveCmdReal() *cobra.Command {
 	var client string
 	var rootPID int
@@ -46,40 +23,18 @@ func newCleanupAggressiveCmdReal() *cobra.Command {
 	var includeClasses []string
 	c := &cobra.Command{
 		Use:   "aggressive",
-		Short: "Kill live-rooted MCP-stdio processes under one explicit scope (operator-confirmed override)",
-		Long: `Kill the live-rooted MCP-stdio processes that the default safe sweep
-(mcphub cleanup) correctly refuses to touch — the per-subagent stdio
-fan-out where a live client spawns N subagents that each leak their own
-stdio MCP children.
+		Short: "Aggressive cleanup is unavailable on Windows (creator retirement authority required)",
+		Long: `Aggressive cleanup is unavailable on Windows: creator retirement authority
+is not established, so preview and apply are disabled. A confirmation token,
+process identity, age or class opt-in cannot enable this operation.
 
 REQUIRES exactly one scope:
-  --client <name>     descendants of a live client launcher
-                      (claude / codex / gemini / qwen / cursor / code /
-                      cascade / antigravity)
-  --root-pid <pid>    descendants of an explicit process id
+  --client <name>     client launcher (claude / codex / gemini / qwen /
+                      cursor / code / cascade / antigravity)
+  --root-pid <pid>    explicit process id
 
-Mandatory two-step confirmation (no single-shot kill):
-  1. Preview (no token): prints the candidate list with per-PID
-     match-source and a confirmation token. Kills NOTHING.
-  2. Kill: re-run with --confirm-aggressive-token <token>. The token is
-     recomputed from a fresh snapshot and must still match the previewed
-     candidate set; if the set changed, the token is rejected and a new
-     preview prints.
-
-Default-excluded dangerous classes (operator terminals + Playwright):
-  cmd · conhost · pwsh · powershell · chrome
-Opt one back in with --include-class <name> (prints a stderr warning).
-
-Always spared (no aggressive bypass): mcphub.exe daemon descendants and
-mcphub's own binaries.
-
-Examples:
-  mcphub cleanup aggressive --client codex            # preview + token
-  mcphub cleanup aggressive --client codex --confirm-aggressive-token <token>
-  mcphub cleanup aggressive --root-pid 12345
-  mcphub cleanup aggressive --client codex --include-class chrome   # also sweep Playwright chrome
-
-See also: cleanup (safe sweep), stop, status.`,
+Scope and confirmation flags retain their syntax. Valid non-Windows calls
+retain the existing empty-result behavior.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			killMode := strings.TrimSpace(token) != ""
 
@@ -171,9 +126,9 @@ See also: cleanup (safe sweep), stop, status.`,
 	c.Flags().IntVar(&rootPID, "root-pid", 0, "scope to descendants of this process id")
 	c.Flags().Int64Var(&minAge, "min-age-sec", 60, "ignore processes younger than this (seconds)")
 	c.Flags().StringVar(&token, "confirm-aggressive-token", "",
-		"confirmation token from a prior preview run; required to actually kill")
+		"confirmation token syntax retained; cannot enable unavailable cleanup")
 	c.Flags().StringArrayVar(&includeClasses, "include-class", nil,
-		"opt a default-excluded dangerous class (cmd/conhost/pwsh/powershell/chrome) back into the kill set; repeatable")
+		"class opt-in syntax retained; cannot enable unavailable cleanup; repeatable")
 	return c
 }
 

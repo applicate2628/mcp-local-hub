@@ -84,6 +84,16 @@ var SettingsRegistry = []SettingDef{
 		Help:    "Screen shown when the GUI is opened with no hash route. Default is the Dashboard (live daemon state)."},
 
 	// ----- gui_server -----
+	{Key: GUIRunDesiredKey, Section: "gui_server", Type: TypeEnum,
+		Default: GUIRunRunning, Enum: []string{GUIRunRunning, GUIRunStopped}, ReadOnly: true,
+		Help: "Intentional Quit remains stopped until mcphub gui --resume. Changed only by the GUI owner operation."},
+	{Key: GUIAutorunEnabledKey, Section: "gui_server", Type: TypeEnum,
+		Default: "", Enum: []string{"", "true", "false"}, ReadOnly: true,
+		Help: "Explicit logon autorun preference; empty preserves the verified legacy Task convention. Enabling does not resume a quit GUI."},
+	{Key: GUIStopCauseKey, Section: "gui_server", Type: TypeString, Optional: true, ReadOnly: true,
+		Help: "Original intentional-stop cause, maintained by the GUI owner."},
+	{Key: GUIStopGenerationKey, Section: "gui_server", Type: TypeString, Optional: true, ReadOnly: true,
+		Help: "Original GUI generation stopped by the owner operation."},
 	{Key: "gui_server.browser_on_launch", Section: "gui_server", Type: TypeBool,
 		Default: "true", Help: "Open GUI in browser on launch."},
 	{Key: "gui_server.port", Section: "gui_server", Type: TypeInt,
@@ -139,8 +149,9 @@ var SettingsRegistry = []SettingDef{
 		// tick (~60s) — no restart.
 		Help: "Auto-remove daemon registrations for deleted workspaces and ephemeral agent worktrees. A pruned workspace re-registers on next open. Takes effect within ~60s; no restart."},
 	{Key: "daemons.prune_idle_hours", Section: "daemons", Type: TypeInt,
-		Default: "0", Min: intPtr(0), Max: intPtr(8760),
-		// Phase 3 idle auto-prune. 0 = OFF (only the structural agent-worktree +
+		Default: "168", Min: intPtr(0), Max: intPtr(8760),
+		// Phase 3 idle auto-prune. Default 168 hours (7 days); explicitly set 0 = OFF
+		// (only the structural agent-worktree +
 		// deleted-dir triggers run). >0 = ALSO auto-remove a workspace whose
 		// most-recent activity (the registry LastToolsCallAt across its serena +
 		// LSP rows) is older than this many HOURS. A workspace with NO recorded
@@ -148,7 +159,7 @@ var SettingsRegistry = []SettingDef{
 		// activity signal, never wall-clock-since-register. Re-registers on next
 		// open (non-destructive); gated by auto_prune_workspaces; skips a
 		// workspace mid serena call. Read each sweep tick (~60s); no restart.
-		Help: "Also auto-remove a workspace daemon idle (no serena/LSP activity) for more than this many HOURS (0 = off). Re-registers on next open. Takes effect within ~60s; no restart."},
+		Help: "Default: 168 hours (7 days). Set to 0 to disable. Also auto-remove a workspace daemon idle (no serena/LSP activity) for more than this many HOURS. Re-registers on next open. Takes effect within ~60s; no restart."},
 	{Key: "daemons.prune_dead_worktrees", Section: "daemons", Type: TypeBool,
 		Default: "true",
 		// Dead-git-worktree structural signal (PR-2). The 60s in-GUI prune sweeper

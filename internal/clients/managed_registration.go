@@ -725,6 +725,42 @@ func (l *lockingClient) conditionalManagedRegistrationMutation(ctx context.Conte
 			return nil
 		}
 
+		var expectedCodexBytes []byte
+		if l.Client.Name() == "codex-cli" && (before.Exists || request.CodexRelocation != nil) {
+			sourceName := request.EntryName
+			if request.CodexRelocation != nil {
+				sourceName = request.CodexRelocation.SourceEntryName
+			}
+			var transformErr error
+			expectedCodexBytes, transformErr = replaceCodexTransportBytes(rawBefore.config, sourceName, request.EntryName, request.Desired)
+			if transformErr != nil {
+				observed.Failure = ManagedRegistrationFailureDesiredEntryInvalid
+				return nil
+			}
+			document, decodeErr := decodeCodexTOMLBytes(expectedCodexBytes)
+			if decodeErr != nil {
+				observed.Failure = ManagedRegistrationFailureDesiredEntryInvalid
+				return nil
+			}
+			preserved := document["mcp_servers"].(map[string]any)[request.EntryName].(map[string]any)
+			if managedRegistrationEnabledState(preserved, true) == ManagedRegistrationEnabledAmbiguous {
+				observed.Failure = ManagedRegistrationFailureEnabledStateInvalid
+				return nil
+			}
+			preservedDesired := request.Desired
+			preservedDesired.Disabled = mcpEntryDisabled(preserved)
+			preservedDesired.ToolTimeoutSec, transformErr = codexToolTimeoutSec(preserved)
+			if transformErr != nil {
+				observed.Failure = ManagedRegistrationFailureDesiredEntryInvalid
+				return nil
+			}
+			desired, desiredFailure = l.validateManagedRegistrationDesired(request.EntryName, preservedDesired)
+			if desiredFailure != ManagedRegistrationFailureNone {
+				observed.Failure = desiredFailure
+				return nil
+			}
+		}
+
 		backupID := request.PreparedBackupID
 		var backupBytes []byte
 		defer clear(backupBytes)
@@ -828,11 +864,12 @@ func (l *lockingClient) conditionalManagedRegistrationMutation(ctx context.Conte
 				return managedRegistrationError(ManagedRegistrationFailureDesiredEntryInvalid)
 			}
 			_, err := codex.RelocateHTTPEntry(CodexHTTPRelocation{
-				SourceEntryName: relocation.SourceEntryName,
-				TargetEntryName: relocation.TargetEntryName,
-				Entry:           request.Desired,
-				ExpectedSource:  relocation.ExpectedSource,
-				SourceSnapshot:  sourceSnapshot,
+				SourceEntryName:      relocation.SourceEntryName,
+				TargetEntryName:      relocation.TargetEntryName,
+				Entry:                request.Desired,
+				ExpectedSource:       relocation.ExpectedSource,
+				ExpectedConfigSHA256: before.ConfigSHA256.String(),
+				SourceSnapshot:       sourceSnapshot,
 			})
 			return err
 		})
@@ -853,6 +890,9 @@ func (l *lockingClient) conditionalManagedRegistrationMutation(ctx context.Conte
 			return nil
 		}
 		match, matchFailure := managedRegistrationDesiredMatchesReadback(desired, rawAfter)
+		if expectedCodexBytes != nil && !bytes.Equal(expectedCodexBytes, rawAfter.config) {
+			match, matchFailure = false, ManagedRegistrationFailureReadbackMismatch
+		}
 		if !match {
 			observed.Phase = ManagedRegistrationPhaseReadback
 			observed.Failure = matchFailure
@@ -955,6 +995,20 @@ func (l *lockingClient) ConditionalManagedRegistrationBackupRestore(ctx context.
 				return restorer.restoreEntryFromBytes(backupBytes, request.EntryName, true, nil)
 			}
 			inverse := *request.CodexInverse
+			if inverse.exactInverse == nil {
+				codex, ok := l.Client.(*codexCLI)
+				if !ok {
+					return managedRegistrationError(ManagedRegistrationFailureRestoreRequestInvalid)
+				}
+				appliedBytes, err := replaceCodexTransportBytes(backupBytes, inverse.SourceEntryName, inverse.TargetEntryName, inverse.Target)
+				if err != nil || managedRegistrationBytesSHA256(appliedBytes) != request.ExpectedApplied.ConfigSHA256 {
+					return managedRegistrationError(ManagedRegistrationFailureBackupReferenceInvalid)
+				}
+				inverse.exactInverse = cloneCodexHTTPInverseCapsule(&codexHTTPInverseCapsule{
+					configPath: codex.path, source: inverse.SourceEntryName, target: inverse.TargetEntryName,
+					entry: inverse.Target, before: backupBytes, applied: appliedBytes,
+				})
+			}
 			codex, ok := l.Client.(interface {
 				RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
 			})

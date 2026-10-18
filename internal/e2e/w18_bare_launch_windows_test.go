@@ -596,6 +596,9 @@ func newW18Fixture(t *testing.T) *w18Fixture {
 			t.Fatal(err)
 		}
 	}
+	if err := clients.PrepareClientConfigSandboxDirectories(configRoot); err != nil {
+		t.Fatalf("prepare caller-owned W18 config namespace (fixture retained at %s): %v", root, err)
+	}
 	lease, port, err := reserveLoopback()
 	if err != nil {
 		t.Fatal(err)

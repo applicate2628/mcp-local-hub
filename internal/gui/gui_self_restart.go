@@ -303,7 +303,7 @@ func (p *retainedGUIProcess) DetachAtRelease() error {
 // launch and RestartV3. Package-level so the spawn configuration can be
 // asserted without starting a GUI.
 //
-// DELIBERATELY uses configureDetachedGUI, NOT configureDetachedSupervisor.
+// The replacement GUI uses configureDetachedGUI for its GUI launch policy.
 // This child is a replacement GUI, not a supervisor, and it re-parses the
 // SAME argv — so under --foreground / --no-tray the operator has explicitly
 // asked for a console-attached GUI, and suppressing the attach would

@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/supervisorowner"
 )
@@ -14,7 +19,8 @@ import (
 // SupervisorIntentFile is the on-disk schema for <state-dir>/supervisor-intent.json.
 // Spec §"supervisor-intent.json (NEW)".
 type SupervisorIntentFile struct {
-	Version int `json:"version"`
+	SerenaPreparedConsumers *PreparedSerenaConsumersV1 `json:"serena_prepared_consumers,omitempty"`
+	Version                 int                        `json:"version"`
 	// IntentGeneration is a monotonically increasing durable revision. It
 	// fences the complete desired-state snapshot selected by a stop batch.
 	IntentGeneration  uint64             `json:"intent_generation,omitempty"`
@@ -92,11 +98,12 @@ func (f *SupervisorIntentFile) EffectiveOwnerMode() OwnerMode {
 // prefix at compare time to match production install.go:1639-1642
 // BARE form planned map.
 type SupervisorDaemon struct {
-	TaskName string   `json:"task_name"` // canonical, e.g. "\\mcp-local-hub-memory-default"
-	Server   string   `json:"server"`
-	Daemon   string   `json:"daemon"`
-	Command  string   `json:"command"`
-	Args     []string `json:"args"`
+	PreparedRuntime *PreparedSerenaRuntimeBinding `json:"prepared_runtime,omitempty"`
+	TaskName        string                        `json:"task_name"` // canonical, e.g. "\\mcp-local-hub-memory-default"
+	Server          string                        `json:"server"`
+	Daemon          string                        `json:"daemon"`
+	Command         string                        `json:"command"`
+	Args            []string                      `json:"args"`
 	// WorkingDir is the frozen working directory of the supervisor wrapper.
 	// Empty preserves legacy inherited-cwd descriptors. For new global rows it
 	// is populated from the accepted Plan.SupervisorIntent entry so a later
@@ -156,6 +163,9 @@ const DaemonRuntimeSpecVersion = 1
 //
 // Design ref: docs/superpowers/specs/2026-05-29-serena-migrate-redesign-descriptor-proxy.md §3.
 type DaemonRuntimeSpec struct {
+	// Prepared Serena is explicitly version 2; a version-1 uvx spec is
+	// migration-required for that route, never a prepared-runtime fallback.
+	PreparedRuntime *PreparedSerenaRuntimeBinding `json:"prepared_runtime,omitempty"`
 	// SpecVersion is DaemonRuntimeSpecVersion at materialization time; the
 	// launcher fails loud on an unsupported value (no manifest fallback).
 	SpecVersion int `json:"spec_version"`
@@ -245,6 +255,69 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 	return f, err
 }
 
+var ErrSupervisorRuntimeIntentUnavailable = errors.New("current supervisor runtime intent unavailable")
+
+// SupervisorRuntimeIntent is one operation-local observation, never persisted.
+// Its bytes, normalized stop policy and complete descriptor cohort share a read.
+type SupervisorRuntimeIntent struct {
+	SHA256     string
+	Generation uint64
+	ObservedAt time.Time
+	Ports      []SupervisorFrozenPort
+	Stopped    map[string]bool
+	StopSHA256 string
+}
+
+func ObserveSupervisorRuntimeIntent(ctx context.Context, path string, now time.Time) (*SupervisorRuntimeIntent, error) {
+	cap := stateFileReadCapBytes(path)
+	raw, reader, err := ReadStateFileInodeAnchoredObserved(ctx, path, cap)
+	if err != nil {
+		return nil, errors.Join(ErrSupervisorRuntimeIntentUnavailable, err)
+	}
+	sum := sha256.Sum256(raw)
+	digest := hex.EncodeToString(sum[:])
+	if err := reader.Validate(ctx, path, cap, raw, digest); err != nil {
+		return nil, err
+	}
+	return decodeSupervisorRuntimeIntent(path, raw, now)
+}
+
+func decodeSupervisorRuntimeIntent(path string, raw []byte, now time.Time) (*SupervisorRuntimeIntent, error) {
+	if now.IsZero() {
+		return nil, errors.New("current runtime observation clock is required")
+	}
+	f, err := decodeOriginalSupervisorIntentFile(path, raw)
+	if err != nil {
+		return nil, err
+	}
+	ports, err := captureSupervisorIntentPorts(f, resolveManifestDaemonPort, true)
+	if err != nil {
+		return nil, err
+	}
+	if f.EffectiveOwnerMode() != OwnerModeGUI && f.EffectiveOwnerMode() != OwnerModeSupervise {
+		return nil, errors.New("current runtime owner mode is invalid")
+	}
+	canonicalizeSupervisorIntentStopMaps(f)
+	stops := UnifiedStopsFile(f, nil)
+	effective := make(map[string]string, len(stops.Tasks))
+	stopped := make(map[string]bool, len(ports))
+	for key, stop := range stops.Tasks {
+		if active, reason := stop.IsActiveStop(now); active {
+			effective[key] = reason
+		}
+	}
+	for _, port := range ports {
+		_, stopped[port.TaskName] = effective[canonicalIntentTaskKey(port.TaskName)]
+	}
+	stopRaw, err := json.Marshal(effective)
+	if err != nil {
+		return nil, err
+	}
+	sum, stopSum := sha256.Sum256(raw), sha256.Sum256(stopRaw)
+	return &SupervisorRuntimeIntent{SHA256: hex.EncodeToString(sum[:]), Generation: f.IntentGeneration,
+		ObservedAt: now, Ports: ports, Stopped: stopped, StopSHA256: hex.EncodeToString(stopSum[:])}, nil
+}
+
 type supervisorIntentRawStopMaps struct {
 	Stops                map[string]DaemonIntent
 	LegacyStopWatermarks map[string]DaemonIntent
@@ -266,17 +339,30 @@ func readSupervisorIntentWithRawStopMaps(path string) (*SupervisorIntentFile, su
 }
 
 func decodeSupervisorIntentFile(path string, raw []byte) (*SupervisorIntentFile, supervisorIntentRawStopMaps, error) {
-	var f SupervisorIntentFile
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, supervisorIntentRawStopMaps{}, fmt.Errorf("decode %s: %w", path, err)
+	f, err := decodeOriginalSupervisorIntentFile(path, raw)
+	if err != nil {
+		return nil, supervisorIntentRawStopMaps{}, err
 	}
 	rawStops := supervisorIntentRawStopMaps{
 		Stops:                cloneDaemonIntentMap(f.Stops),
 		LegacyStopWatermarks: cloneDaemonIntentMap(f.LegacyStopWatermarks),
 	}
-	canonicalizeSupervisorIntentStopMaps(&f)
-	filterSupervisorIntentOneshotDaemons(&f)
-	return &f, rawStops, nil
+	canonicalizeSupervisorIntentStopMaps(f)
+	filterSupervisorIntentOneshotDaemons(f)
+	return f, rawStops, nil
+}
+
+// decodeOriginalSupervisorIntentFile shares parse/prepared validation without
+// normalizing or filtering away operands from the original byte snapshot.
+func decodeOriginalSupervisorIntentFile(path string, raw []byte) (*SupervisorIntentFile, error) {
+	var f SupervisorIntentFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := validatePreparedSupervisorIntent(&f); err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 func readSupervisorIntentFileInodeAnchored(path string) ([]byte, error) {
@@ -341,6 +427,12 @@ func WriteSupervisorIntent(path string, f *SupervisorIntentFile) (err error) {
 }
 
 func marshalSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
+	if f != nil && f.SerenaPreparedConsumers != nil {
+		f.SerenaPreparedConsumers.canonicalize()
+	}
+	if err := validatePreparedSupervisorIntent(f); err != nil {
+		return nil, err
+	}
 	normalizeAbsentOnlyStopWatermarks(f)
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -633,17 +725,7 @@ func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFil
 // without the lock loses the cross-process write serialization
 // WriteStateFileAtomic otherwise provides.
 func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
-	if f == nil {
-		return fmt.Errorf("nil supervisor intent")
-	}
-	// Every successful durable rewrite owns one generation. Stop batches carry
-	// this value with their snapshot so the controller can reject an older
-	// command instead of depending on a later watcher refresh.
-	if f.IntentGeneration == ^uint64(0) {
-		return fmt.Errorf("supervisor intent generation overflow")
-	}
-	f.IntentGeneration++
-	raw, err := marshalSupervisorIntent(f)
+	raw, err := marshalNextSupervisorIntent(f)
 	if err != nil {
 		return err
 	}
@@ -651,4 +733,18 @@ func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 	return secureWriteStateFileWithOperatorOpt(path, raw)
+}
+
+func marshalNextSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
+	if f == nil {
+		return nil, fmt.Errorf("nil supervisor intent")
+	}
+	// Every successful durable rewrite owns one generation. Stop batches carry
+	// this value with their snapshot so the controller can reject an older
+	// command instead of depending on a later watcher refresh.
+	if f.IntentGeneration == ^uint64(0) {
+		return nil, fmt.Errorf("supervisor intent generation overflow")
+	}
+	f.IntentGeneration++
+	return marshalSupervisorIntent(f)
 }

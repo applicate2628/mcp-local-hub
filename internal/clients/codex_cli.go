@@ -118,6 +118,48 @@ type CodexHTTPRelocationResult struct {
 	Outcome          CodexHTTPRelocationOutcome
 	SourceSnapshot   map[string]any
 	Readback         CodexHTTPRelocationReadback
+	exactInverse     *codexHTTPInverseCapsule
+}
+
+type codexHTTPInverseCapsule struct {
+	configPath, source, target string
+	entry                      MCPEntry
+	before, applied            []byte
+}
+
+// ExactInverse returns a cloned, transient byte-bound inverse. Its private
+// preimage cannot be reconstructed from or serialized with SourceSnapshot.
+func (result CodexHTTPRelocationResult) ExactInverse() *CodexHTTPInverseRelocation {
+	if result.exactInverse == nil {
+		return nil
+	}
+	capsule := cloneCodexHTTPInverseCapsule(result.exactInverse)
+	document, err := decodeCodexTOMLBytes(capsule.before)
+	if err != nil {
+		return nil
+	}
+	servers, _ := document["mcp_servers"].(map[string]any)
+	snapshot, _ := servers[capsule.source].(map[string]any)
+	target := capsule.entry
+	target.Headers = make(map[string]string, len(capsule.entry.Headers))
+	for key, value := range capsule.entry.Headers {
+		target.Headers[key] = value
+	}
+	return &CodexHTTPInverseRelocation{
+		SourceEntryName: capsule.source, TargetEntryName: capsule.target,
+		Target: target, SourceSnapshot: cloneCodexRawEntry(snapshot), exactInverse: capsule,
+	}
+}
+
+func cloneCodexHTTPInverseCapsule(capsule *codexHTTPInverseCapsule) *codexHTTPInverseCapsule {
+	cloned := *capsule
+	cloned.before = append([]byte(nil), capsule.before...)
+	cloned.applied = append([]byte(nil), capsule.applied...)
+	cloned.entry.Headers = make(map[string]string, len(capsule.entry.Headers))
+	for key, value := range capsule.entry.Headers {
+		cloned.entry.Headers[key] = value
+	}
+	return &cloned
 }
 
 // CodexHTTPRelocationReadback is the closed receiving-state observation owned
@@ -169,6 +211,7 @@ type CodexHTTPInverseRelocation struct {
 	Target          MCPEntry
 	SourceSnapshot  map[string]any
 	WriteConfig     WriteConfigFileFunc
+	exactInverse    *codexHTTPInverseCapsule
 }
 
 func (c *codexCLI) Name() string       { return "codex-cli" }
@@ -336,7 +379,25 @@ type codexConfigPathComponent struct {
 // leaf identity across open, and rechecks the component identities after open so
 // a path substitution cannot silently supply bytes from another file. Missing
 // components retain the documented optional-project-config behavior.
-func readCodexConfigNoReparse(path string) ([]byte, bool, error) {
+// The optional operation-local I/O port lets fixtures report read/close failures
+// on this same opened file. Production calls use io.ReadAll and File.Close.
+type codexConfigReadIO struct {
+	read  func(*os.File) ([]byte, error)
+	close func(*os.File) error
+}
+
+func readCodexConfigNoReparse(path string, injected ...codexConfigReadIO) (data []byte, present bool, resultErr error) {
+	readFile := func(file *os.File) ([]byte, error) { return io.ReadAll(file) }
+	closeFile := (*os.File).Close
+	if len(injected) > 1 {
+		return nil, false, ErrCodexLayerParseFailed
+	}
+	if len(injected) == 1 {
+		if injected[0].read == nil || injected[0].close == nil {
+			return nil, false, ErrCodexLayerParseFailed
+		}
+		readFile, closeFile = injected[0].read, injected[0].close
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: resolve Codex config path", ErrCodexLayerParseFailed)
@@ -387,7 +448,11 @@ func readCodexConfigNoReparse(path string) ([]byte, bool, error) {
 		}
 		return nil, false, fmt.Errorf("%w: open Codex config", ErrCodexLayerParseFailed)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := closeFile(file); closeErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("%w: close Codex config: %w", ErrCodexLayerParseFailed, closeErr))
+		}
+	}()
 	openedInfo, err := file.Stat()
 	if err != nil || !openedInfo.Mode().IsRegular() || len(components) == 0 || !os.SameFile(components[len(components)-1].info, openedInfo) {
 		return nil, false, fmt.Errorf("%w: Codex config identity changed during open", ErrCodexLayerParseFailed)
@@ -395,9 +460,9 @@ func readCodexConfigNoReparse(path string) ([]byte, bool, error) {
 	if err := recheckCodexConfigPathComponents(components); err != nil {
 		return nil, false, err
 	}
-	data, err := io.ReadAll(file)
+	data, err = readFile(file)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: read Codex config", ErrCodexLayerParseFailed)
+		return nil, false, fmt.Errorf("%w: read Codex config: %w", ErrCodexLayerParseFailed, err)
 	}
 	return data, true, nil
 }
@@ -469,12 +534,7 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 			return result, fmt.Errorf("%w: project config fingerprint differs", ErrCodexProjectSourceChanged)
 		}
 	}
-	var before map[string]any
-	if projectBound {
-		before, err = decodeCodexTOMLBytes(originalBytes)
-	} else {
-		before, err = c.readTOML()
-	}
+	before, err := decodeCodexTOMLBytes(originalBytes)
 	if err != nil {
 		return result, err
 	}
@@ -495,7 +555,7 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 			return result, fmt.Errorf("%w: entry_type_invalid", ErrCodexLayerParseFailed)
 		}
 		if targetExists {
-			matches, matchErr := codexHubEntryMatches(target, req.Entry)
+			matches, matchErr := codexSourceProvenHTTPMatches(target, req.SourceSnapshot, req.Entry)
 			if matchErr != nil {
 				return result, matchErr
 			}
@@ -511,6 +571,15 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 	}
 	if !exists {
 		return result, fmt.Errorf("%w: source %s table %q is absent or malformed", ErrCodexLayerCollisionUnowned, c.codexConfigScope(), req.SourceEntryName)
+	}
+	if req.SourceEntryName == req.TargetEntryName && len(req.SourceSnapshot) != 0 {
+		matches, matchErr := codexSourceProvenHTTPMatches(raw, req.SourceSnapshot, req.Entry)
+		if matchErr != nil {
+			return result, matchErr
+		}
+		if matches {
+			return c.codexRelocationResult(req, CodexHTTPRelocationAlreadyConfigured, nil), nil
+		}
 	}
 	actual, _, classifyErr := codexTransportOfEntry(raw, req.SourceEntryName)
 	if classifyErr != nil {
@@ -533,16 +602,13 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 		}
 		delete(servers, req.SourceEntryName)
 	}
-	entryMap := map[string]any{"url": req.Entry.URL, "startup_timeout_sec": 10.0}
-	if len(req.Entry.Headers) > 0 {
-		entryMap["http_headers"] = codexDecodedHeaderMap(req.Entry.Headers)
-	}
-	if req.Entry.ToolTimeoutSec > 0 {
-		entryMap["tool_timeout_sec"] = float64(req.Entry.ToolTimeoutSec)
-	}
-	servers[req.TargetEntryName] = entryMap
+	servers[req.TargetEntryName] = codexHTTPReplacement(raw, req.Entry)
 	expected["mcp_servers"] = servers
-	if err := c.writeTOMLWithWriter(expected, req.WriteConfig); err != nil {
+	appliedBytes, err := replaceCodexTransportBytes(originalBytes, req.SourceEntryName, req.TargetEntryName, req.Entry)
+	if err != nil {
+		return result, err
+	}
+	if err := writeConfigFileWith(req.WriteConfig, c.path, appliedBytes); err != nil {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("CODEX_CLIENT_CONFIG_WRITE_FAILED: %w", err))
 	}
 	readback, err := c.readRelocationTOML()
@@ -552,7 +618,64 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 	if !reflect.DeepEqual(readback, expected) {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: semantic readback differs", ErrCodexConfigReadbackFailed))
 	}
-	return c.codexRelocationResult(req, CodexHTTPRelocationCommitted, sourceSnapshot), nil
+	actualBytes, err := c.readRelocationConfigBytes()
+	if err != nil || !bytes.Equal(actualBytes, appliedBytes) {
+		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: byte readback differs", ErrCodexConfigReadbackFailed))
+	}
+	result = c.codexRelocationResult(req, CodexHTTPRelocationCommitted, sourceSnapshot)
+	result.exactInverse = cloneCodexHTTPInverseCapsule(&codexHTTPInverseCapsule{
+		configPath: c.path, source: req.SourceEntryName, target: req.TargetEntryName,
+		entry: req.Entry, before: originalBytes, applied: appliedBytes,
+	})
+	return result, nil
+}
+
+// These are transport-owned keys, not a whitelist of valid entry settings.
+// Every other existing key, including unknown policy, remains unchanged.
+func codexTransportField(key string) bool {
+	switch key {
+	case "command", "args", "env", "cwd", "env_vars", "url", "http_headers":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexHTTPTransportFields(entry MCPEntry) map[string]any {
+	fields := map[string]any{"url": entry.URL}
+	if len(entry.Headers) > 0 {
+		fields["http_headers"] = codexDecodedHeaderMap(entry.Headers)
+	}
+	return fields
+}
+
+func codexHTTPReplacement(source map[string]any, entry MCPEntry) map[string]any {
+	fields := cloneCodexRawEntry(source)
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	for key := range fields {
+		if codexTransportField(key) {
+			delete(fields, key)
+		}
+	}
+	for key, value := range codexHTTPTransportFields(entry) {
+		fields[key] = value
+	}
+	return fields
+}
+
+func codexSourceProvenHTTPMatches(raw, source map[string]any, entry MCPEntry) (bool, error) {
+	if len(source) == 0 {
+		return codexHubEntryMatches(raw, entry)
+	}
+	if _, _, err := codexTransportOfEntry(source, entry.Name); err != nil {
+		return false, err
+	}
+	if _, _, err := codexTransportOfEntry(raw, entry.Name); err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(raw, codexHTTPReplacement(source, entry)), nil
 }
 
 func (c *codexCLI) readRelocationConfigBytes() ([]byte, error) {
@@ -655,9 +778,89 @@ func cloneCodexValue(value any) any {
 	}
 }
 
-// RestoreRelocatedHTTPEntry is the locked-owner inverse: it removes the exact
-// hub target alias and restores the caller-validated source table in one global
-// TOML write. Any failed write/readback restores the full pre-operation bytes.
+// RestoreRelocatedHTTPEntryFromProvenance rehydrates an inverse only from a
+// hash-pinned original and a caller-verified recorded transport tuple. Observed
+// current bytes are compared with rendered expectations, never used as proof.
+func (c *codexCLI) RestoreRelocatedHTTPEntryFromProvenance(req CodexHTTPInverseRelocation, pinnedOriginal []byte, originalSHA256 string) (CodexHTTPInverseResult, error) {
+	var result CodexHTTPInverseResult
+	if req.SourceEntryName == "" || req.TargetEntryName == "" || req.Target.Name != req.TargetEntryName || req.Target.URL == "" || req.Target.ToolTimeoutSec < 0 || len(pinnedOriginal) == 0 {
+		return result, fmt.Errorf("%w: provenance inverse binding is incomplete", ErrCodexLayerCollisionUnowned)
+	}
+	if c.isProjectBound() && (req.SourceEntryName != c.projectLogicalEntry || req.TargetEntryName != req.SourceEntryName) {
+		return result, fmt.Errorf("%w: provenance inverse differs from project binding", ErrCodexLayerCollisionUnowned)
+	}
+	original := append([]byte(nil), pinnedOriginal...)
+	if originalSHA256 == "" || fmt.Sprintf("%x", sha256.Sum256(original)) != originalSHA256 {
+		return result, fmt.Errorf("%w: pinned original fingerprint differs", ErrCodexLayerCollisionUnowned)
+	}
+	before, err := decodeCodexTOMLBytes(original)
+	if err != nil {
+		return result, err
+	}
+	servers, _ := before["mcp_servers"].(map[string]any)
+	source, present := servers[req.SourceEntryName].(map[string]any)
+	if !present || len(source) == 0 || !reflect.DeepEqual(source, req.SourceSnapshot) {
+		return result, fmt.Errorf("%w: pinned original source differs", ErrCodexLayerCollisionUnowned)
+	}
+	if _, _, err := codexTransportOfEntry(source, req.SourceEntryName); err != nil {
+		return result, err
+	}
+	beforeToken, beforePresent, err := extractTOMLEntryPhysicalToken(original, "mcp_servers", req.SourceEntryName)
+	if err != nil || !beforePresent {
+		return result, fmt.Errorf("%w: pinned original is not byte-editable", ErrCodexLayerCollisionUnowned)
+	}
+	applied, err := replaceCodexTransportBytes(original, req.SourceEntryName, req.TargetEntryName, req.Target)
+	if err != nil {
+		return result, err
+	}
+	current, err := c.readRelocationConfigBytes()
+	if err != nil {
+		return result, err
+	}
+	currentToken, currentPresent, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(current, "mcp_servers", req.TargetEntryName, true)
+	if err != nil {
+		return result, fmt.Errorf("%w: provenance inverse target is ambiguous", ErrCodexTargetNameConflict)
+	}
+	if !currentPresent {
+		sourceToken, sourcePresent, sourceErr := extractTOMLEntryPhysicalToken(current, "mcp_servers", req.SourceEntryName)
+		if sourceErr == nil && sourcePresent && entryPhysicalTokensEqual(sourceToken, beforeToken) {
+			return CodexHTTPInverseResult{Outcome: CodexHTTPInverseAlreadyRestored}, nil
+		}
+		return result, fmt.Errorf("%w: provenance inverse target is absent", ErrCodexTargetNameConflict)
+	}
+	if req.SourceEntryName == req.TargetEntryName && entryPhysicalTokensEqual(currentToken, beforeToken) {
+		return CodexHTTPInverseResult{Outcome: CodexHTTPInverseAlreadyRestored}, nil
+	}
+	expectedToken, expectedPresent, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(applied, "mcp_servers", req.TargetEntryName, true)
+	if err != nil || !expectedPresent {
+		return result, fmt.Errorf("%w: rendered provenance target is invalid", ErrCodexLayerCollisionUnowned)
+	}
+	if !entryPhysicalTokensEqual(currentToken, expectedToken) {
+		// Only a validated provenance call admits the canonical new-entry shape
+		// used by older relocation writers. Its fields share the AddEntry owner;
+		// this is an expected-byte renderer, never a whole-file restore.
+		legacyServers := before["mcp_servers"].(map[string]any)
+		delete(legacyServers, req.SourceEntryName)
+		legacyServers[req.TargetEntryName] = codexNewHTTPEntryFields(req.Target)
+		applied, err = toml.Marshal(before)
+		if err != nil {
+			return result, err
+		}
+		expectedToken, expectedPresent, err = extractTOMLEntryPhysicalTokenWithOwnedFooter(applied, "mcp_servers", req.TargetEntryName, true)
+		if err != nil || !expectedPresent || !entryPhysicalTokensEqual(currentToken, expectedToken) {
+			return result, fmt.Errorf("%w: provenance inverse target bytes changed", ErrCodexTargetNameConflict)
+		}
+	}
+	req.SourceSnapshot = cloneCodexRawEntry(source)
+	req.exactInverse = cloneCodexHTTPInverseCapsule(&codexHTTPInverseCapsule{
+		configPath: c.path, source: req.SourceEntryName, target: req.TargetEntryName,
+		entry: req.Target, before: original, applied: applied,
+	})
+	return c.RestoreRelocatedHTTPEntry(req)
+}
+
+// RestoreRelocatedHTTPEntry is the locked-owner lexical compare-and-swap
+// inverse. A semantic source snapshot alone cannot restore original syntax.
 func (c *codexCLI) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error) {
 	var result CodexHTTPInverseResult
 	if req.SourceEntryName == "" || req.TargetEntryName == "" || req.Target.URL == "" || len(req.SourceSnapshot) == 0 {
@@ -670,7 +873,7 @@ func (c *codexCLI) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (Co
 		}
 		return result, fmt.Errorf("%w: read global snapshot: %v", ErrCodexLayerCollisionUnowned, err)
 	}
-	m, err := c.readTOML()
+	m, err := decodeCodexTOMLBytes(originalBytes)
 	if err != nil {
 		return result, err
 	}
@@ -679,40 +882,60 @@ func (c *codexCLI) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (Co
 		return result, fmt.Errorf("%w: target global table %q is absent", ErrCodexLayerCollisionUnowned, req.TargetEntryName)
 	}
 	target, targetExists := servers[req.TargetEntryName].(map[string]any)
-	source, sourceExists := servers[req.SourceEntryName].(map[string]any)
-	if !targetExists {
-		if sourceExists && reflect.DeepEqual(source, req.SourceSnapshot) {
+	if targetExists {
+		if _, _, err := codexTransportOfEntry(target, req.TargetEntryName); err != nil {
+			return result, err
+		}
+	}
+	capsule := req.exactInverse
+	if capsule == nil || capsule.configPath != c.path || capsule.source != req.SourceEntryName || capsule.target != req.TargetEntryName ||
+		!reflect.DeepEqual(codexHTTPTransportFields(capsule.entry), codexHTTPTransportFields(req.Target)) {
+		return result, fmt.Errorf("%w: exact inverse preimage proof is required", ErrCodexLayerCollisionUnowned)
+	}
+	beforeToken, beforePresent, beforeErr := extractTOMLEntryPhysicalToken(capsule.before, "mcp_servers", capsule.source)
+	appliedToken, appliedPresent, appliedErr := extractTOMLEntryPhysicalTokenWithOwnedFooter(capsule.applied, "mcp_servers", capsule.target, true)
+	if beforeErr != nil || appliedErr != nil || !beforePresent || !appliedPresent {
+		return result, fmt.Errorf("%w: inverse byte proof is invalid", ErrCodexLayerCollisionUnowned)
+	}
+	beforeDocument, err := decodeCodexTOMLBytes(capsule.before)
+	if err != nil {
+		return result, err
+	}
+	beforeSource, _ := beforeDocument["mcp_servers"].(map[string]any)[capsule.source].(map[string]any)
+	if !reflect.DeepEqual(beforeSource, req.SourceSnapshot) {
+		return result, fmt.Errorf("%w: inverse source proof differs", ErrCodexLayerCollisionUnowned)
+	}
+	currentToken, currentPresent, currentErr := extractTOMLEntryPhysicalTokenWithOwnedFooter(originalBytes, "mcp_servers", capsule.target, true)
+	if currentErr != nil {
+		return result, fmt.Errorf("%w: selected inverse target is ambiguous", ErrCodexTargetNameConflict)
+	}
+	if capsule.source == capsule.target && currentPresent && entryPhysicalTokensEqual(currentToken, beforeToken) {
+		return CodexHTTPInverseResult{Outcome: CodexHTTPInverseAlreadyRestored}, nil
+	}
+	if !currentPresent {
+		sourceToken, sourcePresent, sourceErr := extractTOMLEntryPhysicalToken(originalBytes, "mcp_servers", capsule.source)
+		if sourceErr == nil && sourcePresent && entryPhysicalTokensEqual(sourceToken, beforeToken) {
 			return CodexHTTPInverseResult{Outcome: CodexHTTPInverseAlreadyRestored}, nil
 		}
-		return result, fmt.Errorf("%w: target global table %q is absent", ErrCodexLayerCollisionUnowned, req.TargetEntryName)
+		return result, fmt.Errorf("%w: selected inverse target is absent", ErrCodexTargetNameConflict)
 	}
-	matches, matchErr := codexHubEntryMatches(target, req.Target)
-	if matchErr != nil {
-		return result, matchErr
+	if !entryPhysicalTokensEqual(currentToken, appliedToken) {
+		return result, fmt.Errorf("%w: selected inverse target bytes changed", ErrCodexTargetNameConflict)
 	}
-	if !matches {
-		return result, fmt.Errorf("%w: target global table %q is not the expected owned hub entry", ErrCodexTargetNameConflict, req.TargetEntryName)
+	if capsule.source != capsule.target {
+		if _, present := servers[capsule.source]; present {
+			return result, fmt.Errorf("%w: inverse source table is occupied", ErrCodexLayerCollisionUnowned)
+		}
 	}
-	if sourceExists && !reflect.DeepEqual(source, req.SourceSnapshot) {
-		return result, fmt.Errorf("%w: source global table %q conflicts with the saved source snapshot", ErrCodexLayerCollisionUnowned, req.SourceEntryName)
-	}
-	delete(servers, req.TargetEntryName)
-	servers[req.SourceEntryName] = cloneCodexRawEntry(req.SourceSnapshot)
-	m["mcp_servers"] = servers
-	if err := c.writeTOMLWithWriter(m, req.WriteConfig); err != nil {
+	restoredBytes := append([]byte(nil), originalBytes[:currentToken.memberStart]...)
+	restoredBytes = append(restoredBytes, beforeToken.memberBytes...)
+	restoredBytes = append(restoredBytes, originalBytes[currentToken.memberEnd:]...)
+	if err := writeConfigFileWith(req.WriteConfig, c.path, restoredBytes); err != nil {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("CODEX_CLIENT_CONFIG_WRITE_FAILED: %w", err))
 	}
-	readback, err := c.readTOML()
-	if err != nil {
+	readback, err := c.readRelocationConfigBytes()
+	if err != nil || !bytes.Equal(readback, restoredBytes) {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: %v", ErrCodexConfigReadbackFailed, err))
-	}
-	readbackServers, _ := readback["mcp_servers"].(map[string]any)
-	actualSource, sourcePresent := readbackServers[req.SourceEntryName].(map[string]any)
-	if !sourcePresent || !reflect.DeepEqual(actualSource, req.SourceSnapshot) {
-		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: source global table %q did not restore exactly", ErrCodexConfigReadbackFailed, req.SourceEntryName))
-	}
-	if _, remains := readbackServers[req.TargetEntryName]; remains {
-		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: target global table %q remains", ErrCodexConfigReadbackFailed, req.TargetEntryName))
 	}
 	return CodexHTTPInverseResult{Outcome: CodexHTTPInverseRestored}, nil
 }
@@ -926,20 +1149,35 @@ func (c *codexCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFi
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	// Replace the entry wholesale — this drops any stdio-era fields like `command`/`args`.
-	entryMap := map[string]any{
-		"url":                 entry.URL,
-		"startup_timeout_sec": 10.0,
+	if existing, present := servers[entry.Name]; present {
+		if _, ok := existing.(map[string]any); !ok {
+			return fmt.Errorf("%w: entry_type_invalid", ErrCodexLayerParseFailed)
+		}
+		original, err := c.readRelocationConfigBytes()
+		if err != nil {
+			return err
+		}
+		updated, err := replaceCodexTransportBytes(original, entry.Name, entry.Name, entry)
+		if err != nil {
+			return err
+		}
+		return writeConfigFileWith(writer, c.path, updated)
 	}
-	if len(entry.Headers) > 0 {
-		entryMap["http_headers"] = entry.Headers
-	}
-	if entry.ToolTimeoutSec > 0 {
-		entryMap["tool_timeout_sec"] = float64(entry.ToolTimeoutSec)
-	}
-	servers[entry.Name] = entryMap
+	servers[entry.Name] = codexNewHTTPEntryFields(entry)
 	m["mcp_servers"] = servers
 	return c.writeTOMLWithWriter(m, writer)
+}
+
+// codexNewHTTPEntryFields is the single owner of established new-entry defaults.
+// Provenance recovery may render this canonical shape without changing policy
+// for existing entries or admitting an unproven alias.
+func codexNewHTTPEntryFields(entry MCPEntry) map[string]any {
+	fields := codexHTTPTransportFields(entry)
+	fields["startup_timeout_sec"] = 10.0
+	if entry.ToolTimeoutSec > 0 {
+		fields["tool_timeout_sec"] = float64(entry.ToolTimeoutSec)
+	}
+	return fields
 }
 
 func (c *codexCLI) RemoveEntry(name string) error {
@@ -1301,4 +1539,179 @@ func (c *codexCLI) BackupEntryIsHubManaged(backupPath, name string) (bool, error
 		return false, nil
 	}
 	return isHubURLShapeEntry(entry, "url"), nil
+}
+
+const CodexSharedStdioReplaySchemaV1 = "codex-shared-stdio-replay-v1"
+
+var ErrCodexSharedStdioReplayEvidenceInvalid = errors.New("CODEX_SHARED_STDIO_REPLAY_EVIDENCE_INVALID")
+var ErrCodexSharedStdioReplayTokenChanged = errors.New("CODEX_SHARED_STDIO_REPLAY_TOKEN_CHANGED")
+
+type CodexSharedStdioReplayEvidenceV1 struct {
+	Schema               string                             `json:"schema"`
+	TargetSHA256         string                             `json:"target_sha256"`
+	OriginalGlobal       []byte                             `json:"original_global"`
+	OriginalGlobalSHA256 string                             `json:"original_global_sha256"`
+	BeforeToken          []byte                             `json:"before_token"`
+	AppliedToken         []byte                             `json:"applied_token"`
+	GlobalLocation       CodexConfiguredGlobalLocationV1    `json:"global_location"`
+	Sources              []CodexSharedStdioSourceEvidenceV1 `json:"sources"`
+}
+
+func (CodexSharedStdioReplayEvidenceV1) String() string {
+	return "shared STDIO replay evidence (private)"
+}
+func (v CodexSharedStdioReplayEvidenceV1) GoString() string { return v.String() }
+
+func CloneCodexSharedStdioReplayEvidence(v CodexSharedStdioReplayEvidenceV1) CodexSharedStdioReplayEvidenceV1 {
+	v.OriginalGlobal = bytes.Clone(v.OriginalGlobal)
+	v.BeforeToken = bytes.Clone(v.BeforeToken)
+	v.AppliedToken = bytes.Clone(v.AppliedToken)
+	v.GlobalLocation = cloneCodexConfiguredGlobalLocation(v.GlobalLocation)
+	sources := make([]CodexSharedStdioSourceEvidenceV1, len(v.Sources))
+	for i, source := range v.Sources {
+		sources[i] = cloneCodexSharedStdioSourceEvidence(source)
+	}
+	v.Sources = sources
+	return v
+}
+
+type CodexSharedStdioMutationState string
+type CodexSharedStdioTokenState string
+
+const (
+	CodexSharedStdioNoChange       CodexSharedStdioMutationState = "no-change"
+	CodexSharedStdioWriteAttempted CodexSharedStdioMutationState = "write-attempted"
+	CodexSharedStdioPublished      CodexSharedStdioMutationState = "published"
+	CodexSharedStdioBefore         CodexSharedStdioTokenState    = "before"
+	CodexSharedStdioApplied        CodexSharedStdioTokenState    = "applied"
+)
+
+type CodexSharedStdioMutationResult struct {
+	State                CodexSharedStdioMutationState
+	DesiredToken         CodexSharedStdioTokenState
+	ExpectedConfigSHA256 string
+}
+type CodexSharedStdioWriteScope func(func(*ConfigWriteSnapshot, func(ConfigWriteRequest) error) (CodexSharedStdioMutationResult, error)) (CodexSharedStdioMutationResult, error)
+type CodexSharedStdioRelocation struct {
+	SourceEntryName string
+	TargetEntryName string
+	Target          MCPEntry
+	Evidence        CodexSharedStdioReplayEvidenceV1
+	CurrentSources  []*CodexConfiguredProjectProfile
+}
+type CodexSharedStdioInverseRelocation struct {
+	SourceEntryName string
+	TargetEntryName string
+	Target          MCPEntry
+	Evidence        CodexSharedStdioReplayEvidenceV1
+	CurrentSources  []*CodexConfiguredProjectProfile
+}
+
+func validateCodexSharedStdioTarget(name string, target MCPEntry) error {
+	if name == "" || target.Name != name || target.RelayExePath != "mcphub" || target.RelayURL == "" || target.URL != "" || len(target.Headers) != 0 || len(target.Env) != 0 || len(target.Raw) != 0 || target.RelayServer != "" || target.RelayDaemon != "" {
+		return ErrCodexDesiredTransportInvalid
+	}
+	return nil
+}
+
+// Evidence validation never creates a live profile or native write capability.
+// The exact frozen token remains the replay comparison/splice operand.
+func ValidateCodexSharedStdioReplayEvidence(v CodexSharedStdioReplayEvidenceV1, name string, target MCPEntry) error {
+	if err := validateCodexSharedStdioTarget(name, target); err != nil {
+		return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	if v.Schema != CodexSharedStdioReplaySchemaV1 || !codexSharedStdioDigest(v.TargetSHA256) || v.OriginalGlobalSHA256 != codexAttachmentSHA(v.OriginalGlobal) || len(v.BeforeToken) == 0 || len(v.AppliedToken) == 0 || len(v.Sources) == 0 || v.GlobalLocation.LogicalPath == "" || v.GlobalLocation.ReferentPath == "" {
+		return ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	if err := validateCodexSharedStdioFrozenTokens(v.OriginalGlobal, name, target, v.BeforeToken, v.AppliedToken); err != nil {
+		return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	previous := ""
+	for _, source := range v.Sources {
+		actual, err := CodexProjectIdentitySHA256ForRoot(source.ProjectRoot)
+		if err != nil || actual != source.ProjectIdentitySHA256 || source.ProjectIdentitySHA256 <= previous || source.ProjectConfigPath != filepath.Join(source.ProjectRoot, ".codex", "config.toml") || !codexSharedStdioDigest(source.ProjectFileIdentitySHA256) || !codexSharedStdioDigest(source.ReplayContextSHA256) || source.ProjectSHA256 != codexAttachmentSHA(source.ProjectBytes) {
+			return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+		}
+		if _, err := decodeCodexConfiguredMCP(source.ConfiguredPayload, name); err != nil {
+			return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+		}
+		previous = source.ProjectIdentitySHA256
+	}
+	for index, rows := range [][]CodexConfiguredGlobalLocationRowV1{v.GlobalLocation.LogicalRows, v.GlobalLocation.ReferentRows} {
+		if len(rows) == 0 {
+			return ErrCodexSharedStdioReplayEvidenceInvalid
+		}
+		expectedPath := v.GlobalLocation.LogicalPath
+		if index == 1 {
+			expectedPath = v.GlobalLocation.ReferentPath
+			if rows[len(rows)-1].Kind != "regular" {
+				return ErrCodexSharedStdioReplayEvidenceInvalid
+			}
+		}
+		if rows[len(rows)-1].Path != expectedPath {
+			return ErrCodexSharedStdioReplayEvidenceInvalid
+		}
+		for _, row := range rows {
+			if row.Path == "" || !codexConfiguredIdentityComplete(row.Identity) || (row.Kind != "directory" && row.Kind != "symlink" && row.Kind != "regular") || (row.Kind == "symlink") != (row.RawLinkTarget != nil) {
+				return ErrCodexSharedStdioReplayEvidenceInvalid
+			}
+		}
+	}
+	return nil
+}
+func codexSharedStdioDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// The caller receives a genuine native profile AFTER all write/lock scopes have
+// settled; this comparison uses the same decoder as the original source owner.
+func ValidateCodexSharedStdioOriginalSource(ctx context.Context, current *CodexConfiguredProjectProfile, original CodexSharedStdioSourceEvidenceV1, location CodexConfiguredGlobalLocationV1) error {
+	if err := current.ValidateSharedStdioReplaySource(ctx, original, location); err != nil {
+		return err
+	}
+	expected, err := decodeCodexConfiguredMCP(original.ConfiguredPayload, current.logical)
+	if err != nil {
+		return errors.Join(ErrCodexSharedStdioReplaySourceChanged, err)
+	}
+	if !reflect.DeepEqual(expected, current.configured) {
+		return ErrCodexSharedStdioReplaySourceChanged
+	}
+	return nil
+}
+
+// Called only by the existing paired coordinator after all original locks have
+// entered. Bytes come from the transaction-issued snapshot, never serialized DATA.
+func (c *codexCLI) mutateSharedStdioEntry(ctx context.Context, name string, evidence CodexSharedStdioReplayEvidenceV1, desired CodexSharedStdioTokenState, snapshot *ConfigWriteSnapshot, publish func(ConfigWriteRequest) error) (result CodexSharedStdioMutationResult, retErr error) {
+	if c == nil || c.isProjectBound() || ctx == nil || snapshot == nil || publish == nil {
+		return result, ErrConfigWriteSnapshotConflict
+	}
+	if err := snapshot.ValidateObservedCapture(ctx, evidence.GlobalLocation.ReferentPath); err != nil {
+		return result, err
+	}
+	output, changed, err := replaceCodexSharedStdioFrozenToken(snapshot.contents, name, evidence, desired)
+	if err != nil {
+		return result, err
+	}
+	if desired == CodexSharedStdioApplied && changed && !bytes.Equal(snapshot.contents, evidence.OriginalGlobal) {
+		return result, ErrProjectClientPlanStale
+	}
+	result.DesiredToken, result.ExpectedConfigSHA256 = desired, codexAttachmentSHA(output)
+	if !changed {
+		result.State = CodexSharedStdioNoChange
+		return result, nil
+	}
+	result.State = CodexSharedStdioWriteAttempted
+	if err := publish(ConfigWriteRequest{Context: ctx, Path: evidence.GlobalLocation.ReferentPath, Contents: output, ExpectedSnapshot: snapshot}); err != nil {
+		return result, err
+	}
+	result.State = CodexSharedStdioPublished
+	return result, nil
 }

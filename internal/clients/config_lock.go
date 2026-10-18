@@ -44,7 +44,9 @@ func perPathMutex(configPath string) *sync.Mutex {
 // ONE config file is ever locked per withConfigLock call, and the decorator
 // never nests withConfigLock (the concrete adapter's internal cross-method
 // calls bypass the decorator — see lockingClient), so no two config locks are
-// ever held at once and the cross-file deadlock class is structurally absent.
+// ever held at once for ordinary decorators. The optional attachment policy
+// transaction is the sole composition exception: global mutex/flock first,
+// then the injected project identity owner, with no decorator reentry.
 //
 // The flock is BLOCKING (mirrors api.Registry.Lock at
 // internal/api/workspace_registry.go:200): the live GUI + CLI client-config
@@ -64,8 +66,10 @@ func perPathMutex(configPath string) *sync.Mutex {
 type configLockExecution struct {
 	bodyEntered      bool
 	bodyErr          error
+	primaryErr       error
 	releaseErr       error
 	releaseConfirmed bool
+	releaseDefined   bool
 }
 
 func (e configLockExecution) bodyApplied() bool {
@@ -79,6 +83,19 @@ func withConfigLockExecution(configPath string, fn func() error) (execution conf
 // A non-nil context bounds only attach's acquisition of the established
 // per-path mutex and flock. Legacy callers keep their blocking semantics.
 func withConfigLockExecutionContext(configPath string, ctx context.Context, fn func() error) (execution configLockExecution, err error) {
+	return withConfigLockExecutionContextMode(configPath, ctx, fn, true)
+}
+
+func withConfigLockExecutionContextMode(configPath string, ctx context.Context, fn func() error, createParent bool) (execution configLockExecution, err error) {
+	return withConfigLockExecutionContextPolicy(configPath, ctx, fn, createParent, false)
+}
+
+func withConfigLockExecutionContextPolicy(configPath string, ctx context.Context, fn func() error, createParent, requireFlock bool, afterAcquire ...func()) (execution configLockExecution, err error) {
+	defer func() {
+		if !execution.releaseDefined {
+			execution.primaryErr = err
+		}
+	}()
 	mu := perPathMutex(configPath)
 	if ctx == nil {
 		mu.Lock()
@@ -94,6 +111,31 @@ func withConfigLockExecutionContext(configPath string, ctx context.Context, fn f
 	defer mu.Unlock()
 	if ctx != nil && ctx.Err() != nil {
 		return execution, ctx.Err()
+	}
+	if !createParent {
+		if SecureVerifyParentDir == nil {
+			return execution, errors.New("config read lock parent verification capability unavailable")
+		}
+		dir, resolveErr := filepath.Abs(filepath.Dir(configPath))
+		if resolveErr != nil {
+			return execution, resolveErr
+		}
+		exists, verifyErr := SecureVerifyParentDir(ctx, dir)
+		if verifyErr != nil {
+			return execution, verifyErr
+		}
+		if ctx != nil && ctx.Err() != nil {
+			return execution, ctx.Err()
+		}
+		if !exists {
+			if requireFlock {
+				return execution, errors.New("attachment policy exclusion requires an existing global parent")
+			}
+			execution.bodyEntered = true
+			execution.bodyErr = fn()
+			execution.releaseConfirmed = true
+			return execution, execution.bodyErr
+		}
 	}
 
 	// Ensure the write-target parent dir exists BEFORE creating the advisory
@@ -157,7 +199,7 @@ func withConfigLockExecutionContext(configPath string, ctx context.Context, fn f
 	// skip — the gap stays closed). The flock + the actual file write below use the
 	// SAME process cwd to resolve the original relative configPath, so the secured
 	// absolute dir and the lock/write target are the same physical directory.
-	if dir := filepath.Dir(configPath); dir != "" {
+	if dir := filepath.Dir(configPath); createParent && dir != "" {
 		absDir, absErr := filepath.Abs(dir)
 		if absErr != nil {
 			return execution, fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
@@ -188,7 +230,9 @@ func withConfigLockExecutionContext(configPath string, ctx context.Context, fn f
 		return execution, fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
 	release := newConfigLockRelease(fl, lockPath)
+	execution.releaseDefined = true
 	defer func() {
+		execution.primaryErr = err
 		if releaseErr := release(); releaseErr != nil {
 			execution.releaseErr = releaseErr
 			err = errors.Join(err, fmt.Errorf("release config lock %s: %w", lockPath, releaseErr))
@@ -196,6 +240,11 @@ func withConfigLockExecutionContext(configPath string, ctx context.Context, fn f
 			execution.releaseConfirmed = true
 		}
 	}()
+	for _, observe := range afterAcquire {
+		if observe != nil {
+			observe()
+		}
+	}
 	if ctx != nil && ctx.Err() != nil {
 		return execution, ctx.Err()
 	}
@@ -391,6 +440,9 @@ type ConditionalEntryMutationRequest struct {
 	Context         context.Context
 	LockWaitTimeout time.Duration
 	ConfigWriter    WriteConfigFileFunc
+	// RemovalSourceToken opts explicit removal into the physical compare/splice
+	// owner. It grants no historical restore or stdio cleanup capability.
+	RemovalSourceToken string
 }
 
 // EntryMutationDependency is one additional live-entry predicate that must
@@ -463,6 +515,7 @@ type EntryMutationObserved struct {
 	ObservationErr       error
 	ReleaseConfirmed     bool
 	ReleaseErr           error
+	RemovalInverse       *physicalEntryInverse
 }
 
 // ConditionalEntryGroupMutationObserved retains the target observation and
@@ -521,7 +574,8 @@ func (l *lockingClient) ConditionalEntryGroupMutation(req ConditionalEntryGroupM
 }
 
 func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroupMutationRequest) (observed ConditionalEntryGroupMutationObserved) {
-	if req.Context != nil && req.ConfigWriter == nil {
+	physicalRemoval := req.Operation == EntryMutationRemove && req.RemovalSourceToken != ""
+	if req.Context != nil && req.ConfigWriter == nil && !physicalRemoval {
 		observed.PreparationErr = errors.New("conditional entry mutation: bounded lock requires scoped writer")
 		return observed
 	}
@@ -576,6 +630,8 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 		observed.Dependencies[i].EntryName = dependency.EntryName
 	}
 
+	var removalSource *entryRemovalSource
+	var removalReadbackErr error
 	body := func() error {
 		before, readErr := l.Client.GetEntry(req.EntryName)
 		observed.Before = before
@@ -589,6 +645,28 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 			observed.ConflictScope = "target"
 			observed.ConflictEntryName = req.EntryName
 			return nil
+		}
+		if physicalRemoval {
+			data, err := l.readConfigBytesForLockedOperation()
+			if err == nil {
+				removalSource, err = l.resolveEntryRemovalSource(data, req.EntryName)
+			}
+			if err != nil || removalSource.fingerprint != req.RemovalSourceToken {
+				if removalSource != nil {
+					removalSource.release()
+				}
+				observed.PreconditionConflict = err == nil || errors.Is(err, ErrEntryMutationPreconditionConflict)
+				if observed.PreconditionConflict {
+					observed.PreparationErr = ErrEntryMutationPreconditionConflict
+				} else if errors.Is(err, ErrEntryRemovalUnsupportedSource) {
+					observed.PreparationErr = err
+				} else {
+					observed.PreparationErr = errors.Join(ErrEntryRemovalInspection, err)
+				}
+				return nil
+			}
+			defer removalSource.release()
+			observed.RemovalInverse = &physicalEntryInverse{client: l, token: removalSource.token, ancestors: removalSource.ancestors, guarded: true}
 		}
 		for i, dependency := range req.Dependencies {
 			dependencyBefore, dependencyErr := l.Client.GetEntry(dependency.EntryName)
@@ -638,9 +716,58 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 		case EntryMutationAdd:
 			observed.MutationErr = AddEntryWithConfigWriter(l.Client, req.Entry, req.ConfigWriter)
 		case EntryMutationRemove:
-			observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
+			if physicalRemoval {
+				data, err := l.readConfigBytesForLockedOperation()
+				var fresh *entryRemovalSource
+				if err == nil {
+					fresh, err = l.resolveEntryRemovalSource(data, req.EntryName)
+				}
+				if err != nil || fresh.fingerprint != removalSource.fingerprint || !os.SameFile(fresh.fileInfo, removalSource.fileInfo) {
+					if fresh != nil {
+						fresh.release()
+					}
+					observed.Invoked = false
+					observed.PreconditionConflict = err == nil || errors.Is(err, ErrEntryMutationPreconditionConflict)
+					if observed.PreconditionConflict {
+						observed.PreparationErr = ErrEntryMutationPreconditionConflict
+					} else if errors.Is(err, ErrEntryRemovalUnsupportedSource) {
+						observed.PreparationErr = err
+					} else {
+						observed.PreparationErr = errors.Join(ErrEntryRemovalInspection, err)
+					}
+					return nil
+				}
+				defer fresh.release()
+				snapshot, snapshotErr := l.newConfigWriteSnapshot(data, fresh.fileInfo, fresh.ancestors, fresh.parentHandle)
+				if snapshotErr != nil {
+					observed.Invoked = false
+					observed.PreparationErr = snapshotErr
+					return nil
+				}
+				observed.MutationErr = writePhysicalRemoval(l.Client, nil, data, fresh.token, ConfigWriteRequest{Context: req.Context, Path: l.Client.ConfigPath(), ExpectedSnapshot: snapshot})
+				// The writer's success and the projected GetEntry view alone do
+				// not establish physical absence (malformed/scalar members can
+				// disappear from that projection). Re-open the committed source.
+				actual, readErr := l.readConfigBytesForLockedOperation()
+				if readErr != nil {
+					removalReadbackErr = readErr
+				} else {
+					owner := l.Client.(physicalEntryTokenOwner)
+					afterToken, present, extractErr := owner.EntryPhysicalToken(actual, req.EntryName)
+					if extractErr != nil {
+						removalReadbackErr = extractErr
+					} else if present || afterToken != nil {
+						removalReadbackErr = errors.New("physical removal readback retained selected member")
+					}
+				}
+			} else {
+				observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
+			}
 		}
 		observed.After, observed.ObservationErr = l.Client.GetEntry(req.EntryName)
+		if removalReadbackErr != nil {
+			observed.ObservationErr = errors.Join(observed.ObservationErr, removalReadbackErr)
+		}
 		for i, dependency := range req.Dependencies {
 			dependencyAfter, dependencyErr := l.Client.GetEntry(dependency.EntryName)
 			observed.Dependencies[i].After = dependencyAfter
@@ -806,6 +933,9 @@ func (l *lockingClient) RelocateHTTPEntry(req CodexHTTPRelocation) (result Codex
 		result, err = codex.RelocateHTTPEntry(req)
 		return err
 	})
+	if err != nil {
+		result = CodexHTTPRelocationResult{}
+	}
 	return result, err
 }
 
@@ -820,6 +950,23 @@ func (l *lockingClient) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation
 		result, err = codex.RestoreRelocatedHTTPEntry(req)
 		return err
 	})
+	return result, err
+}
+
+func (l *lockingClient) RestoreRelocatedHTTPEntryFromProvenance(req CodexHTTPInverseRelocation, pinnedOriginal []byte, originalSHA256 string) (result CodexHTTPInverseResult, err error) {
+	err = l.withMutationLock(func() error {
+		codex, ok := l.Client.(interface {
+			RestoreRelocatedHTTPEntryFromProvenance(CodexHTTPInverseRelocation, []byte, string) (CodexHTTPInverseResult, error)
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support Codex provenance inverse", l.Client.Name())
+		}
+		result, err = codex.RestoreRelocatedHTTPEntryFromProvenance(req, pinnedOriginal, originalSHA256)
+		return err
+	})
+	if err != nil {
+		result = CodexHTTPInverseResult{}
+	}
 	return result, err
 }
 
@@ -990,4 +1137,15 @@ func (l *lockingClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]L
 		return c.FindStdioLanguageServerCandidatesWriteTargetOwned()
 	}
 	return l.Client.FindStdioLanguageServerEntries()
+}
+
+func (l *lockingClient) RelocateSharedStdioEntry(ctx context.Context, req CodexSharedStdioRelocation, scope CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error) {
+	req.Evidence = CloneCodexSharedStdioReplayEvidence(req.Evidence)
+	req.CurrentSources = append([]*CodexConfiguredProjectProfile(nil), req.CurrentSources...)
+	return l.withSharedStdioReplay(ctx, req.SourceEntryName, req.TargetEntryName, req.Target, req.Evidence, req.CurrentSources, scope, CodexSharedStdioApplied)
+}
+func (l *lockingClient) RestoreSharedStdioEntryFromProvenance(ctx context.Context, req CodexSharedStdioInverseRelocation, scope CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error) {
+	req.Evidence = CloneCodexSharedStdioReplayEvidence(req.Evidence)
+	req.CurrentSources = append([]*CodexConfiguredProjectProfile(nil), req.CurrentSources...)
+	return l.withSharedStdioReplay(ctx, req.SourceEntryName, req.TargetEntryName, req.Target, req.Evidence, req.CurrentSources, scope, CodexSharedStdioBefore)
 }

@@ -2,6 +2,9 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,171 @@ import (
 	"testing"
 	"time"
 )
+
+func TestGeneratedRuntimeImageTimerOnlyConvergence(t *testing.T) {
+	root := hardenedTempDir(t)
+	legacy := filepath.Join(root, "local", "mcphub.exe")
+	image := filepath.Join(root, "npm-native", "mcphub.exe")
+	enabled, disabled := true, false
+	timers := []MaintenanceTimer{
+		{Name: canonicalIntentTaskKey("mcp-local-hub-image-fixture-weekly-refresh"), Kind: "server-weekly-refresh", Server: "image-fixture", Command: legacy, Args: []string{"restart", "--server", "image-fixture"}, Enabled: &disabled},
+		{Name: canonicalIntentTaskKey("mcp-local-hub-image-fixture-alpha-weekly-refresh"), Kind: "server-weekly-refresh", Command: legacy, Args: []string{"restart", "--server", "image-fixture-alpha"}},
+		{Name: WeeklyRefreshTaskName, Kind: "workspace-weekly-refresh", Command: legacy, Args: []string{"workspace-weekly-refresh"}, Enabled: &enabled},
+		{Name: "foreign", Kind: "server-weekly-refresh", Server: "image-fixture", Command: legacy, Args: []string{"restart", "--server", "image-fixture"}},
+		{Name: canonicalIntentTaskKey("mcp-local-hub-image-fixture-weekly-refresh"), Kind: "server-weekly-refresh", Server: "other", Command: legacy, Args: []string{"restart", "--server", "image-fixture"}},
+		{Name: canonicalIntentTaskKey("mcp-local-hub-other-weekly-refresh"), Kind: "server-weekly-refresh", Command: legacy, Args: []string{"restart", "--server", "image-fixture"}},
+		{Name: WeeklyRefreshTaskName, Kind: "workspace-weekly-refresh", Command: legacy, Args: []string{"workspace-weekly-refresh", "--custom"}},
+		{Name: WeeklyRefreshTaskName, Kind: "workspace-weekly-refresh", Server: "other", Command: legacy, Args: []string{"workspace-weekly-refresh"}},
+		{Name: canonicalIntentTaskKey("mcp-local-hub-image-fixture-weekly-refresh"), Kind: "server-weekly-refresh", Command: "custom-native", Args: []string{"restart", "--server", "image-fixture"}},
+		{Name: canonicalIntentTaskKey("mcp-local-hub-weekly-refresh"), Kind: "server-weekly-refresh", Command: legacy, Args: []string{"restart", "--server", ""}},
+	}
+	path := filepath.Join(root, "supervisor-intent.json")
+	intent := &SupervisorIntentFile{Version: 1, OwnerMode: OwnerModeSupervise, StrictMode: true, MaintenanceTimers: timers, Stops: map[string]DaemonIntent{"foreign": {Desired: "stopped", Reason: "operator"}}}
+	if err := WriteSupervisorIntent(path, intent); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytesBefore, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supervisorIntentHasLegacyImage(before, legacy) {
+		t.Error("timer-only legacy intent did not enter image convergence")
+	}
+	preview := cloneSupervisorIntentFile(before)
+	if changed, err := convergeGeneratedSupervisorImage(preview, legacy, image); err != nil || !changed {
+		t.Fatalf("timer-only preview: changed=%v error=%v", changed, err)
+	}
+	want := cloneSupervisorIntentFile(before)
+	for i := 0; i < 3; i++ {
+		want.MaintenanceTimers[i].Command = image
+	}
+	if !reflect.DeepEqual(preview, want) {
+		t.Fatalf("preview changed timer settings, foreign rows, or other intent fields: got=%#v want=%#v", preview, want)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(bytesBefore, after) {
+		t.Fatalf("preview wrote intent: %v", err)
+	}
+	result, err := MutateSupervisorIntentIfChangedReturning(path, func(f *SupervisorIntentFile) (bool, error) {
+		return convergeGeneratedSupervisorImage(f, legacy, image)
+	})
+	if err != nil || !result.Changed {
+		t.Fatalf("timer-only writer: changed=%v error=%v", result.Changed, err)
+	}
+	want.IntentGeneration, want.UpdatedAt = result.Intent.IntentGeneration, result.Intent.UpdatedAt
+	if !reflect.DeepEqual(result.Intent, want) {
+		t.Fatalf("writer changed timer settings or foreign intent: got=%#v want=%#v", result.Intent, want)
+	}
+	settledBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := MutateSupervisorIntentIfChangedReturning(path, func(f *SupervisorIntentFile) (bool, error) {
+		return convergeGeneratedSupervisorImage(f, legacy, image)
+	})
+	if err != nil || second.Changed || !reflect.DeepEqual(second.Intent, result.Intent) {
+		t.Fatalf("second timer pass changed: %+v error=%v", second, err)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(settledBytes, after) {
+		t.Fatalf("second timer pass wrote intent: %v", err)
+	}
+	foreignOnly := cloneSupervisorIntentFile(before)
+	foreignOnly.MaintenanceTimers = foreignOnly.MaintenanceTimers[3:]
+	if supervisorIntentHasLegacyImage(foreignOnly, legacy) {
+		t.Fatal("foreign-only timer intent requested runtime image resolution")
+	}
+	if _, err := os.Stat(filepath.Dir(legacy)); !os.IsNotExist(err) {
+		t.Fatalf("timer convergence created an optional local installation: %v", err)
+	}
+}
+
+func TestGeneratedRuntimeImageConvergencePreservesObservedIntent(t *testing.T) {
+	root := hardenedTempDir(t)
+	legacy := filepath.Join(root, "local", "mcphub.exe")
+	image := filepath.Join(root, "npm-native", "mcphub.exe")
+	manifestDir := filepath.Join(root, "manifests")
+	makeFakeManifest(t, filepath.Join(manifestDir, "image-fixture"), "image-fixture", 31013)
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	raw, err := os.ReadFile(filepath.Join(manifestDir, "image-fixture", "manifest.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := WorkspaceEntry{WorkspacePath: filepath.Join(root, "workspace"), Language: "go", Backend: "mcp-language-server", Port: 31012}
+	ws.WorkspaceKey = WorkspaceKey(ws.WorkspacePath)
+	registryPath := filepath.Join(root, "workspaces.yaml")
+	originalRegistry := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = originalRegistry })
+	reg := NewRegistry(registryPath)
+	reg.Workspaces = []WorkspaceEntry{ws}
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	global := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-image-fixture-default`, Server: "image-fixture", Daemon: "default",
+		Command: legacy, Args: []string{"daemon", "--server", "image-fixture", "--daemon", "default"},
+		WorkingDir: filepath.Dir(legacy), Port: 31013, ManifestHash: ManifestHashContent(raw),
+	}
+	workspace := BuildSupervisorDaemonForLSP(ws, legacy)
+	builtin := BuildBuiltinRouteDaemon(legacy, 31011)
+	custom := SupervisorDaemon{TaskName: `\foreign`, Command: "node", Args: []string{"./mcp-memory-server.js"}, RuntimeSpec: &DaemonRuntimeSpec{SpecVersion: 1, ChildCommand: "custom-native"}}
+	unproven := global
+	unproven.TaskName = `\mcp-local-hub-image-fixture-custom`
+	unproven.Args = append(unproven.Args, "--custom")
+	path := filepath.Join(root, "supervisor-intent.json")
+	latest := &SupervisorIntentFile{
+		Version: 1, StrictMode: true, OwnerMode: OwnerModeSupervise,
+		Daemons: []SupervisorDaemon{global, workspace, builtin, custom, unproven},
+		Stops:   map[string]DaemonIntent{global.TaskName: {Desired: "stopped", Reason: "operator"}},
+	}
+	if err := WriteSupervisorIntent(path, latest); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := MutateSupervisorIntentIfChangedReturning(path, func(f *SupervisorIntentFile) (bool, error) {
+		return convergeGeneratedSupervisorImage(f, legacy, image)
+	})
+	if err != nil || !result.Changed {
+		t.Fatalf("converge: changed=%v error=%v", result.Changed, err)
+	}
+	want := cloneSupervisorIntentFile(before)
+	for i := 0; i < 2; i++ {
+		want.Daemons[i].Command = image
+	}
+	want.Daemons[0].WorkingDir = filepath.Dir(image)
+	// The writer owns timestamp/generation; every semantic field is compared.
+	want.IntentGeneration = result.Intent.IntentGeneration
+	want.UpdatedAt = result.Intent.UpdatedAt
+	if !reflect.DeepEqual(result.Intent, want) {
+		t.Fatalf("OBSERVED-GENERATION or custom state changed: got=%#v want=%#v", result.Intent, want)
+	}
+	bytesBefore, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := MutateSupervisorIntentIfChangedReturning(path, func(f *SupervisorIntentFile) (bool, error) {
+		return convergeGeneratedSupervisorImage(f, legacy, image)
+	})
+	if err != nil || second.Changed || !reflect.DeepEqual(second.Intent, result.Intent) {
+		t.Fatalf("second pass changed observed generation: %+v error=%v", second, err)
+	}
+	bytesAfter, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(bytesBefore, bytesAfter) {
+		t.Fatalf("second pass rewrote intent bytes: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(legacy)); !os.IsNotExist(err) {
+		t.Fatalf("convergence created an optional installation: %v", err)
+	}
+	if changed, err := convergeGeneratedSupervisorImage(before, legacy, ""); changed || err == nil {
+		t.Fatalf("missing image weakened convergence: changed=%v error=%v", changed, err)
+	}
+}
 
 func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	// v0.5.0 Fix Group 5: WriteSupervisorIntent now flows through
@@ -598,5 +766,96 @@ func TestSupervisorIntent_RoundTrip_WithRuntimeSpec(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Daemons[0].RuntimeSpec, want.Daemons[0].RuntimeSpec) {
 		t.Errorf("RuntimeSpec round-trip mismatch:\n got=%#v\nwant=%#v", got.Daemons[0].RuntimeSpec, want.Daemons[0].RuntimeSpec)
+	}
+}
+
+func TestSupervisorRuntimeIntentQualifiedSnapshotAndEffectiveStopDrift(t *testing.T) {
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	route := BuildBuiltinRouteDaemon("mcphub.exe", 9140)
+	intent := SupervisorIntentFile{Version: 1, IntentGeneration: 7, Daemons: []SupervisorDaemon{
+		{TaskName: `\current`, Command: "mcphub.exe", Port: 9137, Args: []string{"daemon", "--server", "fixture", "--daemon", "default"}},
+		{TaskName: WeeklyRefreshTaskName, Command: "mcphub.exe", Args: []string{"workspace-weekly-refresh"}},
+		route,
+	}, Stops: map[string]DaemonIntent{
+		`\current`:           {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-24*time.Hour + time.Second)},
+		BuiltinRouteTaskName: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-24*time.Hour + time.Second)},
+	}}
+	raw, err := json.Marshal(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(hardenedTempDir(t), "supervisor-intent.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ObserveSupervisorRuntimeIntent(context.Background(), path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	if got.SHA256 != hex.EncodeToString(sum[:]) || got.Generation != 7 || !got.ObservedAt.Equal(now) || len(got.Ports) != 2 || !got.Stopped[`\current`] || !got.Stopped[BuiltinRouteTaskName] {
+		t.Fatalf("snapshot not bound to actual bytes/stops: %+v", got)
+	}
+	later, err := ObserveSupervisorRuntimeIntent(context.Background(), path, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.SHA256 != got.SHA256 || later.StopSHA256 == got.StopSHA256 || later.Stopped[`\current`] || later.Stopped[BuiltinRouteTaskName] {
+		t.Fatal("effective stop TTL change hidden behind unchanged raw bytes")
+	}
+	if _, err := ObserveSupervisorRuntimeIntent(context.Background(), path+"-missing", now); !errors.Is(err, ErrSupervisorRuntimeIntentUnavailable) {
+		t.Fatalf("missing snapshot=%v", err)
+	}
+}
+
+func TestSupervisorRuntimeIntentEmptyMaintenanceAndInvalidInput(t *testing.T) {
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	maintenance, err := json.Marshal(SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{TaskName: WeeklyRefreshTaskName, Command: "mcphub.exe", Args: []string{"workspace-weekly-refresh"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marshalDaemon := func(d SupervisorDaemon) []byte {
+		raw, err := json.Marshal(SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{d}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	badRouteArgv := BuildBuiltinRouteDaemon("mcphub.exe", 9140)
+	badRouteArgv.Args = []string{"daemon", "--server", BuiltinRouteServer, "--daemon", BuiltinRouteDaemonName}
+	badRouteName := BuildBuiltinRouteDaemon("mcphub.exe", 9140)
+	badRouteName.TaskName = `\foreign-route`
+	badRouteIdentity := BuildBuiltinRouteDaemon("mcphub.exe", 9140)
+	badRouteIdentity.Server = "foreign"
+	badRoutePort := BuildBuiltinRouteDaemon("mcphub.exe", 9140)
+	badRoutePort.Port++
+	for _, tc := range []struct {
+		name  string
+		raw   []byte
+		valid bool
+	}{
+		{"explicit empty", []byte(`{"version":1,"daemons":[]}`), true},
+		{"recognized maintenance", maintenance, true},
+		{"reserved route with ordinary argv", marshalDaemon(badRouteArgv), false},
+		{"route with foreign task name", marshalDaemon(badRouteName), false},
+		{"route with foreign identity", marshalDaemon(badRouteIdentity), false},
+		{"route with conflicting argv port", marshalDaemon(badRoutePort), false},
+		{"null", []byte(`null`), false},
+		{"missing daemons", []byte(`{"version":1}`), false},
+		{"malformed", []byte(`{`), false},
+		{"unknown role", []byte(`{"version":1,"daemons":[{"task_name":"x","command":"mcphub.exe","args":["unknown"],"port":9137}]}`), false},
+		{"unresolved ordinary", []byte(`{"version":1,"daemons":[{"task_name":"x","command":"mcphub.exe","args":["daemon","--server","missing-fixture","--daemon","default"]}]}`), false},
+		{"duplicate task", []byte(`{"version":1,"daemons":[{"task_name":"x","command":"mcphub.exe","args":["daemon","--server","fixture","--daemon","default"],"port":9137},{"task_name":"x","command":"mcphub.exe","args":["daemon","--server","fixture","--daemon","default"],"port":9138}]}`), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodeSupervisorRuntimeIntent("synthetic intent", tc.raw, now)
+			if tc.valid {
+				if err != nil || got == nil || got.Ports == nil || len(got.Ports) != 0 {
+					t.Fatalf("known empty=%+v error=%v", got, err)
+				}
+			} else if err == nil || got != nil {
+				t.Fatalf("invalid intent accepted: %+v %v", got, err)
+			}
+		})
 	}
 }

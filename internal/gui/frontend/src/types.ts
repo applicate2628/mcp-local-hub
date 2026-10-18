@@ -381,6 +381,14 @@ export interface ClientPresence {
   // perClientRouting maps such a cell to "via-hub-inherited" (read-only).
   // Absent/false on every other client's cell (omitempty on the wire).
   inherited?: boolean;
+  removal?: ClientEntryRemovalCapability;
+}
+
+export interface ClientEntryRemovalCapability {
+  version: 1;
+  source_token?: string;
+  supported: boolean;
+  reason?: string;
 }
 
 // ClientEntry mirrors api.ClientEntry (internal/api/types.go:111). On the

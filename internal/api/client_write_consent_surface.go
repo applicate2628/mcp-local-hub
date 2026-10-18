@@ -35,7 +35,13 @@
 
 package api
 
-import "path/filepath"
+import (
+	"context"
+	"errors"
+	"path/filepath"
+
+	"mcp-local-hub/internal/clients"
+)
 
 // ResolveClientConfigSymlink reports whether path is a follow-able symlink at
 // the moment of the call and, if so, the resolved TARGET file path plus the
@@ -51,7 +57,7 @@ import "path/filepath"
 //     take its ordinary non-symlink write path.
 //   - isSymlink == true: resolvedTarget is the real file the symlink points
 //     at; pinnedPath is filepath.Clean(resolved) — the FULL target path (parent
-//     + basename) to surface to the operator AND to carry into
+//   - basename) to surface to the operator AND to carry into
 //     ResolvedSymlinkConsent.PinnedResolvedPath for the write. Pinning the full
 //     target, not just the parent, closes the same-parent-repoint bypass.
 //
@@ -88,6 +94,83 @@ func ResolveClientConfigSymlink(path string) (resolvedTarget, pinnedPath string,
 // full resolved target path).
 func SecureWriteClientConfigWithConsent(consent ResolvedSymlinkConsent, contents []byte) error {
 	return secureWriteWithOperatorOptConsent(consent.OriginalPath, contents, &consent)
+}
+
+// The conditional client operation retains its original captures even when a
+// client callback, publication, readback or close fails. It is private API state,
+// not a serialized receipt or a permission to publish another request.
+type clientConfigConditionalWriteObservation struct {
+	ctx                                                                    context.Context
+	sources                                                                []*clients.CodexConfiguredProjectProfile
+	projects                                                               []clients.Client
+	consent                                                                *ResolvedSymlinkConsent
+	logical, referent                                                      string
+	links                                                                  map[string]string
+	globalSource                                                           []byte
+	projectSources                                                         [][]byte
+	evidence                                                               clients.CodexSharedStdioReplayEvidenceV1
+	result                                                                 clients.CodexSharedStdioMutationResult
+	global, readback                                                       clientConfigConditionalCapture
+	projectInputs                                                          []clientConfigConditionalCapture
+	request                                                                clients.ConfigWriteRequest
+	active                                                                 bool
+	publicationEntered, publicationReturned                                bool
+	clientEntered, clientReturned                                          bool
+	clientError, publicationError, readbackError, primaryError, closeError error
+	native                                                                 []clientConfigConditionalNativeWrite
+}
+
+type clientConfigConditionalCapture struct {
+	transaction      *clients.ConfigWriteCaptureTransaction
+	snapshot         *clients.ConfigWriteSnapshot
+	captureError     error
+	closeObservation *clients.ConfigWriteParentCloseObservation
+	closeError       error
+}
+
+type clientConfigConditionalNativeWrite struct {
+	capture           *stateFileIOCapture
+	entered, returned bool
+	err               error
+}
+
+func (clientConfigConditionalWriteObservation) String() string {
+	return "conditional client-config write observation (private)"
+}
+
+func (o clientConfigConditionalWriteObservation) GoString() string { return o.String() }
+
+func (c *clientConfigConditionalCapture) closeObserved() error {
+	if c.transaction != nil {
+		c.closeObservation, c.closeError = c.transaction.CloseObserved()
+	}
+	return c.closeError
+}
+
+func (o *clientConfigConditionalWriteObservation) closeObserved() error {
+	// Reverse acquisition order; CloseObserved retains an already returned close
+	// result and never retries the underlying native close after an error.
+	o.closeError = errors.Join(o.closeError, o.readback.closeObserved())
+	for i := len(o.projectInputs) - 1; i >= 0; i-- {
+		o.closeError = errors.Join(o.closeError, o.projectInputs[i].closeObserved())
+	}
+	o.closeError = errors.Join(o.closeError, o.global.closeObserved())
+	return o.closeError
+}
+
+func captureConditionalClientConfigInput(ctx context.Context, path string, expected []byte) clientConfigConditionalCapture {
+	// The original capture requires a positive ceiling even for an empty input.
+	// This ceiling is derived from the exact admitted bytes, not a new policy.
+	maximum := int64(len(expected))
+	if maximum == 0 {
+		maximum = 1
+	}
+	transaction, err := clients.CaptureStateFileWriteSnapshotObserved(ctx, path, maximum, preparedSerenaHash(expected))
+	var snapshot *clients.ConfigWriteSnapshot
+	if transaction != nil {
+		snapshot = transaction.Snapshot()
+	}
+	return clientConfigConditionalCapture{transaction: transaction, snapshot: snapshot, captureError: err}
 }
 
 // InteractiveSymlinkConsent is a process-level, nil-by-default consent port

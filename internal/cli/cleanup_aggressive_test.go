@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -53,21 +54,73 @@ func TestCleanupAggressive_RejectsUnknownClient(t *testing.T) {
 }
 
 // TestCleanupAggressive_IncludeClassFlagOverridesWithWarning: passing
-// --include-class emits a stderr warning naming the dangerous class
-// (spec H.1). The warning fires before the platform-specific snapshot, so
-// this is portable. A valid scope (--client codex) is supplied so the
-// command reaches the warning emit.
+// --include-class retains its warning on the non-Windows empty-success path.
+// Windows refuses missing retirement authority before warnings or success output.
 func TestCleanupAggressive_IncludeClassFlagOverridesWithWarning(t *testing.T) {
 	cmd := newCleanupAggressiveCmdReal()
+	cmd.SilenceUsage = true
 	cmd.SetArgs([]string{"--client", "codex", "--include-class", "chrome"})
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	if err := cmd.Execute(); err != nil {
+	err := cmd.Execute()
+	if runtime.GOOS == "windows" {
+		const cause = "aggressive cleanup unavailable: creator retirement authority is not established; preview and apply disabled"
+		if err == nil || err.Error() != cause {
+			t.Fatalf("error = %v, want retirement-authority refusal", err)
+		}
+		if stdout.Len() != 0 || strings.Contains(strings.ToLower(stderr.String()), "warning:") {
+			t.Fatalf("refusal emitted success or class warning: stdout=%q stderr=%q", stdout.String(), stderr.String())
+		}
+		return
+	}
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stderr.String(), "chrome") || !strings.Contains(strings.ToLower(stderr.String()), "warning") {
 		t.Fatalf("expected a stderr warning naming the opted-in class 'chrome', got stderr=%q", stderr.String())
+	}
+}
+
+func TestCleanupAggressive_RetirementAuthorityUnavailable(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows retirement-authority containment")
+	}
+	const cause = "aggressive cleanup unavailable: creator retirement authority is not established; preview and apply disabled"
+	oldStateDir := stateDirFunc
+	stateDirCalls := 0
+	stateDirFunc = func() (string, error) {
+		stateDirCalls++
+		return "", nil
+	}
+	t.Cleanup(func() { stateDirFunc = oldStateDir })
+	for _, args := range [][]string{
+		{"--client", "codex"},
+		{"--root-pid", "1234", "--confirm-aggressive-token", "synthetic-old-token", "--include-class", "chrome", "--min-age-sec", "1"},
+	} {
+		cmd := newCleanupAggressiveCmdReal()
+		cmd.SetArgs(args)
+		cmd.SilenceUsage = true
+		var stdout, stderr bytes.Buffer
+		cmd.SetOut(&stdout)
+		cmd.SetErr(&stderr)
+		if err := cmd.Execute(); err == nil || err.Error() != cause {
+			t.Fatalf("args=%v error=%v, want fixed refusal", args, err)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("refusal published output: %q", stdout.String())
+		}
+	}
+	if stateDirCalls != 0 {
+		t.Fatalf("success audit requested state directory %d times", stateDirCalls)
+	}
+}
+
+func TestCleanupAggressive_HelpStatesUnavailability(t *testing.T) {
+	cmd := newCleanupAggressiveCmdReal()
+	if !strings.Contains(cmd.Long, "preview and apply are disabled") ||
+		!strings.Contains(cmd.Long, "cannot enable this operation") {
+		t.Fatalf("help must explain current availability and confirmation limits: %s", cmd.Long)
 	}
 }
 

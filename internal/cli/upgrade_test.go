@@ -94,6 +94,59 @@ func TestUpgradeCmd_CommittedRecoveryBypassesOrdinaryDispatcher(t *testing.T) {
 	}
 }
 
+func TestUpgradeCmd_PendingRecoveryExclusiveAndEarly(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
+	resetUpgradeSeams(t)
+	prior := pendingRecoveryFn
+	t.Cleanup(func() { pendingRecoveryFn = prior })
+	called := 0
+	pendingRecoveryFn = func(*cobra.Command) error { called++; return nil }
+	upgradeDispatcher = func(*cobra.Command) error {
+		t.Fatal("pending recovery entered normal promotion dispatcher")
+		return nil
+	}
+	upgradeExecutableFn = func() (string, error) { t.Fatal("pending recovery entered self/promotion preflight"); return "", nil }
+	root := NewRootCmd()
+	root.SetArgs([]string{"upgrade", "--recover-pending-transaction"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	if err := root.Execute(); err != nil || called != 1 {
+		t.Fatalf("early pending route: %v calls=%d", err, called)
+	}
+}
+
+func TestUpgradeCmd_PendingRecoveryRejectsOtherModesArgumentsAndGUIFlags(t *testing.T) {
+	priorPending, priorCommitted := pendingRecoveryFn, committedRecoveryFn
+	t.Cleanup(func() { pendingRecoveryFn = priorPending; committedRecoveryFn = priorCommitted })
+	pendingRecoveryFn = func(*cobra.Command) error { t.Fatal("invalid request reached pending recovery"); return nil }
+	committedRecoveryFn = func(*cobra.Command) error { t.Fatal("invalid request reached committed recovery"); return nil }
+	for _, suffix := range [][]string{{"--complete-committed-recovery"}, {"--terminate-gui-for-upgrade"}, {"--stop-gui-owned-fleet-for-upgrade"}, {"unexpected"}} {
+		root := NewRootCmd()
+		root.SetArgs(append([]string{"upgrade", "--recover-pending-transaction"}, suffix...))
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+		if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "UPGRADE_PENDING_RECOVERY_NOT_ADMITTED") {
+			t.Fatalf("suffix=%v error=%v", suffix, err)
+		}
+	}
+}
+
+func TestUpgradeCmd_FalsePendingFlagRetainsNormalDispatcher(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
+	prior := pendingRecoveryFn
+	t.Cleanup(func() { pendingRecoveryFn = prior })
+	pendingRecoveryFn = func(*cobra.Command) error { t.Fatal("false recovery flag entered recovery"); return nil }
+	called := 0
+	upgradeDispatcher = func(*cobra.Command) error { called++; return nil }
+	root := NewRootCmd()
+	root.SetArgs([]string{"upgrade", "--recover-pending-transaction=false"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	if err := root.Execute(); err != nil || called != 1 {
+		t.Fatalf("normal route: %v calls=%d", err, called)
+	}
+}
+
 func TestUpgradeCmd_CommittedRecoveryRejectsConflictingFlagsAndArguments(t *testing.T) {
 	priorRecovery := committedRecoveryFn
 	t.Cleanup(func() { committedRecoveryFn = priorRecovery })

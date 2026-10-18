@@ -17,6 +17,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/preact";
 import { SecretsScreen } from "./Secrets";
+import userEvent from "@testing-library/user-event";
 import type { SecretsEnvelope } from "../lib/secrets-api";
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -269,5 +270,48 @@ describe("SecretsScreen — ?key= deep-link prefill (epic area 2)", () => {
     const modal = screen.queryByTestId("add-secret-modal");
     // happy-dom: a closed <dialog> has no `open` attribute.
     expect(modal && (modal as HTMLDialogElement).open).toBeFalsy();
+  });
+});
+
+describe("SecretsScreen — initialization containment", () => {
+  const capability = { schema_version: 1, workflow: "cli_support_readonly", path_free_errors: true };
+  beforeEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(cleanup);
+  function wire(status: number, body: unknown, cap: unknown = capability) {
+    const requests = fetchRouter({
+      "/api/secrets/init-capabilities": () => jsonResponse(200, cap),
+      "/api/secrets/init": () => jsonResponse(status, body),
+      "/api/secrets": () => jsonResponse(200, missingVault),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(requests as unknown as typeof fetch);
+    return requests;
+  }
+  it("visibly blocks initialization without positive capability and keeps the key-backup warning", async () => {
+    const requests = wire(200, { vault_state: "ok" }, {});
+    render(<SecretsScreen />);
+    const button = await screen.findByRole("button", { name: "Initialize secrets vault" });
+    await screen.findByText(/Reload or update the application/);
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(requests.mock.calls.some(c => c[1]?.method === "POST")).toBe(false);
+    expect(screen.getByText(/unrecoverable/)).toBeTruthy();
+  });
+  it.each([200, 500])("contains all init output and shows only a safe support reference (%i)", async status => {
+    const id = "216980ce5b66faa0cc5363401ea67007";
+    const requests = wire(status, { vault_state: "missing", cleanup_status: status === 200 ? "ok" : "failed",
+      code: "SECRETS_INIT_FAILED", error: "private-marker", orphan_path: "private-orphan", recovery_id: id, recovery_status: "ready" });
+    render(<SecretsScreen />);
+    const button = await screen.findByRole("button", { name: "Initialize secrets vault" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    await userEvent.setup().keyboard("{Enter}");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(id);
+    expect(alert.textContent).toContain("local support");
+    expect(document.body.textContent).not.toContain("private-marker");
+    expect(document.body.textContent).not.toContain("private-orphan");
+    expect(requests.mock.calls.filter(c => c[0] === "/api/secrets")).toHaveLength(1);
+    expect(requests.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
   });
 });

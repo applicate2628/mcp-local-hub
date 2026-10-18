@@ -26,6 +26,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -215,16 +216,32 @@ func defaultMigrateSerenaSupervisorHealthy() (bool, error) {
 // the supervisor does not reconcile within the bounded window, so a hung or
 // crash-looping start surfaces as a migrate error rather than a silent
 // "complete" with clients pointed at a router that resolves to nothing.
-func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
+func defaultMigrateSerenaStart(ctx context.Context, w io.Writer) (retErr error) {
 	deps, _, err := migrateSerenaUpgradeDeps()
 	if err != nil {
 		return err
 	}
-	if err := deps.StartSupervisor(deps.exePath); err != nil {
-		// HARD start failure — the detached spawn itself failed. This stays
-		// fail-loud at EVERY call site (pre-commit, recovery, AND post-commit
-		// step 10): it is NOT wrapped with ErrMigrateSerenaReconcileReadyTimeout.
+	digest, err := startedSupervisorDigest(deps.exePath)
+	if err != nil {
 		return err
+	}
+	launch, err := deps.StartSupervisor(deps.exePath)
+	if err != nil {
+		return errors.Join(err, abortStartedSupervisor(launch))
+	}
+	if launch == nil {
+		return missingSupervisorLaunch(launch)
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			retErr = errors.Join(retErr, abortStartedSupervisor(launch))
+		}
+	}()
+	stateDir := filepath.Dir(deps.supervisorLockDir)
+	binding, err := launch.BindControl(ctx, supervisorExpectation(stateDir, deps.exePath, digest))
+	if err != nil {
+		return fmt.Errorf("supervisor startup control receiving: %w", err)
 	}
 	fmt.Fprintln(w, "supervisor started; waiting for it to reconcile the on-disk serena intent…")
 
@@ -245,6 +262,10 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 	// existing forward-migration readiness primitive). Bounded so a hung start
 	// cannot block forever.
 	if err := waitReconcileReadyViaIPC(deps.pipePath)(migrateSerenaReconcileReadyTimeout); err != nil {
+		if handoffErr := launch.Handoff(ctx, binding); handoffErr != nil {
+			return errors.Join(err, fmt.Errorf("supervisor control handoff before reconcile warning: %w", handoffErr))
+		}
+		handedOff = true
 		// The spawn SUCCEEDED but the supervisor did not report reconcile-ready
 		// in the window. Wrap the TYPED sentinel so the POST-COMMIT start (step
 		// 10) can recognize this as the benign release→child-acquire hand-off
@@ -259,6 +280,10 @@ func defaultMigrateSerenaStart(_ context.Context, w io.Writer) error {
 				"check `mcphub status` and the supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
 			migrateSerenaReconcileReadyTimeout, ErrMigrateSerenaReconcileReadyTimeout, err)
 	}
+	if err := launch.Handoff(ctx, binding); err != nil {
+		return err
+	}
+	handedOff = true
 	fmt.Fprintln(w, "supervisor reconcile-ready; the serena dynamic-pool daemons are reconciling on their allocated ports.")
 	return nil
 }

@@ -315,7 +315,9 @@ func (*realBinaryUpgradeDeps) ExitGraceful(context.Context, string, int) (api.IP
 }
 
 func (*realBinaryUpgradeDeps) ForceKillSupervisor(string) error { return nil }
-func (*realBinaryUpgradeDeps) StartSupervisor(string) error     { return nil }
+func (*realBinaryUpgradeDeps) StartSupervisor(string) (SupervisorLaunch, error) {
+	return &fixtureSupervisorLaunch{}, nil
+}
 
 func TestInstallUpgradeRestoresConsolePriorAfterSuccessorReadinessFailure(t *testing.T) {
 	dir := t.TempDir()

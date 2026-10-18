@@ -51,10 +51,9 @@ prompt, request elevation, or reap/restart the running fleet. On Windows the
 atomic product transaction may rewrite only the Command node of an existing
 exact-owned current-user mcphub task so it targets the canonical product.
 
-It is the minimal, non-interactive canonicalize step the npm package's
-postinstall hook (npm/scripts/postinstall.js) runs on the freshly installed
-platform binary, so 'npm install -g mcp-local-hub@<newer>' refreshes the
-authoritative ~/.local/bin binary directly. The copy is lock-safe on Windows:
+This is an explicit local-install action. npm starts its admitted native
+platform payload directly and does not require or create this local copy.
+The optional local copy is lock-safe on Windows:
 if the running fleet holds the canonical binary, the prior binary is renamed
 aside to '.old-<ts>' (the same crash-safe swap 'mcphub install --upgrade'
 uses) and the new binary takes effect on the next fleet/supervisor restart.
@@ -62,8 +61,7 @@ uses) and the new binary takes effect on the next fleet/supervisor restart.
 Idempotent: a no-op when the running binary already IS the canonical target,
 or when the canonical binary is already byte-identical to this one.
 
-For hosts installed with 'npm install --ignore-scripts' (which skips the
-postinstall), the manual equivalent is 'mcphub setup'.`,
+Skipping npm lifecycle scripts does not require this action.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -146,15 +146,22 @@ describe("DashboardScreen — supervisor Restart confirmation", () => {
     await act(async () => {
       resolveRestart(jsonResponse(200, {
         killed: true, killed_pid: 42, spawned: true, spawned_pid: 43,
+        outcome: "restarted",
+        ready: true,
+        selected_generation: { pid: 43, started_at: "2026-01-01T00:01:00Z" },
+        original_settled: true,
+        phase: "complete",
+        transfer_committed: false,
+        transferred: false,
+        original_child_disposition: "retained",
+        namespace_disposition: "occupied",
       }));
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect((await view.findByTestId("recovery-msg")).textContent).toContain("killed PID 42, spawned PID 43");
+    const restartMessage = (await view.findByTestId("recovery-msg")).textContent ?? "";
+    expect(restartMessage).toContain("Supervisor restart confirmed.");
+    expect(restartMessage).toContain("killed PID 42, spawned PID 43");
     expect(restartButton.disabled).toBe(false);
-    expect(statusCalls).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
-    expect(statusCalls).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(statusCalls).toBe(2);
   });
 
@@ -191,7 +198,41 @@ describe("DashboardScreen — supervisor Restart confirmation", () => {
     await waitFor(() => expect(restartPosts()).toHaveLength(1));
     expect(fetchSpy).toHaveBeenCalledWith("/api/supervisor/restart", expect.objectContaining({ method: "POST" }));
     await view.findByTestId("recovery-msg");
-    expect(view.getByTestId("recovery-msg").textContent).toContain("restart denied");
+    expect(view.getByTestId("recovery-msg").textContent).toContain("/api/supervisor/restart [RESTART_FAILED]: HTTP 500");
+  });
+
+  it("keeps a created but failed restart with safe step errors non-green", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/supervisor/restart") {
+        return Promise.resolve(jsonResponse(200, {
+          killed_pid: 42,
+          killed: true,
+          spawned_pid: 43,
+          spawned: true,
+          outcome: "failed",
+          ready: true,
+          selected_generation: { pid: 43, started_at: "2026-01-01T00:01:00Z" },
+          original_settled: false,
+          phase: "settlement",
+          original_child_disposition: "pending",
+          namespace_disposition: "occupied",
+          code: "RESTART_FAILED",
+          per_step_error: { settlement: "restart step incomplete" },
+        }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByTestId("recovery-toggle"));
+    fireEvent.click(view.getByRole("button", { name: "Restart supervisor" }));
+    fireEvent.click(view.getByTestId("recovery-restart-confirm-confirm"));
+
+    const message = await view.findByRole("alert");
+    expect(message.textContent).toContain("Supervisor restart failed.");
+    expect(message.textContent).toContain("spawned PID 43");
+    expect(message.textContent).toContain("settlement: restart step incomplete");
   });
 });
 

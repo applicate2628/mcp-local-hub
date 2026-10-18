@@ -17,6 +17,7 @@ const (
 	MCPReadinessStageNone           = "none"
 	MCPReadinessStageProfile        = "profile"
 	MCPReadinessStageIdentity       = "identity"
+	MCPReadinessStageHost           = readinesswire.StageHost
 	MCPReadinessStageInitialize     = "initialize"
 	MCPReadinessStageInitialized    = "initialized"
 	MCPReadinessStageToolsList      = "tools_list"
@@ -73,6 +74,8 @@ func readinessStageFromWire(stage string) string {
 		return MCPReadinessStageProfile
 	case readinesswire.StageIdentity:
 		return MCPReadinessStageIdentity
+	case readinesswire.StageHost:
+		return MCPReadinessStageHost
 	case readinesswire.StageInitialize:
 		return MCPReadinessStageInitialize
 	case readinesswire.StageInitialized:

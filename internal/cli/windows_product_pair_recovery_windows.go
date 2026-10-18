@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +24,7 @@ type WindowsProductPairRecoverySettled struct {
 	TransactionID     string
 	Outcome           WindowsProductPairRecoveryPhase
 	PairOrPriorHashes [2]string
+	Runtime           *pendingRuntimeReceiving
 }
 
 type windowsProductPairRecoveryRequest struct {
@@ -32,7 +34,7 @@ type windowsProductPairRecoveryRequest struct {
 	WindowlessPath     string
 	SettleSuccessor    func(string) error
 	ObservePriorReady  func(context.Context, string, string) (bool, error)
-	RestartPrior       func(string) error
+	RestartPrior       func(string) (SupervisorLaunch, error)
 	WaitPriorReady     func(context.Context, string, string) error
 	ReconcileCommitted func(windowsProductPairRecoveryJournal) error
 	Deps               windowsProductPairRecoveryDeps
@@ -62,11 +64,16 @@ type windowsProductRecoveryRequest struct {
 	LegacyWindowlessPath   string
 	Legacy                 windowsProductPairRecoveryRequest
 	RecoverPriorSettlement func(context.Context, windowsProductRecoveryJournalV3) error
+	PreparePendingRuntime  func(context.Context, windowsProductRecoveryJournalV3, *pendingRuntimeReceiving) (func(context.Context, windowsProductRecoveryJournalV3) error, error)
+	PendingRuntime         *pendingRuntimeReceiving
 	ObserveSuccessorReady  func(context.Context, string, string) (bool, error)
-	StartSupervisor        func(string) error
+	StartSupervisor        func(string) (SupervisorLaunch, error)
 	WaitSupervisorReady    func(context.Context, string, string) error
 	ReconcileCommitted     func(windowsProductRecoveryJournalV3) error
 	Deps                   windowsProductRecoveryDeps
+	// Optional command admission controls; legacy recovery retains its contract.
+	ExpectedJournalSHA256                   string
+	RequirePriorSettlementOnSettledRollback bool
 }
 
 type windowsProductRecoveryDeps struct {
@@ -88,12 +95,28 @@ type windowsProductRecoveryDeps struct {
 	Now              func() time.Time
 }
 
+// The recovery owner, shared by stored-pending admission and execution.
+func windowsProductPriorRecoveryPending(j windowsProductRecoveryJournalV3) bool {
+	if j.Mode != WindowsProductPairModeUpgrade || j.PreSettlement == nil {
+		return false
+	}
+	switch j.Phase {
+	case WindowsProductRecoveryPrepared, WindowsProductRecoveryGUIOwnedStopPending, WindowsProductRecoverySuccessorStarting, WindowsProductRecoverySettledRollback:
+		return true
+	default:
+		return false
+	}
+}
+
 func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result *WindowsProductPairRecoverySettled, retErr error) {
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
 	if !cleanAbsolutePath(req.StateDir) || !cleanAbsolutePath(req.ProductPath) || !cleanAbsolutePath(req.LegacyWindowlessPath) {
 		return nil, fmt.Errorf("%w: state and canonical product paths are required", ErrWindowsProductRecoveryIdentity)
+	}
+	if req.RequirePriorSettlementOnSettledRollback && !validLowerHexSHA256(req.ExpectedJournalSHA256) {
+		return nil, fmt.Errorf("%w: pending command requires an admitted V3 journal digest", ErrWindowsProductRecoveryIdentity)
 	}
 	d := withWindowsProductRecoveryDefaults(req.Deps)
 	v3Path := filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)
@@ -102,6 +125,11 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	_, legacyErr := d.ReadJournal(legacyPath)
 	v3Present := v3Err == nil
 	legacyPresent := legacyErr == nil
+	if req.ExpectedJournalSHA256 != "" {
+		if !validLowerHexSHA256(req.ExpectedJournalSHA256) || !v3Present || legacyPresent || (legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist)) {
+			return nil, fmt.Errorf("%w: expected V3 journal admission is unavailable or mixed", ErrWindowsProductRecoveryIdentity)
+		}
+	}
 	if v3Present && legacyPresent {
 		return nil, fmt.Errorf("%w: legacy and V3 recovery journals coexist", ErrWindowsProductRecoveryIdentity)
 	}
@@ -125,6 +153,12 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	if err != nil {
 		return nil, fmt.Errorf("%w: read V3 journal: %v", ErrWindowsProductRecoveryIdentity, err)
 	}
+	if req.ExpectedJournalSHA256 != "" {
+		sum := sha256.Sum256(raw)
+		if hex.EncodeToString(sum[:]) != req.ExpectedJournalSHA256 {
+			return nil, fmt.Errorf("%w: expected V3 journal changed before recovery", ErrWindowsProductRecoveryIdentity)
+		}
+	}
 	journal, err := decodeWindowsProductRecoveryJournalV3(raw)
 	if err != nil || !sameWindowsRecoveryPath(journal.Product.Target, req.ProductPath) ||
 		!sameWindowsRecoveryPath(journal.LegacyWindowless.Target, req.LegacyWindowlessPath) ||
@@ -132,7 +166,49 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json")) {
 		return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch", ErrWindowsProductRecoveryIdentity)
 	}
+	// Stored pre-decision GUI-owned recovery binds current desired state before
+	// task opening or material inverse. Immediate rollback never enters this hook.
+	if req.PreparePendingRuntime != nil && windowsProductPriorRecoveryPending(journal) && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+		if req.PendingRuntime == nil {
+			req.PendingRuntime = new(pendingRuntimeReceiving)
+		}
+		defer func() {
+			if result != nil {
+				snapshot := *req.PendingRuntime
+				result.Runtime = &snapshot
+			}
+			if retErr != nil {
+				var typed *pendingRuntimeError
+				if !errors.As(retErr, &typed) {
+					var kind pendingRuntimeCause
+					if errors.Is(retErr, ErrWindowsProductRecoveryIdentity) || errors.Is(retErr, ErrWindowsProductPairRecoveryRollback) {
+						kind = pendingRuntimeMaterial
+					}
+					retErr = pendingRuntimeFailure(kind, req.PendingRuntime, retErr)
+				}
+			}
+		}()
+		settle, err := req.PreparePendingRuntime(req.Context, journal, req.PendingRuntime)
+		if err != nil {
+			return nil, err
+		}
+		if settle == nil {
+			return nil, pendingRuntimeFailure(pendingRuntimeUnavailable, req.PendingRuntime, nil)
+		}
+		req.RecoverPriorSettlement = settle
+		if journal.Phase == WindowsProductRecoverySettledRollback {
+			req.RequirePriorSettlementOnSettledRollback = true
+		}
+	}
 	if journal.Phase == WindowsProductRecoverySettledCommit || journal.Phase == WindowsProductRecoverySettledRollback {
+		if journal.Phase == WindowsProductRecoverySettledRollback && req.RequirePriorSettlementOnSettledRollback {
+			if req.RecoverPriorSettlement == nil {
+				return nil, fmt.Errorf("%w: settled rollback prior health owner is unavailable", ErrWindowsProductRecoveryPending)
+			}
+			if err := req.RecoverPriorSettlement(req.Context, journal); err != nil {
+				return nil, err
+			}
+		}
 		if journal.Phase == WindowsProductRecoverySettledCommit {
 			if req.ReconcileCommitted == nil {
 				return nil, errors.New("committed product recovery reconciliation owner is unavailable")
@@ -145,7 +221,7 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 			return nil, fmt.Errorf("%w: retained task-store cleanup owner is unavailable", ErrWindowsProductPairRecoveryCleanup)
 		}
 		if err := d.DiscardTaskStore(journal.Tasks); err != nil {
-			return nil, fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductPairRecoveryCleanup, err)
+			return nil, fmt.Errorf("%w: discard retained task store: %w", ErrWindowsProductPairRecoveryCleanup, err)
 		}
 		if err := d.RemoveJournal(v3Path); err != nil {
 			return nil, fmt.Errorf("%w: remove settled V3 journal: %v", ErrWindowsProductPairRecoveryCleanup, err)
@@ -161,7 +237,7 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	}
 	tasks, err := d.ReopenTasks(req.Context, journal.Tasks)
 	if err != nil {
-		return nil, fmt.Errorf("%w: reopen retained task transaction: %v", ErrWindowsProductRecoveryIdentity, err)
+		return nil, fmt.Errorf("%w: reopen retained task transaction: %w", ErrWindowsProductRecoveryIdentity, err)
 	}
 	defer func() { retErr = errors.Join(retErr, tasks.Close()) }()
 	if journal.Phase == WindowsProductRecoveryCommitDecided {
@@ -218,7 +294,7 @@ func rollbackWindowsProductRecovery(req windowsProductRecoveryRequest, d windows
 	if req.RecoverPriorSettlement != nil {
 		if err := req.RecoverPriorSettlement(req.Context, journal); err != nil {
 			if guiOwnedPredecision {
-				restoreErrs = append(restoreErrs, fmt.Errorf("%w: GUI-owned prior fleet settlement: %v", ErrWindowsProductRecoveryPending, err))
+				restoreErrs = append(restoreErrs, fmt.Errorf("%w: GUI-owned prior fleet settlement: %w", ErrWindowsProductRecoveryPending, err))
 			} else {
 				restoreErrs = append(restoreErrs, err)
 			}
@@ -233,12 +309,59 @@ func rollbackWindowsProductRecovery(req windowsProductRecoveryRequest, d windows
 		return nil, fmt.Errorf("%w: persist settled rollback: %v", ErrWindowsProductPairRecoveryCleanup, err)
 	}
 	if err := d.DiscardTaskStore(journal.Tasks); err != nil {
-		return nil, fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductPairRecoveryCleanup, err)
+		return nil, fmt.Errorf("%w: discard retained task store: %w", ErrWindowsProductPairRecoveryCleanup, err)
 	}
 	if err := d.RemoveJournal(journalPath); err != nil {
 		return nil, fmt.Errorf("%w: remove settled V3 journal: %v", ErrWindowsProductPairRecoveryCleanup, err)
 	}
 	return &WindowsProductPairRecoverySettled{TransactionID: journal.TransactionID, Outcome: WindowsProductPairRecoverySettledRollback}, nil
+}
+
+// Read-only pending-command admission reuses the recovery owner's physical
+// preimage and task validators. It never restores, discards or starts anything.
+func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j windowsProductRecoveryJournalV3) (retErr error) {
+	if req.Context == nil {
+		return fmt.Errorf("%w: recovery context is unavailable", ErrWindowsProductRecoveryIdentity)
+	}
+	if err := req.Context.Err(); err != nil {
+		return err
+	}
+	d := withWindowsProductRecoveryDefaults(req.Deps)
+	product := windowsProductPairRecoveryArtifact{Target: j.Product.Target, PriorPresent: j.Product.PriorPresent, PriorSHA256: j.Product.PriorSHA256, NewSHA256: j.Product.NewSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.Product.BaselineAsides)}
+	state, err := inspectWindowsProductPairRecoveryArtifact(product, pairRecoveryDepsFromProduct(d))
+	if err != nil {
+		return fmt.Errorf("%w: prior Product inverse: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	legacy := windowsProductPairRecoveryArtifact{Target: j.LegacyWindowless.Target, PriorPresent: j.LegacyWindowless.PriorPresent, PriorSHA256: j.LegacyWindowless.PriorSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.LegacyWindowless.BaselineAsides)}
+	if _, err := inspectWindowsProductLegacyRecoveryArtifact(legacy, d); err != nil {
+		return fmt.Errorf("%w: legacy inverse: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	if j.Product.PriorPresent {
+		path := j.Product.Target
+		if state.canonical != j.Product.PriorSHA256 {
+			path = state.priorAside
+		}
+		prior, err := d.AdmitProduct(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: j.Product.PriorSHA256})
+		if err != nil || prior.SHA256 != j.Product.PriorSHA256 || prior.Role != binaryadmission.WindowsArtifactRoleProduct || prior.Subsystem != binaryadmission.WindowsGUISubsystem || prior.Machine != 0x8664 {
+			return fmt.Errorf("%w: prior Product admission differs", ErrWindowsProductRecoveryIdentity)
+		}
+	}
+	if j.Phase == WindowsProductRecoverySettledRollback {
+		return readbackGUIOwnedPriorProduct(j)
+	}
+	if d.ReopenTasks == nil {
+		return fmt.Errorf("%w: task inverse validation owner unavailable", ErrWindowsProductRecoveryIdentity)
+	}
+	tasks, err := d.ReopenTasks(req.Context, j.Tasks)
+	if err != nil {
+		return fmt.Errorf("%w: task inverse validation: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	if tasks == nil {
+		return fmt.Errorf("%w: task inverse validation returned no owner", ErrWindowsProductRecoveryIdentity)
+	}
+	// Close releases only the reopened task transaction lock. DiscardRecoveryStore
+	// is intentionally not invoked: retained XML remains recovery-owned.
+	return tasks.Close()
 }
 
 func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
@@ -263,11 +386,14 @@ func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d 
 		return nil, fmt.Errorf("%w: observe successor readiness: %v", ErrWindowsProductCleanupPending, err)
 	}
 	if !ready {
-		if err := req.StartSupervisor(journal.Product.Target); err != nil {
-			return nil, fmt.Errorf("%w: restart committed successor: %v", ErrWindowsProductCleanupPending, err)
+		launch, err := req.StartSupervisor(journal.Product.Target)
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("%w: restart committed successor: %v", ErrWindowsProductCleanupPending, err), abortStartedSupervisor(launch))
 		}
-		if err := req.WaitSupervisorReady(req.Context, journal.Product.Target, journal.Product.NewSHA256); err != nil {
-			return nil, fmt.Errorf("%w: committed successor readiness: %v", ErrWindowsProductCleanupPending, err)
+		if err := receiveStartedSupervisor(req.Context, launch, supervisorExpectation(req.StateDir, journal.Product.Target, journal.Product.NewSHA256), func() error {
+			return req.WaitSupervisorReady(req.Context, journal.Product.Target, journal.Product.NewSHA256)
+		}); err != nil {
+			return nil, fmt.Errorf("%w: committed successor readiness/control: %w", ErrWindowsProductCleanupPending, err)
 		}
 	}
 	productPriorAside, err := inspectWindowsProductForwardAsides(journal.Product.Target,
@@ -500,7 +626,7 @@ func reconcileWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) 
 	}
 	tasks, err := d.ReopenTasks(req.Context, journal.Tasks)
 	if err != nil {
-		return nil, fmt.Errorf("%w: reopen retained task transaction: %v", ErrWindowsProductPairRecoveryIdentity, err)
+		return nil, fmt.Errorf("%w: reopen retained task transaction: %w", ErrWindowsProductPairRecoveryIdentity, err)
 	}
 	defer func() {
 		if closeErr := tasks.Close(); closeErr != nil {
@@ -515,7 +641,7 @@ func reconcileWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) 
 				return nil, fmt.Errorf("%w: persist settled commit: %v", ErrWindowsProductPairCommittedCleanupFailed, err)
 			}
 			if err := cleanupSettledWindowsProductPairRecovery(journalPath, journal, d); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrWindowsProductPairCommittedCleanupFailed, err)
+				return nil, fmt.Errorf("%w: %w", ErrWindowsProductPairCommittedCleanupFailed, err)
 			}
 			if req.ReconcileCommitted == nil {
 				return recoverySettledResult(journal), errors.New("committed recovery reconciliation owner is unavailable")
@@ -556,9 +682,12 @@ func reconcileWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) 
 		} else if ready, err := req.ObservePriorReady(req.Context, req.CLIPath, journal.CLI.PriorSHA256); err != nil {
 			restoreErrs = append(restoreErrs, fmt.Errorf("observe prior readiness: %w", err))
 		} else if !ready {
-			if err := req.RestartPrior(req.CLIPath); err != nil {
-				restoreErrs = append(restoreErrs, fmt.Errorf("restart prior supervisor: %w", err))
-			} else if err := req.WaitPriorReady(req.Context, req.CLIPath, journal.CLI.PriorSHA256); err != nil {
+			launch, err := req.RestartPrior(req.CLIPath)
+			if err != nil {
+				restoreErrs = append(restoreErrs, errors.Join(fmt.Errorf("restart prior supervisor: %w", err), abortStartedSupervisor(launch)))
+			} else if err := receiveStartedSupervisor(req.Context, launch, supervisorExpectation(req.StateDir, req.CLIPath, journal.CLI.PriorSHA256), func() error {
+				return req.WaitPriorReady(req.Context, req.CLIPath, journal.CLI.PriorSHA256)
+			}); err != nil {
 				restoreErrs = append(restoreErrs, fmt.Errorf("prior supervisor readiness: %w", err))
 			}
 		}
@@ -773,7 +902,7 @@ func verifyRecoveryArtifactPrior(a windowsProductPairRecoveryArtifact, d windows
 
 func cleanupSettledWindowsProductPairRecovery(path string, journal windowsProductPairRecoveryJournal, d windowsProductPairRecoveryDeps) error {
 	if err := d.DiscardTaskStore(journal.Tasks); err != nil {
-		return fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductPairRecoveryCleanup, err)
+		return fmt.Errorf("%w: discard retained task store: %w", ErrWindowsProductPairRecoveryCleanup, err)
 	}
 	if err := d.RemoveJournal(path); err != nil {
 		return fmt.Errorf("%w: remove settled journal: %v", ErrWindowsProductPairRecoveryCleanup, err)

@@ -1,15 +1,20 @@
 package clients
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
 
 func TestClientConfigSandboxEnvironment_ContainsEveryConstructedAdapter(t *testing.T) {
 	root := t.TempDir()
-	restoreEnv := ApplyClientConfigSandboxEnvironment(root)
+	restoreEnv, err := ApplyClientConfigSandboxEnvironment(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(restoreEnv)
 
 	for _, entry := range ClientConfigSandboxEnvironment(root) {
@@ -23,6 +28,9 @@ func TestClientConfigSandboxEnvironment_ContainsEveryConstructedAdapter(t *testi
 		if !set || !withinSandboxRoot(normalizeSandboxPath(value), normalizeSandboxPath(root)) {
 			t.Fatalf("%s=%q is not redirected under %q", entry.Key, value, root)
 		}
+		if info, err := os.Stat(entry.Value); err != nil || !info.IsDir() {
+			t.Fatalf("declared sandbox directory %s not ready: %v", entry.Key, err)
+		}
 	}
 
 	escapes := installReportModeAudit(t, root)
@@ -34,7 +42,10 @@ func TestClientConfigSandboxEnvironment_ContainsEveryConstructedAdapter(t *testi
 
 func TestClientConfigSandboxEnvironment_MissingRedirectFailsClosed(t *testing.T) {
 	root := t.TempDir()
-	restoreEnv := ApplyClientConfigSandboxEnvironment(root)
+	restoreEnv, err := ApplyClientConfigSandboxEnvironment(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(restoreEnv)
 
 	key := "XDG_CONFIG_HOME"
@@ -72,7 +83,11 @@ func TestClientConfigSandboxEnvironment_UnsetsCODEXHOMEAndRestoresIt(t *testing.
 	outside := t.TempDir()
 	t.Setenv("CODEX_HOME", outside)
 	root := t.TempDir()
-	restoreEnv := ApplyClientConfigSandboxEnvironment(root)
+	restoreEnv, err := ApplyClientConfigSandboxEnvironment(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restoreEnv)
 
 	if value, present := os.LookupEnv("CODEX_HOME"); present {
 		t.Fatalf("CODEX_HOME remains set to %q inside sandbox", value)
@@ -91,5 +106,39 @@ func TestClientConfigSandboxEnvironment_UnsetsCODEXHOMEAndRestoresIt(t *testing.
 	restoreEnv()
 	if value, present := os.LookupEnv("CODEX_HOME"); !present || value != outside {
 		t.Fatalf("CODEX_HOME after restore = %q, present=%v; want %q, true", value, present, outside)
+	}
+}
+
+func TestClientConfigSandboxDirectories_PreparationAndFailureKeepParentEnvironment(t *testing.T) {
+	before := os.Environ()
+	root := t.TempDir()
+	if err := PrepareClientConfigSandboxDirectories(root); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(os.Environ(), before) {
+		t.Fatal("child namespace preparation mutated parent environment")
+	}
+
+	blockedRoot := t.TempDir()
+	blocker := filepath.Join(blockedRoot, "AppData")
+	if err := os.WriteFile(blocker, []byte("caller-owned-blocker"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := ApplyClientConfigSandboxEnvironment(blockedRoot)
+	if restore != nil {
+		t.Cleanup(restore)
+	}
+	if err == nil || restore != nil {
+		t.Fatalf("blocked namespace was admitted: restore=%t error=%v", restore != nil, err)
+	}
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("namespace failure lost original filesystem error: %v", err)
+	}
+	if !reflect.DeepEqual(os.Environ(), before) {
+		t.Fatal("failed namespace changed parent environment")
+	}
+	if raw, readErr := os.ReadFile(blocker); readErr != nil || string(raw) != "caller-owned-blocker" {
+		t.Fatalf("preparation deleted or changed caller-owned root/content: %v", readErr)
 	}
 }

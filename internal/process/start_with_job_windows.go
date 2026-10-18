@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -76,12 +78,21 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 // startWithJobFilesObserved extends only the at-create owner; nil options
 // follow the ordinary launch path without retaining any additional handle.
 type startWithJobObserverOptions struct {
-	retainOriginal func(windows.Handle, uint32) error
-	findProcess    func(int) (*os.Process, error)
-	childHandles   []windows.Handle
+	retainCreated             func(windows.ProcessInformation)
+	retainOriginal            func(windows.Handle, uint32) error
+	findProcess               func(int) (*os.Process, error)
+	childHandles              []windows.Handle
+	childHandleClosed         func(windows.Handle, error)
+	childHandleAcquired       func(windows.Handle)
+	originalChildHandleClosed func(windows.Handle, originalInheritedCloseOutcome, error)
+	attributeListOwner        func(*procThreadAttributeListObserved)
+	duplicateHandle           func(*os.File) (windows.Handle, error)
+	closeChildHandle          func(windows.Handle) (originalInheritedCloseOutcome, error)
+	newAttributeList          func(uint32) (*procThreadAttributeListObserved, error)
+	attributeListClosed       func(ProcThreadAttributeListCloseObservation)
 }
 
-func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, observer *startWithJobObserverOptions) (int, error) {
+func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, observer *startWithJobObserverOptions) (pid int, retErr error) {
 	if job == nil {
 		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: nil job"))
 	}
@@ -113,11 +124,31 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	if stdin != nil || (observer != nil && len(observer.childHandles) != 0) {
 		attributeCount++
 	}
-	attrList, err := windows.NewProcThreadAttributeList(uint32(attributeCount))
+	newAttributeList := newProcThreadAttributeListObserved
+	if observer != nil && observer.newAttributeList != nil {
+		newAttributeList = observer.newAttributeList
+	}
+	attrList, err := newAttributeList(uint32(attributeCount))
+	if attrList != nil {
+		if observer != nil && observer.attributeListOwner != nil {
+			observer.attributeListOwner(attrList)
+		}
+		defer func() {
+			view, closeErr := attrList.CloseObserved()
+			if observer != nil && observer.attributeListClosed != nil {
+				observer.attributeListClosed(view)
+			}
+			if closeErr != nil {
+				if pid != 0 {
+					closeErr = fmt.Errorf("%w: attribute allocation close: %w", ErrSpawnPostCreate, closeErr)
+				}
+				retErr = errors.Join(retErr, startWithJobError(StartWithJobContainment, closeErr))
+			}
+		}()
+	}
 	if err != nil {
 		return 0, startWithJobError(StartWithJobContainment, fmt.Errorf("NewProcThreadAttributeList: %w", err))
 	}
-	defer attrList.Delete()
 
 	// Pass &jobHandle (a *windows.Handle) as the attribute value.
 	// The kernel reads sizeof(HANDLE) bytes; the container's Update
@@ -132,20 +163,47 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	}
 
 	var childHandles []windows.Handle
+	duplicateHandle := duplicateInheritableHandle
+	if observer != nil && observer.duplicateHandle != nil {
+		duplicateHandle = observer.duplicateHandle
+	}
+	closeChildHandle := func(handle windows.Handle) error {
+		var outcome originalInheritedCloseOutcome
+		var reported error
+		if observer != nil && observer.closeChildHandle != nil {
+			outcome, reported = observer.closeChildHandle(handle)
+		} else {
+			outcome.NativeError = windows.CloseHandle(handle)
+			outcome.ClosedKnown = outcome.NativeError == nil
+			reported = outcome.NativeError
+		}
+		if observer != nil && observer.childHandleClosed != nil {
+			observer.childHandleClosed(handle, errors.Join(outcome.NativeError, reported))
+		}
+		if observer != nil && observer.originalChildHandleClosed != nil {
+			observer.originalChildHandleClosed(handle, outcome, reported)
+		}
+		return errors.Join(outcome.NativeError, reported)
+	}
 	if stdin != nil {
 		for _, file := range []*os.File{stdin, stdout, stderr} {
-			duplicate, duplicateErr := duplicateInheritableHandle(file)
+			duplicate, duplicateErr := duplicateHandle(file)
 			if duplicateErr != nil {
 				for _, handle := range childHandles {
-					_ = windows.CloseHandle(handle)
+					_ = closeChildHandle(handle)
+
 				}
 				return 0, startWithJobError(StartWithJobLaunch, duplicateErr)
 			}
 			childHandles = append(childHandles, duplicate)
+			if observer != nil && observer.childHandleAcquired != nil {
+				observer.childHandleAcquired(duplicate)
+			}
 		}
 		defer func() {
 			for _, handle := range childHandles {
-				_ = windows.CloseHandle(handle)
+				_ = closeChildHandle(handle)
+
 			}
 		}()
 	}
@@ -169,7 +227,7 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		StartupInfo: windows.StartupInfo{
 			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
 		},
-		ProcThreadAttributeList: attrList.List(),
+		ProcThreadAttributeList: (*windows.ProcThreadAttributeList)(attrList.List()),
 	}
 	if stdin != nil {
 		si.StartupInfo.Flags |= windows.STARTF_USESTDHANDLES
@@ -215,9 +273,16 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		return 0, startWithJobError(StartWithJobLaunch, fmt.Errorf("CreateProcess: %w", err))
 	}
 
-	// Close the thread handle; we don't need it for orchestration.
-	_ = windows.CloseHandle(pi.Thread)
 	retainedOriginal := false
+	if observer != nil && observer.retainCreated != nil {
+		// The provisional lifetime owner adopts both creation handles before
+		// either can be closed, including post-create wrapper failures.
+		observer.retainCreated(pi)
+		retainedOriginal = true
+	} else {
+		// Ordinary/CST callers retain their established thread ownership.
+		_ = windows.CloseHandle(pi.Thread)
+	}
 	if observer != nil && observer.retainOriginal != nil {
 		if retainErr := observer.retainOriginal(pi.Process, pi.ProcessId); retainErr != nil {
 			_ = windows.CloseHandle(pi.Process)
@@ -228,10 +293,9 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 
 	// Populate cmd.Process so callers can use Wait()/Kill() through
 	// the standard os/exec surface. NOTE: this constructs an
-	// *os.Process directly from the PID — the underlying handle in
-	// pi.Process is leaked because os.FindProcess on Windows opens
-	// its own handle, and we cannot inject pi.Process into the
-	// unexported os.Process.handle field. Caller workflows that
+	// *os.Process from the PID while the original creation handle is held.
+	// os.FindProcess opens its own handle; an observing lifetime owner retains
+	// the creator handle separately. Caller workflows that
 	// already use exec.Cmd.Wait() will go through os.FindProcess,
 	// which is the expected path.
 	findProcess := os.FindProcess
@@ -256,7 +320,7 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		if !retainedOriginal {
 			_ = windows.CloseHandle(pi.Process)
 		}
-		if stdin != nil {
+		if stdin != nil && !retainedOriginal {
 			_ = job.TerminateAll(1)
 			_ = job.Close()
 		}
@@ -273,6 +337,203 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	runtime.KeepAlive(allowedHandles)
 
 	return int(pi.ProcessId), nil
+}
+
+// provisionalWindowsChild keeps the original creation handles distinct from the
+// standard Go wrapper. It uses the existing contained-current owner and direct
+// creator-handle wait; generic and strict starters retain their own contracts.
+type provisionalWindowsChild struct {
+	*windowsContainedChild
+	ownerSIDFormatting *SIDFormatObservation
+	creationTime       string
+	creationErr        error
+	exitObservation    creatorExitObservation
+}
+
+func (c *provisionalWindowsChild) wait() containedWaitResult {
+	result := c.windowsContainedChild.wait()
+	if result.err == nil && result.exited && c.cmd.Process != nil {
+		err := c.cmd.Wait()
+		if state := c.cmd.ProcessState; state != nil && state.Pid() == int(c.original.pid) {
+			c.exitObservation.known, c.exitObservation.code = true, state.ExitCode()
+		} else {
+			c.exitObservation.err = creatorClosureUnavailable(errors.New("original standard wait observation is unavailable"))
+		}
+		var rawExit *exec.ExitError
+		if errors.As(err, &rawExit) {
+			c.exitObservation.raw = rawExit
+		}
+		if err != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				result.err = err
+			}
+		}
+	}
+	return result
+}
+
+func (c *provisionalWindowsChild) creatorBinding() (creatorClosureBinding, error) {
+	if c == nil || c.windowsContainedChild == nil || c.cmd == nil || c.cmd.Process == nil || c.job == nil || c.job.handle == 0 || !c.original.atCreate || c.original.job != c.job || c.original.handle != c.process || c.process == 0 || c.process == windows.InvalidHandle || c.thread == 0 || c.thread == windows.InvalidHandle || c.original.pid == 0 {
+		return creatorClosureBinding{}, errors.New("original at-create Windows custody is unavailable")
+	}
+	if c.creationErr != nil {
+		return creatorClosureBinding{}, c.creationErr
+	}
+	return creatorClosureBinding{pid: int(c.original.pid), startedAt: c.creationTime}, nil
+}
+
+func (c *provisionalWindowsChild) creatorExitObservation() creatorExitObservation {
+	return c.exitObservation
+}
+
+// Startup identity comes from the original creation capture, including when
+// the standard wrapper was never obtained. Identity alone is not a known exit.
+func (c *provisionalWindowsChild) creatorStartupSnapshot() (CreatorRootExitSnapshot, error) {
+	if c == nil || c.windowsContainedChild == nil {
+		return CreatorRootExitSnapshot{}, creatorClosureUnavailable(errors.New("original startup capture is unavailable"))
+	}
+	if c.original.pid == 0 {
+		return CreatorRootExitSnapshot{}, nil
+	}
+	root := CreatorRootExitSnapshot{OriginalPID: int(c.original.pid), OriginalStartedAt: c.creationTime}
+	if !c.original.atCreate || c.original.job != c.job || c.original.handle != c.process || c.process == 0 || c.process == windows.InvalidHandle {
+		return root, creatorClosureUnavailable(errors.New("original startup creation binding is invalid"))
+	}
+	return root, c.creationErr
+}
+
+func (c *provisionalWindowsChild) observeCreatorMembers(ctx context.Context) error {
+	observation, err := c.job.observeCreatorClosure(ctx, c.original)
+	if err != nil {
+		return err
+	}
+	if !observation.ObservedCurrentMembersExited {
+		return creatorClosureUnavailable(errors.New("current Job members remain unsettled"))
+	}
+	return nil
+}
+
+func (c *provisionalWindowsChild) completeCreatorMembers(ctx context.Context) (creatorTerminalObservation, error) {
+	observation, err := c.job.completeCreatorAfterExit(ctx, c.original)
+	return creatorTerminalObservation{action: observation.terminalAction, actionErr: observation.terminalActionErr, membersExited: observation.ObservedCurrentMembersExited, native: copyCreatorJobObservation(observation.native)}, err
+}
+
+func (c *provisionalWindowsChild) terminateCreatorMembers(ctx context.Context) (creatorTerminalObservation, error) {
+	if err := creatorClosureContext(ctx); err != nil {
+		return creatorTerminalObservation{}, err
+	}
+	if c == nil || c.job == nil {
+		return creatorTerminalObservation{}, creatorClosureUnavailable(errors.New("original creator Job unavailable"))
+	}
+	deadline, _ := ctx.Deadline()
+	ms := time.Until(deadline).Milliseconds()
+	if ms < 1 {
+		return creatorTerminalObservation{}, context.DeadlineExceeded
+	}
+	if ms > int64(^uint32(0)) {
+		ms = int64(^uint32(0))
+	}
+	original := c.original
+	original.required = true
+	observation, err := c.job.observeCurrentJobPolicy(uint32(ms), original, ctx, true, false)
+	return creatorTerminalObservation{action: observation.terminalAction, actionErr: observation.terminalActionErr, membersExited: observation.ObservedCurrentMembersExited, native: copyCreatorJobObservation(observation.native)}, err
+}
+
+func (c *provisionalWindowsChild) close() error {
+	if c.memberSource != nil {
+		permit, err := c.memberSource.gate.beginTerminal(nil)
+		if err != nil {
+			return err
+		}
+		defer permit.finish()
+		return c.closeOriginalWithPermit(permit)
+	}
+	err := c.windowsContainedChild.close()
+	if c.cmd.Process != nil && c.cmd.ProcessState == nil {
+		err = errors.Join(err, c.cmd.Process.Release())
+	}
+	return err
+}
+
+func startProvisionalWithJob(job *Job, cmd *exec.Cmd) (containedChild, error) {
+	return startProvisionalWithJobObserver(job, cmd, nil)
+}
+
+func startProvisionalWithJobObserver(job *Job, cmd *exec.Cmd, findProcess func(int) (*os.Process, error)) (containedChild, error) {
+	child, err := newProvisionalWindowsChild(job, cmd)
+	if err != nil {
+		return child, err
+	}
+	before, err := job.queryAccounting()
+	if err != nil || before.TotalProcesses != 0 || before.ActiveProcesses != 0 {
+		return child, errors.Join(err, errors.New("provisional creator Job is not proved empty"))
+	}
+	return child, startPreparedProvisionalWithJob(child, findProcess)
+}
+
+func (job *Job) prepareCreatorStart(cmd *exec.Cmd) (containedChild, func() error, error) {
+	if job == nil || job.handle == 0 || cmd == nil || cmd.Process != nil {
+		return nil, nil, creatorClosureUnavailable(errors.New("invalid fresh creator Job or command"))
+	}
+	before, err := job.queryAccounting()
+	if err != nil || before.TotalProcesses != 0 || before.ActiveProcesses != 0 {
+		return nil, nil, errors.Join(err, errors.New("provisional creator Job is not proved empty"))
+	}
+	child, err := newProvisionalWindowsChild(job, cmd)
+	if err != nil {
+		return child, nil, err
+	}
+	return child, func() error {
+		return child.startPreparedCreator(func() error { return startPreparedProvisionalWithJob(child, nil) })
+	}, nil
+}
+
+// Only the additive retained start requires a complete original binding before
+// reporting success. A failed capture stays a post-create startup failure.
+func (child *provisionalWindowsChild) startPreparedCreator(start func() error) error {
+	if err := start(); err != nil {
+		return err
+	}
+	binding, err := child.creatorBinding()
+	if err == nil && (binding.pid <= 0 || binding.startedAt == "") {
+		err = errors.New("original creator binding is incomplete after start")
+	}
+	if err != nil {
+		return startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: original creator binding after start: %w", ErrSpawnPostCreate, err))
+	}
+	return nil
+}
+
+func startPreparedProvisionalWithJob(child *provisionalWindowsChild, findProcess func(int) (*os.Process, error)) error {
+	job, cmd := child.job, child.cmd
+	lookup := findProcess
+	if lookup == nil {
+		lookup = os.FindProcess
+	}
+	var wrapperErr error
+	_, err := startWithJobFilesObserved(job, cmd, nil, nil, nil, &startWithJobObserverOptions{
+		attributeListClosed: func(view ProcThreadAttributeListCloseObservation) { child.attributeClose = view },
+		retainCreated: func(pi windows.ProcessInformation) {
+			child.process, child.thread = pi.Process, pi.Thread
+			child.original = containedJobOriginal{job: job, handle: pi.Process, pid: pi.ProcessId, atCreate: true}
+			var created, exited, kernel, user windows.Filetime
+			child.creationErr = windows.GetProcessTimes(pi.Process, &created, &exited, &kernel, &user)
+			if child.creationErr == nil {
+				if created.HighDateTime == 0 && created.LowDateTime == 0 {
+					child.creationErr = errors.New("original creation time is unavailable")
+				} else {
+					child.creationTime = time.Unix(0, created.Nanoseconds()).UTC().Format(time.RFC3339Nano)
+				}
+			}
+		},
+		findProcess: func(pid int) (*os.Process, error) {
+			process, err := lookup(pid)
+			wrapperErr = err
+			return process, err
+		},
+	})
+	return errors.Join(err, wrapperErr)
 }
 
 func startWithJobCreationFlags() uint32 {

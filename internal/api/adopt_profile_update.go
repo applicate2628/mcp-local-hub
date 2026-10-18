@@ -108,6 +108,9 @@ func buildAdoptProfileUpdatePlan(manifestName, profile string) (*AdoptProfileUpd
 
 func buildAdoptProfileUpdatePlanInDir(manifestName, profile, manifestDir string) (*AdoptProfileUpdatePlan, error) {
 	rec, found, err := ReadAdoptProvenance(manifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if err != nil {
 		return nil, adoptProfileFailure(AdoptProfileUpdateNotAdopted, "provenance-read", err)
 	}
@@ -177,6 +180,9 @@ func (a *API) ExecuteAdoptProfileUpdate(plan *AdoptProfileUpdatePlan, opts Adopt
 		return adoptProfileFailure(AdoptProfileUpdateIdentity, "manifest-read", err)
 	}
 	rec, found, err := ReadAdoptProvenance(fresh.ManifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if err != nil || !found {
 		return adoptProfileFailure(AdoptProfileUpdateNotAdopted, "provenance-read", errors.New("provenance row disappeared"))
 	}
@@ -241,6 +247,9 @@ func (a *API) recoverAdoptProfileUpdateUnderLeaseInDir(manifestName, manifestDir
 		return adoptProfileFailure(AdoptProfileUpdateRecovery, "recovery-read", err)
 	}
 	rec, found, err := ReadAdoptProvenance(manifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if err != nil || !found {
 		return adoptProfileFailure(AdoptProfileUpdateRecovery, "recovery-read", errors.New("provenance row missing"))
 	}

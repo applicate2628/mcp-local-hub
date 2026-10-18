@@ -14,6 +14,9 @@
 package api
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,5 +92,100 @@ func TestSecureWriteClientConfigRejectsPermissiveParentDACL(t *testing.T) {
 	// half-written token at the path is worse than the missing gate.
 	if _, statErr := os.Stat(target); statErr == nil {
 		t.Errorf("destination %q must not exist after refusal", target)
+	}
+}
+
+// The existing hook places a different native object at the destination after
+// the real rename and verification open. Cleanup must follow the original held
+// object even after its name changes. All files here belong to this TempDir
+// fixture; "foreign" means foreign to the production write, not user state.
+func TestSecureWritePostRenameFailurePreservesForeignReplacement(t *testing.T) {
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "client-config.json")
+	ownedAside := filepath.Join(dir, "owned-publication.json")
+	stagedForeign := filepath.Join(dir, "foreign-publication.json")
+	ownedBytes := []byte(`{"writer":"owned"}`)
+	foreignBytes := []byte(`{"writer":"foreign"}`)
+	if err := os.WriteFile(stagedForeign, foreignBytes, 0o600); err != nil {
+		t.Fatalf("stage synthetic replacement: %v", err)
+	}
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+	applyProtectedDACLFromEntries(t, stagedForeign, []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
+	})
+	foreignID := windowsFileIdentityForTest(t, stagedForeign)
+	foreignDACL := windowsSDDLForTest(t, stagedForeign)
+	if foreignDACL == "" {
+		t.Fatal("replacement DACL observation is empty")
+	}
+	forcedFailure := errors.New("synthetic post-rename verification failure after foreign replacement")
+	var setupError error
+	hookEntered, replacementInstalled := false, false
+	previous := postRenameVerifyFailHook
+	t.Cleanup(func() { postRenameVerifyFailHook = previous })
+	postRenameVerifyFailHook = func() error {
+		hookEntered = true
+		ownedID := windowsFileIdentityForTest(t, target)
+		ownedDACL := windowsSDDLForTest(t, target)
+		if sameWindowsAdoptLeaseIdentity(ownedID, foreignID) || ownedDACL == "" || ownedDACL == foreignDACL {
+			setupError = errors.New("original and replacement native object/DACL observations are not distinct")
+			return setupError
+		}
+		if err := os.Rename(target, ownedAside); err != nil {
+			setupError = fmt.Errorf("move original publication with its native handles held: %w", err)
+			return setupError
+		}
+		if err := os.Rename(stagedForeign, target); err != nil {
+			setupError = fmt.Errorf("install synthetic foreign replacement: %w", err)
+			return setupError
+		}
+		if got := windowsFileIdentityForTest(t, target); !sameWindowsAdoptLeaseIdentity(got, foreignID) {
+			setupError = errors.New("installed replacement does not have the staged native identity")
+			return setupError
+		}
+		replacementInstalled = true
+		return forcedFailure
+	}
+
+	capture := newStateFileIOCapture()
+	writeErr := secureWriteClientConfigImplObserved(target, ownedBytes, false, capture)
+	if !hookEntered || !replacementInstalled || setupError != nil {
+		t.Fatalf("native foreign-replacement window was not exercised: hook=%t installed=%t setup=%v write=%v", hookEntered, replacementInstalled, setupError, writeErr)
+	}
+	if !errors.Is(writeErr, forcedFailure) {
+		t.Errorf("original verification failure was lost: %v", writeErr)
+	}
+	for _, name := range []string{"parent", "temp", "verify"} {
+		close := capture.slots[name]
+		if !close.Acquired || !close.Attempted || !close.Closed || close.Error != nil {
+			t.Errorf("original %s handle did not settle: %+v; write=%v", name, close, writeErr)
+		}
+		if close.Error != nil && !errors.Is(writeErr, close.Error) {
+			t.Errorf("original %s close error was lost from returned failure: %v", name, writeErr)
+		}
+	}
+	if capture.cleanup != nil || !capture.complete() || capture.error() != nil {
+		t.Errorf("owned cleanup/close remains unsettled: cleanup=%v capture=%v write=%v", capture.cleanup, capture.error(), writeErr)
+	}
+	gotBytes, readErr := os.ReadFile(target)
+	if readErr != nil || !bytes.Equal(gotBytes, foreignBytes) {
+		t.Fatalf("foreign replacement bytes were changed or deleted: read=%v bytes_match=%t", readErr, bytes.Equal(gotBytes, foreignBytes))
+	}
+	if got := windowsFileIdentityForTest(t, target); !sameWindowsAdoptLeaseIdentity(got, foreignID) {
+		t.Error("foreign replacement native object changed during cleanup")
+	}
+	if got := windowsSDDLForTest(t, target); got != foreignDACL {
+		t.Error("foreign replacement DACL changed during cleanup")
+	}
+	if _, err := os.Lstat(ownedAside); !os.IsNotExist(err) {
+		t.Errorf("original moved object was not removed by its held DELETE handle: %v; cleanup=%v write=%v", err, capture.cleanup, writeErr)
 	}
 }

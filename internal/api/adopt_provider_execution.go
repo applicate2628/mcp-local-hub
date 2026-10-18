@@ -60,6 +60,9 @@ func (d providerTransactionDeps) closeProvenance(manifestName string) error {
 }
 
 func providerAdoptOwnershipScope(rec *AdoptProvenanceRecord) (*supervisorIntentOwnershipScope, error) {
+	if rec != nil && rec.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if rec == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -299,6 +302,9 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	current, found, provenanceErr := ReadAdoptProvenance(provenance.ServerName)
+	if current != nil && current.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if provenanceErr != nil || !found || current.ProviderSource == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -348,6 +354,9 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 	defer releaseSupervisorIntentAndJoin(&retErr, release, "provider restore ownership")
 
 	current, found, provenanceErr = ReadAdoptProvenance(provenance.ServerName)
+	if current != nil && current.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if provenanceErr != nil || !found || current.ProviderSource == nil || current.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}

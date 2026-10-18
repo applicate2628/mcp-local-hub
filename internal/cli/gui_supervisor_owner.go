@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/gui"
 	processowner "mcp-local-hub/internal/process"
 )
 
@@ -35,11 +36,22 @@ import (
 // The owner is thread-safe — Stop() is idempotent and safe to call
 // concurrently with passive status reads.
 type supervisorOwner struct {
-	spawned     bool
-	proc        *os.Process
-	stateDir    string
-	stoppedOnce sync.Once
-	stoppedErr  error
+	spawned           bool
+	proc              *os.Process
+	createdPID        int
+	createdGeneration api.SupervisorLockOwner
+	stateDir          string
+	control           SupervisorControlBinding
+	exitDone          chan struct{}
+	exitResult        exitInfo
+	stoppedOnce       sync.Once
+	stoppedErr        error
+	// Original Stop sender outcome; read only after stoppedOnce and ipcDone.
+	ipcDone       chan struct{}
+	ipcErr        error
+	killErr       error
+	killCommitted bool // original Process.Kill actually accepted; read after Stop
+	attempt       *supervisorCreationAttempt
 
 	// PR #212 r6 reliability finding 1: monitor channel used by the
 	// background watcher to publish the supervisor's exit. Buffered
@@ -61,6 +73,66 @@ type supervisorOwner struct {
 // code in its Sys() field.
 type exitInfo struct {
 	exitErr error
+}
+
+// These copied facts convey observation only, never process/control custody.
+type supervisorCreationSnapshot struct {
+	Entered, PreStart, Created, GenerationAvailable bool
+	PID                                             int
+	Generation                                      api.SupervisorLockOwner
+	WaitReceived, Finished                          bool
+	WaitError, Cause, SettlementError               error
+}
+
+type supervisorAttemptReceiver func(supervisorCreationSnapshot) error
+
+type supervisorCreatorOperations struct {
+	capturePeer   func(*os.Process, api.SupervisorLockOwner) (api.SupervisorProcessIdentityV1, error)
+	settleUnbound func(*supervisorOwner) error
+}
+
+func (s supervisorCreationSnapshot) diagnosticFields() map[string]any {
+	fields := map[string]any{
+		"entered": s.Entered, "pre_start": s.PreStart, "created": s.Created,
+		"pid": s.PID, "generation_available": s.GenerationAvailable,
+		"wait_received": s.WaitReceived, "finished": s.Finished,
+	}
+	if s.GenerationAvailable {
+		fields["generation"] = s.Generation
+	}
+	for key, cause := range map[string]error{"cause": s.Cause, "wait_error": s.WaitError, "settlement_error": s.SettlementError} {
+		if cause != nil {
+			fields[key] = cause.Error()
+		}
+	}
+	return fields
+}
+
+// The original creator and its sole monitor serialize incremental publication.
+// Receivers must only copy facts under short synchronization; no I/O or waits.
+type supervisorCreationAttempt struct {
+	mu         sync.Mutex
+	snapshot   supervisorCreationSnapshot
+	receive    supervisorAttemptReceiver
+	receiveErr error
+}
+
+func (a *supervisorCreationAttempt) publish(update func(*supervisorCreationSnapshot)) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	update(&a.snapshot)
+	if a.receive != nil {
+		a.receiveErr = errors.Join(a.receiveErr, a.receive(a.snapshot))
+	}
+}
+
+func (a *supervisorCreationAttempt) observationError() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.receiveErr
 }
 
 // supervisorReadyPollInterval bounds how often ensureSupervisorRunning
@@ -101,7 +173,7 @@ var supervisorMonitorStderr io.Writer = guiRuntimeStderr
 // spawn CONFIGURATION can be asserted without a real `mcphub supervise`.
 //
 // This is also the RESPAWN path: the manager's spawn seam resolves to
-// ensureSupervisorRunning, so every replacement supervisor the respawn loop
+// ensureSupervisorRunningObserved, so every replacement the respawn loop
 // starts is built right here — and so is every degraded retry inside
 // startSupervisorDetachedBreakaway, which rebuilds through this function with
 // creation flags stripped. The console-attach suppression comes from
@@ -116,6 +188,50 @@ func newGUISupervisorCmd(mcphubBin string, args []string, stderr io.Writer) *exe
 }
 
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
+	return ensureSupervisorRunningObserved(ctx, mcphubBin, strictMode, waitFor, nil)
+}
+
+func ensureSupervisorRunningObserved(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration, receive supervisorAttemptReceiver) (retOwner *supervisorOwner, retErr error) {
+	return ensureSupervisorRunningWithOperations(ctx, mcphubBin, strictMode, waitFor, receive, supervisorCreatorOperations{})
+}
+
+func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration, receive supervisorAttemptReceiver, operations supervisorCreatorOperations) (retOwner *supervisorOwner, retErr error) {
+	if operations.capturePeer == nil {
+		operations.capturePeer = captureCreatedSupervisorPeer
+	}
+	if operations.settleUnbound == nil {
+		operations.settleUnbound = (*supervisorOwner).settleUnboundCreator
+	}
+	attempt := &supervisorCreationAttempt{receive: receive}
+	var owner *supervisorOwner
+	attempt.publish(func(s *supervisorCreationSnapshot) { s.Entered, s.PreStart = true, true })
+	defer func() {
+		attempt.publish(func(s *supervisorCreationSnapshot) { s.Cause = errors.Join(s.Cause, retErr) })
+		if observeErr := attempt.observationError(); observeErr != nil {
+			retErr = errors.Join(retErr, observeErr)
+			if owner != nil && retOwner != nil && owner.proc != nil {
+				retErr = errors.Join(retErr, operations.settleUnbound(owner))
+				retOwner = nil
+			}
+		}
+		attempt.publish(func(s *supervisorCreationSnapshot) { s.Finished = true; s.Cause = errors.Join(s.Cause, retErr) })
+		retErr = errors.Join(retErr, attempt.observationError())
+		// A terminal receiver can itself fail after successful binding. That
+		// failure still cannot discard this creator's actual retained child.
+		if attempt.observationError() != nil && owner != nil && retOwner != nil && owner.proc != nil {
+			retOwner = nil
+			attempt.publish(func(s *supervisorCreationSnapshot) { s.Finished = false })
+			retErr = errors.Join(retErr, operations.settleUnbound(owner))
+			attempt.publish(func(s *supervisorCreationSnapshot) { s.Finished = true; s.Cause = errors.Join(s.Cause, retErr) })
+			retErr = errors.Join(retErr, attempt.observationError())
+		}
+	}()
+	if ctx == nil {
+		return nil, errors.New("supervisor owner: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		// A state-dir RESOLVE failure has different causes and different
@@ -154,6 +270,19 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 		return nil, fmt.Errorf("supervisor owner: existing supervisor IPC broken (refusing to spawn duplicate): %w", probeErr)
 	}
 
+	productPath, err := filepath.Abs(mcphubBin)
+	if err != nil {
+		return nil, err
+	}
+	productPath, err = filepath.EvalSymlinks(productPath)
+	if err != nil {
+		return nil, err
+	}
+	digest, err := startedSupervisorDigest(productPath)
+	if err != nil {
+		return nil, err
+	}
+	expected := supervisorExpectation(stateDir, productPath, digest)
 	args := []string{"supervise"}
 	if strictMode {
 		args = append(args, "--strict-mode")
@@ -168,79 +297,128 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	stderrBuf := newBoundedBuffer(4096)
 	// Every shared-owner attempt reuses the same bounded stderr sink.
 	build := func() *exec.Cmd { return newGUISupervisorCmd(mcphubBin, args, stderrBuf) }
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// A proven direct-GUI lifecycle admits the optional flagless compatibility
 	// attempt; Job-owned or ambiguous launchers resolve to required/no-retry.
 	startedCmd, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
 		fmt.Fprintf(supervisorMonitorStderr, "supervisor owner: CREATE_BREAKAWAY_FROM_JOB rejected by parent job (no BREAKAWAY_OK); spawned flagless — supervisor may be cascade-killed if the launcher's job closes: %v\n", degradeErr)
-	}, processowner.BreakawayPolicyForCurrentProcess())
+	}, processowner.BreakawayPolicyForCurrentProcess(), func(started *exec.Cmd) {
+		proc := started.Process
+		owner = &supervisorOwner{
+			proc: proc, stateDir: stateDir, exitedCh: make(chan exitInfo, 1),
+			createdPID: proc.Pid, exitDone: make(chan struct{}),
+			stderrBuf: stderrBuf, stderrSink: supervisorMonitorStderr, attempt: attempt,
+		}
+		// Establish the only Wait before identity acquisition or diagnostics.
+		attempt.publish(func(s *supervisorCreationSnapshot) {
+			s.PreStart = false
+			s.Created = true
+			s.PID = proc.Pid
+			owner.startExitMonitor(started)
+		})
+	})
 	if err != nil {
 		return nil, fmt.Errorf("supervisor owner: spawn %q: %w", mcphubBin, err)
 	}
 	proc := startedCmd.Process
-
+	original, captureErr := captureGUISupervisorGeneration(proc)
+	var peer api.SupervisorProcessIdentityV1
+	if captureErr == nil {
+		peer, captureErr = operations.capturePeer(proc, original)
+	}
+	owner.createdGeneration = original
+	attempt.publish(func(s *supervisorCreationSnapshot) {
+		s.Generation = original
+		s.GenerationAvailable = original.PID > 0 && original.StartedAt != ""
+		s.Cause = errors.Join(s.Cause, captureErr)
+	})
+	if captureErr != nil {
+		return nil, errors.Join(captureErr, operations.settleUnbound(owner))
+	}
 	deadline := time.Now().Add(waitFor)
 	for {
-		ok, probeErr := probeSupervisor(ctx, 500*time.Millisecond)
-		if ok {
-			owner := &supervisorOwner{
-				spawned:    true,
-				proc:       proc,
-				stateDir:   stateDir,
-				exitedCh:   make(chan exitInfo, 1),
-				stderrBuf:  stderrBuf,
-				stderrSink: supervisorMonitorStderr,
+		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		current, bindErr := observeCreatedSupervisorControl(probeCtx, expected, original, peer, func(candidate api.SupervisorLockOwner) error {
+			return validateCreatedSupervisorNativeControl(expected, candidate)
+		}, api.ReadSupervisorLockOwner)
+		cancel()
+		attempt.publish(func(s *supervisorCreationSnapshot) { s.Cause = errors.Join(s.Cause, bindErr) })
+		if bindErr == nil {
+			proof := &supervisorControlProof{creator: proc, expected: expected, owner: current, peer: peer}
+			proof.originalOutcome = func() (bool, error) {
+				select {
+				case <-owner.exitDone:
+					return true, owner.exitResult.exitErr
+				default:
+					return false, nil
+				}
 			}
-			owner.startExitMonitor(proc)
+			proof.validateCreator = func() error {
+				if owner.control.proof != proof || owner.proc != proc || proof.owner != original || proof.expected != expected {
+					return errSupervisorControlBinding
+				}
+				return nil
+			}
+			owner.control = SupervisorControlBinding{proof: proof}
+			owner.spawned = true
 			return owner, nil
 		}
-		if probeErr != nil {
-			_ = proc.Kill()
-			_, _ = proc.Wait()
-			// Same classification as the pre-spawn probe: a local setup fault
-			// (unreadable/DACL-refused owner sidecar) is not a transport/handshake
-			// failure of the freshly-spawned supervisor — the spawned child could
-			// not write (or the reader could not read) its own owner sidecar
-			// because of the DACL. Surface the repair-state-dacl remediation
-			// instead of "IPC handshake broken" (bot PR #477 P3 respawn-twin
-			// classification).
-			if errors.Is(probeErr, api.ErrStatusSetupFailure) {
-				return nil, supervisorSetupFaultError(probeErr)
+		if errors.Is(bindErr, errSupervisorControlGenerationChanged) {
+			// Another owner is DATA until this exact created loser is settled.
+			if settleErr := operations.settleUnbound(owner); settleErr != nil {
+				return nil, errors.Join(bindErr, settleErr)
 			}
-			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC handshake broken: %w", proc.Pid, probeErr)
+			winner, readErr := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+			if readErr != nil || winner == original {
+				return nil, errors.Join(bindErr, readErr)
+			}
+			winnerPeer, peerErr := api.ObserveSupervisorProcessIdentityV1(winner.PID)
+			if peerErr != nil {
+				return nil, errors.Join(bindErr, peerErr)
+			}
+			if _, err := observeCreatedSupervisorControl(ctx, expected, winner, winnerPeer, func(candidate api.SupervisorLockOwner) error {
+				return validateCreatedSupervisorNativeControl(expected, candidate)
+			}, api.ReadSupervisorLockOwner); err != nil {
+				return nil, errors.Join(bindErr, err)
+			}
+			// Original child exit evidence remains on the same owner. Clearing
+			// its retained (now reaped) proc conveys no control over the winner.
+			owner.proc = nil
+			return owner, nil
+		}
+		if ctx.Err() != nil {
+			return nil, errors.Join(ctx.Err(), bindErr, operations.settleUnbound(owner))
+		}
+		select {
+		case <-owner.exitDone:
+			return nil, errors.Join(bindErr, owner.exitResult.exitErr, errors.New("created supervisor exited before control binding"))
+		default:
+		}
+		if !errors.Is(bindErr, os.ErrNotExist) && !errors.Is(bindErr, api.ErrSupervisorIPCUnavailable) && !errors.Is(bindErr, context.DeadlineExceeded) {
+			return nil, errors.Join(bindErr, operations.settleUnbound(owner))
 		}
 		if time.Now().After(deadline) {
-			_ = proc.Kill()
-			_, _ = proc.Wait()
-			stderrTail := strings.TrimSpace(stderrBuf.String())
-			if stderrTail != "" {
-				return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; check supervisor-events.log; supervisor stderr tail: %s", proc.Pid, waitFor, stderrTail)
-			}
-			// An EMPTY tail no longer means "the supervisor printed nothing".
-			// Once the child passes its singleton lock it rebinds its own
-			// stderr to the sink file, so post-lock crash text — including a
-			// runtime panic traceback — goes there and never reaches this
-			// buffer. Naming the sink keeps the PR #212 r5 diagnosability
-			// contract intact instead of silently pointing at an empty tail.
-			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; no stderr captured before it rebound stderr — check supervisor-events.log and %s", proc.Pid, waitFor, supervisorStderrSinkHint())
+			return nil, errors.Join(fmt.Errorf("supervisor owner: original PID %d control not ready within %s; stderr: %s", proc.Pid, waitFor, strings.TrimSpace(stderrBuf.String())), bindErr, operations.settleUnbound(owner))
 		}
 		select {
 		case <-ctx.Done():
-			_ = proc.Kill()
-			_, _ = proc.Wait()
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), bindErr, operations.settleUnbound(owner))
 		case <-time.After(supervisorReadyPollInterval):
 		}
 	}
+
 }
 
 // spawnSupervisorFn is the package-level spawn seam the
 // supervisorManager calls to respawn a dead supervisor child. It
-// defaults to ensureSupervisorRunning (the verbatim spawn primitive —
+// defaults to ensureSupervisorRunningObserved (the same spawn primitive —
 // the singleton flock makes a redundant spawn a safe no-op). Tests
 // swap it (with t.Cleanup restore) to inject a synthetic owner so the
 // respawn loop can be exercised without a real `mcphub supervise`
 // binary. Mirrors the supervisorMonitorStderr swap pattern.
-var spawnSupervisorFn = ensureSupervisorRunning
+var spawnSupervisorFn = ensureSupervisorRunningObserved
 
 // GUI-side supervisor-respawn bounded-restart-policy knobs. Named next
 // to supervisorReadyPollInterval / supervisorForceKillFallbackWindow so
@@ -272,19 +450,29 @@ const (
 // `current` and `shuttingDown` are guarded together under ONE mutex (a
 // bare atomic.Pointer cannot express the atomic "is shutdown latched?"
 // + "install new owner" decision without a TOCTOU window that would leak
-// an un-Stopped respawned supervisor). The respawn (monitor) goroutine
-// is the only writer of `current`; the shutdown defer and status path
-// are readers — all go through mu. The mutex is held only for O(1)
+// an un-Stopped respawned supervisor). Respawn and explicit restart share
+// one admitted operation; shutdown and status observe that same owner.
+// All current publication goes through mu. The mutex is held only for O(1)
 // swap/flag operations, never across a spawn or a Wait.
 //
 // The manager NEVER calls proc.Wait(): the owner's own startExitMonitor
-// owns the sole proc.Wait() and publishes to exitedCh. The loop blocks
+// owns the sole cmd.Wait() and publishes to exitedCh. The loop blocks
 // on <-owner.exitedCh, guaranteeing exactly one Wait owner and exactly
 // one exit consumer per live process.
 type supervisorManager struct {
-	mu           sync.Mutex // guards current + shuttingDown (the swap-vs-shutdown decision)
-	current      *supervisorOwner
-	shuttingDown bool
+	mu             sync.Mutex // guards current + shuttingDown (the swap-vs-shutdown decision)
+	current        *supervisorOwner
+	shuttingDown   bool
+	loopCancel     context.CancelFunc
+	loopDone       chan struct{} // nil until the actual loop is armed
+	loopErr        error         // published before loopDone closes
+	workerCancel   context.CancelFunc
+	initialized    bool
+	operation      *supervisorManagerOperation
+	startupAttempt supervisorCreationSnapshot
+	lifecycle      *gui.GUIOwnerLifecycle
+	generation     string
+	restartFn      func(context.Context, *supervisorManagerOperation) (gui.SupervisorRestartResult, error)
 
 	ctx        context.Context
 	bin        string
@@ -292,7 +480,7 @@ type supervisorManager struct {
 	waitFor    time.Duration
 
 	window  []time.Time // sliding respawn-timestamp ring (no new state file)
-	spawnFn func(context.Context, string, bool, time.Duration) (*supervisorOwner, error)
+	spawnFn func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error)
 
 	stderrSink io.Writer
 
@@ -311,9 +499,12 @@ type supervisorManager struct {
 // caller (startGuiServer) and ONLY when first.Spawned()==true — an
 // adopted owner gets no loop, preserving the adopt contract.
 func newSupervisorManager(ctx context.Context, bin string, strict bool, waitFor time.Duration, first *supervisorOwner) *supervisorManager {
+	loopCtx, cancel := context.WithCancel(ctx)
 	return &supervisorManager{
 		current:        first,
-		ctx:            ctx,
+		initialized:    true,
+		ctx:            loopCtx,
+		loopCancel:     cancel,
 		bin:            bin,
 		strictMode:     strict,
 		waitFor:        waitFor,
@@ -326,34 +517,39 @@ func newSupervisorManager(ctx context.Context, bin string, strict bool, waitFor 
 	}
 }
 
-// armSupervisorManager is the construct-and-arm seam startGuiServer calls
-// once it has obtained the seed supervisor owner from
-// ensureSupervisorRunning. It encodes the load-bearing wiring decision:
-//
-//   - nil owner (the spawn errored) or an ADOPTED owner (Spawned()==false,
-//     the GUI adopted an externally-managed supervisor) → return nil. No
-//     manager, no respawn loop — the GUI does not own that supervisor's
-//     lifecycle, so there is nothing to self-heal.
-//   - a GUI-SPAWNED owner (Spawned()==true) → construct the manager via
-//     newSupervisorManager (which seeds spawnFn from the package-level
-//     spawnSupervisorFn) AND launch its bounded respawn loop, so an
-//     unexpected supervisor-child death under a live GUI self-heals.
-//
-// This is extracted out of startGuiServer's inline body specifically so
-// the REAL wiring — manager constructed from a Spawned() owner with its
-// loop armed via the spawnSupervisorFn seam — is unit-testable without a
-// real `mcphub supervise` binary. The seam-based newTestManager tests
-// inject spawnFn directly and never reach this gate; the §5 deploy-
-// verification found the live respawn loop did not visibly fire, so the
-// gate itself needs a test that drives it through the production
-// newSupervisorManager + runRespawnLoop path.
+// armSupervisorManager always constructs the same lifetime coordinator.
+// Only an actually GUI-created actor arms its automatic worker.
 func armSupervisorManager(ctx context.Context, owner *supervisorOwner, bin string, strictMode bool) *supervisorManager {
-	if owner == nil || !owner.Spawned() {
-		return nil
-	}
 	manager := newSupervisorManager(ctx, bin, strictMode, 15*time.Second, owner)
-	go manager.runRespawnLoop(ctx) // self-healing respawn ONLY for GUI-spawned owners
+	manager.mu.Lock()
+	manager.armWorkerLocked()
+	manager.mu.Unlock()
 	return manager
+}
+
+// The caller holds mu and has joined any earlier worker before rearming.
+func (m *supervisorManager) armWorkerLocked() {
+	if m.current == nil || !m.current.Spawned() || m.shuttingDown || m.ctx.Err() != nil {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(m.ctx)
+	m.workerCancel = cancel
+	m.loopDone = make(chan struct{})
+	go m.runRespawnLoop(workerCtx)
+}
+
+func (m *supervisorManager) initialize(owner *supervisorOwner, bin string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.initialized {
+		return errors.New("supervisor manager initialization already settled")
+	}
+	m.current, m.bin, m.initialized = owner, bin, true
+	if m.shuttingDown || m.ctx.Err() != nil {
+		return context.Canceled
+	}
+	m.armWorkerLocked()
+	return nil
 }
 
 // currentOwner returns the live supervisor handle under the mutex. Used
@@ -364,41 +560,117 @@ func (m *supervisorManager) currentOwner() *supervisorOwner {
 	return m.current
 }
 
-// Stop latches shutdown and stops whatever owner is currently live. It
-// sets shuttingDown=true and snapshots current under mu BEFORE calling
-// that owner's Stop, so the respawn loop (which re-checks shuttingDown
-// under the SAME mu) can never install a fresh supervisor after this
-// returns: either the loop observes shuttingDown and Stops the orphan
-// it just spawned, or this snapshot already holds the installed new
-// owner and stops it here. supervisorOwner.Stop is sync.Once-guarded so
-// a double-stop across the two paths is impossible.
+// Stop receives the accepted current owner and the original respawn worker.
+// Control budgets bound attempts, not original process or sender custody.
 func (m *supervisorManager) Stop(ctx context.Context, graceTimeoutMs int) error {
+	return m.finish(ctx, graceTimeoutMs, true)
+}
+
+// Quiesce joins the same worker and unpublished attempts while preserving the
+// accepted current supervisor for authenticated GUI self-restart.
+func (m *supervisorManager) Quiesce(ctx context.Context) error {
+	return m.finish(ctx, 5000, false)
+}
+
+func (m *supervisorManager) finish(ctx context.Context, graceTimeoutMs int, stopCurrent bool) error {
+	if m == nil {
+		return nil
+	}
 	m.mu.Lock()
 	m.shuttingDown = true
 	victim := m.current
+	cancel, done := m.loopCancel, m.loopDone
+	operation := m.operation
 	m.mu.Unlock()
-	if victim != nil {
-		return victim.Stop(ctx, graceTimeoutMs)
+	if cancel != nil {
+		cancel()
 	}
-	return nil
+	var result error
+	if operation != nil && operation.kind == "restart" {
+		// Cancellation is admitted above, but actual creator/transfer receiving
+		// remains with this operation before current shutdown and GUI release.
+		<-operation.done
+		m.mu.Lock()
+		result = errors.Join(result, operation.err)
+		victim, done = m.current, m.loopDone
+		m.mu.Unlock()
+	}
+	if stopCurrent {
+		result = errors.Join(result, m.stopOwnerAndJoin(ctx, victim, graceTimeoutMs))
+	}
+	if done != nil {
+		<-done
+	}
+	m.mu.Lock()
+	result = errors.Join(result, m.loopErr)
+	m.mu.Unlock()
+	return result
+}
+
+func (m *supervisorManager) stopOwnerAndJoin(ctx context.Context, owner *supervisorOwner, graceTimeoutMs int) error {
+	if owner == nil || !owner.Spawned() {
+		return nil
+	}
+	result := owner.Stop(ctx, graceTimeoutMs)
+	reportedPending := false
+	if owner.exitDone != nil {
+		select {
+		case <-owner.exitDone:
+		default:
+			fmt.Fprintln(m.stderrSink, "warning: supervisor settlement unconfirmed; retaining GUI ownership until original process and exit sender settle")
+			reportedPending = true
+			<-owner.exitDone
+		}
+		if cause := owner.exitResult.exitErr; cause != nil && !errors.Is(result, cause) {
+			result = errors.Join(result, cause)
+		}
+	}
+	if owner.ipcDone != nil {
+		select {
+		case <-owner.ipcDone:
+		default:
+			if !reportedPending {
+				fmt.Fprintln(m.stderrSink, "warning: supervisor settlement unconfirmed; retaining GUI ownership until original process and exit sender settle")
+			}
+			<-owner.ipcDone
+		}
+		if cause := owner.ipcErr; cause != nil && !errors.Is(result, cause) {
+			result = errors.Join(result, cause)
+		}
+	}
+	if cause := owner.killErr; cause != nil && !errors.Is(result, cause) {
+		result = errors.Join(result, cause)
+	}
+	return result
 }
 
 // runRespawnLoop is the ONE dedicated goroutine per GUI run that chains
 // supervisor owners. It blocks on the current owner's exitedCh (NOT
 // proc.Wait — startExitMonitor owns that), classifies the exit, and on
 // an UNEXPECTED exit respawns with bounded backoff under a sliding
-// window cap. It has exactly three exit points so it cannot leak past
-// startGuiServer's return:
-//
-//  1. shutdown latched / ctx cancelled / this owner's Stop ran → EXPECTED,
-//     re-publish the drained exit so a racing owner.Stop() still sees it,
-//     then return.
-//  2. respawn cap reached within the sliding window → durable warn +
-//     stderr shadow, then return (no thrash).
-//  3. ctx.Done() during the backoff sleep → return.
+// window cap. Every return publishes the same completion and retained result;
+// manager cleanup receives it before GUI terminal publication or lease release.
 //
 // Launched only when the seeded owner Spawned()==true.
 func (m *supervisorManager) runRespawnLoop(ctx context.Context) {
+	m.mu.Lock()
+	// Direct test calls arm here; production arm publishes before go.
+	if m.loopDone == nil {
+		m.loopDone = make(chan struct{})
+	}
+	done := m.loopDone
+	shutting := m.shuttingDown
+	m.mu.Unlock()
+	var result error
+	defer func() {
+		m.mu.Lock()
+		m.loopErr = errors.Join(m.loopErr, result)
+		m.mu.Unlock()
+		close(done)
+	}()
+	if shutting {
+		return
+	}
 	for {
 		cur := m.currentOwner()
 		if cur == nil {
@@ -418,6 +690,8 @@ func (m *supervisorManager) runRespawnLoop(ctx context.Context) {
 				return
 			}
 		case <-ctx.Done():
+			return
+		case <-m.ctx.Done():
 			return
 		}
 		// Classify under the lock. shuttingDown is the authoritative
@@ -447,6 +721,7 @@ func (m *supervisorManager) runRespawnLoop(ctx context.Context) {
 		// would re-block on the already-drained dead owner) or
 		// tight-looping. A ctx cancel during backoff/spawn returns.
 		var newOwner *supervisorOwner
+		var completedAttempt *supervisorManagerOperation
 		for {
 			now := time.Now()
 			m.window = append(m.window, now)
@@ -476,36 +751,86 @@ func (m *supervisorManager) runRespawnLoop(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
+			case <-m.ctx.Done():
+				return
 			case <-time.After(backoff):
 			}
-			o, err := m.spawnFn(m.ctx, m.bin, m.strictMode, m.waitFor)
+			// Explicit restart, respawn and shutdown share this admission.
+			m.mu.Lock()
+			stopping := m.shuttingDown || ctx.Err() != nil || m.ctx.Err() != nil || m.current != cur
+			busy := m.operation
+			var operation *supervisorManagerOperation
+			if !stopping && busy == nil {
+				operation = &supervisorManagerOperation{kind: "respawn", done: make(chan struct{}), original: cur}
+				m.operation = operation
+			}
+			m.mu.Unlock()
+			if stopping {
+				return
+			}
+			if busy != nil {
+				select {
+				case <-busy.done:
+				case <-ctx.Done():
+					return
+				case <-m.ctx.Done():
+					return
+				}
+				continue
+			}
+			o, err := m.spawnFn(m.ctx, m.bin, m.strictMode, m.waitFor, m.receiveCreationAttempt(operation))
 			if err != nil {
+				if errors.Is(err, errSupervisorLaunchSettlement) {
+					// Recovery does not erase an acquired startup cleanup failure.
+					result = errors.Join(result, err)
+				}
+				if o != nil {
+					result = errors.Join(result, err, m.stopOwnerAndJoin(context.Background(), o, 5000))
+					m.completeManagerOperation(operation, gui.SupervisorRestartResult{}, result)
+					return
+				}
+				m.completeManagerOperation(operation, gui.SupervisorRestartResult{}, err)
+				m.mu.Lock()
+				stopping := m.shuttingDown || ctx.Err() != nil || m.ctx.Err() != nil
+				m.mu.Unlock()
+				if stopping {
+					// Startup returns only after original creator settlement.
+					// Preserve its shutdown error rather than retrying it.
+					if !errors.Is(result, err) {
+						result = errors.Join(result, err)
+					}
+					return
+				}
 				// Transient/wedged spawn failure: log + RETRY (the inner
 				// loop re-appends a window slot and re-checks the cap), so
 				// a chronic failure trips the cap rather than silently
 				// disabling GUI self-healing after a single error.
 				_ = api.LogHubMcpEvent("warn", "gui-supervisor-respawn-failed", map[string]any{
-					"error": err.Error(),
+					"error":            err.Error(),
+					"creation_attempt": m.creationAttemptFields(operation),
 				})
 				fmt.Fprintf(m.stderrSink, "warning: supervisor respawn attempt failed: %v\n", err)
 				continue
 			}
+			// Keep admission through the actual current-publication decision.
 			newOwner = o
+			m.mu.Lock()
+			if m.shuttingDown || ctx.Err() != nil || m.ctx.Err() != nil {
+				m.mu.Unlock()
+				result = errors.Join(result, m.stopOwnerAndJoin(context.Background(), newOwner, 5000))
+				m.completeManagerOperation(operation, gui.SupervisorRestartResult{}, result)
+				return
+			}
+			m.current = newOwner
+			m.mu.Unlock()
+			m.completeManagerOperation(operation, gui.SupervisorRestartResult{}, nil)
+			completedAttempt = operation
 			break
 		}
 		_ = api.LogHubMcpEvent("info", "gui-supervisor-respawned-by-gui", map[string]any{
-			"pid": newOwner.Pid(),
+			"pid":              newOwner.Pid(),
+			"creation_attempt": m.creationAttemptFields(completedAttempt),
 		})
-		// INSTALL under the lock. If shutdown won the race during the
-		// spawn, Stop the orphan ourselves and do NOT install it.
-		m.mu.Lock()
-		if m.shuttingDown {
-			m.mu.Unlock()
-			_ = newOwner.Stop(m.ctx, 5000)
-			return
-		}
-		m.current = newOwner
-		m.mu.Unlock()
 		// If the respawn ADOPTED an already-bound (foreign) supervisor
 		// instead of spawning a fresh GUI-owned one, ensureSupervisorRunning
 		// returned spawned=false with a nil exitedCh — the GUI does not
@@ -567,15 +892,14 @@ func (b *boundedBuffer) String() string { return string(b.buf) }
 // already consumed). The "expected vs unexpected" classification is
 // done in the monitor via the stoppedOnce sentinel: if the supervisor
 // exits before Stop() runs, it's unexpected.
-func (s *supervisorOwner) startExitMonitor(proc *os.Process) {
+func (s *supervisorOwner) startExitMonitor(cmd *exec.Cmd) {
+	proc := cmd.Process
 	go func() {
-		state, err := proc.Wait()
-		var exitErr error
-		if err != nil {
-			exitErr = err
-		} else if state != nil && !state.Success() {
-			exitErr = fmt.Errorf("supervisor exited with non-zero status: %s", state.String())
-		}
+		exitErr := cmd.Wait()
+		s.receiveExitOutcome(exitErr)
+		// Notification is separate from committing the acquired Wait and
+		// releasing original completion. It publishes the latest snapshot.
+		s.attempt.publish(func(*supervisorCreationSnapshot) {})
 		// Publish exit info to stop()'s receive channel. Non-blocking
 		// send via buffered chan(1); if stop() already drained, the
 		// next send would block — but stop() reads exactly once per
@@ -609,6 +933,18 @@ func (s *supervisorOwner) startExitMonitor(proc *os.Process) {
 			}
 		}
 	}()
+}
+
+// The original monitor commits its received Wait before releasing completion.
+// No observer or diagnostic is invoked at this completion boundary.
+func (s *supervisorOwner) receiveExitOutcome(exitErr error) {
+	s.exitResult = exitInfo{exitErr: exitErr}
+	if attempt := s.attempt; attempt != nil {
+		attempt.mu.Lock()
+		attempt.snapshot.WaitReceived, attempt.snapshot.WaitError = true, exitErr
+		attempt.mu.Unlock()
+	}
+	close(s.exitDone)
 }
 
 // Stop sends graceful exit IPC to a spawned supervisor and waits for
@@ -656,12 +992,18 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 	s.stopRequested.Store(true)
 
 	// The background exit monitor (startExitMonitor) is already
-	// running cmd.Wait() and will publish to s.exitedCh on exit. We
-	// just drain it here. If the supervisor crashed before Stop()
-	// was called, the monitor has already buffered the exit info
-	// AND emitted the early-exit warning — Stop() then just sees an
-	// already-dead process and returns cleanly.
-	exited := s.exitedCh
+	// running cmd.Wait() and retains its outcome behind exitDone as well as
+	// notifying the respawn manager. Stop observes that retained original
+	// result even if the manager has already consumed its notification.
+	if s.exitDone == nil {
+		return errors.New("supervisor owner: original exit observation unavailable")
+	}
+	exited := s.exitDone
+	select {
+	case <-exited:
+		return s.exitResult.exitErr
+	default:
+	}
 
 	// Issue the IPC exit concurrently under a sub-deadline derived
 	// from graceTimeoutMs only — never the full parent ctx deadline.
@@ -669,10 +1011,13 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 	// even when the supervisor's IPC pipe is hung or the supervisor
 	// process is unresponsive.
 	ipcDone := make(chan error, 1)
+	s.ipcDone = make(chan struct{})
 	go func() {
+		defer close(s.ipcDone)
 		ipcCtx, cancel := context.WithTimeout(ctx, time.Duration(graceTimeoutMs)*time.Millisecond)
 		defer cancel()
-		ipcDone <- api.DialSupervisorIPCExit(ipcCtx, graceTimeoutMs)
+		s.ipcErr = s.control.ExitGraceful(ipcCtx, graceTimeoutMs)
+		ipcDone <- s.ipcErr
 	}()
 
 	total := time.Duration(graceTimeoutMs)*time.Millisecond + supervisorForceKillFallbackWindow
@@ -686,12 +1031,14 @@ func (s *supervisorOwner) stop(ctx context.Context, graceTimeoutMs int) error {
 		// above, so this drain is bounded.
 		ipcErr := <-ipcDone
 		if ipcErr != nil && !errors.Is(ipcErr, api.ErrSupervisorIPCUnavailable) {
-			return fmt.Errorf("supervisor owner: graceful exit IPC failed but process exited: %w", ipcErr)
+			return errors.Join(s.exitResult.exitErr, fmt.Errorf("supervisor owner: graceful exit IPC failed but process exited: %w", ipcErr))
 		}
-		return nil
+		return s.exitResult.exitErr
 	case <-time.After(total):
 		// Force-kill — supervisor didn't exit in time.
 		killErr := s.proc.Kill()
+		s.killErr = killErr
+		s.killCommitted = killErr == nil
 		// Wait for the process exit with a backstop timer. If Kill
 		// failed (Windows ACCESS_DENIED on protected process, POSIX
 		// EPERM, kernel-level immortal-process bug), the supervisor
@@ -894,33 +1241,41 @@ func probeSupervisor(ctx context.Context, probeTimeout time.Duration) (bool, err
 	return true, nil
 }
 
-// resolveMCPHubBinary returns the absolute, symlink-resolved path to
-// the currently-running mcphub binary. Used by the GUI to spawn its
-// supervisor child with the same code as the running process —
-// critical for dev builds where the binary path is not on PATH and
-// for guaranteeing version consistency between GUI and supervisor.
-//
-// EvalSymlinks closes a TOCTOU window on macOS (preview tier) where
-// os.Executable can return a symlink path; an attacker with write
-// access to the symlink's parent directory could swap the target
-// between resolve and cmd.Start, redirecting the supervisor spawn to
-// an attacker-controlled binary. EvalSymlinks resolves to the inode
-// path so subsequent spawn cannot be redirected via symlink swap.
-// On Linux, /proc/self/exe already returns the resolved path so
-// EvalSymlinks is a no-op there; on Windows, the path is canonicalized
-// at kernel-load time and symlinks aren't part of the exe-resolution
-// chain. PR #212 r3 security finding 2.
+// resolveMCPHubBinary uses the API-owned admitted runtime-image authority,
+// retaining a verified active Product owner instead of selecting a helper.
 func resolveMCPHubBinary() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("resolve mcphub binary: %w", err)
+	return api.RuntimeMcphubExecutable()
+}
+
+// settleUnboundCreator settles only the GUI's actual child when readiness or a
+// singleton race fails. The existing exit monitor remains the sole Wait owner.
+func (s *supervisorOwner) settleUnboundCreator() (result error) {
+	defer func() {
+		if result != nil {
+			result = errors.Join(errSupervisorLaunchSettlement, result)
+		}
+		s.attempt.publish(func(snapshot *supervisorCreationSnapshot) {
+			snapshot.SettlementError = errors.Join(snapshot.SettlementError, result)
+		})
+	}()
+	s.stopRequested.Store(true)
+	var killErr error
+	select {
+	case <-s.exitDone:
+	default:
+		killErr = s.proc.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		// Preserve the original startup cleanup's creator Wait semantics.
+		// Cancellation does not abandon this original child or start a timer.
+		<-s.exitDone
 	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
+	var exitStatus *exec.ExitError
+	if s.exitResult.exitErr != nil && !errors.As(s.exitResult.exitErr, &exitStatus) {
+		return errors.Join(killErr, s.exitResult.exitErr)
 	}
-	abs, err := filepath.Abs(exe)
-	if err != nil {
-		return exe, nil // best-effort; caller will spawn with non-abs
-	}
-	return abs, nil
+	// A native nonzero exit is retained in exitResult, distinct from a failed
+	// Kill/Wait operation; a singleton loser can be settled without exit0.
+	return killErr
 }

@@ -55,7 +55,11 @@ func TestAttachExisting_PublicCLIReceiving(t *testing.T) {
 		t.Fatal(err)
 	}
 	applyProtectedDACLFromEntries(t, stateDir, entries)
-	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(root))
+	restoreClientEnv, err := clients.ApplyClientConfigSandboxEnvironment(root)
+	if err != nil {
+		t.Fatalf("prepare public CLI client sandbox: %v", err)
+	}
+	t.Cleanup(restoreClientEnv)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
 	withDaemonStateRootOverride(t, stateDir)
 	leaseReport, leaseErr := InspectAdoptLeaseNamespace()

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9371", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})

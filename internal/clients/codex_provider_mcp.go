@@ -142,20 +142,63 @@ func resolveCodexProviderInventoryCommand(exe string) (*exec.Cmd, error) {
 }
 
 func resolveCodexProviderInventoryCommandWithLookup(exe string, lookup func(string) (string, error)) (*exec.Cmd, error) {
+	return resolveCodexProviderCommandWithLookup(exe, lookup, codexNativeInventory, "")
+}
+
+type codexNativeReadKind uint8
+
+const (
+	codexNativeInventory codexNativeReadKind = iota
+	codexNativeMCPGet
+)
+
+// The resolver owns the only admitted native argument sets. Neither source
+// callers nor a command shim can add runtime configuration or profile options.
+func resolveCodexProviderCommandWithLookup(exe string, lookup func(string) (string, error), kind codexNativeReadKind, logical string, shimClose ...func(*os.File) error) (command *exec.Cmd, resultErr error) {
+	if len(shimClose) > 1 {
+		return nil, errors.New("multiple shim close owners refused")
+	}
+	closeFile := (*os.File).Close
+	if len(shimClose) == 1 && shimClose[0] != nil {
+		closeFile = shimClose[0]
+	}
+	var args []string
+	switch kind {
+	case codexNativeInventory:
+		if logical != "" {
+			return nil, errors.New("inventory logical argument is not supported")
+		}
+		args = []string{"plugin", "list", "--json"}
+	case codexNativeMCPGet:
+		if logical == "" || strings.HasPrefix(logical, "-") || strings.ContainsAny(logical, "\x00\r\n") {
+			return nil, errors.New("configured MCP logical argument is invalid")
+		}
+		args = []string{"mcp", "get", logical, "--json"}
+	default:
+		return nil, errors.New("unsupported native read kind")
+	}
 	ext := strings.ToLower(filepath.Ext(exe))
 	if ext == ".bat" {
 		return nil, errors.New("unsupported codex cmd shim")
 	}
 	if ext != ".cmd" {
-		return exec.Command(exe, "plugin", "list", "--json"), nil
+		return exec.Command(exe, args...), nil
 	}
 	shimFile, err := os.Open(exe)
 	if err != nil {
 		return nil, errors.New("unsupported codex cmd shim")
 	}
-	defer shimFile.Close()
+	defer func() {
+		if closeErr := closeFile(shimFile); closeErr != nil {
+			command = nil
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	shimRaw, err := io.ReadAll(io.LimitReader(shimFile, 64<<10+1))
-	if err != nil || len(shimRaw) > 64<<10 {
+	if err != nil {
+		return nil, errors.Join(errors.New("unsupported codex cmd shim"), err)
+	}
+	if len(shimRaw) > 64<<10 {
 		return nil, errors.New("unsupported codex cmd shim")
 	}
 	shim := strings.ReplaceAll(string(shimRaw), "\r\n", "\n")
@@ -199,7 +242,7 @@ func resolveCodexProviderInventoryCommandWithLookup(exe string, lookup func(stri
 	if info, err := os.Stat(script); err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("unsupported codex cmd shim")
 	}
-	return exec.Command(node, script, "plugin", "list", "--json"), nil
+	return exec.Command(node, append([]string{script}, args...)...), nil
 }
 
 func resolveCodexProviderNode(shimDir string, lookup func(string) (string, error)) (string, error) {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,16 +16,18 @@ import (
 )
 
 type fakeDeAdoptCLIAPI struct {
-	plan       *api.DeAdoptPlan
-	planErr    error
-	report     *api.DeAdoptReport
-	executeErr error
+	planContext context.Context
+	plan        *api.DeAdoptPlan
+	planErr     error
+	report      *api.DeAdoptReport
+	executeErr  error
 
 	executeServer string
 	executeOpts   api.ExecuteDeAdoptOpts
 }
 
-func (f *fakeDeAdoptCLIAPI) BuildDeAdoptPlan(string) (*api.DeAdoptPlan, error) {
+func (f *fakeDeAdoptCLIAPI) BuildDeAdoptPlanWithContext(ctx context.Context, _ string) (*api.DeAdoptPlan, error) {
+	f.planContext = ctx
 	return f.plan, f.planErr
 }
 
@@ -346,5 +349,22 @@ func TestDeAdoptCmdExecuteErrorReturnsError(t *testing.T) {
 	_, err := runDeAdoptCommandWithFake(t, fake, "de-adopt", "execute-error", "--yes")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("execute error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestDeAdoptCLIActionBudgetIsNotRenewedForExecute(t *testing.T) {
+	fake := &fakeDeAdoptCLIAPI{
+		plan:   &api.DeAdoptPlan{Routing: api.DeAdoptRoutingFresh},
+		report: &api.DeAdoptReport{},
+	}
+	_, err := runDeAdoptCommandWithFake(t, fake, "de-adopt", "example", "--yes", "--action-timeout", "1m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.planContext == nil || fake.executeOpts.Context != fake.planContext {
+		t.Fatal("executor received a renewed or absent planning context")
+	}
+	if _, ok := fake.planContext.Deadline(); !ok || !errors.Is(fake.planContext.Err(), context.Canceled) {
+		t.Fatal("command did not retain and settle its derived action context")
 	}
 }

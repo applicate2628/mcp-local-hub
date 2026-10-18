@@ -192,7 +192,21 @@ describe("SectionAdvanced", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
       return new Response(JSON.stringify(url === "/api/supervisor/restart"
-        ? { killed_pid: 100, killed: true, spawned_pid: 101, spawned: true }
+        ? {
+          killed_pid: 100,
+          killed: true,
+          spawned_pid: 101,
+          spawned: true,
+          outcome: "restarted",
+          ready: true,
+          selected_generation: { pid: 101, started_at: "2026-01-01T00:01:00Z" },
+          original_settled: true,
+          phase: "complete",
+          transfer_committed: false,
+          transferred: false,
+          original_child_disposition: "retained",
+          namespace_disposition: "occupied",
+        }
         : { enabled: false }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -222,7 +236,7 @@ describe("SectionAdvanced", () => {
     fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
     await waitFor(() => expect(restartPosts()).toHaveLength(1));
     await waitFor(() => expect(view.queryByTestId("advanced-restart-confirm")).toBeNull());
-    expect(view.getByRole("status").textContent).toContain("Supervisor restart requested.");
+    expect(view.getByRole("status").textContent).toContain("Supervisor restart confirmed.");
   });
 
   it("keeps Restart keyboard focus in the dialog and returns it to the trigger after each close", async () => {
@@ -530,9 +544,16 @@ describe("SectionAdvanced", () => {
     vi.spyOn(appApi, "restartSupervisor").mockResolvedValue({
       killed_pid: 100,
       killed: true,
-      spawned_pid: 0,
-      spawned: false,
-      per_step_error: { spawn: "permission denied" },
+      spawned_pid: 101,
+      spawned: true,
+      outcome: "failed",
+      ready: true,
+      original_settled: false,
+      phase: "spawn",
+      original_child_disposition: "settled",
+      namespace_disposition: "cleared",
+      code: "RESTART_FAILED",
+      per_step_error: { spawn: "restart step incomplete" },
     });
     const view = render(<SectionAdvanced snapshot={portSnap()} />);
     const restartButton = view.getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
@@ -540,7 +561,12 @@ describe("SectionAdvanced", () => {
     fireEvent.click(restartButton);
     fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
 
-    await waitFor(() => expect(view.getByRole("alert").textContent).toContain("Restart incomplete: spawn: permission denied"));
+    await waitFor(() => {
+      const message = view.getByRole("alert").textContent ?? "";
+      expect(message).toContain("Supervisor restart failed.");
+      expect(message).toContain("spawned PID 101");
+      expect(message).toContain("spawn: restart step incomplete");
+    });
     expect(view.queryByTestId("advanced-restart-confirm")).toBeNull();
     expect(restartButton.disabled).toBe(false);
   });
@@ -560,11 +586,22 @@ describe("SectionAdvanced", () => {
   });
 });
 
-describe("SectionAdvanced - Autorun toggle", () => {
+describe("SectionAdvanced - State-read compatibility", () => {
   beforeEach(() => vi.restoreAllMocks());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("labels compatibility honestly and preserves an explicit OFF without a write", async () => {
+    stubRelaxFetch();
+    const view = render(<SectionAdvanced snapshot={snap} />);
+    const toggle = view.getByRole("checkbox", { name: /Allow state reads on managed Windows/ }) as HTMLInputElement;
+    await waitFor(() => expect(toggle.disabled).toBe(false));
+    expect(toggle.checked).toBe(false);
+    expect(view.getByRole("heading", { name: "State-read compatibility" })).toBeTruthy();
+    expect(view.queryByText(/Autorun on corp-managed Windows/)).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
 
   it("initial state reflects GET response (enabled=true)", async () => {

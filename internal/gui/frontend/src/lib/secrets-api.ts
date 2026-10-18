@@ -75,13 +75,92 @@ async function parseJSONBody(resp: Response): Promise<any> {
   }
 }
 
-export async function secretsInit(): Promise<{ vault_state?: string; cleanup_status?: string; orphan_path?: string; error?: string; code?: string }> {
-  const resp = await fetch("/api/secrets/init", { method: "POST" });
-  const body = await parseJSONBody(resp);
-  if (resp.status === 200) return body;
-  throw makeAPIError(resp.status, body.code, body.error ?? `init failed: ${resp.status}`, body);
+export interface SecretsInitReference {
+  recovery_id?: string;
+  recovery_status?: "ready" | "incomplete" | "unavailable";
 }
 
+export interface SecretsInitResult extends SecretsInitReference {
+  vault_state?: string;
+  cleanup_status?: string;
+  error?: string;
+  code?: string;
+  status: number;
+  body: unknown;
+}
+
+function initReference(value: unknown): SecretsInitReference {
+  if (!value || typeof value !== "object") return {};
+  const fields = value as Record<string, unknown>;
+  const state = fields.recovery_status;
+  if (state !== "ready" && state !== "incomplete" && state !== "unavailable") return {};
+  const id = fields.recovery_id;
+  return {
+    recovery_status: state,
+    ...(state !== "unavailable" && typeof id === "string" && /^[0-9a-f]{32}$/.test(id) && !/^0{32}$/.test(id)
+      ? { recovery_id: id } : {}),
+  };
+}
+
+// Init presentation never uses server error text or arbitrary caught messages.
+export function secretsInitErrorMessage(value: unknown): string {
+  const fields = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const ref = initReference(fields);
+  let message: string;
+  if (fields.code === "SECRETS_INIT_UNSUPPORTED") {
+    message = "Initialization is unavailable. Reload or update the application before initializing the secrets vault.";
+  } else if (fields.code === "SECRETS_INIT_BLOCKED") {
+    message = "Initialization is blocked by existing files. Reload or update the application and contact local support.";
+  } else if (ref.recovery_status === "incomplete" || ref.recovery_status === "unavailable") {
+    message = "Recovery evidence could not be verified. Reload or update the application and contact local support before trying again.";
+  } else {
+    message = "Initialization failed. Reload or update the application and contact local support before trying again.";
+  }
+  return ref.recovery_id ? `${message} Support reference: ${ref.recovery_id}.` : message;
+}
+
+function initError(status: number, code: string | undefined, body: unknown): APIError & SecretsInitReference {
+  const ref = initReference(body);
+  return Object.assign(makeAPIError(status, code, secretsInitErrorMessage({ code, ...ref }), body), ref);
+}
+
+export async function checkSecretsInitCapability(signal?: AbortSignal): Promise<void> {
+  let status = 0;
+  let body: unknown;
+  try {
+    const resp = await fetch("/api/secrets/init-capabilities", { cache: "no-store", signal });
+    status = resp.status;
+    body = await parseJSONBody(resp);
+    if (status === 200 && body && typeof body === "object" && !Array.isArray(body)) {
+      const cap = body as Record<string, unknown>;
+      if (Object.keys(cap).length === 3 && cap.schema_version === 1 &&
+          cap.workflow === "cli_support_readonly" && cap.path_free_errors === true) return;
+    }
+  } catch {
+    // A transport failure supplies no positive permission to initialize.
+  }
+  throw initError(status, "SECRETS_INIT_UNSUPPORTED", body);
+}
+
+export async function secretsInit(): Promise<SecretsInitResult> {
+  // Every init caller checks the current server; version metadata is not permission.
+  await checkSecretsInitCapability();
+  let resp: Response;
+  try {
+    resp = await fetch("/api/secrets/init", { method: "POST" });
+  } catch {
+    throw initError(0, undefined, undefined);
+  }
+  const body: unknown = await parseJSONBody(resp);
+  const fields = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const code = typeof fields.code === "string" ? fields.code : undefined;
+  // Cleanup-ok failure is HTTP200 with missing vault; it must stop every caller.
+  if (resp.status === 200 && fields.vault_state === "ok" && fields.code === undefined && fields.error === undefined) {
+    return { vault_state: "ok", ...(typeof fields.cleanup_status === "string" ? { cleanup_status: fields.cleanup_status } : {}),
+      ...initReference(fields), status: resp.status, body };
+  }
+  throw initError(resp.status, code, body);
+}
 export async function getSecrets(): Promise<SecretsEnvelope> {
   const resp = await fetch("/api/secrets");
   const body = await parseJSONBody(resp);

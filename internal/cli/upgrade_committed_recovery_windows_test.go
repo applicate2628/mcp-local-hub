@@ -19,6 +19,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/gui"
 )
 
 func committedRecoveryFixture(t *testing.T) (productRecoveryV3Fixture, string, upgradeCommittedRecoveryDeps) {
@@ -645,5 +646,175 @@ func TestCommittedRecoverySettledJournalProbePreservesOSError(t *testing.T) {
 		strings.Contains(err.Error(), private) || strings.Contains(stderr.String(), private) ||
 		strings.Contains(out.String(), "UPGRADE_COMMITTED_RECOVERY_SETTLED") {
 		t.Fatalf("error=%v pathErr=%v releases=%d stderr=%q stdout=%q", err, pathErr, fence.releases, stderr.String(), out.String())
+	}
+}
+
+func TestPendingRecoveryResultsAndUnknownOwnerStayDistinctAndPrivate(t *testing.T) {
+	private := "PRIVATE_PATH_X\\SID-S-1-5-21\\argv-secret\\<Task>PRIVATE_XML</Task>\\E_FAKE"
+	for _, tc := range []struct {
+		name   string
+		result *WindowsProductPairRecoverySettled
+		cause  error
+		want   string
+	}{
+		{"missing", nil, nil, "RESULT_MISSING"},
+		{"outcome", &WindowsProductPairRecoverySettled{Outcome: WindowsProductPairRecoverySettledCommit}, nil, "OUTCOME_DIFFERENT"},
+		{"transaction", &WindowsProductPairRecoverySettled{Outcome: WindowsProductPairRecoverySettledRollback, TransactionID: private}, nil, "TRANSACTION_DIFFERENT"},
+		{"unknown-owner", nil, fmt.Errorf("%w: %s", ErrWindowsProductRecoveryPending, private), "OWNER_ERROR_UNCLASSIFIED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, executor, deps := committedRecoveryFixture(t)
+			f.journal.Phase = WindowsProductRecoverySuccessorStarting
+			writeCommittedRecoveryJournal(t, f)
+			fence := &committedRecoveryFenceFake{}
+			deps.AcquireFence = func(context.Context, string) (upgradeCommittedFence, error) { return fence, nil }
+			deps.ValidatePending = func(windowsProductRecoveryRequest, windowsProductRecoveryJournalV3) error { return nil }
+			calls := 0
+			deps.Recover = func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error) {
+				calls++
+				return tc.result, tc.cause
+			}
+			cmd, out := committedRecoveryCommand()
+			err := runWindowsProductRecoveryCommandWithDeps(cmd, f.stateDir, executor, f.product, windowsRecoveryCommandPending, deps)
+			if err == nil || calls != 1 || fence.releases != 1 || !errors.Is(err, ErrWindowsProductRecoveryPending) || err.Error() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result="+tc.want || strings.Contains(err.Error(), private) || out.Len() != 0 {
+				t.Fatalf("safe result receiving failed: %v", err)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Fatal("actual unknown owner error was lost")
+			}
+		})
+	}
+}
+
+func TestPendingRecoveryPriorCauseSurvivesRollbackAndKeepsPublicID(t *testing.T) {
+	f := newProductRecoveryV3Fixture(t, WindowsProductRecoverySuccessorStarting)
+	f.journal.Mode = WindowsProductPairModeUpgrade
+	f.journal.PreSettlement = &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}
+	initial := errors.New("UPGRADE_GUI_TASK_DRIFT: PRIVATE_PATH_X nested E_FAKE")
+	terminal := fmt.Errorf("%w: PRIVATE_PATH_X SID-S-1-5-21 argv-secret", ErrWindowsProductPairCommittedObservabilityFailed)
+	ops, _, _ := guiPriorDiagnosticOpsFixture(t)
+	ops.ObserveHealthy = func(context.Context, windowsProductRecoveryJournalV3) error { return initial }
+	ops.Reservation = func(context.Context) (gui.OwnedSingleInstanceLease, error) { return nil, terminal }
+	ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), f.journal, ops)
+	tasks := &recoveryTaskTxnFake{}
+	req := f.request(tasks)
+	req.RecoverPriorSettlement = func(context.Context, windowsProductRecoveryJournalV3) error { return ownerErr }
+	settled, err := rollbackWindowsProductRecovery(req, withWindowsProductRecoveryDefaults(req.Deps), filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal, tasks)
+	var diagnostic *upgradeGUIPriorSettlementError
+	if settled != nil || !errors.As(err, &diagnostic) || !errors.Is(err, terminal) || !errors.Is(err, initial) || !errors.Is(err, ErrWindowsProductPairCommittedObservabilityFailed) {
+		t.Fatal("real rollback router dropped typed prior causes")
+	}
+	public := committedRecoveryCommandError(committedRecoveryOwnerFailureID(err), "recover pending prior settlement", err)
+	if public.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" || public.Error() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=UNCLASSIFIED; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT" {
+		t.Fatalf("child sentinel changed pending ID or private projection: %s", public.Error())
+	}
+}
+
+func TestPendingRecoveryProjectionRefusesInjectedOperationAndText(t *testing.T) {
+	private := "PRIVATE_PATH_X\\SID-S-1-5-21\\argv-secret\\E_FAKE"
+	for _, cause := range []error{
+		fmt.Errorf("%w: failed_operation=RESERVATION; %s", ErrWindowsProductRecoveryPending, private),
+		&upgradeGUIPriorSettlementError{operation: upgradeGUIPriorOperation(private), cause: errors.New(private), initialHealth: errors.New("UPGRADE_GUI_TASK_DRIFT: " + private)},
+	} {
+		public := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", cause)
+		if public.Error() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR_UNCLASSIFIED" || strings.Contains(public.Error(), private) {
+			t.Fatal("untrusted operation/text crossed pending projection")
+		}
+		if !errors.Is(public, cause) {
+			t.Fatal("redaction erased the original error")
+		}
+	}
+}
+
+func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *testing.T) {
+	private := "PRIVATE_PATH_X\\SID-S-1-5-21\\argv-secret\\<Task>PRIVATE_XML</Task>"
+	primary := errors.New(private)
+	cleanup := errors.New("PRIVATE_RELEASE_X")
+	for _, tc := range []struct {
+		name                                  string
+		firstFails, acquireFails, secondFails bool
+		missingLease                          bool
+		releaseErr                            error
+		step                                  string
+		cleanupSuffix                         string
+	}{
+		{name: "first", firstFails: true, step: "FIRST_ABSENCE"},
+		{name: "acquire", acquireFails: true, step: "ACQUIRE_EXACT"},
+		{name: "missing-lease", missingLease: true, step: "ACQUIRE_EXACT"},
+		{name: "second", secondFails: true, step: "SECOND_ABSENCE"},
+		{name: "second-release", secondFails: true, releaseErr: cleanup, step: "SECOND_ABSENCE", cleanupSuffix: "; reservation_cleanup=RELEASE_FAILED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := 0
+			reservationLease := &upgradeGUITestLease{releaseErr: tc.releaseErr}
+			ops, _, _ := guiPriorDiagnosticOpsFixture(t)
+			ops.ObserveHealthy = func(context.Context, windowsProductRecoveryJournalV3) error {
+				return errors.New("UPGRADE_GUI_TASK_DRIFT: " + private)
+			}
+			ops.Reservation = func(ctx context.Context) (gui.OwnedSingleInstanceLease, error) {
+				return acquireGUIOwnedPriorReservation(ctx, nil, guiOwnedPriorReservationOps{
+					ProveNoGUIOrTray: func(context.Context) error {
+						checks++
+						if (checks == 1 && tc.firstFails) || (checks == 2 && tc.secondFails) {
+							return primary
+						}
+						return nil
+					},
+					AcquireExact: func() (gui.OwnedSingleInstanceLease, error) {
+						if tc.acquireFails {
+							return nil, primary
+						}
+						if tc.missingLease {
+							return nil, nil
+						}
+						return reservationLease, nil
+					},
+				})
+			}
+			journal := windowsProductRecoveryJournalV3{PreSettlement: &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}}
+			ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), journal, ops)
+			public := committedRecoveryCommandError(committedRecoveryOwnerFailureID(ownerErr), "recover pending prior settlement", ownerErr)
+			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
+			if public.Error() != want || !errors.Is(public, ErrWindowsProductRecoveryPending) || public.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" {
+				t.Fatal("actual reservation substep or original causal chain was lost")
+			}
+			if !tc.missingLease && !errors.Is(public, primary) {
+				t.Fatal("original reservation primary cause was text-only")
+			}
+			var outer, inner *upgradeGUIPriorSettlementError
+			if !errors.As(ownerErr, &outer) || !errors.As(outer.cause, &inner) {
+				t.Fatal("original reservation carrier did not survive prior settlement wrapping")
+			}
+			if tc.releaseErr != nil {
+				if inner.reservationRelease != cleanup || strings.Index(inner.cause.Error(), primary.Error()) > strings.Index(inner.cause.Error(), cleanup.Error()) {
+					t.Fatal("actual release failure was lost or reordered before primary")
+				}
+			} else if inner.reservationRelease != nil {
+				t.Fatal("cleanup failure was manufactured")
+			}
+			if tc.releaseErr != nil && !errors.Is(public, cleanup) {
+				t.Fatal("actual cleanup cause was dropped")
+			}
+			if strings.Contains(public.Error(), private) || strings.Contains(public.Error(), "PRIVATE_RELEASE_X") || strings.Contains(fmt.Sprintf("%v %#v", ownerErr, ownerErr), private) {
+				t.Fatal("private reservation detail escaped its closed projection")
+			}
+			wantReleases := 0
+			if tc.secondFails {
+				wantReleases = 1
+			}
+			if reservationLease.released != wantReleases {
+				t.Fatal("diagnostics repeated or fabricated a release")
+			}
+		})
+	}
+}
+
+func TestPendingRecoveryReservationProjectionRejectsInjectedStepAndCleanup(t *testing.T) {
+	private := "PRIVATE_RESERVATION_STEP_X"
+	cause := &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIPriorReservationStep(private), reservationRelease: errors.New(private), cause: errors.New(private)}
+	public := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", cause)
+	want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=UNCLASSIFIED"
+	if public.Error() != want || strings.Contains(public.Error(), "RELEASE_FAILED") || strings.Contains(public.Error(), private) {
+		t.Fatal("injected unknown step acquired a classified cleanup indication")
 	}
 }

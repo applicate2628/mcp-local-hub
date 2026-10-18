@@ -37,8 +37,10 @@ type HTTPToStdioRelay struct {
 
 	// sessionID is minted by the server on the first POST response
 	// (InitializeResult) and echoed on every subsequent request.
-	sessionMu sync.Mutex
-	sessionID string // "" until minted
+	sessionMu       sync.Mutex
+	sessionID       string // "" until minted
+	qualificationMu sync.Mutex
+	qualification   *mcpHTTPQualificationOwner
 
 	// stdoutMu serializes writes from both stdin-pump and sse-listener
 	// goroutines so interleaved JSON lines never corrupt the wire.
@@ -337,32 +339,44 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 // forwarding each `data:` event's JSON payload to stdout. Returns the
 // last observed event ID so the caller may resume.
 func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string) string {
+	lastID, _ := readRelaySSE(ctx, body, startID, 0, func(payload []byte) (bool, error) {
+		r.writeLine(payload)
+		return false, nil
+	})
+	return lastID
+}
+
+// The legacy relay and finite observed exchange share the same SSE framing.
+// A matched response can stop an observed POST without claiming body EOF.
+func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventBytes int, receive func([]byte) (bool, error)) (string, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxStdinLineBytes)
 
 	var dataBuf strings.Builder
 	lastID := startID
 
-	flush := func() {
+	flush := func() (bool, error) {
 		if dataBuf.Len() == 0 {
-			return
+			return false, nil
 		}
 		payload := dataBuf.String()
 		dataBuf.Reset()
 		// SSE `data:` payloads may span multiple lines (joined with \n per spec).
 		// For our use case MCP messages are single JSON objects and never contain
 		// raw newlines, so the joined form equals the JSON bytes.
-		r.writeLine([]byte(payload))
+		return receive([]byte(payload))
 	}
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			return lastID
+			return lastID, ctx.Err()
 		}
 		line := scanner.Text()
 		switch {
 		case line == "":
-			flush() // event delimiter
+			if stop, err := flush(); stop || err != nil {
+				return lastID, err
+			}
 		case strings.HasPrefix(line, "data:"):
 			// Per SSE spec the value is everything after the first colon,
 			// optionally with one leading space stripped.
@@ -372,6 +386,9 @@ func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, st
 				dataBuf.WriteByte('\n')
 			}
 			dataBuf.WriteString(val)
+			if maxEventBytes > 0 && dataBuf.Len() > maxEventBytes {
+				return lastID, errStdinLineTooLong
+			}
 		case strings.HasPrefix(line, "id:"):
 			lastID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		default:
@@ -380,8 +397,11 @@ func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, st
 			// transport-level and forwards only the data: payload.
 		}
 	}
-	flush()
-	return lastID
+	if err := scanner.Err(); err != nil {
+		return lastID, err
+	}
+	_, err := flush()
+	return lastID, err
 }
 
 // pipeSSE handles the rare case where POST /mcp returns an SSE stream

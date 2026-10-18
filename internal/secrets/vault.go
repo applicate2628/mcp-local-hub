@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -121,7 +122,15 @@ func InitVault(keyPath, vaultPath string) error {
 
 // OpenVault reads the identity from keyPath and opens the encrypted vault at vaultPath.
 func OpenVault(keyPath, vaultPath string) (*Vault, error) {
-	readFile := currentVaultFileReader()
+	return OpenVaultWithReader(keyPath, vaultPath, currentVaultFileReader())
+}
+
+// The original vault parser accepts a per-call owning reader; it does not
+// install a process-global reader or interpret that reader's closure proof.
+func OpenVaultWithReader(keyPath, vaultPath string, readFile VaultFileReader) (*Vault, error) {
+	if readFile == nil {
+		return nil, errors.New("vault reader required")
+	}
 	keyBytes, err := readFile(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("read identity: %w", err)

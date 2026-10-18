@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -226,12 +227,10 @@ func TestMain(m *testing.M) {
 	localAppData := filepath.Join(tmp, "AppData", "Local")
 	stateRoot := filepath.Join(localAppData, "mcp-local-hub")
 	if mkErr := os.MkdirAll(stateRoot, 0o700); mkErr != nil {
-		_ = os.RemoveAll(tmp)
-		panic("internal/gui TestMain: create state root: " + mkErr.Error())
+		panic(errors.Join(fmt.Errorf("internal/gui TestMain: create state root: %w", mkErr), apitest.RemoveTestMainRoot(tmp)))
 	}
 	if hardenErr := apitest.HardenedDirForTestMain(stateRoot); hardenErr != nil {
-		_ = os.RemoveAll(tmp)
-		panic("internal/gui TestMain: harden state root: " + hardenErr.Error())
+		panic(errors.Join(fmt.Errorf("internal/gui TestMain: harden state root: %w", hardenErr), apitest.RemoveTestMainRoot(tmp)))
 	}
 
 	restoreState := api.SetDaemonStateRootForTest(stateRoot)
@@ -240,7 +239,12 @@ func TestMain(m *testing.M) {
 	restoreStdioAdmission := api.SetFrozenStdioBridgeAdmissionForTest(func(context.Context, []api.FrozenStdioBridgeAdmissionRequest) error { return nil })
 	// Redirect every client-adapter path input before installing the audit. The
 	// descriptor is shared with API and CLI package test setup.
-	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	restoreClientEnv, err := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	if err != nil {
+		restoreStdioAdmission()
+		restoreState()
+		panic(errors.Join(err, apitest.RemoveTestMainRoot(tmp)))
+	}
 	restoreEnv := setEnvWithRestore(map[string]string{
 		"MCPHUB_STATE_DIR_OVERRIDE": stateRoot,
 		// Global browser kill-switch for the whole gui test binary AND any

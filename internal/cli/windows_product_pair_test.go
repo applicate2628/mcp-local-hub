@@ -202,7 +202,7 @@ func TestWindowsProductTxnPrePrepareStoreDisposition(t *testing.T) {
 	if counter.closes != 1 {
 		t.Fatalf("task lock Close calls=%d, want exactly one in Run", counter.closes)
 	}
-	if _, err := os.Stat(owner.store.root); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(owner.store.RootPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unjournaled Prepare failure retained task store: %v", err)
 	}
 
@@ -246,40 +246,98 @@ func TestWindowsProductTxnClosePreservesStoreOnAmbiguousJournalPopulation(t *tes
 	if err == nil || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
 		t.Fatalf("ambiguous second journal Close error=%v, want typed uncertainty", err)
 	}
-	if _, statErr := os.Stat(store.root); statErr != nil {
+	if _, statErr := os.Stat(store.RootPath()); statErr != nil {
 		t.Fatalf("journal-bound store was discarded: %v", statErr)
 	}
 }
 
 func TestWindowsProductTxnConstructorJoinsStoreCleanupFailure(t *testing.T) {
-	stateDir := t.TempDir()
-	beginErr := errors.New("test-owned task begin refusal")
-	var storeRoot string
-	_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
-		Context: context.Background(), StateDir: stateDir,
-		ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
-		LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
-		StagedProduct:        filepath.Join(stateDir, "candidate.exe"),
-		Mode:                 WindowsProductPairModeUpgrade,
-	}, func(root string) (*windowsProductPairTaskStore, error) {
-		store, err := newWindowsProductPairTaskStore(root)
-		if err != nil {
-			return nil, err
+	t.Run("later task begin failure", func(t *testing.T) {
+		stateDir := t.TempDir()
+		beginErr := errors.New("test-owned task begin refusal")
+		var storeRoot string
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+			Context: context.Background(), StateDir: stateDir,
+			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+			StagedProduct:        filepath.Join(stateDir, "candidate.exe"),
+			Mode:                 WindowsProductPairModeUpgrade,
+		}, func(root string) (*windowsProductPairTaskStore, error) {
+			store, err := newWindowsProductPairTaskStore(root)
+			if err != nil {
+				return nil, err
+			}
+			storeRoot = store.RootPath()
+			if err := os.WriteFile(filepath.Join(storeRoot, "test-owned-unrecognized-leaf"), []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return store, nil
+		}, func(context.Context, string, string, string, scheduler.RetainedTaskXMLStore) (*scheduler.OwnedEntrypointTaskTxn, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
+			t.Fatalf("constructor error=%v, want begin cause and cleanup failure", err)
 		}
-		storeRoot = store.root
-		if err := os.WriteFile(filepath.Join(storeRoot, "test-owned-unrecognized-leaf"), []byte("preserve"), 0o600); err != nil {
-			t.Fatal(err)
+		if _, statErr := os.Stat(filepath.Join(storeRoot, "test-owned-unrecognized-leaf")); statErr != nil {
+			t.Fatalf("failed cleanup erased unrecognized leaf: %v", statErr)
 		}
-		return store, nil
-	}, func(context.Context, string, string, string, scheduler.RetainedTaskXMLStore) (*scheduler.OwnedEntrypointTaskTxn, error) {
-		return nil, beginErr
 	})
-	if !errors.Is(err, beginErr) || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
-		t.Fatalf("constructor error=%v, want begin cause and cleanup failure", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(storeRoot, "test-owned-unrecognized-leaf")); statErr != nil {
-		t.Fatalf("failed cleanup erased unrecognized leaf: %v", statErr)
-	}
+
+	t.Run("partial store acquisition error", func(t *testing.T) {
+		stateDir := t.TempDir()
+		acquisitionErr := errors.New("test-owned task store acquisition refusal")
+		retainedXML := []byte("<Task><RegistrationInfo><URI>owned</URI></RegistrationInfo></Task>")
+		var storeRoot, retainedRef string
+		var partialStore *windowsProductPairTaskStore
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+			Context: context.Background(), StateDir: stateDir,
+			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+			StagedProduct:        filepath.Join(stateDir, "candidate.exe"),
+			Mode:                 WindowsProductPairModeUpgrade,
+		}, func(root string) (*windowsProductPairTaskStore, error) {
+			store, err := newWindowsProductPairTaskStore(root)
+			if err != nil {
+				return nil, err
+			}
+			partialStore = store
+			storeRoot = store.RootPath()
+			retainedRef, err = store.Retain(context.Background(), retainedXML)
+			if err != nil {
+				t.Fatalf("materialize real retained task XML: %v", err)
+			}
+			if got, readErr := os.ReadFile(filepath.Join(storeRoot, retainedRef)); readErr != nil || !bytes.Equal(got, retainedXML) {
+				t.Fatalf("real retained task XML was not present before constructor cleanup: bytes=%q error=%v", got, readErr)
+			}
+			if err := os.WriteFile(filepath.Join(storeRoot, "test-owned-unrecognized-leaf"), []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return store, acquisitionErr
+		}, func(context.Context, string, string, string, scheduler.RetainedTaskXMLStore) (*scheduler.OwnedEntrypointTaskTxn, error) {
+			t.Fatal("task begin ran after store acquisition returned an error")
+			return nil, nil
+		})
+		if err == nil || !errors.Is(err, acquisitionErr) || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
+			t.Fatalf("constructor error=%v, want original acquisition cause joined with cleanup uncertainty", err)
+		}
+		if partialStore == nil {
+			t.Fatal("partial physical store was not returned to the constructor")
+		}
+		retainedPath := filepath.Join(storeRoot, retainedRef)
+		if _, statErr := os.Lstat(retainedPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("constructor did not dispose selected retained XML material: stat error=%v", statErr)
+		}
+		unrecognizedPath := filepath.Join(storeRoot, "test-owned-unrecognized-leaf")
+		if got, readErr := os.ReadFile(unrecognizedPath); readErr != nil || string(got) != "preserve" {
+			t.Fatalf("constructor cleanup changed unrelated material: bytes=%q error=%v", got, readErr)
+		}
+		if _, statErr := os.Stat(storeRoot); statErr != nil {
+			t.Fatalf("unrelated material's containing root was removed: %v", statErr)
+		}
+		if _, retainErr := partialStore.Retain(context.Background(), []byte("after-close")); retainErr == nil || !strings.Contains(retainErr.Error(), "closed") {
+			t.Fatalf("partial store remained usable after selected cleanup: error=%v", retainErr)
+		}
+	})
 }
 
 func TestWindowsProductTxnPredecisionFaultRestoresProductTasksLegacyAndReceipt(t *testing.T) {
@@ -688,30 +746,6 @@ func productTxnTestDeps(order *[]string) WindowsProductTxnDeps {
 	})
 }
 
-func TestWindowsProductPairTaskStoreExactReadbackAndCleanup(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	store, err := newWindowsProductPairTaskStore(stateDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := store.root
-	want := []byte("<Task><Actions><Exec><Command>exact</Command></Exec></Actions></Task>\r\n")
-	ref, err := store.Retain(context.Background(), want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.Load(context.Background(), ref)
-	if err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("load bytes=%q err=%v", got, err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("rollback store survived Close: %v", err)
-	}
-}
-
 type productPairPaths struct{ priorCLI, windowless, stagedCLI, stagedWindowless, receipt string }
 
 func productPairFixturePaths(dir string) productPairPaths {
@@ -782,7 +816,10 @@ func productPairTestDeps(order *[]string) WindowsProductPairTxnDeps {
 			*order = append(*order, "readback-windowless")
 			return nil
 		},
-		StartSupervisor: func(string) error { *order = append(*order, "start-supervisor"); return nil },
+		StartSupervisor: func(string) (SupervisorLaunch, error) {
+			*order = append(*order, "start-supervisor")
+			return &fixtureSupervisorLaunch{}, nil
+		},
 		SettleSuccessor: func(string) error { *order = append(*order, "settle-successor"); return nil },
 		WaitSupervisorReady: func(context.Context, string, binaryadmission.WindowsProductPair) error {
 			*order = append(*order, "supervisor-ready")
@@ -884,4 +921,45 @@ func mustReadPairFile(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestWindowsProductPairTaskStorePrivateJournalClosePreservesBytes(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(fmt.Sprintf("uncertain=%t", uncertain), func(t *testing.T) {
+			stateDir := withTempStateDir(t)
+			store, err := newWindowsProductPairTaskStore(stateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			xml := []byte("<Task>synthetic journal retention</Task>")
+			ref, err := store.Retain(context.Background(), xml)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3)
+			if uncertain {
+				if err := os.Mkdir(journal, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(journal, []byte("synthetic pending journal"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tasks := &productPairTaskFake{}
+			txn := &WindowsProductTxn{constructorStore: store, Opts: WindowsProductTxnOpts{StateDir: stateDir, Tasks: tasks}}
+			closeErr := txn.Close()
+			if uncertain && (closeErr == nil || !strings.Contains(closeErr.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED")) {
+				t.Fatalf("uncertain journal cleanup was accepted: %v", closeErr)
+			}
+			if !uncertain && closeErr != nil {
+				t.Fatalf("journal-preserving close: %v", closeErr)
+			}
+			if !tasks.closed {
+				t.Fatal("coordinator did not close its task lease")
+			}
+			got, err := store.Load(context.Background(), ref)
+			if err != nil || !bytes.Equal(got, xml) {
+				t.Fatalf("journal-linked store bytes were discarded: %v", err)
+			}
+		})
+	}
 }

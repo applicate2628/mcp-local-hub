@@ -102,6 +102,7 @@ type DeAdoptPlan struct {
 // AcceptConflictClients is validated again at E3 under each client's config
 // lock; naming a client here never by itself makes that client terminal.
 type ExecuteDeAdoptOpts struct {
+	Context               context.Context
 	AcceptConflictClients []string
 	providerDeps          providerTransactionDeps
 }
@@ -135,6 +136,12 @@ const (
 // BuildDeAdoptPlan computes the gate-OFF, all-clients de-adopt plan. It never
 // mutates a manifest, provenance row, snapshot, or client config.
 func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
+	return a.BuildDeAdoptPlanWithContext(nil, server)
+}
+
+// BuildDeAdoptPlanWithContext carries the original active action ceiling through
+// cold planning; the compatibility wrapper cannot admit shared native work.
+func (a *API) BuildDeAdoptPlanWithContext(ctx context.Context, server string) (*DeAdoptPlan, error) {
 	server = strings.TrimSpace(server)
 	if server == "" {
 		return nil, fmt.Errorf("de-adopt server name is required")
@@ -161,8 +168,16 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	// Read the row even after the P0 probe so the G3 ownership surface stays
 	// truthful on a gate-ON refusal. State-specific routing still stops at P0.
 	rec, found, err := ReadAdoptProvenance(server)
+	if rec != nil && rec.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if err != nil {
 		return nil, fmt.Errorf("de-adopt plan: read provenance for %q: %w", server, err)
+	}
+	if found && adoptRecordHasSharedStdioTarget(*rec) {
+		if _, _, err := ResolveCodexSharedStdioActionContext(ctx, nil); err != nil {
+			return nil, err
+		}
 	}
 	plan.Eligibility.AdoptOwned = found
 	plan.Eligibility.Eligible = found && len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0
@@ -375,9 +390,9 @@ func (a *API) ExecuteDeAdoptWithOpts(server string, w io.Writer, opts ExecuteDeA
 
 	// The read-only planner is the single owner of gate-OFF, provenance routing,
 	// manifest readiness, and plan-time client classification.
-	plan, err := a.BuildDeAdoptPlan(server)
+	plan, err := a.BuildDeAdoptPlanWithContext(opts.Context, server)
 	if err != nil {
-		return nil, fmt.Errorf("de-adopt plan for manifest %q could not be built", strings.TrimSpace(server))
+		return nil, fmt.Errorf("de-adopt plan for manifest %q could not be built: %w", strings.TrimSpace(server), err)
 	}
 	return a.executeDeAdoptPlanWithOpts(plan, w, opts)
 }
@@ -396,6 +411,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, fmt.Errorf("de-adopt refused: manifest %q has no executable provenance", plan.ManifestName)
 	}
 
+	if adoptRecordHasSharedStdioTarget(*plan.provenance) {
+		if _, _, err := ResolveCodexSharedStdioActionContext(opts.Context, nil); err != nil {
+			return nil, err
+		}
+	}
 	plannedRec := plan.provenance
 	manifestDir, err := adoptCommittedManifestDir()
 	if err != nil {
@@ -442,6 +462,9 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// holding the lease so a completed de-adopt followed by a same-name re-adopt
 	// cannot make this executor act on the replaced row's stale recovery data.
 	fresh, found, err := ReadAdoptProvenance(plan.ManifestName)
+	if fresh != nil && fresh.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if err != nil {
 		return nil, fmt.Errorf("de-adopt: re-read provenance under lease failed")
 	}
@@ -621,7 +644,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 				if !supported || !valid {
 					mutationErr = fmt.Errorf("Codex alias inverse transaction is unavailable")
 				} else {
-					_, mutationErr = transport.RestoreRelocatedHTTPEntry(clients.CodexHTTPInverseRelocation{
+					_, mutationErr = transport.RestoreRelocatedHTTPEntryFromProvenance(clients.CodexHTTPInverseRelocation{
 						SourceEntryName: rec.SourceEntryName,
 						TargetEntryName: targetEntryName,
 						Target: clients.MCPEntry{
@@ -630,7 +653,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 							ToolTimeoutSec: binding.ToolTimeoutSec,
 						},
 						SourceSnapshot: sourceSnapshot,
-					})
+					}, snapshot, clientRec.SnapshotSHA256)
 				}
 			} else {
 				mutationErr = mutator.CASRestoreEntryFromBytes(targetEntryName, match, snapshot)
@@ -914,6 +937,9 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 // client/manifest teardown: entry into this path proves that no ordinary adopt
 // commit may be inferred from the receipt.
 func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts ExecuteDeAdoptOpts, w io.Writer) (*DeAdoptReport, error) {
+	if rec != nil && rec.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if rec == nil || rec.ProviderSource == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -922,6 +948,9 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 		return nil, fmt.Errorf("de-adopt provider recovery: resolve manifest root: %w", err)
 	}
 	current, found, err := ReadAdoptProvenance(rec.ManifestName)
+	if current != nil && current.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if err != nil || !found || current.OperationState != AdoptOperationStateDeAdopting || current.ProviderSource == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}

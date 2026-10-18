@@ -114,6 +114,7 @@ type upgradeGUIObservationInputs struct {
 	SupervisorOwner  func(string) (api.SupervisorLockOwner, error)
 	TaskActions      func(context.Context, string) ([]upgradeGUITaskAction, error)
 	PortOwners       func(context.Context, string, string, int) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error)
+	PendingRuntime   *pendingRuntimeReceiving
 }
 
 func (in upgradeGUIObservationInputs) complete() bool {
@@ -207,6 +208,10 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 			frozen = append(frozen, windowsProductIntentPortV1{TaskName: daemon.TaskName, Port: port, ArgvSHA256: windowsProductArgvSHA256(append([]string{daemon.Command}, daemon.Args...))})
 		}
 	}
+	return captureUpgradeGUIPortOwnersFromSnapshot(ctx, target, supervisorPID, sha256.Sum256(raw), frozen, in, portOwner, commandIdentities)
+}
+
+func captureUpgradeGUIPortOwnersFromSnapshot(ctx context.Context, target string, supervisorPID int, intentHash [32]byte, frozen []windowsProductIntentPortV1, in upgradeGUIObservationInputs, portOwner func(context.Context, int) (int, bool, error), commandIdentities func(context.Context, []int) (map[int]process.ProcessIdentity, error)) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error) {
 	observed, anchors, err := observeWindowsProductIntentPortsWithInputs(ctx, target, frozen, false, portOwner, in.CurrentIdentity)
 	if err != nil {
 		return [32]byte{}, nil, nil, err
@@ -226,7 +231,7 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 	}
 	identities, err := commandIdentities(ctx, pids)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return [32]byte{}, nil, nil, ctxErr
+		return [32]byte{}, nil, nil, errors.Join(err, ctxErr)
 	}
 	if err != nil {
 		return [32]byte{}, nil, nil, err
@@ -251,7 +256,7 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 			}
 			handleID, err := in.CurrentIdentity(row.PrePID)
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return [32]byte{}, nil, nil, ctxErr
+				return [32]byte{}, nil, nil, errors.Join(err, ctxErr)
 			}
 			if err != nil {
 				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d generation unverifiable: %w", owner.Port, err)
@@ -265,7 +270,7 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 			}
 			owner.ParentPID, err = in.ParentPID(row.PrePID)
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return [32]byte{}, nil, nil, ctxErr
+				return [32]byte{}, nil, nil, errors.Join(err, ctxErr)
 			}
 			if err != nil {
 				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d parent differs: %w", owner.Port, err)
@@ -278,7 +283,7 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 			}
 			sameUser, err := in.SIDMatches(row.PrePID)
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return [32]byte{}, nil, nil, ctxErr
+				return [32]byte{}, nil, nil, errors.Join(err, ctxErr)
 			}
 			if err != nil {
 				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d user identity differs: %w", owner.Port, err)
@@ -292,15 +297,21 @@ func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target
 	if err := ctx.Err(); err != nil {
 		return [32]byte{}, nil, nil, err
 	}
-	return sha256.Sum256(raw), frozen, owners, nil
+	return intentHash, frozen, owners, nil
 }
 
 func verifyUpgradeGUIHeldIdentity(held process.HeldPIDIdentity, pid int, target string, startedAt time.Time, lookupCurrent func(int) (process.PIDHandleIdentity, error)) (process.PIDHandleIdentity, error) {
 	handleID, err := held.Identity()
+	if pendingRuntimeStopsRecovery(err) {
+		return process.PIDHandleIdentity{}, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: held identity cleanup unconfirmed: %w", err)
+	}
 	if err != nil || handleID.PID != pid || !samePath(handleID.ExecutablePath, target) || (!startedAt.IsZero() && !handleID.StartedAt.Equal(startedAt.UTC())) {
 		return process.PIDHandleIdentity{}, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: held process generation differs from recorded identity: %v", err)
 	}
 	current, err := lookupCurrent(pid)
+	if pendingRuntimeStopsRecovery(err) {
+		return process.PIDHandleIdentity{}, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: current identity cleanup unconfirmed: %w", err)
+	}
 	if err != nil || current.PID != handleID.PID || !samePath(current.ExecutablePath, handleID.ExecutablePath) || !current.StartedAt.Equal(handleID.StartedAt) {
 		return process.PIDHandleIdentity{}, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: PID differs from held generation: %v", err)
 	}
@@ -321,6 +332,9 @@ func holdUpgradeGUIRole(ctx context.Context, pid int, target string, startedAt t
 	}
 	held, err := in.HoldTermination(pid)
 	if err != nil {
+		if held != nil && in.PendingRuntime != nil {
+			err = pendingRuntimeCloseError(err, in.PendingRuntime, held.Close())
+		}
 		return result, nil, err
 	}
 	if held == nil {
@@ -329,7 +343,12 @@ func holdUpgradeGUIRole(ctx context.Context, pid int, target string, startedAt t
 	owned := held
 	defer func() {
 		if retErr != nil {
-			retErr = errors.Join(retErr, owned.Close())
+			closeErr := owned.Close()
+			if in.PendingRuntime != nil {
+				retErr = pendingRuntimeCloseError(retErr, in.PendingRuntime, closeErr)
+			} else {
+				retErr = errors.Join(retErr, closeErr)
+			}
 			held = nil
 		}
 	}()
@@ -338,14 +357,14 @@ func holdUpgradeGUIRole(ctx context.Context, pid int, target string, startedAt t
 	}
 	handleID, err := heldUpgradeGUIIdentity(held, pid, target, startedAt, in.CurrentIdentity)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return result, nil, fmt.Errorf("%s kernel image identity: %w", role, ctxErr)
+		return result, nil, fmt.Errorf("%s kernel image identity: %w", role, errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return result, nil, fmt.Errorf("%s kernel image identity: %w", role, err)
 	}
 	observed, err := in.CommandIdentity(ctx, pid)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return result, nil, fmt.Errorf("%s command generation differs: %w", role, ctxErr)
+		return result, nil, fmt.Errorf("%s command generation differs: %w", role, errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return result, nil, fmt.Errorf("%s command generation differs: %w", role, err)
@@ -363,7 +382,7 @@ func holdUpgradeGUIRole(ctx context.Context, pid int, target string, startedAt t
 	}
 	sameUser, err := in.SIDMatches(pid)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return result, nil, fmt.Errorf("%s user identity differs: %w", role, ctxErr)
+		return result, nil, fmt.Errorf("%s user identity differs: %w", role, errors.Join(err, ctxErr))
 	}
 	if err != nil || !sameUser {
 		return result, nil, fmt.Errorf("%s user identity differs: %v", role, err)
@@ -484,7 +503,7 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	}
 	detail, err := in.CommandIdentity(ctx, owner.PID)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", ctxErr)
+		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", err)
@@ -527,7 +546,7 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	}
 	held.IntentHash, held.FrozenPorts, held.PortOwners, err = in.PortOwners(ctx, stateDir, target, owner.PID)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners: %w", ctxErr)
+		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners: %w", errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed listener preimage: %w", err)
@@ -573,7 +592,7 @@ func recheckUpgradeGUISupervisorAndInputs(ctx context.Context, held *upgradeGUIH
 	}
 	detail, err := in.CommandIdentity(ctx, owner.PID)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", ctxErr)
+		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", err)
@@ -590,7 +609,7 @@ func recheckUpgradeGUISupervisorAndInputs(ctx context.Context, held *upgradeGUIH
 	}
 	intentHash, frozen, ports, err := in.PortOwners(ctx, held.StateDir, held.Identity.Target, owner.PID)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %w", ctxErr)
+		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %w", errors.Join(err, ctxErr))
 	}
 	if err != nil {
 		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %w", err)
@@ -744,7 +763,11 @@ func (h *upgradeGUIHeldTopology) Close() error {
 	if h.Supervisor != nil {
 		errs = append(errs, h.Supervisor.Close())
 	}
-	return errors.Join(errs...)
+	closeErr := errors.Join(errs...)
+	if h.inputs.PendingRuntime != nil {
+		return pendingRuntimeCloseError(nil, h.inputs.PendingRuntime, closeErr)
+	}
+	return closeErr
 }
 
 type upgradeGUIExitOps struct {
@@ -925,6 +948,13 @@ func validateUpgradeGUIOwnedPriorHealth(journal windowsProductRecoveryJournalV3,
 	if err := validateGUIOwnedIndependentFleet(journal, held.FrozenPorts, held.PortOwners, held.Identity.Supervisor.PID); err != nil {
 		return fmt.Errorf("UPGRADE_GUI_PAIR_RECOVERY_UNCONFIRMED: %w", err)
 	}
+	return validateGUIOwnedPriorTasks(journal, held.TaskActions)
+}
+
+func validateGUIOwnedPriorTasks(journal windowsProductRecoveryJournalV3, actions []upgradeGUITaskAction) error {
+	if len(journal.Tasks.Backups) != len(actions) {
+		return errors.New("UPGRADE_GUI_PAIR_RECOVERY_UNCONFIRMED: task population differs")
+	}
 	backups := make(map[string]string, len(journal.Tasks.Backups))
 	for _, backup := range journal.Tasks.Backups {
 		if _, exists := backups[backup.TaskName]; exists {
@@ -932,7 +962,7 @@ func validateUpgradeGUIOwnedPriorHealth(journal windowsProductRecoveryJournalV3,
 		}
 		backups[backup.TaskName] = backup.SHA256
 	}
-	for _, action := range held.TaskActions {
+	for _, action := range actions {
 		want, exists := backups[action.Name]
 		if !exists || want != hex.EncodeToString(action.XMLSHA256[:]) {
 			return errors.New("UPGRADE_GUI_PAIR_RECOVERY_UNCONFIRMED: exact task XML differs")
@@ -958,7 +988,7 @@ func validateGUIOwnedIndependentFleet(journal windowsProductRecoveryJournalV3, o
 		}
 		pre[key] = row
 	}
-	want := make(map[string]windowsProductFrozenPortV3, len(journal.FrozenPorts))
+	want := make(map[string]api.SupervisorFrozenPort, len(journal.FrozenPorts))
 	for _, row := range journal.FrozenPorts {
 		key := fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)
 		if _, exists := want[key]; exists {
@@ -1012,19 +1042,47 @@ func acquireGUIOwnedPriorReservation(ctx context.Context, owned gui.OwnedSingleI
 		return nil, fmt.Errorf("%w: GUI absence/reservation owner is incomplete", ErrWindowsProductRecoveryPending)
 	}
 	if err := ops.ProveNoGUIOrTray(ctx); err != nil {
-		return nil, fmt.Errorf("%w: exact GUI/tray absence unproven: %v", ErrWindowsProductRecoveryPending, err)
+		return nil, &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIReservationFirstAbsence,
+			cause: fmt.Errorf("%w: exact GUI/tray absence unproven: %w", ErrWindowsProductRecoveryPending, err)}
 	}
 	if owned != nil {
 		return owned, nil
 	}
 	lease, err := ops.AcquireExact()
 	if err != nil || lease == nil {
-		return nil, fmt.Errorf("%w: exact GUI reservation unavailable: %v", ErrWindowsProductRecoveryPending, err)
+		return nil, &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIReservationAcquireExact,
+			cause: errors.Join(fmt.Errorf("%w: exact GUI reservation unavailable", ErrWindowsProductRecoveryPending), err)}
 	}
 	if err := ops.ProveNoGUIOrTray(ctx); err != nil {
-		return nil, errors.Join(fmt.Errorf("%w: GUI/tray appeared during reservation: %v", ErrWindowsProductRecoveryPending, err), lease.ReleaseErr())
+		releaseErr := lease.ReleaseErr()
+		return nil, &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIReservationSecondAbsence,
+			cause:              errors.Join(fmt.Errorf("%w: GUI/tray appeared during reservation: %w", ErrWindowsProductRecoveryPending, err), releaseErr),
+			reservationRelease: releaseErr}
 	}
 	return lease, nil
+}
+
+// The GUI record owns state interpretation; this existing consumer operation
+// owns only the original active endpoint observation after GUI/tray absence.
+func proveUpgradeGUIOwnerEndpointAbsent(ctx context.Context, record gui.GUIOwnerRecord, observe func(context.Context, int) (int, bool, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	port, terminal, err := record.ReservationEndpoint()
+	if err != nil {
+		return err
+	}
+	if terminal {
+		return nil
+	}
+	pid, bound, err := observe(ctx, port)
+	if err != nil {
+		return err
+	}
+	if bound {
+		return fmt.Errorf("GUI listener port remains bound by PID %d", pid)
+	}
+	return nil
 }
 
 func readbackGUIOwnedPriorProduct(journal windowsProductRecoveryJournalV3) error {
@@ -1065,29 +1123,123 @@ type guiOwnedPriorRecoveryOps struct {
 	SupervisorState     func(context.Context, windowsProductRecoveryJournalV3) (guiOwnedPriorSupervisorState, error)
 	SettleSame          func(context.Context, windowsProductRecoveryJournalV3) error
 	ProveAbsent         func(context.Context, windowsProductRecoveryJournalV3) error
-	StartSupervisor     func() error
+	StartSupervisor     func() (SupervisorLaunch, error)
+	SupervisorExpected  SupervisorControlExpectation
 	WaitSupervisorReady func(context.Context) error
 	ProveIndependent    func(context.Context, windowsProductRecoveryJournalV3) error
 	StartGUI            func() error
 	PollInterval        time.Duration
 }
 
+type upgradeGUIPriorOperation string
+
+const (
+	upgradeGUIPriorInput              upgradeGUIPriorOperation = "INPUT"
+	upgradeGUIPriorReadback           upgradeGUIPriorOperation = "READBACK"
+	upgradeGUIPriorReservation        upgradeGUIPriorOperation = "RESERVATION"
+	upgradeGUIPriorSupervisorState    upgradeGUIPriorOperation = "SUPERVISOR_STATE"
+	upgradeGUIPriorSettleSame         upgradeGUIPriorOperation = "SETTLE_SAME"
+	upgradeGUIPriorAbsence            upgradeGUIPriorOperation = "ABSENCE"
+	upgradeGUIPriorSupervisorStart    upgradeGUIPriorOperation = "SUPERVISOR_START"
+	upgradeGUIPriorControl            upgradeGUIPriorOperation = "CONTROL"
+	upgradeGUIPriorReadiness          upgradeGUIPriorOperation = "READINESS"
+	upgradeGUIPriorIndependentFleet   upgradeGUIPriorOperation = "INDEPENDENT_FLEET"
+	upgradeGUIPriorReservationRelease upgradeGUIPriorOperation = "RESERVATION_RELEASE"
+	upgradeGUIPriorGUIStart           upgradeGUIPriorOperation = "GUI_START"
+	upgradeGUIPriorFinalReadback      upgradeGUIPriorOperation = "FINAL_READBACK"
+	upgradeGUIPriorFinalHealth        upgradeGUIPriorOperation = "FINAL_HEALTH"
+	upgradeGUIPriorHandoff            upgradeGUIPriorOperation = "HANDOFF"
+)
+
+func isUpgradeGUIPriorOperation(operation upgradeGUIPriorOperation) bool {
+	switch operation {
+	case upgradeGUIPriorInput, upgradeGUIPriorReadback, upgradeGUIPriorReservation,
+		upgradeGUIPriorSupervisorState, upgradeGUIPriorSettleSame, upgradeGUIPriorAbsence,
+		upgradeGUIPriorSupervisorStart, upgradeGUIPriorControl, upgradeGUIPriorReadiness,
+		upgradeGUIPriorIndependentFleet, upgradeGUIPriorReservationRelease, upgradeGUIPriorGUIStart,
+		upgradeGUIPriorFinalReadback, upgradeGUIPriorFinalHealth, upgradeGUIPriorHandoff:
+		return true
+	default:
+		return false
+	}
+}
+
+type upgradeGUIPriorReservationStep string
+
+const (
+	upgradeGUIReservationFirstAbsence  upgradeGUIPriorReservationStep = "FIRST_ABSENCE"
+	upgradeGUIReservationAcquireExact  upgradeGUIPriorReservationStep = "ACQUIRE_EXACT"
+	upgradeGUIReservationSecondAbsence upgradeGUIPriorReservationStep = "SECOND_ABSENCE"
+)
+
+func isUpgradeGUIPriorReservationStep(step upgradeGUIPriorReservationStep) bool {
+	switch step {
+	case upgradeGUIReservationFirstAbsence, upgradeGUIReservationAcquireExact, upgradeGUIReservationSecondAbsence:
+		return true
+	default:
+		return false
+	}
+}
+
+// The terminal chain keeps its primary and cleanup ordering. Health observations
+// are prerequisites retained only when the fallback ultimately fails.
+type upgradeGUIPriorSettlementError struct {
+	reservationStep           upgradeGUIPriorReservationStep
+	reservationRelease        error
+	operation                 upgradeGUIPriorOperation
+	cause                     error
+	initialHealth, lastHealth error
+}
+
+func (*upgradeGUIPriorSettlementError) Error() string {
+	return "E_WINDOWS_PRODUCT_RECOVERY_PENDING: prior GUI settlement unconfirmed"
+}
+func (upgradeGUIPriorSettlementError) String() string {
+	return "prior GUI settlement diagnostic (private)"
+}
+func (e upgradeGUIPriorSettlementError) GoString() string { return e.String() }
+func (e *upgradeGUIPriorSettlementError) Unwrap() []error {
+	if e == nil {
+		return nil
+	}
+	return []error{e.cause, e.initialHealth, e.lastHealth}
+}
+
 func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsProductRecoveryJournalV3, ops guiOwnedPriorRecoveryOps) (retErr error) {
+	operation := upgradeGUIPriorInput
+	var initialHealth, lastHealth error
+	defer func() {
+		if retErr != nil {
+			diagnostic := &upgradeGUIPriorSettlementError{operation: operation, cause: retErr, initialHealth: initialHealth, lastHealth: lastHealth}
+			var reservation *upgradeGUIPriorSettlementError
+			if operation == upgradeGUIPriorReservation && errors.As(retErr, &reservation) && reservation.operation == upgradeGUIPriorReservation {
+				diagnostic.reservationStep = reservation.reservationStep
+				diagnostic.reservationRelease = reservation.reservationRelease
+			}
+			retErr = diagnostic
+		}
+	}()
 	if ctx == nil || journal.PreSettlement == nil || journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent ||
 		ops.Readback == nil || ops.ObserveHealthy == nil || ops.Reservation == nil || ops.SupervisorState == nil ||
 		ops.SettleSame == nil || ops.ProveAbsent == nil || ops.StartSupervisor == nil ||
 		ops.WaitSupervisorReady == nil || ops.ProveIndependent == nil || ops.StartGUI == nil {
 		return fmt.Errorf("%w: GUI-owned prior recovery inputs are incomplete", ErrWindowsProductRecoveryPending)
 	}
+	operation = upgradeGUIPriorReadback
 	if err := ops.Readback(journal); err != nil {
-		return fmt.Errorf("%w: prior Product or receipt readback: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: prior Product or receipt readback: %w", ErrWindowsProductRecoveryPending, err)
 	}
-	if err := ops.ObserveHealthy(ctx, journal); err == nil {
+	initialHealth = ops.ObserveHealthy(ctx, journal)
+	if initialHealth == nil {
 		return nil
 	}
+	if pendingRuntimeStopsRecovery(initialHealth) {
+		return initialHealth
+	}
+	operation = upgradeGUIPriorReservation
 	lease, err := ops.Reservation(ctx)
 	if err != nil || lease == nil {
-		return fmt.Errorf("%w: GUI absence/reservation unproven: %v", ErrWindowsProductRecoveryPending, err)
+		return errors.Join(fmt.Errorf("%w: GUI absence/reservation unproven", ErrWindowsProductRecoveryPending), err)
 	}
 	released := false
 	defer func() {
@@ -1095,33 +1247,53 @@ func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsP
 			retErr = errors.Join(retErr, lease.ReleaseErr())
 		}
 	}()
+	operation = upgradeGUIPriorSupervisorState
 	state, err := ops.SupervisorState(ctx, journal)
 	if err != nil || (state != guiOwnedPriorSupervisorSame && state != guiOwnedPriorSupervisorAbsent) {
-		return fmt.Errorf("%w: original supervisor state is ambiguous: %v", ErrWindowsProductRecoveryPending, err)
+		return errors.Join(fmt.Errorf("%w: original supervisor state is ambiguous", ErrWindowsProductRecoveryPending), err)
 	}
 	if state == guiOwnedPriorSupervisorSame {
+		operation = upgradeGUIPriorSettleSame
 		if err := ops.SettleSame(ctx, journal); err != nil {
-			return fmt.Errorf("%w: exact original supervisor reap unconfirmed: %v", ErrWindowsProductRecoveryPending, err)
+			return fmt.Errorf("%w: exact original supervisor reap unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
 		}
 	}
+	operation = upgradeGUIPriorAbsence
 	if err := ops.ProveAbsent(ctx, journal); err != nil {
-		return fmt.Errorf("%w: prior supervisor lock/ports remain: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: prior supervisor lock/ports remain: %w", ErrWindowsProductRecoveryPending, err)
 	}
-	if err := ops.StartSupervisor(); err != nil {
-		return fmt.Errorf("%w: independent prior supervisor start unconfirmed: %v", ErrWindowsProductRecoveryPending, err)
+	operation = upgradeGUIPriorSupervisorStart
+	launch, startErr := ops.StartSupervisor()
+	if startErr != nil || launch == nil {
+		return errors.Join(fmt.Errorf("%w: independent prior supervisor start unconfirmed: %w", ErrWindowsProductRecoveryPending, errors.Join(startErr, missingSupervisorLaunch(launch))), abortStartedSupervisor(launch))
 	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			retErr = errors.Join(retErr, abortStartedSupervisor(launch))
+		}
+	}()
+	operation = upgradeGUIPriorControl
+	binding, err := launch.BindControl(ctx, ops.SupervisorExpected)
+	if err != nil {
+		return fmt.Errorf("%w: prior supervisor control unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
+	}
+	operation = upgradeGUIPriorReadiness
 	if err := ops.WaitSupervisorReady(ctx); err != nil {
-		return fmt.Errorf("%w: prior supervisor readiness unconfirmed: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: prior supervisor readiness unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
 	}
+	operation = upgradeGUIPriorIndependentFleet
 	if err := ops.ProveIndependent(ctx, journal); err != nil {
-		return fmt.Errorf("%w: independent prior fleet health unconfirmed: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: independent prior fleet health unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
 	}
+	operation = upgradeGUIPriorReservationRelease
 	if err := lease.ReleaseErr(); err != nil {
-		return fmt.Errorf("%w: release GUI reservation before canonical task: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: release GUI reservation before canonical task: %w", ErrWindowsProductRecoveryPending, err)
 	}
 	released = true
+	operation = upgradeGUIPriorGUIStart
 	if err := ops.StartGUI(); err != nil {
-		return fmt.Errorf("%w: start canonical GUI task: %v", ErrWindowsProductRecoveryPending, err)
+		return fmt.Errorf("%w: start canonical GUI task: %w", ErrWindowsProductRecoveryPending, err)
 	}
 	interval := ops.PollInterval
 	if interval <= 0 {
@@ -1135,17 +1307,33 @@ func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsP
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var lastObservation error
 	for {
-		if err := ops.Readback(journal); err == nil {
+		operation = upgradeGUIPriorFinalReadback
+		if readbackErr := ops.Readback(journal); readbackErr == nil {
+			operation = upgradeGUIPriorFinalHealth
 			if healthErr := ops.ObserveHealthy(limit, journal); healthErr == nil {
+				operation = upgradeGUIPriorHandoff
+				if err := launch.Handoff(limit, binding); err != nil {
+					return fmt.Errorf("%w: prior supervisor managed handoff: %w", ErrWindowsProductRecoveryPending, err)
+				}
+				handedOff = true
 				return nil
 			} else {
-				err = healthErr
+				lastHealth, lastObservation = healthErr, healthErr
+				if pendingRuntimeStopsRecovery(healthErr) {
+					return healthErr
+				}
+			}
+		} else {
+			lastObservation = readbackErr
+			if pendingRuntimeStopsRecovery(readbackErr) {
+				return readbackErr
 			}
 		}
 		select {
 		case <-limit.Done():
-			return fmt.Errorf("%w: prior GUI/fleet readback remained unconfirmed: %v: %w", ErrWindowsProductRecoveryPending, err, limit.Err())
+			return fmt.Errorf("%w: prior GUI/fleet readback remained unconfirmed: %w", ErrWindowsProductRecoveryPending, errors.Join(lastObservation, limit.Err()))
 		case <-ticker.C:
 		}
 	}
@@ -1344,7 +1532,24 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 	}
 	var guiLease gui.OwnedSingleInstanceLease
 	completionText := ""
+	projectCurrentAutorunOff := func() error {
+		return (&api.API{}).WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+			if control.AutorunEnabled == nil || *control.AutorunEnabled {
+				return nil
+			}
+			backend, err := autostartBackendFactoryFn()
+			if err != nil {
+				return err
+			}
+			return autostart.ProjectAutorunDisabled(control.AutorunEnabled, backend, autostart.Options{MCPHubPath: target})
+		})
+	}
 	defer func() {
+		// All later transaction/rollback/task-close defers have unwound. Apply
+		// current OFF before releasing the outer exclusion or reporting success.
+		if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
+		}
 		if guiLease != nil {
 			if releaseErr := guiLease.ReleaseErr(); releaseErr != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_GUI_LEASE_RELEASE_UNCONFIRMED: %w", releaseErr))
@@ -1425,7 +1630,7 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 	} else {
 		settled, err := reconcileWiredWindowsProductRecovery(windowsProductRecoveryRuntimeRequest(ctx, stateDir, target, legacyWindowlessTarget))
 		if err != nil {
-			return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", err)
+			return ordinaryWindowsProductRecoveryError(err)
 		}
 		if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
 			return nil
@@ -1548,8 +1753,12 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 				}
 				return releaseErr
 			})
+			// The temporary lease handoff above is needed to start/prove RUNNING.
+			// Reconcile OFF only after that proof returns, while the outer fence
+			// remains held; preserve both the original proof and policy outcomes.
+			err = errors.Join(err, projectCurrentAutorunOff())
 			if err != nil {
-				return digest, fmt.Errorf("%w: GUI/tray forward proof: %v", ErrWindowsProductRecoveryPending, err)
+				return digest, fmt.Errorf("%w: GUI/tray forward proof: %w", ErrWindowsProductRecoveryPending, err)
 			}
 			return digest, nil
 		}
@@ -1615,6 +1824,7 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 	}
 	txnErr := runInstallUpgradeWindowsFn(ctx, UpgradeOpts{
 		WindowsProduct:    productTxn,
+		StateDir:          stateDir,
 		GUIOwnedPending:   pairOptIn,
 		OnProductPrepared: onProductPrepared,
 		WindowsProductPairLifecycle: &windowsProductPairLifecycleHooks{
@@ -2018,7 +2228,7 @@ func observeWindowsProductIntentPortsWithInputs(ctx context.Context, target stri
 		}
 		pid, bound, err := portOwner(ctx, intent.Port)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			return nil, nil, errors.Join(err, ctxErr)
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("probe frozen intent port %s/%d: %w", intent.TaskName, intent.Port, err)
@@ -2039,7 +2249,7 @@ func observeWindowsProductIntentPortsWithInputs(ctx context.Context, target stri
 		}
 		identity, err := nativeIdentity(pid)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			return nil, nil, errors.Join(err, ctxErr)
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve frozen intent port %s/%d owner PID %d: %w", intent.TaskName, intent.Port, pid, err)
@@ -2202,6 +2412,7 @@ func buildV5UpgradeDeps(canonicalTarget, stateDir string) *v5UpgradeDeps {
 		pipePath:            api.SupervisorIPCAddress(stateDir),
 		readSupervisorOwner: api.ReadSupervisorLockOwner,
 		sendIPC:             sendIPCWithResponse,
+		sendIPCPeer:         sendIPCWithResponseForPeer,
 	}
 }
 
@@ -2233,12 +2444,297 @@ func windowsProductPairRecoveryRuntimeRequest(ctx context.Context, stateDir, cli
 	}
 }
 
+type pendingRuntimeCause string
+
+const (
+	pendingRuntimeUnavailable pendingRuntimeCause = "CURRENT_TARGET_UNAVAILABLE"
+	pendingRuntimeInvalid     pendingRuntimeCause = "CURRENT_TARGET_INVALID"
+	pendingRuntimeChanged     pendingRuntimeCause = "CURRENT_INTENT_CHANGED"
+	pendingRuntimeMismatch    pendingRuntimeCause = "CURRENT_TARGET_MISMATCH"
+	pendingRuntimeMaterial    pendingRuntimeCause = "PRIOR_MATERIAL_MISMATCH"
+	pendingRuntimeReadiness   pendingRuntimeCause = "PRIOR_READINESS_FAILED"
+	pendingRuntimeHistorical  pendingRuntimeCause = "HISTORICAL_COHORT_UNCONFIRMED"
+	pendingRuntimeCleanup     pendingRuntimeCause = "RUNTIME_CLEANUP_FAILED"
+)
+
+type pendingRuntimeReceiving struct {
+	intentSHA256, stopSHA256, guiSHA256 string
+	generation                          uint64
+	observedAt                          time.Time
+}
+
+func (r *pendingRuntimeReceiving) projection() string {
+	if r == nil || !validLowerHexSHA256(r.intentSHA256) || !validLowerHexSHA256(r.stopSHA256) || !validLowerHexSHA256(r.guiSHA256) || r.observedAt.IsZero() {
+		return "; runtime_basis=current-intent; runtime_snapshot=UNAVAILABLE"
+	}
+	return fmt.Sprintf("; runtime_basis=current-intent; runtime_intent_sha256=%s; runtime_stop_sha256=%s; runtime_gui_sha256=%s; runtime_intent_generation=%d; runtime_observed_at=%s", r.intentSHA256, r.stopSHA256, r.guiSHA256, r.generation, r.observedAt.UTC().Format(time.RFC3339Nano))
+}
+
+type pendingRuntimeError struct {
+	kind      pendingRuntimeCause
+	receiving *pendingRuntimeReceiving
+	cause     error
+}
+
+func (e *pendingRuntimeError) Error() string {
+	return "E_WINDOWS_PRODUCT_RECOVERY_PENDING: " + currentPendingRuntimeStage + pendingRuntimeProjection(e, e.receiving)
+}
+func (e *pendingRuntimeError) GoString() string { return e.Error() }
+func (e *pendingRuntimeError) Unwrap() error {
+	return errors.Join(ErrWindowsProductRecoveryPending, e.cause)
+}
+
+// Closed cause values are standard errors.Is targets; matching traverses every
+// retained Join branch instead of selecting the first error of this type.
+func (kind pendingRuntimeCause) Error() string { return string(kind) }
+func (e *pendingRuntimeError) Is(target error) bool {
+	kind, ok := target.(pendingRuntimeCause)
+	return ok && e != nil && e.kind == kind
+}
+
+func pendingRuntimeFailure(kind pendingRuntimeCause, receiving *pendingRuntimeReceiving, cause error) error {
+	return &pendingRuntimeError{kind: kind, receiving: receiving, cause: cause}
+}
+
+func pendingRuntimeStopsRecovery(err error) bool {
+	return errors.Is(err, pendingRuntimeChanged) || errors.Is(err, pendingRuntimeCleanup)
+}
+
+// The acquiring owner retains the primary first and classifies actual cleanup
+// before any higher-level wrapper can obscure its fatal meaning.
+func pendingRuntimeCloseError(primary error, receiving *pendingRuntimeReceiving, cleanup error) error {
+	if cleanup == nil {
+		return primary
+	}
+	if !errors.Is(cleanup, pendingRuntimeCleanup) {
+		cleanup = pendingRuntimeFailure(pendingRuntimeCleanup, receiving, cleanup)
+	}
+	return errors.Join(primary, cleanup)
+}
+
+type pendingRuntimeExpectation struct {
+	intent     *api.SupervisorRuntimeIntent
+	receiving  *pendingRuntimeReceiving
+	now        func() time.Time
+	observe    func(context.Context, time.Time) (*api.SupervisorRuntimeIntent, error)
+	observeGUI func() (api.GUIOwnerControl, error)
+}
+
+func pendingGUIControlSnapshot() (api.GUIOwnerControl, error) {
+	var control api.GUIOwnerControl
+	err := api.NewAPI().WithGUIOwnerControl(func(current api.GUIOwnerControl) error {
+		control = current
+		if current.AutorunEnabled != nil {
+			enabled := *current.AutorunEnabled
+			control.AutorunEnabled = &enabled
+		}
+		return nil
+	})
+	return control, err
+}
+
+func capturePendingRuntimeExpectation(ctx context.Context, now func() time.Time, observe func(context.Context, time.Time) (*api.SupervisorRuntimeIntent, error), observeGUI func() (api.GUIOwnerControl, error), receiving *pendingRuntimeReceiving) (*pendingRuntimeExpectation, error) {
+	if ctx == nil || now == nil || observe == nil || observeGUI == nil || receiving == nil {
+		return nil, pendingRuntimeFailure(pendingRuntimeUnavailable, receiving, nil)
+	}
+	// Settings is observed and released before acquiring intent; no lock spans IPC.
+	control, err := observeGUI()
+	if err != nil {
+		return nil, pendingRuntimeFailure(pendingRuntimeUnavailable, receiving, err)
+	}
+	intent, err := observe(ctx, now())
+	if errors.Is(err, api.ErrSupervisorRuntimeIntentUnavailable) {
+		return nil, pendingRuntimeFailure(pendingRuntimeUnavailable, receiving, err)
+	}
+	if err != nil || intent == nil {
+		return nil, pendingRuntimeFailure(pendingRuntimeInvalid, receiving, err)
+	}
+	if !validLowerHexSHA256(intent.SHA256) || !validLowerHexSHA256(intent.StopSHA256) || intent.Ports == nil || intent.ObservedAt.IsZero() {
+		return nil, pendingRuntimeFailure(pendingRuntimeInvalid, receiving, nil)
+	}
+	guiRaw, err := json.Marshal(control)
+	if err != nil {
+		return nil, pendingRuntimeFailure(pendingRuntimeInvalid, receiving, err)
+	}
+	guiHash := sha256.Sum256(guiRaw)
+	*receiving = pendingRuntimeReceiving{intentSHA256: intent.SHA256, stopSHA256: intent.StopSHA256, guiSHA256: hex.EncodeToString(guiHash[:]), generation: intent.Generation, observedAt: intent.ObservedAt}
+	if err := control.ValidateAutomaticStart(); err != nil {
+		return nil, pendingRuntimeFailure(pendingRuntimeMismatch, receiving, err)
+	}
+	return &pendingRuntimeExpectation{intent: intent, receiving: receiving, now: now, observe: observe, observeGUI: observeGUI}, nil
+}
+
+func (e *pendingRuntimeExpectation) validate(ctx context.Context) error {
+	if e == nil || e.intent == nil || e.receiving == nil {
+		return pendingRuntimeFailure(pendingRuntimeUnavailable, nil, nil)
+	}
+	current, err := capturePendingRuntimeExpectation(ctx, e.now, e.observe, e.observeGUI, new(pendingRuntimeReceiving))
+	if err != nil {
+		return pendingRuntimeFailure(pendingRuntimeChanged, e.receiving, err)
+	}
+	if e.receiving.intentSHA256 != current.receiving.intentSHA256 || e.receiving.stopSHA256 != current.receiving.stopSHA256 || e.receiving.guiSHA256 != current.receiving.guiSHA256 || e.receiving.generation != current.receiving.generation {
+		return pendingRuntimeFailure(pendingRuntimeChanged, e.receiving, nil)
+	}
+	return nil
+}
+
+func (e *pendingRuntimeExpectation) validateFleet(observed []windowsProductIntentPortV1, owners []upgradeGUIPortOwner, supervisorPID int) error {
+	if e == nil || e.receiving == nil {
+		return pendingRuntimeFailure(pendingRuntimeUnavailable, nil, nil)
+	}
+	if e.intent == nil || supervisorPID <= 0 || len(e.intent.Ports) != len(observed) || len(observed) != len(owners) {
+		return pendingRuntimeFailure(pendingRuntimeMismatch, e.receiving, nil)
+	}
+	want := make(map[string]api.SupervisorFrozenPort, len(e.intent.Ports))
+	for _, row := range e.intent.Ports {
+		want[row.TaskName] = row
+	}
+	for i, row := range observed {
+		expected, ok := want[row.TaskName]
+		owner := owners[i]
+		if !ok || expected.Port != row.Port || expected.ArgvSHA256 != row.ArgvSHA256 || owner.TaskName != row.TaskName || owner.Port != row.Port {
+			return pendingRuntimeFailure(pendingRuntimeMismatch, e.receiving, nil)
+		}
+		if e.intent.Stopped[row.TaskName] {
+			if owner.PID != 0 {
+				return pendingRuntimeFailure(pendingRuntimeMismatch, e.receiving, nil)
+			}
+		} else if owner.PID <= 0 || owner.StartedAt.IsZero() || owner.ParentPID != supervisorPID || owner.ArgvSHA256 != row.ArgvSHA256 {
+			return pendingRuntimeFailure(pendingRuntimeMismatch, e.receiving, nil)
+		}
+		delete(want, row.TaskName)
+	}
+	if len(want) != 0 {
+		return pendingRuntimeFailure(pendingRuntimeMismatch, e.receiving, nil)
+	}
+	return nil
+}
+
+// The existing query/synchronize owner separates failure to acquire from
+// identity or close failure. Only original OpenProcess absence with no acquired
+// resource is absence; a close error can never be reclassified as process exit.
+func lookupPendingHistoricalIdentity(pid int) (process.PIDHandleIdentity, error) {
+	return lookupPendingHistoricalIdentityWithHold(pid, process.HoldPIDForObservation)
+}
+
+func lookupPendingHistoricalIdentityWithHold(pid int, hold func(int) (process.HeldPIDObservation, error)) (process.PIDHandleIdentity, error) {
+	if pid <= 0 || hold == nil {
+		return process.PIDHandleIdentity{}, errors.New("historical PID/observation owner unavailable")
+	}
+	held, err := hold(pid)
+	if held == nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return process.PIDHandleIdentity{}, process.ErrProcessNotFound
+		}
+		return process.PIDHandleIdentity{}, errors.Join(err, errors.New("historical query handle unavailable"))
+	}
+	if err != nil {
+		return process.PIDHandleIdentity{}, pendingRuntimeCloseError(err, nil, held.Close())
+	}
+	identity, identityErr := held.Identity()
+	closeErr := held.Close()
+	if identityErr != nil || closeErr != nil {
+		return process.PIDHandleIdentity{}, pendingRuntimeCloseError(identityErr, nil, closeErr)
+	}
+	return identity, nil
+}
+
+// An old port becoming free is not a process-closure proof, nor is a later
+// occupant a stop target. A reused historical daemon PID without creation
+// evidence remains unknown. Only actual absent PIDs or the genuinely observed
+// original supervisor/current managed cohort can discharge these obligations.
+func validatePendingHistoricalCohort(ctx context.Context, journal windowsProductRecoveryJournalV3, supervisor api.SupervisorLockOwner, owners []upgradeGUIPortOwner, lookup func(int) (process.PIDHandleIdentity, error)) error {
+	if ctx == nil || journal.PreSettlement == nil || lookup == nil {
+		return errors.New("historical cohort observation unavailable")
+	}
+	// The original owner already acquired and bound closure before promotion.
+	// Reuse that receipt; later PID/port reuse cannot invalidate completed work.
+	if journal.PriorFleetReaped {
+		if err := validateWindowsProductRecoveryJournalV3(journal); err != nil {
+			return err
+		}
+		return nil
+	}
+	original := journal.PreSettlement.Supervisor.Generation
+	if original == nil {
+		return errors.New("historical supervisor generation unavailable")
+	}
+	originalStarted, parseErr := time.Parse(time.RFC3339Nano, original.StartedAt)
+	if parseErr != nil || originalStarted.IsZero() {
+		return errors.New("historical supervisor creation time unavailable")
+	}
+	for _, row := range journal.PreSettlement.Ports {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if row.PreState == windowsProductPortUnbound && row.PrePID == 0 {
+			continue
+		}
+		if row.PreState != windowsProductPortCanonicalOwned || row.PrePID <= 0 {
+			return errors.New("historical port state unavailable")
+		}
+		identity, err := lookup(row.PrePID)
+		if errors.Is(err, process.ErrProcessNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if identity.PID != row.PrePID || identity.StartedAt.IsZero() || identity.ExecutablePath == "" {
+			return errors.New("historical daemon native identity unavailable")
+		}
+		matched := false
+		if supervisor.PID == original.PID && supervisor.StartedAt == original.StartedAt {
+			for _, owner := range owners {
+				if owner.TaskName == row.TaskName && owner.Port == row.Port && owner.PID == identity.PID && owner.ParentPID == supervisor.PID && owner.StartedAt.Equal(identity.StartedAt) && samePath(identity.ExecutablePath, journal.Product.Target) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return errors.New("historical daemon generation or closure unconfirmed")
+		}
+	}
+	if supervisor.PID == original.PID && supervisor.StartedAt == original.StartedAt {
+		return nil
+	}
+	identity, err := lookup(original.PID)
+	if errors.Is(err, process.ErrProcessNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if identity.PID != original.PID || identity.StartedAt.IsZero() || identity.ExecutablePath == "" {
+		return errors.New("historical supervisor native identity unavailable")
+	}
+	if !identity.StartedAt.Equal(originalStarted) {
+		return nil
+	}
+	return errors.New("historical supervisor generation remains")
+}
+
 func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, productPath, legacyWindowlessPath string) windowsProductRecoveryRequest {
 	deps := buildV5UpgradeDeps(productPath, stateDir)
 	legacy := windowsProductPairRecoveryRuntimeRequest(ctx, stateDir, productPath, legacyWindowlessPath)
 	return windowsProductRecoveryRequest{
-		Context: ctx, StateDir: stateDir, ProductPath: productPath,
+		Context: ctx, StateDir: stateDir, ProductPath: productPath, PendingRuntime: new(pendingRuntimeReceiving),
 		LegacyWindowlessPath: legacyWindowlessPath, Legacy: legacy,
+		PreparePendingRuntime: func(ctx context.Context, journal windowsProductRecoveryJournalV3, receiving *pendingRuntimeReceiving) (func(context.Context, windowsProductRecoveryJournalV3) error, error) {
+			expectation, err := capturePendingRuntimeExpectation(ctx, time.Now, func(ctx context.Context, now time.Time) (*api.SupervisorRuntimeIntent, error) {
+				return api.ObserveSupervisorRuntimeIntent(ctx, filepath.Join(stateDir, "supervisor-intent.json"), now)
+			}, pendingGUIControlSnapshot, receiving)
+			if err != nil {
+				return nil, err
+			}
+			if journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent {
+				return nil, pendingRuntimeFailure(pendingRuntimeMismatch, receiving, errors.New("current runtime recovery requires its GUI-owned settlement owner"))
+			}
+			return func(ctx context.Context, journal windowsProductRecoveryJournalV3) error {
+				return recoverGUIOwnedPriorSettlementForExpectation(ctx, stateDir, productPath, journal, nil, expectation)
+			}, nil
+		},
 		Deps: windowsProductRecoveryDeps{PublishCommitted: func(event WindowsProductCommitEvent) (string, error) {
 			digest, err := windowsProductEventPublisher(stateDir)(event)
 			if err != nil {
@@ -2327,10 +2823,13 @@ func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, product
 						return err
 					}
 				}
-				if err := deps.StartSupervisor(productPath); err != nil {
-					return err
+				launch, err := deps.StartSupervisor(productPath)
+				if err != nil {
+					return errors.Join(err, abortStartedSupervisor(launch))
 				}
-				return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, productPath, UpgradeCandidateV1{SHA256: journal.Product.PriorSHA256})
+				return receiveStartedSupervisor(ctx, launch, supervisorExpectation(stateDir, productPath, journal.Product.PriorSHA256), func() error {
+					return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, productPath, UpgradeCandidateV1{SHA256: journal.Product.PriorSHA256})
+				})
 			default:
 				return fmt.Errorf("%w: unsupported prior supervisor state", ErrWindowsProductRecoveryIdentity)
 			}
@@ -2371,22 +2870,96 @@ func (r guiOwnedExactPriorReap) ForceKillSupervisor(string) error {
 }
 
 func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath string, journal windowsProductRecoveryJournalV3, ownedLease gui.OwnedSingleInstanceLease) error {
+	return recoverGUIOwnedPriorSettlementForExpectation(ctx, stateDir, productPath, journal, ownedLease, nil)
+}
+
+func recoverGUIOwnedPriorSettlementForExpectation(ctx context.Context, stateDir, productPath string, journal windowsProductRecoveryJournalV3, ownedLease gui.OwnedSingleInstanceLease, expectation *pendingRuntimeExpectation) error {
 	deps := buildV5UpgradeDeps(productPath, stateDir)
 	frozen := expandWindowsProductFrozenPorts(journal.FrozenPorts)
+	if expectation != nil {
+		frozen = expandWindowsProductFrozenPorts(expectation.intent.Ports)
+	}
+	observationInputs := productionUpgradeGUIObservationInputs()
+	if expectation != nil {
+		observationInputs.PendingRuntime = expectation.receiving
+		observationInputs.CurrentIdentity = lookupPendingHistoricalIdentity
+	}
+	capture := func(ctx context.Context, supervisorPID int) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error) {
+		if expectation == nil {
+			return captureUpgradeGUIPortOwners(ctx, stateDir, productPath, supervisorPID)
+		}
+		if err := expectation.validate(ctx); err != nil {
+			return [32]byte{}, nil, nil, err
+		}
+		digestBytes, err := hex.DecodeString(expectation.intent.SHA256)
+		if err != nil || len(digestBytes) != sha256.Size {
+			return [32]byte{}, nil, nil, pendingRuntimeFailure(pendingRuntimeInvalid, expectation.receiving, err)
+		}
+		var digest [32]byte
+		copy(digest[:], digestBytes)
+		return captureUpgradeGUIPortOwnersFromSnapshot(ctx, productPath, supervisorPID, digest, frozen, observationInputs, api.LoopbackPortOwnerPIDContext, process.LookupProcessIdentitiesContext)
+	}
+	proveHistorical := func(ctx context.Context, supervisor api.SupervisorLockOwner, owners []upgradeGUIPortOwner) error {
+		if expectation == nil {
+			return nil
+		}
+		if err := validatePendingHistoricalCohort(ctx, journal, supervisor, owners, lookupPendingHistoricalIdentity); err != nil {
+			return pendingRuntimeFailure(pendingRuntimeHistorical, expectation.receiving, err)
+		}
+		return nil
+	}
 	return recoverGUIOwnedPriorSettlementWithOps(ctx, journal, guiOwnedPriorRecoveryOps{
-		Readback: readbackGUIOwnedPriorProduct,
-		ObserveHealthy: func(ctx context.Context, journal windowsProductRecoveryJournalV3) error {
-			in := productionUpgradeGUIObservationInputs()
+		Readback: func(journal windowsProductRecoveryJournalV3) error {
+			if expectation != nil {
+				if err := expectation.validate(ctx); err != nil {
+					return err
+				}
+			}
+			if err := readbackGUIOwnedPriorProduct(journal); err != nil {
+				if expectation != nil {
+					return pendingRuntimeFailure(pendingRuntimeMaterial, expectation.receiving, err)
+				}
+				return err
+			}
+			return nil
+		},
+		ObserveHealthy: func(ctx context.Context, journal windowsProductRecoveryJournalV3) (retErr error) {
+			in := observationInputs
+			if expectation != nil {
+				in.PortOwners = func(ctx context.Context, _, _ string, pid int) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error) {
+					return capture(ctx, pid)
+				}
+			}
 			held, pairErr := observeUpgradeGUIOwnedPairHeldTopologyWithInputs(ctx, stateDir, productPath, in)
 			if pairErr != nil {
+				if pendingRuntimeStopsRecovery(pairErr) {
+					return pairErr
+				}
 				var independentErr error
 				held, independentErr = observeUpgradeGUIHeldTopologyWithInputs(ctx, stateDir, productPath, in)
 				if independentErr != nil {
 					return errors.Join(pairErr, independentErr)
 				}
 			}
-			defer held.Close()
-			return validateUpgradeGUIOwnedPriorHealth(journal, held)
+			defer func() {
+				closeErr := held.Close()
+				if expectation != nil && closeErr != nil {
+					retErr = pendingRuntimeCloseError(retErr, expectation.receiving, closeErr)
+				}
+			}()
+			if expectation == nil {
+				return validateUpgradeGUIOwnedPriorHealth(journal, held)
+			}
+			if err := validateGUIOwnedPriorTasks(journal, held.TaskActions); err != nil {
+				return pendingRuntimeFailure(pendingRuntimeMaterial, expectation.receiving, err)
+			}
+			if err := expectation.validateFleet(held.FrozenPorts, held.PortOwners, held.Identity.Supervisor.PID); err != nil {
+				return err
+			}
+			if err := proveHistorical(ctx, held.SupervisorOwner, held.PortOwners); err != nil {
+				return err
+			}
+			return expectation.validate(ctx)
 		},
 		Reservation: func(ctx context.Context) (gui.OwnedSingleInstanceLease, error) {
 			return acquireGUIOwnedPriorReservation(ctx, ownedLease, guiOwnedPriorReservationOps{
@@ -2422,14 +2995,7 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 					if err != nil {
 						return err
 					}
-					pid, bound, err := api.LoopbackPortOwnerPIDContext(ctx, record.Port)
-					if err != nil {
-						return err
-					}
-					if bound {
-						return fmt.Errorf("GUI listener port remains bound by PID %d", pid)
-					}
-					return nil
+					return proveUpgradeGUIOwnerEndpointAbsent(ctx, record, api.LoopbackPortOwnerPIDContext)
 				},
 				AcquireExact: func() (gui.OwnedSingleInstanceLease, error) {
 					path, err := resolveUpgradeGUIOwnerPath()
@@ -2440,13 +3006,16 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 				},
 			})
 		},
-		SupervisorState: func(ctx context.Context, journal windowsProductRecoveryJournalV3) (guiOwnedPriorSupervisorState, error) {
+		SupervisorState: func(ctx context.Context, journal windowsProductRecoveryJournalV3) (result guiOwnedPriorSupervisorState, retErr error) {
 			lockPath := filepath.Join(stateDir, "supervisor.lock")
 			lock, err := api.AcquireSupervisorLockQuiet(lockPath)
 			if err == nil {
 				lock.Release()
 				if _, portErr := observeWindowsProductIntentPorts(ctx, productPath, frozen, true); portErr != nil {
 					return "", portErr
+				}
+				if err := proveHistorical(ctx, api.SupervisorLockOwner{}, nil); err != nil {
+					return "", err
 				}
 				return guiOwnedPriorSupervisorAbsent, nil
 			}
@@ -2462,7 +3031,12 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 			if err != nil {
 				return "", err
 			}
-			defer held.Close()
+			defer func() {
+				closeErr := held.Close()
+				if expectation != nil {
+					retErr = pendingRuntimeCloseError(retErr, expectation.receiving, closeErr)
+				}
+			}()
 			if err := held.VerifyIdentity(process.PIDIdentityProof{PID: owner.PID, ExecutablePath: productPath, StartedAt: owner.StartedAt, StartTolerance: time.Nanosecond}); err != nil {
 				return "", err
 			}
@@ -2503,12 +3077,37 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 				return fmt.Errorf("supervisor lock remains held or unknown: %w", err)
 			}
 			lock.Release()
+			if err := proveHistorical(ctx, api.SupervisorLockOwner{}, nil); err != nil {
+				return err
+			}
 			_, err = observeWindowsProductIntentPorts(ctx, productPath, frozen, true)
 			return err
 		},
-		StartSupervisor: func() error { return deps.StartSupervisor(productPath) },
+		StartSupervisor: func() (SupervisorLaunch, error) {
+			if expectation != nil {
+				if err := expectation.validate(ctx); err != nil {
+					return nil, err
+				}
+			}
+			return deps.StartSupervisor(productPath)
+		},
+		SupervisorExpected: supervisorExpectation(stateDir, productPath, journal.Product.PriorSHA256),
 		WaitSupervisorReady: func(ctx context.Context) error {
-			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, productPath, UpgradeCandidateV1{SHA256: journal.Product.PriorSHA256})
+			if expectation != nil {
+				if err := expectation.validate(ctx); err != nil {
+					return err
+				}
+			}
+			if err := deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, productPath, UpgradeCandidateV1{SHA256: journal.Product.PriorSHA256}); err != nil {
+				if expectation != nil {
+					return pendingRuntimeFailure(pendingRuntimeReadiness, expectation.receiving, err)
+				}
+				return err
+			}
+			if expectation != nil {
+				return expectation.validate(ctx)
+			}
+			return nil
 		},
 		ProveIndependent: func(ctx context.Context, journal windowsProductRecoveryJournalV3) error {
 			limit, cancel := context.WithTimeout(ctx, defaultSupervisorLockReleaseTimeout)
@@ -2530,6 +3129,16 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 				inJob, jobErr := held.InAnyJob()
 				closeErr := held.Close()
 				if identityErr != nil || jobErr != nil || inJob || closeErr != nil {
+					if expectation != nil {
+						primary := errors.Join(identityErr, jobErr)
+						if inJob {
+							primary = errors.Join(primary, errors.New("independent supervisor remains in a Job"))
+						}
+						if primary != nil {
+							primary = pendingRuntimeFailure(pendingRuntimeMismatch, expectation.receiving, primary)
+						}
+						return pendingRuntimeCloseError(primary, expectation.receiving, closeErr)
+					}
 					return fmt.Errorf("independent supervisor identity/Job unconfirmed: identity=%v job=%v member=%v close=%v", identityErr, jobErr, inJob, closeErr)
 				}
 				sameUser, err := process.ProcessOwnerSIDMatchesCurrent(owner.PID)
@@ -2540,12 +3149,25 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 				if err != nil || !samePath(identity.ExecutablePath, productPath) || supervisorCommandLineSubcommand(identity.CommandLine) != "supervise" {
 					return fmt.Errorf("independent supervisor image/role unconfirmed: %v", err)
 				}
-				_, observedFrozen, owners, err := captureUpgradeGUIPortOwners(limit, stateDir, productPath, owner.PID)
+				_, observedFrozen, owners, err := capture(limit, owner.PID)
 				if err == nil {
-					err = validateGUIOwnedIndependentFleet(journal, observedFrozen, owners, owner.PID)
+					if expectation == nil {
+						err = validateGUIOwnedIndependentFleet(journal, observedFrozen, owners, owner.PID)
+					} else {
+						err = expectation.validateFleet(observedFrozen, owners, owner.PID)
+						if err == nil {
+							err = proveHistorical(limit, owner, owners)
+						}
+						if err == nil {
+							err = expectation.validate(limit)
+						}
+					}
 				}
 				if err == nil {
 					return nil
+				}
+				if pendingRuntimeStopsRecovery(err) {
+					return err
 				}
 				lastErr = err
 				select {
@@ -2555,7 +3177,14 @@ func recoverGUIOwnedPriorSettlement(ctx context.Context, stateDir, productPath s
 				}
 			}
 		},
-		StartGUI: autostart.StartOwner,
+		StartGUI: func() error {
+			if expectation != nil {
+				if err := expectation.validate(ctx); err != nil {
+					return err
+				}
+			}
+			return autostart.StartOwnerForExpectedProduct(ctx, productPath)
+		},
 	})
 }
 
@@ -2624,7 +3253,7 @@ func restoreGUIOwnedForwardWithObserver(ctx context.Context, journal windowsProd
 	if err != nil || !free {
 		return fmt.Errorf("%w: GUI lease not free before canonical task: %v", ErrWindowsProductRecoveryPending, err)
 	}
-	if err := autostart.StartOwner(); err != nil {
+	if err := autostart.StartOwnerForExpectedProduct(limit, productPath); err != nil {
 		return fmt.Errorf("%w: start canonical GUI task: %v", ErrWindowsProductRecoveryPending, err)
 	}
 	return waitUpgradeGUIForwardHealth(limit, func() error { return observe(limit) })
@@ -3041,34 +3670,6 @@ func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.C
 	return func() *exec.Cmd { return newInstallSupervisorCmd(exePath, args) }
 }
 
-// spawnSupervisorDetached returns a closure that launches
-// `<exe> supervise [--strict-mode]` as a detached background process via the
-// per-OS process-detachment primitive.
-//
-// Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP provides lifetime and
-// signal isolation. The command builder independently applies the shared
-// no-window policy on every attempt. The spawned supervisor
-// survives the CLI's own exit AND the closing of the terminal the operator ran
-// `mcphub install --upgrade` in.
-func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
-	return func() error {
-		// Build supplies fresh equivalent commands to the shared process owner.
-		build := installSupervisorCmdBuilder(exePath, strictMode)
-		// Upgrade successors require independent lifetime. Access-denied
-		// breakaway therefore fails typed after one attempt with no fallback.
-		started, err := startSupervisorDetachedBreakaway(build(), build, nil, process.BreakawayRequired)
-		if err != nil {
-			return fmt.Errorf("spawn supervisor: %w", err)
-		}
-		// Release the handle — the supervisor manages its own lifetime
-		// from here. Caller does NOT Wait().
-		if started.Process != nil {
-			_ = started.Process.Release()
-		}
-		return nil
-	}
-}
-
 // ---------------------------------------------------------------------------
 // v5UpgradeDeps: production wiring for cli.UpgradeDeps.
 // ---------------------------------------------------------------------------
@@ -3076,6 +3677,10 @@ func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 // v5UpgradeDeps is the production implementation of UpgradeDeps that
 // drives the rename-aside + IPC + supervisor-spawn flow on Windows.
 // Field semantics match the cli.UpgradeOpts shape exactly.
+type supervisorPeerIPCSender func(context.Context, string, api.SupervisorLockOwner, api.SupervisorProcessIdentityV1, string, map[string]any, time.Duration) (api.IPCResponse, error)
+
+var errSupervisorPeerIPCSenderRequired = errors.New("original-created supervisor requires a strict peer IPC sender")
+
 type v5UpgradeDeps struct {
 	// exePath is the canonical transaction target used to start and identify
 	// the managed supervisor. It is deliberately not the updater executable.
@@ -3084,6 +3689,7 @@ type v5UpgradeDeps struct {
 	pipePath            string
 	readSupervisorOwner func(string) (api.SupervisorLockOwner, error)
 	sendIPC             func(context.Context, string, api.SupervisorLockOwner, string, map[string]any, time.Duration) (api.IPCResponse, error)
+	sendIPCPeer         supervisorPeerIPCSender
 }
 
 func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (api.RenameAsideResult, error) {
@@ -3143,6 +3749,19 @@ func (d *v5UpgradeDeps) ipcSender() func(context.Context, string, api.Supervisor
 		return d.sendIPC
 	}
 	return sendIPCWithResponse
+}
+
+func (d *v5UpgradeDeps) peerIPCSender() (supervisorPeerIPCSender, error) {
+	if d == nil {
+		return nil, errSupervisorPeerIPCSenderRequired
+	}
+	if d.sendIPCPeer != nil {
+		return d.sendIPCPeer, nil
+	}
+	if d.sendIPC != nil {
+		return nil, errSupervisorPeerIPCSenderRequired
+	}
+	return sendIPCWithResponseForPeer, nil
 }
 
 func observedV5UpgradeIPCOwner(operation, lockDir string, readSupervisorOwner func(string) (api.SupervisorLockOwner, error)) (api.SupervisorLockOwner, error) {
@@ -3214,18 +3833,64 @@ func (d *v5UpgradeDeps) forceKillSupervisorForOwner(expected api.SupervisorLockO
 	return killPIDViaTaskkillFn(expected.PID)
 }
 
-func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) error {
-	// Read strict-mode intent from disk so the new supervisor honors
-	// the operator's last setting after the rename-aside swap.
+func (d *v5UpgradeDeps) supervisorLaunchDependencies() (supervisorLaunchDependencies, error) {
+	sender, err := d.peerIPCSender()
+	if err != nil {
+		return supervisorLaunchDependencies{}, err
+	}
+	lockPath := d.supervisorLockDir
+	deps := supervisorLaunchDependencies{
+		exePath:            d.exePath,
+		supervisorLockPath: lockPath,
+		pipePath:           d.pipePath,
+		readOwner:          d.ownerReader(),
+		sendIPCPeer:        sender,
+		waitLockReleased: func(ctx context.Context, timeout time.Duration) error {
+			return waitV5SupervisorLockReleased(ctx, timeout, lockPath)
+		},
+	}
+	if err := deps.validate(); err != nil {
+		return supervisorLaunchDependencies{}, err
+	}
+	return deps, nil
+}
+
+func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) (SupervisorLaunch, error) {
+	launchDeps, err := d.supervisorLaunchDependencies()
+	if err != nil {
+		return nil, err
+	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return fmt.Errorf("resolve state-dir: %w", err)
+		return nil, fmt.Errorf("resolve state-dir: %w", err)
+	}
+	if !samePath(stateDir, filepath.Dir(launchDeps.supervisorLockPath)) || !samePath(binaryPath, launchDeps.exePath) {
+		return nil, errors.New("supervisor launch namespace/target differs from adapter")
+	}
+	ports, err := supervisorCompatExpectedPorts(stateDir)
+	if err != nil {
+		return nil, err
 	}
 	strictMode, _ := readPreMigrationStrictMode(stateDir)
-	return spawnSupervisorDetached(binaryPath, strictMode)()
+	build := installSupervisorCmdBuilder(binaryPath, strictMode)
+	started, err := startSupervisorDetachedBreakaway(build(), build, nil, process.BreakawayRequired)
+	if err != nil {
+		return nil, fmt.Errorf("spawn supervisor: %w", err)
+	}
+	launch, err := newOwnedSupervisorLaunch(started, launchDeps, ports)
+	if err != nil {
+		// Even a failed first identity observation leaves the actual creator
+		// with its caller, which owns bounded settlement of that start.
+		return launch, err
+	}
+	return launch, nil
 }
 
 func (d *v5UpgradeDeps) WaitSupervisorLockReleased(ctx context.Context, timeout time.Duration) error {
+	return waitV5SupervisorLockReleased(ctx, timeout, d.supervisorLockDir)
+}
+
+func waitV5SupervisorLockReleased(ctx context.Context, timeout time.Duration, lockPath string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -3233,7 +3898,7 @@ func (d *v5UpgradeDeps) WaitSupervisorLockReleased(ctx context.Context, timeout 
 	defer cancel()
 	var lastErr error
 	for {
-		lk, err := api.AcquireSupervisorLockQuiet(d.supervisorLockDir)
+		lk, err := api.AcquireSupervisorLockQuiet(lockPath)
 		if err == nil {
 			lk.Release()
 			return nil
@@ -3279,62 +3944,126 @@ func (d *v5UpgradeDeps) probeUpgradeReadyOnce(binaryPath string, candidate Upgra
 	if err != nil {
 		return false, fmt.Errorf("read successor supervisor lock owner: %w", err)
 	}
-	if owner.PID <= 0 {
-		return false, fmt.Errorf("successor supervisor lock owner has invalid PID %d", owner.PID)
-	}
-	identity, err := processLookupIdentityFn(owner.PID)
-	if err != nil {
-		return false, fmt.Errorf("probe successor process identity: %w", err)
-	}
-	if supervisorCommandLineSubcommand(identity.CommandLine) != "supervise" {
-		return false, fmt.Errorf("successor PID %d is not a supervise process", owner.PID)
-	}
-	ownerStartedUnix, ok := parseSidecarStartedAtUnix(owner.StartedAt)
-	if !ok || identity.CreationDateUnix == 0 || identity.CreationDateUnix > ownerStartedUnix {
-		return false, fmt.Errorf("successor PID %d creation identity does not match lock generation", owner.PID)
-	}
-	if !samePath(identity.ExecutablePath, binaryPath) {
-		return false, fmt.Errorf("successor PID %d executable %s does not match canonical %s", owner.PID, identity.ExecutablePath, binaryPath)
-	}
-	if candidate.SHA256 != "" {
-		hash, err := hashFile(identity.ExecutablePath)
-		if err != nil {
-			return false, fmt.Errorf("hash successor executable identity: %w", err)
-		}
-		if got := hex.EncodeToString(hash); got != candidate.SHA256 {
-			return false, fmt.Errorf("successor executable SHA-256 mismatch: got %s want %s", got, candidate.SHA256)
-		}
+	if err := d.validateUpgradeSupervisorIdentity(binaryPath, candidate, owner); err != nil {
+		return false, err
 	}
 	return probeReconcileReadyOnceWithOwner(d.pipePath, &owner)
+}
+
+func (d *v5UpgradeDeps) validateUpgradeSupervisorIdentity(binaryPath string, candidate UpgradeCandidateV1, owner api.SupervisorLockOwner) error {
+	return validateSupervisorImageIdentity(binaryPath, candidate.SHA256, owner)
 }
 
 // sendIPCWithResponse is the response-returning IPC sender used by
 // v5UpgradeDeps. Returns the final-frame response (or the only frame for
 // single-frame commands).
 func sendIPCWithResponse(ctx context.Context, pipePath string, owner api.SupervisorLockOwner, cmdName string, args map[string]any, timeout time.Duration) (api.IPCResponse, error) {
+	return sendIPCWithResponseProjection(ctx, pipePath, owner, nil, cmdName, args, timeout)
+}
+
+func sendIPCWithResponseForPeer(ctx context.Context, pipePath string, owner api.SupervisorLockOwner, expected api.SupervisorProcessIdentityV1, cmdName string, args map[string]any, timeout time.Duration) (api.IPCResponse, error) {
+	return sendIPCWithResponseProjection(ctx, pipePath, owner, &expected, cmdName, args, timeout)
+}
+
+// supervisorIPCDispatchError describes only its producing strict invocation.
+// Only the immediate result of a direct production sender call is evidence;
+// custom callbacks, matching operands and errors.As over causal history cannot
+// establish that this observation belongs to their current invocation.
+type supervisorIPCDispatchError struct {
+	owner               api.SupervisorLockOwner
+	peer                api.SupervisorProcessIdentityV1
+	command             string
+	requestWriteEntered bool
+	cause               error
+}
+
+func (e *supervisorIPCDispatchError) Error() string { return e.cause.Error() }
+func (e *supervisorIPCDispatchError) Unwrap() error { return e.cause }
+
+func sendIPCWithResponseProjection(ctx context.Context, pipePath string, owner api.SupervisorLockOwner, peer *api.SupervisorProcessIdentityV1, cmdName string, args map[string]any, timeout time.Duration) (api.IPCResponse, error) {
+	var dispatch *supervisorIPCDispatchError
+	if peer != nil {
+		dispatch = &supervisorIPCDispatchError{owner: owner, peer: *peer, command: cmdName}
+		if ctx == nil || timeout <= 0 {
+			dispatch.cause = errors.New("strict supervisor IPC requires context and positive timeout")
+			return api.IPCResponse{}, dispatch
+		}
+		if err := ctx.Err(); err != nil {
+			dispatch.cause = err
+			return api.IPCResponse{}, dispatch
+		}
+	}
 	conn, err := winio.DialPipe(pipePath, durPtr(timeout))
 	if err != nil {
+		if dispatch != nil {
+			dispatch.cause = fmt.Errorf("DialPipe: %w", err)
+			return api.IPCResponse{}, dispatch
+		}
 		return api.IPCResponse{}, fmt.Errorf("DialPipe: %w", err)
 	}
-	defer conn.Close()
+	return exchangeSupervisorIPCResponse(ctx, conn, owner, peer, cmdName, args, timeout)
+}
+
+// This existing exchange owns the passed actual connection on every return.
+// Dial projections, including the strict Product sender, share its sole body.
+func exchangeSupervisorIPCResponse(ctx context.Context, conn net.Conn, owner api.SupervisorLockOwner, peer *api.SupervisorProcessIdentityV1, cmdName string, args map[string]any, timeout time.Duration) (response api.IPCResponse, retErr error) {
+	var dispatch *supervisorIPCDispatchError
+	if peer == nil {
+		defer conn.Close()
+	} else {
+		dispatch = &supervisorIPCDispatchError{owner: owner, peer: *peer, command: cmdName}
+		defer func() {
+			if err := errors.Join(retErr, conn.Close()); err != nil {
+				dispatch.cause = err
+				retErr = dispatch
+			}
+		}()
+		if ctx == nil || timeout <= 0 {
+			return api.IPCResponse{}, errors.New("strict supervisor IPC requires context and positive timeout")
+		}
+		if err := ctx.Err(); err != nil {
+			return api.IPCResponse{}, err
+		}
+	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(timeout)
 	}
-	_ = conn.SetDeadline(deadline)
+	if err := conn.SetDeadline(deadline); peer != nil && err != nil {
+		return api.IPCResponse{}, fmt.Errorf("set supervisor IPC deadline: %w", err)
+	}
+	if peer != nil {
+		if err := api.ValidateSupervisorControlPeerConnectionV1(conn, owner, *peer); err != nil {
+			return api.IPCResponse{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return api.IPCResponse{}, err
+		}
+	}
 
 	if err := verifyHelloFrame(conn, owner); err != nil {
 		return api.IPCResponse{}, fmt.Errorf("hello: %w", err)
 	}
+	if peer != nil {
+		if err := ctx.Err(); err != nil {
+			return api.IPCResponse{}, err
+		}
+	}
 	req := api.IPCRequest{ID: time.Now().UnixNano(), Cmd: cmdName, Args: args}
-	if err := writeFrame(conn, req); err != nil {
+	if err := writeFrameWithDispatch(conn, req, dispatch); err != nil {
 		return api.IPCResponse{}, fmt.Errorf("send %s: %w", cmdName, err)
 	}
 	// Loop for the final frame.
 	for {
 		resp, err := readFrame(conn)
 		if err != nil {
+			if peer != nil {
+				return response, fmt.Errorf("read %s: %w", cmdName, err)
+			}
 			return api.IPCResponse{}, fmt.Errorf("read %s: %w", cmdName, err)
+		}
+		if peer != nil {
+			response = resp
 		}
 		if resp.Final {
 			return resp, nil
@@ -3479,11 +4208,18 @@ func verifyHelloFrame(conn net.Conn, expected api.SupervisorLockOwner) error {
 // writeFrame JSON-encodes req + appends a trailing newline (the
 // supervisor's frame delimiter per spec §"Wire format").
 func writeFrame(conn net.Conn, req api.IPCRequest) error {
+	return writeFrameWithDispatch(conn, req, nil)
+}
+
+func writeFrameWithDispatch(conn net.Conn, req api.IPCRequest, dispatch *supervisorIPCDispatchError) error {
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
 	raw = append(raw, '\n')
+	if dispatch != nil {
+		dispatch.requestWriteEntered = true
+	}
 	if _, err := conn.Write(raw); err != nil {
 		return err
 	}

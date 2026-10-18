@@ -145,7 +145,7 @@ func (d SequentialDescriptor) validate() error {
 	if d.SchemaVersion != 1 || d.ServerID != "sequential-thinking" {
 		return errors.New("Sequential descriptor must use schema_version 1 and server_id sequential-thinking")
 	}
-	if d.UpstreamRepository != serversRepositoryURL || !calverPattern.MatchString(d.Version) {
+	if d.UpstreamRepository != serversRepositoryURL || !semverPattern.MatchString(d.Version) {
 		return errors.New("Sequential descriptor repository or version is not an exact release")
 	}
 	if !commitPattern.MatchString(d.SourceCommit) {

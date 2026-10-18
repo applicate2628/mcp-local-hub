@@ -515,10 +515,13 @@ func (f *fakeUpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	return f.forceKillErr
 }
 
-func (f *fakeUpgradeDeps) StartSupervisor(binaryPath string) error {
+func (f *fakeUpgradeDeps) StartSupervisor(binaryPath string) (SupervisorLaunch, error) {
 	f.calls = append(f.calls, "start")
 	f.startCalled = true
-	return f.startErr
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
+	return &fixtureSupervisorLaunch{}, nil
 }
 
 func TestRollbackInstallUpgradeRefusesPendingStopSettlementBeforeForceKill(t *testing.T) {
@@ -732,7 +735,7 @@ func (d *orderedUpgradeDeps) ForceKillSupervisor(pipe string) error {
 	*d.order = append(*d.order, "force-kill")
 	return d.delegate.ForceKillSupervisor(pipe)
 }
-func (d *orderedUpgradeDeps) StartSupervisor(path string) error {
+func (d *orderedUpgradeDeps) StartSupervisor(path string) (SupervisorLaunch, error) {
 	*d.order = append(*d.order, "start")
 	return d.delegate.StartSupervisor(path)
 }

@@ -329,12 +329,6 @@ type windowsProductRecoveryStagedV3 struct {
 	SHA256 string `json:"sha256"`
 }
 
-type windowsProductFrozenPortV3 struct {
-	TaskName   string `json:"task_name"`
-	Port       int    `json:"port"`
-	ArgvSHA256 string `json:"argv_sha256"`
-}
-
 type windowsProductPreSettlementV3 struct {
 	Supervisor             windowsProductSupervisorSettlementV1 `json:"supervisor"`
 	Ports                  []windowsProductPortSettlementV1     `json:"ports"`
@@ -352,7 +346,7 @@ type windowsProductRecoveryJournalV3 struct {
 	Receipts                windowsProductRecoveryReceiptsV3         `json:"receipts"`
 	Tasks                   WindowsProductPairTaskRecovery           `json:"tasks"`
 	Staged                  windowsProductRecoveryStagedV3           `json:"staged"`
-	FrozenPorts             []windowsProductFrozenPortV3             `json:"frozen_ports"`
+	FrozenPorts             []api.SupervisorFrozenPort               `json:"frozen_ports"`
 	PreSettlement           *windowsProductPreSettlementV3           `json:"pre_settlement"`
 	PriorFleetReaped        bool                                     `json:"prior_fleet_reaped"`
 	Quiescence              *windowsProductRecoveryQuiescenceV2      `json:"quiescence"`
@@ -536,9 +530,9 @@ type WindowsProductTxnDeps struct {
 	ListGeneratedAsides    func(string) ([]string, error)
 	HashFile               func(string) (string, error)
 	RemoveExact            func(string) error
-	StartSupervisor        func(string) error
+	StartSupervisor        func(string) (SupervisorLaunch, error)
 	WaitSupervisorReady    func(context.Context, string, binaryadmission.WindowsArtifact) error
-	RestartPrior           func(string) error
+	RestartPrior           func(string) (SupervisorLaunch, error)
 	RecoverPriorSettlement func(windowsProductRecoveryJournalV3) error
 	SettleSuccessor        func(string) error
 	WriteReceipt           func(string, []byte) error
@@ -569,17 +563,21 @@ type WindowsProductTxnOpts struct {
 }
 
 type windowsProductPreparedTxn struct {
-	deps             WindowsProductTxnDeps
-	staged           binaryadmission.WindowsArtifact
-	productPrior     productPairFileSnapshot
-	legacyPrior      productPairFileSnapshot
-	receiptV3Prior   productPairFileSnapshot
-	receiptV2Prior   productPairFileSnapshot
-	journal          windowsProductRecoveryJournalV3
-	productPromotion *WindowsProductPairPromotion
-	legacyRetained   string
-	successorStarted bool
-	disposition      windowsProductPairDispositionV1
+	deps                  WindowsProductTxnDeps
+	staged                binaryadmission.WindowsArtifact
+	productPrior          productPairFileSnapshot
+	legacyPrior           productPairFileSnapshot
+	receiptV3Prior        productPairFileSnapshot
+	receiptV2Prior        productPairFileSnapshot
+	journal               windowsProductRecoveryJournalV3
+	productPromotion      *WindowsProductPairPromotion
+	legacyRetained        string
+	successorLaunch       SupervisorLaunch
+	successorBinding      SupervisorControlBinding
+	successorForwardOwned bool
+	lastJournalBytes      []byte
+	attemptedJournalBytes []byte
+	disposition           windowsProductPairDispositionV1
 }
 
 // WindowsProductTxn is the sole V3 writer for canonical product, task,
@@ -860,13 +858,21 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
 	if p.deps.StartSupervisor != nil {
-		if err := p.deps.StartSupervisor(o.ProductPath); err != nil {
-			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("start canonical supervisor: %w", err))
+		launch, err := p.deps.StartSupervisor(o.ProductPath)
+		p.successorLaunch = launch
+		if err != nil || launch == nil {
+			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("start canonical supervisor: %w", errors.Join(err, missingSupervisorLaunch(launch))))
 		}
-		p.successorStarted = true
 	}
 	if err := fault(WindowsProductStageSupervisorStarted); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
+	}
+	if p.successorLaunch != nil {
+		binding, err := p.successorLaunch.BindControl(ctx, supervisorExpectation(o.StateDir, o.ProductPath, p.staged.SHA256))
+		if err != nil {
+			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("canonical supervisor control binding: %w", err))
+		}
+		p.successorBinding = binding
 	}
 	if p.deps.WaitSupervisorReady != nil {
 		if err := p.deps.WaitSupervisorReady(ctx, o.ProductPath, readBack); err != nil {
@@ -892,9 +898,30 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 	if err := fault(WindowsProductStageLegacyRetired); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
+	priorBytes := append([]byte(nil), p.lastJournalBytes...)
 	p.journal.Phase = WindowsProductRecoveryCommitDecided
 	if err := t.persistProductJournal(); err != nil {
-		return WindowsProductCommitted{}, t.rollback(fmt.Errorf("persist commit-decided V3 recovery phase: %w", err))
+		commitBytes := append([]byte(nil), p.attemptedJournalBytes...)
+		decision, readErr := t.readCommitDecision(priorBytes, commitBytes)
+		if decision == productDecisionPrior {
+			previous, decodeErr := decodeWindowsProductRecoveryJournalV3(priorBytes)
+			if decodeErr != nil {
+				return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: prior decision snapshot invalid", ErrWindowsProductRecoveryPending), err, decodeErr)
+			}
+			p.journal = previous
+			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("persist commit-decided V3 recovery phase: %w", err))
+		}
+		// Unknown never grants inverse or abort authority. Only this already-bound
+		// original launch may be received, after the owner freshly revalidates it.
+		receiveErr := t.receiveProductSuccessor(ctx)
+		label := "commit decision is unknown"
+		if decision == productDecisionCommit {
+			label = "commit decision persisted; forward recovery remains pending"
+		}
+		return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: %s", ErrWindowsProductRecoveryPending, label), err, readErr, receiveErr)
+	}
+	if err := t.receiveProductSuccessor(ctx); err != nil {
+		return WindowsProductCommitted{}, fmt.Errorf("%w: committed successor control handoff: %w", ErrWindowsProductCleanupPending, err)
 	}
 	if err := fault(WindowsProductStageCommitDecided); err != nil {
 		return WindowsProductCommitted{}, fmt.Errorf("%w: %v", ErrWindowsProductCleanupPending, err)
@@ -1006,23 +1033,14 @@ func snapshotWindowsProductAsides(target string, d WindowsProductTxnDeps) ([]win
 	return rows, nil
 }
 
-func projectWindowsProductFrozenPorts(rows []windowsProductIntentPortV1) []windowsProductFrozenPortV3 {
-	projected := make([]windowsProductFrozenPortV3, 0, len(rows))
+func projectWindowsProductFrozenPorts(rows []windowsProductIntentPortV1) []api.SupervisorFrozenPort {
+	projected := make([]api.SupervisorFrozenPort, 0, len(rows))
 	for _, row := range rows {
-		projected = append(projected, windowsProductFrozenPortV3{
+		projected = append(projected, api.SupervisorFrozenPort{
 			TaskName: row.TaskName, Port: row.Port, ArgvSHA256: row.ArgvSHA256,
 		})
 	}
-	sort.Slice(projected, func(i, j int) bool {
-		if projected[i].TaskName != projected[j].TaskName {
-			return projected[i].TaskName < projected[j].TaskName
-		}
-		if projected[i].Port != projected[j].Port {
-			return projected[i].Port < projected[j].Port
-		}
-		return projected[i].ArgvSHA256 < projected[j].ArgvSHA256
-	})
-	return projected
+	return api.CanonicalSupervisorFrozenPorts(projected)
 }
 
 func projectWindowsProductPreSettlement(observation *windowsProductQuiescenceObservationV1) *windowsProductPreSettlementV3 {
@@ -1037,7 +1055,7 @@ func projectWindowsProductPreSettlement(observation *windowsProductQuiescenceObs
 	}
 }
 
-func expandWindowsProductFrozenPorts(rows []windowsProductFrozenPortV3) []windowsProductIntentPortV1 {
+func expandWindowsProductFrozenPorts(rows []api.SupervisorFrozenPort) []windowsProductIntentPortV1 {
 	expanded := make([]windowsProductIntentPortV1, 0, len(rows))
 	for _, row := range rows {
 		expanded = append(expanded, windowsProductIntentPortV1{
@@ -1067,10 +1085,54 @@ func sameWindowsProductIdentity(a, b binaryadmission.WindowsArtifact) bool {
 
 func (t *WindowsProductTxn) persistProductJournal() error {
 	p := t.prepared
-	return persistWindowsProductRecoveryJournalV3(
-		filepath.Join(t.Opts.StateDir, WindowsProductRecoveryFileLeafV3),
-		p.journal, p.deps.WriteRecoveryJournal, p.deps.ReadRecoveryJournal,
-	)
+	raw, err := encodeWindowsProductRecoveryJournalV3(p.journal)
+	p.attemptedJournalBytes = append([]byte(nil), raw...)
+	if err != nil {
+		return err
+	}
+	if err := persistEncodedWindowsProductRecoveryJournalV3(filepath.Join(t.Opts.StateDir, WindowsProductRecoveryFileLeafV3), p.journal, raw, p.deps.WriteRecoveryJournal, p.deps.ReadRecoveryJournal); err != nil {
+		return err
+	}
+	p.lastJournalBytes = append([]byte(nil), raw...)
+	return nil
+}
+
+type productCommitDecision uint8
+
+const (
+	productDecisionUnknown productCommitDecision = iota
+	productDecisionPrior
+	productDecisionCommit
+)
+
+func (t *WindowsProductTxn) readCommitDecision(priorBytes, commitBytes []byte) (productCommitDecision, error) {
+	if len(priorBytes) == 0 || len(commitBytes) == 0 || bytes.Equal(priorBytes, commitBytes) {
+		return productDecisionUnknown, errors.New("commit decision snapshots are unavailable")
+	}
+	actual, err := t.prepared.deps.ReadRecoveryJournal(filepath.Join(t.Opts.StateDir, WindowsProductRecoveryFileLeafV3))
+	if err != nil {
+		return productDecisionUnknown, err
+	}
+	if bytes.Equal(actual, priorBytes) {
+		return productDecisionPrior, nil
+	}
+	if bytes.Equal(actual, commitBytes) {
+		return productDecisionCommit, nil
+	}
+	return productDecisionUnknown, errors.New("commit decision full snapshot differs")
+}
+
+func (t *WindowsProductTxn) receiveProductSuccessor(ctx context.Context) error {
+	p := t.prepared
+	if p.successorLaunch == nil {
+		return nil
+	}
+	// Attempting irreversible receiving disables all predecision inverse paths.
+	// Handoff itself rejects stale/foreign bindings and owns the handle release.
+	p.successorForwardOwned = true
+	receivingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultSupervisorLockReleaseTimeout)
+	defer cancel()
+	return p.successorLaunch.Handoff(receivingCtx, p.successorBinding)
 }
 
 // SettleGUIOwnedStop binds the observed absence to the original live preimage
@@ -1106,12 +1168,14 @@ func (t *WindowsProductTxn) SettleGUIOwnedStop(receipt windowsProductQuiescenceR
 func (t *WindowsProductTxn) rollback(trigger error) error {
 	o, p := t.Opts, t.prepared
 	var restoreErrs []error
-	if p.successorStarted {
-		if p.deps.SettleSuccessor == nil {
-			restoreErrs = append(restoreErrs, errors.New("settle transaction-started successor: no settlement owner"))
-		} else if err := p.deps.SettleSuccessor(o.ProductPath); err != nil {
-			restoreErrs = append(restoreErrs, fmt.Errorf("settle transaction-started successor: %w", err))
+	if p.successorForwardOwned {
+		return errors.Join(trigger, fmt.Errorf("%w: successor custody belongs to forward receiving", ErrWindowsProductCleanupPending))
+	}
+	if p.successorLaunch != nil {
+		if err := abortStartedSupervisor(p.successorLaunch); err != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: settle transaction-created successor before inverse: %w", ErrWindowsProductRecoveryPending, err))
 		}
+		p.successorLaunch = nil
 	}
 	pairDeps := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{RestorePromotion: p.deps.RestorePromotion})
 	if err := restoreProductPairPromotion(pairDeps, p.productPromotion, p.productPrior); err != nil {
@@ -1139,8 +1203,19 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 			return errors.Join(trigger, fmt.Errorf("%w: GUI-owned prior settlement: %v", ErrWindowsProductRecoveryPending, err))
 		}
 	} else if p.journal.PriorFleetReaped && p.productPrior.present && p.deps.RestartPrior != nil {
-		if err := p.deps.RestartPrior(o.ProductPath); err != nil {
-			return errors.Join(trigger, fmt.Errorf("%w: restart prior supervisor: %v", ErrWindowsProductPairRecoveryRollback, err))
+		launch, err := p.deps.RestartPrior(o.ProductPath)
+		if err != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: restart prior supervisor: %v", ErrWindowsProductPairRecoveryRollback, err), abortStartedSupervisor(launch))
+		}
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), defaultSupervisorLockReleaseTimeout)
+		defer cancel()
+		if err := receiveStartedSupervisor(recoveryCtx, launch, supervisorExpectation(o.StateDir, o.ProductPath, windowsProductPreimage(p.productPrior).SHA256), func() error {
+			if p.deps.WaitSupervisorReady != nil {
+				return p.deps.WaitSupervisorReady(recoveryCtx, o.ProductPath, binaryadmission.WindowsArtifact{Path: o.ProductPath, SHA256: windowsProductPreimage(p.productPrior).SHA256})
+			}
+			return nil
+		}); err != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: prior supervisor control/readiness: %w", ErrWindowsProductPairRecoveryRollback, err))
 		}
 	}
 	p.journal.Phase = WindowsProductRecoverySettledRollback
@@ -1149,7 +1224,7 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 		return errors.Join(trigger, fmt.Errorf("%w: persist settled rollback: %v", ErrWindowsProductPairRecoveryCleanup, err))
 	}
 	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
-		return errors.Join(trigger, fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductPairRecoveryCleanup, err))
+		return errors.Join(trigger, fmt.Errorf("%w: discard retained task store: %w", ErrWindowsProductPairRecoveryCleanup, err))
 	}
 	if err := p.deps.RemoveRecoveryJournal(filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)); err != nil {
 		return errors.Join(trigger, fmt.Errorf("%w: remove settled V3 journal: %v", ErrWindowsProductPairRecoveryCleanup, err))
@@ -1264,7 +1339,7 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 	}
 	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
-		return committed, fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductCleanupPending, err)
+		return committed, fmt.Errorf("%w: discard retained task store: %w", ErrWindowsProductCleanupPending, err)
 	}
 	if err := p.deps.RemoveRecoveryJournal(filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)); err != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
@@ -1399,9 +1474,9 @@ type WindowsProductPairTxnDeps struct {
 	RestorePromotion      func(WindowsProductPairPromotion) (string, error)
 	SweepOldTargets       func([]string, ...func(string, error)) error
 	ReadBackWindowless    func(path string, expected binaryadmission.WindowsArtifact) error
-	StartSupervisor       func(cliPath string) error
+	StartSupervisor       func(string) (SupervisorLaunch, error)
 	WaitSupervisorReady   func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error
-	RestartPrior          func(cliPath string) error
+	RestartPrior          func(string) (SupervisorLaunch, error)
 	SettleSuccessor       func(cliPath string) error
 	WriteReceipt          func(path string, raw []byte) error
 	ReadReceipt           func(path string) ([]byte, error)
@@ -1864,18 +1939,14 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		if len(j.FrozenPorts) == 0 && j.FrozenPorts == nil {
 			return errors.New("upgrade V3 recovery requires a non-null frozen port set")
 		}
-		for i, row := range j.FrozenPorts {
-			if strings.TrimSpace(row.TaskName) == "" || row.Port < 1 || row.Port > 65535 ||
-				!validLowerHexSHA256(row.ArgvSHA256) {
+		if err := api.ValidateSupervisorFrozenPorts(j.FrozenPorts); err != nil {
+			switch {
+			case errors.Is(err, api.ErrInvalidSupervisorFrozenPort):
 				return errors.New("invalid V3 frozen port")
-			}
-			if i > 0 {
-				prev := j.FrozenPorts[i-1]
-				if prev.TaskName > row.TaskName ||
-					(prev.TaskName == row.TaskName && prev.Port > row.Port) ||
-					(prev.TaskName == row.TaskName && prev.Port == row.Port && prev.ArgvSHA256 >= row.ArgvSHA256) {
-					return errors.New("unsorted or duplicate V3 frozen port")
-				}
+			case errors.Is(err, api.ErrUnsortedSupervisorFrozenPorts):
+				return errors.New("unsorted or duplicate V3 frozen port")
+			default:
+				return err
 			}
 		}
 		pre := expandWindowsProductPreSettlement(j.PreSettlement)
@@ -2071,15 +2142,26 @@ func sameWindowsProductPath(left, right string) bool {
 	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
 }
 
-func persistWindowsProductRecoveryJournalV3(path string, journal windowsProductRecoveryJournalV3, write func(string, []byte) error, read func(string) ([]byte, error)) error {
+func encodeWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
 	if err := validateWindowsProductRecoveryJournalV3(journal); err != nil {
-		return err
+		return nil, err
 	}
 	raw, err := json.MarshalIndent(journal, "", "  ")
 	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
+
+func persistWindowsProductRecoveryJournalV3(path string, journal windowsProductRecoveryJournalV3, write func(string, []byte) error, read func(string) ([]byte, error)) error {
+	raw, err := encodeWindowsProductRecoveryJournalV3(journal)
+	if err != nil {
 		return err
 	}
-	raw = append(raw, '\n')
+	return persistEncodedWindowsProductRecoveryJournalV3(path, journal, raw, write, read)
+}
+
+func persistEncodedWindowsProductRecoveryJournalV3(path string, journal windowsProductRecoveryJournalV3, raw []byte, write func(string, []byte) error, read func(string) ([]byte, error)) error {
 	if err := write(path, raw); err != nil {
 		return err
 	}

@@ -2,6 +2,8 @@ package api
 
 import (
 	"time"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // State is the snapshot of what the API knows about the running system.
@@ -277,10 +279,11 @@ type ProcessAttributionDiagnosticV1 struct {
 // ClientEntry captures the shape of how one MCP server is configured inside
 // one client config.
 type ClientEntry struct {
-	Transport string         `json:"transport"`           // "http" | "stdio" | "relay" | "absent"
-	Endpoint  string         `json:"endpoint"`            // URL for http, command for stdio, etc.
-	RelayURL  string         `json:"relay_url,omitempty"` // resolved relay --url target, when present
-	Raw       map[string]any `json:"raw"`                 // the original JSON/TOML fragment
+	Removal   *clients.EntryRemovalCapability `json:"removal,omitempty"`
+	Transport string                          `json:"transport"`           // "http" | "stdio" | "relay" | "absent"
+	Endpoint  string                          `json:"endpoint"`            // URL for http, command for stdio, etc.
+	RelayURL  string                          `json:"relay_url,omitempty"` // resolved relay --url target, when present
+	Raw       map[string]any                  `json:"raw"`                 // the original JSON/TOML fragment
 	// Disabled mirrors the client entry's launch gate. It is set by the scan
 	// shaper from rawClientEntryDisabled (disabled:true OR enabled:false) and
 	// survives GUI Raw stripping so display-only predicates do not need to

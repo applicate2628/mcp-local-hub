@@ -3,14 +3,329 @@
 package process
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+const retainedExitChildEnv = "MCPHUB_TEST_RETAINED_EXIT_CHILD"
+
+func TestRetainedProcessExitChild(t *testing.T) {
+	value := os.Getenv(retainedExitChildEnv)
+	if value == "" {
+		return
+	}
+	code, err := strconv.Atoi(value)
+	if err != nil || (code != 0 && code != 7) {
+		t.Fatal("invalid retained-exit test helper")
+	}
+	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(code)
+}
+
+func TestHeldPIDExitWaiterNativeOriginalExitCodes(t *testing.T) {
+	if os.Getenv(retainedExitChildEnv) != "" {
+		t.Fatal("unexpected child selector")
+	}
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Fatal("Root's bounded native runner must provide a deadline")
+	}
+	for _, code := range []int{0, 7} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(exe, "-test.run=^TestRetainedProcessExitChild$")
+			cmd.Env = append(os.Environ(), retainedExitChildEnv+"="+strconv.Itoa(code))
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			input, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(errors.Join(err, input.Close()))
+			}
+			inputClosed := false
+			t.Cleanup(func() {
+				if !inputClosed {
+					if err := input.Close(); err != nil {
+						t.Error(err)
+					}
+				}
+				waitErr := cmd.Wait() // The creator's only Wait; WaitExit never reaps.
+				if code == 0 && waitErr != nil {
+					t.Error(waitErr)
+				}
+				if code != 0 && (cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != code) {
+					t.Errorf("original creator outcome: %v", waitErr)
+				}
+			})
+			identity, err := LookupPIDHandleIdentity(cmd.Process.Pid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			held, err := HoldPIDForTermination(cmd.Process.Pid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := held.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := held.VerifyIdentity(PIDIdentityProof{PID: identity.PID, ExecutablePath: identity.ExecutablePath, StartedAt: identity.StartedAt.UTC().Format(time.RFC3339Nano)}); err != nil {
+				t.Fatal(err)
+			}
+			waiter, ok := held.(HeldPIDExitWaiter)
+			if !ok {
+				t.Fatal("production held object lacks optional exit waiter")
+			}
+			inputClosed = true // Record the one attempt even if closure is non-clean.
+			if err := input.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			defer cancel()
+			result, err := waiter.WaitExit(ctx)
+			if err != nil || !result.Exited || !result.ExitCodeAvailable || result.ExitCode != uint32(code) {
+				t.Fatalf("same original exit=%+v error=%v", result, err)
+			}
+		})
+	}
+}
+
+// These are labelled synthetic provider outcomes, not failed Windows syscalls.
+func TestRetainedProcessExitPreservesFactsAndFailureCauses(t *testing.T) {
+	primary, closing := errors.New("synthetic native primary"), errors.New("synthetic event close")
+	for _, scenario := range []string{"partial-create", "wait", "unexpected-timeout", "exit-code", "late-close"} {
+		t.Run(scenario, func(t *testing.T) {
+			closes := 0
+			ops := retainedProcessExitOps{
+				createEvent: func() (windows.Handle, error) {
+					if scenario == "partial-create" {
+						return 0x22, primary
+					}
+					return 0x22, nil
+				},
+				setEvent: func(windows.Handle) error { t.Error("unexpected wake"); return nil },
+				wait: func(handles []windows.Handle, all bool, timeout uint32) (uint32, error) {
+					if len(handles) != 2 || handles[0] != 0x11 || handles[1] != 0x22 || all || timeout != windows.INFINITE {
+						t.Error("borrowed original/wait policy changed")
+					}
+					if scenario == "wait" {
+						return 0, primary
+					}
+					if scenario == "unexpected-timeout" {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
+					return windows.WAIT_OBJECT_0, nil
+				},
+				exitCode: func(handle windows.Handle, value *uint32) error {
+					if handle != 0x11 {
+						t.Error("exit read changed original")
+					}
+					if scenario == "exit-code" {
+						return primary
+					}
+					*value = 7
+					return nil
+				},
+				close: func(handle windows.Handle) error {
+					closes++
+					if handle != 0x22 {
+						t.Error("closed borrowed process")
+					}
+					return closing
+				},
+			}
+			result, err := waitRetainedProcessExit(context.Background(), 0x11, ops)
+			if !errors.Is(err, closing) || closes != 1 {
+				t.Fatalf("event close receiving=%v calls=%d", err, closes)
+			}
+			if scenario != "late-close" && scenario != "unexpected-timeout" && !errors.Is(err, primary) {
+				t.Fatal("lost original native cause")
+			}
+			if scenario == "unexpected-timeout" && !strings.Contains(err.Error(), "without a deadline") {
+				t.Fatal("impossible infinite timeout became a poll/retry")
+			}
+			wantExit := scenario == "exit-code" || scenario == "late-close"
+			if result.Exited != wantExit || result.ExitCodeAvailable != (scenario == "late-close") {
+				t.Fatalf("lost signal/code distinction: %+v", result)
+			}
+			if scenario == "late-close" && result.ExitCode != 7 {
+				t.Fatal("late failure erased actual code")
+			}
+		})
+	}
+}
+
+func TestRetainedProcessExitFailedWakeKeepsNativeInvocation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered, wakeReturned, originalSignal := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	wakeFailure := errors.New("synthetic failed cancellation wake")
+	var closes atomic.Int32
+	ops := retainedProcessExitOps{
+		createEvent: func() (windows.Handle, error) { return 0x22, nil },
+		setEvent:    func(windows.Handle) error { defer close(wakeReturned); return wakeFailure },
+		wait: func([]windows.Handle, bool, uint32) (uint32, error) {
+			close(entered)
+			<-originalSignal
+			return windows.WAIT_OBJECT_0, nil
+		},
+		exitCode: func(windows.Handle, *uint32) error { return nil },
+		close: func(h windows.Handle) error {
+			if h != 0x22 {
+				t.Error("borrowed original closed")
+			}
+			closes.Add(1)
+			return nil
+		},
+	}
+	type outcome struct {
+		result HeldPIDExitResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(originalSignal) }) }
+	var receiveOnce sync.Once
+	var received outcome
+	receive := func() outcome { receiveOnce.Do(func() { received = <-done }); return received }
+	t.Cleanup(func() { cancel(); release(); receive() })
+	go func() { result, err := waitRetainedProcessExit(ctx, 0x11, ops); done <- outcome{result, err} }()
+	<-entered
+	cancel()
+	<-wakeReturned
+	select {
+	case early := <-done:
+		received = early
+		receiveOnce.Do(func() {})
+		t.Fatal("failed wake detached/completed the pending native invocation")
+	default:
+	}
+	if closes.Load() != 0 {
+		t.Fatal("event closed while native wait remained pending")
+	}
+	release()
+	actual := receive()
+	if !actual.result.Exited || !actual.result.ExitCodeAvailable || !errors.Is(actual.err, wakeFailure) || closes.Load() != 1 {
+		t.Fatalf("original outcome/callback/event receiving=%+v / %v", actual.result, actual.err)
+	}
+}
+
+func TestHeldPIDExitWaiterBorrowAndFirstCloseError(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	closeFailure := errors.New("synthetic held close failure")
+	waitFailure := errors.New("synthetic controlled wait outcome unavailable")
+	closes := 0
+	held := &heldPIDGeneration{pid: 9, handle: 0x11, ops: heldPIDGenerationOps{
+		waitExit: func(context.Context, uintptr) (HeldPIDExitResult, error) {
+			close(entered)
+			<-release
+			return HeldPIDExitResult{}, waitFailure
+		},
+		close: func(windows.Handle) error { closes++; return closeFailure },
+	}}
+	done := make(chan error, 1)
+	go func() { _, err := held.WaitExit(context.Background()); done <- err }()
+	<-entered
+	if held.mu.TryLock() {
+		held.mu.Unlock()
+		close(release)
+		<-done
+		t.Fatal("native wait did not retain its Close borrowing guard")
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, waitFailure) {
+		t.Fatal("controlled wait failure was lost")
+	}
+	for i := 0; i < 2; i++ {
+		if err := held.Close(); !errors.Is(err, closeFailure) {
+			t.Fatal("first held close cause lost")
+		}
+	}
+	if closes != 1 || held.handle != 0x11 {
+		t.Fatal("uncertain held close retried or erased original identity")
+	}
+	if _, err := held.WaitExit(context.Background()); err == nil {
+		t.Fatal("reused close-attempted held owner")
+	}
+	legacyEffects := &heldPIDGeneration{pid: 9, handle: 0x11}
+	if _, err := legacyEffects.WaitExit(context.Background()); !errors.Is(err, ErrProcessIdentityUnsupported) {
+		t.Fatal("old effect fixture gained fake native support")
+	}
+}
+
+func TestRetainedProcessExitNativeNoDeadlineCancellation(t *testing.T) {
+	handle, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := windows.CloseHandle(handle); err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{})
+	ops := retainedProcessExitOps{
+		createEvent: func() (windows.Handle, error) { return windows.CreateEvent(nil, 1, 0, nil) },
+		setEvent:    windows.SetEvent, exitCode: windows.GetExitCodeProcess, close: windows.CloseHandle,
+		wait: func(handles []windows.Handle, all bool, timeout uint32) (uint32, error) {
+			close(entered)
+			return windows.WaitForMultipleObjects(handles, all, timeout)
+		},
+	}
+	type outcome struct {
+		result HeldPIDExitResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := waitRetainedProcessExit(ctx, uintptr(handle), ops)
+		done <- outcome{result, err}
+	}()
+	select {
+	case <-entered:
+	case early := <-done:
+		t.Fatalf("native wait failed before entry: %+v / %v", early.result, early.err)
+	}
+	cancel()
+	actual := <-done
+	if !errors.Is(actual.err, context.Canceled) || actual.result.Exited {
+		t.Fatalf("cancellation became exit: %+v / %v", actual.result, actual.err)
+	}
+	if state, err := windows.WaitForSingleObject(handle, 0); err != nil || state != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatal("cancellation released/affected original handle")
+	}
+	if _, err := WaitRetainedProcessExit(nil, uintptr(handle)); err == nil {
+		t.Fatal("nil context accepted")
+	}
+	if _, err := WaitRetainedProcessExit(context.Background(), 0); err == nil {
+		t.Fatal("missing handle accepted")
+	}
+	already, stop := context.WithCancel(context.Background())
+	stop()
+	if _, err := WaitRetainedProcessExit(already, uintptr(handle)); !errors.Is(err, context.Canceled) {
+		t.Fatal("pre-entry cancellation lost")
+	}
+}
 
 func TestLookupPIDHandleIdentityUsesKernelCreationTime(t *testing.T) {
 	pid := os.Getpid()

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -41,10 +42,26 @@ const (
 	guiOwnerStateTombstone = "tombstone"
 )
 
+// ReservationEndpoint classifies an already decoded/validated owner record.
+// A terminal tombstone has no active endpoint to observe; that fact alone
+// proves neither process absence nor ownership of the GUI flock. Handoff is
+// reserved for its original designated child and is never an absence variant.
+func (record GUIOwnerRecord) ReservationEndpoint() (port int, terminal bool, err error) {
+	if !record.Legacy && record.Version == guiOwnerRecordVersion && record.State == guiOwnerStateTombstone && record.Port == 0 {
+		return 0, true, nil
+	}
+	if record.State == guiOwnerStateActive && record.Port > 0 && record.Port <= 65535 &&
+		((record.Legacy && record.Version == 1) || (!record.Legacy && record.Version == guiOwnerRecordVersion)) {
+		return record.Port, false, nil
+	}
+	return 0, false, errors.New("GUI owner record is not a settled terminal or active positive endpoint")
+}
+
 // GUIOwnerLifecycle owns the durable record transitions for one process that
 // already owns the GUI flock. SingleInstanceLock deliberately remains an
 // unlock-only resource; cleanup changes the record before that lock releases.
 type GUIOwnerLifecycle struct {
+	mu         sync.Mutex
 	path       string
 	generation string
 	pid        int
@@ -183,7 +200,24 @@ func writeGUIOwnerRecord(path string, record GUIOwnerRecord) error {
 	return api.WriteStateFileBytesLockHeld(path, append(b, '\n'))
 }
 
-func writeCurrentGUIOwnerRecord(path string, pid, port int) (GUIOwnerRecord, error) {
+func writeCurrentGUIOwnerRecord(path string, pid, port int, resume ...*api.GUIOwnerControl) (GUIOwnerRecord, error) {
+	if len(resume) > 1 {
+		return GUIOwnerRecord{}, errors.New("GUI resume has multiple policy preimages")
+	}
+	if len(resume) == 1 && resume[0] != nil {
+		if _, err := api.NewAPI().ResumeGUIOwner(*resume[0]); err != nil {
+			return GUIOwnerRecord{}, err
+		}
+	}
+	// The original GUI lease remains held throughout. Other user transitions
+	// need that SAME lease, and the prior owner terminalized before releasing
+	// it. Confirm policy AND settings release before publishing any active row;
+	// a settings-release failure must not create an unowned active generation.
+	if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+		return control.ValidateAutomaticStart()
+	}); err != nil {
+		return GUIOwnerRecord{}, err
+	}
 	record, err := currentGUIOwnerRecord(pid, port)
 	if err != nil {
 		return GUIOwnerRecord{}, err
@@ -204,6 +238,8 @@ func (l *GUIOwnerLifecycle) UpdatePort(port int) error {
 	if l == nil {
 		return errors.New("GUI owner lifecycle is nil")
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	record, err := ReadGUIOwnerRecord(l.path)
 	if err != nil {
 		return err
@@ -221,12 +257,22 @@ func (l *GUIOwnerLifecycle) BeginHandoff(id, generation string, targetPID, targe
 	if l == nil {
 		return errors.New("GUI owner lifecycle is nil")
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	record, err := ReadGUIOwnerRecord(l.path)
 	if err != nil {
 		return err
 	}
 	if !l.matches(record) || record.State != guiOwnerStateActive {
 		return errors.New("GUI owner record changed before handoff")
+	}
+	if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+		if control.RunDesired == api.GUIRunStopped {
+			return api.ErrGUIStoppedByUser
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	record.State = guiOwnerStateHandoff
 	record.HandoffID, record.HandoffGeneration = id, generation
@@ -238,6 +284,8 @@ func (l *GUIOwnerLifecycle) RestoreActive(handoffID, handoffGeneration string) e
 	if l == nil {
 		return errors.New("GUI owner lifecycle is nil")
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	record, err := ReadGUIOwnerRecord(l.path)
 	if err != nil {
 		return err
@@ -258,6 +306,8 @@ func (l *GUIOwnerLifecycle) TerminalSettle() error {
 	if l == nil {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	record, err := ReadGUIOwnerRecord(l.path)
 	if err != nil {
 		return err

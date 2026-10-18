@@ -37,6 +37,111 @@ import (
 	"mcp-local-hub/internal/process"
 )
 
+func TestSupervisorPeerIPCSenderOmissionSafety(t *testing.T) {
+	legacyCalled := false
+	legacy := func(context.Context, string, api.SupervisorLockOwner, string, map[string]any, time.Duration) (api.IPCResponse, error) {
+		legacyCalled = true
+		return api.IPCResponse{}, nil
+	}
+	custom := &v5UpgradeDeps{sendIPC: legacy}
+	if sender, err := custom.peerIPCSender(); sender != nil || !errors.Is(err, errSupervisorPeerIPCSenderRequired) {
+		t.Fatalf("legacy-only strict resolution=%v/%v, want typed refusal", sender != nil, err)
+	}
+	if launch, err := custom.StartSupervisor("unused-before-native-allocation"); launch != nil || !errors.Is(err, errSupervisorPeerIPCSenderRequired) {
+		t.Fatalf("legacy-only launch=%v/%v, want refusal before state/spawn", launch != nil, err)
+	}
+	if legacyCalled {
+		t.Fatal("legacy callback was invoked as strict proof")
+	}
+	if sender, err := (&v5UpgradeDeps{}).peerIPCSender(); sender == nil || err != nil {
+		t.Fatal("omitted ports did not select strict production implementation")
+	}
+	strictCalled := false
+	custom.sendIPCPeer = func(context.Context, string, api.SupervisorLockOwner, api.SupervisorProcessIdentityV1, string, map[string]any, time.Duration) (api.IPCResponse, error) {
+		strictCalled = true
+		return api.IPCResponse{ID: 91, OK: true, Final: true}, nil
+	}
+	sender, err := custom.peerIPCSender()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := sender(context.Background(), "", api.SupervisorLockOwner{}, api.SupervisorProcessIdentityV1{}, "exit", nil, time.Second)
+	if err != nil || response.ID != 91 || !strictCalled || legacyCalled {
+		t.Fatal("explicit strict callback did not win; callback is selection evidence only, not native proof")
+	}
+}
+
+func TestSupervisorPeerIPCSenderPreDialEvidence(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	owner := api.SupervisorLockOwner{PID: 41, StartedAt: "private-owner-generation"}
+	peer := api.SupervisorProcessIdentityV1{PID: 41, CreationTime: owner.StartedAt, ImagePath: "private-peer-path"}
+	for _, scenario := range []struct {
+		name    string
+		ctx     context.Context
+		timeout time.Duration
+	}{
+		{"canceled", ctx, time.Second},
+		{"missing-context", nil, time.Second},
+		{"nonpositive-timeout", context.Background(), 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			response, err := sendIPCWithResponseForPeer(scenario.ctx, "unused-before-dial", owner, peer, "exit", nil, scenario.timeout)
+			dispatch, ok := err.(*supervisorIPCDispatchError)
+			if !ok || dispatch.requestWriteEntered || dispatch.owner != owner || dispatch.peer != peer || dispatch.command != "exit" || response.OK || response.Final {
+				t.Fatalf("production admission lost no-write binding: %+v / %v", response, err)
+			}
+			if scenario.name == "canceled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation cause lost: %v", err)
+			}
+			if strings.Contains(err.Error(), owner.StartedAt) || strings.Contains(err.Error(), peer.ImagePath) {
+				t.Fatal("dispatch error exposed private binding")
+			}
+		})
+	}
+}
+
+type supervisorRequestWriteFaultConn struct {
+	net.Conn
+	writes          int
+	n               int
+	err             error
+	dispatch        *supervisorIPCDispatchError
+	observedEntered bool
+}
+
+func (c *supervisorRequestWriteFaultConn) Write([]byte) (int, error) {
+	c.writes++
+	c.observedEntered = c.dispatch.requestWriteEntered
+	return c.n, c.err
+}
+
+func TestSupervisorRequestCodecWriteEntry(t *testing.T) {
+	writeFailure := errors.New("synthetic entered write failure")
+	for _, scenario := range []struct {
+		name string
+		args map[string]any
+		n    int
+	}{
+		{"marshal-refusal", map[string]any{"unsupported": make(chan int)}, 0},
+		{"zero-write-error", nil, 0},
+		{"partial-write-error", nil, 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			dispatch := &supervisorIPCDispatchError{}
+			conn := &supervisorRequestWriteFaultConn{n: scenario.n, err: writeFailure, dispatch: dispatch}
+			err := writeFrameWithDispatch(conn, api.IPCRequest{Cmd: "exit", Args: scenario.args}, dispatch)
+			if scenario.name == "marshal-refusal" {
+				if err == nil || dispatch.requestWriteEntered || conn.writes != 0 {
+					t.Fatalf("marshal refusal entered Write: writes=%d error=%v", conn.writes, err)
+				}
+			} else if !errors.Is(err, writeFailure) || !dispatch.requestWriteEntered || !conn.observedEntered || conn.writes != 1 {
+				t.Fatalf("entered Write lost possible effect: writes=%d error=%v", conn.writes, err)
+			}
+		})
+	}
+}
+
 func TestUpgradeIPCResponseFrameUsesSupervisorBound(t *testing.T) {
 	t.Run("realistic status response above 30 KiB is accepted", func(t *testing.T) {
 		raw, err := json.Marshal(api.IPCResponse{
@@ -108,9 +213,9 @@ func (d *targetBoundRollbackDeps) ExitGraceful(context.Context, string, int) (ap
 	return api.IPCResponse{OK: true, Final: true}, nil
 }
 
-func (d *targetBoundRollbackDeps) StartSupervisor(binary string) error {
+func (d *targetBoundRollbackDeps) StartSupervisor(binary string) (SupervisorLaunch, error) {
 	d.started = append(d.started, binary)
-	return nil
+	return &fixtureSupervisorLaunch{}, nil
 }
 
 func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t *testing.T) {

@@ -82,10 +82,10 @@ jobs:
           else
             V="$VERSION_INPUT"
           fi
-          if ! printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::version '$V' is not semver"; exit 1
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version is not semver"; exit 1
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
           echo "Publishing version: $V"
 
       - name: Set package versions + regenerate platform packages
@@ -94,10 +94,9 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          V="$VERSION"
-          node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          node -e "const v=process.env.VERSION;const f='npm/package.json';const p=require('./'+f);p.version=v;for(const k in p.optionalDependencies)p.optionalDependencies[k]=v;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
           node npm/generate-platform-packages.js
-          node npm/sync-version.js --inject   # push $V into build.sh + versioninfo.json so the binary matches
+          node npm/sync-version.js --inject   # push release version into build.sh + versioninfo.json so the binary matches
           TARGETS="$(node -e "process.stdout.write(Object.keys(require('./npm/lib/platform-binary').PACKAGE_BY_PLATFORM).join(' '))")"
           if [ "$TARGETS" != "win32-x64" ]; then
             echo "::error::this release workflow admits only win32-x64; manifest targets: $TARGETS"; exit 1
@@ -115,15 +114,62 @@ jobs:
           COMMIT="$(git rev-parse HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           printf 'commit=%s\nbuild_date=%s\n' "$COMMIT" "$DATE" >> "$GITHUB_OUTPUT"
+          CHECKOUT="$(pwd -P)"
+          # This fresh parent belongs to the runner's existing job-temporary
+          # lifecycle. Go alone creates and verifies the export and snapshot.
+          SOURCE_OWNER="$(mktemp -d "$RUNNER_TEMP/mcphub-publisher-source.XXXXXX")"
+          SOURCE_EXPORT="$SOURCE_OWNER/source"
+          SOURCE_SNAPSHOT="$SOURCE_OWNER/source-snapshot.json"
+          SOURCE_PREPARATION="$SOURCE_OWNER/preparation.json"
+          # sync-version owns these generated build inputs. Frontend assets
+          # are committed source inputs, selected by the same Go capture.
+          go run ./tools/windows-product-validate \
+            --prepare-source "$SOURCE_EXPORT" \
+            --source-checkout "$CHECKOUT" \
+            --source-snapshot-output "$SOURCE_SNAPSHOT" \
+            --expected-commit "$COMMIT" \
+            --generated-source build.sh \
+            --generated-source build.ps1 \
+            --generated-source cmd/mcphub/versioninfo.json > "$SOURCE_PREPARATION"
+          SOURCE_EPOCH="$(SOURCE_PREPARATION="$SOURCE_PREPARATION" EXPECTED_COMMIT="$COMMIT" node <<'NODE'
+          const fs = require('node:fs');
+          const raw = fs.readFileSync(process.env.SOURCE_PREPARATION, 'utf8');
+          const row = JSON.parse(raw);
+          const keys = (value, expected) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+            JSON.stringify(Object.keys(value)) === JSON.stringify(expected);
+          // Go emits this constant compact shape. Exact roundtrip also refuses
+          // duplicate keys and trailing data without a second JSON parser.
+          if (raw !== JSON.stringify(row) + '\n' ||
+              !keys(row, ['schema', 'git_commit', 'git_tree', 'dirty_selected_source', 'source_input']) ||
+              row.schema !== 'windows-publisher-source-preparation-v1' ||
+              typeof row.git_commit !== 'string' || !/^[0-9a-f]{40}$/.test(row.git_commit) ||
+              row.git_commit !== process.env.EXPECTED_COMMIT ||
+              typeof row.git_tree !== 'string' || !/^[0-9a-f]{40}$/.test(row.git_tree) ||
+              typeof row.dirty_selected_source !== 'boolean' ||
+              !keys(row.source_input, ['schema', 'source_snapshot_sha256', 'source_epoch', 'file_count']) ||
+              row.source_input.schema !== 'windows-publisher-source-input-v1' ||
+              typeof row.source_input.source_snapshot_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.source_input.source_snapshot_sha256) ||
+              typeof row.source_input.source_epoch !== 'string' || !/^[0-9a-f]{64}$/.test(row.source_input.source_epoch) ||
+              !Number.isSafeInteger(row.source_input.file_count) || row.source_input.file_count <= 0) {
+            throw new Error('PUBLISHER_SOURCE_TABLE_INVALID: invalid preparation result');
+          }
+          process.stdout.write(row.source_input.source_epoch);
+          NODE
+          )"
+          printf 'source_epoch=%s\n' "$SOURCE_EPOCH" >> "$GITHUB_OUTPUT"
           for d in $TARGETS; do
             case "$d" in
               win32-x64)
-                pwsh -NoProfile -File ./build.ps1 \
-                  -WindowsTargetArch amd64 \
-                  -OutputDirectory "npm/packages/$d/bin" \
-                  -ReleaseVersion "$V" \
-                  -ReleaseCommit "$COMMIT" \
-                  -ReleaseBuildDate "$DATE"
+                (
+                  cd "$SOURCE_EXPORT"
+                  pwsh -NoProfile -File ./build.ps1 \
+                    -WindowsTargetArch amd64 \
+                    -OutputDirectory "$CHECKOUT/npm/packages/$d/bin" \
+                    -ReleaseVersion "$V" \
+                    -ReleaseCommit "$COMMIT" \
+                    -ReleaseBuildDate "$DATE" \
+                    -SourceSnapshotPath "$SOURCE_SNAPSHOT"
+                )
                 ;;
               *) echo "::error::no admitted build route for $d"; exit 1 ;;
             esac
@@ -136,6 +182,7 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           COMMIT: ${{ steps.native.outputs.commit }}
           BUILD_DATE: ${{ steps.native.outputs.build_date }}
+          SOURCE_EPOCH: ${{ steps.native.outputs.source_epoch }}
           TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           windows_product_rows() {
@@ -159,7 +206,8 @@ jobs:
                 --candidate "$candidate" \
                 --expected-version "$VERSION" \
                 --expected-commit "$COMMIT" \
-                --expected-build-date "$BUILD_DATE" > "$observed"
+                --expected-build-date "$BUILD_DATE" \
+                --expected-source-epoch "$SOURCE_EPOCH" > "$observed"
               cmp "$observed" "npm/packages/$target/bin/windows-product-identity.json"
               echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
             done < "$WINDOWS_PRODUCT_ROWS"

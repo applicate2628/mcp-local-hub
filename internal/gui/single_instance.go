@@ -15,6 +15,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/process"
 )
 
@@ -74,6 +75,9 @@ type OwnedSingleInstanceLease interface {
 // single acquisition. Existing callers pass no options and retain the legacy
 // single-shot behavior without reading the marker.
 type SingleInstanceAcquireOptions struct {
+	// Non-nil only for an explicit resume consumer. Compared inside settings
+	// RMW AFTER this acquisition owns the real GUI lease, before publication.
+	GUIResumeControl     *api.GUIOwnerControl
 	RestartV3Enabled     bool
 	MarkerStore          HandoffMarkerReader
 	DesignatedChildNonce []byte
@@ -305,14 +309,16 @@ func AcquireSingleInstance(port int) (*SingleInstanceLock, error) {
 }
 
 // acquireSingleInstanceAt is the injectable form used by tests.
-func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock, error) {
+func acquireSingleInstanceAt(pidportPath string, port int, resume ...*api.GUIOwnerControl) (*SingleInstanceLock, error) {
 	lease, err := tryAcquireSingleInstanceLockAt(pidportPath)
 	if err != nil {
 		return nil, err
 	}
-	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port)
+	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port, resume...)
 	if err != nil {
-		lease.Release()
+		if releaseErr := lease.ReleaseErr(); releaseErr != nil {
+			return nil, newGUIOwnerLeaseUnknown("release tentative GUI lease after publication refusal", errors.Join(err, releaseErr))
+		}
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
 	lease.ownerLifecycle = newGUIOwnerLifecycle(pidportPath, ownerRecord)
@@ -511,6 +517,12 @@ func formatPidport(pid, port int) string {
 // force-kill callers intentionally remain unwired in Phase E.
 func AcquireSingleInstanceAt(pidportPath string, port int, options ...SingleInstanceAcquireOptions) (*SingleInstanceLock, error) {
 	if len(options) == 0 || !options[0].RestartV3Enabled {
+		if len(options) > 1 {
+			return nil, errors.New("multiple GUI acquisition option sets")
+		}
+		if len(options) == 1 {
+			return acquireSingleInstanceAt(pidportPath, port, options[0].GUIResumeControl)
+		}
 		return acquireSingleInstanceAt(pidportPath, port)
 	}
 	if len(options) != 1 {
@@ -550,7 +562,7 @@ func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, optio
 		return nil, releaseTentativeLeaseWithReason(lease, ErrHandoffReserved)
 	}
 
-	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port)
+	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port, options.GUIResumeControl)
 	if err != nil {
 		if releaseErr := lease.release(); releaseErr != nil {
 			return nil, newGUIOwnerLeaseUnknown("release tentative lease after pidport write failure", errors.Join(err, releaseErr))

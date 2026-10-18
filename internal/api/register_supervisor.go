@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"slices"
 	"time"
 
 	"mcp-local-hub/internal/config"
@@ -614,7 +616,9 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 		priorDescriptor = daemon
 	}
 	desired.Daemons = append(kept, descriptor)
-	desired.Version = 1
+	if err := normalizePreparedSupervisorIntentMerge(prior, desired); err != nil {
+		return nil, err
+	}
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	// Capture any prior stop artifact for this task through both the canonical
 	// and bare key forms. A stop or absent-only watermark keyed under the bare
@@ -843,7 +847,9 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (undo com
 	undo = func() error {
 		return upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorArtifacts)
 	}
-	desired.Version = 1
+	if err := normalizePreparedSupervisorIntentMerge(prior, desired); err != nil {
+		return undo, false, err
+	}
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return undo, false, fmt.Errorf("write supervisor-intent without LSP row %s: %w", taskName, err)
@@ -927,7 +933,9 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 	}
 	desired.Daemons = append(kept, descriptor)
 	restoreSupervisorStopArtifacts(desired, descriptor.TaskName, artifacts)
-	desired.Version = 1
+	if err := normalizePreparedSupervisorIntentMerge(current, desired); err != nil {
+		return err
+	}
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeSupervisorIntentLockHeld(path, desired); err != nil {
 		return err
@@ -966,20 +974,96 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 	removedDescriptor := SupervisorDaemon{TaskName: taskName}
 	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, []SupervisorDaemon{removedDescriptor})
 	restoreSupervisorStopArtifacts(desired, taskName, artifacts)
-	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode && len(desired.Stops) == 0 && len(desired.LegacyStopWatermarks) == 0 {
-		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return removeErr
-		}
-		applied = true
-		return nil
+	err = publishScopedSupervisorIntentRemovalLockHeld(path, desired, removeFileIfEmpty)
+	applied = err == nil
+	return err
+}
+
+// The original scoped publisher remains the sole compensation boundary.
+// Observed inputs are original invocation-local owner objects, never capsule
+// fields or a serialized fence that constructs mutation/retirement authority.
+type scopedSupervisorIntentPublication struct {
+	ctx context.Context
+	prior *SupervisorIntentFile
+	invocation *PreparedSerenaConsumerInvocation
+	lease *StateFileObservedLease
+	beforeSHA string
+	freshCommit *SupervisorFileMutationObservation
+	freshCommitSHA string
+}
+
+func prepareScopedSupervisorIntentRemoval(prior, desired *SupervisorIntentFile, removeFileIfEmpty bool) (*SupervisorIntentFile, bool, bool, error) {
+	if prior == nil || desired == nil {
+		return nil, false, false, errors.New("SERENA_PREPARED_INTENT_MISSING")
 	}
-	desired.Version = 1
-	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := writeSupervisorIntentLockHeld(path, desired); err != nil {
+	proposal := cloneSupervisorIntentFile(desired)
+	// This publisher never owns consumer retirement. Keep every current,
+	// pending and rollback row byte-equivalent; their ticket owner settles them.
+	if !reflect.DeepEqual(prior.SerenaPreparedConsumers, proposal.SerenaPreparedConsumers) {
+		return nil, false, false, errors.New("SERENA_PREPARED_INTENT_BINDING_DRIFT")
+	}
+	if err := normalizePreparedSupervisorIntentMerge(prior, proposal); err != nil {
+		return nil, false, false, err
+	}
+	empty := len(proposal.Daemons) == 0 && len(proposal.MaintenanceTimers) == 0 && !proposal.StrictMode && len(proposal.Stops) == 0 && len(proposal.LegacyStopWatermarks) == 0
+	remove := removeFileIfEmpty && empty
+	if remove && proposal.SerenaPreparedConsumers != nil && len(proposal.SerenaPreparedConsumers.Bindings) != 0 {
+		return nil, false, false, errors.New("SERENA_PREPARED_PRIOR_CONSUMER_PENDING")
+	}
+	observed := remove && (prior.Version == 2 || proposal.Version == 2)
+	before := make(map[string]SupervisorDaemon, len(prior.Daemons))
+	after := make(map[string]SupervisorDaemon, len(proposal.Daemons))
+	for _, row := range prior.Daemons { before[row.TaskName] = row }
+	for _, row := range proposal.Daemons { after[row.TaskName] = row }
+	for _, rows := range []map[string]SupervisorDaemon{before, after} {
+		for task, row := range rows {
+			binding, err := preparedSerenaDescriptorBinding(row)
+			if err != nil { return nil, false, false, err }
+			if binding != nil && !reflect.DeepEqual(before[task], after[task]) {
+				observed = true
+			}
+		}
+	}
+	return proposal, remove, observed, nil
+}
+
+func publishScopedSupervisorIntentRemovalLockHeld(path string, desired *SupervisorIntentFile, removeFileIfEmpty bool, received ...scopedSupervisorIntentPublication) error {
+	if len(received) > 1 {
+		return errors.New("SERENA_PARSED_REPLACEMENT_INPUT_MISSING")
+	}
+	var input scopedSupervisorIntentPublication
+	if len(received) == 1 { input = received[0] }
+	prior := input.prior
+	if prior == nil {
+		var err error
+		prior, _, err = readSupervisorIntentForMerge(path)
+		if err != nil { return err }
+	}
+	proposal, remove, needsObserved, err := prepareScopedSupervisorIntentRemoval(prior, desired, removeFileIfEmpty)
+	if err != nil { return err }
+	if needsObserved || input.invocation != nil {
+		if input.ctx == nil || input.invocation == nil || input.lease == nil || input.invocation.io.IntentPath != path || !preparedSerenaDigest(input.beforeSHA) {
+			return errors.New("SERENA_PARSED_REPLACEMENT_INPUT_MISSING")
+		}
+		if remove {
+			if input.freshCommit == nil || input.freshCommitSHA != input.beforeSHA {
+				return errors.New("SERENA_PARSED_RESTORATION_OWNER_MISSING")
+			}
+			return input.invocation.restoreParsedIntentAbsenceObserved(input.ctx, input.lease, input.freshCommit, input.freshCommitSHA)
+		}
+		_, _, err = input.invocation.replaceParsedIntentObserved(input.ctx, input.lease, input.beforeSHA, proposal)
 		return err
 	}
-	applied = true
-	return nil
+	if remove {
+		// Only unchanged legacy v1 absence has this original lock-held path.
+		if prior.Version != 1 || proposal.Version != 1 || proposal.SerenaPreparedConsumers != nil {
+			return errors.New("SERENA_PARSED_RESTORATION_OWNER_MISSING")
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) { return err }
+		return nil
+	}
+	proposal.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return writeSupervisorIntentLockHeld(path, proposal)
 }
 
 func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {
@@ -987,20 +1071,29 @@ func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {
 		return &SupervisorIntentFile{Version: 1}
 	}
 	out := *in
-	out.Daemons = append([]SupervisorDaemon(nil), in.Daemons...)
+	out.SerenaPreparedConsumers = clonePreparedSerenaConsumers(in.SerenaPreparedConsumers)
+	out.Daemons = slices.Clone(in.Daemons)
 	for i := range out.Daemons {
-		out.Daemons[i].Args = append([]string(nil), in.Daemons[i].Args...)
+		out.Daemons[i].Args = slices.Clone(in.Daemons[i].Args)
 		out.Daemons[i].Env = cloneStringMap(in.Daemons[i].Env)
+		if in.Daemons[i].PreparedRuntime != nil {
+			binding := *in.Daemons[i].PreparedRuntime
+			out.Daemons[i].PreparedRuntime = &binding
+		}
 		if in.Daemons[i].RuntimeSpec != nil {
 			spec := *in.Daemons[i].RuntimeSpec
-			spec.ChildArgs = append([]string(nil), in.Daemons[i].RuntimeSpec.ChildArgs...)
+			spec.ChildArgs = slices.Clone(in.Daemons[i].RuntimeSpec.ChildArgs)
 			spec.EnvRefs = cloneStringMap(in.Daemons[i].RuntimeSpec.EnvRefs)
+			if in.Daemons[i].RuntimeSpec.PreparedRuntime != nil {
+				binding := *in.Daemons[i].RuntimeSpec.PreparedRuntime
+				spec.PreparedRuntime = &binding
+			}
 			out.Daemons[i].RuntimeSpec = &spec
 		}
 	}
-	out.MaintenanceTimers = append([]MaintenanceTimer(nil), in.MaintenanceTimers...)
+	out.MaintenanceTimers = slices.Clone(in.MaintenanceTimers)
 	for i := range out.MaintenanceTimers {
-		out.MaintenanceTimers[i].Args = append([]string(nil), in.MaintenanceTimers[i].Args...)
+		out.MaintenanceTimers[i].Args = slices.Clone(in.MaintenanceTimers[i].Args)
 		if in.MaintenanceTimers[i].Enabled != nil {
 			enabled := *in.MaintenanceTimers[i].Enabled
 			out.MaintenanceTimers[i].Enabled = &enabled

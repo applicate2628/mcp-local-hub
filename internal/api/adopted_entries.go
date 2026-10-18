@@ -34,13 +34,16 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -83,6 +86,7 @@ const (
 	adoptedEntriesSchemaV1      = 1
 	adoptedEntriesSchemaV2      = 2
 	adoptedEntriesSchemaV3      = 3
+	adoptedEntriesSchemaV4      = 4
 	adoptedEntriesSchemaVersion = adoptedEntriesSchemaV1
 )
 
@@ -120,6 +124,7 @@ type AdoptOperationState string
 const (
 	AdoptOperationStateAdopting AdoptOperationState = "adopting"
 	AdoptOperationStateAdopted  AdoptOperationState = "adopted"
+	AdoptOperationStateDefined  AdoptOperationState = "defined"
 
 	// AdoptOperationStateDeAdopting and AdoptOperationStateClosed are the
 	// de-adopt-owned states. DECLARED here so the shared schema supports them;
@@ -162,8 +167,10 @@ const (
 // AdoptClientProvenance is the per-client pre-adopt state + pinned-snapshot
 // pointer. SnapshotRef/SnapshotSHA256 are present-only (empty for `absent`).
 type AdoptClientProvenance struct {
-	Client         string `json:"client"`
-	ToolTimeoutSec int    `json:"tool_timeout_sec,omitempty"`
+	TargetID        string                        `json:"target_id,omitempty"`
+	AttachmentState GraphifyTargetAttachmentState `json:"attachment_state,omitempty"`
+	Client          string                        `json:"client"`
+	ToolTimeoutSec  int                           `json:"tool_timeout_sec,omitempty"`
 	// TargetEntryName is the physical client-config key written by adopt. Older
 	// records omit it; readers treat that omission as SourceEntryName.
 	TargetEntryName string                     `json:"target_entry_name,omitempty"`
@@ -202,6 +209,7 @@ type AdoptProvenanceRecord struct {
 	UpdatedAt            time.Time                   `json:"updated_at"`
 	Clients              []AdoptClientProvenance     `json:"clients"`
 	ProviderSource       *ProviderSourceProvenanceV1 `json:"provider_source,omitempty"`
+	ProjectService       *ProjectServiceProvenanceV1 `json:"project_service,omitempty"`
 }
 
 // AdoptedEntries is the <state-dir>/adopted-entries.json file root.
@@ -209,6 +217,9 @@ type AdoptedEntries struct {
 	Version                int                         `json:"version"`
 	Records                []AdoptProvenanceRecord     `json:"records"`
 	ProtocolProfileUpdates []AdoptProfileUpdateJournal `json:"protocol_profile_updates,omitempty"`
+	preimage               []byte
+	present                bool
+	selectedProjectService string
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +237,7 @@ var adoptedEntriesMu sync.Mutex
 // Deadlock-freedom of the whole capture path: the per-snapshot flock that
 // WriteStateFileBytesAtomic takes (<snapshot>.lock) is acquired STRICTLY INSIDE
 // this lock (adopted-entries.lock -> <snapshot>.lock, never reversed).
-func withAdoptedEntriesLock(fn func() error) error {
+func withAdoptedEntriesLock(fn func() error) (resultErr error) {
 	adoptedEntriesMu.Lock()
 	defer adoptedEntriesMu.Unlock()
 
@@ -239,7 +250,7 @@ func withAdoptedEntriesLock(fn func() error) error {
 	if err := lk.Lock(); err != nil {
 		return fmt.Errorf("adopted-entries flock %s: %w", lockPath, err)
 	}
-	defer func() { _ = lk.Unlock() }()
+	defer func() { resultErr = errors.Join(resultErr, lk.Unlock()) }()
 
 	return fn()
 }
@@ -256,7 +267,18 @@ func readAdoptedEntries() (*AdoptedEntries, error) {
 		}
 		return nil, err
 	}
-	return decodeAdoptedEntriesWithMaxVersion(raw, adoptedEntriesSchemaV3)
+	m, err := decodeAdoptedEntriesWithMaxVersion(raw, adoptedEntriesSchemaV4)
+	if err != nil {
+		return nil, err
+	}
+	m.preimage = bytes.Clone(raw)
+	m.present = true
+	if m.Version == adoptedEntriesSchemaV4 {
+		if err := requireCanonicalAdoptedEntries(raw, m); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
 }
 
 func decodeAdoptedEntriesWithMaxVersion(raw []byte, maxVersion int) (*AdoptedEntries, error) {
@@ -267,12 +289,28 @@ func decodeAdoptedEntriesWithMaxVersion(raw []byte, maxVersion int) (*AdoptedEnt
 	if m.Version == 0 {
 		m.Version = adoptedEntriesSchemaV1
 	}
-	if m.Version != adoptedEntriesSchemaV1 && m.Version != adoptedEntriesSchemaV2 && m.Version != adoptedEntriesSchemaV3 || m.Version > maxVersion {
+	if m.Version != adoptedEntriesSchemaV1 && m.Version != adoptedEntriesSchemaV2 && m.Version != adoptedEntriesSchemaV3 && m.Version != adoptedEntriesSchemaV4 || m.Version > maxVersion {
 		return nil, fmt.Errorf("adopted-entries.json: unknown schema version %d (this build expects at most %d)", m.Version, maxVersion)
 	}
 	hasProvider := false
 	hasProjectTarget := false
+	hasProjectService := false
 	for i := range m.Records {
+		if m.Records[i].ProjectService != nil {
+			hasProjectService = true
+			if err := validateProjectServiceRecord(m.Records[i]); err != nil {
+				return nil, err
+			}
+		} else {
+			if m.Records[i].OperationState == AdoptOperationStateDefined {
+				return nil, errors.New("defined provenance requires project service")
+			}
+			for _, client := range m.Records[i].Clients {
+				if client.TargetID != "" || client.AttachmentState != "" {
+					return nil, errors.New("project service target requires association")
+				}
+			}
+		}
 		for j := range m.Records[i].Clients {
 			if m.Records[i].Clients[j].ConfigTarget == nil {
 				continue
@@ -290,6 +328,15 @@ func decodeAdoptedEntriesWithMaxVersion(raw []byte, maxVersion int) (*AdoptedEnt
 		if err := validateProviderSourceProvenance(provider); err != nil {
 			return nil, fmt.Errorf("adopted-entries.json: record %q provider source: %w", m.Records[i].ManifestName, err)
 		}
+	}
+	if hasProjectService {
+		if m.Version != adoptedEntriesSchemaV4 {
+			return nil, errors.New("project service requires schema version 4")
+		}
+		return &m, nil
+	}
+	if m.Version == adoptedEntriesSchemaV4 {
+		return nil, errors.New("schema version 4 requires project service")
 	}
 	if hasProjectTarget && m.Version != adoptedEntriesSchemaV3 {
 		return nil, errors.New("adopted-entries.json: project config target requires schema version 3")
@@ -318,13 +365,39 @@ func writeAdoptedEntries(m *AdoptedEntries) error {
 	if err != nil {
 		return fmt.Errorf("marshal adopted-entries: %w", err)
 	}
-	return writeHubMcpStateFile(adoptedEntriesFileLeaf, raw)
+	if m.Version == adoptedEntriesSchemaV4 || adoptedEntriesPreimageHasProjectService(m.preimage) {
+		if err := validateAdoptedEntriesPublication(m, raw); err != nil {
+			return err
+		}
+	}
+	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, raw); err != nil {
+		return err
+	}
+	if m.Version == adoptedEntriesSchemaV4 {
+		readback, err := readHubMcpStateFile(adoptedEntriesFileLeaf)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(readback, raw) {
+			return errors.New("GRAPHIFY_PROVENANCE_READBACK_MISMATCH")
+		}
+	}
+	m.preimage = bytes.Clone(raw)
+	m.present = true
+	return nil
 }
 
 func adoptedEntriesVersionForRecords(records []AdoptProvenanceRecord) (int, error) {
 	hasProvider := false
 	hasProjectTarget := false
+	hasProjectService := false
 	for i := range records {
+		if records[i].ProjectService != nil {
+			hasProjectService = true
+			if err := validateProjectServiceRecord(records[i]); err != nil {
+				return 0, err
+			}
+		}
 		for j := range records[i].Clients {
 			if records[i].Clients[j].ConfigTarget == nil {
 				continue
@@ -342,6 +415,9 @@ func adoptedEntriesVersionForRecords(records []AdoptProvenanceRecord) (int, erro
 			return 0, fmt.Errorf("adopted-entries: record %q provider source: %w", records[i].ManifestName, err)
 		}
 	}
+	if hasProjectService {
+		return adoptedEntriesSchemaV4, nil
+	}
 	if hasProjectTarget {
 		return adoptedEntriesSchemaV3, nil
 	}
@@ -356,8 +432,8 @@ func validateAdoptClientConfigTarget(rec AdoptProvenanceRecord, client AdoptClie
 	if target == nil {
 		return nil
 	}
-	if target.Kind != adoptClientConfigTargetKindCodexProject || client.Client != "codex-cli" || rec.SourceClient != "codex-cli" ||
-		adoptClientTargetEntryName(rec, client) != rec.SourceEntryName {
+	if target.Kind != adoptClientConfigTargetKindCodexProject || client.Client != "codex-cli" ||
+		(rec.ProjectService == nil && (rec.SourceClient != "codex-cli" || adoptClientTargetEntryName(rec, client) != rec.SourceEntryName)) {
 		return errProjectAdoptConfigTargetInvalid
 	}
 	if _, ok := decodeLowerProjectAdoptSHA256(target.ProjectIdentitySHA256); !ok {
@@ -743,11 +819,25 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // positive absence, destructive-default polarity). Only when EVERY adopt_client is
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
 // disk is the row a true pre-install crash orphan => REAP.
+// adoptRecordHasSharedStdioTarget identifies DATA only; it acquires no native
+// authority and must precede legacy classifiers in passive consumers.
+func adoptRecordHasSharedStdioTarget(rec AdoptProvenanceRecord) bool {
+	for _, client := range rec.Clients {
+		if client.ConfigTarget != nil && client.ConfigTarget.Kind == adoptClientConfigTargetKindCodexSharedStdio {
+			return true
+		}
+	}
+	return false
+}
+
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 	return classifyDeadAdoptingRowWithResolver(rec, newAdoptClientTargetResolver())
 }
 
 func classifyDeadAdoptingRowWithResolver(rec AdoptProvenanceRecord, resolver adoptClientTargetResolver) adoptRowVerdict {
+	if rec.ProjectService != nil {
+		return adoptRowRecoveryKeep
+	}
 	if rec.ProviderSource != nil {
 		return classifyDeadAdoptingRowWithLookup(rec, func(clientName string) (clients.Client, string, bool) {
 			client, ok := clients.AllClients()[clientName]
@@ -772,6 +862,12 @@ func classifyDeadAdoptingRowWithResolver(rec AdoptProvenanceRecord, resolver ado
 }
 
 func classifyDeadAdoptingRowWithLookup(rec AdoptProvenanceRecord, lookup func(string) (clients.Client, string, bool)) adoptRowVerdict {
+	if adoptRecordHasSharedStdioTarget(rec) {
+		return adoptRowRecoveryKeep
+	}
+	if rec.ProjectService != nil {
+		return adoptRowRecoveryKeep
+	}
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
 	// merely supplies its daemon-port input from the row instead of the mutable file.
@@ -906,6 +1002,9 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			}
 			if r.OperationState != AdoptOperationStateAdopting {
 				return fmt.Errorf("adopt provenance capture: manifest %q already has committed adopt provenance (state %q); refusing to overwrite it", plan.ManifestName, r.OperationState)
+			}
+			if r.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
 			}
 			switch classifyDeadAdoptingRow(r) {
 			case adoptRowRecoveryKeep:
@@ -1226,6 +1325,9 @@ func promoteAdoptProvenanceToAdopted(manifestName string) error {
 				continue
 			}
 			manifestHash = store.Records[i].AdoptManifestHash
+			if store.Records[i].ProjectService != nil {
+				return errGraphifyServiceOperationRequired
+			}
 			if store.Records[i].OperationState == AdoptOperationStateAdopted {
 				return nil // idempotent no-op
 			}
@@ -1265,6 +1367,9 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 		return nil
 	}
 	manifestName := rec.ManifestName
+	if rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	err := withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
@@ -1274,6 +1379,9 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 		keepProviderPhase := false
 		for _, r := range store.Records {
 			if r.ManifestName == manifestName {
+				if r.ProjectService != nil {
+					return errGraphifyServiceOperationRequired
+				}
 				keepProviderPhase = keepProviderPhase || r.ProviderSource != nil
 				continue
 			}
@@ -1331,6 +1439,9 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 		keepProviderPhase := false
 		for _, r := range store.Records {
 			if r.ManifestName == manifestName && r.OperationState == expectedState && r.UpdatedAt.Equal(expectedUpdatedAt) {
+				if r.ProjectService != nil {
+					return errGraphifyServiceOperationRequired
+				}
 				matched = true
 				keepProviderPhase = r.ProviderSource != nil
 				break
@@ -1443,6 +1554,9 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 }
 
 func adoptRowProvablyUnmutatedWithResolver(rec AdoptProvenanceRecord, resolver adoptClientTargetResolver) bool {
+	if adoptRecordHasSharedStdioTarget(rec) {
+		return false
+	}
 	for _, c := range rec.Clients {
 		var adapter clients.Client
 		if rec.ProviderSource != nil {
@@ -1580,7 +1694,7 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		}
 		for _, r := range store.Records {
 			rowManifests[r.ManifestName] = true
-			if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
+			if r.ProjectService == nil && r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
 				candidates = append(candidates, candidate{rec: r, ageSec: time.Since(r.UpdatedAt).Seconds()})
 			}
 		}
@@ -1796,10 +1910,15 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 				continue
 			}
 			switch rec.OperationState {
+			case AdoptOperationStateAdopted:
+				if rec.ProjectService != nil {
+					return errGraphifyServiceOperationRequired
+				}
+				// Ready to transition below.
+			case AdoptOperationStateDefined:
+				return errGraphifyServiceOperationRequired
 			case AdoptOperationStateDeAdopting:
 				return nil
-			case AdoptOperationStateAdopted:
-				// Ready to transition below.
 			case AdoptOperationStateAdopting:
 				if verdict := classifyDeadAdoptingRow(*rec); verdict != adoptRowCommittedKeep && verdict != adoptRowRecoveryKeep {
 					return fmt.Errorf("adopt provenance mark de-adopting: manifest %q adopting row is not committed; refusing to take it from adopt orphan GC", manifestName)
@@ -1840,6 +1959,9 @@ func advanceProviderManagedInstallState(manifestName string, expectedState, next
 			}
 			if rec.OperationState != AdoptOperationStateAdopting || rec.ProviderSource == nil {
 				return fmt.Errorf("provider managed install state: manifest %q is not provider adopting", manifestName)
+			}
+			if rec.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
 			}
 			if rec.ProviderSource.ManagedInstallState != expectedState {
 				return fmt.Errorf("provider managed install state: manifest %q changed state", manifestName)
@@ -1887,6 +2009,9 @@ func AdvanceProviderDeAdoptPhase(manifestName, expectedPhase, nextPhase string) 
 			}
 			if rec.ProviderSource.DeAdoptPhase != expectedPhase {
 				return fmt.Errorf("provider de-adopt phase: manifest %q changed phase", manifestName)
+			}
+			if rec.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
 			}
 			rec.ProviderSource.DeAdoptPhase = nextPhase
 			rec.UpdatedAt = time.Now().UTC()
@@ -1943,4 +2068,163 @@ func CloseAdoptProvenance(manifestName string) error {
 		return fmt.Errorf("adopt provenance close: %w", err)
 	}
 	return nil
+}
+
+func validateAdoptSharedStdioProvenance(rec AdoptProvenanceRecord, client AdoptClientProvenance) error {
+	target := client.ConfigTarget
+	if target == nil || target.Kind != adoptClientConfigTargetKindCodexSharedStdio || target.ProjectRoot != "" || target.ProjectIdentitySHA256 != "" || client.Client != "codex-cli" || rec.SourceClient != "codex-cli" || rec.ProjectService != nil || rec.SourceEntryName == "" || adoptClientTargetEntryName(rec, client) != rec.SourceEntryName || client.OriginalState != AdoptOriginalStatePresent || client.RestoreMode != AdoptRestoreModeByteEquivalent {
+		return errProjectAdoptConfigTargetInvalid
+	}
+	return validateAdoptCodexSharedStdioTarget(target.SharedStdio)
+}
+
+func adoptSharedStdioTargetSHA256(target *AdoptClientConfigTargetV1) (string, error) {
+	if target == nil || target.Kind != adoptClientConfigTargetKindCodexSharedStdio || target.ProjectRoot != "" || target.ProjectIdentitySHA256 != "" {
+		return "", errProjectAdoptConfigTargetInvalid
+	}
+	if err := validateAdoptCodexSharedStdioTarget(target.SharedStdio); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(target)
+	if err != nil {
+		return "", err
+	}
+	return ManifestHashContent(encoded), nil
+}
+
+// Preparation is the existing protected snapshot producing owner. It requires
+// genuine originals and produces the one envelope before any publication; it
+// neither obtains native authority nor writes a second companion record.
+func prepareAdoptSharedStdioEvidence(name string, target *AdoptClientConfigTargetV1, sources []*clients.CodexConfiguredProjectProfile) (clients.CodexSharedStdioReplayEvidenceV1, error) {
+	var evidence clients.CodexSharedStdioReplayEvidenceV1
+	digest, err := adoptSharedStdioTargetSHA256(target)
+	if err != nil {
+		return evidence, err
+	}
+	if len(sources) != len(target.SharedStdio.Consumers) || len(sources) == 0 {
+		return evidence, clients.ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	relay := clients.MCPEntry{Name: name, RelayExePath: "mcphub", RelayURL: target.SharedStdio.RelayURL}
+	evidence.Schema = clients.CodexSharedStdioReplaySchemaV1
+	evidence.TargetSHA256 = digest
+	shared, err := sources[0].ConfiguredStdioLaunch()
+	if err != nil {
+		return evidence, err
+	}
+	for i, source := range sources {
+		if source == nil {
+			return evidence, clients.ErrProjectClientInvalid
+		}
+		if err := source.ValidateSharedStdioContributors(shared, relay); err != nil {
+			return evidence, err
+		}
+		row, err := source.SharedStdioSourceEvidence()
+		if err != nil {
+			return evidence, err
+		}
+		consumer := target.SharedStdio.Consumers[i]
+		if row.ProjectRoot != consumer.ProjectRoot || row.ProjectIdentitySHA256 != consumer.ProjectIdentitySHA256 {
+			return evidence, clients.ErrProjectClientPlanStale
+		}
+		global, _, err := source.ConfiguredSourcePreimages()
+		if err != nil {
+			return evidence, err
+		}
+		location, err := source.SharedStdioGlobalLocationEvidence()
+		if err != nil {
+			return evidence, err
+		}
+		if i == 0 {
+			evidence.OriginalGlobal = global
+			evidence.GlobalLocation = location
+		} else if !bytes.Equal(evidence.OriginalGlobal, global) || !reflect.DeepEqual(evidence.GlobalLocation, location) {
+			return evidence, clients.ErrProjectClientPlanStale
+		}
+		evidence.Sources = append(evidence.Sources, row)
+	}
+	if evidence.GlobalLocation.LogicalPath != target.SharedStdio.GlobalLogicalPath || evidence.GlobalLocation.ReferentPath != target.SharedStdio.GlobalReferentPath {
+		return evidence, clients.ErrProjectClientPlanStale
+	}
+	evidence.OriginalGlobalSHA256 = ManifestHashContent(evidence.OriginalGlobal)
+	evidence.BeforeToken, evidence.AppliedToken, err = clients.PrepareCodexSharedStdioTransportTokens(evidence.OriginalGlobal, name, relay)
+	if err != nil {
+		return evidence, err
+	}
+	if err := clients.ValidateCodexSharedStdioReplayEvidence(evidence, name, relay); err != nil {
+		return evidence, err
+	}
+	return clients.CloneCodexSharedStdioReplayEvidence(evidence), nil
+}
+
+// The legacy snapshot writer remains the sole hardened storage action; the new
+// kind serializes one protected envelope into the same codex-cli.snapshot leaf.
+func writeAdoptSharedStdioSnapshot(manifestName, name string, target *AdoptClientConfigTargetV1, sources []*clients.CodexConfiguredProjectProfile) (AdoptClientProvenance, error) {
+	var client AdoptClientProvenance
+	evidence, err := prepareAdoptSharedStdioEvidence(name, target, sources)
+	if err != nil {
+		return client, err
+	}
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return client, err
+	}
+	ref, digest, err := writeAdoptClientSnapshot(manifestName, "codex-cli", encoded)
+	client = AdoptClientProvenance{Client: "codex-cli", TargetEntryName: name, ConfigTarget: &AdoptClientConfigTargetV1{Kind: adoptClientConfigTargetKindCodexSharedStdio, SharedStdio: cloneAdoptCodexSharedStdioTarget(target.SharedStdio)}, OriginalState: AdoptOriginalStatePresent, RestoreMode: AdoptRestoreModeByteEquivalent, SnapshotRef: ref, SnapshotSHA256: digest}
+	return client, err
+}
+
+func decodeAdoptSharedStdioEvidence(rec AdoptProvenanceRecord, client AdoptClientProvenance, encoded []byte) (clients.CodexSharedStdioReplayEvidenceV1, error) {
+	var evidence clients.CodexSharedStdioReplayEvidenceV1
+	if err := validateAdoptSharedStdioProvenance(rec, client); err != nil {
+		return evidence, err
+	}
+	if client.SnapshotSHA256 == "" || ManifestHashContent(encoded) != client.SnapshotSHA256 {
+		return evidence, clients.ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&evidence); err != nil {
+		return evidence, errors.Join(clients.ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	var tail any
+	if err := decoder.Decode(&tail); !errors.Is(err, io.EOF) {
+		return evidence, errors.Join(clients.ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	target := client.ConfigTarget.SharedStdio
+	digest, err := adoptSharedStdioTargetSHA256(client.ConfigTarget)
+	if err != nil {
+		return evidence, err
+	}
+	if evidence.TargetSHA256 != digest || evidence.GlobalLocation.LogicalPath != target.GlobalLogicalPath || evidence.GlobalLocation.ReferentPath != target.GlobalReferentPath || len(evidence.Sources) != len(target.Consumers) {
+		return evidence, clients.ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	for i, consumer := range target.Consumers {
+		if evidence.Sources[i].ProjectRoot != consumer.ProjectRoot || evidence.Sources[i].ProjectIdentitySHA256 != consumer.ProjectIdentitySHA256 {
+			return evidence, clients.ErrCodexSharedStdioReplayEvidenceInvalid
+		}
+	}
+	relay := clients.MCPEntry{Name: rec.SourceEntryName, RelayExePath: "mcphub", RelayURL: target.RelayURL}
+	if err := clients.ValidateCodexSharedStdioReplayEvidence(evidence, rec.SourceEntryName, relay); err != nil {
+		return evidence, err
+	}
+	return clients.CloneCodexSharedStdioReplayEvidence(evidence), nil
+}
+
+func readAdoptSharedStdioEvidence(rec AdoptProvenanceRecord, client AdoptClientProvenance) (clients.CodexSharedStdioReplayEvidenceV1, error) {
+	var evidence clients.CodexSharedStdioReplayEvidenceV1
+	if err := validateAdoptSharedStdioProvenance(rec, client); err != nil {
+		return evidence, err
+	}
+	if err := validateAdoptSnapshotClientName(client.Client); err != nil {
+		return evidence, err
+	}
+	dir, err := adoptSnapshotDir(rec.ManifestName)
+	if err != nil {
+		return evidence, err
+	}
+	encoded, err := ReadStateFileInodeAnchored(filepath.Join(dir, client.Client+adoptSnapshotFileSuffix))
+	if err != nil {
+		return evidence, err
+	}
+	return decodeAdoptSharedStdioEvidence(rec, client, encoded)
 }

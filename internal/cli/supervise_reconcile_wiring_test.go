@@ -57,6 +57,172 @@ type fixtureSpawnWorkers struct {
 	beforeEmit func()
 }
 
+func TestDaemonCreatorRecordsRetainIncompleteRetiredOwners(t *testing.T) {
+	records := &daemonCreatorRecords{}
+	old, err := records.begin("synthetic-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &process.ProvisionalProcess{}
+	if err := records.retain(old, owner); err != nil {
+		t.Fatal(err)
+	}
+	old.generation = 7
+	records.endStart(old, nil)
+	if _, err := records.begin(old.task); err == nil {
+		t.Fatal("replacement admitted beside incomplete original owner")
+	}
+	if len(records.operations) != 1 || records.operations[0].owner != owner || records.operations[0].generation != 7 {
+		t.Fatal("retired operation lost original custody/correlation")
+	}
+	old.terminal = &process.CreatorTerminalResult{}
+	if _, err := records.begin(old.task); err == nil {
+		t.Fatal("zero terminal result converted snapshot into replacement authority")
+	}
+	other, err := records.begin("independent-task")
+	if err != nil || other.id == old.id {
+		t.Fatal("disjoint task admission or never-reused operation identity failed")
+	}
+	other.unsupported = true
+	records.endStart(other, nil)
+	records.workerFinished(other, true, nil)
+	records.workerFinished(other, false, nil)
+	if other.complete || other.stdio != "not-configured-by-this-creator" {
+		t.Fatal("unsupported/stdio record fabricated strong completion")
+	}
+	old.startupReceipt = true
+	old.startupDisposition = process.CreatorTerminalSnapshot{StartupReleaseKnown: true}
+	if _, err := records.begin(old.task); err == nil {
+		t.Fatal("known failed startup release permitted replacement")
+	}
+	old.startupDisposition.StartupResourcesReleased = true
+	retry, err := records.begin(old.task)
+	if err != nil || retry.id == old.id || len(records.operations) != 3 {
+		t.Fatal("verified startup release lost legacy retry or old record")
+	}
+	if old.complete || old.terminal.Closure() != nil {
+		t.Fatal("startup release was converted into terminal completion")
+	}
+}
+
+// Synthetic root/terminal observations exercise the same production gate with
+// a held unbuffered channel. No fake can create a process-owned closure proof.
+func TestDaemonCreatorIncompleteClosureNeverEntersBlockingExitPublication(t *testing.T) {
+	for _, name := range []string{"member-failure", "close-failure", "missing-result", "zero-result"} {
+		t.Run(name, func(t *testing.T) {
+			records := &daemonCreatorRecords{}
+			operation, err := records.begin("synthetic-incomplete-task")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := &process.ProvisionalProcess{}
+			if err := records.retain(operation, owner); err != nil {
+				t.Fatal(err)
+			}
+			records.endStart(operation, nil)
+			rootCause := errors.New("synthetic original exit17")
+			terminalCause := errors.New("synthetic terminal " + name)
+			operation.root = process.CreatorRootExitSnapshot{Known: true, ExitCode: 17}
+			operation.rootErr = rootCause
+			if name == "member-failure" || name == "close-failure" {
+				operation.terminalErr = terminalCause
+			}
+			if name == "zero-result" {
+				operation.terminal = &process.CreatorTerminalResult{}
+			}
+			crashCh := make(chan crashEvent)
+			entered := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- records.publishAfterCreatorClosure(operation, func() {
+					// Entering this callback would also enter the blocking guard
+					// and tracker-retirement path in the actual daemon waiter.
+					close(entered)
+					crashCh <- crashEvent{ExitCode: 17, WaitErr: rootCause}
+				})
+			}()
+			select {
+			case err = <-done:
+			case <-entered:
+				<-crashCh // reap the deliberately held sender before failure
+				<-done
+				t.Fatal("incomplete creator entered resource-closed blocking publication")
+			case <-time.After(time.Second):
+				t.Fatal("incomplete creator gate did not return its failure")
+			}
+			if err == nil {
+				t.Fatal("missing physical closure was classified publishable")
+			}
+			if operation.terminalErr != nil && !errors.Is(err, terminalCause) {
+				t.Fatal("terminal failure cause was suppressed")
+			}
+			records.workerFinished(operation, false, err)
+			if operation.owner != owner || operation.root.ExitCode != 17 || operation.rootErr != rootCause || operation.complete || !operation.waiterDone || operation.waiterErr != err {
+				t.Fatal("failed publication lost original owner/root cause/incomplete worker result")
+			}
+			if _, err := records.begin(operation.task); err == nil {
+				t.Fatal("replacement admitted beside incomplete original resources")
+			}
+			select {
+			case <-entered:
+				t.Fatal("publication callback executed after refusal")
+			default:
+			}
+		})
+	}
+}
+
+// Native receiving is separately admitted by Root. The existing before-emit
+// barrier deterministically holds the waiter after physical creator closure;
+// this guard neither launches nor runs as part of source-only acceptance.
+func TestProductionSpawnFn_RetainedCreatorClosesBeforeBlockingCrashSend(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("retained existing-Job creator requires Windows")
+	}
+	dir := apitest.HardenedTempDir(t)
+	events, err := api.OpenSupervisorEventLog(filepath.Join(dir, "events.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer events.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	workers := &fixtureSpawnWorkers{}
+	held, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	workers.beforeEmit = func() { close(held); <-release }
+	defer func() { unblock(); settleFixtureSpawnWorkers(t, workers, cancel) }()
+	records := &daemonCreatorRecords{}
+	crashCh := make(chan crashEvent)
+	spawn := makeProductionSpawnFnWithCreatorRecords(events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, ctx, nil, false, workers, records)
+	command, args := portableNoopCommand()
+	if err := spawn(api.SupervisorDaemon{TaskName: reconcileWiringTestTaskName, Server: "memory", Daemon: "default", Command: command, Args: args}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held:
+	case event := <-crashCh:
+		t.Fatalf("exit published before creator closure barrier: %+v", event)
+	case <-time.After(10 * time.Second):
+		t.Fatal("retained waiter did not reach post-closure barrier")
+	}
+	records.mu.Lock()
+	operation := records.operations[0]
+	closed := operation.owner != nil && operation.terminal != nil && operation.terminal.Closure() != nil && operation.terminal.Snapshot().HandlesClosed
+	complete := operation.complete
+	waiterDone := operation.waiterDone
+	records.mu.Unlock()
+	if !closed || complete || waiterDone {
+		t.Fatal("physical closure missing or upper worker falsely complete before blocking publication")
+	}
+	unblock()
+	select {
+	case <-crashCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("retained exit was lost")
+	}
+}
+
 func (f *fixtureSpawnWorkers) childStarted(p *os.Process) {
 	f.mu.Lock()
 	if f.children == nil {
@@ -1850,7 +2016,12 @@ func TestProductionSpawnFn_ClosesJobBeforeBlockingCrashSend(t *testing.T) {
 			close(releaseClose)
 		}
 	}
-	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	workers := &fixtureSpawnWorkers{}
+	defer func() {
+		release()
+		settleFixtureSpawnWorkers(t, workers, cancel)
+	}()
 
 	prevClose := closeDaemonJobAfterWaitFn
 	closeDaemonJobAfterWaitFn = func(job *process.Job) error {
@@ -1861,8 +2032,8 @@ func TestProductionSpawnFn_ClosesJobBeforeBlockingCrashSend(t *testing.T) {
 	t.Cleanup(func() { closeDaemonJobAfterWaitFn = prevClose })
 
 	crashCh := make(chan crashEvent)
-	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
+	spawnFn := makeProductionSpawnFnWithWorkers(
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, ctx, nil, false, workers,
 	)
 
 	command, args := portableNoopCommand()

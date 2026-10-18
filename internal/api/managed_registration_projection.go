@@ -188,7 +188,7 @@ func removeAndVerifyManagedRegistrationEntry(ctx context.Context, stateDir strin
 	}
 	kept := state.Entries[:0]
 	for _, entry := range state.Entries {
-		if entry.Client == row.ClientID && entry.TargetIdentitySHA256 == row.TargetIdentitySHA256 {
+		if entry.Client == row.ClientID && entry.TargetIdentitySHA256 == row.TargetIdentitySHA256 && (row.ConfigPathSHA256.String() == "" || entry.ConfigPathSHA256 == row.ConfigPathSHA256 && entry.EntryKeySHA256 == row.EntryKeySHA256) {
 			continue
 		}
 		kept = append(kept, entry)
@@ -202,7 +202,7 @@ func removeAndVerifyManagedRegistrationEntry(ctx context.Context, stateDir strin
 		return newManagedRegistrationFailure(ManagedRegistrationFailureSafeProjectionFailed, err)
 	}
 	for _, entry := range state.Entries {
-		if entry.Client == row.ClientID && entry.TargetIdentitySHA256 == row.TargetIdentitySHA256 {
+		if entry.Client == row.ClientID && entry.TargetIdentitySHA256 == row.TargetIdentitySHA256 && (row.ConfigPathSHA256.String() == "" || entry.ConfigPathSHA256 == row.ConfigPathSHA256 && entry.EntryKeySHA256 == row.EntryKeySHA256) {
 			return newManagedRegistrationFailure(ManagedRegistrationFailureSafeProjectionFailed, nil)
 		}
 	}

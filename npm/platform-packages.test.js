@@ -62,8 +62,12 @@ test("generator, meta manifest, and runtime lookup expose only the shipped Windo
     assert.deepStrictEqual(fs.readdirSync(path.join(npmDir, "packages")).sort(), ["win32-x64"]);
     const meta = JSON.parse(fs.readFileSync(path.join(npmDir, "package.json"), "utf8"));
     assert.deepStrictEqual(meta.optionalDependencies, {
-      "@applicate2628/mcp-local-hub-win32-x64": "0.4.37",
+      "@applicate2628/mcp-local-hub-win32-x64": meta.version,
     });
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(npmDir, "packages", "win32-x64", "package.json"), "utf8"),
+    );
+    assert.strictEqual(manifest.version, meta.version);
     const { PACKAGE_BY_PLATFORM } = require("./lib/platform-binary");
     assert.deepStrictEqual(PACKAGE_BY_PLATFORM, {
       "win32-x64": "@applicate2628/mcp-local-hub-win32-x64",

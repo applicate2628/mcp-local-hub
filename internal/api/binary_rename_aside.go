@@ -5,8 +5,8 @@
 // mapped; it lingers until the running supervisor exits. On POSIX
 // the `.old-<ts>` aside is created for symmetry (see
 // binary_rename_aside_posix.go). Either way, the sweep removes
-// aged-out files on every `mcphub install --upgrade` and every
-// `mcphub supervise` startup so accumulation stays bounded.
+// aged-out files through explicitly admitted legacy cleanup callers. Ordinary
+// supervisor startup has no binary-aside deletion responsibility.
 //
 // Spec §"Cold-restart upgrade flow (detail)" / §"Windows binary
 // replacement (rename-aside)" §step 4:
@@ -48,8 +48,8 @@ const renameAsideMaxKeep = 5
 //
 // Per-file Remove failures are non-fatal — a still-mapped image, an
 // in-progress AV scan, or an ACL flip can transiently block the
-// delete. The caller (supervisor startup, install --upgrade) is
-// expected to log warn and retry on the next pass.
+// delete. Explicit legacy cleanup callers log warnings; Product transactions
+// retain their own bound-aside cleanup and recovery ownership.
 //
 // Returns a non-nil error only if filepath.Glob itself fails (a
 // programming error in the pattern, not a runtime condition). Optional warn

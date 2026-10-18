@@ -449,6 +449,7 @@ upgrade flow) so the binary that next reads the new runtime_spec intent is the
 new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
 			return runMigrateSerenaDynamicPool(cmd.Context(), cmd.OutOrStdout())
 		},
 	}

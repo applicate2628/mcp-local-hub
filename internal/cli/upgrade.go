@@ -65,6 +65,7 @@ Examples:
   ./bin/mcphub.exe upgrade --terminate-gui-for-upgrade # opt in to exact GUI/tray force-exit
   ./bin/mcphub.exe upgrade --terminate-gui-for-upgrade --stop-gui-owned-fleet-for-upgrade # opt in to exact GUI-owned fleet stop
   ./bin/mcphub.exe upgrade --complete-committed-recovery # only finish an existing Windows V3 commit_decided transaction
+  ./bin/mcphub.exe upgrade --recover-pending-transaction # only recover an existing pre-decision Windows V3 upgrade
 
   # Equivalent (older form):
   ./mcphub install --upgrade
@@ -86,9 +87,22 @@ Limitations:
   - --complete-committed-recovery is exclusive, Windows-only, and uses an
     external admitted Product solely to finish an identity-bound committed
     transaction. It never stages or promotes that external executable.
+  - --recover-pending-transaction is exclusive, Windows-only, and restores
+    only the journal-bound prior state through its existing recovery owner.
+    It accepts an already healthy prior GUI and never stages this executor.
 See also: install, setup, restart, stop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			recovery, _ := cmd.Flags().GetBool("complete-committed-recovery")
+			pending, _ := cmd.Flags().GetBool("recover-pending-transaction")
+			if pending {
+				if recovery || len(args) != 0 || upgradeGUIRequested(cmd) || upgradeGUIOwnedFleetStopRequested(cmd) {
+					return fmt.Errorf("UPGRADE_PENDING_RECOVERY_NOT_ADMITTED: recovery is exclusive and takes no arguments or GUI-stop flags")
+				}
+				if pendingRecoveryFn == nil {
+					return fmt.Errorf("UPGRADE_PENDING_RECOVERY_NOT_ADMITTED: pending Product recovery is unsupported on this platform")
+				}
+				return pendingRecoveryFn(cmd)
+			}
 			if recovery {
 				if len(args) != 0 || upgradeGUIRequested(cmd) || upgradeGUIOwnedFleetStopRequested(cmd) {
 					return fmt.Errorf("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: recovery takes no arguments or GUI-stop flags")
@@ -111,9 +125,12 @@ See also: install, setup, restart, stop.`,
 		"with --terminate-gui-for-upgrade: permit a verified GUI-child Job-bound supervisor fleet stop after V3 recovery preimage readback")
 	c.Flags().Bool("complete-committed-recovery", false,
 		"complete only an existing, identity-verified Windows V3 commit_decided Product upgrade; never stage or promote this executable")
+	c.Flags().Bool("recover-pending-transaction", false,
+		"recover only an existing pre-decision Windows V3 Product upgrade and prove prior health; never stage or promote this executor")
 	return c
 }
 
 // Windows installs the sole Product-owned forward-recovery adapter. Other
 // platforms leave this nil and reject the opt-in without side effects.
 var committedRecoveryFn func(*cobra.Command) error
+var pendingRecoveryFn func(*cobra.Command) error

@@ -24,6 +24,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -33,12 +34,20 @@ import (
 )
 
 func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
+	_, err := secureParentDirAnywhereMode(nil, dir, skipParentGate, true)
+	return err
+}
+
+func secureParentDirAnywhereMode(ctx context.Context, dir string, skipParentGate, createMissing bool) (bool, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	cleaned := filepath.Clean(dir)
 	if cleaned == "" || cleaned == "." {
-		return fmt.Errorf("secure mkparent: empty dir")
+		return false, fmt.Errorf("secure mkparent: empty dir")
 	}
 	if !filepath.IsAbs(cleaned) {
-		return fmt.Errorf("secure mkparent: dir %q is not absolute; cannot descend from volume root", dir)
+		return false, fmt.Errorf("secure mkparent: dir %q is not absolute; cannot descend from volume root", dir)
 	}
 
 	// Split into components below the volume root. The LAST component IS part of
@@ -58,7 +67,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	// the G17 creator does from its home anchor.
 	anchorFd, err := unix.Open("/", unix.O_DIRECTORY|unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
-		return fmt.Errorf("secure mkparent: open volume-root anchor /: %w", err)
+		return false, fmt.Errorf("secure mkparent: open volume-root anchor /: %w", err)
 	}
 	defer unix.Close(anchorFd)
 
@@ -80,6 +89,10 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	gated := skipParentGate // skip lane: treat the gate as already satisfied.
 
 	for _, comp := range parts {
+		if ctx != nil && ctx.Err() != nil {
+			closeCur()
+			return false, ctx.Err()
+		}
 		if comp == "" || comp == "." {
 			continue
 		}
@@ -94,11 +107,14 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 		// already exists (existing prefix); nil → freshly created (so curFd, its
 		// parent, is the deepest existing prefix and must be gated before we
 		// trust it as the create root).
-		mkErr := unix.Mkdirat(curFd, comp, 0o700)
-		created := mkErr == nil
+		var mkErr error
+		if createMissing {
+			mkErr = unix.Mkdirat(curFd, comp, 0o700)
+		}
+		created := createMissing && mkErr == nil
 		if mkErr != nil && !errors.Is(mkErr, unix.EEXIST) {
 			closeCur()
-			return fmt.Errorf("secure mkparent: mkdirat %s: %w", nextPath, mkErr)
+			return false, fmt.Errorf("secure mkparent: mkdirat %s: %w", nextPath, mkErr)
 		}
 
 		if created && !gated {
@@ -110,7 +126,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 			// secure_create_client_config_parent_posix.go's package doc).
 			if verr := verifyPosixParentDirFromFd(curFd); verr != nil {
 				closeCur()
-				return wrapParentGateRefusal(curPath, verr)
+				return false, wrapParentGateRefusal(curPath, verr)
 			}
 			gated = true
 		}
@@ -122,17 +138,20 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 		nextFd, openErr := openExistingRealDirAt(curFd, comp)
 		if openErr != nil {
 			closeCur()
+			if !createMissing && errors.Is(openErr, unix.ENOENT) {
+				return false, nil
+			}
 			if created {
 				// Created it but cannot re-open as a real dir — a hostile swap in
 				// the microsecond window. Surface loud.
-				return fmt.Errorf(
+				return false, fmt.Errorf(
 					"secure mkparent: created %s but re-open as real dir failed (possible concurrent swap): %w",
 					nextPath, openErr,
 				)
 			}
 			// EEXIST path: the existing entry is a symlink (ELOOP) or non-dir
 			// (ENOTDIR). Refuse — never follow it.
-			return fmt.Errorf(
+			return false, fmt.Errorf(
 				"secure mkparent: refuse to descend through non-directory or symlink at %s: %w",
 				nextPath, openErr,
 			)
@@ -143,7 +162,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 			if cherr := unix.Fchmod(nextFd, 0o700); cherr != nil {
 				_ = unix.Close(nextFd)
 				closeCur()
-				return fmt.Errorf("secure mkparent: fchmod %s: %w", nextPath, cherr)
+				return false, fmt.Errorf("secure mkparent: fchmod %s: %w", nextPath, cherr)
 			}
 		}
 		closeCur()
@@ -159,9 +178,9 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	if !gated {
 		if verr := verifyPosixParentDirFromFd(curFd); verr != nil {
 			closeCur()
-			return wrapParentGateRefusal(curPath, verr)
+			return false, wrapParentGateRefusal(curPath, verr)
 		}
 	}
 	closeCur()
-	return nil
+	return true, nil
 }

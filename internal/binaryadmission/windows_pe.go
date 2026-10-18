@@ -289,6 +289,7 @@ func formatError(path string, err error) error {
 type windowsPEHeader struct {
 	machine   uint16
 	subsystem uint16
+	characteristics uint16
 }
 
 // ReadWindowsPESubsystem performs exactly two bounded random-access reads. It
@@ -340,5 +341,6 @@ func readWindowsPEHeader(r io.ReaderAt, size int64) (windowsPEHeader, error) {
 	return windowsPEHeader{
 		machine:   binary.LittleEndian.Uint16(header[4:6]),
 		subsystem: binary.LittleEndian.Uint16(header[24+68 : 24+70]),
+		characteristics: binary.LittleEndian.Uint16(header[22:24]),
 	}, nil
 }

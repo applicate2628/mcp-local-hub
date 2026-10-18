@@ -18,6 +18,7 @@ import (
 
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -37,6 +38,33 @@ func SetFrozenStdioBridgeAdmissionForTest(fn func(context.Context, []FrozenStdio
 	var once sync.Once
 	return func() {
 		once.Do(func() { frozenStdioBridgeAdmissionFn = original })
+	}
+}
+
+// RefuseNextStdioBridgeSettlementForTest degrades exactly one API-owned cleanup
+// attempt. Every later attempt calls the real same-child owner; no admission
+// result, native handle or successful settlement is fabricated. Tests using
+// package hooks must remain serialized and restore them after owned cleanup.
+func RefuseNextStdioBridgeSettlementForTest(cause error) (restore func()) {
+	if !testing.Testing() {
+		panic("api.RefuseNextStdioBridgeSettlementForTest called outside a test binary")
+	}
+	if cause == nil {
+		panic("api.RefuseNextStdioBridgeSettlementForTest called with nil refusal")
+	}
+	original := settleStdioBridgeProvisionalFn
+	var refusalOnce sync.Once
+	settleStdioBridgeProvisionalFn = func(child *process.ProvisionalProcess, timeout time.Duration) error {
+		var refusal error
+		refusalOnce.Do(func() { refusal = cause })
+		if refusal != nil {
+			return refusal
+		}
+		return child.TerminateAndWait(timeout)
+	}
+	var restoreOnce sync.Once
+	return func() {
+		restoreOnce.Do(func() { settleStdioBridgeProvisionalFn = original })
 	}
 }
 

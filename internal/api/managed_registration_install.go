@@ -191,11 +191,18 @@ func freezeManagedRegistrationInstallInput(manifest *config.ServerManifest, plan
 			return managedRegistrationFrozenInstallInput{}, newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeTargetConflict, nil)
 		}
 		desired := installClientEntryV1(plan.Server, update, plan.installRelayExePath)
+		logical := plan.Server
+		if plan.projectAttachment != nil {
+			desired = plan.projectAttachment.preparation.DesiredEntry()
+			desired.Raw = nil
+			logical, _, _, _, _ = plan.projectAttachment.preparation.OwnedDelta()
+		}
 		frozen := managedRegistrationFrozenInstallTarget{
-			ClientID: update.Client, LogicalEntryName: plan.Server, PhysicalEntryName: desired.Name, Action: update.Action,
+			ClientID: update.Client, LogicalEntryName: logical, PhysicalEntryName: desired.Name, Action: update.Action,
 			DaemonName: update.DaemonName, TaskName: taskName, Port: daemon.Port, URLPath: urlPath, Desired: desired,
 		}
-		if isCodexAliasInstallUpdate(plan.Server, update) {
+		frozen.ProjectAttachment = plan.projectAttachment != nil
+		if plan.projectAttachment == nil && isCodexAliasInstallUpdate(plan.Server, update) {
 			codex := &managedRegistrationFrozenCodexRelocation{SourceEntryName: plan.Server, TargetEntryName: desired.Name, AlreadyConfigured: update.codexAlreadyConfigured}
 			if update.codexAlreadyConfigured {
 				codex.ExpectedSource = clients.CodexTransportNone

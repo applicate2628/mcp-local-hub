@@ -54,8 +54,15 @@ func (io *w10ManagedRegistrationBackupIO) Read(_ context.Context, _ string, _ st
 type w10TimeoutDroppingCodex struct{ *codexCLI }
 
 func (c *w10TimeoutDroppingCodex) AddEntry(entry MCPEntry) error {
-	entry.ToolTimeoutSec = 0
-	return c.codexCLI.AddEntry(entry)
+	if err := c.codexCLI.AddEntry(entry); err != nil {
+		return err
+	}
+	document, err := c.readTOML()
+	if err != nil {
+		return err
+	}
+	delete(document["mcp_servers"].(map[string]any)[entry.Name].(map[string]any), "tool_timeout_sec")
+	return c.writeTOML(document)
 }
 
 // TestW10_CodexFrozenPhysicalTargetAndTimeout catches a managed-registration

@@ -1,6 +1,7 @@
 package binaryadmission
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ type windowsBuildIdentityV1 struct {
 	Role             WindowsArtifactRole
 	InternalName     string
 	OriginalFilename string
+	Comments         string
 }
 
 type windowsPESection struct {
@@ -58,7 +60,11 @@ func readWindowsBuildIdentity(path string) (windowsBuildIdentityV1, error) {
 	if !info.Mode().IsRegular() {
 		return windowsBuildIdentityV1{}, fmt.Errorf("not a regular file")
 	}
-	resource, err := readWindowsVersionResource(f, info.Size())
+	return readWindowsBuildIdentityAt(f, info.Size())
+}
+
+func readWindowsBuildIdentityAt(r io.ReaderAt, size int64) (windowsBuildIdentityV1, error) {
+	resource, err := readWindowsVersionResource(r, size)
 	if err != nil {
 		return windowsBuildIdentityV1{}, err
 	}
@@ -343,7 +349,39 @@ func parseWindowsBuildIdentity(payload []byte) (windowsBuildIdentityV1, error) {
 	if values["InternalName"] != wantInternal || values["OriginalFilename"] != wantFilename {
 		return windowsBuildIdentityV1{}, fmt.Errorf("VERSIONINFO role/name mismatch for %s", role)
 	}
-	return windowsBuildIdentityV1{Version: values["ProductVersion"], Commit: commit, BuildDate: buildDate, Role: role, InternalName: wantInternal, OriginalFilename: wantFilename}, nil
+	return windowsBuildIdentityV1{Version: values["ProductVersion"], Commit: commit, BuildDate: buildDate, Role: role, InternalName: wantInternal, OriginalFilename: wantFilename, Comments: values["Comments"]}, nil
+}
+
+func parsePublisherSourceComments(comments string) (string, error) {
+	const marker = "mcphub-source-v1;sha256="
+	if !strings.Contains(comments, marker) { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_UNMARKED") }
+	if strings.Count(comments, marker) != 1 { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: duplicate source suffix") }
+	i := strings.Index(comments, marker)
+	if i == 0 || comments[i-1] != '\n' || !validLowerHex(comments[i+len(marker):], 64, 64) { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: source suffix grammar") }
+	return comments[i+len(marker):], nil
+}
+
+// WindowsPublisherSourceIdentity parses only the caller's captured bytes.
+// It grants no image observation, native identity or file-resource proof.
+type WindowsPublisherSourceIdentity struct {
+	SourceEpoch, Version, Commit, BuildDate string
+	Role WindowsArtifactRole
+	Machine, Subsystem uint16
+}
+
+func ParseWindowsPublisherSourceIdentity(raw []byte) (WindowsPublisherSourceIdentity, error) {
+	r := bytes.NewReader(raw)
+	h, err := readWindowsPEHeader(r, int64(len(raw)))
+	if err != nil { return WindowsPublisherSourceIdentity{}, err }
+	if h.characteristics & windowsPEDLLCharacteristic != 0 { return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: DLL") }
+	i, err := readWindowsBuildIdentityAt(r, int64(len(raw)))
+	if err != nil { return WindowsPublisherSourceIdentity{}, err }
+	want := WindowsGUISubsystem
+	if i.Role == WindowsArtifactRoleCLI { want = WindowsCUISubsystem }
+	if h.subsystem != want { return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: role/subsystem") }
+	epoch, err := parsePublisherSourceComments(i.Comments)
+	if err != nil { return WindowsPublisherSourceIdentity{}, err }
+	return WindowsPublisherSourceIdentity{epoch, i.Version, i.Commit, i.BuildDate, i.Role, h.machine, h.subsystem}, nil
 }
 
 func parseVersionInfoBlock(data []byte, offset int) (versionInfoBlock, int, error) {

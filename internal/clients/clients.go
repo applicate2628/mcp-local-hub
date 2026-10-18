@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -349,9 +350,12 @@ type ScopedConfigWriterClient interface {
 // accepts a config path. NewCodexCLI preserves the global binding, while
 // NewCodexCLIForProject supplies one validated fixed project binding.
 type CodexTransportClient interface {
+	RelocateSharedStdioEntry(context.Context, CodexSharedStdioRelocation, CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error)
+	RestoreSharedStdioEntryFromProvenance(context.Context, CodexSharedStdioInverseRelocation, CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error)
 	ResolveTransportTarget(CodexTransportTargetRequest) (CodexTransportTarget, error)
 	RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
 	RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
+	RestoreRelocatedHTTPEntryFromProvenance(CodexHTTPInverseRelocation, []byte, string) (CodexHTTPInverseResult, error)
 }
 
 func AsCodexTransportClient(client Client) (CodexTransportClient, bool) {

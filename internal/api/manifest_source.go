@@ -2,8 +2,11 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,9 +47,14 @@ func manifestDirForTests() string {
 // embeddedManifestNames returns the sorted list of server names that
 // have a manifest.yaml baked into the binary.
 func embeddedManifestNames() []string {
+	names, _ := embeddedManifestNamesObserved()
+	return names
+}
+
+func embeddedManifestNamesObserved() ([]string, error) {
 	entries, err := fs.ReadDir(servers.Manifests, ".")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var names []string
 	for _, e := range entries {
@@ -58,7 +66,7 @@ func embeddedManifestNames() []string {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
-	return names
+	return names, nil
 }
 
 // embeddedManifestNamesContains reports RAW membership in the binary's embed
@@ -199,38 +207,177 @@ func embeddedDiskShadowWarning(name, manifestDir string) string {
 // status_enrich, secrets_scan, migrate) that compose `name` straight
 // into the loader without their own pre-load check.
 func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
-	data, handled, err := loadManifestEmbeddedOrOverride(name)
-	if handled {
-		return data, err
-	}
-	dir, err := CanonicalManifestDir()
-	if err != nil {
-		return nil, fmt.Errorf("load manifest %s: %w", name, err)
-	}
-	return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+	observation := loadManifestSourceObserved(name, nil)
+	return bytes.Clone(observation.bytes), observation.selectionError
+}
+
+// The original selection owner also serves consumers retaining observed reads.
+func loadManifestYAMLEmbedFirstWithReader(name string, readFile func(string) ([]byte, error)) ([]byte, error) {
+	observation := selectManifestSource(name, nil, func(kind, path string) manifestSourceReadAttempt {
+		if kind == "embedded" {
+			return readManifestSourceAttempt(kind, path)
+		}
+		raw, err := readFile(path)
+		return manifestSourceReadAttempt{kind: kind, path: path, bytes: raw, readError: err}
+	})
+	return bytes.Clone(observation.bytes), observation.selectionError
 }
 
 func loadManifestYAMLEmbedFirstFromDir(name, diskDir string) ([]byte, error) {
-	data, handled, err := loadManifestEmbeddedOrOverride(name)
-	if handled {
-		return data, err
-	}
-	return os.ReadFile(filepath.Join(diskDir, name, "manifest.yaml"))
+	observation := loadManifestSourceObserved(name, &diskDir)
+	return bytes.Clone(observation.bytes), observation.selectionError
 }
 
-func loadManifestEmbeddedOrOverride(name string) ([]byte, bool, error) {
+type manifestSourceReadAttempt struct {
+	kind           string
+	path           string
+	reader         fs.File
+	bytes          []byte
+	opened         bool
+	closeAttempted bool
+	closeDefined   bool
+	readError      error
+	closeError     error
+}
+
+type ManifestSourceObservation struct {
+	name           string
+	selectedKind   string
+	selectedPath   string
+	bytes          []byte
+	attempts       []manifestSourceReadAttempt
+	selectionError error
+}
+
+type manifestSourceObservationFailure struct {
+	observation *ManifestSourceObservation
+	cause       error
+}
+
+func (e *manifestSourceObservationFailure) Error() string {
+	return "GRAPHIFY_SELECTED_MANIFEST_READ_UNQUALIFIED"
+}
+func (e *manifestSourceObservationFailure) Unwrap() error { return e.cause }
+func (ManifestSourceObservation) String() string          { return "manifest source observation (private)" }
+func (o ManifestSourceObservation) GoString() string      { return o.String() }
+func (o *ManifestSourceObservation) Bytes() []byte {
+	if o == nil {
+		return nil
+	}
+	return bytes.Clone(o.bytes)
+}
+
+// One selector core preserves the ordinary loader's fallback and error policy.
+// Strict observation evaluates all actual prior acquisition and Close outcomes
+// separately, without rewriting a failed read as absence or a successful seal.
+func loadManifestSourceObserved(name string, diskDir *string) *ManifestSourceObservation {
+	return selectManifestSource(name, diskDir, readManifestSourceAttempt)
+}
+
+func selectManifestSource(name string, diskDir *string, acquire func(string, string) manifestSourceReadAttempt) *ManifestSourceObservation {
+	observation := &ManifestSourceObservation{name: name}
 	if err := checkManifestName(name); err != nil {
-		return nil, true, err
+		observation.selectionError = err
+		return observation
 	}
 	if dir := manifestDirForTests(); dir != "" {
-		// Test-only override: skip the embed FS entirely.
-		data, err := os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
-		return data, true, err
+		read := acquire("override", filepath.Join(dir, name, "manifest.yaml"))
+		observation.attempts = append(observation.attempts, read)
+		observation.selectedKind, observation.selectedPath = read.kind, read.path
+		observation.bytes, observation.selectionError = read.bytes, read.readError
+		return observation
 	}
-	if data, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil {
-		return data, true, nil
+	embedded := acquire("embedded", name+"/manifest.yaml")
+	observation.attempts = append(observation.attempts, embedded)
+	if embedded.readError == nil {
+		observation.selectedKind, observation.selectedPath = embedded.kind, embedded.path
+		observation.bytes = embedded.bytes
+		return observation
 	}
-	return nil, false, nil
+	dir := ""
+	if diskDir != nil {
+		dir = *diskDir
+	} else {
+		var err error
+		dir, err = CanonicalManifestDir()
+		if err != nil {
+			observation.selectionError = fmt.Errorf("load manifest %s: %w", name, err)
+			return observation
+		}
+	}
+	disk := acquire("disk", filepath.Join(dir, name, "manifest.yaml"))
+	observation.attempts = append(observation.attempts, disk)
+	observation.selectedKind, observation.selectedPath = disk.kind, disk.path
+	observation.bytes, observation.selectionError = disk.bytes, disk.readError
+	return observation
+}
+
+func readManifestSourceAttempt(kind, path string) (observation manifestSourceReadAttempt) {
+	var file fs.File
+	var err error
+	if kind == "embedded" {
+		file, err = servers.Manifests.Open(path)
+	} else {
+		var original *os.File
+		original, err = os.Open(path)
+		if original != nil {
+			file = original
+		}
+	}
+	return consumeManifestSourceAttempt(kind, path, file, err)
+}
+
+func consumeManifestSourceAttempt(kind, path string, file fs.File, openErr error) (observation manifestSourceReadAttempt) {
+	observation.kind, observation.path, observation.readError = kind, path, openErr
+	if file == nil {
+		if openErr == nil {
+			observation.readError = errors.New("manifest original reader unavailable")
+		}
+		return observation
+	}
+	observation.reader = file
+	observation.opened = true
+	defer func() {
+		observation.closeAttempted = true
+		observation.closeError = file.Close()
+		observation.closeDefined = true
+	}()
+	if openErr != nil {
+		return observation
+	}
+	observation.bytes, observation.readError = io.ReadAll(file)
+	return observation
+}
+
+func (o *ManifestSourceObservation) ValidateProjectServiceLaunchRead(ctx context.Context) error {
+	if o == nil {
+		return errors.New("GRAPHIFY_SELECTED_MANIFEST_OBSERVATION_UNISSUED")
+	}
+	if ctx == nil || ctx.Err() != nil || o.name == "" || o.selectedKind == "" || len(o.attempts) == 0 {
+		cause := errors.Join(o.selectionError, errors.New("GRAPHIFY_SELECTED_MANIFEST_OBSERVATION_UNISSUED"))
+		if ctx != nil {
+			cause = errors.Join(cause, ctx.Err())
+		}
+		return &manifestSourceObservationFailure{observation: o, cause: cause}
+	}
+	cause := o.selectionError
+	for _, read := range o.attempts {
+		if read.opened && (read.reader == nil || !read.closeAttempted || !read.closeDefined) {
+			cause = errors.Join(cause, errors.New("manifest close unavailable"))
+		}
+		cause = errors.Join(cause, read.closeError)
+		if read.readError != nil && !(read.kind == "embedded" && errors.Is(read.readError, fs.ErrNotExist) && o.selectedKind == "disk") {
+			cause = errors.Join(cause, read.readError)
+		}
+	}
+	if cause != nil {
+		return &manifestSourceObservationFailure{observation: o, cause: cause}
+	}
+	return nil
+}
+
+func (o *ManifestSourceObservation) SameSelection(other *ManifestSourceObservation) bool {
+	return o != nil && other != nil && o.name == other.name && o.selectedKind == other.selectedKind && o.selectedPath == other.selectedPath && bytes.Equal(o.bytes, other.bytes)
 }
 
 // listManifestNamesEmbedFirst returns the set of available server

@@ -36,26 +36,82 @@ describe("getSecrets", () => {
 });
 
 describe("secretsInit", () => {
-  it("returns body on 200", async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ vault_state: "ok" }),
-    });
-    const res = await secretsInit();
-    expect(res.vault_state).toBe("ok");
+  const capability = { schema_version: 1, workflow: "cli_support_readonly", path_free_errors: true };
+  function reply(status: number, body: unknown) {
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  }
+  function initReply(status: number, body: unknown) {
+    mockFetch.mockResolvedValueOnce(reply(200, capability)).mockResolvedValueOnce(reply(status, body));
+  }
+
+  it("returns the successful body after a fresh capability check", async () => {
+    initReply(200, { vault_state: "ok" });
+    expect((await secretsInit()).vault_state).toBe("ok");
+    expect(mockFetch.mock.calls.map(c => c[0])).toEqual(["/api/secrets/init-capabilities", "/api/secrets/init"]);
   });
 
-  it("throws on 409 SECRETS_INIT_BLOCKED", async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({ error: "blocked", code: "SECRETS_INIT_BLOCKED" }),
+  it.each([undefined, null, {}, { schema_version: 0 }, { ...capability, schema_version: 2 },
+    { ...capability, workflow: "other" }, { ...capability, path_free_errors: false },
+    { ...capability, path_free_errors: "true" }, { ...capability, extra: true }])(
+    "blocks unsupported or malformed capability %j without a POST", async body => {
+      mockFetch.mockResolvedValue(reply(200, body));
+      await expect(secretsInit()).rejects.toMatchObject({ code: "SECRETS_INIT_UNSUPPORTED" });
+      expect(mockFetch.mock.calls.every(c => c[1]?.method !== "POST")).toBe(true);
     });
-    await expect(secretsInit()).rejects.toMatchObject({ code: "SECRETS_INIT_BLOCKED", status: 409 });
+
+  it("blocks a legacy missing capability endpoint and raw network failure", async () => {
+    // Historical producer RED: HTTP405, text/plain "method not allowed".
+    mockFetch.mockResolvedValue({ ok: false, status: 405, json: async () => { throw new SyntaxError("method not allowed"); } });
+    await expect(secretsInit()).rejects.toMatchObject({ code: "SECRETS_INIT_UNSUPPORTED" });
+    mockFetch.mockReset().mockRejectedValue(new Error("private-marker"));
+    await expect(secretsInit()).rejects.toThrow("Reload or update the application");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [409, { code: "SECRETS_INIT_BLOCKED", error: "private-marker" }],
+    [200, { vault_state: "missing", cleanup_status: "ok", code: "SECRETS_INIT_FAILED", error: "private-marker", recovery_id: "216980ce5b66faa0cc5363401ea67007", recovery_status: "ready" }],
+    [500, { cleanup_status: "failed", code: "SECRETS_INIT_FAILED", error: "private-marker", orphan_path: "private-orphan", recovery_id: "6a17532f94e218f277f8f94801cb67f8", recovery_status: "ready" }],
+    [500, { code: "SECRETS_INIT_FAILED", error: "private-marker", recovery_id: "f3c3da1270290f0451de4bfc89fa3a84", recovery_status: "incomplete" }],
+    [500, { code: "SECRETS_INIT_FAILED", error: "private-marker", recovery_status: "unavailable" }],
+  ])("preserves status/body/code but contains the visible message (%i)", async (status, body) => {
+    initReply(status as number, body);
+    const err = await secretsInit().catch(e => e);
+    expect(err).toMatchObject({ status, code: (body as {code: string}).code, body });
+    expect(err.message).not.toContain("private-marker");
+    expect(err.message).not.toContain("private-orphan");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not promote unsafe references from a successful body", async () => {
+    const body = { vault_state: "ok", recovery_id: "private-marker", recovery_status: "ready" };
+    initReply(200, body);
+    const result = await secretsInit();
+    expect(result.body).toEqual(body);
+    expect(result.status).toBe(200);
+    expect(result.recovery_id).toBeUndefined();
+  });
+
+  it.each([null, {}, { vault_state: "missing" }, { vault_state: "ok", error: "private-marker" }])(
+    "does not grant success to a missing or contradictory HTTP200 body %j", async body => {
+      initReply(200, body);
+      await expect(secretsInit()).rejects.toMatchObject({ status: 200, body });
+    });
+
+  it("rechecks capability for each caller after a server change", async () => {
+    initReply(200, { vault_state: "ok" });
+    await secretsInit();
+    mockFetch.mockResolvedValueOnce(reply(200, { ...capability, path_free_errors: false }));
+    await expect(secretsInit()).rejects.toMatchObject({ code: "SECRETS_INIT_UNSUPPORTED" });
+    expect(mockFetch.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
+  });
+  it.each(["", "0".repeat(32), "A".repeat(32), "../private", "1".repeat(31)])(
+    "does not promote an unsafe support reference %s", async recovery_id => {
+      initReply(500, { code: "SECRETS_INIT_FAILED", recovery_id, recovery_status: "ready" });
+      const err = await secretsInit().catch(e => e);
+      expect(err.recovery_id).toBeUndefined();
+    });
 });
-
 describe("addSecret", () => {
   it("returns void on 201", async () => {
     mockFetch.mockResolvedValue({ ok: true, status: 201, json: async () => ({}) });

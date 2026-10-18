@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -52,10 +53,52 @@ func ClientConfigSandboxEnvironment(root string) []ClientConfigSandboxEnv {
 	}
 }
 
+// PrepareClientConfigSandboxDirectories materializes the descriptor's base
+// directories inside an existing caller-owned fixture root. The caller owns
+// freshness, privacy and cleanup, including any partial preparation on error.
+func PrepareClientConfigSandboxDirectories(root string) error {
+	if root == "" || !filepath.IsAbs(root) {
+		return fmt.Errorf("client config sandbox requires an existing absolute fixture root")
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("client config sandbox root: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("client config sandbox root is not a directory")
+	}
+	normalRoot := normalizeSandboxPath(root)
+	seen := make(map[string]bool)
+	directories := make([]string, 0)
+	// Validate the entire descriptor before any directory creation.
+	for _, entry := range ClientConfigSandboxEnvironment(root) {
+		if entry.Unset {
+			continue
+		}
+		key := normalizeSandboxPath(entry.Value)
+		if !filepath.IsAbs(entry.Value) || !withinSandboxRoot(key, normalRoot) {
+			return fmt.Errorf("client config sandbox directory %s escapes its fixture root", entry.Key)
+		}
+		if !seen[key] {
+			seen[key] = true
+			directories = append(directories, entry.Value)
+		}
+	}
+	for _, directory := range directories {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return fmt.Errorf("prepare client config sandbox directory: %w", err)
+		}
+	}
+	return nil
+}
+
 // ApplyClientConfigSandboxEnvironment applies the descriptor to this test
-// process and returns a restoration function. Callers own its lifetime; this
+// process after namespace preparation and returns a restoration function. Callers own its lifetime; this
 // function deliberately has no production call sites.
-func ApplyClientConfigSandboxEnvironment(root string) func() {
+func ApplyClientConfigSandboxEnvironment(root string) (restore func(), err error) {
+	if err := PrepareClientConfigSandboxDirectories(root); err != nil {
+		return nil, err
+	}
 	type previous struct {
 		value string
 		set   bool
@@ -78,5 +121,5 @@ func ApplyClientConfigSandboxEnvironment(root string) func() {
 				_ = os.Unsetenv(entries[i].Key)
 			}
 		}
-	}
+	}, nil
 }

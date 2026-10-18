@@ -3,10 +3,12 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -36,9 +38,12 @@ type HeldPIDIdentity interface {
 }
 
 type heldPIDGeneration struct {
-	pid    int
-	handle windows.Handle
-	ops    heldPIDGenerationOps
+	mu             sync.Mutex
+	pid            int
+	handle         windows.Handle
+	ops            heldPIDGenerationOps
+	closeAttempted bool
+	closeErr       error
 }
 
 // HeldPIDJobObservation owns a query-only process handle. The caller must
@@ -47,6 +52,89 @@ type HeldPIDJobObservation interface {
 	VerifyIdentity(PIDIdentityProof) error
 	InAnyJob() (bool, error)
 	Close() error
+}
+
+// HeldPIDObservation retains one query/synchronize-only generation. No raw
+// handle, signal or termination capability is exposed to its consumer.
+type HeldPIDObservation interface {
+	Identity() (PIDHandleIdentity, error)
+	OwnerSID() (string, error)
+	Wait() (PIDWaitObservation, error)
+	VerifyIdentity(PIDIdentityProof) error
+	Close() error
+}
+
+type PIDWaitObservation struct{ Result uint32 }
+
+type heldPIDObservation struct {
+	*heldPIDJobObservation
+	ownerSID           func(windows.Handle) (*windows.SID, error)
+	wait               func(windows.Handle, uint32) (uint32, error)
+	closeMu            sync.Mutex
+	closeAttempted     bool
+	closeErr           error
+	ownerSIDFormatting *SIDFormatObservation
+}
+
+func (h *heldPIDObservation) Close() error {
+	if h == nil || h.heldPIDJobObservation == nil {
+		return errors.New("process: original held observation required")
+	}
+	h.closeMu.Lock()
+	defer h.closeMu.Unlock()
+	if h.closeAttempted {
+		return h.closeErr
+	}
+	h.closeAttempted = true
+	h.closeErr = h.heldPIDJobObservation.Close()
+	return h.closeErr
+}
+
+func HoldPIDForObservation(pid int) (HeldPIDObservation, error) {
+	base, err := holdPIDForJobObservationWithAccess(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, windows.OpenProcess, verifyHandleIdentity, processInAnyJob, windows.CloseHandle)
+	if err != nil {
+		return nil, err
+	}
+	return &heldPIDObservation{heldPIDJobObservation: base, ownerSID: processHandleOwnerUserSID, wait: windows.WaitForSingleObject}, nil
+}
+
+func (h *heldPIDObservation) OwnerSID() (string, error) {
+	if h == nil || h.heldPIDJobObservation == nil || h.handle == 0 {
+		return "", errors.New("process: held observation is closed")
+	}
+	sid, err := h.ownerSID(h.handle)
+	if err != nil {
+		return "", err
+	}
+	if sid == nil {
+		return "", errors.New("process: held owner SID unavailable")
+	}
+	value, observation, formatErr := FormatSIDObserved(sid)
+	h.ownerSIDFormatting = observation
+	if formatErr != nil {
+		return "", formatErr
+	}
+	if err := observation.ValidateInput(sid, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
+	if h == nil || h.heldPIDJobObservation == nil || h.handle == 0 || !h.verified {
+		return PIDWaitObservation{}, errors.New("process: held observation lacks verified identity")
+	}
+	result, err := h.wait(h.handle, 0)
+	if result == windows.WAIT_FAILED {
+		if err == nil {
+			err = errors.New("Windows wait failed without an immediate error")
+		}
+		return PIDWaitObservation{Result: result}, fmt.Errorf("process: held wait failed: %w", err)
+	}
+	if result != windows.WAIT_OBJECT_0 && result != uint32(windows.WAIT_TIMEOUT) {
+		return PIDWaitObservation{Result: result}, fmt.Errorf("process: held wait returned unsupported state %d", result)
+	}
+	return PIDWaitObservation{Result: result}, nil
 }
 
 type heldPIDJobObservation struct {
@@ -64,10 +152,14 @@ func HoldPIDForJobObservation(pid int) (HeldPIDJobObservation, error) {
 }
 
 func holdPIDForJobObservation(pid int, open func(uint32, bool, uint32) (windows.Handle, error), verify func(PIDIdentityProof, windows.Handle) error, query func(windows.Handle) (bool, error), close func(windows.Handle) error) (HeldPIDJobObservation, error) {
+	return holdPIDForJobObservationWithAccess(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION, open, verify, query, close)
+}
+
+func holdPIDForJobObservationWithAccess(pid int, access uint32, open func(uint32, bool, uint32) (windows.Handle, error), verify func(PIDIdentityProof, windows.Handle) error, query func(windows.Handle) (bool, error), close func(windows.Handle) error) (*heldPIDJobObservation, error) {
 	if pid <= 0 {
 		return nil, fmt.Errorf("process: invalid PID %d", pid)
 	}
-	h, err := open(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	h, err := open(access, false, uint32(pid))
 	if err != nil {
 		return nil, fmt.Errorf("process: open PID %d for job observation: %w", pid, err)
 	}
@@ -134,6 +226,7 @@ type heldPIDGenerationOps struct {
 	terminate      func(windows.Handle, uint32) error
 	wait           func(windows.Handle, uint32) (uint32, error)
 	close          func(windows.Handle) error
+	waitExit       func(context.Context, uintptr) (HeldPIDExitResult, error)
 }
 
 var productionHeldPIDGenerationOps = heldPIDGenerationOps{
@@ -142,6 +235,7 @@ var productionHeldPIDGenerationOps = heldPIDGenerationOps{
 	terminate:      windows.TerminateProcess,
 	wait:           windows.WaitForSingleObject,
 	close:          windows.CloseHandle,
+	waitExit:       WaitRetainedProcessExit,
 }
 
 // HoldPIDForTermination opens one process generation with the complete access
@@ -178,7 +272,12 @@ func (h *heldPIDGeneration) PID() int {
 }
 
 func (h *heldPIDGeneration) Identity() (PIDHandleIdentity, error) {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return PIDHandleIdentity{}, errors.New("process: held PID generation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || h.closeAttempted {
 		return PIDHandleIdentity{}, errors.New("process: held PID generation is closed")
 	}
 	return identityFromHeld(h.pid, h.handle, h.ops.identity)
@@ -196,7 +295,12 @@ func identityFromHeld(pid int, handle windows.Handle, read func(int, windows.Han
 }
 
 func (h *heldPIDGeneration) VerifyIdentity(proof PIDIdentityProof) error {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return fmt.Errorf("process: held PID generation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || h.closeAttempted {
 		return fmt.Errorf("process: held PID generation is closed")
 	}
 	if proof.PID != h.pid {
@@ -206,7 +310,12 @@ func (h *heldPIDGeneration) VerifyIdentity(proof PIDIdentityProof) error {
 }
 
 func (h *heldPIDGeneration) Terminate() (bool, error) {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return false, fmt.Errorf("process: held PID generation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || h.closeAttempted {
 		return false, fmt.Errorf("process: held PID generation is closed")
 	}
 	if err := h.ops.terminate(h.handle, 1); err != nil {
@@ -231,15 +340,144 @@ func (h *heldPIDGeneration) Terminate() (bool, error) {
 }
 
 func (h *heldPIDGeneration) Close() error {
-	if h == nil || h.handle == 0 {
+	if h == nil {
 		return nil
 	}
-	err := h.ops.close(h.handle)
-	h.handle = 0
-	if err != nil {
-		return fmt.Errorf("process: close held PID %d generation: %w", h.pid, err)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closeAttempted {
+		return h.closeErr
 	}
+	if h.handle == 0 {
+		return nil
+	}
+	h.closeAttempted = true
+	err := h.ops.close(h.handle)
+	if err != nil {
+		h.closeErr = fmt.Errorf("process: close held PID %d generation: %w", h.pid, err)
+		return h.closeErr
+	}
+	h.handle = 0
 	return nil
+}
+
+func (h *heldPIDGeneration) WaitExit(ctx context.Context) (HeldPIDExitResult, error) {
+	if ctx == nil {
+		return HeldPIDExitResult{}, errors.New("process: exit wait context required")
+	}
+	if h == nil {
+		return HeldPIDExitResult{}, errors.New("process: held PID generation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || h.closeAttempted {
+		return HeldPIDExitResult{}, errors.New("process: held PID generation is closed")
+	}
+	if h.ops.waitExit == nil {
+		return HeldPIDExitResult{}, ErrProcessIdentityUnsupported
+	}
+	return h.ops.waitExit(ctx, uintptr(h.handle))
+}
+
+type retainedProcessExitOps struct {
+	createEvent func() (windows.Handle, error)
+	setEvent    func(windows.Handle) error
+	wait        func([]windows.Handle, bool, uint32) (uint32, error)
+	exitCode    func(windows.Handle, *uint32) error
+	close       func(windows.Handle) error
+}
+
+// WaitRetainedProcessExit borrows this exact original waitable process object.
+// It opens/terminates/closes no process and adds no caller budget or waiter.
+func WaitRetainedProcessExit(ctx context.Context, handle uintptr) (HeldPIDExitResult, error) {
+	return waitRetainedProcessExit(ctx, handle, retainedProcessExitOps{
+		createEvent: func() (windows.Handle, error) { return windows.CreateEvent(nil, 1, 0, nil) },
+		setEvent:    windows.SetEvent, wait: windows.WaitForMultipleObjects,
+		exitCode: windows.GetExitCodeProcess, close: windows.CloseHandle,
+	})
+}
+
+func waitRetainedProcessExit(ctx context.Context, handle uintptr, ops retainedProcessExitOps) (result HeldPIDExitResult, resultErr error) {
+	if ctx == nil || handle == 0 {
+		return result, errors.New("process: original handle and exit wait context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	cancel, err := ops.createEvent()
+	if err != nil || cancel == 0 {
+		if cancel != 0 {
+			err = errors.Join(err, ops.close(cancel))
+		}
+		if err == nil {
+			err = errors.New("native cancellation event unavailable")
+		}
+		return result, fmt.Errorf("create process observation cancellation event: %w", err)
+	}
+	wakeDone := make(chan struct{})
+	var wakeErr error
+	stopWake := context.AfterFunc(ctx, func() {
+		wakeErr = ops.setEvent(cancel)
+		close(wakeDone)
+	})
+	defer func() {
+		if !stopWake() {
+			<-wakeDone
+			if wakeErr != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("wake process observation: %w", wakeErr))
+			}
+		}
+		if err := ops.close(cancel); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close process observation cancellation event: %w", err))
+		}
+	}()
+	for {
+		// Native milliseconds are a representation limit, not a polling budget.
+		timeout := uint32(windows.INFINITE)
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return result, context.DeadlineExceeded
+			}
+			millis := remaining.Milliseconds()
+			if remaining%time.Millisecond != 0 {
+				millis++
+			}
+			if millis >= int64(windows.INFINITE) {
+				timeout = windows.INFINITE - 1
+			} else {
+				timeout = uint32(millis)
+			}
+		}
+		event, err := ops.wait([]windows.Handle{windows.Handle(handle), cancel}, false, timeout)
+		if err != nil {
+			return result, fmt.Errorf("wait original retained process: %w", err)
+		}
+		switch event {
+		case windows.WAIT_OBJECT_0:
+			result.Exited = true
+			var code uint32
+			if err := ops.exitCode(windows.Handle(handle), &code); err != nil {
+				return result, fmt.Errorf("read original retained process exit: %w", err)
+			}
+			result.ExitCode, result.ExitCodeAvailable = code, true
+			return result, nil
+		case windows.WAIT_OBJECT_0 + 1:
+			if err := ctx.Err(); err != nil {
+				return result, err
+			}
+			return result, errors.New("process cancellation event signalled without context cancellation")
+		case uint32(windows.WAIT_TIMEOUT):
+			if err := ctx.Err(); err != nil {
+				return result, err
+			}
+			if timeout == windows.INFINITE {
+				return result, errors.New("original retained process wait timed out without a deadline")
+			}
+		default:
+			return result, fmt.Errorf("wait original retained process returned %#x", event)
+		}
+	}
 }
 
 func PIDExecutableMatches(pid int, expectedPath string) bool {

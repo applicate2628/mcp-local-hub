@@ -2016,3 +2016,63 @@ func TestReconcileIPC_R8_BareKeyDescriptorDriftResolvesViaLookupCanonical(t *tes
 		t.Fatalf("site 4: resolved descriptor must be the bare-keyed legacy row; got TaskName=%q want %q", got.TaskName, bare.TaskName)
 	}
 }
+
+type reconcileFailWriteConn struct {
+	*fakeIPCConn
+	cause  error
+	writes int
+}
+
+func (c *reconcileFailWriteConn) Write([]byte) (int, error) { c.writes++; return 0, c.cause }
+
+func TestHandleReconcileFrameFailureRetainsCancellation(t *testing.T) {
+	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1})
+	ctx, cancel := context.WithCancel(fx.ctrl.ctx)
+	t.Cleanup(cancel)
+	fx.ctrl.ctx = ctx
+	t.Cleanup(setBuiltinRouteSeedingDisabledForTest())
+	restore := setReconcileSchedulerListFnForTest(func(context.Context) ([]scheduler.TaskStatus, error) { cancel(); return nil, context.Canceled })
+	t.Cleanup(restore)
+	transport := errors.New("controlled reconcile frame write failure")
+	conn := &reconcileFailWriteConn{fakeIPCConn: newFakeIPCConn(), cause: transport}
+	target := api.ReconcileTarget{WorkspaceKey: "abcd1234", WorkspacePath: filepath.Join(fx.deps.stateDir, "workspace"), TaskName: "mcp-local-hub-serena-abcd1234", RegisteredAt: "2026-10-15T00:00:00Z", ExpectedPort: 9311}
+	err := handleReconcile(conn, api.IPCRequest{ID: 77, Cmd: "reconcile", Args: map[string]any{"apply": true, "settle_target": target}}, fx.deps)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, transport) {
+		t.Fatalf("original cancellation/transport lost: %v", err)
+	}
+	var retained *reconcileResultError
+	if !errors.As(err, &retained) || retained.frame == nil || retained.frame.Error == nil || retained.frame.Error.Code != "RECONCILE_TIMEOUT" || conn.writes != 1 {
+		t.Fatalf("actual frame attempt was lost/retried: writes=%d err=%v", conn.writes, err)
+	}
+}
+
+// Controlled causes enter the SAME production write boundary after acquisition.
+// This is a channel oracle, not a fabricated native invocation/Close proof.
+func TestReconcileFrameFailureRetainsConsumedCloseAndResult(t *testing.T) {
+	primary := errors.New("controlled acquired primary cause")
+	closed := errors.New("controlled already-consumed close cause")
+	transport := errors.New("controlled terminal frame write failure")
+	result := api.ReconcileResponse{SerenaOrphansRepaired: 1, SerenaRepairOutcome: api.SerenaIntentRepairOutcomeError, SerenaRepairError: errors.Join(primary, closed).Error()}
+	frame := api.IPCResponse{ID: 78, OK: true, Result: result, Final: true}
+	conn := &reconcileFailWriteConn{fakeIPCConn: newFakeIPCConn(), cause: transport}
+	err := writeReconcileResultFrame(conn, frame, result, errors.Join(primary, closed))
+	for _, cause := range []error{primary, closed, transport} {
+		if !errors.Is(err, cause) {
+			t.Fatalf("acquired cause lost: %v", err)
+		}
+	}
+	var retained *reconcileResultError
+	if !errors.As(err, &retained) || retained.response.SerenaOrphansRepaired != 1 || conn.writes != 1 {
+		t.Fatalf("partial result lost/retried: %v", err)
+	}
+	// Keep the historical successful-transmission return convention. Its typed
+	// response remains error-outcome data and grants no runtime readiness.
+	sent := newFakeIPCConn()
+	if err := writeReconcileResultFrame(sent, frame, result, errors.Join(primary, closed)); err != nil {
+		t.Fatalf("successful transmission convention changed: %v", err)
+	}
+	_, received := decodeReconcileResponse(t, sent)
+	if received.SerenaOrphansRepaired != 1 || received.SerenaRepairError == "" || received.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeError {
+		t.Fatalf("transmitted error-outcome result lost: %+v", received)
+	}
+}

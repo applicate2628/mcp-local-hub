@@ -873,6 +873,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		}
 	}
 	classifyLSPEntries(entries, reg)
+	applyEntryRemovalCapabilities(entries, paths)
 
 	out := &ScanResult{
 		At:                   time.Now(),

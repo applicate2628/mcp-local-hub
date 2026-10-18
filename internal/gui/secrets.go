@@ -10,8 +10,15 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+const (
+	secretsInitCapabilityKey   = "init-capabilities"
+	secretsInitCapabilityPath  = "/api/secrets/" + secretsInitCapabilityKey
+	secretsInitCapabilityAllow = "GET, PUT, DELETE"
+)
+
 func registerSecretsRoutes(s *Server) {
 	s.mux.HandleFunc("/api/secrets/init", s.requireSameOrigin(s.secretsInitHandler))
+	s.mux.HandleFunc("GET "+secretsInitCapabilityPath, s.requireSameOrigin(s.secretsInitCapabilitiesHandler))
 	s.mux.HandleFunc("/api/secrets", s.requireSameOrigin(s.secretsListOrAddHandler))
 	s.mux.HandleFunc("/api/secrets/", s.requireSameOrigin(s.secretsByKeyHandler))
 }
@@ -30,8 +37,13 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // Four outcomes per memo §5.1 D2:
 //   - 200 {vault_state:"ok"}                    — idempotent or fresh init
 //   - 200 {code:"SECRETS_INIT_FAILED", cleanup_status:"ok", vault_state:"missing"} — init failed, cleanup succeeded
-//   - 500 {code:"SECRETS_INIT_FAILED", cleanup_status:"failed", orphan_path:…}     — init + cleanup both failed
+//   - 500 {code:"SECRETS_INIT_FAILED", cleanup_status:"failed"} — init + cleanup both failed
 //   - 409 {code:"SECRETS_INIT_BLOCKED"}          — pre-existing files
+//   - 500 {code:"SECRETS_INIT_FAILED", recovery_status:…} — evidence persistence failed
+//
+// Authorization: the registered route retains the Server Host and same-origin
+// guards. Headerless local callers remain supported; no private report/action
+// authority is granted by this projection.
 func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -43,10 +55,20 @@ func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, res)
 		return
 	}
+	var persistence *api.SecretsRecoveryPersistenceError
+	if errors.As(err, &persistence) {
+		body := map[string]any{
+			"error": "Recovery evidence could not be verified. Reload or update the application and contact local support.",
+			"code":  "SECRETS_INIT_FAILED",
+		}
+		addSecretsInitRecoveryReference(body, persistence.RecoveryReference())
+		writeJSON(w, http.StatusInternalServerError, body)
+		return
+	}
 	var blocked *api.SecretsInitBlocked
 	if errors.As(err, &blocked) {
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": err.Error(),
+			"error": "Initialization is blocked by existing files. Reload or update the application and contact local support.",
 			"code":  "SECRETS_INIT_BLOCKED",
 		})
 		return
@@ -54,13 +76,11 @@ func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
 	var initFailed *api.SecretsInitFailed
 	if errors.As(err, &initFailed) {
 		body := map[string]any{
-			"error":          err.Error(),
+			"error":          "Initialization failed. Reload or update the application and contact local support.",
 			"code":           "SECRETS_INIT_FAILED",
 			"cleanup_status": initFailed.CleanupStatus,
 		}
-		if initFailed.OrphanPath != "" {
-			body["orphan_path"] = initFailed.OrphanPath
-		}
+		addSecretsInitRecoveryReference(body, initFailed.RecoveryReference())
 		if initFailed.CleanupStatus == "ok" {
 			body["vault_state"] = "missing"
 			writeJSON(w, http.StatusOK, body)
@@ -70,9 +90,35 @@ func (s *Server) secretsInitHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]any{
-		"error": err.Error(),
+		"error": "Initialization failed. Reload or update the application and contact local support.",
 		"code":  "SECRETS_INIT_FAILED",
 	})
+}
+
+func addSecretsInitRecoveryReference(body map[string]any, reference api.PublicRecoveryReference) {
+	if reference.ID != "" {
+		body["recovery_id"] = reference.ID
+	}
+	if reference.Status != "" {
+		body["recovery_status"] = reference.Status
+	}
+}
+
+// Authorization: the canonical registration applies the existing Host/Origin
+// guards. This static compatibility declaration carries no private data,
+// operator capability or recovery action, and invokes no secrets backend.
+func (s *Server) secretsInitCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", secretsInitCapabilityAllow)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, struct {
+		SchemaVersion  int    `json:"schema_version"`
+		Workflow       string `json:"workflow"`
+		PathFreeErrors bool   `json:"path_free_errors"`
+	}{1, "cli_support_readonly", true})
 }
 
 // secretsListOrAddHandler handles GET /api/secrets and POST /api/secrets.
@@ -259,7 +305,11 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 		})
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		w.Header().Set("Allow", "PUT, DELETE")
+		allow := "PUT, DELETE"
+		if key == secretsInitCapabilityKey {
+			allow = secretsInitCapabilityAllow
+		}
+		w.Header().Set("Allow", allow)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }

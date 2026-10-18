@@ -27,6 +27,8 @@ const defaultGUIShutdownDrainTimeout = 5 * time.Second
 
 // Config drives Server construction. Zero values are sensible defaults.
 type Config struct {
+	ProjectServiceLaunchPreparation api.ProjectServiceLaunchPreparationReader
+	SerenaPreparation               api.SerenaPreparationAssembly
 	// Port to bind on 127.0.0.1. Zero lets the OS pick one from the
 	// ephemeral range; the chosen port is reported via Server.Port().
 	Port int
@@ -304,6 +306,13 @@ type realManifestGetter struct{}
 
 func (realManifestGetter) ManifestGetWithHash(name string) (string, string, error) {
 	return api.NewAPI().ManifestGetWithHash(name)
+}
+
+// realManifestViewer is the production adapter for /api/manifest/view.
+type realManifestViewer struct{}
+
+func (realManifestViewer) ManifestGet(name string) (string, error) {
+	return api.NewAPI().ManifestGet(name)
 }
 
 type realManifestPresence struct{}
@@ -645,8 +654,10 @@ type Server struct {
 	guiListener *GUIListenerOwner
 	// restartCoordinator is composed by the CLI for every gate-ON server,
 	// including an activated RestartV3 child. Gate-OFF servers leave it nil.
-	restartCoordinator restartCoordinatorStarter
-	port               atomic.Int32 // set after Listen, read by Port()
+	restartCoordinator       restartCoordinatorStarter
+	guiQuitHandler           GUIQuitHandler
+	supervisorRestartHandler SupervisorRestartHandler
+	port                     atomic.Int32 // set after Listen, read by Port()
 	// api is the long-lived shared *api.API handle. Phase G2 places the
 	// HealthSnapshot TTL+singleflight cache on this struct, so the
 	// healthBackend adapter MUST reuse this instance — per-request
@@ -663,10 +674,12 @@ type Server struct {
 	health                 healthBackend
 	migrator               migrator
 	demigrater             demigrater
+	clientEntryRemover     clientEntryRemover
 	dismisser              dismisser
 	manifestCreator        manifestCreator
 	manifestValidator      manifestValidator
 	manifestGetter         manifestGetter
+	manifestViewer         manifestViewer
 	manifestPresence       manifestPresence
 	manifestEditor         manifestEditor
 	manifestLister         manifestLister
@@ -699,16 +712,19 @@ type Server struct {
 	logs                  logsProvider
 	extractor             extractor
 	events                *Broadcaster
-	hubHealth             *hubHealthTracker
-	secrets               secretsAPI
-	settings              settingsAPI
-	backups               backupsAPI
-	backupActions         backupActionsAPI
-	cleanup               cleanupAPI
-	clientInit            clientInitializer
-	symlinkWriter         symlinkResolveWriter
-	lspRegistrar          lspRegistrar
-	groups                groupsAPI
+	// Event streams end with this Server, independently of listener rebinds.
+	eventStreamCtx     context.Context
+	cancelEventStreams context.CancelFunc
+	hubHealth          *hubHealthTracker
+	secrets            secretsAPI
+	settings           settingsAPI
+	backups            backupsAPI
+	backupActions      backupActionsAPI
+	cleanup            cleanupAPI
+	clientInit         clientInitializer
+	symlinkWriter      symlinkResolveWriter
+	lspRegistrar       lspRegistrar
+	groups             groupsAPI
 
 	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
 	// /api/groups mutation tail (republishGroupsSnapshot). Production: nil —
@@ -920,7 +936,10 @@ func NewServer(cfg Config) *Server {
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
 	}
+	eventStreamCtx, cancelEventStreams := context.WithCancel(context.Background())
 	s := &Server{
+		eventStreamCtx:           eventStreamCtx,
+		cancelEventStreams:       cancelEventStreams,
 		cfg:                      cfg,
 		mux:                      http.NewServeMux(),
 		guiListener:              NewGUIListenerOwner(GUIReadHeaderTimeout),
@@ -930,12 +949,9 @@ func NewServer(cfg Config) *Server {
 		pruneEnoentTicks:         map[string]pruneEnoentEntry{},
 	}
 	s.serenaRouterSessions.onWorkspaceEmpty = s.handleSerenaRouterWorkspaceEmpty
-	// Long-lived shared *API handle. Phase G2 (/api/health) places the
-	// TTL+singleflight HealthSnapshot cache here so concurrent requests
-	// reuse the same cache; the healthBackend adapter below references
-	// THIS instance. Other handlers continue to use api.NewAPI() per
-	// request — out of scope for this task.
-	s.api = api.NewAPI()
+	// The shared API owns health caching and original provisional children
+	// across install/adopt requests, through terminal listener shutdown.
+	s.api = api.NewAPIWithSerenaAndProjectServicePreparation(cfg.SerenaPreparation, cfg.ProjectServiceLaunchPreparation)
 	s.adoptLeaseOwner = cfg.AdoptLeaseOwner
 	s.adoptReceivingVerifier = cfg.AdoptReceivingVerifier
 	s.scanner = realScanner{guiPort: s.Port, shadowWarnings: api.NewDiskShadowWarningTracker()}
@@ -943,10 +959,12 @@ func NewServer(cfg Config) *Server {
 	s.health = realHealthBackend{api: s.api}
 	s.migrator = realMigrator{guiPort: s.Port}
 	s.demigrater = realDemigrater{}
+	s.clientEntryRemover = s.api
 	s.dismisser = realDismisser{}
 	s.manifestCreator = realManifestCreator{}
 	s.manifestValidator = realManifestValidator{}
 	s.manifestGetter = realManifestGetter{}
+	s.manifestViewer = realManifestViewer{}
 	s.manifestPresence = realManifestPresence{}
 	s.manifestEditor = realManifestEditor{}
 	s.manifestLister = realManifestLister{}
@@ -959,9 +977,9 @@ func NewServer(cfg Config) *Server {
 	s.marketplacePortPicker = realGlobalPortPicker{}
 	s.marketplaceNamePresence = realServerNamePresence{}
 	s.marketplaceDirectWriter = realDirectClientWriter{}
-	s.installer = realInstaller{}
+	s.installer = realInstaller{api: s.api}
 	s.uninstaller = realUninstaller{}
-	s.installBulk = realInstallBulkAPI{}
+	s.installBulk = realInstallBulkAPI{api: s.api}
 	s.restart = realRestarter{}
 	s.daemonRecover = realDaemonRecoverer{}
 	s.stop = realStopper{}
@@ -1008,6 +1026,7 @@ func NewServer(cfg Config) *Server {
 	registerHealthRoute(s)
 	registerMigrateRoutes(s)
 	registerDemigrateRoutes(s)
+	registerClientEntryRemovalRoutes(s)
 	registerDismissRoutes(s)
 	registerManifestRoutes(s)
 	registerMarketplaceRoutes(s)
@@ -1041,6 +1060,7 @@ func NewServer(cfg Config) *Server {
 	registerLSPTrustedRootsRoutes(s)
 	registerSupervisorRestartRoutes(s)
 	registerGUISelfRestartRoutes(s) // Wave 3: POST /api/gui/restart self re-exec with lock handoff
+	registerGUIQuitRoutes(s)
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
 	registerLSPRouterRoutes(s)
@@ -1195,6 +1215,7 @@ func (s *Server) ContinueWithGUIListener(ctx context.Context, ready chan<- struc
 }
 
 func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struct{}, owner *GUIListenerOwner, ln net.Listener) error {
+	defer s.cancelEventStreams()
 	if err := s.auditLock.activateStore(ctx); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("activate daemon recovery occurrence store: %w", err)
@@ -1224,6 +1245,7 @@ func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struc
 	}
 	if err := serveFull(ln, s.httpHandler()); err != nil {
 		_ = ln.Close()
+		s.cancelEventStreams()
 		s.events.Close()
 		return err
 	}
@@ -1344,6 +1366,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 
 	select {
 	case <-ctx.Done():
+		s.cancelEventStreams()
 		s.recoverySettlements.closeAdmission()
 		s.auditLock.beginClose()
 		// Cancel producers and wait only up to the bounded join budget before
@@ -1378,7 +1401,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 			// this, hung requests survive Start's return.
 			shutdownErr = fmt.Errorf("graceful shutdown: %w", shutdownErr)
 		}
-		settlementErr := s.recoverySettlements.wait()
+		settlementErr := errors.Join(s.recoverySettlements.wait(), s.api.CloseStdioBridgeAdmissions(context.Background()))
 		// G9: stop the persist worker after HTTP is quiesced, so
 		// any pending events queued by in-flight handlers are
 		// flushed to gui-events.log before the goroutine exits
@@ -1388,6 +1411,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		s.events.Close()
 		return errors.Join(shutdownErr, settlementErr)
 	case err := <-errCh:
+		s.cancelEventStreams()
 		s.recoverySettlements.closeAdmission()
 		s.auditLock.beginClose()
 		// A failed GUI listener uses the same cancel/join/take hub boundary as
@@ -1401,7 +1425,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		if s.shutdownDrainObserved != nil {
 			s.shutdownDrainObserved(guiDrainErr)
 		}
-		settlementErr := s.recoverySettlements.wait()
+		settlementErr := errors.Join(s.recoverySettlements.wait(), s.api.CloseStdioBridgeAdmissions(context.Background()))
 		s.auditLock.close()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {

@@ -91,7 +91,7 @@ type configureResult struct {
 	CacheSummary map[string]string `json:"cache_summary,omitempty"`
 	WallMs       int64             `json:"wall_ms"`
 	TimedOut     bool              `json:"timed_out,omitempty"`
-	RawTail      string            `json:"raw_tail,omitempty"`
+	RawTail      string            `json:"raw_tail"`
 }
 
 type buildResult struct {
@@ -101,7 +101,7 @@ type buildResult struct {
 	BuiltTargets []string     `json:"built_targets,omitempty"`
 	WallMs       int64        `json:"wall_ms"`
 	TimedOut     bool         `json:"timed_out,omitempty"`
-	RawTail      string       `json:"raw_tail,omitempty"`
+	RawTail      string       `json:"raw_tail"`
 }
 
 // testCase is one ctest test outcome.
@@ -125,7 +125,7 @@ type testResult struct {
 	JUnitPath       string     `json:"junit_path,omitempty"`
 	WallMs          int64      `json:"wall_ms"`
 	TimedOut        bool       `json:"timed_out,omitempty"`
-	RawTail         string     `json:"raw_tail,omitempty"`
+	RawTail         string     `json:"raw_tail"`
 }
 
 type workflowResult struct {
@@ -134,7 +134,7 @@ type workflowResult struct {
 	Diagnostics []Diagnostic `json:"diagnostics"`
 	WallMs      int64        `json:"wall_ms"`
 	TimedOut    bool         `json:"timed_out,omitempty"`
-	RawTail     string       `json:"raw_tail,omitempty"`
+	RawTail     string       `json:"raw_tail"`
 }
 
 type cleanResult struct {
@@ -145,7 +145,7 @@ type cleanResult struct {
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 	WallMs      int64        `json:"wall_ms,omitempty"`
 	TimedOut    bool         `json:"timed_out,omitempty"`
-	RawTail     string       `json:"raw_tail,omitempty"`
+	RawTail     string       `json:"raw_tail"`
 }
 
 // installedPackage is one vcpkg package spec (name:triplet@version).
@@ -162,14 +162,14 @@ type vcpkgInstallResult struct {
 	Diagnostics []Diagnostic       `json:"diagnostics"`
 	WallMs      int64              `json:"wall_ms"`
 	TimedOut    bool               `json:"timed_out,omitempty"`
-	RawTail     string             `json:"raw_tail,omitempty"`
+	RawTail     string             `json:"raw_tail"`
 }
 
 type vcpkgListResult struct {
 	Success  bool               `json:"success"`
 	ExitCode int                `json:"exit_code"`
 	Packages []installedPackage `json:"packages"`
-	RawTail  string             `json:"raw_tail,omitempty"`
+	RawTail  string             `json:"raw_tail"`
 }
 
 // searchPackage is one vcpkg_search catalog row.
@@ -184,7 +184,7 @@ type vcpkgSearchResult struct {
 	ExitCode int             `json:"exit_code"`
 	Query    string          `json:"query"`
 	Packages []searchPackage `json:"packages"`
-	RawTail  string          `json:"raw_tail,omitempty"`
+	RawTail  string          `json:"raw_tail"`
 }
 
 // --- shared handler helpers --------------------------------------------------

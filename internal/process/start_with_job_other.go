@@ -21,6 +21,19 @@ import (
 //
 // Returns the child PID on success. The caller is responsible for
 // reaping the child via cmd.Wait() / cmd.Process.Wait().
+func startProvisionalWithJob(job *Job, cmd *exec.Cmd) (containedChild, error) {
+	owner, err := newPlatformContainedChild(cmd)
+	if err != nil {
+		return nil, err
+	}
+	child := owner.(*posixContainedChild)
+	if _, err := StartWithJob(job, cmd); err != nil {
+		return owner, err
+	}
+	child.pid = cmd.Process.Pid
+	return owner, nil
+}
+
 func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	return startWithJobFiles(job, cmd, nil, nil, nil)
 }

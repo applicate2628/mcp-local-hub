@@ -20,23 +20,20 @@
 // itself installed, and it still resolves under `npm install --ignore-scripts`
 // (that flag skips lifecycle scripts, not optional dependencies).
 //
-// The package DOES ship one lifecycle script, scripts/postinstall.js, but it
-// performs NO network I/O: it only COPIES the already-installed local platform
-// binary into the canonical ~/.local/bin (via `mcphub canonicalize`) so a bare
-// `mcphub` runs the version npm just delivered. A copy-only step is a
-// different, far narrower risk profile than a downloading postinstall, and it
-// is fully fail-safe — a copy failure never breaks `npm install`. Under
-// `--ignore-scripts` it simply does not run, and the operator reconciles
-// ~/.local with `mcphub setup`.
+// The package ships scripts/postinstall.js as a no-op. npm owns delivery
+// and replacement of the native platform payload; this shim resolves it
+// directly. The lifecycle script does not launch the product or promote
+// another copy into ~/.local/bin. Explicit setup/canonicalize remains a
+// separate optional local-install action.
 
 "use strict";
 
 const { spawnSync } = require("node:child_process");
 const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
 
-// PACKAGE_BY_PLATFORM and binaryBasename live in ../lib/platform-binary.js,
-// shared with postinstall. The map is derived from the shipped meta manifest:
-// a deferred host is rejected before looking for any older installed package.
+// PACKAGE_BY_PLATFORM and binaryBasename live in ../lib/platform-binary.js.
+// The map is derived from the shipped meta manifest: a deferred host is
+// rejected before looking for any older installed package.
 
 const RELEASES_URL =
   "https://github.com/applicate2628/mcp-local-hub/releases";

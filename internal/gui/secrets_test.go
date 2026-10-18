@@ -3,20 +3,28 @@ package gui
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/secrets"
 )
 
 // fakeSecretsAPI is the test double for secretsAPI. It records all
 // calls made by the handlers so tests can assert dispatch correctness.
 type fakeSecretsAPI struct {
+	initCalls      int
+	panicOnInit    bool
 	initResult     api.SecretsInitResult
 	initErr        error
 	listResult     api.SecretsEnvelope
@@ -40,8 +48,14 @@ type fakeSecretsAPI struct {
 	}
 }
 
-func (f *fakeSecretsAPI) Init() (api.SecretsInitResult, error) { return f.initResult, f.initErr }
-func (f *fakeSecretsAPI) List() (api.SecretsEnvelope, error)   { return f.listResult, f.listErr }
+func (f *fakeSecretsAPI) Init() (api.SecretsInitResult, error) {
+	f.initCalls++
+	if f.panicOnInit {
+		panic("capability unexpectedly invoked initialization")
+	}
+	return f.initResult, f.initErr
+}
+func (f *fakeSecretsAPI) List() (api.SecretsEnvelope, error) { return f.listResult, f.listErr }
 func (f *fakeSecretsAPI) Set(name, value string) error {
 	f.calledSet = append(f.calledSet, struct{ Name, Value string }{name, value})
 	return f.setErr
@@ -179,8 +193,377 @@ func TestSecretsInit_PartialCleanupFailed_Returns500(t *testing.T) {
 	if body["cleanup_status"] != "failed" {
 		t.Errorf("cleanup_status=%v", body["cleanup_status"])
 	}
-	if body["orphan_path"] != "/some/path/secrets.age" {
-		t.Errorf("orphan_path=%v", body["orphan_path"])
+	if _, present := body["orphan_path"]; present {
+		t.Errorf("orphan_path escaped the init HTTP boundary")
+	}
+}
+
+func serveHTTPInitProof(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, "http://127.0.0.1:9081"+path, nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	return rec
+}
+
+func saveHTTPInitProof(t *testing.T, name string, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	root := os.Getenv("MCPHUB_HTTP_PROOF_DIR")
+	if root == "" {
+		return
+	}
+	if !filepath.IsAbs(root) {
+		t.Fatal("HTTP proof root is not absolute")
+	}
+	prefix := os.Getenv("MCPHUB_HTTP_EPOCH") + "." + name
+	if err := os.WriteFile(filepath.Join(root, prefix+".body.json"), rec.Body.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := json.Marshal(struct {
+		Status int         `json:"status"`
+		Header http.Header `json:"header"`
+	}{rec.Code, rec.Header()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, prefix+".response.json"), metadata, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertHTTPInitContained(t *testing.T, rec *httptest.ResponseRecorder, status int, forbidden ...string) map[string]any {
+	t.Helper()
+	if rec.Code != status {
+		t.Errorf("HTTP status=%d want=%d body=%q", rec.Code, status, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("unexpected init Content-Type=%q", rec.Header().Get("Content-Type"))
+	}
+	for _, value := range forbidden {
+		if value != "" && bytes.Contains(rec.Body.Bytes(), []byte(value)) {
+			t.Errorf("private cause/path reflected: %q", value)
+		}
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := body["orphan_path"]; present {
+		t.Error("orphan_path emitted")
+	}
+	message, ok := body["error"].(string)
+	for _, value := range forbidden {
+		if value != "" && strings.Contains(message, value) {
+			t.Errorf("decoded private cause/path reflected: %q", value)
+		}
+	}
+	if !ok || !strings.Contains(message, "Reload") {
+		t.Errorf("missing fixed compatible reload guidance: %v", body["error"])
+	}
+	return body
+}
+
+func TestSecretsInit_HTTPFailureProjection(t *testing.T) {
+	cause := errors.New("HTTP-PRIVATE-CAUSE /synthetic-private/target")
+	for _, c := range []struct {
+		name    string
+		err     error
+		status  int
+		cleanup string
+	}{
+		{"typed_cleanup_ok", &api.SecretsInitFailed{CleanupStatus: "ok", Cause: cause}, 200, "ok"},
+		{"typed_cleanup_failed", &api.SecretsInitFailed{CleanupStatus: "failed", OrphanPath: "/synthetic-private/orphan", Cause: cause}, 500, "failed"},
+		{"untyped", cause, 500, ""},
+		{"wrapped_blocked", fmt.Errorf("HTTP-PRIVATE-WRAPPER: %w", &api.SecretsInitBlocked{KeyExists: true}), 409, ""},
+		{"persistence_wrapping_cleanup_ok", &api.SecretsRecoveryPersistenceError{PersistenceCause: cause, InitError: &api.SecretsInitFailed{CleanupStatus: "ok", Cause: cause}}, 500, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newEphemeralServer(t, Config{Port: 9081})
+			fake := &fakeSecretsAPI{initErr: c.err}
+			s.secrets = fake
+			rec := serveHTTPInitProof(t, s, http.MethodPost, "/api/secrets/init")
+			saveHTTPInitProof(t, "mock."+c.name, rec)
+			body := assertHTTPInitContained(t, rec, c.status, "HTTP-PRIVATE-CAUSE", "HTTP-PRIVATE-WRAPPER", "/synthetic-private")
+			code := "SECRETS_INIT_FAILED"
+			if c.status == 409 {
+				code = "SECRETS_INIT_BLOCKED"
+			}
+			if body["code"] != code {
+				t.Errorf("code=%v", body["code"])
+			}
+			if c.cleanup != "" && body["cleanup_status"] != c.cleanup {
+				t.Errorf("cleanup status=%v", body["cleanup_status"])
+			}
+			if c.cleanup == "ok" && body["vault_state"] != "missing" {
+				t.Error("cleanup-ok no longer reports missing")
+			}
+			if fake.initCalls != 1 {
+				t.Errorf("init calls=%d", fake.initCalls)
+			}
+		})
+	}
+}
+
+func TestSecretsInit_HTTPCapability(t *testing.T) {
+	s := newEphemeralServer(t, Config{Port: 9081})
+	fake := &fakeSecretsAPI{panicOnInit: true}
+	s.secrets = fake
+	rec := serveHTTPInitProof(t, s, http.MethodGet, "/api/secrets/init-capabilities")
+	saveHTTPInitProof(t, "capability", rec)
+	if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/json" || rec.Body.String() != `{"schema_version":1,"workflow":"cli_support_readonly","path_free_errors":true}`+"\n" {
+		t.Errorf("capability=%d %q", rec.Code, rec.Body.String())
+	}
+	method := serveHTTPInitProof(t, s, http.MethodPost, "/api/secrets/init-capabilities")
+	if method.Code != 405 || method.Header().Get("Allow") != "GET, PUT, DELETE" {
+		t.Errorf("capability method gate=%d Allow=%q", method.Code, method.Header().Get("Allow"))
+	}
+	if fake.initCalls != 0 {
+		t.Fatal("static capability invoked init")
+	}
+}
+
+func TestSecretsCapabilityRouteMethodMetadata(t *testing.T) {
+	s := newEphemeralServer(t, Config{Port: 9081})
+	fake := &fakeSecretsAPI{panicOnInit: true}
+	s.secrets = fake
+	for _, method := range []string{http.MethodHead, http.MethodPost, http.MethodPatch, http.MethodOptions, "CUSTOM"} {
+		for _, path := range []string{"/api/secrets/init-capabilities", "/api/secrets/K1"} {
+			rec := serveHTTPInitProof(t, s, method, path)
+			allow := "PUT, DELETE"
+			if path == "/api/secrets/init-capabilities" {
+				allow = "GET, PUT, DELETE"
+			}
+			if rec.Code != 405 || rec.Header().Get("Allow") != allow {
+				t.Errorf("%s %s => %d Allow=%q", method, path, rec.Code, rec.Header().Get("Allow"))
+			}
+		}
+	}
+	if len(fake.calledDelete) != 0 || len(fake.calledRotate) != 0 || fake.initCalls != 0 {
+		t.Fatal("rejected/read methods invoked mutation")
+	}
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		for _, kind := range []string{"host", "origin", "fetch-site"} {
+			req := httptest.NewRequest(method, "http://127.0.0.1:9081/api/secrets/init-capabilities?confirm=true", nil)
+			switch kind {
+			case "host":
+				req.Host = "evil.invalid:9081"
+			case "origin":
+				req.Header.Set("Origin", "http://evil.invalid:9081")
+			case "fetch-site":
+				req.Header.Set("Sec-Fetch-Site", "cross-site")
+			}
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != 403 {
+				t.Errorf("%s %s guard=%d", method, kind, rec.Code)
+			}
+		}
+	}
+	if len(fake.calledDelete) != 0 || len(fake.calledRotate) != 0 || fake.initCalls != 0 {
+		t.Fatal("outer refusal invoked mutation")
+	}
+}
+
+func TestSecretsCapabilityRouteLegacyEncryptedDelete(t *testing.T) {
+	key, vaultPath, state := httpPrivateInitFixture(t)
+	if result, err := api.NewAPI().SecretsInit(); err != nil || result.VaultState != "ok" {
+		t.Fatal("private public initialization failed", err)
+	}
+	vault, err := secrets.OpenVault(key, vaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = vault.ImportYAML([]byte("init-capabilities: SYNTHETIC-LEGACY\nK1: SYNTHETIC-CONTROL\n")); err != nil {
+		t.Fatal(err)
+	}
+	readState := func() ([]string, string) {
+		t.Helper()
+		v, err := secrets.OpenVault(key, vaultPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(vaultPath)
+		if err != nil || !bytes.HasPrefix(raw, []byte("age-encryption.org/v1")) {
+			t.Fatal("private vault is not valid encrypted storage", err)
+		}
+		return v.List(), fmt.Sprintf("%x", sha256.Sum256(raw))
+	}
+	initial, _ := readState()
+	if strings.Join(initial, ",") != "K1,init-capabilities" {
+		t.Fatal("supported import did not persist both exact names")
+	}
+	s := NewServer(Config{Port: 9081})
+	t.Cleanup(s.Broadcaster().Close)
+	var observations []map[string]any
+	for _, c := range []struct {
+		name, method, path, body string
+		status                   int
+	}{
+		{"get_before", http.MethodGet, "/api/secrets/init-capabilities", "", 200},
+		{"legacy_put", http.MethodPut, "/api/secrets/init-capabilities", `{"value":"SYNTHETIC-ROTATE","restart":false}`, 400},
+		{"legacy_delete", http.MethodDelete, "/api/secrets/init-capabilities?confirm=true", "", 204},
+		{"ordinary_delete", http.MethodDelete, "/api/secrets/K1?confirm=true", "", 204},
+		{"get_after", http.MethodGet, "/api/secrets/init-capabilities", "", 200},
+	} {
+		beforeNames, beforeHash := readState()
+		req := httptest.NewRequest(c.method, "http://127.0.0.1:9081"+c.path, strings.NewReader(c.body))
+		if c.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		afterNames, afterHash := readState()
+		if rec.Code != c.status {
+			t.Errorf("actual %s status=%d want=%d", c.name, rec.Code, c.status)
+		}
+		if strings.HasPrefix(c.name, "get_") {
+			if rec.Body.String() != `{"schema_version":1,"workflow":"cli_support_readonly","path_free_errors":true}`+"\n" || rec.Header().Get("Cache-Control") != "no-store" || beforeHash != afterHash || strings.Join(beforeNames, ",") != strings.Join(afterNames, ",") {
+				t.Error("capability bytes or encrypted store changed")
+			}
+		}
+		if c.name == "legacy_put" && beforeHash != afterHash {
+			t.Error("invalid setter acquired new write permission")
+		}
+		if c.name == "legacy_delete" && strings.Contains(strings.Join(afterNames, ","), "init-capabilities") {
+			t.Error("stored legacy key remained after DELETE")
+		}
+		if c.name == "ordinary_delete" && strings.Contains(strings.Join(afterNames, ","), "K1") {
+			t.Error("stored ordinary key remained after DELETE")
+		}
+		observations = append(observations, map[string]any{"case": c.name, "method": c.method, "status": rec.Code, "body": rec.Body.String(), "headers": rec.Header(), "before_names": beforeNames, "after_names": afterNames, "before_vault_sha256": beforeHash, "after_vault_sha256": afterHash})
+	}
+	s.Broadcaster().Close() // joins the existing durable persistence owner before inspection
+	raw, err := os.ReadFile(filepath.Join(state, "gui-events.log"))
+	if err != nil {
+		t.Fatal("canonical delete events were not durably received", err)
+	}
+	deleteKeys := []string{}
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var ev struct {
+			Type string `json:"type"`
+			Body struct {
+				Action string `json:"action"`
+				Key    string `json:"key"`
+			} `json:"body"`
+		}
+		if err := json.Unmarshal(line, &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev.Type == "operator-action" && ev.Body.Action == "secret-delete" {
+			deleteKeys = append(deleteKeys, ev.Body.Key)
+		}
+	}
+	if strings.Join(deleteKeys, ",") != "init-capabilities,K1" {
+		t.Fatalf("durable post-commit delete events=%v", deleteKeys)
+	}
+	if proof := os.Getenv("MCPHUB_HTTP_PROOF_DIR"); proof != "" {
+		summary, err := json.Marshal(map[string]any{"observations": observations, "durable_delete_keys": deleteKeys, "key_ciphertext_or_actor_retained": false})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(proof, "route-green-observations.json"), summary, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSecretsInit_HTTPOuterGuards(t *testing.T) {
+	for _, path := range []string{"/api/secrets/init", "/api/secrets/init-capabilities"} {
+		for _, kind := range []string{"host", "origin", "fetch_site"} {
+			t.Run(path+"/"+kind, func(t *testing.T) {
+				s := newEphemeralServer(t, Config{Port: 9081})
+				fake := &fakeSecretsAPI{panicOnInit: true}
+				s.secrets = fake
+				method := http.MethodPost
+				if strings.HasSuffix(path, "capabilities") {
+					method = http.MethodGet
+				}
+				req := httptest.NewRequest(method, "http://127.0.0.1:9081"+path, nil)
+				switch kind {
+				case "host":
+					req.Host = "evil.invalid:9081"
+				case "origin":
+					req.Header.Set("Origin", "http://evil.invalid:9081")
+				case "fetch_site":
+					req.Header.Set("Sec-Fetch-Site", "cross-site")
+				}
+				rec := httptest.NewRecorder()
+				s.ServeHTTP(rec, req)
+				if rec.Code != 403 || fake.initCalls != 0 {
+					t.Errorf("outer guard=%d calls=%d", rec.Code, fake.initCalls)
+				}
+			})
+		}
+	}
+}
+
+func httpPrivateInitFixture(t *testing.T) (key, vault, state string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+	t.Setenv("HOME", dir)
+	key, vault = secrets.DefaultKeyPath(), secrets.DefaultVaultPath()
+	for _, p := range []string{key, vault, vault + ".lock"} {
+		rel, err := filepath.Rel(os.TempDir(), p)
+		if err != nil || !filepath.IsAbs(p) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatal("HTTP init fixture escaped private temporary targets")
+		}
+		for current := p; ; current = filepath.Dir(current) {
+			info, err := os.Lstat(current)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir() && !info.Mode().IsRegular()) {
+				t.Fatal("HTTP fixture ancestry is not ordinary")
+			}
+			if current == filepath.Clean(os.TempDir()) {
+				break
+			}
+		}
+	}
+	state = apitest.HardenedTempDir(t)
+	restore := api.SetDaemonStateRootForTest(state)
+	t.Cleanup(restore)
+	return
+}
+
+func TestSecretsInit_HTTPDefaultRealAdapter(t *testing.T) {
+	key, vault, _ := httpPrivateInitFixture(t)
+	s := newEphemeralServer(t, Config{Port: 9081})
+	for i := 0; i < 2; i++ {
+		rec := serveHTTPInitProof(t, s, http.MethodPost, "/api/secrets/init")
+		saveHTTPInitProof(t, fmt.Sprintf("default-real-success-%d", i), rec)
+		if rec.Code != 200 || rec.Body.String() != `{"vault_state":"ok"}`+"\n" {
+			t.Fatalf("real adapter=%d %q", rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := secrets.OpenVault(key, vault); err != nil {
+		t.Fatal("default real adapter did not produce an openable vault", err)
+	}
+}
+
+func TestSecretsInit_HTTPActualUntyped(t *testing.T) {
+	key, _, _ := httpPrivateInitFixture(t)
+	if err := os.WriteFile(filepath.Dir(key), []byte("SYNTHETIC-NONDIRECTORY"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, cause := api.NewAPI().SecretsInit()
+	if cause == nil {
+		t.Fatal("ordinary-file vault parent did not produce actual API error")
+	}
+	var failed *api.SecretsInitFailed
+	var persistence *api.SecretsRecoveryPersistenceError
+	if errors.As(cause, &failed) || errors.As(cause, &persistence) {
+		t.Fatalf("fixture returned typed instead of untyped error: %T", cause)
+	}
+	s := newEphemeralServer(t, Config{Port: 9081})
+	s.secrets = &fakeSecretsAPI{initErr: cause}
+	rec := serveHTTPInitProof(t, s, http.MethodPost, "/api/secrets/init")
+	saveHTTPInitProof(t, "actual-api-untyped", rec)
+	body := assertHTTPInitContained(t, rec, 500, cause.Error(), filepath.Dir(key))
+	if body["code"] != "SECRETS_INIT_FAILED" {
+		t.Errorf("untyped code=%v", body["code"])
 	}
 }
 

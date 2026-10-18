@@ -3,18 +3,71 @@ package api
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"mcp-local-hub/internal/clients"
 )
 
-const adoptClientConfigTargetKindCodexProject = "codex_project"
+const (
+	adoptClientConfigTargetKindCodexProject     = "codex_project"
+	adoptClientConfigTargetKindCodexSharedStdio = "codex_shared_stdio"
+)
 
 var errProjectAdoptConfigTargetInvalid = errors.New("PROJECT_ADOPT_CONFIG_TARGET_INVALID")
 
 type AdoptClientConfigTargetV1 struct {
-	Kind                  string `json:"kind"`
+	Kind                  string                         `json:"kind"`
+	ProjectRoot           string                         `json:"project_root"`
+	ProjectIdentitySHA256 string                         `json:"project_identity_sha256"`
+	SharedStdio           *AdoptCodexSharedStdioTargetV1 `json:"shared_stdio,omitempty"`
+}
+
+// AdoptCodexSharedStdioTargetV1 describes constructor-bound destinations. It is
+// evidence DATA; neither paths nor a validated descriptor authorize publication.
+type AdoptCodexSharedStdioTargetV1 struct {
+	GlobalLogicalPath  string                            `json:"global_logical_path"`
+	GlobalReferentPath string                            `json:"global_referent_path"`
+	Consumers          []AdoptCodexSharedStdioConsumerV1 `json:"consumers"`
+	RelayURL           string                            `json:"relay_url"`
+}
+
+type AdoptCodexSharedStdioConsumerV1 struct {
 	ProjectRoot           string `json:"project_root"`
 	ProjectIdentitySHA256 string `json:"project_identity_sha256"`
+}
+
+func cloneAdoptCodexSharedStdioTarget(target *AdoptCodexSharedStdioTargetV1) *AdoptCodexSharedStdioTargetV1 {
+	if target == nil {
+		return nil
+	}
+	cloned := *target
+	cloned.Consumers = append([]AdoptCodexSharedStdioConsumerV1(nil), target.Consumers...)
+	return &cloned
+}
+
+// Validation runs before either factory; it preserves the frozen consumer order
+// rather than silently sorting or deduplicating a different descriptor.
+func validateAdoptCodexSharedStdioTarget(target *AdoptCodexSharedStdioTargetV1) error {
+	if target == nil || target.GlobalLogicalPath == "" || target.GlobalReferentPath == "" || target.RelayURL == "" || len(target.Consumers) == 0 {
+		return invalidProjectAdoptTarget("shared stdio target requires global paths, relay URL and consumers")
+	}
+	for _, path := range []string{target.GlobalLogicalPath, target.GlobalReferentPath} {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return invalidProjectAdoptTarget("shared stdio global paths must be clean and absolute")
+		}
+	}
+	previous := ""
+	for _, consumer := range target.Consumers {
+		if _, ok := decodeLowerProjectAdoptSHA256(consumer.ProjectIdentitySHA256); !ok || consumer.ProjectIdentitySHA256 <= previous {
+			return invalidProjectAdoptTarget("shared stdio consumers require unique identities in canonical identity order")
+		}
+		actual, err := clients.CodexProjectIdentitySHA256ForRoot(consumer.ProjectRoot)
+		if err != nil || actual != consumer.ProjectIdentitySHA256 {
+			return invalidProjectAdoptTarget("shared stdio consumer root and identity differ: %v", err)
+		}
+		previous = consumer.ProjectIdentitySHA256
+	}
+	return nil
 }
 
 type adoptClientTargetRef struct {
@@ -28,6 +81,8 @@ type resolvedAdoptClientTarget struct {
 	client          clients.Client
 	targetEntryName string
 	projectSource   *projectAdoptSource
+	sharedStdio     *AdoptCodexSharedStdioTargetV1
+	projects        []clients.Client
 }
 
 type adoptGlobalClientCatalogFactory func() map[string]clients.Client
@@ -71,6 +126,40 @@ func (r adoptClientTargetResolver) Resolve(ref adoptClientTargetRef) (resolvedAd
 		return resolvedAdoptClientTarget{}, invalidProjectAdoptTarget("project target requires client codex-cli")
 	}
 
+	if hasConfigTarget && ref.configTarget.Kind == adoptClientConfigTargetKindCodexSharedStdio {
+		if ref.configTarget.ProjectRoot != "" || ref.configTarget.ProjectIdentitySHA256 != "" {
+			return resolvedAdoptClientTarget{}, invalidProjectAdoptTarget("shared stdio target cannot contain project variant fields")
+		}
+		target := cloneAdoptCodexSharedStdioTarget(ref.configTarget.SharedStdio)
+		if err := validateAdoptCodexSharedStdioTarget(target); err != nil {
+			return resolvedAdoptClientTarget{}, err
+		}
+		if r.globalCatalogFactory == nil || r.projectClientFactory == nil {
+			return resolvedAdoptClientTarget{}, fmt.Errorf("shared stdio client factories are unavailable")
+		}
+		global, ok := r.globalCatalogFactory()[ref.clientName]
+		if !ok || global == nil {
+			return resolvedAdoptClientTarget{}, fmt.Errorf("client %q is unavailable", ref.clientName)
+		}
+		if global.ConfigPath() != target.GlobalLogicalPath {
+			return resolvedAdoptClientTarget{}, invalidProjectAdoptTarget("shared stdio logical path differs from bound global client")
+		}
+		projects := make([]clients.Client, 0, len(target.Consumers))
+		for _, consumer := range target.Consumers {
+			project, err := r.projectClientFactory(consumer.ProjectRoot, ref.targetEntryName)
+			if err != nil {
+				return resolvedAdoptClientTarget{}, err
+			}
+			if project == nil {
+				return resolvedAdoptClientTarget{}, fmt.Errorf("project client factory returned no client")
+			}
+			projects = append(projects, project)
+		}
+		return resolvedAdoptClientTarget{client: global, targetEntryName: ref.targetEntryName, sharedStdio: target, projects: projects}, nil
+	}
+	if hasConfigTarget && ref.configTarget.SharedStdio != nil {
+		return resolvedAdoptClientTarget{}, invalidProjectAdoptTarget("shared stdio operand requires its explicit kind")
+	}
 	projectRoot := ""
 	projectIdentitySHA256 := ""
 	if hasConfigTarget {

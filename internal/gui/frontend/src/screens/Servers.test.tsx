@@ -124,6 +124,330 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+describe("ServersScreen — explicit client-entry removal", () => {
+  const client = "kimi-code-cli";
+  const token = "a".repeat(64);
+  function removalScan(names = ["memory"]): ScanResult {
+    const scan = scanWith({ [client]: "ok" });
+    scan.entries = names.map((name) => ({
+      name, manifest_exists: false, can_migrate: false,
+      client_presence: { [client]: { transport: "http", endpoint: "http://127.0.0.1:9999/mcp", removal: { version: 1, supported: true, source_token: token } } },
+    }));
+    return scan;
+  }
+  function settled(server: string) {
+    return { operation: "remove-client-entry", server, client, outcome: "removed", effective_absent: true,
+      code: "REMOVAL_SETTLED", receipt: { version: 1, before_token: token, after_token: "b".repeat(64), source_count: 1 } };
+  }
+  beforeEach(() => { cleanup(); vi.restoreAllMocks(); ls.reset(); });
+  afterEach(() => cleanup());
+
+  it("removes selected non-manifest entries through the new action without demigrate", async () => {
+    let scan = removalScan();
+    const calls: unknown[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        calls.push(JSON.parse(init!.body as string));
+        scan = { ...scan, entries: [] };
+        return jsonResponse(200, settled("memory"));
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await screen.findByText("Removed 1 selected entry. Refreshing…");
+    expect(calls).toEqual([{ apply: true, server: "memory", client, source_token: token }]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/demigrate")).toBe(false);
+    await screen.findByText("No client entries available to remove.");
+  });
+
+  it("preserves the failed cell and retries only that selected cell after partial success", async () => {
+    let scan = removalScan(["memory", "serena"]);
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const { server } = JSON.parse(init!.body as string);
+        posted.push(server);
+        if (server === "memory") {
+          scan = removalScan(["serena"]);
+          return jsonResponse(200, settled(server));
+        }
+        return jsonResponse(207, { ...settled(server), outcome: "rollback-conflict", effective_absent: false, code: "REMOVAL_ROLLBACK_CONFLICT", receipt: undefined });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (2)" }));
+    await screen.findByText(/serena\/kimi-code-cli: rollback-conflict/);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove from client (1)" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await waitFor(() => expect(posted).toEqual(["memory", "serena", "serena"]));
+  });
+
+  it("shows unsupported inherited/missing metadata sources without admitting a delete", async () => {
+    const scan = removalScan(["memory", "serena"]);
+    scan.entries![0].client_presence![client].removal = { version: 1, supported: false, source_token: "", reason: "REMOVAL_SHARED_SOURCE_SCOPE" };
+    delete scan.entries![1].client_presence![client].removal;
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    expect(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("checkbox", { name: `Remove serena from ${client}` }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("This source is shared with another client. Removing it would affect an unselected client.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove from client (0)" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("requires refreshed selection after source-token drift", async () => {
+    let scan = removalScan();
+    const posted: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => { posted.push(JSON.parse(init!.body as string)); return jsonResponse(200, settled("memory")); },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    scan = removalScan();
+    scan.entries![0].client_presence![client].removal!.source_token = "c".repeat(64);
+    act(() => StubEventSource.current?.emit("clients-rescan"));
+    await screen.findByText("Source changed. Refresh, clear this selection, and select the current entry again.");
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await screen.findByText(/memory\/kimi-code-cli: Source changed/);
+    expect(posted).toEqual([]);
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await waitFor(() => expect(posted).toEqual([{ apply: true, server: "memory", client, source_token: "c".repeat(64) }]));
+  });
+
+  it("gates same-client ON after a known removal refusal while unrelated ON succeeds and retries only pending intents", async () => {
+    const otherClient = "claude-code";
+    const refusedToken = "c".repeat(64);
+    let scan = removalScan(["memory", "serena", "enable-same", "enable-other"]);
+    scan.client_config_presence![otherClient] = "ok";
+    for (const entry of scan.entries!) {
+      entry.manifest_exists = true;
+      entry.can_migrate = true;
+      entry.daemon_ports = [9999];
+      if (entry.name === "serena") entry.client_presence![client].removal!.source_token = refusedToken;
+      if (entry.name === "enable-same" || entry.name === "enable-other") {
+        entry.client_presence = { [entry.name === "enable-same" ? client : otherClient]: {
+          transport: "http", endpoint: "https://direct.example/mcp",
+        } };
+      }
+    }
+    scan.entries![0].client_presence![otherClient] = { transport: "stdio", raw: { command: "preserved-memory", args: ["--preserve"] } };
+    const unselectedBefore = JSON.stringify(scan.entries![0].client_presence![otherClient]);
+    const removed: unknown[] = [];
+    const migrated: unknown[] = [];
+    let allowRetry = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const body = JSON.parse(init!.body as string);
+        removed.push(body);
+        if (body.server === "serena" && !allowRetry) {
+          return jsonResponse(207, { ...settled(body.server), outcome: "refused", effective_absent: false,
+            code: "REMOVAL_SOURCE_CONFLICT", receipt: undefined });
+        }
+        scan = { ...scan, entries: scan.entries!.map((entry) => {
+          if (entry.name !== body.server) return entry;
+          const presence = { ...entry.client_presence };
+          delete presence[client];
+          return { ...entry, client_presence: presence };
+        }) };
+        const result = settled(body.server);
+        return jsonResponse(200, { ...result, receipt: { ...result.receipt,
+          before_token: body.server === "serena" ? refusedToken : token } });
+      },
+      "/api/migrate": (init) => {
+        const body = JSON.parse(init!.body as string);
+        migrated.push(body);
+        scan = { ...scan, entries: scan.entries!.map((entry) => entry.name === body.servers[0]
+          ? { ...entry, client_presence: { ...entry.client_presence, [body.clients[0]]: {
+            transport: "http", endpoint: "http://127.0.0.1:9999/mcp",
+          } } } : entry) };
+        return jsonResponse(200, { migrated: [{ server: body.servers[0], client: body.clients[0] }], failed: [] });
+      },
+    }));
+    render(<ServersScreen />);
+    await screen.findByTestId(`matrix-col-toggle-${client}`);
+    for (const server of ["memory", "serena", "enable-same"]) {
+      const toggle = screen.getByText(server).closest("tr")!.querySelector<HTMLInputElement>(`input[type="checkbox"][title*="${client}"]`)!;
+      expect(toggle.disabled).toBe(false);
+      fireEvent.click(toggle);
+    }
+    const unrelatedToggle = screen.getByText("enable-other").closest("tr")!.querySelector<HTMLInputElement>(`input[type="checkbox"][title*="${otherClient}"]`)!;
+    fireEvent.click(unrelatedToggle);
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await screen.findByText("Failed: 2 row(s); re-toggle and retry below.");
+    expect(removed).toEqual([
+      { apply: true, server: "memory", client, source_token: token },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+    ]);
+    expect(migrated).toEqual([{ servers: ["enable-other"], clients: [otherClient] }]);
+    expect(screen.getByTestId("apply-failed-rows").textContent).toContain(`serena/${client}: refused`);
+    expect(screen.getByTestId("apply-failed-rows").textContent).toContain(`enable-same/${client}: Not attempted`);
+    allowRetry = true;
+    const retry = await screen.findByRole("button", { name: "Apply changes (incl. retry 2)" });
+    await waitFor(() => expect(retry.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(retry);
+    await waitFor(() => expect(migrated).toEqual([
+      { servers: ["enable-other"], clients: [otherClient] },
+      { servers: ["enable-same"], clients: [client] },
+    ]));
+    expect(removed).toEqual([
+      { apply: true, server: "memory", client, source_token: token },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+    ]);
+    expect(JSON.stringify(scan.entries![0].client_presence![otherClient])).toBe(unselectedBefore);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/demigrate")).toBe(false);
+  });
+
+  it("keeps Direct ON migration and explicitly named Undo dispatch separate from removal", async () => {
+    let scan = removalScan();
+    scan.entries![0].manifest_exists = true;
+    scan.entries![0].can_migrate = true;
+    scan.entries![0].daemon_ports = [9999];
+    scan.entries![0].client_presence![client].endpoint = "https://direct.example/mcp";
+    const migrated: unknown[] = [];
+    const undone: unknown[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/migrate": (init) => {
+        migrated.push(JSON.parse(init!.body as string));
+        scan = { ...scan, entries: scan.entries!.map((entry) => ({ ...entry,
+          client_presence: { ...entry.client_presence, [client]: { ...entry.client_presence![client], endpoint: "http://127.0.0.1:9999/mcp" } },
+        })) };
+        return jsonResponse(200, { migrated: [{ server: "memory", client }], failed: [] });
+      },
+      "/api/demigrate": (init) => {
+        undone.push(JSON.parse(init!.body as string));
+        return jsonResponse(207, { restored: [], failed: [{ server: "memory", client, err: "no pre-hub backup or managed marker" }] });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByTestId(`matrix-col-toggle-${client}`));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    const undo = await screen.findByRole("button", { name: `Restore direct connection for memory in ${client}` });
+    await waitFor(() => expect(undo.hasAttribute("disabled")).toBe(false));
+    expect(migrated).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(undone).toEqual([]);
+    fireEvent.click(undo);
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await screen.findByText(/memory\/kimi-code-cli: no pre-hub backup or managed marker/);
+    expect(undone).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(migrated).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/client-entry/remove")).toBe(false);
+  });
+
+  it("removes 21 selected Kimi entries through column OFF then Apply with exact member tokens", async () => {
+    const names = Array.from({ length: 21 }, (_, index) => `server-${String(index + 1).padStart(2, "0")}`);
+    const tokens = new Map(names.map((name, index) => [name, (index + 1).toString(16).padStart(64, "0")]));
+    const unselectedClient = "claude";
+    let scan = removalScan(names);
+    for (const entry of scan.entries!) {
+      entry.manifest_exists = true;
+      entry.can_migrate = true;
+      entry.daemon_ports = [9999];
+      entry.client_presence![client].removal!.source_token = tokens.get(entry.name)!;
+      entry.client_presence![unselectedClient] = { transport: "stdio", raw: { command: `direct-${entry.name}`, args: ["--preserve"] } };
+    }
+    const unselectedBefore = scan.entries!.map((entry) => JSON.stringify(entry.client_presence![unselectedClient]));
+    const posted: unknown[] = [];
+    const events: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => { events.push("scan"); return jsonResponse(200, scan); },
+      "/api/status": () => jsonResponse(200, []),
+      "/api/demigrate": (init) => {
+        const body = JSON.parse(init!.body as string);
+        return jsonResponse(207, { restored: [], failed: [{ server: body.servers[0], client, err: "no pre-hub backup or managed marker" }] });
+      },
+      "/api/client-entry/remove": (init) => {
+        const body = JSON.parse(init!.body as string);
+        expect(body).toEqual({ apply: true, server: body.server, client, source_token: tokens.get(body.server) });
+        posted.push(body);
+        events.push(body.server);
+        scan = { ...scan, entries: scan.entries!.map((entry) => {
+          if (entry.name !== body.server) return entry;
+          const presence = { ...entry.client_presence };
+          delete presence[client];
+          return { ...entry, client_presence: presence };
+        }) };
+        const result = settled(body.server);
+        return jsonResponse(200, { ...result, receipt: { ...result.receipt, before_token: tokens.get(body.server) } });
+      },
+    }));
+    // Hold only background polling intervals; waitFor keeps its real timeouts.
+    // This distinguishes a new per-member scan pipeline from a legitimate poll.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      render(<ServersScreen />);
+      fireEvent.click(await screen.findByTestId(`matrix-col-toggle-${client}`));
+      fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+        ["/api/client-entry/remove", "/api/demigrate", "/api/migrate"].includes(String(url)))).toBe(true));
+      expect(fetchMock.mock.calls.filter(([url]) => ["/api/demigrate", "/api/migrate"].includes(String(url)))).toEqual([]);
+      await waitFor(() => expect(posted).toEqual(names.map((server) => ({ apply: true, server, client, source_token: tokens.get(server) }))));
+      await waitFor(() => expect(events.filter((event) => event === "scan").length).toBeGreaterThan(1));
+      expect(events.slice(events.indexOf(names[0]), events.indexOf(names[names.length - 1]) + 1)).toEqual(names);
+      expect(scan.entries!.every((entry) => entry.client_presence![client] === undefined)).toBe(true);
+      expect(scan.entries!.map((entry) => JSON.stringify(entry.client_presence![unselectedClient]))).toEqual(unselectedBefore);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops sending additional removal requests after the screen unmounts", async () => {
+    const first = deferred<Response>();
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, removalScan(["memory", "serena"])), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => { posted.push(JSON.parse(init!.body as string).server); return first.promise; },
+    }));
+    const view = render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (2)" }));
+    await waitFor(() => expect(posted).toEqual(["memory"]));
+    view.unmount();
+    await act(async () => { first.resolve(jsonResponse(200, settled("memory"))); await first.promise; });
+    expect(posted).toEqual(["memory"]);
+  });
+
+  it("stops after an uncertain removal and retains unattempted cells without replaying success", async () => {
+    let scan = removalScan(["memory", "serena", "time"]);
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const { server } = JSON.parse(init!.body as string);
+        posted.push(server);
+        if (server === "memory") {
+          scan = removalScan(["serena", "time"]);
+          return jsonResponse(200, settled(server));
+        }
+        return jsonResponse(207, { ...settled(server), outcome: "applied-unverified", code: "REMOVAL_SETTLEMENT_UNVERIFIED", receipt: undefined });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (3)" }));
+    await screen.findByText(/time\/kimi-code-cli: Not attempted because another removal could not be settled/);
+    expect(posted).toEqual(["memory", "serena"]);
+    expect(screen.getByRole("button", { name: "Remove from client (2)" })).toBeTruthy();
+  });
+});
+
 describe("ServersScreen — Initialize button (v0.4.5)", () => {
   beforeEach(() => {
     cleanup();

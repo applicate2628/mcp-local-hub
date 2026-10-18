@@ -1,10 +1,8 @@
 "use strict";
 // Runtime projection of the shipped meta package's optional dependencies.
-// Shared by:
-//   * bin/cli.js           — the runtime platform-resolver shim, and
-//   * scripts/postinstall.js — the ~/.local/bin canonicalize hook,
-// so the lookup cannot advertise an unshipped release target. Node built-ins
-// and the adjacent shipped manifest only; no installed dependency is loaded.
+// bin/cli.js consumes this lookup so it cannot advertise an unshipped release
+// target. Node built-ins and the adjacent shipped manifest only; no installed
+// dependency is loaded. The no-op lifecycle script does not use this module.
 //
 // The generator's TARGETS registry checks the meta optionalDependencies set.
 

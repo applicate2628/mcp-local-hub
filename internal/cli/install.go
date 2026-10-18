@@ -27,9 +27,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var installAllWithOpts = func(opts api.InstallAllOpts) []api.InstallResult {
-	return api.NewAPI().InstallAllWithOpts(opts)
-}
+// A test-only complete-outcome override; production uses the operation's API.
+var installAllWithOpts func(opts api.InstallAllOpts) []api.InstallResult
 
 // renderCommandSettlement emits the canonical command-settlement-v1 payload.
 // It is colocated with the admitted install consumer so this transfer does not
@@ -74,6 +73,10 @@ func newInstallCmdReal() *cobra.Command {
 	var stopGUIOwnedFleetForUpgrade bool
 	var check bool
 	var noClientConfig bool
+	var projectClientRoot, projectClientEntry, projectClientPolicy, projectClientDigest string
+	var createProjectClient bool
+	var rollbackProjectClient string
+	var applyProjectClientRollback bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -111,7 +114,30 @@ Prerequisites:
     supervised proxy instead of legacy scheduled tasks.
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			var projectClient *api.InstallProjectClientCreate
+			var projectRollback *api.InstallProjectClientRollback
+			if cmd.Flags().Changed("rollback-project-client") || cmd.Flags().Changed("apply-project-client-rollback") {
+				projectRollback, err = parseInstallProjectClientRollbackControls(cmd, dryRun, all, allClients, reconcileHubMode, reconcileMCPFront, rollbackMCPFront, upgrade, check, noClientConfig, projectClientRoot, projectClientEntry, rollbackProjectClient, applyProjectClientRollback)
+			} else {
+				projectClient, err = parseInstallProjectClientControls(cmd, server, daemonFilter, clientsFlag, dryRun, all, allClients, reconcileHubMode, reconcileMCPFront, rollbackMCPFront, upgrade, check, noClientConfig, projectClientRoot, projectClientEntry, projectClientPolicy, createProjectClient, projectClientDigest)
+			}
+			if err != nil {
+				return err
+			}
+			a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+			defer func() {
+				if closeErr := a.CloseStdioBridgeAdmissions(context.Background()); closeErr != nil {
+					err = errors.Join(err, closeErr)
+				}
+			}()
+			if projectRollback != nil {
+				settled, rollbackErr := api.NewCommandCoordinator(a).Install(cmd.Context(), api.InstallOpts{ProjectClientRollback: projectRollback, DryRun: dryRun, Writer: cmd.OutOrStdout()})
+				if err := renderCommandSettlement(cmd.OutOrStdout(), settled); err != nil {
+					return err
+				}
+				return rollbackErr
+			}
 			if terminateGUIForUpgrade && !upgrade {
 				return fmt.Errorf("--terminate-gui-for-upgrade requires --upgrade")
 			}
@@ -265,15 +291,16 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				renderReadinessReport(cmd.OutOrStdout(), rep)
 				return nil
 			}
-			// If mcphub is not on PATH, try to bootstrap before we hit
-			// the API's preflight check. Three-tier fallback:
+			// Only ordinary installs bootstrap when mcphub is not on PATH, before
+			// API preflight. Project attachments leave native/runtime and existing
+			// backend admission to the API and never bootstrap. Ordinary fallback:
 			//   1. ~/.local/bin already on PATH — silently copy there
 			//      (no registry write, no prompt, non-interactive safe).
 			//   2. Interactive terminal — prompt "bootstrap? [Y/n]".
 			//   3. Non-interactive without canonical dir on PATH —
 			//      return the guidance error (preflight would produce
 			//      the same message).
-			if !dryRun {
+			if !dryRun && projectClient == nil {
 				if _, err := exec.LookPath(mcphubShortName); err != nil {
 					switch {
 					case targetDirOnPath():
@@ -295,12 +322,18 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if err != nil {
 					return err
 				}
-				results := installAllWithOpts(api.InstallAllOpts{
+				bulkOpts := api.InstallAllOpts{
 					ClientsInclude:    include,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
-				})
+				}
+				var results []api.InstallResult
+				if installAllWithOpts != nil {
+					results = installAllWithOpts(bulkOpts)
+				} else {
+					results = a.InstallAllWithOpts(bulkOpts)
+				}
 				failed := 0
 				for _, r := range results {
 					if r.Err != nil {
@@ -348,7 +381,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			if blocked := renderReadinessReport(cmd.OutOrStdout(), rep); blocked {
 				return fmt.Errorf("%s is not ready to install — fix the blocker(s) above (or run `mcphub install --server %s --check` to re-print them)", server, server)
 			}
-			settlement, installErr := api.NewCommandCoordinator(api.NewAPI()).Install(cmd.Context(), api.InstallOpts{
+			settlement, installErr := api.NewCommandCoordinator(a).Install(cmd.Context(), api.InstallOpts{
 				Server:                 server,
 				DaemonFilter:           daemonFilter,
 				ClientsInclude:         include,
@@ -357,6 +390,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				DryRun:                 dryRun,
 				Writer:                 cmd.OutOrStdout(),
 				GUIPort:                resolveInstallGUIPort(),
+				ProjectClientCreate:    projectClient,
 			})
 			if renderErr := renderCommandSettlement(cmd.OutOrStdout(), settlement); renderErr != nil {
 				return renderErr
@@ -367,6 +401,13 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
+	c.Flags().StringVar(&projectClientRoot, "project-client-root", "", "existing project root for a prospective Codex attachment")
+	c.Flags().StringVar(&projectClientEntry, "project-client-entry", "", "logical project MCP entry")
+	c.Flags().StringVar(&projectClientPolicy, "project-client-policy-source", "", "inherited-global or native-defaults")
+	c.Flags().BoolVar(&createProjectClient, "create-project-client", false, "positively apply the exact previewed project attachment")
+	c.Flags().StringVar(&projectClientDigest, "project-client-plan-sha256", "", "exact preview plan digest required for apply")
+	c.Flags().StringVar(&rollbackProjectClient, "rollback-project-client", "", "exact project attachment generation to receive or restore")
+	c.Flags().BoolVar(&applyProjectClientRollback, "apply-project-client-rollback", false, "positively apply the exact received project attachment inverse")
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
 	c.Flags().BoolVar(&noClientConfig, "no-client-config", false, "materialize the selected server daemon(s) without reading or writing MCP client configs")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
@@ -477,7 +518,7 @@ func renderReadinessReport(w io.Writer, rep *api.ReadinessReport) (blocked bool)
 // must invoke the reconciler explicitly; without this entry point
 // the Phase 5 Settings toggle would be a no-op.
 func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
-	a := api.NewAPI()
+	a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
 	// 1. Read current gate state. False = OFF (default) → restore
 	//    per-daemon entries + remove the aggregate. codex bot phase5
 	//    r7 P2 closure on PR #160: a corrupt settings.yaml must NOT
@@ -877,7 +918,7 @@ var (
 
 func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string, err error) {
 	errOut := cmd.ErrOrStderr()
-	a := api.NewAPI()
+	a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
 
 	curExe, target, err = resolveUpgradeSelfPaths()
 	if err != nil {

@@ -77,17 +77,28 @@ type restartV3ChildStartupConfig struct {
 type releaseOnceLease struct {
 	lease gui.SingleInstanceLease
 	once  sync.Once
+	err   error
 }
 
 func (l *releaseOnceLease) Release() {
+	_ = l.ReleaseErr()
+}
+
+func (l *releaseOnceLease) ReleaseErr() error {
 	if l == nil {
-		return
+		return nil
 	}
 	l.once.Do(func() {
 		if l.lease != nil {
-			l.lease.Release()
+			if observed, ok := l.lease.(gui.OwnedSingleInstanceLease); ok {
+				l.err = observed.ReleaseErr()
+			} else {
+				l.lease.Release()
+				l.err = errors.New("GUI_LEASE_RELEASE_UNOBSERVED")
+			}
 		}
 	})
+	return l.err
 }
 
 // OwnerLifecycle forwards the acquisition-bound lifecycle through the
@@ -141,11 +152,15 @@ func selfRestartProcessExitBoundary(requested *atomic.Bool, exit func()) func() 
 
 type guiSupervisorManagerStopper interface {
 	Stop(context.Context, int) error
+	Quiesce(context.Context) error
 }
 
 func stopSupervisorManagerUnlessSelfRestart(ctx context.Context, manager guiSupervisorManagerStopper, exitRequested *atomic.Bool) error {
-	if manager == nil || (exitRequested != nil && exitRequested.Load()) {
+	if manager == nil {
 		return nil
+	}
+	if exitRequested != nil && exitRequested.Load() {
+		return manager.Quiesce(ctx)
 	}
 	return manager.Stop(ctx, 5000)
 }
@@ -263,10 +278,12 @@ func runRestartV3ChildStartup(ctx context.Context, cfg restartV3ChildStartupConf
 	}
 
 	server := gui.NewServer(gui.Config{
-		Port:             cfg.Port,
-		Version:          cfg.Version,
-		PID:              cfg.PID,
-		RestartV3Enabled: true,
+		SerenaPreparation:               newSerenaPreparationAssembly(),
+		ProjectServiceLaunchPreparation: newProjectServiceLaunchPreparationReader(),
+		Port:                            cfg.Port,
+		Version:                         cfg.Version,
+		PID:                             cfg.PID,
+		RestartV3Enabled:                true,
 	})
 	defer server.Broadcaster().Close()
 	owner := server.GUIListenerOwner()
@@ -379,7 +396,7 @@ func bindRestartV3ChildStandby(
 // failure, etc.) returns immediately. On deadline expiry the last busy
 // error is returned so the caller's existing handshake/--force flow runs
 // exactly as before for a genuinely-occupied lock.
-func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, port int) (*gui.SingleInstanceLock, error) {
+func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, port int, resume ...*api.GUIOwnerControl) (*gui.SingleInstanceLock, error) {
 	restartV3Enabled := gui.RestartV3Enabled()
 	var options gui.SingleInstanceAcquireOptions
 	if restartV3Enabled {
@@ -399,10 +416,13 @@ func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, p
 			Deadlines:        deadlines,
 		}
 	}
+	if len(resume) > 1 {
+		return nil, errors.New("multiple GUI resume policy preimages")
+	}
+	if len(resume) == 1 {
+		options.GUIResumeControl = resume[0]
+	}
 	acquire := func() (*gui.SingleInstanceLock, error) {
-		if !restartV3Enabled {
-			return gui.AcquireSingleInstanceAt(pidportPath, port)
-		}
 		return gui.AcquireSingleInstanceAt(pidportPath, port, options)
 	}
 
@@ -456,6 +476,7 @@ func newGuiCmdReal() *cobra.Command {
 		strictMode bool
 		reveal     bool
 		foreground bool
+		resumeGUI  bool
 	)
 	c := &cobra.Command{
 		Use:   "gui",
@@ -466,8 +487,14 @@ Chrome/Edge app-mode window accompany it by default.
 
 The server binds 127.0.0.1 only — no remote access, no auth, no TLS.
 A Windows named mutex guards against a second instance: a second invocation
-activates the first window and exits 0.`,
+activates the first window and exits 0.
+
+Intentional Quit persists across automatic recovery and logon. Use
+mcphub gui --resume for an explicit start; it does not enable logon autorun.`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if resumeGUI && (force || kill || resetPort) {
+				return errors.New("--resume is a deliberate GUI start; run --force/--kill/--reset-port maintenance separately")
+			}
 			// --kill and --yes are stuck-instance-recovery modifiers
 			// for --force; both are silently inert without it. Reject
 			// the misuse with a usage error so cobra prints help and
@@ -690,7 +717,16 @@ activates the first window and exits 0.`,
 			// acquire. acquireSingleInstanceWithHandoff recognizes only the
 			// literal "1" compatibility signal so a v1 parent from before a
 			// rename-aside upgrade can still hand off to this v3 binary.
-			lock, err := acquireSingleInstanceWithHandoff(ctx, pidportPath, port)
+			var resumeControl *api.GUIOwnerControl
+			if resumeGUI {
+				if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+					resumeControl = &control
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			lock, err := acquireSingleInstanceWithHandoff(ctx, pidportPath, port, resumeControl)
 			if err != nil {
 				if !errors.Is(err, gui.ErrSingleInstanceBusy) {
 					return err
@@ -746,6 +782,7 @@ activates the first window and exits 0.`,
 	}
 	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 in [1024,65535] (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
+	c.Flags().BoolVar(&resumeGUI, "resume", false, "explicitly resume a quit GUI under its real owner lease; preserves logon autorun preference")
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon (also implies --foreground lifetime behavior; does not enable a console)")
 	c.Flags().BoolVar(&foreground, "foreground", false, "retain foreground lifetime behavior; does not enable a console. Use the exact startup prefix for console diagnostics. Implied by --no-tray.")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")
@@ -913,9 +950,11 @@ func composeGuiServerRestartV3(
 	var s *gui.Server
 	if startup == nil {
 		s = gui.NewServer(gui.Config{
-			Port:             port,
-			Version:          versionString(),
-			RestartV3Enabled: restartV3Enabled,
+			SerenaPreparation:               newSerenaPreparationAssembly(),
+			ProjectServiceLaunchPreparation: newProjectServiceLaunchPreparationReader(),
+			Port:                            port,
+			Version:                         versionString(),
+			RestartV3Enabled:                restartV3Enabled,
 		})
 	} else {
 		s = startup.server
@@ -1001,11 +1040,16 @@ func shouldRunTray(noTray bool) bool {
 	return !noTray
 }
 
-func startTrayIfEnabled(noTray bool, run func()) {
+func startTrayIfEnabled(noTray bool, run func() error) <-chan error {
 	if !shouldRunTray(noTray) {
-		return
+		return nil
 	}
-	go run()
+	done := make(chan error, 1)
+	go func() {
+		done <- run()
+		close(done)
+	}()
+	return done
 }
 
 func safeTrayLifecycleDetail(detail string) string {
@@ -1032,6 +1076,13 @@ func safeTrayLifecycleDetail(detail string) string {
 	return "operation failed"
 }
 
+// Required settlement diagnostics keep public detail allowlisted while the
+// actual producer/fallback causes return through the original tray completion.
+func writeTraySettlementDiagnostic(sink *consoleReleaseSink, detail string) error {
+	_, err := sink.WriteRequired([]byte(fmt.Sprintf("tray: settlement unconfirmed; original child remains owned: %s\n", safeTrayLifecycleDetail(detail))))
+	return err
+}
+
 func trayLifecycleGUIEvent(report tray.LifecycleReport) gui.Event {
 	body := make(map[string]any, 5)
 	switch report.Type {
@@ -1049,6 +1100,10 @@ func trayLifecycleGUIEvent(report tray.LifecycleReport) gui.Event {
 	case "tray-child-protocol-warning":
 		body["phase"] = report.Phase
 		body["attempt"] = report.Attempt
+	case "tray-child-settlement-unconfirmed":
+		body["phase"] = report.Phase
+		body["attempt"] = report.Attempt
+		body["error_detail"] = safeTrayLifecycleDetail(report.ErrorDetail)
 	}
 	return gui.Event{Type: report.Type, Body: body}
 }
@@ -1073,7 +1128,18 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			resultErr = errors.Join(resultErr, fmt.Errorf("settle GUI owner record before flock release: %w", err))
 			return
 		}
-		ownedLease.Release()
+		resultErr = errors.Join(resultErr, ownedLease.ReleaseErr())
+	}()
+	// Registered before manager cleanup: it runs AFTER the original manager's
+	// cleanup, but BEFORE terminal publication/flock release. This is the SAME
+	// tray.Run completion, not a second child Wait or a cancellation shortcut.
+	var trayDone <-chan error
+	defer func() {
+		if trayDone != nil {
+			if err := <-trayDone; err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("tray settlement: %w", err))
+			}
+		}
 	}()
 
 	// Route this command's output through the switchable diagnostic sinks
@@ -1142,6 +1208,36 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	if err != nil {
 		return err
 	}
+
+	// Allocate the existing lifetime coordinator before the normal or reused
+	// server can accept restart. Initial supervisor setup settles it below;
+	// startup-in-progress requests refuse without any native effects.
+	supervisorBin, binErr := resolveMCPHubBinary()
+	if binErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
+	}
+	manager := armSupervisorManager(ctx, nil, supervisorBin, strictMode)
+	manager.initialized = false
+	composeSupervisorRestart(s, manager, ownerLifecycle)
+	defer func() {
+		shutdownCtx, cancel := supervisorRestartCleanupContext()
+		defer cancel()
+		if err := stopSupervisorManagerUnlessSelfRestart(shutdownCtx, manager, &selfRestartExitRequested); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "supervisor shutdown: %v\n", err)
+			resultErr = errors.Join(resultErr, fmt.Errorf("supervisor shutdown: %w", err))
+		}
+	}()
+	// Registered after manager cleanup, so every early return starts shutdown
+	// before that same manager/tray/terminal/lease settlement chain.
+	defer stop()
+
+	quitOperation := &guiQuitOperation{
+		lifecycle: ownerLifecycle, stop: stop,
+		persist: guiAPI.RecordGUIStop, emit: gui.EmitExitReasonEventObserved,
+		stopDaemons: stopGUIRequestedDaemons,
+	}
+	s.SetGUIQuitHandler(quitOperation.request)
+	defer func() { resultErr = errors.Join(resultErr, quitOperation.outcomeError()) }()
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
 	// dependencies and hand them to the GUI server. The /serena/mcp
@@ -1359,59 +1455,26 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	if os.Getenv("MCPHUB_E2E_SUPERVISOR") == "none" {
 		fmt.Fprintln(cmd.ErrOrStderr(),
 			"warning: MCPHUB_E2E_SUPERVISOR=none is set — supervisor spawn suppressed (test seam; not for production use)")
+		if err := manager.initialize(nil, ""); err != nil {
+			return err
+		}
 		return <-errCh
 	}
-	supervisorBin, binErr := resolveMCPHubBinary()
-	if binErr != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
-	}
-	// The manager owns the swappable "current live supervisor owner"
-	// handle. For a GUI-SPAWNED supervisor it also runs a bounded
-	// respawn loop so an unexpected supervisor-child death under a live
-	// GUI self-heals (startExitMonitor only LOGS the death; the loop
-	// respawns it). An ADOPTED supervisor gets no manager and no loop —
-	// the GUI does not own its lifecycle, so Stop is a no-op there.
-	var manager *supervisorManager
+	var supervisor *supervisorOwner
 	if supervisorBin != "" {
-		supervisor, spawnErr := ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second)
+		var spawnErr error
+		supervisor, spawnErr = ensureSupervisorRunningObserved(ctx, supervisorBin, strictMode, 15*time.Second, manager.receiveCreationAttempt(nil))
 		if spawnErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: supervisor: %v\n", spawnErr)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: supervisor: %v; creation attempt: %v\n", spawnErr, manager.creationAttemptFields(nil))
 		} else if supervisor.Spawned() {
 			fmt.Fprintf(cmd.OutOrStdout(), "supervisor: spawned PID %d (GUI owns lifecycle)\n", supervisor.Pid())
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "supervisor: adopted (running externally)")
 		}
-		// The Spawned()-gated construct-and-arm decision is extracted into
-		// armSupervisorManager so the REAL wiring (manager constructed AND
-		// its respawn loop launched, seeded from the package-level
-		// spawnSupervisorFn) is unit-testable WITHOUT a real `mcphub
-		// supervise` binary — the seam-based newTestManager tests inject
-		// spawnFn directly and so never exercise this gate. A nil/adopted
-		// owner returns nil here (no manager, no loop), matching the
-		// adopt contract. §5 deploy-verification gap.
-		manager = armSupervisorManager(ctx, supervisor, supervisorBin, strictMode)
 	}
-	// This defer is registered after the lock.Release defer at the
-	// top of startGuiServer. Under Go's LIFO defer stack, this
-	// supervisor-shutdown defer therefore runs FIRST on function
-	// return — supervisor stops before the single-instance lock is
-	// released, so the next gui invocation cannot race a still-
-	// shutting-down supervisor.
-	//
-	// manager.Stop latches shuttingDown + snapshots the CURRENT owner
-	// under one mutex, so it always stops the RESPAWNED handle (not a
-	// stale captured one) and the respawn loop can never install a fresh
-	// supervisor after this returns.
-	defer func() {
-		if manager == nil {
-			return
-		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := stopSupervisorManagerUnlessSelfRestart(shutdownCtx, manager, &selfRestartExitRequested); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "supervisor shutdown: %v\n", err)
-		}
-	}()
+	if err := manager.initialize(supervisor, supervisorBin); err != nil {
+		return err
+	}
 
 	// Startup is complete: the listener is bound, the port has been
 	// reported, and the supervisor is up. A background GUI now releases only
@@ -1441,7 +1504,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not auto-launch browser: %v\n", err)
 		}
 	}
-	startTrayIfEnabled(noTray, func() {
+	trayDone = startTrayIfEnabled(noTray, func() error {
 		// tray.Run owns child recovery and reports bounded lifecycle
 		// diagnostics through the broadcaster callback below. A return is
 		// terminal for this one GUI-owned tray lifecycle invocation.
@@ -1494,9 +1557,14 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		stateRelaxCh := make(chan bool, 4)
 		go pollStateReadRelaxForTray(ctx, port, stateRelaxCh)
 
+		var trayReportErr error
 		if err := tray.Run(ctx, tray.Config{
 			LifecycleReport: func(report tray.LifecycleReport) {
 				s.Broadcaster().Publish(trayLifecycleGUIEvent(report))
+				if report.Type == "tray-child-settlement-unconfirmed" {
+					reportErr := writeTraySettlementDiagnostic(guiRuntimeStderr, report.ErrorDetail)
+					trayReportErr = errors.Join(trayReportErr, reportErr)
+				}
 			},
 			ActivateWindow: func() {
 				activateDashboardFromTray(
@@ -1515,28 +1583,16 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 				}
 			},
 			Quit: func() {
-				// GUI exit-reason attribution: emit BEFORE stop() so the
-				// event is durable even if shutdown proceeds quickly.
-				// Bounded (guiExitReasonEmitTimeout) — never delays Quit
-				// beyond that ceiling. If an OS signal races this click,
-				// gui.EmitExitReasonEvent's own process-wide
-				// first-trigger-wins dedup (P2-5 review fix) ensures only
-				// whichever call actually runs first is durably recorded
-				// — never both.
-				gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
-				stop()
+				_, err := quitOperation.requestGUIQuit(ctx, gui.GUIQuitRequest{ExpectedGeneration: ownerLifecycle.Generation()}, gui.GUIExitReasonTrayQuit)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray Quit: %v\n", err)
+				}
 			},
 			QuitAndStopAll: func() {
-				// GUI exit-reason attribution: see Quit above.
-				gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuitAndStopAll, nil)
-				// Stop all via HTTP (so the Dashboard sees the SSE
-				// lifecycle), then trigger the GUI shutdown. Errors
-				// don't block the shutdown — partial cleanup beats
-				// a hung GUI.
-				if err := postBulk("stop"); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
+				_, err := quitOperation.requestGUIQuit(ctx, gui.GUIQuitRequest{ExpectedGeneration: ownerLifecycle.Generation(), StopDaemons: true}, gui.GUIExitReasonTrayQuitAndStopAll)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray Quit and stop all: %v\n", err)
 				}
-				stop()
 			},
 			RunAllDaemons: func() {
 				if err := postBulk("restart"); err != nil {
@@ -1591,8 +1647,10 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 				}
 			},
 		}); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "tray: %v (GUI continues without tray)\n", err)
+			_, reportErr := guiRuntimeStderr.WriteRequired([]byte(fmt.Sprintf("tray: %s (GUI continues without tray)\n", safeTrayLifecycleDetail(err.Error()))))
+			return errors.Join(err, trayReportErr, reportErr)
 		}
+		return trayReportErr
 	})
 
 	// Auto-cleanup ticker: every 5 min, POST to the GUI's own

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -318,6 +319,22 @@ func (a *API) ManifestGet(name string) (string, error) {
 	return string(data), nil
 }
 
+func (a *API) ManifestGetObserved(ctx context.Context, name string) (*ManifestSourceObservation, error) {
+	if ctx == nil || ctx.Err() != nil {
+		observation := &ManifestSourceObservation{name: name}
+		cause := errors.New("GRAPHIFY_SELECTED_MANIFEST_CONTEXT_UNAVAILABLE")
+		if ctx != nil {
+			cause = errors.Join(cause, ctx.Err())
+		}
+		return observation, &manifestSourceObservationFailure{observation: observation, cause: cause}
+	}
+	observation := loadManifestSourceObserved(name, nil)
+	if err := observation.ValidateProjectServiceLaunchRead(ctx); err != nil {
+		return observation, err
+	}
+	return observation, nil
+}
+
 // ErrManifestNotEmbedded is returned by CatalogManifestGet when the
 // requested server name is NOT in the binary's embedded manifest set
 // (embeddedManifestNames). The D2 cold-re-enable Re-add flow maps it to
@@ -516,6 +533,10 @@ func manifestExistsIn(dir, name string) (bool, error) {
 // work-items/decisions/2026-07-03-embed-vs-disk-manifest-precedence.md.
 var ErrManifestNameEmbedded = errors.New("manifest name collides with a shipped (built-in) server")
 
+// ErrManifestNameExists identifies an existing disk manifest, independently of
+// the contextual path retained by ManifestCreateIn's wrapped error.
+var ErrManifestNameExists = errors.New("manifest name already exists")
+
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
 func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if err := checkManifestName(name); err != nil {
@@ -533,7 +554,7 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("manifest %q already exists at %s; use edit instead", name, target)
+		return fmt.Errorf("manifest %q already exists at %s; use edit instead: %w", name, target, ErrManifestNameExists)
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))

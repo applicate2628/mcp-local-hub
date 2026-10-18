@@ -60,6 +60,10 @@ func registrationDiagnosticPublicText(d api.RegistrationDiagnostic) string {
 		return "A legacy scheduler task could not be deleted during unregister."
 	case api.RegistrationCodeUnregisterClientRemoveFailed:
 		return "A client registration entry could not be removed during unregister."
+	case api.RegistrationCodeUnregisterClientPreserved:
+		return "A client entry was preserved because its ownership could not be proven."
+	case api.RegistrationCodeUnregisterClientReadFailed:
+		return "A client entry was preserved because its current configuration could not be read."
 	case api.RegistrationCodeLSPEnsureFailed:
 		return "unknown LSP language or LSP registration failed for the requested language."
 	case api.RegistrationCodeUnknown:

@@ -26,11 +26,26 @@ import (
 )
 
 type upgradeCommittedRecoveryDeps struct {
-	AdmitProduct func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
-	BuildInfo    func() (string, string, string)
-	Recover      func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error)
-	AcquireFence func(context.Context, string) (upgradeCommittedFence, error)
-	LstatJournal func(string) (os.FileInfo, error)
+	AdmitProduct    func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
+	BuildInfo       func() (string, string, string)
+	Recover         func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error)
+	AcquireFence    func(context.Context, string) (upgradeCommittedFence, error)
+	LstatJournal    func(string) (os.FileInfo, error)
+	ValidatePending func(windowsProductRecoveryRequest, windowsProductRecoveryJournalV3) error
+}
+
+type windowsRecoveryCommandPolicy uint8
+
+const (
+	windowsRecoveryCommandCommitted windowsRecoveryCommandPolicy = iota
+	windowsRecoveryCommandPending
+)
+
+func (p windowsRecoveryCommandPolicy) prefix() string {
+	if p == windowsRecoveryCommandPending {
+		return "UPGRADE_PENDING_RECOVERY"
+	}
+	return "UPGRADE_COMMITTED_RECOVERY"
 }
 
 type upgradeCommittedFence interface{ Release() error }
@@ -41,9 +56,22 @@ var ErrUpgradeCommittedRecoveryNotAdmitted = errors.New("UPGRADE_COMMITTED_RECOV
 // underlying error stays available to typed in-process diagnostics, but its
 // path-, SID-, or argv-bearing text must not cross the CLI stderr boundary.
 type upgradeCommittedCommandError struct {
-	id, stage string
-	cause     error
+	id, stage     string
+	cause         error
+	pendingResult upgradePendingRecoveryResult
+	runtime       *pendingRuntimeReceiving
 }
+
+type upgradePendingRecoveryResult string
+
+const (
+	upgradePendingOwnerError           upgradePendingRecoveryResult = "OWNER_ERROR"
+	upgradePendingResultMissing        upgradePendingRecoveryResult = "RESULT_MISSING"
+	upgradePendingOutcomeDifferent     upgradePendingRecoveryResult = "OUTCOME_DIFFERENT"
+	upgradePendingTransactionDifferent upgradePendingRecoveryResult = "TRANSACTION_DIFFERENT"
+)
+
+const currentPendingRuntimeStage = "current runtime receiving unconfirmed"
 
 func (e *upgradeCommittedCommandError) Error() string {
 	message := e.id + ": " + e.stage
@@ -53,16 +81,83 @@ func (e *upgradeCommittedCommandError) Error() string {
 			message += "; last_failed_predicate=" + health.predicate
 		}
 	}
+	if e.stage == "recover pending prior settlement" || e.stage == currentPendingRuntimeStage {
+		switch e.pendingResult {
+		case upgradePendingResultMissing, upgradePendingOutcomeDifferent, upgradePendingTransactionDifferent:
+			message += "; recovery_result=" + string(e.pendingResult)
+		default:
+			var prior *upgradeGUIPriorSettlementError
+			if errors.As(e.cause, &prior) && prior != nil && isUpgradeGUIPriorOperation(prior.operation) {
+				message += "; recovery_result=OWNER_ERROR; failed_operation=" + string(prior.operation)
+				if prior.operation == upgradeGUIPriorReservation {
+					if isUpgradeGUIPriorReservationStep(prior.reservationStep) {
+						message += "; reservation_step=" + string(prior.reservationStep)
+						if prior.reservationStep == upgradeGUIReservationSecondAbsence && prior.reservationRelease != nil {
+							message += "; reservation_cleanup=RELEASE_FAILED"
+						}
+					} else {
+						message += "; reservation_step=UNCLASSIFIED"
+					}
+				}
+				if prior.initialHealth != nil {
+					message += "; initial_failed_predicate=" + upgradeGUIForwardHealthPredicate(prior.initialHealth)
+				}
+				if prior.lastHealth != nil {
+					message += "; last_failed_predicate=" + upgradeGUIForwardHealthPredicate(prior.lastHealth)
+				}
+			} else {
+				message += "; recovery_result=OWNER_ERROR_UNCLASSIFIED"
+			}
+		}
+	}
+	if e.runtime != nil || e.stage == currentPendingRuntimeStage {
+		message += pendingRuntimeProjection(e.cause, e.runtime)
+	}
 	return message
 }
 func (e *upgradeCommittedCommandError) Unwrap() error     { return e.cause }
 func (e *upgradeCommittedCommandError) FailureID() string { return e.id }
 
-func committedRecoveryCommandError(id, stage string, cause error) error {
+// pendingRuntimeProjection is the shared closed-field owner. It never renders
+// private cause text or manufactures a snapshot when original receiving is nil.
+func pendingRuntimeProjection(cause error, receiving *pendingRuntimeReceiving) string {
+	message := receiving.projection()
+	if errors.Is(cause, pendingRuntimeCleanup) {
+		message += "; runtime_cleanup=FAILED"
+	}
+	var current *pendingRuntimeError
+	if errors.As(cause, &current) && current != nil {
+		switch current.kind {
+		case pendingRuntimeUnavailable, pendingRuntimeInvalid, pendingRuntimeChanged, pendingRuntimeMismatch, pendingRuntimeMaterial, pendingRuntimeReadiness, pendingRuntimeHistorical, pendingRuntimeCleanup:
+			message += "; runtime_failure=" + string(current.kind)
+		}
+	}
+	return message
+}
+
+// This is the ordinary Product recovery return boundary. Only retained typed
+// current-pending failures receive the existing safe recovery projection.
+func ordinaryWindowsProductRecoveryError(cause error) error {
+	var current *pendingRuntimeError
+	if errors.As(cause, &current) && current != nil {
+		projected := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", currentPendingRuntimeStage, cause)
+		projected.runtime = current.receiving
+		cause = projected
+	}
+	return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", cause)
+}
+
+func committedRecoveryCommandError(id, stage string, cause error) *upgradeCommittedCommandError {
 	return &upgradeCommittedCommandError{id: id, stage: stage, cause: cause}
 }
 
 func committedRecoveryOwnerFailureID(err error) string {
+	var prior *upgradeGUIPriorSettlementError
+	if errors.As(err, &prior) && prior != nil {
+		// Retained private child sentinels do not change this owner's pending
+		// class. Ordinary committed-forward errors keep the existing precedence.
+		return "E_WINDOWS_PRODUCT_RECOVERY_PENDING"
+	}
 	switch {
 	case errors.Is(err, ErrWindowsProductPairCommittedObservabilityFailed):
 		return "E_WINDOWS_PRODUCT_PAIR_COMMITTED_OBSERVABILITY_FAILED"
@@ -79,27 +174,38 @@ func committedRecoveryOwnerFailureID(err error) string {
 	}
 }
 
-func init() { committedRecoveryFn = runCommittedRecoveryWindows }
+func init() {
+	committedRecoveryFn = runCommittedRecoveryWindows
+	pendingRecoveryFn = runPendingRecoveryWindows
+}
 
 func runCommittedRecoveryWindows(cmd *cobra.Command) error {
+	return runWindowsProductRecoveryCommand(cmd, windowsRecoveryCommandCommitted)
+}
+func runPendingRecoveryWindows(cmd *cobra.Command) error {
+	return runWindowsProductRecoveryCommand(cmd, windowsRecoveryCommandPending)
+}
+
+func runWindowsProductRecoveryCommand(cmd *cobra.Command, policy windowsRecoveryCommandPolicy) error {
 	if runtime.GOARCH != "amd64" {
-		return errors.New("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: Windows amd64 Product is required")
+		return errors.New(policy.prefix() + "_NOT_ADMITTED: Windows amd64 Product is required")
 	}
 	executor, canonical, err := resolveUpgradeSelfPaths()
 	if err != nil {
-		return committedRecoveryCommandError("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED", "resolve Product paths", err)
+		return committedRecoveryCommandError(policy.prefix()+"_NOT_ADMITTED", "resolve Product paths", err)
 	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return committedRecoveryCommandError("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED", "resolve Product state", err)
+		return committedRecoveryCommandError(policy.prefix()+"_NOT_ADMITTED", "resolve Product state", err)
 	}
-	return runCommittedRecoveryWindowsWithDeps(cmd, stateDir, executor, canonical, upgradeCommittedRecoveryDeps{
+	return runWindowsProductRecoveryCommandWithDeps(cmd, stateDir, executor, canonical, policy, upgradeCommittedRecoveryDeps{
 		AdmitProduct: binaryadmission.AdmitWindowsRole,
 		BuildInfo:    buildinfo.Get,
 		Recover:      reconcileWiredWindowsProductRecovery,
 		AcquireFence: func(ctx context.Context, dir string) (upgradeCommittedFence, error) {
 			return api.AcquireUpgradeFence(ctx, dir)
 		},
+		ValidatePending: validateWiredWindowsProductPendingRecovery,
 	})
 }
 
@@ -167,14 +273,24 @@ func admitCommittedRecoveryExecutor(path string, admit func(binaryadmission.Wind
 }
 
 func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor, canonical string, deps upgradeCommittedRecoveryDeps) (retErr error) {
-	failureID, failureStage := "UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED", "initialize recovery"
+	return runWindowsProductRecoveryCommandWithDeps(cmd, stateDir, executor, canonical, windowsRecoveryCommandCommitted, deps)
+}
+
+func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, executor, canonical string, policy windowsRecoveryCommandPolicy, deps upgradeCommittedRecoveryDeps) (retErr error) {
+	prefix := policy.prefix()
+	failureID, failureStage := prefix+"_NOT_ADMITTED", "initialize recovery"
+	var pendingResult upgradePendingRecoveryResult
+	var runtimeReceiving *pendingRuntimeReceiving
 	defer func() {
 		if retErr != nil {
-			retErr = committedRecoveryCommandError(failureID, failureStage, retErr)
+			projected := committedRecoveryCommandError(failureID, failureStage, retErr)
+			projected.pendingResult = pendingResult
+			projected.runtime = runtimeReceiving
+			retErr = projected
 		}
 	}()
 	if cmd == nil || deps.AdmitProduct == nil || deps.BuildInfo == nil || deps.Recover == nil {
-		return errors.New("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: recovery dependencies incomplete")
+		return errors.New(prefix + "_NOT_ADMITTED: recovery dependencies incomplete")
 	}
 	if deps.AcquireFence == nil {
 		deps.AcquireFence = func(ctx context.Context, dir string) (upgradeCommittedFence, error) {
@@ -188,9 +304,18 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if policy == windowsRecoveryCommandPending {
+		if !cleanAbsolutePath(stateDir) || !cleanAbsolutePath(canonical) {
+			return errors.New("invalid recovery namespace")
+		}
+		info, err := os.Lstat(stateDir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: recovery namespace is not ordinary", ErrWindowsProductRecoveryIdentity)
+		}
+	}
 	acquireCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	failureID, failureStage = "UPGRADE_COMMITTED_RECOVERY_FENCE_UNAVAILABLE", "acquire upgrade fence"
+	failureID, failureStage = prefix+"_FENCE_UNAVAILABLE", "acquire upgrade fence"
 	fence, err := deps.AcquireFence(acquireCtx, stateDir)
 	if err != nil {
 		return fmt.Errorf("UPGRADE_COMMITTED_RECOVERY_FENCE_UNAVAILABLE: %w", err)
@@ -205,8 +330,12 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_FENCE_RELEASE_UNCONFIRMED: %w", releaseErr))
 		}
 		if retErr == nil && completion != "" {
-			failureID, failureStage = "UPGRADE_COMMITTED_RECOVERY_OUTPUT_FAILED", "write completion marker"
-			_, retErr = fmt.Fprintln(cmd.OutOrStdout(), completion)
+			failureID, failureStage = prefix+"_OUTPUT_FAILED", "write completion marker"
+			var n int
+			n, retErr = fmt.Fprintln(cmd.OutOrStdout(), completion)
+			if retErr == nil && n != len(completion)+1 {
+				retErr = io.ErrShortWrite
+			}
 		}
 	}()
 
@@ -219,14 +348,14 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 	v3Path := filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3)
 	raw, err := readCommittedRecoveryRegular(v3Path)
 	if errors.Is(err, os.ErrNotExist) {
-		failureID = "UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED"
+		failureID = prefix + "_NOT_ADMITTED"
 		return fmt.Errorf("%w: no V3 recovery journal: %w", ErrUpgradeCommittedRecoveryNotAdmitted, err)
 	}
 	if err != nil {
 		return fmt.Errorf("%w: V3 journal unreadable: %w", ErrWindowsProductRecoveryIdentity, err)
 	}
 	if _, err := os.Lstat(filepath.Join(stateDir, WindowsProductPairRecoveryFileLeaf)); err == nil {
-		failureID = "UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED"
+		failureID = prefix + "_NOT_ADMITTED"
 		return errors.New("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: legacy recovery journal coexists")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%w: legacy journal inspection: %w", ErrWindowsProductRecoveryIdentity, err)
@@ -235,10 +364,9 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 	if err != nil {
 		return fmt.Errorf("%w: invalid V3 journal: %w", ErrWindowsProductRecoveryIdentity, err)
 	}
-	if journal.Mode != WindowsProductPairModeUpgrade || journal.Phase != WindowsProductRecoveryCommitDecided ||
-		journal.PreSettlement == nil || journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent {
-		failureID = "UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED"
-		return errors.New("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: not a committed GUI-owned upgrade")
+	if !recoveryCommandAdmitsJournal(policy, journal) {
+		failureID = prefix + "_NOT_ADMITTED"
+		return errors.New("journal is outside the selected recovery policy")
 	}
 	failureStage = "verify committed Product targets and receipt"
 	legacy := scheduler.WindowsLegacyEntrypointPath(canonical)
@@ -247,29 +375,72 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(stateDir, UpgradeReceiptSchemaV2+".json")) {
 		return fmt.Errorf("%w: journal target paths differ", ErrWindowsProductRecoveryIdentity)
 	}
-	if _, err := readCommittedRecoveryRegular(journal.Receipts.V3.Path); err != nil {
-		return fmt.Errorf("%w: V3 receipt unreadable: %w", ErrWindowsProductRecoveryIdentity, err)
+	if policy == windowsRecoveryCommandPending && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+		runtimeReceiving = new(pendingRuntimeReceiving)
 	}
-	evidence, err := inspectWindowsProductReceiptEvidence(stateDir, canonical, canonical, WindowsProductPairModeUpgrade, deps.AdmitProduct)
-	if err != nil {
-		return fmt.Errorf("%w: receipt admission: %w", ErrWindowsProductRecoveryIdentity, err)
-	}
-	if !evidence.present || !evidence.match || evidence.receipt == nil ||
-		evidence.receipt.TransactionID != journal.TransactionID || evidence.receipt.Mode != journal.Mode ||
-		evidence.receipt.Artifact.SHA256 != journal.Product.NewSHA256 || evidence.receipt.TaskSetSHA256 != journal.TaskSetSHA256 ||
-		evidence.receipt.Artifact.Version != execIdentity.Version || evidence.receipt.Artifact.Machine != execIdentity.Machine ||
-		evidence.receipt.Artifact.Subsystem != execIdentity.Subsystem {
-		return fmt.Errorf("%w: canonical Product, receipt, journal or executor compatibility differs", ErrWindowsProductRecoveryIdentity)
-	}
-	failureID, failureStage = "UPGRADE_COMMITTED_RECOVERY_OWNER_FAILED", "complete committed forward recovery"
 	req := windowsProductRecoveryRuntimeRequest(ctx, stateDir, canonical, legacy)
+	if policy == windowsRecoveryCommandPending {
+		req.PendingRuntime = runtimeReceiving
+	}
+	if policy == windowsRecoveryCommandPending {
+		if deps.ValidatePending == nil {
+			return fmt.Errorf("%w: pending readonly admission unavailable", ErrWindowsProductRecoveryIdentity)
+		}
+		if err := deps.ValidatePending(req, journal); err != nil {
+			return err
+		}
+		reread, err := readCommittedRecoveryRegular(v3Path)
+		if err != nil || !bytes.Equal(reread, raw) {
+			return fmt.Errorf("%w: admitted journal changed", ErrWindowsProductRecoveryIdentity)
+		}
+		sum := sha256.Sum256(raw)
+		req.ExpectedJournalSHA256 = hex.EncodeToString(sum[:])
+		req.RequirePriorSettlementOnSettledRollback = true
+	} else {
+		if _, err := readCommittedRecoveryRegular(journal.Receipts.V3.Path); err != nil {
+			return fmt.Errorf("%w: V3 receipt unreadable: %w", ErrWindowsProductRecoveryIdentity, err)
+		}
+		evidence, err := inspectWindowsProductReceiptEvidence(stateDir, canonical, canonical, WindowsProductPairModeUpgrade, deps.AdmitProduct)
+		if err != nil {
+			return fmt.Errorf("%w: receipt admission: %w", ErrWindowsProductRecoveryIdentity, err)
+		}
+		if !evidence.present || !evidence.match || evidence.receipt == nil ||
+			evidence.receipt.TransactionID != journal.TransactionID || evidence.receipt.Mode != journal.Mode ||
+			evidence.receipt.Artifact.SHA256 != journal.Product.NewSHA256 || evidence.receipt.TaskSetSHA256 != journal.TaskSetSHA256 ||
+			evidence.receipt.Artifact.Version != execIdentity.Version || evidence.receipt.Artifact.Machine != execIdentity.Machine ||
+			evidence.receipt.Artifact.Subsystem != execIdentity.Subsystem {
+			return fmt.Errorf("%w: canonical Product, receipt, journal or executor compatibility differs", ErrWindowsProductRecoveryIdentity)
+		}
+	}
+	failureID, failureStage = prefix+"_OWNER_FAILED", "complete committed forward recovery"
+	if policy == windowsRecoveryCommandPending {
+		failureStage = "recover pending prior settlement"
+		pendingResult = upgradePendingOwnerError
+	}
 	settled, err := deps.Recover(req)
 	if err != nil {
 		failureID = committedRecoveryOwnerFailureID(err)
+		if failureID == "UPGRADE_COMMITTED_RECOVERY_OWNER_FAILED" {
+			failureID = prefix + "_OWNER_FAILED"
+		}
 		return err
 	}
-	if settled == nil || settled.Outcome != WindowsProductPairRecoverySettledCommit || settled.TransactionID != journal.TransactionID {
+	wantOutcome := WindowsProductPairRecoverySettledCommit
+	if policy == windowsRecoveryCommandPending {
+		wantOutcome = WindowsProductPairRecoverySettledRollback
+	}
+	if settled == nil || settled.Outcome != wantOutcome || settled.TransactionID != journal.TransactionID {
 		failureID = "E_WINDOWS_PRODUCT_RECOVERY_PENDING"
+		if policy == windowsRecoveryCommandPending {
+			switch {
+			case settled == nil:
+				pendingResult = upgradePendingResultMissing
+			case settled.Outcome != wantOutcome:
+				pendingResult = upgradePendingOutcomeDifferent
+			default:
+				pendingResult = upgradePendingTransactionDifferent
+			}
+		}
 		return fmt.Errorf("%w: recovery did not settle the admitted transaction", ErrWindowsProductRecoveryPending)
 	}
 	if _, err := deps.LstatJournal(v3Path); !errors.Is(err, os.ErrNotExist) {
@@ -279,6 +450,25 @@ func runCommittedRecoveryWindowsWithDeps(cmd *cobra.Command, stateDir, executor,
 		}
 		return fmt.Errorf("%w: V3 journal still present", ErrWindowsProductRecoveryPending)
 	}
-	completion = fmt.Sprintf("UPGRADE_COMMITTED_RECOVERY_SETTLED: transaction=%s executor_version=%s executor_commit=%s executor_sha256=%s executor_sidecar_sha256=%s", journal.TransactionID, execIdentity.Version, execIdentity.Commit, execIdentity.SHA256, sidecarSHA)
+	if policy == windowsRecoveryCommandPending && settled.Runtime != nil {
+		runtimeReceiving = settled.Runtime
+	}
+	completion = fmt.Sprintf(prefix+"_SETTLED: transaction=%s executor_version=%s executor_commit=%s executor_sha256=%s executor_sidecar_sha256=%s", journal.TransactionID, execIdentity.Version, execIdentity.Commit, execIdentity.SHA256, sidecarSHA)
+	if runtimeReceiving != nil {
+		completion += runtimeReceiving.projection()
+	}
 	return nil
+}
+
+func recoveryCommandAdmitsJournal(policy windowsRecoveryCommandPolicy, j windowsProductRecoveryJournalV3) bool {
+	if j.Mode != WindowsProductPairModeUpgrade || j.PreSettlement == nil {
+		return false
+	}
+	if policy == windowsRecoveryCommandCommitted {
+		return j.Phase == WindowsProductRecoveryCommitDecided && j.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent
+	}
+	if policy != windowsRecoveryCommandPending {
+		return false
+	}
+	return windowsProductPriorRecoveryPending(j)
 }

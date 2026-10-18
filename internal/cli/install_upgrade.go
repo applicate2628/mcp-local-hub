@@ -9,7 +9,7 @@
 //   - QuiesceTimers     → IPC client `quiesce-timers`
 //   - ExitGraceful      → IPC client `exit{graceful: true, ...}`
 //   - ForceKillSupervisor → identity-gated `taskkill /F /T /PID` on Windows
-//   - StartSupervisor   → spawnSupervisorDetached with no-window policy
+//   - StartSupervisor   → the creator-retained supervisor launch owner with no-window policy
 //
 // Unsupported platforms provide no adapter and fail closed in dispatch.
 package cli
@@ -69,7 +69,7 @@ type UpgradeDeps interface {
 	QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ForceKillSupervisor(pipePath string) error
-	StartSupervisor(binaryPath string) error
+	StartSupervisor(binaryPath string) (SupervisorLaunch, error)
 }
 
 const (
@@ -230,6 +230,7 @@ type UpgradeOpts struct {
 	// Nil leaves legacy single-binary upgrades unchanged and cannot authorize a
 	// product-pair replacement.
 	WindowsProductPairLifecycle *windowsProductPairLifecycleHooks
+	StateDir                    string
 	BinaryPath                  string
 	NewBinary                   string
 	PipePath                    string
@@ -646,7 +647,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 
 	// Step 6: Start the admitted successor through the wired platform adapter.
 	//
-	// Windows always uses spawnSupervisorDetached: detached CreateProcess with
+	// Windows always uses the creator-retained supervisor launch owner: detached CreateProcess with
 	// required breakaway and the shared no-window child policy. A denied
 	// breakaway fails typed without a flagless successor. The new
 	// supervisor's
@@ -655,7 +656,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// terminal the upgrade was typed into. Surviving the caller's
 	// EXIT and surviving the caller's CONSOLE are different
 	// properties; detached lifetime plus the no-window policy provide both. See
-	// spawnSupervisorDetached in install_migration_wiring_windows.go,
+	// the creator-retained supervisor launch owner in install_migration_wiring_windows.go,
 	// which is the Deps.StartSupervisor implementation this calls.
 	// Other platforms currently have no UpgradeDeps adapter; their dispatcher
 	// fails closed before entering this transaction.
@@ -663,19 +664,32 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// Failure triggers exact retained-prior rollback. The command returns the
 	// successor-start cause plus rollback proof or the precise rollback stage
 	// that could not be completed.
-	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
-		return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
-			fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w", err))
+	launch, startErr := opts.Deps.StartSupervisor(opts.BinaryPath)
+	if startErr != nil || launch == nil {
+		if settleErr := abortStartedSupervisor(launch); settleErr != nil {
+			return errors.Join(startErr, settleErr)
+		}
+		return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout, fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w", errors.Join(startErr, missingSupervisorLaunch(launch))))
+	}
+	rollbackOwned := func(trigger error) error {
+		if err := abortStartedSupervisor(launch); err != nil {
+			return errors.Join(trigger, fmt.Errorf("owned successor settlement unconfirmed: %w", err))
+		}
+		return rollbackInstallUpgradeSettled(ctx, opts, retainedPrior, priorSHA256, handoffTimeout, trigger)
+	}
+	binding, err := launch.BindControl(ctx, supervisorExpectation(opts.StateDir, opts.BinaryPath, admitted.SHA256))
+	if err != nil {
+		return rollbackOwned(fmt.Errorf("supervisor control receiving failed: %w", err))
 	}
 	if opts.WaitSupervisorReady != nil {
 		if err := opts.WaitSupervisorReady(ctx, handoffTimeout, opts.BinaryPath, admitted); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
+			return rollbackOwned(
 				fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w", handoffTimeout, err))
 		}
 	}
 	if opts.VerifyCanonical != nil {
 		if err := opts.VerifyCanonical(opts.BinaryPath, admitted); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
+			return rollbackOwned(
 				fmt.Errorf("promoted canonical binary readback failed: %w", err))
 		}
 	}
@@ -694,9 +708,12 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 			InstalledAt: now().UTC().Format(time.RFC3339Nano),
 		}
 		if err := opts.WriteReceipt(receipt); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
+			return rollbackOwned(
 				fmt.Errorf("persist %s failed: %w", UpgradeReceiptSchemaV1, err))
 		}
+	}
+	if err := launch.Handoff(ctx, binding); err != nil {
+		return errors.Join(fmt.Errorf("supervisor managed handoff failed: %w", err), abortStartedSupervisor(launch))
 	}
 	if err := sweepOldBinariesFn(filepath.Dir(opts.BinaryPath), func(path string, err error) {
 		fmt.Fprintf(os.Stderr, "warn: old binary sweep remove %s failed: %v\n", path, err)
@@ -1139,14 +1156,18 @@ func retainedGenerationPreSettlement(observation retainedGenerationObservationV1
 }
 
 func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {
-	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
-		return fmt.Errorf("%w; canonical prior binary was not promoted but prior supervisor recovery start failed: %v", trigger, err)
+	launch, err := opts.Deps.StartSupervisor(opts.BinaryPath)
+	if err != nil {
+		return errors.Join(trigger, fmt.Errorf("canonical prior binary was not promoted but prior supervisor recovery start failed: %w", err), abortStartedSupervisor(launch))
 	}
-	if opts.WaitSupervisorReady != nil {
-		priorCandidate := UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256}
-		if err := opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, priorCandidate); err != nil {
-			return fmt.Errorf("%w; canonical prior binary was not promoted and recovery start returned, but prior supervisor did not become ready: %v", trigger, err)
+	receiveErr := receiveStartedSupervisor(ctx, launch, supervisorExpectation(opts.StateDir, opts.BinaryPath, priorSHA256), func() error {
+		if opts.WaitSupervisorReady != nil {
+			return opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256})
 		}
+		return nil
+	})
+	if receiveErr != nil {
+		return fmt.Errorf("%w; canonical prior binary was not promoted and recovery start returned, but prior supervisor did not become ready: %w", trigger, receiveErr)
 	}
 	return fmt.Errorf("%w; canonical prior binary was not promoted and prior supervisor recovery completed", trigger)
 }
@@ -1228,6 +1249,13 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 			return fmt.Errorf("%w; automatic rollback successor %s, but expected ports remained bound: %v", trigger, stopOutcome, err)
 		}
 	}
+	return rollbackInstallUpgradeSettled(ctx, opts, retainedPrior, priorSHA256, timeout, trigger)
+}
+
+func rollbackInstallUpgradeSettled(ctx context.Context, opts UpgradeOpts, retainedPrior, priorSHA256 string, timeout time.Duration, trigger error) error {
+	if retainedPrior == "" {
+		return fmt.Errorf("%w; automatic rollback unavailable: retained prior missing", trigger)
+	}
 	if opts.VerifyPrior != nil {
 		if err := opts.VerifyPrior(retainedPrior, priorSHA256); err != nil {
 			return fmt.Errorf("%w; automatic rollback retained-prior SHA-256 verification failed: %v", trigger, err)
@@ -1241,14 +1269,18 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 			return fmt.Errorf("%w; automatic rollback restored prior bytes but canonical SHA-256 readback failed: %v", trigger, err)
 		}
 	}
-	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
-		return fmt.Errorf("%w; prior binary restored but prior supervisor restart failed: %v", trigger, err)
+	launch, err := opts.Deps.StartSupervisor(opts.BinaryPath)
+	if err != nil {
+		return errors.Join(trigger, fmt.Errorf("prior binary restored but prior supervisor restart failed: %w", err), abortStartedSupervisor(launch))
 	}
-	if opts.WaitSupervisorReady != nil {
-		priorCandidate := UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256}
-		if err := opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, priorCandidate); err != nil {
-			return fmt.Errorf("%w; prior binary restored and restarted but did not become ready: %v; run `mcphub supervise` from a shell to inspect startup diagnostics", trigger, err)
+	receiveErr := receiveStartedSupervisor(ctx, launch, supervisorExpectation(opts.StateDir, opts.BinaryPath, priorSHA256), func() error {
+		if opts.WaitSupervisorReady != nil {
+			return opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256})
 		}
+		return nil
+	})
+	if receiveErr != nil {
+		return fmt.Errorf("%w; prior binary restored and restarted but did not become ready: %w; run `mcphub supervise` from a shell to inspect startup diagnostics", trigger, receiveErr)
 	}
 	if samePath(retainedPrior, opts.BinaryPath) {
 		return fmt.Errorf("%w; automatic rollback restored the prior supervisor and verified it ready, but refusing retained-artifact cleanup because %s aliases the canonical binary", trigger, retainedPrior)

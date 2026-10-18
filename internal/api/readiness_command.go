@@ -51,6 +51,9 @@ type CommandMutationRowV1 struct {
 // InstallMutationReceiptV1 is made from the exact plan instance passed to the
 // low-level core before it is applied. A receiver must never create a plan.
 type InstallMutationReceiptV1 struct {
+	projectSettlement       *CommandSettlementV1
+	projectPolicyExecution  *clients.ProjectHTTPAttachmentPolicyExecution
+	BackendInstall          *ManagedBackendInstallReceiptV1 `json:"managed_backend_install,omitempty"`
 	DryRun                  bool
 	Committed               bool
 	ExpectedTasks           []string
@@ -253,6 +256,12 @@ func (c CommandCoordinator) Install(ctx context.Context, opts InstallOpts) (Comm
 	}
 	if receipt.DryRun {
 		return commandSettlementV1(CommandOperationInstall, "dry_run", receipt.MutationRows, ReadinessSnapshotV1{}), nil
+	}
+	if opts.ProjectClientCreate != nil || opts.ProjectClientRollback != nil {
+		if receipt.projectSettlement == nil {
+			return commandSettlementV1(CommandOperationInstall, "committed_unverified", receipt.MutationRows, ReadinessSnapshotV1{}), ErrProjectClientBackendReceiptUnavailable
+		}
+		return *receipt.projectSettlement, nil
 	}
 	if !receipt.Committed || len(receipt.ExpectedTasks) == 0 {
 		settlement := commandSettlementV1(CommandOperationInstall, "committed_unverified", receipt.MutationRows, ReadinessSnapshotV1{})

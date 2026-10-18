@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,12 +14,14 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/mcpcompat/readinesswire"
@@ -46,16 +49,9 @@ var mcphubShortName = func() string {
 	return "mcphub"
 }()
 
-// canonicalMcphubPath returns the absolute path at which `mcphub setup`
-// installs the binary: ~/.local/bin/mcphub.exe (Windows) or
-// ~/.local/bin/mcphub (Linux/macOS). Scheduler tasks use this path as their
-// <Command> because Windows Task Scheduler's CreateProcess call sets
-// lpApplicationName — which skips PATH search entirely — so a bare
-// "mcphub.exe" Command fails with ERROR_FILE_NOT_FOUND even when PATH
-// contains the canonical dir. The path is user-canonical (depends only on
-// $HOME / %USERPROFILE%), not dev-location-specific: moving or rebuilding
-// the binary and re-running `mcphub setup` keeps scheduler tasks valid
-// without any rewrite.
+// The explicit local-install target and the admitted runtime image are
+// separate policies. Generated launchers require a native absolute image,
+// never a bare PATH command which could name npm's script shim.
 // testCanonicalMcphubPathOverride is the test seam for canonicalMcphubPath.
 // Production leaves it empty; unit tests that need a deterministic (or
 // deliberately missing) binary path set it in their setup and restore
@@ -67,7 +63,9 @@ var testCanonicalMcphubPathOverride string
 // make the expected and written client entries disagree.
 var canonicalInstallRelayPathFn = canonicalMcphubPath
 
-func canonicalMcphubPath() (string, error) {
+// LocalInstallMcphubPath is the fixed optional local-install policy. It is not
+// runtime-image discovery and must not follow an npm payload or active owner.
+func LocalInstallMcphubPath() (string, error) {
 	if testCanonicalMcphubPathOverride != "" {
 		return testCanonicalMcphubPathOverride, nil
 	}
@@ -82,7 +80,7 @@ func canonicalMcphubPath() (string, error) {
 // every product process context. It derives only from the canonical installed
 // product path and performs no filesystem access or directory creation.
 func CanonicalManifestDir() (string, error) {
-	canonicalExecutable, err := canonicalMcphubPath()
+	canonicalExecutable, err := LocalInstallMcphubPath()
 	if err != nil {
 		return "", fmt.Errorf("resolve canonical manifest root: %w", err)
 	}
@@ -92,13 +90,150 @@ func CanonicalManifestDir() (string, error) {
 	return filepath.Join(filepath.Dir(canonicalExecutable), "servers"), nil
 }
 
+func canonicalMcphubPath() (string, error) {
+	return RuntimeMcphubExecutable()
+}
+
+// RuntimeProductImageError preserves the specific ownership/admission cause
+// while allowing install dry-run to distinguish it from prior-read advisories.
+type RuntimeProductImageError struct{ Cause error }
+
+func (e *RuntimeProductImageError) Error() string {
+	return "E_RUNTIME_PRODUCT_IMAGE: " + e.Cause.Error()
+}
+func (e *RuntimeProductImageError) Unwrap() error { return e.Cause }
+
+var selfMcphubImage struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// SelfMcphubExecutable is the native image already entered by this process.
+// It never searches PATH, which may name an npm command script rather than PE.
+func SelfMcphubExecutable() (string, error) {
+	selfMcphubImage.once.Do(func() {
+		path, err := os.Executable()
+		if err != nil {
+			selfMcphubImage.err = fmt.Errorf("resolve running native image: %w", err)
+			return
+		}
+		path, err = filepath.Abs(path)
+		if err == nil {
+			path, err = filepath.EvalSymlinks(path)
+		}
+		if err != nil {
+			selfMcphubImage.err = fmt.Errorf("resolve running native image path: %w", err)
+			return
+		}
+		selfMcphubImage.path = filepath.Clean(path)
+	})
+	return selfMcphubImage.path, selfMcphubImage.err
+}
+
+func admitRuntimeMcphubImage(path string) error {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return fmt.Errorf("runtime product image must be clean and absolute")
+	}
+	if runtime.GOOS == "windows" {
+		_, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleProduct})
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("runtime product image is not an executable regular file")
+	}
+	return nil
+}
+
+// RuntimeMcphubExecutable is the one generated-launch authority. An already
+// authenticated and admitted supervisor owner wins over an invoking helper.
+// The supervisor recognizes its own lock generation without calling its IPC.
+func RuntimeMcphubExecutable() (path string, err error) {
+	defer func() {
+		if err != nil {
+			err = &RuntimeProductImageError{Cause: err}
+		}
+	}()
+	if testCanonicalMcphubPathOverride != "" {
+		return testCanonicalMcphubPathOverride, nil
+	}
+	candidate, err := SelfMcphubExecutable()
+	if err != nil {
+		return "", err
+	}
+	stateDir, err := daemonStateDirReadOnly()
+	if err != nil {
+		return "", fmt.Errorf("runtime product state: %w", err)
+	}
+	if _, err := os.Stat(stateDir); err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect runtime product state: %w", err)
+		}
+		return selectRuntimeMcphubImage(candidate, nil, admitRuntimeMcphubImage)
+	}
+	running, _, err := SupervisorRunningUnderStateDir(stateDir)
+	if err != nil {
+		return "", fmt.Errorf("observe runtime product owner: %w", err)
+	}
+	if !running {
+		return selectRuntimeMcphubImage(candidate, nil, admitRuntimeMcphubImage)
+	}
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	owner, err := ReadSupervisorLockOwner(lockPath)
+	if err != nil {
+		return "", fmt.Errorf("read runtime product owner: %w", err)
+	}
+	var proof SupervisorRecoveryStatusV1
+	if owner.PID == os.Getpid() {
+		started, ok := process.ProcessStartTime(os.Getpid())
+		declared, parseErr := time.Parse(time.RFC3339Nano, owner.StartedAt)
+		if !ok || parseErr != nil || !started.Equal(declared) {
+			return "", fmt.Errorf("runtime product self-owner generation is unverified")
+		}
+		proof.Owner = owner
+		proof.Server.ImagePath = candidate
+	} else {
+		proof, err = DialSupervisorIPCRecoveryStatusV1(context.Background(), stateDir)
+		if err != nil {
+			return "", fmt.Errorf("authenticate runtime product owner: %w", err)
+		}
+	}
+	path, err = selectRuntimeMcphubImage(candidate, &proof, admitRuntimeMcphubImage)
+	if err != nil {
+		return "", err
+	}
+	after, err := ReadSupervisorLockOwner(lockPath)
+	if err != nil || after.PID != proof.Owner.PID || after.StartedAt != proof.Owner.StartedAt {
+		return "", fmt.Errorf("runtime product owner generation changed during admission: %w", errors.Join(err, ErrSupervisorIPCUnavailable))
+	}
+	return path, nil
+}
+
+func selectRuntimeMcphubImage(candidate string, owner *SupervisorRecoveryStatusV1, admit func(string) error) (string, error) {
+	if admit == nil {
+		return "", fmt.Errorf("runtime product admission owner is unavailable")
+	}
+	path := candidate
+	if owner != nil {
+		path = owner.Server.ImagePath
+	}
+	if err := admit(path); err != nil {
+		return "", fmt.Errorf("admit runtime product image: %w", err)
+	}
+	return path, nil
+}
+
 func ensureCanonicalMcphubPresent() (string, error) {
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return "", err
 	}
 	if _, err := os.Stat(canonicalPath); err != nil {
-		return "", fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
+		return "", fmt.Errorf("runtime product image %s not present: %w", canonicalPath, err)
 	}
 	return canonicalPath, nil
 }
@@ -131,11 +266,18 @@ func CanonicalAutostartEntrypoint() (string, error) {
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type Plan struct {
-	Server           string
-	CanMigrate       bool
-	SchedulerTasks   []ScheduledTaskPlan     // DEPRECATED: kept for v0.5.x backward compat; replaced by SupervisorIntent in v0.6+.
-	SupervisorIntent []SupervisorIntentEntry // v0.5.0 Phase 12 — authoritative for new supervisor-intent.json consumers.
-	ClientUpdates    []ClientUpdatePlan
+	ownedBackendInstall *managedBackendInstallOperation
+	projectAttachment *projectClientAttachmentPlan
+	selectedExecutionPhase  *selectedInstallExecutionPhase
+	serenaPreparedRecord     *PreparedSerenaRuntimeRecord
+	serenaPreparedBinding    *PreparedSerenaRuntimeBinding
+	serenaPreparationRequest *PreparedSerenaRequest
+	serenaPreparedInvocation *PreparedSerenaConsumerInvocation
+	Server                   string
+	CanMigrate               bool
+	SchedulerTasks           []ScheduledTaskPlan     // DEPRECATED: kept for v0.5.x backward compat; replaced by SupervisorIntent in v0.6+.
+	SupervisorIntent         []SupervisorIntentEntry // v0.5.0 Phase 12 — authoritative for new supervisor-intent.json consumers.
+	ClientUpdates            []ClientUpdatePlan
 	// installRelayExePath is resolved once before mutation. It is an
 	// execution-only value shared by binding expectations and client writers.
 	installRelayExePath string
@@ -223,10 +365,14 @@ type ClientUpdatePlan struct {
 
 // InstallOpts controls an install invocation.
 type InstallOpts struct {
-	Server            string
-	DaemonFilter      string   // empty = all daemons in the manifest
-	ClientsInclude    []string // empty = default install clients
-	IncludeAllClients bool
+	requireExistingStdioBridge bool
+	ProjectClientRollback *InstallProjectClientRollback
+	ProjectClientCreate *InstallProjectClientCreate
+	SerenaPreparationPolicy *SerenaPreparationPolicyV1
+	Server                  string
+	DaemonFilter            string   // empty = all daemons in the manifest
+	ClientsInclude          []string // empty = default install clients
+	IncludeAllClients       bool
 	// SkipClientConfigWrites materializes daemon/supervisor intent while
 	// producing no client-config updates. It conflicts with client selectors.
 	SkipClientConfigWrites bool
@@ -341,6 +487,21 @@ func (a *API) Install(opts InstallOpts) error {
 // wrapper and the command adapter. The optional receipt callback observes the
 // one plan instance that is subsequently applied; it must not re-plan.
 func (a *API) installWithFrozenPlan(ctx context.Context, opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
+	if opts.ProjectClientRollback != nil {
+		err := a.rollbackProjectClientAttachment(ctx, opts, opts.Writer)
+		if receipt != nil {
+			r := InstallMutationReceiptV1{DryRun: opts.DryRun, Committed: err == nil && !opts.DryRun}
+			if err == nil && !opts.DryRun {
+				s := commandSettlementV1(CommandOperationInstall, "rolled_back", nil, ReadinessSnapshotV1{})
+				r.projectSettlement = &s
+			}
+			receipt(r)
+		}
+		return err
+	}
+	if err := validateInstallProjectClientCreate(opts); err != nil {
+		return err
+	}
 	return withInstallManifestLease(opts, func(opts InstallOpts) error {
 		return a.installWithAdoptLeaseHeld(ctx, opts, receipt)
 	})
@@ -462,10 +623,33 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 // mutation receipt to the caller. A committed client-config row is evidence of
 // its lower transaction only; it never promotes the wider install outcome.
 func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1)) error {
+	if opts.ProjectClientCreate != nil {
+		return a.installProjectClientAttachment(ctx, m, plan, opts, w, receipt)
+	}
 	return a.installFrozenPlanCoreWithManagedDeps(ctx, m, plan, opts, authorityRequest, w, receipt, productionManagedRegistrationInstallDeps(a))
 }
 
 func (a *API) installFrozenPlanCoreWithManagedDeps(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1), deps managedRegistrationInstallCompositionDeps) (err error) {
+
+	selected, selectErr := selectGlobalInstallExecutionPhase(m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	if selectErr != nil {
+		return selectErr
+	}
+	plan.selectedExecutionPhase = selected
+	if err = a.prepareSerenaInstallPlan(ctx, m, plan, opts.DryRun); err != nil {
+		return err
+	}
+	if plan.serenaPreparationRequest != nil {
+		bounded, cancel := context.WithDeadline(ctx, plan.serenaPreparationRequest.WorkDeadline)
+		defer cancel()
+		ctx = bounded
+	}
+	if plan.serenaPreparedInvocation != nil {
+		defer func() {
+			proof, closeErr := plan.serenaPreparedInvocation.CloseObserved()
+			err = errors.Join(err, closeErr, proof.Validate(plan.serenaPreparedInvocation))
+		}()
+	}
 	// Freeze task and client identities from the exact plan before apply. The
 	// receiving port re-reads every client after commit; no post-write
 	// observation can become the expected identity.
@@ -483,7 +667,7 @@ func (a *API) installFrozenPlanCoreWithManagedDeps(ctx context.Context, m *confi
 	// supervisor descriptor has completed a contained initialize -> tools/list
 	// probe and its provisional process tree has been reaped. This runs before
 	// every audit, client, intent, or scheduler writer.
-	if err := admitFrozenStdioBridgeBeforeMutation(ctx, m, plan, opts); err != nil {
+	if err := a.admitFrozenStdioBridgeBeforeMutation(ctx, m, plan, opts); err != nil {
 		return err
 	}
 	var allClients map[string]clients.Client
@@ -692,6 +876,7 @@ func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
 		GUIPort:                opts.GUIPort,
 		CodexProjectRoot:       opts.CodexProjectRoot,
 		CodexWorkingDir:        opts.CodexWorkingDir,
+		ProjectClientCreate:    opts.ProjectClientCreate,
 	}
 }
 
@@ -2071,6 +2256,7 @@ func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []sch
 
 // BuildPlanOpts controls plan-time filtering.
 type BuildPlanOpts struct {
+	ProjectClientCreate *InstallProjectClientCreate
 	DaemonFilter      string
 	ClientsInclude    []string
 	IncludeAllClients bool
@@ -2272,6 +2458,17 @@ func supervisorTaskNameForManifestDaemon(manifestName, daemonName string) string
 func freezeCodexInstallTargetNames(p *Plan, opts BuildPlanOpts) (*Plan, error) {
 	if p == nil {
 		return nil, fmt.Errorf("install plan is nil")
+	}
+	if opts.ProjectClientCreate != nil {
+		// This prospective route never asks the global relocation resolver to
+		// pretend an inherited source physically exists in the project.
+		for i := range p.ClientUpdates {
+			if p.ClientUpdates[i].Client != "codex-cli" {
+				return nil, clients.ErrProjectClientInvalid
+			}
+			p.ClientUpdates[i].EntryName = opts.ProjectClientCreate.LogicalEntryName + "-mcphub"
+		}
+		return p, nil
 	}
 	hasCodexUpdate := false
 	for _, update := range p.ClientUpdates {
@@ -3196,6 +3393,138 @@ type installPlanOpts struct {
 	SymlinkConsents []ResolvedSymlinkConsent
 }
 
+// installExecutionActions is the executor's sole action-predicate owner.
+// Creation eligibility and acquisition are distinct: empty declarations do not
+// suppress a full-install prune or the existing start-mode acquisition.
+type installExecutionActions struct {
+	createEligible, create, prune, start, scheduler, clients bool
+}
+
+func selectedInstallActions(p *Plan, startTasks, skipPrune, skipTasks bool) installExecutionActions {
+	createEligible := !skipTasks
+	create := createEligible && len(p.SchedulerTasks) > 0
+	prune := p.FullInstall && !skipPrune
+	start := startTasks && createEligible
+	return installExecutionActions{createEligible: createEligible, create: create, prune: prune,
+		start: start, scheduler: create || prune || start, clients: len(p.ClientUpdates) > 0}
+}
+
+// selectedInstallExecutionPhase is private invocation-local input binding.
+// Manifest encoding is compared in memory only; it is never a persisted phase,
+// capability, issuer or write proof. The held caller supplies the real commit.
+type selectedInstallExecutionPhase struct {
+	manifest *config.ServerManifest
+	plan *Plan
+	manifestInput []byte
+	server string
+	fullInstall, hashesBound, supervisorCommit, workspace bool
+	tasks []ScheduledTaskPlan
+	intent []SupervisorIntentEntry
+	clients []ClientUpdatePlan
+	opts installPlanOpts
+	backend *managedBackendInstallOperation
+	attachment, backendAttachment *projectClientAttachmentPlan
+	backendPublic, attachmentPublic ProjectClientCreatePlanV1
+}
+
+func selectInstallExecutionPhase(m *config.ServerManifest, p *Plan, opts installPlanOpts, supervisorCommit, workspace bool) (*selectedInstallExecutionPhase, error) {
+	if m == nil || p == nil {
+		return nil, errors.New("SERENA_INSTALL_PLAN_MISSING")
+	}
+	manifestInput, err := json.Marshal(m)
+	if err != nil {
+		return nil, errors.Join(errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED"), err)
+	}
+	opts.SymlinkConsents = append([]ResolvedSymlinkConsent(nil), opts.SymlinkConsents...)
+	tasks := append([]ScheduledTaskPlan(nil), p.SchedulerTasks...)
+	for i := range tasks {
+		if tasks[i].Args != nil {
+			tasks[i].Args = append([]string{}, tasks[i].Args...)
+		}
+	}
+	intent := append([]SupervisorIntentEntry(nil), p.SupervisorIntent...)
+	for i := range intent {
+		if intent[i].Args != nil {
+			intent[i].Args = append([]string{}, intent[i].Args...)
+		}
+	}
+	updates := append([]ClientUpdatePlan(nil), p.ClientUpdates...)
+	for i := range updates {
+		if updates[i].Headers != nil {
+			updates[i].Headers = make(map[string]string, len(p.ClientUpdates[i].Headers))
+			for key, value := range p.ClientUpdates[i].Headers {
+				updates[i].Headers[key] = value
+			}
+		}
+	}
+	selected := &selectedInstallExecutionPhase{manifest: m, plan: p, manifestInput: manifestInput,
+		server: p.Server, fullInstall: p.FullInstall, hashesBound: p.supervisorIntentHashesBound,
+		supervisorCommit: supervisorCommit, workspace: workspace, tasks: tasks, intent: intent,
+		clients: updates, opts: opts, backend: p.ownedBackendInstall, attachment: p.projectAttachment}
+	if selected.backend != nil {
+		if selected.backend.attachment == nil {
+			return nil, errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED")
+		}
+		if err := selected.backend.public.validate(); err != nil {
+			return nil, errors.Join(errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED"), err)
+		}
+		selected.backendAttachment = selected.backend.attachment
+		selected.backendPublic = selected.backend.public
+	}
+	if selected.attachment != nil {
+		if err := selected.attachment.public.validate(); err != nil {
+			return nil, errors.Join(errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED"), err)
+		}
+		selected.attachmentPublic = selected.attachment.public
+	}
+	return selected, nil
+}
+
+func (s *selectedInstallExecutionPhase) executionOptions(intermediate intentWriteStep, auditTasks []string) installPlanOpts {
+	opts := s.opts
+	opts.Intermediate = intermediate
+	opts.AuditTaskNames = auditTasks
+	return opts
+}
+
+func (s *selectedInstallExecutionPhase) admitPrepared(m *config.ServerManifest, p *Plan, opts installPlanOpts, executing bool) error {
+	refused := errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED")
+	if s == nil || m == nil || p == nil || s.manifest != m || s.plan != p {
+		return refused
+	}
+	manifestInput, err := json.Marshal(m)
+	if err != nil {
+		return errors.Join(refused, err)
+	}
+	if s.backend != p.ownedBackendInstall || s.attachment != p.projectAttachment {
+		return refused
+	}
+	if s.backend != nil && (s.backendAttachment != s.backend.attachment ||
+		s.backendPublic != s.backend.public) {
+		return refused
+	}
+	if s.attachment != nil && s.attachmentPublic != s.attachment.public {
+		return refused
+	}
+	if !bytes.Equal(s.manifestInput, manifestInput) || s.server != p.Server ||
+		s.fullInstall != p.FullInstall || s.hashesBound != p.supervisorIntentHashesBound ||
+		!reflect.DeepEqual(s.tasks, append([]ScheduledTaskPlan(nil), p.SchedulerTasks...)) ||
+		!reflect.DeepEqual(s.intent, append([]SupervisorIntentEntry(nil), p.SupervisorIntent...)) ||
+		!reflect.DeepEqual(s.clients, append([]ClientUpdatePlan(nil), p.ClientUpdates...)) ||
+		s.opts.DaemonFilter != opts.DaemonFilter || s.opts.DryRun != opts.DryRun ||
+		s.opts.StartTasks != opts.StartTasks || s.opts.SkipSchedulerPrune != opts.SkipSchedulerPrune ||
+		s.opts.SkipSchedulerTasks != opts.SkipSchedulerTasks || !s.supervisorCommit ||
+		!reflect.DeepEqual(s.opts.SymlinkConsents, append([]ResolvedSymlinkConsent(nil), opts.SymlinkConsents...)) ||
+		(s.workspace && m.DaemonTemplate == nil) || (executing && opts.Intermediate == nil) {
+		return refused
+	}
+	actions := selectedInstallActions(p, opts.StartTasks, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks)
+	if actions.scheduler || actions.create || actions.prune || actions.start || actions.clients {
+		return refused
+	}
+	return nil
+}
+
 // installPlan is the shared materialization core between api.Install (and
 // its embed/dir siblings) and InstallParsedManifest: emit the audit-first
 // entries per planned task, then execute the plan with the requested
@@ -3210,6 +3539,11 @@ type installPlanOpts struct {
 // scheduler steps are synchronous and do not yet observe it.
 func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *Plan, opts installPlanOpts) error {
 	_ = ctx
+	if plan.serenaPreparedInvocation != nil {
+		if err := plan.selectedExecutionPhase.admitPrepared(m, plan, opts, true); err != nil {
+			return err
+		}
+	}
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -3340,7 +3674,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// intermediate that writes those rows. Folding skipTasks into the Pass A /
 	// Pass B / needsScheduler conditions keeps the client-config block + the
 	// intermediate supervisor-intent write inside the SAME rollback scope.
-	createTasks := !skipTasks
+	actions := selectedInstallActions(p, startTasks, skipPrune, skipTasks)
 	for _, notice := range p.Notices {
 		fmt.Fprintf(w, "  notice: %s\n", notice)
 	}
@@ -3356,9 +3690,8 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// use below is inside the SchedulerTasks loop, the prune block (FullInstall
 	// && !skipPrune), or Pass B (startTasks) — exactly the conditions in
 	// needsScheduler.
-	needsScheduler := (createTasks && len(p.SchedulerTasks) > 0) || (p.FullInstall && !skipPrune) || (startTasks && createTasks)
 	var sch scheduler.Scheduler
-	if needsScheduler {
+	if actions.scheduler {
 		s, serr := newScheduler()
 		if serr != nil {
 			return fmt.Errorf("scheduler: %w", serr)
@@ -3446,7 +3779,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// empty, so Pass B's start loop is a no-op too.
 	var createdTasks []createdTask
 	for _, t := range p.SchedulerTasks {
-		if !createTasks {
+		if !actions.createEligible {
 			break
 		}
 		spec := scheduler.TaskSpec{
@@ -3502,7 +3835,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// empty planned set would prune every registered mcp-local-hub-<server>-*
 	// task. Those daemons are tracked in supervisor-intent.json, not scheduler
 	// tasks — there is nothing for this reconcile to own.
-	if p.FullInstall && !skipPrune {
+	if actions.prune {
 		planned := make(map[string]struct{}, len(p.SchedulerTasks))
 		for _, t := range p.SchedulerTasks {
 			planned[t.Name] = struct{}{}
@@ -3529,6 +3862,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 
 clientUpdates:
 	for _, u := range p.ClientUpdates {
+		if !actions.clients {
+			break
+		}
 		client := allClients[u.Client]
 		if client == nil {
 			return failAfterRollback(fmt.Errorf("unknown client %q in binding", u.Client))
@@ -3601,17 +3937,14 @@ clientUpdates:
 			if len(result.SourceSnapshot) == 0 {
 				return failAfterRollback(fmt.Errorf("CODEX_CLIENT_CONFIG_READBACK_FAILED: relocation of %s to %s produced no source snapshot", m.Name, u.EntryName))
 			}
-			sourceSnapshot := result.SourceSnapshot
+			inverse := result.ExactInverse()
+			if inverse == nil {
+				return failAfterRollback(fmt.Errorf("CODEX_CLIENT_CONFIG_READBACK_FAILED: relocation produced no exact inverse"))
+			}
+			inverse.WriteConfig = configWriter
 			targetName := u.EntryName
-			targetEntry := entry
 			rollback = append(rollback, func() {
-				_, restoreErr := codex.RestoreRelocatedHTTPEntry(clients.CodexHTTPInverseRelocation{
-					SourceEntryName: m.Name,
-					TargetEntryName: targetName,
-					Target:          targetEntry,
-					SourceSnapshot:  sourceSnapshot,
-					WriteConfig:     configWriter,
-				})
+				_, restoreErr := codex.RestoreRelocatedHTTPEntry(*inverse)
 				if restoreErr != nil {
 					rollbackClientRestoreFailures = append(rollbackClientRestoreFailures, u.Client)
 					fmt.Fprintf(w, "  rollback: restore Codex logical %s from target %s failed: %v\n", m.Name, targetName, restoreErr)
@@ -3740,7 +4073,7 @@ clientUpdates:
 	// spawn to the supervisor. A Run failure here is warning-only and must
 	// NOT trigger rollback - the install (tasks + client configs) stands;
 	// regressing this to a rollback-on-Run-failure would be a P0.
-	if startTasks {
+	if actions.start {
 		for _, ct := range createdTasks {
 			// Skip weekly refresh: triggered on schedule, not on install.
 			if ct.trigger != "At logon" {

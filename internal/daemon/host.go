@@ -46,7 +46,7 @@ type HostConfig struct {
 	// upstream chatter into the parent's inherited stdio (issue #162).
 	LogPath string
 	// LaunchCapability is set only for the supervisor-tracked CST frontend.
-	// A nil value preserves every existing stdio launch. When enrollment is
+	// A nil value selects the ordinary stdio launch. When CST enrollment is
 	// unavailable the child still starts without the locator so the existing six
 	// CST tools remain available while the optional sampler stays default-off.
 	LaunchCapability *LaunchCapabilityConfig
@@ -63,26 +63,11 @@ type HostConfig struct {
 // credential path with an empty token, and a same-named ambient parent value
 // is never inherited (Codex #377). Shared by StdioHost + HTTPHost.
 func composeChildEnv(env map[string]string, unset []string) []string {
-	var unsetSet map[string]bool
-	if len(unset) > 0 {
-		unsetSet = make(map[string]bool, len(unset))
-		for _, k := range unset {
-			unsetSet[envKeyNorm(k)] = true
-		}
-	}
-	out := make([]string, 0, len(os.Environ())+len(env))
-	for _, kv := range os.Environ() {
-		if unsetSet != nil {
-			if k, _, ok := strings.Cut(kv, "="); ok && unsetSet[envKeyNorm(k)] {
-				continue
-			}
-		}
-		out = append(out, kv)
-	}
-	for k, v := range env {
-		out = append(out, k+"="+v)
-	}
-	return out
+	return composeChildEnvFrom(os.Environ(), env, unset)
+}
+
+func ComposeChildEnvironment(env map[string]string, unset []string) []string {
+	return composeChildEnv(env, unset)
 }
 
 // envKeyNorm normalizes an env-var key for comparison. Windows env keys are
@@ -160,7 +145,12 @@ type StdioHost struct {
 	// daemon process is force-killed without a chance to run cleanup.
 	// Set after cmd.Start(); released in Stop after killProcessTree.
 	// See internal/process/jobobject_windows.go.
-	job *process.Job
+	job                *process.Job
+	original           *stdioOriginalLifecycle
+	originalLaunch     *stdioOriginalLaunchOps
+	prepared           *StdioLaunchPreparation
+	preparedGeneration *stdioLaunchGeneration
+	launchContext      *StdioLaunchContext
 }
 
 const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
@@ -285,25 +275,57 @@ func closePipeChildEnd(stream any) {
 // Start spawns the subprocess and begins the stdout reader goroutine.
 // Returns an error if the subprocess fails to start.
 func (h *StdioHost) Start(ctx context.Context) error {
+	return h.start(ctx, false)
+}
+
+// StartPrepared consumes the original context and exact command. Original
+// source/manifest/overlay/reference rechecks remain the upper CLI owner.
+func (h *StdioHost) StartPrepared() error {
+	return h.start(nil, true)
+}
+
+func (h *StdioHost) start(ctx context.Context, prepared bool) (retErr error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	originalAcquired := false
+	defer func() {
+		original := h.original
+		h.mu.Unlock()
+		if retErr != nil && originalAcquired && original != nil {
+			_, cleanupErr := h.StopObserved(context.Background())
+			retErr = errors.Join(retErr, cleanupErr)
+		}
+	}()
 	if h.started {
 		return errors.New("already started")
 	}
 
-	cmd := exec.CommandContext(ctx, h.cfg.Command, h.cfg.Args...)
-	process.NoConsole(cmd) // Windows: suppress console pop (windowsgui parent)
-	// Linux: PR_SET_PDEATHSIG=SIGKILL — best-effort direct-child
-	// orphan mitigation if mcphub is force-killed. Strictly weaker
-	// than Windows Job Object: does NOT cascade through wrappers
-	// like uvx/npx that fork-and-stay. See pdeathsig_linux.go.
-	process.SetParentDeathSignal(cmd)
-	cmd.Dir = h.cfg.WorkingDir
-	// The handle locator is a reserved control-plane key. Strip any ambient or
-	// manifest value now; only the launch owner below may append its exact decimal
-	// value after successful enrollment.
+	var cmd *exec.Cmd
+	if prepared {
+		if h.stopped || h.prepared == nil {
+			return &StdioLaunchPreparationError{cause: ErrStdioLaunchPartial, partial: h.prepared}
+		}
+		if err := h.prepared.validateFor(h); err != nil {
+			return err
+		}
+		if !h.prepared.consumed.CompareAndSwap(false, true) {
+			return &StdioLaunchPreparationError{cause: ErrStdioLaunchConsumed, partial: h.prepared}
+		}
+		ctx, cmd = h.prepared.context.ctx, h.prepared.command
+	} else {
+		if h.prepared != nil {
+			return &StdioLaunchPreparationError{cause: ErrStdioLaunchPartial, partial: h.prepared}
+		}
+		parent := os.Environ()
+		if h.launchContext != nil {
+			parent = h.launchContext.environment
+		}
+		cmd = prepareStdioCommand(ctx, h.cfg, parent)
+	}
 	launchUnset := append(append([]string{}, h.cfg.UnsetEnv...), LaunchCapabilityHandleEnv)
-	cmd.Env = composeChildEnv(h.cfg.Env, launchUnset)
+	if selected, err := h.startOriginal(ctx, cmd); selected {
+		originalAcquired = true
+		return err
+	}
 
 	// Partial-init pipe cleanup: each successful *Pipe() call opens a pipe
 	// PAIR (2 fds). One end is returned to us (the parent end: stdin/stdout);
@@ -648,6 +670,11 @@ func (h *StdioHost) ExitState() *os.ProcessState {
 // while the old child + watcher could still be alive.
 func (h *StdioHost) Stop() error {
 	h.mu.Lock()
+	if h.original != nil {
+		h.mu.Unlock()
+		_, err := h.StopObserved(context.Background())
+		return err
+	}
 	defer h.mu.Unlock()
 	if !h.started || h.stopped {
 		return nil

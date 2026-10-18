@@ -55,7 +55,7 @@ func TestProviderManagedInstallStateAdvancesBeforeInstall(t *testing.T) {
 		installErr := errors.New("injected install failure")
 		err := NewAPI().ExecuteAdoptWithOpts(plan, nil, ExecuteAdoptOpts{
 			providerDeps: providerTransactionDeps{source: provider, observer: observer},
-			installFn: func(_ *API, _ InstallOpts) error {
+			installFn: func(_ context.Context, _ *API, _ InstallOpts) error {
 				installCalls++
 				persisted, found, readErr := ReadAdoptProvenance(entry)
 				if readErr != nil || !found || persisted.ProviderSource == nil {
@@ -91,7 +91,7 @@ func TestProviderManagedInstallStateAdvancesBeforeInstall(t *testing.T) {
 		installCalls := 0
 		err := NewAPI().ExecuteAdoptWithOpts(plan, nil, ExecuteAdoptOpts{
 			providerDeps: providerTransactionDeps{source: provider, observer: observer},
-			installFn: func(_ *API, _ InstallOpts) error {
+			installFn: func(_ context.Context, _ *API, _ InstallOpts) error {
 				installCalls++
 				return errors.New("install invoked despite durable state conflict")
 			},

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -11,13 +12,14 @@ import (
 )
 
 type deAdoptCLIAPI interface {
-	BuildDeAdoptPlan(string) (*api.DeAdoptPlan, error)
+	BuildDeAdoptPlanWithContext(context.Context, string) (*api.DeAdoptPlan, error)
 	ExecuteDeAdoptWithOpts(string, io.Writer, api.ExecuteDeAdoptOpts) (*api.DeAdoptReport, error)
 }
 
 var newDeAdoptCLIAPI = func() deAdoptCLIAPI { return api.NewAPI() }
 
 func newDeAdoptCmdReal() *cobra.Command {
+	var actionTimeout string
 	var yes bool
 	var acceptConflictClients []string
 	cmd := &cobra.Command{
@@ -26,8 +28,17 @@ func newDeAdoptCmdReal() *cobra.Command {
 		Short:   "Restore client entries and remove an adopt-owned manifest",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			actionCtx := cmd.Context()
+			if cmd.Flags().Changed("action-timeout") {
+				resolved, cancel, err := api.ResolveCodexSharedStdioActionContext(actionCtx, &actionTimeout)
+				if err != nil {
+					return err
+				}
+				defer cancel()
+				actionCtx = resolved
+			}
 			a := newDeAdoptCLIAPI()
-			plan, err := a.BuildDeAdoptPlan(args[0])
+			plan, err := a.BuildDeAdoptPlanWithContext(actionCtx, args[0])
 			if err != nil {
 				return err
 			}
@@ -63,7 +74,7 @@ func newDeAdoptCmdReal() *cobra.Command {
 				return nil
 			}
 
-			report, err := a.ExecuteDeAdoptWithOpts(args[0], cmd.OutOrStdout(), api.ExecuteDeAdoptOpts{AcceptConflictClients: acceptConflictClients})
+			report, err := a.ExecuteDeAdoptWithOpts(args[0], cmd.OutOrStdout(), api.ExecuteDeAdoptOpts{Context: actionCtx, AcceptConflictClients: acceptConflictClients})
 			if err != nil {
 				return err
 			}
@@ -80,6 +91,7 @@ func newDeAdoptCmdReal() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&actionTimeout, "action-timeout", "", "positive Go duration for a shared stdio action; no default")
 	cmd.Flags().BoolVar(&yes, "yes", false, "execute the de-adopt plan; without this the command is a dry-run")
 	cmd.Flags().StringArrayVar(&acceptConflictClients, "accept-conflict", nil, "accept a genuine conflict for this client (repeatable)")
 	return cmd

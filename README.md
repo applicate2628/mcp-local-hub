@@ -22,15 +22,15 @@ platforms are deferred and the 0.4.37 shim will reject them. The npm
 **package** is `mcp-local-hub`; the **command** it installs is `mcphub`.
 
 ```bash
-# 1. Install the binary globally (the command it installs is `mcphub`)
-npm install -g mcp-local-hub@0.4.37 --allow-scripts=mcp-local-hub --foreground-scripts
+# 1. Install globally (npm places the `mcphub` command on PATH)
+npm install -g mcp-local-hub@0.4.37
 
-# 2. Put mcphub on your PATH and register state (idempotent)
-mcphub setup
-
-# 3. Open the GUI — install servers with one click, see every daemon's health
+# 2. Open the GUI — install servers with one click, see every daemon's health
 mcphub gui
 ```
+
+npm launches its native Product directly from the installed package. `mcphub setup`
+is optional for explicit local testing/install mode, not an npm prerequisite.
 
 ```bash
 # Or run once without installing:
@@ -42,12 +42,6 @@ supply-chain attack vector) — npm installs the Windows x64 binary via an
 optional dependency, and a tiny Node shim execs it. Building from source is
 still supported for dev iteration — see
 [Building from source](#building-from-source) below.
-
-The positional package spec must remain before the per-package script flag.
-Do not shorten the command to `npm install -g --allow-scripts=mcp-local-hub`:
-that supplies npm no install root. The command above grants script permission
-only to `mcp-local-hub` for that invocation; it does not enable scripts
-globally.
 
 Detailed setup, per-client behaviour, and troubleshooting in [INSTALL.md](INSTALL.md).
 
@@ -229,7 +223,7 @@ The commands you reach for day to day:
 
 | Command | What it does |
 |---|---|
-| `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
+| `mcphub setup` | Optional explicit local install/testing mode: install to `~/.local/bin` and register on user PATH |
 | `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
 | `mcphub install --server <name> --no-client-config` | Materialize only that server's daemon/supervisor intent; do not read or write MCP client configs |
 | `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
@@ -247,10 +241,11 @@ scheduler/secrets, and the hidden transport shims — is in
 
 ## Architecture highlights
 
-- **One Windows product executable** — `~/.local/bin/mcphub.exe` is the sole
-  native MCPHub image. The public npm command is the meta-package Node shim;
-  setup/upgrade admit the product identity and exact-owned background tasks
-  target the same canonical executable.
+- **One admitted Windows Product image** — the public npm command is a Node shim
+  that launches the native executable in the npm package. Generated background
+  launches use that admitted image, retaining an authenticated active Product owner.
+  `~/.local/bin` remains the optional explicit-local install and fixed storage policy;
+  production npm use requires no promotion or executable copy there.
 - **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
 - **go:embed manifests** — all 18 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 17 global manifests; the remaining manifest is workspace-scoped.
 - **Embedded entry patterns** — `godbolt`, `lldb-bridge`, and `perftools` expose a `NewCommand()` factory imported by both a standalone binary and the hub subcommand. `vcpkg` exposes the same factory only to the hub subcommand because it is deliberately hub-only.

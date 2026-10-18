@@ -1347,6 +1347,236 @@ func TestCloseRetainsLeaseUntilStubbornWorkerSettles(t *testing.T) {
 	})
 }
 
+func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
+	for _, scenario := range []string{"final admission", "pre-copy discovery", "post-copy replay", "cleanup cause", "cleanup wire projection", "already closed"} {
+		t.Run(scenario, func(t *testing.T) {
+			storeRoot := t.TempDir()
+			projectRoot := writeProject(t)
+			projectFile := filepath.Join(projectRoot, "sample.son")
+			original, err := os.ReadFile(projectFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			driver := &fakeDriver{}
+			s := NewServer(testConfig(storeRoot, driver))
+			if s.initErr != nil {
+				t.Fatal(s.initErr)
+			}
+			request := StartRequest{ProjectRoot: projectRoot, ProjectFile: "sample.son", TimeoutSeconds: 10}
+			if scenario == "pre-copy discovery" || scenario == "post-copy replay" {
+				request.IdempotencyKey = "same-request"
+			}
+			seed := func() {
+				started, err := s.Start(context.Background(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				s.mu.Lock()
+				done := s.runs[started.RunID].done
+				s.mu.Unlock()
+				<-done
+			}
+			arrived, release := make(chan struct{}), make(chan struct{})
+			cleanupArrived, cleanupRelease := make(chan struct{}), make(chan struct{})
+			var releaseOnce, cleanupReleaseOnce sync.Once
+			var observationMu sync.Mutex
+			copies, writes, marks := 0, 0, 0
+			var cleanupPath string
+			cleanupCause := errors.New("injected closed-owner cleanup failure")
+			cleanupFails := scenario == "cleanup cause" || scenario == "cleanup wire projection"
+			s.snapshotWriter = func(path string, body []byte) error {
+				observationMu.Lock()
+				writes++
+				observationMu.Unlock()
+				return durableWrite(path, body)
+			}
+			s.markActive = func(work string) (func(), error) {
+				observationMu.Lock()
+				marks++
+				observationMu.Unlock()
+				return hubtemp.MarkActive(work)
+			}
+			s.removeWork = func(work string) error {
+				cleanupPath = work
+				if scenario == "final admission" {
+					close(cleanupArrived)
+					<-cleanupRelease
+				}
+				if cleanupFails {
+					return cleanupCause
+				}
+				return os.RemoveAll(work)
+			}
+			if scenario == "pre-copy discovery" {
+				s.locator = func() (Product, error) {
+					close(arrived)
+					<-release
+					return Product{Available: true, Path: "fake-em"}, nil
+				}
+			} else {
+				s.afterCopy = func() {
+					observationMu.Lock()
+					copies++
+					first := copies == 1
+					observationMu.Unlock()
+					if first {
+						close(arrived)
+						<-release
+					}
+				}
+			}
+			type startOutcome struct {
+				concurrentStartResult
+				wire *mcp.CallToolResult
+			}
+			finished := make(chan startOutcome, 1)
+			joined := false
+			var successor *Server
+			defer func() {
+				releaseOnce.Do(func() { close(release) })
+				cleanupReleaseOnce.Do(func() { close(cleanupRelease) })
+				if !joined {
+					<-finished
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.Close(ctx); err != nil {
+					t.Errorf("owner cleanup: %v", err)
+				}
+				if successor != nil {
+					if err := successor.Close(ctx); err != nil {
+						t.Errorf("successor cleanup: %v", err)
+					}
+				}
+			}()
+			if scenario == "already closed" {
+				if err := s.Close(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			go func() {
+				if scenario == "cleanup wire projection" {
+					body, err := json.Marshal(request)
+					if err != nil {
+						finished <- startOutcome{concurrentStartResult: concurrentStartResult{err: err}}
+						return
+					}
+					wire, err := s.startTool(context.Background(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: body}})
+					finished <- startOutcome{concurrentStartResult: concurrentStartResult{err: err}, wire: wire}
+					return
+				}
+				response, err := s.Start(context.Background(), request)
+				finished <- startOutcome{concurrentStartResult: concurrentStartResult{response: response, err: err}}
+			}()
+			var candidate string
+			if scenario != "already closed" {
+				<-arrived
+				if scenario != "pre-copy discovery" {
+					entries, err := os.ReadDir(filepath.Join(storeRoot, "runs"))
+					if err != nil || len(entries) != 1 {
+						t.Fatalf("held candidates=%d err=%v", len(entries), err)
+					}
+					candidate = filepath.Join(storeRoot, "runs", entries[0].Name())
+				}
+				if scenario == "post-copy replay" {
+					seed()
+				}
+			}
+			s.mu.Lock()
+			registeredBefore := len(s.runs)
+			s.mu.Unlock()
+			observationMu.Lock()
+			writesBefore, marksBefore := writes, marks
+			observationMu.Unlock()
+			driver.mu.Lock()
+			callsBefore := driver.calls
+			driver.mu.Unlock()
+			if scenario != "already closed" {
+				closing, cancel := context.WithCancel(context.Background())
+				cancel()
+				closeErr := s.Close(closing)
+				if !errors.Is(closeErr, ErrShutdownIncomplete) {
+					t.Errorf("held preparation Close=%v, want SONNET_SHUTDOWN_INCOMPLETE", closeErr)
+				}
+				successor = NewServer(testConfig(storeRoot, &fakeDriver{}))
+				if !errors.Is(successor.initErr, ErrRunStoreOwned) {
+					t.Errorf("held preparation successor=%v, want SONNET_RUN_STORE_OWNED", successor.initErr)
+				}
+			}
+			releaseOnce.Do(func() { close(release) })
+			var result startOutcome
+			select {
+			case <-cleanupArrived:
+				probe := NewServer(testConfig(storeRoot, &fakeDriver{}))
+				if !errors.Is(probe.initErr, ErrRunStoreOwned) {
+					t.Errorf("cleanup-in-progress successor=%v, want retained custody", probe.initErr)
+				}
+				if err := probe.Close(context.Background()); err != nil {
+					t.Error(err)
+				}
+				cleanupReleaseOnce.Do(func() { close(cleanupRelease) })
+				result = <-finished
+			case result = <-finished:
+			}
+			joined = true
+			if scenario == "cleanup wire projection" {
+				if result.err != nil || result.wire == nil || !result.wire.IsError || failureID(t, result.wire) != "SONNET_RUN_OWNER_CLOSED" {
+					t.Errorf("closed wire=%+v err=%v, want exact SONNET_RUN_OWNER_CLOSED", result.wire, result.err)
+				}
+			} else {
+				if result.err == nil || stableFailureID(result.err) != "SONNET_RUN_OWNER_CLOSED" || result.response.RunID != "" {
+					t.Errorf("closed Start=%+v err=%v, want exact SONNET_RUN_OWNER_CLOSED and no run", result.response, result.err)
+				}
+				if cleanupFails && (!errors.Is(result.err, cleanupCause) || !strings.Contains(result.err.Error(), "SONNET_WORKSPACE_CLEANUP_FAILED")) {
+					t.Errorf("closed cleanup error=%v, want retained cleanup cause", result.err)
+				}
+			}
+			if err := s.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if successor != nil {
+				if err := successor.Close(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			observationMu.Lock()
+			lateWrites, lateMarks := writes-writesBefore, marks-marksBefore
+			observationMu.Unlock()
+			driver.mu.Lock()
+			lateCalls := driver.calls - callsBefore
+			driver.mu.Unlock()
+			s.mu.Lock()
+			lateRuns, leaseHeld := len(s.runs)-registeredBefore, s.lease != nil
+			s.mu.Unlock()
+			if lateRuns != 0 || lateWrites != 0 || lateMarks != 0 || lateCalls != 0 || leaseHeld {
+				t.Errorf("late runs/writes/markers/calls=%d/%d/%d/%d lease=%t, want all zero/false", lateRuns, lateWrites, lateMarks, lateCalls, leaseHeld)
+			}
+			if candidate != "" {
+				if _, found, err := loadRunRecord(candidate); err != nil || found {
+					t.Errorf("closed candidate persisted=%t err=%v, want no receipt", found, err)
+				}
+				if cleanupPath != candidate {
+					t.Errorf("cleanup path=%q, want owned candidate %q", cleanupPath, candidate)
+				}
+				_, statErr := os.Stat(candidate)
+				if cleanupFails && statErr != nil || !cleanupFails && !os.IsNotExist(statErr) {
+					t.Errorf("candidate cleanup result=%v failureInjected=%t", statErr, cleanupFails)
+				}
+			} else if cleanupPath != "" {
+				t.Errorf("no-copy rejection removed workspace %q", cleanupPath)
+			}
+			successor = NewServer(testConfig(storeRoot, &fakeDriver{}))
+			if successor.initErr != nil {
+				t.Fatalf("settled successor acquisition: %v", successor.initErr)
+			}
+			if body, err := os.ReadFile(projectFile); err != nil || sha256.Sum256(body) != sha256.Sum256(original) {
+				t.Errorf("original project changed: %v", err)
+			}
+			t.Logf("settled: late runs/writes/markers/calls=%d/%d/%d/%d; candidate cleanup failure=%t; successor acquired", lateRuns, lateWrites, lateMarks, lateCalls, cleanupFails)
+		})
+	}
+}
+
 func testConfig(root string, driver Driver) Config {
 	return Config{RunRoot: root, Locator: func() (Product, error) { return Product{Available: true, Path: "fake-em"}, nil }, Driver: driver}
 }

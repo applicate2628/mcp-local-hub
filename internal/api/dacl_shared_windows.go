@@ -78,6 +78,10 @@ func BuildAllowlistSDDL(mode AllowlistMaskMode) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("current user SID: %w", err)
 	}
+	return buildAllowlistSDDLForUser(mode, userSIDStr)
+}
+
+func buildAllowlistSDDLForUser(mode AllowlistMaskMode, userSIDStr string) (string, error) {
 	switch mode {
 	case AllowlistMaskFile:
 		// File form: GENERIC_ALL, allowlist = {user, SY, BA}.

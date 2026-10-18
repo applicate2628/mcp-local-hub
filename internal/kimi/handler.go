@@ -121,7 +121,7 @@ func runKimiInputSchema() map[string]any {
 func (s *Server) runKimiTool(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	runRequest, err := decodeRunRequest(request.Params.Arguments)
 	if err != nil {
-		return failureResult(newFailure("E_KIMI_REQUEST_INVALID", err)), nil
+		return failureResult(newFailure("E_KIMI_REQUEST_INVALID", err), RunOutput{}), nil
 	}
 	output, err := s.runner.Run(ctx, runRequest)
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *Server) runKimiTool(ctx context.Context, request *mcp.CallToolRequest) 
 		if !errors.As(err, &failure) {
 			failure = newFailure("E_KIMI_RUN_FAILED", err)
 		}
-		return failureResult(failure), nil
+		return failureResult(failure, output), nil
 	}
 	return &mcp.CallToolResult{
 		IsError: output.Receipt.IsError(),
@@ -137,9 +137,13 @@ func (s *Server) runKimiTool(ctx context.Context, request *mcp.CallToolRequest) 
 	}, nil
 }
 
-func failureResult(failure *Failure) *mcp.CallToolResult {
+func failureResult(failure *Failure, output RunOutput) *mcp.CallToolResult {
+	content := []mcp.Content{&mcp.TextContent{Text: string(failure.JSON())}}
+	if output.Receipt.Payload != "" {
+		content = append(content, &mcp.TextContent{Text: output.Receipt.Payload})
+	}
 	return &mcp.CallToolResult{
 		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: string(failure.JSON())}},
+		Content: content,
 	}
 }

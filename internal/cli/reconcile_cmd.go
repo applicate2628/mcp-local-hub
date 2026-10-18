@@ -181,7 +181,18 @@ See also: status, install --upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resp, err := reconcileDialFn(cmd.Context(), apply)
 			if err != nil {
-				return err
+				if !hasReconcileRepairResult(resp) {
+					return &reconcileResultError{cause: err, response: resp}
+				}
+				var outputErr error
+				if jsonOut {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					outputErr = enc.Encode(resp)
+				} else {
+					outputErr = printPartialReconcileRepair(cmd.OutOrStderr(), resp)
+				}
+				return &reconcileResultError{cause: errors.Join(err, outputErr), response: resp}
 			}
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
@@ -312,4 +323,17 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 		}
 	}
 	return nil
+}
+
+// Presence here controls diagnostic output only; it never permits success,
+// retries, target acceptance or inference that absent facts mean zero effects.
+func hasReconcileRepairResult(resp api.ReconcileResponse) bool {
+	return resp.SerenaRepairOutcome != "" || resp.SerenaRepairError != "" || resp.SerenaOrphansRepaired != 0 || len(resp.SerenaOrphansDeferred) != 0 || len(resp.SerenaRepairIncomplete) != 0 || len(resp.SerenaRepairRecovered) != 0
+}
+func printPartialReconcileRepair(w io.Writer, resp api.ReconcileResponse) error {
+	if !hasReconcileRepairResult(resp) {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, "partial Serena repair result: repaired=%d, deferred=%d, outcome=%s; runtime readiness remains unconfirmed\n", resp.SerenaOrphansRepaired, len(resp.SerenaOrphansDeferred), resp.SerenaRepairOutcome)
+	return err
 }

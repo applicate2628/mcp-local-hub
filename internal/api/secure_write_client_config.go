@@ -36,6 +36,8 @@ package api
 import (
 	"errors"
 	"time"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // ErrSecureWriteParentInsecure is the typed error returned by
@@ -59,6 +61,10 @@ import (
 // world bits. The hardening is the spec'd outcome; the softening
 // is operator-explicit, observable, and always logged.
 var ErrSecureWriteParentInsecure = errors.New("secure write: parent directory not single-user safe")
+
+// ErrSecureWriteReparsePointRefused identifies the Windows destination reparse
+// refusal without exposing the contextual path retained by the secure writer.
+var ErrSecureWriteReparsePointRefused = errors.New("pre-existing reparse point refused")
 
 const (
 	postRenameOpenMaxAttempts = 3
@@ -142,6 +148,17 @@ var postRenameOpenFailHook func() error
 // legs) so the POSIX swap test — symlink creation needs no elevation there —
 // can set it; the Windows decomposition is unit-tested separately.
 var resolvedParentDescendStepHook func(openedComponent string)
+
+// Deterministic test-only observation seams on the actual production route.
+var expectedSnapshotWriterEntryHook func()
+var expectedSnapshotBeforePublishHook func()
+
+func expectedConfigWriteRequest(expected []*clients.ConfigWriteRequest) *clients.ConfigWriteRequest {
+	if len(expected) == 0 {
+		return nil
+	}
+	return expected[0]
+}
 
 // The AF-1 secure-write observation counters
 // (secureWritePathBasedStringEntryCount / secureWriteResolvedParentEntryCount)

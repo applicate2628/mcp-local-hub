@@ -26,6 +26,42 @@ const (
 	stdioBridgeAdmissionHelperPortEnv = "MCPHUB_STDIO_BRIDGE_ADMISSION_PORT"
 )
 
+// Direct probe tests own the same API custody path as install. Their terminal
+// boundary must not discard a child if an assertion or probe fails.
+func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridgeAdmissionRequest) (err error) {
+	a := NewAPI()
+	defer func() {
+		if closeErr := a.CloseStdioBridgeAdmissions(context.Background()); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	owners, err := a.reserveStdioBridgeAdmissions(ctx, []FrozenStdioBridgeAdmissionRequest{request})
+	if err != nil {
+		return err
+	}
+	defer a.releaseStdioBridgeReservations(owners)
+	return a.admitFrozenStdioBridgeRequest(ctx, request, owners[0])
+}
+
+func admitFrozenStdioBridgeRequests(ctx context.Context, requests []FrozenStdioBridgeAdmissionRequest) error {
+	for _, request := range requests {
+		if err := admitFrozenStdioBridgeRequest(ctx, request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func admitFrozenStdioBridgeBeforeMutation(ctx context.Context, manifest *config.ServerManifest, plan *Plan, opts InstallOpts) (err error) {
+	a := NewAPI()
+	defer func() {
+		if closeErr := a.CloseStdioBridgeAdmissions(context.Background()); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	return a.admitFrozenStdioBridgeBeforeMutation(ctx, manifest, plan, opts)
+}
+
 func TestFrozenStdioBridgeAdmissionHelper(t *testing.T) {
 	mode := os.Getenv(stdioBridgeAdmissionHelperEnv)
 	if mode == "" {

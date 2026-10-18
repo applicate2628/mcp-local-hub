@@ -612,7 +612,8 @@ func registerEventsRoutes(s *Server) {
 			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 			return
 		}
-		ctx := r.Context()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
 		ch, ok := s.events.TrySubscribe(ctx)
 		if !ok {
 			http.Error(w, "too many SSE subscribers", http.StatusServiceUnavailable)
@@ -626,6 +627,8 @@ func registerEventsRoutes(s *Server) {
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-s.eventStreamCtx.Done():
 				return
 			case ev, ok := <-ch:
 				if !ok {

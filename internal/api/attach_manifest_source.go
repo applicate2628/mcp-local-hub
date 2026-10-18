@@ -80,6 +80,9 @@ func (a *API) resolveMissingAttachManifest(req AttachClientRequest) (*attachMani
 			return deny("adopt-provenance-conflict")
 		}
 		rec = &store.Records[i]
+		if rec.ProjectService != nil {
+			return deny("graphify-project-service-operation-required")
+		}
 	}
 	if rec != nil && (rec.OperationState != AdoptOperationStateAdopted || rec.ExpectedManifestHash == "" || rec.AdoptManifestHash == "" ||
 		rec.ExpectedManifestHash != row.ManifestHash || rec.Port != row.Port || rec.ManifestName != req.Server ||

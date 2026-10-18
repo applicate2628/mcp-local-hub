@@ -372,7 +372,7 @@ func TestProviderManagedInstallAndNoStopRecoveryAreLeaseExclusive(t *testing.T) 
 			defer close(adoptSettled)
 			adoptDone <- NewAPI().ExecuteAdoptWithOpts(plan, io.Discard, ExecuteAdoptOpts{
 				providerDeps: providerTransactionDeps{source: adoptProvider, observer: observer},
-				installFn: func(*API, InstallOpts) error {
+				installFn: func(context.Context, *API, InstallOpts) error {
 					installCalls++
 					close(installEntered)
 					<-releaseInstall
@@ -474,7 +474,7 @@ func TestProviderManagedInstallAndNoStopRecoveryAreLeaseExclusive(t *testing.T) 
 
 		installCalls := 0
 		adoptErr := NewAPI().ExecuteAdoptWithOpts(&AdoptPlan{ManifestName: name}, io.Discard, ExecuteAdoptOpts{
-			installFn: func(*API, InstallOpts) error {
+			installFn: func(context.Context, *API, InstallOpts) error {
 				installCalls++
 				return errors.New("Install must not run while recovery owns the lease")
 			},

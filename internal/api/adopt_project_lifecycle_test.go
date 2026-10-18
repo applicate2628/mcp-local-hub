@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -213,8 +214,8 @@ func TestProjectAdoptExactRepeatIsVerificationOnly(t *testing.T) {
 	installCalls := 0
 	var capturedInstall InstallOpts
 	result, err := NewAPI().ExecuteAdoptResultWithOpts(plan, nil, ExecuteAdoptOpts{
-		ReceivingVerifier: func(*API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
-		installFn: func(_ *API, got InstallOpts) error {
+		ReceivingVerifier: func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
+		installFn: func(_ context.Context, _ *API, got InstallOpts) error {
 			installCalls++
 			capturedInstall = got
 			return nil
@@ -286,11 +287,11 @@ func TestProjectAdoptExactRepeatIsVerificationOnly(t *testing.T) {
 	}
 	var out bytes.Buffer
 	if err := NewAPI().ExecuteAdoptWithOpts(repeat, &out, ExecuteAdoptOpts{
-		installFn: func(*API, InstallOpts) error {
+		installFn: func(context.Context, *API, InstallOpts) error {
 			t.Fatal("repeat invoked Install")
 			return nil
 		},
-		ReceivingVerifier: func(_ *API, verified *AdoptPlan, _ *AdoptProvenanceRecord) error {
+		ReceivingVerifier: func(_ context.Context, _ *API, verified *AdoptPlan, _ *AdoptProvenanceRecord) error {
 			return verifyAdoptClientReadbacksWithResolver(verified, "http://127.0.0.1:"+strconv.Itoa(verified.Port)+adoptDefaultURLPath, newAdoptClientTargetResolver())
 		},
 	}); err != nil {
@@ -362,8 +363,8 @@ func TestProjectAdoptRepeatDistinguishesUnknownCollisionAndOwnedDrift(t *testing
 		}
 		cleanupProjectAdoptTestManifest(t, plan.ManifestName)
 		if _, err := NewAPI().ExecuteAdoptResultWithOpts(plan, nil, ExecuteAdoptOpts{
-			installFn:         func(*API, InstallOpts) error { return nil },
-			ReceivingVerifier: func(*API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
+			installFn:         func(context.Context, *API, InstallOpts) error { return nil },
+			ReceivingVerifier: func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
 		}); err != nil {
 			t.Fatal(err)
 		}

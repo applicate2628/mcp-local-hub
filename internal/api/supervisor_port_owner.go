@@ -15,7 +15,161 @@
 // work-items/decisions/2026-07-05-daemon-port-resolution-single-owner.md.
 package api
 
-import "strconv"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"mcp-local-hub/internal/config"
+)
+
+// SupervisorFrozenPort is a serialized original port operand. Its rows carry
+// data only; capture completeness, envelope presence and lifecycle admission
+// remain responsibilities of the consuming operation.
+type SupervisorFrozenPort struct {
+	TaskName   string `json:"task_name"`
+	Port       int    `json:"port"`
+	ArgvSHA256 string `json:"argv_sha256"`
+}
+
+var (
+	ErrInvalidSupervisorFrozenPort    = errors.New("invalid supervisor frozen port")
+	ErrUnsortedSupervisorFrozenPorts  = errors.New("unsorted or duplicate supervisor frozen port")
+	errUnresolvedSupervisorDaemonPort = errors.New("daemon managed port or positive exclusion unresolved")
+)
+
+// CanonicalSupervisorFrozenPorts returns a nonnil owned copy in strict
+// task/port/digest order. It neither validates rows nor proves capture completed.
+func CanonicalSupervisorFrozenPorts(rows []SupervisorFrozenPort) []SupervisorFrozenPort {
+	canonical := make([]SupervisorFrozenPort, len(rows))
+	copy(canonical, rows)
+	sort.Slice(canonical, func(i, j int) bool {
+		return supervisorFrozenPortLess(canonical[i], canonical[j])
+	})
+	return canonical
+}
+
+func supervisorFrozenPortLess(left, right SupervisorFrozenPort) bool {
+	if left.TaskName != right.TaskName {
+		return left.TaskName < right.TaskName
+	}
+	if left.Port != right.Port {
+		return left.Port < right.Port
+	}
+	return left.ArgvSHA256 < right.ArgvSHA256
+}
+
+// ValidateSupervisorFrozenPorts checks row values and strict canonical order.
+// Nil and empty sets have no rows; the consuming codec owns their admission.
+func ValidateSupervisorFrozenPorts(rows []SupervisorFrozenPort) error {
+	for i, row := range rows {
+		if strings.TrimSpace(row.TaskName) == "" || row.Port < 1 || row.Port > 65535 || !isLowerHex64(row.ArgvSHA256) {
+			return ErrInvalidSupervisorFrozenPort
+		}
+		if i > 0 && !supervisorFrozenPortLess(rows[i-1], row) {
+			return ErrUnsortedSupervisorFrozenPorts
+		}
+	}
+	return nil
+}
+
+// CaptureSupervisorFrozenPorts computes an owned canonical cohort from one
+// original intent snapshot, before the normal reader's legacy filtering.
+// A nonnil empty result requires explicit daemons:[] or positive exclusions;
+// unresolved input returns an error and no partial cohort. Source namespace and
+// lifecycle admission remain the caller's responsibility.
+func CaptureSupervisorFrozenPorts(intentSnapshot []byte) ([]SupervisorFrozenPort, error) {
+	return captureSupervisorFrozenPorts(intentSnapshot, resolveManifestDaemonPort)
+}
+
+func captureSupervisorFrozenPorts(intentSnapshot []byte, resolve manifestDaemonPortResolveFn) ([]SupervisorFrozenPort, error) {
+	f, err := decodeOriginalSupervisorIntentFile("original supervisor intent", intentSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	return captureSupervisorIntentPorts(f, resolve, false)
+}
+
+func captureSupervisorIntentPorts(f *SupervisorIntentFile, resolve manifestDaemonPortResolveFn, current bool) ([]SupervisorFrozenPort, error) {
+	// JSON null and missing/null daemons all decode to nil; only an explicitly
+	// present array can supply complete local capture input.
+	if f == nil || f.Daemons == nil {
+		return nil, errors.New("original supervisor intent requires a nonnull daemons array")
+	}
+	rows := make([]SupervisorFrozenPort, 0, len(f.Daemons))
+	seenTasks, seenPorts := make(map[string]bool), make(map[int]bool)
+	for i, d := range f.Daemons {
+		if strings.TrimSpace(d.TaskName) == "" || strings.TrimSpace(d.Command) == "" {
+			return nil, fmt.Errorf("original daemon %d requires task_name and command", i)
+		}
+		if current {
+			key := canonicalIntentTaskKey(d.TaskName)
+			if seenTasks[key] {
+				return nil, errors.New("duplicate current runtime task identity")
+			}
+			seenTasks[key] = true
+			if currentSupervisorPortlessDescriptor(d) {
+				continue
+			}
+			builtinRoute, err := recognizeBuiltinRouteDaemon(d)
+			if err != nil {
+				return nil, fmt.Errorf("original daemon %d: %w", i, err)
+			}
+			_, _, ordinary := DescriptorServerDaemon(d)
+			if !builtinRoute && (len(d.Args) == 0 || d.Args[0] != "daemon" || (!ordinary && !IsSerenaProxyDescriptor(d) && !IsWorkspaceLSPProxyDescriptor(d))) {
+				return nil, errors.New("unknown current runtime descriptor role")
+			}
+		}
+		resolved, err := classifyEffectiveDaemonPort(d, resolve, true)
+		if err != nil {
+			return nil, fmt.Errorf("original daemon %d: %w", i, err)
+		}
+		if resolved.portless {
+			continue
+		}
+		if current {
+			if seenPorts[resolved.port] {
+				return nil, errors.New("duplicate current runtime port identity")
+			}
+			seenPorts[resolved.port] = true
+		}
+		argv, err := json.Marshal(append([]string{d.Command}, d.Args...))
+		if err != nil {
+			return nil, fmt.Errorf("original daemon %d argv: %w", i, err)
+		}
+		digest := sha256.Sum256(argv)
+		rows = append(rows, SupervisorFrozenPort{
+			TaskName: d.TaskName, Port: resolved.port, ArgvSHA256: hex.EncodeToString(digest[:]),
+		})
+	}
+	rows = CanonicalSupervisorFrozenPorts(rows)
+	if err := ValidateSupervisorFrozenPorts(rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// Positive exclusions reuse the existing one-shot and generated timer owners.
+// Port=0 alone never establishes that a descriptor is a maintenance role.
+func currentSupervisorPortlessDescriptor(d SupervisorDaemon) bool {
+	if d.Port != 0 {
+		return false
+	}
+	if isLegacyOneshotDaemon(d) {
+		return true
+	}
+	for _, kind := range []string{"workspace-weekly-refresh", "server-weekly-refresh"} {
+		if generatedSupervisorImageTimer(MaintenanceTimer{Name: d.TaskName, Kind: kind, Server: d.Server, Command: d.Command, Args: d.Args}) {
+			return true
+		}
+	}
+	return false
+}
 
 // Port/deadline defaults, homed here as the SINGLE owner of the magic values
 // (design §4b): the resolver is the sole authority, so the deadline no longer
@@ -64,8 +218,49 @@ func EffectiveStartupBindDeadlineSeconds(d SupervisorDaemon) int {
 // Resolution order: the stamped descriptor Port (>0) → the descriptor's own
 // `--port` arg (LAUNCH TRUTH) → the manifest port for the resolved (server,daemon).
 func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (int, bool) {
+	resolved, err := classifyEffectiveDaemonPort(d, func(server, daemon string) (daemonPortResolution, error) {
+		port, deadlineSecs, ok := resolve(server, daemon)
+		if !ok {
+			return daemonPortResolution{}, errUnresolvedSupervisorDaemonPort
+		}
+		return daemonPortResolution{port: port, deadlineSecs: deadlineSecs}, nil
+	}, false)
+	if err != nil || resolved.port <= 0 {
+		return 0, false
+	}
+	return resolved.port, true
+}
+
+type daemonPortResolution struct {
+	port         int
+	deadlineSecs int
+	portless     bool
+}
+
+type manifestDaemonPortResolveFn func(server, daemon string) (daemonPortResolution, error)
+
+// classifyEffectiveDaemonPort owns the precedence for both legacy Boolean
+// lookup and complete capture. Strict qualification only affects capture;
+// legacy callers retain their existing stamped/first-valid-argv behavior.
+func classifyEffectiveDaemonPort(d SupervisorDaemon, resolve manifestDaemonPortResolveFn, complete bool) (daemonPortResolution, error) {
+	if complete {
+		if d.Port < 0 || d.Port > 65535 {
+			return daemonPortResolution{}, ErrInvalidSupervisorFrozenPort
+		}
+		if _, _, source := ResolveDescriptorMatchIdentity(d); source == IdentityCorruptGlobalArgv {
+			return daemonPortResolution{}, errors.New("corrupt global daemon identity")
+		}
+		if (IsSerenaProxyDescriptor(d) || IsWorkspaceLSPProxyDescriptor(d)) && d.Server != "" && DescriptorServerName(d) == "" {
+			return daemonPortResolution{}, errors.New("conflicting proxy server identity")
+		}
+	}
 	if d.Port > 0 {
-		return d.Port, true
+		if complete {
+			if _, _, err := descriptorArgPort(d, true); err != nil {
+				return daemonPortResolution{}, err
+			}
+		}
+		return daemonPortResolution{port: d.Port}, nil
 	}
 	// The descriptor's own `--port` arg is the launch truth for a proxy row: a
 	// workspace-proxy (`daemon workspace-proxy --port 94xx …`) or serena-proxy
@@ -75,18 +270,34 @@ func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (i
 	// portless and every port protection would stay off (bot PR #505 r3). A global
 	// daemon carries no `--port` arg, so this is a no-op there and it falls to the
 	// manifest as before.
-	if p := descriptorArgPort(d); p > 0 {
-		return p, true
+	p, _, err := descriptorArgPort(d, complete)
+	if err != nil {
+		return daemonPortResolution{}, err
+	}
+	if p > 0 {
+		return daemonPortResolution{port: p}, nil
+	}
+	if complete && (IsSerenaProxyDescriptor(d) || IsWorkspaceLSPProxyDescriptor(d)) {
+		return daemonPortResolution{}, errors.New("proxy has no resolved port argument")
 	}
 	server, daemon, idOK := DescriptorServerDaemon(d)
 	if !idOK {
-		return 0, false
+		return daemonPortResolution{}, errUnresolvedSupervisorDaemonPort
 	}
-	port, _, ok := resolve(server, daemon)
-	if !ok || port <= 0 {
-		return 0, false
+	resolved, err := resolve(server, daemon)
+	if err != nil {
+		return daemonPortResolution{}, err
 	}
-	return port, true
+	if resolved.port > 0 {
+		if complete && resolved.port > 65535 {
+			return daemonPortResolution{}, ErrInvalidSupervisorFrozenPort
+		}
+		return resolved, nil
+	}
+	if complete && resolved.port == 0 && resolved.portless {
+		return resolved, nil
+	}
+	return daemonPortResolution{}, errUnresolvedSupervisorDaemonPort
 }
 
 // IsSerenaProxyDescriptor / IsWorkspaceLSPProxyDescriptor classify a descriptor's
@@ -134,11 +345,10 @@ func DescriptorHasGlobalDaemonArgv(d SupervisorDaemon) bool {
 		!IsSerenaProxyDescriptor(d) && !IsWorkspaceLSPProxyDescriptor(d)
 }
 
-// descriptorArgPort returns the `--port` value from a `daemon …` descriptor's
-// args, or 0 when absent/unparseable. It is the launch-truth port for the proxy
-// shapes (workspace-proxy, serena-proxy) whose dynamic daemon name is not in a
-// manifest.
-func descriptorArgPort(d SupervisorDaemon) int {
+// descriptorArgPort owns proxy argv parsing. Legacy lookup keeps the first
+// positive value; complete capture distinguishes absent, malformed and duplicate
+// operands and validates the selected port range.
+func descriptorArgPort(d SupervisorDaemon, complete bool) (port int, present bool, err error) {
 	// ONLY the proxy shapes carry an authoritative `--port` arg. Scoping the
 	// recovery to `daemon serena-proxy` / `daemon workspace-proxy` (via the shared
 	// argv predicates) prevents a corrupt or non-proxy global descriptor with a
@@ -149,16 +359,36 @@ func descriptorArgPort(d SupervisorDaemon) int {
 	// carries `--port` anyway. Using the SAME predicates the cli classifier uses
 	// keeps the resolve side and the protect side provably in lock-step (r5 F3).
 	if !IsSerenaProxyDescriptor(d) && !IsWorkspaceLSPProxyDescriptor(d) {
-		return 0
+		return 0, false, nil
 	}
-	for i := 2; i+1 < len(d.Args); i++ {
+	for i := 2; i < len(d.Args); i++ {
+		if complete && strings.HasPrefix(d.Args[i], "--port=") {
+			return 0, true, errors.New("unsupported proxy port argument shape")
+		}
 		if d.Args[i] == "--port" {
-			if p, err := strconv.Atoi(d.Args[i+1]); err == nil && p > 0 {
-				return p
+			if complete && present {
+				return 0, true, errors.New("duplicate proxy port argument")
+			}
+			present = true
+			if i+1 >= len(d.Args) {
+				if complete {
+					return 0, true, errors.New("proxy port argument has no value")
+				}
+				continue
+			}
+			p, parseErr := strconv.Atoi(d.Args[i+1])
+			if complete && (parseErr != nil || p < 1 || p > 65535) {
+				return 0, true, errors.New("invalid proxy port argument")
+			}
+			if parseErr == nil && p > 0 {
+				port = p
+				if !complete {
+					return port, true, nil
+				}
 			}
 		}
 	}
-	return 0
+	return port, present, nil
 }
 
 // effectiveDeadline is the shared deadline-decision logic (§4b).
@@ -284,15 +514,29 @@ var resolveManifestPortAndDeadlineFn = resolveManifestPortAndDeadline
 // rather than clobbering it with 0. Reuses the canonical findDaemon (install.go)
 // so the manifest daemon-name match is single-owned.
 func resolveManifestPortAndDeadline(server, daemon string) (port int, deadlineSecs int, ok bool) {
-	m, err := loadManifestForServer("", server)
-	if err != nil || m == nil {
+	resolved, err := resolveManifestDaemonPort(server, daemon)
+	if err != nil {
 		return 0, 0, false
+	}
+	return resolved.port, resolved.deadlineSecs, true
+}
+
+func resolveManifestDaemonPort(server, daemon string) (daemonPortResolution, error) {
+	m, err := loadManifestForServer("", server)
+	if err != nil {
+		return daemonPortResolution{}, fmt.Errorf("resolve manifest %s: %w", server, err)
+	}
+	if m == nil {
+		return daemonPortResolution{}, errors.New("nil daemon manifest")
 	}
 	d, found := findDaemon(m, daemon)
 	if !found {
-		return 0, 0, false
+		return daemonPortResolution{}, fmt.Errorf("manifest %s has no daemon %s", server, daemon)
 	}
-	return d.Port, d.StartupBindDeadlineSeconds, true
+	return daemonPortResolution{
+		port: d.Port, deadlineSecs: d.StartupBindDeadlineSeconds,
+		portless: m.Kind == config.KindCompanion && m.Transport == config.TransportProcess && d.Port == 0,
+	}, nil
 }
 
 // DescriptorServerDaemon resolves the (server, daemon) identity of a supervisor

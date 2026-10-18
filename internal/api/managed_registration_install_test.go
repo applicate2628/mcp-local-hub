@@ -233,7 +233,7 @@ func TestW10_AdoptCommittedUnverifiedPreservesDurableState(t *testing.T) {
 	}
 	cause := newManagedRegistrationFailure(ManagedRegistrationFailurePreconditionConflict, nil)
 	err = NewAPI().ExecuteAdoptWithOpts(plan, io.Discard, ExecuteAdoptOpts{
-		installFn: func(*API, InstallOpts) error { return &InstallCommittedUnverifiedError{cause: cause} },
+		installFn: func(context.Context, *API, InstallOpts) error { return &InstallCommittedUnverifiedError{cause: cause} },
 	})
 	var committed *InstallCommittedUnverifiedError
 	if !errors.As(err, &committed) || !strings.Contains(err.Error(), "PRESERVED") || strings.Contains(err.Error(), "can be re-run") {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/gui"
 	processowner "mcp-local-hub/internal/process"
@@ -45,7 +46,7 @@ type windowsBareLaunchDeps struct {
 
 func defaultWindowsBareLaunchDeps() windowsBareLaunchDeps {
 	return windowsBareLaunchDeps{
-		executable:  os.Executable,
+		executable:  api.RuntimeMcphubExecutable,
 		pidportPath: gui.PidportPathNoCreate,
 		environment: os.Environ,
 		admitProduct: func(productPath string) error {

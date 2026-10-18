@@ -1185,3 +1185,61 @@ func TestCodexProjectConfigSnapshotEntryParsesCapturedHTTPAndRejectsMixed(t *tes
 		t.Fatalf("Entry(mixed) error = %v, want CODEX_LAYER_PARSE_FAILED", err)
 	}
 }
+
+func TestCodexProjectAttachmentRestoreRetainsOriginalWriteAttempt(t *testing.T) {
+	for _, failWrite := range []bool{false, true} {
+		name := "success"
+		if failWrite {
+			name = "original writer error"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, path, original := writeCodexProjectFixture(t)
+			const logical = "synthetic-attachment"
+			client, _, err := NewCodexCLIForProject(root, logical, immediateCodexProjectConfigLockRunnerFactory)
+			if err != nil {
+				t.Fatal("project fixture unavailable")
+			}
+			owner := client.(ProjectHTTPAttachmentClient)
+			global := []byte{}
+			preparation, err := owner.PrepareProjectHTTPAttachment(logical, MCPEntry{Name: logical + "-mcphub", URL: "http://127.0.0.1:9300/mcp"}, "native-defaults", global)
+			if err != nil {
+				t.Fatal("attachment preparation unavailable")
+			}
+			created, err := owner.CreateProjectHTTPAttachment(preparation, global)
+			if err != nil || !created.Committed || created.ExactInverse != preparation {
+				t.Fatal("original attachment inverse unavailable")
+			}
+			writerCalls := 0
+			writeCause := errors.New("synthetic original Restore writer error")
+			previousWriter := WriteConfigFile
+			WriteConfigFile = func(target string, contents []byte) error {
+				writerCalls++
+				if target != path {
+					t.Fatal("Restore selected a foreign write target")
+				}
+				if failWrite {
+					return writeCause
+				}
+				return previousWriter(target, contents)
+			}
+			t.Cleanup(func() { WriteConfigFile = previousWriter })
+			result, err := owner.RestoreCreatedProjectHTTPAttachment(preparation, original)
+			if writerCalls != 1 || !result.WriteAttempted {
+				t.Fatal("original Restore writer invocation was not retained")
+			}
+			want := original
+			if failWrite {
+				want = preparation.AfterBytes()
+				if !errors.Is(err, writeCause) || result.Committed || result.BeforeSHA256 != "" || result.AfterSHA256 != "" {
+					t.Fatal("original writer error or uncommitted result changed")
+				}
+			} else if err != nil || !result.Committed || result.BeforeSHA256 != preparation.AfterSHA256() || result.AfterSHA256 != preparation.BeforeSHA256() {
+				t.Fatal("successful Restore outcome or byte digests changed")
+			}
+			actual, readErr := os.ReadFile(path)
+			if readErr != nil || !bytes.Equal(actual, want) {
+				t.Fatal("Restore did not preserve the expected exact project bytes")
+			}
+		})
+	}
+}

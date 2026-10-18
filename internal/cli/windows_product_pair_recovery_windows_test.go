@@ -121,7 +121,7 @@ func TestWindowsProductRecoveryCompletesCommitDecisionForward(t *testing.T) {
 	tasks := &recoveryTaskTxnFake{digest: fixture.journal.TaskSetSHA256}
 	req := fixture.request(tasks)
 	req.ObserveSuccessorReady = func(context.Context, string, string) (bool, error) { return true, nil }
-	req.StartSupervisor = func(string) error { return errors.New("ready successor must not restart") }
+	req.StartSupervisor = func(string) (SupervisorLaunch, error) { return nil, errors.New("ready successor must not restart") }
 	req.WaitSupervisorReady = func(context.Context, string, string) error {
 		return errors.New("ready successor must not wait")
 	}
@@ -195,7 +195,10 @@ func TestWindowsProductRecoveryForwardReplaysInterruptedCleanup(t *testing.T) {
 			newRequest := func() windowsProductRecoveryRequest {
 				req := f.request(tasks)
 				req.ObserveSuccessorReady = func(context.Context, string, string) (bool, error) { return true, nil }
-				req.StartSupervisor = func(string) error { t.Fatal("ready successor restarted"); return nil }
+				req.StartSupervisor = func(string) (SupervisorLaunch, error) {
+					t.Fatal("ready successor restarted")
+					return &fixtureSupervisorLaunch{}, nil
+				}
 				req.WaitSupervisorReady = func(context.Context, string, string) error { t.Fatal("ready successor waited"); return nil }
 				req.Deps.AdmitProduct = func(input binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
 					actual, err := hashRecoveryFile(input.Path)
@@ -318,7 +321,10 @@ func TestWindowsProductRecoveryForwardRejectsUnboundAsides(t *testing.T) {
 			tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}
 			req := f.request(tasks)
 			req.ObserveSuccessorReady = func(context.Context, string, string) (bool, error) { return true, nil }
-			req.StartSupervisor = func(string) error { t.Fatal("ready successor restarted"); return nil }
+			req.StartSupervisor = func(string) (SupervisorLaunch, error) {
+				t.Fatal("ready successor restarted")
+				return &fixtureSupervisorLaunch{}, nil
+			}
 			req.WaitSupervisorReady = func(context.Context, string, string) error { t.Fatal("ready successor waited"); return nil }
 			req.Deps.AdmitProduct = func(input binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
 				actual, err := hashRecoveryFile(input.Path)
@@ -412,7 +418,7 @@ func newProductRecoveryV3Fixture(t *testing.T, phase WindowsProductRecoveryPhase
 		},
 		Tasks:       WindowsProductPairTaskRecovery{StoreRoot: filepath.Join(f.stateDir, "task-store"), Backups: []WindowsProductPairTaskBackup{}},
 		Staged:      windowsProductRecoveryStagedV3{Path: f.staged, SHA256: hash(f.newProduct)},
-		FrozenPorts: []windowsProductFrozenPortV3{}, TaskSetSHA256: strings.Repeat("e", sha256.Size*2),
+		FrozenPorts: []api.SupervisorFrozenPort{}, TaskSetSHA256: strings.Repeat("e", sha256.Size*2),
 	}
 	if phase == WindowsProductRecoveryPrepared || phase == WindowsProductRecoverySettledRollback {
 		f.journal.TaskSetSHA256 = ""
@@ -649,7 +655,10 @@ func (f recoveryFixture) request(tasks *recoveryTaskTxnFake, order *[]string, ev
 			*order = append(*order, "observe-prior")
 			return false, nil
 		},
-		RestartPrior:   func(string) error { *order = append(*order, "restart-prior"); return nil },
+		RestartPrior: func(string) (SupervisorLaunch, error) {
+			*order = append(*order, "restart-prior")
+			return &fixtureSupervisorLaunch{}, nil
+		},
 		WaitPriorReady: func(context.Context, string, string) error { *order = append(*order, "wait-prior"); return nil },
 		ReconcileCommitted: func(windowsProductPairRecoveryJournal) error {
 			*order = append(*order, "reconcile-committed")

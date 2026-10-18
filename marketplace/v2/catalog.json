@@ -945,6 +945,31 @@
         "run_cmd": "uvx origin-pro-mcp==0.1.0",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "mcp-cbuild",
+      "name": "CMake build MCP server",
+      "summary": "Run CMake preset listing, configure, build, test, workflow, and cache-validated clean operations; vcpkg tools are optional.",
+      "transport": "stdio",
+      "command": "mcphub",
+      "args": [
+        "cbuild"
+      ],
+      "env": {},
+      "categories": [
+        "build",
+        "cmake",
+        "vcpkg",
+        "engineering"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "mcphub",
+          "cmake"
+        ]
+      }
     }
   ],
   "docs_only": [

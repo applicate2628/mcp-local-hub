@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,39 @@ import (
 )
 
 const testExactManifestHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func TestRuntimeImageErrorsReachTimerFanoutAndDryRunWithoutMutation(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Product admission failure oracle is Windows-specific")
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(""))
+	root := hardenedTempDir(t)
+	t.Cleanup(SetDaemonStateRootForTest(root))
+	m := globalTwoDaemonManifest()
+	m.WeeklyRefresh = true
+	assertImageError := func(err error) {
+		t.Helper()
+		var imageErr *RuntimeProductImageError
+		if !errors.As(err, &imageErr) || imageErr.Cause == nil {
+			t.Fatalf("IMAGE-ERROR lost admission cause: %v", err)
+		}
+	}
+	_, err := mergeServerWeeklyRefreshTimer(m, "", nil)
+	assertImageError(err)
+	workspace := &config.ServerManifest{Name: "image-error-workspace", Kind: config.KindWorkspaceScoped, DaemonTemplate: &config.DaemonTemplate{}}
+	_, err = serenaOrPlanDaemons(workspace, nil, "", []WorkspaceEntry{{WorkspacePath: root, Language: SerenaLanguageSentinel}}, "", io.Discard)
+	assertImageError(err)
+	plan := testSupervisorIntentPlan(m, "")
+	var output bytes.Buffer
+	err = NewAPI().printSupervisorGlobalInstallDryRun(m, plan, "", &output)
+	assertImageError(err)
+	if output.Len() != 0 {
+		t.Fatalf("image failure became a dry-run success/advisory: %s", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("failed image admission mutated intent: %v", err)
+	}
+}
 
 func bindTestPlanManifestHash(plan *Plan) *Plan {
 	bindPlanSupervisorIntentManifestHash(plan, testExactManifestHash)
@@ -132,6 +166,8 @@ type fakeInstallAutostartBackend struct {
 	statusReturn autostart.State
 	statusErr    error
 	enableErr    error
+	disableErr   error
+	disableCalls int
 	enableCalls  int
 	enableOpts   []autostart.Options
 	statusOpts   []autostart.Options
@@ -143,7 +179,14 @@ func (f *fakeInstallAutostartBackend) Enable(opts autostart.Options) error {
 	return f.enableErr
 }
 
-func (f *fakeInstallAutostartBackend) Disable() error { return nil }
+func (f *fakeInstallAutostartBackend) Disable() error {
+	f.disableCalls++
+	if f.disableErr != nil {
+		return f.disableErr
+	}
+	f.statusReturn = autostart.StateAbsent
+	return nil
+}
 
 func (f *fakeInstallAutostartBackend) Status(opts autostart.Options) (autostart.State, error) {
 	f.statusOpts = append(f.statusOpts, opts)
@@ -157,9 +200,55 @@ func (f *fakeInstallAutostartBackend) StatusSnapshot(opts autostart.Options) (au
 
 func installFakeAutostartBackend(t *testing.T, fb *fakeInstallAutostartBackend) {
 	t.Helper()
+	// The production Windows reconciliation now reads the shared GUI settings
+	// owner. Keep that new observed/locked path inside this test's hardened root.
+	t.Setenv("LOCALAPPDATA", hardenedTempDir(t))
 	orig := installAutostartBackendFactoryFn
 	installAutostartBackendFactoryFn = func() (autostart.Backend, error) { return fb, nil }
 	t.Cleanup(func() { installAutostartBackendFactoryFn = orig })
+}
+
+func TestEnsureGlobalInstallAutostartOwner_ExplicitWindowsOffPreserved(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("GUI boot policy projects only the Windows owner")
+	}
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateEnabledStopped}
+	installFakeAutostartBackend(t, fb)
+	canonical := filepath.Join(hardenedTempDir(t), MCPHubBinaryName())
+	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
+	path := SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("gui.autorun_enabled: \"false\"\nother.preference: retained\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ensureGlobalInstallAutostartOwner(io.Discard, false, OwnerModeGUI)
+	if fb.enableCalls != 0 || fb.disableCalls != 1 || len(fb.statusOpts) != 1 {
+		t.Fatalf("OFF projection: enable=%d disable=%d status=%d", fb.enableCalls, fb.disableCalls, len(fb.statusOpts))
+	}
+	if state, err := fb.Status(autostart.Options{}); err != nil || state != autostart.StateAbsent {
+		t.Fatalf("restored shim survived OFF: state=%s err=%v", state, err)
+	}
+	ensureGlobalInstallAutostartOwner(io.Discard, false, OwnerModeGUI)
+	if fb.disableCalls != 2 || fb.enableCalls != 0 || fb.statusReturn != autostart.StateAbsent {
+		t.Fatalf("absent OFF not idempotent: disable=%d enable=%d state=%s", fb.disableCalls, fb.enableCalls, fb.statusReturn)
+	}
+	fb.statusReturn = autostart.StateEnabledStopped
+	fb.disableErr = errors.New("injected restored Task removal failure")
+	var warnings bytes.Buffer
+	ensureGlobalInstallAutostartOwner(&warnings, false, OwnerModeGUI)
+	if fb.disableCalls != 3 || fb.enableCalls != 0 || fb.statusReturn != autostart.StateEnabledStopped || !strings.Contains(warnings.String(), fb.disableErr.Error()) {
+		t.Fatalf("OFF removal failure lost: disable=%d enable=%d state=%s warning=%q", fb.disableCalls, fb.enableCalls, fb.statusReturn, warnings.String())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("OFF/settings bytes changed: err=%v after=%q", err, after)
+	}
 }
 
 // TestExecuteInstallTo_PassAPassB_Separation asserts the two-pass
@@ -1070,7 +1159,10 @@ func TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer
 		WeeklyRefresh: false,
 	}
 
-	full := mergeServerWeeklyRefreshTimer(m, "", prior)
+	full, err := mergeServerWeeklyRefreshTimer(m, "", prior)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(full) != 1 {
 		t.Fatalf("full install timers = %d, want 1 sibling only; timers=%+v", len(full), full)
 	}
@@ -1078,7 +1170,10 @@ func TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer
 		t.Fatalf("full install did not preserve sibling timer verbatim:\n got  %+v\n want %+v", full[0], siblingTimer)
 	}
 
-	filtered := mergeServerWeeklyRefreshTimer(m, "alpha", prior)
+	filtered, err := mergeServerWeeklyRefreshTimer(m, "alpha", prior)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(filtered, prior) {
 		t.Fatalf("filtered install mutated timers; got %+v want prior %+v", filtered, prior)
 	}
@@ -1093,6 +1188,7 @@ func TestMergeServerWeeklyRefreshTimer_FullInstallWeeklyFalseDropsOnlyThisServer
 // blank-Server prior timer survives alongside the fresh timer, so the owned
 // timer count becomes 2.
 func TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDuplicate(t *testing.T) {
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(t.TempDir(), "mcphub.exe")))
 	disabled := false
 	prior := []MaintenanceTimer{
 		{
@@ -1117,7 +1213,10 @@ func TestMergeServerWeeklyRefreshTimer_BlankServerNameFallbackReplacesWithoutDup
 		WeeklyRefresh: true,
 	}
 
-	got := mergeServerWeeklyRefreshTimer(m, "", prior)
+	got, err := mergeServerWeeklyRefreshTimer(m, "", prior)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var owned []MaintenanceTimer
 	var sawSibling bool
 	for _, tm := range got {
@@ -1979,6 +2078,64 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 	}
 }
 
+func TestInstallPlanCore_GlobalDryRunSerenaDoesNotRequirePreparedSelection(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	f := newInstallFakeScheduler()
+	installFakeScheduler(t, f)
+
+	m := &config.ServerManifest{
+		Name: "serena",
+		Kind: config.KindGlobal,
+		Daemons: []config.DaemonSpec{
+			{Name: "unified", Port: 9121},
+		},
+	}
+	plan := testSupervisorIntentPlan(m, "unified")
+	plan.Server = m.Name
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	prior := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-serena-unified`, Server: "serena", Daemon: "unified", Command: "prior-mcphub", Port: 9120},
+			{TaskName: `\mcp-local-hub-other-daemon`, Server: "other", Daemon: "daemon", Command: "keep-mcphub", Port: 9122},
+		},
+	}
+	if err := WriteSupervisorIntent(intentPath, prior); err != nil {
+		t.Fatalf("seed valid supervisor intent: %v", err)
+	}
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read seeded supervisor intent: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := NewAPI().installPlanCore(context.Background(), m, plan, "unified", true, &output); err != nil {
+		t.Fatalf("Serena static preview without prepared selection: %v", err)
+	}
+	for _, want := range []string{`Install plan for server "serena"`, "mcp-local-hub-serena-unified", "[port 9121]", "No changes made."} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("Serena static preview missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Prior supervisor-intent diff unavailable") || strings.Contains(output.String(), "SERENA_INSTALL_QUALIFIED_SELECTION_REQUIRED") {
+		t.Fatalf("valid prior diff incorrectly requires prepared runtime selection:\n%s", output.String())
+	}
+	if plan.serenaPreparedBinding != nil || plan.serenaPreparedRecord != nil {
+		t.Fatal("static preview fabricated prepared runtime selection")
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("Serena static preview changed prior intent: read error=%v", err)
+	}
+	if f.createCount != 0 || f.runCount != 0 {
+		t.Fatalf("Serena static preview mutated scheduler: create=%d run=%d", f.createCount, f.runCount)
+	}
+	if _, err := serenaOrPlanDaemons(m, plan, "", nil, "unified", io.Discard); err == nil || err.Error() != "SERENA_INSTALL_QUALIFIED_SELECTION_REQUIRED" {
+		t.Fatalf("runtime projection without selection must still refuse: %v", err)
+	}
+}
+
 func TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir(t *testing.T) {
 	statePathsHelper(t)
 	stateDir := filepath.Join(t.TempDir(), "missing-state")
@@ -2026,7 +2183,7 @@ func TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan(t *testing.T) 
 	installFakeScheduler(t, f)
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	before := []byte("{ this is not valid json")
-	if err := os.WriteFile(intentPath, before, 0o600); err != nil {
+	if err := secureWriteStateFileWithOperatorOpt(intentPath, before); err != nil {
 		t.Fatalf("seed corrupt supervisor intent: %v", err)
 	}
 

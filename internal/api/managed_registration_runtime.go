@@ -33,6 +33,7 @@ type managedRegistrationFrozenInstallInput struct {
 type managedRegistrationReleaseIdentity struct{ Version, Commit string }
 
 type managedRegistrationFrozenInstallTarget struct {
+	ProjectAttachment                             bool
 	ClientID, LogicalEntryName, PhysicalEntryName string
 	Action                                        ClientUpdateAction
 	DaemonName, TaskName                          string
@@ -144,7 +145,7 @@ func cloneManagedRegistrationStringMap(values map[string]string) map[string]stri
 }
 
 func validateManagedRegistrationFrozenTarget(server string, target managedRegistrationFrozenInstallTarget) error {
-	if target.Action != ClientUpdateAddReplace || !managedRegistrationSafeIdentifier(target.ClientID) || target.LogicalEntryName != server || !managedRegistrationSafeIdentifier(target.PhysicalEntryName) || !managedRegistrationSafeIdentifier(target.DaemonName) || !managedRegistrationSafeIdentifier(target.TaskName) || target.Port < 1 || target.Port > 65535 || target.Desired.Name != target.PhysicalEntryName || target.Desired.Raw != nil || target.Desired.ToolTimeoutSec < 0 || !managedRegistrationFrozenURLPathValid(target.URLPath) {
+	if target.Action != ClientUpdateAddReplace || !managedRegistrationSafeIdentifier(target.ClientID) || (!target.ProjectAttachment && target.LogicalEntryName != server) || !managedRegistrationSafeIdentifier(target.LogicalEntryName) || !managedRegistrationSafeIdentifier(target.PhysicalEntryName) || !managedRegistrationSafeIdentifier(target.DaemonName) || !managedRegistrationSafeIdentifier(target.TaskName) || target.Port < 1 || target.Port > 65535 || target.Desired.Name != target.PhysicalEntryName || target.Desired.Raw != nil || target.Desired.ToolTimeoutSec < 0 || !managedRegistrationFrozenURLPathValid(target.URLPath) {
 		return newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeInvalid, nil)
 	}
 	expectedURL := fmt.Sprintf("http://127.0.0.1:%d%s", target.Port, target.URLPath)
@@ -157,6 +158,12 @@ func validateManagedRegistrationFrozenTarget(server string, target managedRegist
 		return newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeInvalid, nil)
 	}
 	alias := target.PhysicalEntryName != target.LogicalEntryName
+	if target.ProjectAttachment {
+		if target.ClientID != "codex-cli" || target.PhysicalEntryName != target.LogicalEntryName+"-mcphub" || target.Codex != nil {
+			return newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeInvalid, nil)
+		}
+		return nil
+	}
 	if target.Codex == nil {
 		if target.ClientID == "codex-cli" && alias {
 			return newManagedRegistrationFailure(ManagedRegistrationFailureRuntimeInvalid, nil)
@@ -189,6 +196,7 @@ func managedRegistrationFrozenSourceReceipt(input managedRegistrationFrozenInsta
 		return strings.Join([]string{targets[i].ClientID, targets[i].LogicalEntryName, targets[i].PhysicalEntryName, targets[i].DaemonName, targets[i].TaskName}, "\x00") < strings.Join([]string{targets[j].ClientID, targets[j].LogicalEntryName, targets[j].PhysicalEntryName, targets[j].DaemonName, targets[j].TaskName}, "\x00")
 	})
 	for _, target := range targets {
+		parts = append(parts, strconv.FormatBool(target.ProjectAttachment))
 		parts = append(parts, target.ClientID, target.LogicalEntryName, target.PhysicalEntryName, string(target.Action), target.DaemonName, target.TaskName, strconv.Itoa(target.Port), target.URLPath, target.Desired.Name, target.Desired.URL, target.Desired.RelayServer, target.Desired.RelayDaemon, target.Desired.RelayExePath, target.Desired.RelayURL, strconv.Itoa(target.Desired.ToolTimeoutSec), strconv.FormatBool(target.Desired.Disabled))
 		parts = append(parts, managedRegistrationFrozenMapParts(target.Desired.Headers)...)
 		parts = append(parts, managedRegistrationFrozenMapParts(target.Desired.Env)...)

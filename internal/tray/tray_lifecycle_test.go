@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -84,20 +85,32 @@ func (w *recordingWriteCloser) Close() error {
 }
 
 type controlledAttempt struct {
-	attempt *childAttempt
-	stdin   *recordingWriteCloser
-	stdoutW *io.PipeWriter
-	exitCh  chan error
-	done    chan struct{}
-	one     sync.Once
+	attempt      *childAttempt
+	stdin        *recordingWriteCloser
+	stdoutW      *io.PipeWriter
+	exitCh       chan error
+	done         chan struct{}
+	one          sync.Once
+	killed       error
+	stdoutCloses atomic.Int32
 
 	mu        sync.Mutex
 	waitCalls int
 	events    []string
 }
 
+type countedAttemptOutput struct {
+	io.ReadCloser
+	closes *atomic.Int32
+}
+
+func (output *countedAttemptOutput) Close() error {
+	output.closes.Add(1)
+	return output.ReadCloser.Close()
+}
+
 func newControlledAttempt(exitOnStdinClose bool) *controlledAttempt {
-	a := &controlledAttempt{exitCh: make(chan error, 1), done: make(chan struct{})}
+	a := &controlledAttempt{exitCh: make(chan error, 1), done: make(chan struct{}), killed: errors.New("killed")}
 	a.stdin = newRecordingWriteCloser(func() {
 		a.record("close")
 		if exitOnStdinClose {
@@ -106,18 +119,22 @@ func newControlledAttempt(exitOnStdinClose bool) *controlledAttempt {
 	})
 	stdoutR, stdoutW := io.Pipe()
 	a.stdoutW = stdoutW
+	output := &countedAttemptOutput{ReadCloser: stdoutR, closes: &a.stdoutCloses}
 	a.attempt = &childAttempt{
 		stdin:  a.stdin,
-		stdout: stdoutR,
+		stdout: output,
 		wait: func() error {
 			a.mu.Lock()
 			a.waitCalls++
 			a.mu.Unlock()
-			return <-a.exitCh
+			err := <-a.exitCh
+			// Model the existing Cmd.Wait contract: its final pipe close is
+			// received only after the application readers are complete.
+			return errors.Join(err, output.Close())
 		},
 		kill: func() error {
 			a.record("kill")
-			a.finish(errors.New("killed"))
+			a.finish(a.killed)
 			return nil
 		},
 	}
@@ -142,6 +159,149 @@ func (a *controlledAttempt) snapshot() (int, []string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.waitCalls, append([]string(nil), a.events...)
+}
+
+type settlementInput struct {
+	io.WriteCloser
+	closeErr     error
+	closes       atomic.Int32
+	writeEntered chan struct{}
+	writeRelease chan struct{}
+	enterOnce    sync.Once
+	releaseOnce  sync.Once
+}
+
+func (input *settlementInput) Write(raw []byte) (int, error) {
+	if input.writeEntered == nil {
+		return input.WriteCloser.Write(raw)
+	}
+	input.enterOnce.Do(func() { close(input.writeEntered) })
+	<-input.writeRelease
+	return 0, io.ErrClosedPipe
+}
+
+func (input *settlementInput) Close() error {
+	input.closes.Add(1)
+	err := input.WriteCloser.Close()
+	if input.writeRelease != nil {
+		input.releaseOnce.Do(func() { close(input.writeRelease) })
+	}
+	return errors.Join(err, input.closeErr)
+}
+
+func TestFailedKillRetainsOriginalAttemptUntilWaitAndAllErrorsReturn(t *testing.T) {
+	for _, mode := range []string{"served cancellation", "served stream failure", "unserved cancellation", "unserved drain failure", "blocked writer cancellation"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			child := newControlledAttempt(false)
+			closeCause, waitCause, readCause := errors.New("controlled input close"), errors.New("controlled original Wait"), errors.New("controlled event read")
+			killCause := fmt.Errorf("controlled private fixture path: %w", os.ErrPermission)
+			input := &settlementInput{WriteCloser: child.stdin, closeErr: closeCause}
+			if mode == "blocked writer cancellation" {
+				input.writeEntered, input.writeRelease = make(chan struct{}), make(chan struct{})
+			}
+			child.attempt.stdin = input
+			var kills, waits, launches atomic.Int32
+			child.attempt.kill = func() error { kills.Add(1); return killCause }
+			originalWait := child.attempt.wait
+			waitGate := make(chan struct{})
+			child.attempt.wait = func() error { waits.Add(1); <-waitGate; return originalWait() }
+			served := make(chan struct{})
+			var serveOnce sync.Once
+			clock := &testLifecycleClock{now: time.Unix(1, 0), waitFn: func(ctx context.Context, duration time.Duration) bool {
+				if duration == lifecycleShutdownTimeout {
+					return true
+				}
+				if duration == lifecycleStableAfter {
+					serveOnce.Do(func() { close(served) })
+				}
+				<-ctx.Done()
+				return false
+			}}
+			reports := make(chan LifecycleReport, 1)
+			state := make(chan TrayState, 1)
+			if input.writeEntered != nil {
+				state <- StateHealthy
+			}
+			done := make(chan error, 1)
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { child.finish(waitCause); close(waitGate) }) }
+			received := false
+			t.Cleanup(func() {
+				cancel()
+				release()
+				if !received {
+					select {
+					case <-done:
+					case <-time.After(2 * time.Second):
+						t.Error("controlled tray fixture did not settle after release")
+					}
+				}
+			})
+			go func() {
+				done <- runLifecycle(ctx, Config{StateCh: state, LifecycleReport: func(report LifecycleReport) { reports <- report }}, lifecycleDeps{clock: clock, launch: func() (*childAttempt, lifecyclePhase, error) {
+					launches.Add(1)
+					if mode == "unserved cancellation" || mode == "unserved drain failure" {
+						if mode == "unserved drain failure" {
+							if err := child.stdoutW.CloseWithError(readCause); err != nil {
+								return child.attempt, lifecyclePhaseChildExit, err
+							}
+						}
+						cancel()
+					}
+					return child.attempt, "", nil
+				}})
+			}()
+			if mode != "unserved cancellation" && mode != "unserved drain failure" {
+				<-served
+				if input.writeEntered != nil {
+					<-input.writeEntered
+				}
+				if mode == "served stream failure" {
+					if err := child.stdoutW.CloseWithError(readCause); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					cancel()
+				}
+			}
+			var report LifecycleReport
+			select {
+			case report = <-reports:
+			case <-time.After(2 * time.Second):
+				t.Fatal("failed original Kill was not exposed while settlement remained pending")
+			}
+			if report.Type != lifecycleEventSettlementUnconfirmed || report.ErrorDetail != "permission denied" || report.Attempt != 1 || report.NextRetryMS != 0 {
+				t.Fatalf("unsafe or incorrect pending report: %#v", report)
+			}
+			if launches.Load() != 1 || kills.Load() != 1 || input.closes.Load() != 1 {
+				t.Fatalf("extra ownership action: launch=%d kill=%d close=%d", launches.Load(), kills.Load(), input.closes.Load())
+			}
+			select {
+			case err := <-done:
+				received = true
+				t.Fatalf("custody escaped before original Wait release: %v", err)
+			default:
+			}
+			cancel()
+			release()
+			err := <-done
+			received = true
+			if !errors.Is(err, killCause) || !errors.Is(err, closeCause) || !errors.Is(err, waitCause) {
+				t.Fatalf("lost acquired cleanup causes: %v", err)
+			}
+			if (mode == "served stream failure" || mode == "unserved drain failure") && !errors.Is(err, readCause) {
+				t.Fatalf("lost prior read/drain error: %v", err)
+			}
+			if mode == "blocked writer cancellation" && !errors.Is(err, io.ErrClosedPipe) {
+				t.Fatalf("lost blocked writer outcome: %v", err)
+			}
+			primitiveWaits, _ := child.snapshot()
+			if waits.Load() != 1 || primitiveWaits != 1 || child.stdoutCloses.Load() != 1 || input.closes.Load() != 1 {
+				t.Fatalf("duplicate finalization: wrapperWait=%d originalWait=%d stdoutClose=%d inputClose=%d", waits.Load(), primitiveWaits, child.stdoutCloses.Load(), input.closes.Load())
+			}
+		})
+	}
 }
 
 func TestRunRetriesWithExactBackoffAndThirtySecondReset(t *testing.T) {
@@ -372,6 +532,7 @@ func (r *cancelEOFReader) Read([]byte) (int, error) {
 func TestRunCancellationAlreadyWonDoesNotReportFailure(t *testing.T) {
 	t.Run("launch failure", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
+		launchCause, closeCause := errors.New("controlled canceled launch"), errors.New("controlled setup close")
 		var reports []LifecycleReport
 		clock := &testLifecycleClock{now: time.Unix(1, 0), waitFn: func(context.Context, time.Duration) bool {
 			t.Fatal("canceled launch failure must not enter backoff")
@@ -381,10 +542,10 @@ func TestRunCancellationAlreadyWonDoesNotReportFailure(t *testing.T) {
 			reports = append(reports, report)
 		}}, lifecycleDeps{launch: func() (*childAttempt, lifecyclePhase, error) {
 			cancel()
-			return nil, lifecyclePhaseSpawn, errors.New("canceled launch")
+			return nil, lifecyclePhaseSpawn, errors.Join(launchCause, closeCause)
 		}, clock: clock})
-		if err != nil {
-			t.Fatalf("runLifecycle: %v", err)
+		if !errors.Is(err, launchCause) || !errors.Is(err, closeCause) {
+			t.Fatalf("cancellation hid already-acquired setup errors: %v", err)
 		}
 		if len(reports) != 0 {
 			t.Fatalf("reports after cancellation won = %#v, want none", reports)
@@ -496,7 +657,7 @@ func TestRunCancellationSettlesAttemptAndJoins(t *testing.T) {
 		}
 	})
 
-	t.Run("hung child closes gracefully before owned kill", func(t *testing.T) {
+	t.Run("hung child input closes before owned kill and Wait failure survives", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		clock := &testLifecycleClock{now: time.Unix(1, 0)}
 		clock.waitFn = func(ctx context.Context, d time.Duration) bool {
@@ -518,8 +679,8 @@ func TestRunCancellationSettlesAttemptAndJoins(t *testing.T) {
 		}()
 		<-launched
 		cancel()
-		if err := <-done; err != nil {
-			t.Fatalf("runLifecycle: %v", err)
+		if err := <-done; !errors.Is(err, child.killed) {
+			t.Fatalf("runLifecycle lost original killed-child Wait failure: %v", err)
 		}
 		waitCalls, events := child.snapshot()
 		if waitCalls != 1 {

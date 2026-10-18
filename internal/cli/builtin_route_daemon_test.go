@@ -48,6 +48,7 @@ import (
 // the orphan-drop bug this test exists to catch. Reverted after confirming
 // the failure; see the implementation report for the transcript.
 func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	stateDir := apitest.HardenedTempDir(t)
 
 	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
@@ -87,6 +88,7 @@ func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.
 }
 
 func TestEnsureBuiltinRouteDaemonAtStartup_StableFrontKeepsAdmittedPortAcrossRequestedChange(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	const (
 		admittedPort  = 19137
 		requestedPort = 19138
@@ -107,6 +109,7 @@ func TestEnsureBuiltinRouteDaemonAtStartup_StableFrontKeepsAdmittedPortAcrossReq
 }
 
 func TestEnsureBuiltinRouteDaemonAtStartup_PreparingRebaseUsesAdmittedPort(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	const (
 		admittedPort  = 20137
 		requestedPort = 20138
@@ -227,6 +230,7 @@ func readLastBuiltinRouteEnsuredEvent(t *testing.T, path string) api.SupervisorE
 // plan runs ahead of disk" bug the next 60s IntentWatcher poll would then
 // have to un-do by killing the freshly-spawned daemon as an orphan.
 func TestEnsureBuiltinRouteDaemonAtStartup_PersistFailurePreservesExistingRow(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	parent := t.TempDir()
 	stateDir := filepath.Join(parent, "not-a-directory")
 	if err := os.WriteFile(stateDir, []byte("not a directory"), 0o600); err != nil {
@@ -277,6 +281,7 @@ func TestEnsureBuiltinRouteDaemonAtStartup_PersistFailurePreservesExistingRow(t 
 // this test fail — the row's port would be silently rewritten to
 // api.DefaultMCPFrontPort (9137) despite the corrupt settings file.
 func TestEnsureBuiltinRouteDaemonAtStartup_PortResolutionFailurePreservesExistingRow(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	// api.SettingsPath (unlike api.DaemonStateDir) reads LOCALAPPDATA
 	// directly, not the in-memory daemonStateRootOverride — mirrors
 	// api.DefaultRegistryPath. t.Setenv overrides internal/cli's TestMain

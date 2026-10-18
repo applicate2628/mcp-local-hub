@@ -25,6 +25,12 @@ weekly_refresh: false
 func seedAdoptProfileUpdate(t *testing.T) (string, AdoptProvenanceRecord, InstallSupervisorIntentTarget) {
 	t.Helper()
 	root := t.TempDir()
+	// This fixture models intent/provenance only; no product image is launched.
+	canonical := filepath.Join(root, mcphubShortName)
+	if err := os.WriteFile(canonical, []byte("synthetic intent-only descriptor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
 	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 	path := filepath.Join(root, "profile-update", "manifest.yaml")
@@ -90,6 +96,7 @@ func TestAdoptProfileUpdatePlanDryRunHashesAndRestartOnly(t *testing.T) {
 
 func TestAdoptProfileUpdateExecuteIntentOnlyPreservesSibling(t *testing.T) {
 	_, rec, old := seedAdoptProfileUpdate(t)
+	graphifyName, graphifyBefore := seedAdoptProfileGraphifySibling(t, AdoptOperationStateDefined)
 	p, _ := DefaultSupervisorIntentPath()
 	intent, _ := ReadSupervisorIntent(p)
 	intent.Daemons = append(intent.Daemons, SupervisorDaemon{TaskName: "\\sibling", Server: "sibling", Daemon: "default", Port: 9999})
@@ -103,6 +110,7 @@ func TestAdoptProfileUpdateExecuteIntentOnlyPreservesSibling(t *testing.T) {
 	if err := NewAPI().ExecuteAdoptProfileUpdate(plan, AdoptProfileUpdateOpts{}); err != nil {
 		t.Fatal(err)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	got, found, _ := ReadAdoptProvenance(rec.ManifestName)
 	if !found || got.AdoptManifestHash != rec.AdoptManifestHash || got.ExpectedManifestHash != plan.NewManifestHash || got.MCPProtocolCompatibilityProfile != plan.Profile {
 		t.Fatalf("record=%+v", got)
@@ -119,15 +127,20 @@ func TestAdoptProfileUpdateExecuteIntentOnlyPreservesSibling(t *testing.T) {
 
 func TestAdoptProfileUpdateRecoveryNewNewAndThirdTargetConflict(t *testing.T) {
 	_, rec, old := seedAdoptProfileUpdate(t)
+	graphifyName, graphifyBefore := seedAdoptProfileGraphifySibling(t, AdoptOperationStateDefined)
 	j := profileUpdateJournal(t, rec, old)
 	writeProfileUpdateJournal(t, j)
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	if err := NewAPI().recoverAdoptProfileUpdateUnderLease(rec.ManifestName); err != nil {
 		t.Fatalf("old/old forward: %v", err)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	writeProfileUpdateJournal(t, j)
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	if err := NewAPI().recoverAdoptProfileUpdateUnderLease(rec.ManifestName); err != nil {
 		t.Fatalf("new/new clear: %v", err)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	writeProfileUpdateJournal(t, j)
 	p, _ := DefaultSupervisorIntentPath()
 	intent, _ := ReadSupervisorIntent(p)
@@ -144,10 +157,12 @@ func TestAdoptProfileUpdateRecoveryNewNewAndThirdTargetConflict(t *testing.T) {
 	if !errors.As(err, &failure) || failure.FailureID != AdoptProfileUpdateRecovery {
 		t.Fatalf("err=%v failure=%+v", err, failure)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 }
 
 func TestAdoptProfileUpdateRecoveryOldNewRestoresTargetBeforeReceipt(t *testing.T) {
 	root, rec, old := seedAdoptProfileUpdate(t)
+	graphifyName, graphifyBefore := seedAdoptProfileGraphifySibling(t, AdoptOperationStateClosed)
 	j := profileUpdateJournal(t, rec, old)
 	// Simulate a completed forward update followed by a crash after manifest
 	// rollback but before target/provenance restoration.
@@ -175,6 +190,7 @@ func TestAdoptProfileUpdateRecoveryOldNewRestoresTargetBeforeReceipt(t *testing.
 	if err := markAdoptProfileUpdateRollback(rec.ManifestName); err != nil {
 		t.Fatal(err)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 	if err := os.WriteFile(filepath.Join(root, rec.ManifestName, "manifest.yaml"), []byte(profileUpdateFixture), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +205,7 @@ func TestAdoptProfileUpdateRecoveryOldNewRestoresTargetBeforeReceipt(t *testing.
 	if got.ExpectedManifestHash != j.OldManifestHash || got.MCPProtocolCompatibilityProfile != "" {
 		t.Fatalf("record=%+v", got)
 	}
+	assertAdoptProfileGraphifySibling(t, graphifyName, graphifyBefore)
 }
 
 func TestMaterializeSupervisorIntentTargetRejectsClientSettlement(t *testing.T) {

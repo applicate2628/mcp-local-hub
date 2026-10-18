@@ -148,6 +148,9 @@ func startProviderInstallForTask(manifestName, taskName string) (bool, error) {
 			if rec.ProviderSource == nil || rec.ManifestName != manifestName {
 				continue
 			}
+			if rec.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
+			}
 			expected := canonicalIntentTaskKey("mcp-local-hub-" + rec.ManifestName + "-" + adoptDefaultDaemonName)
 			if expected != canonical {
 				continue
@@ -189,6 +192,9 @@ func startProviderInstallForTask(manifestName, taskName string) (bool, error) {
 }
 
 func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
+	if rec != nil && rec.ProjectService != nil {
+		return false, errGraphifyServiceOperationRequired
+	}
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -282,7 +288,7 @@ func bootstrapLegacyProviderManagedSettled(manifestName string) bool {
 			if candidate.ManifestName != manifestName {
 				continue
 			}
-			if current != nil || candidate.ProviderSource == nil {
+			if current != nil || candidate.ProviderSource == nil || candidate.ProjectService != nil {
 				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 			}
 			current = candidate
@@ -325,7 +331,7 @@ func providerInstallPhaseAllowsRestore(manifestName string) bool {
 		return false
 	}
 	current, found, err := ReadAdoptProvenance(manifestName)
-	if err != nil || !found || current.ProviderSource == nil {
+	if err != nil || !found || current.ProviderSource == nil || current.ProjectService != nil {
 		return false
 	}
 	claimed, err := providerInstallNeverStarted(current)
@@ -360,7 +366,7 @@ func settleProviderInstallStarted(name, phase string) error {
 			if rec.ManifestName != name {
 				continue
 			}
-			if rec.ProviderSource == nil || rec.OperationState != AdoptOperationStateAdopting {
+			if rec.ProviderSource == nil || rec.OperationState != AdoptOperationStateAdopting || rec.ProjectService != nil {
 				return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 			}
 			matches++

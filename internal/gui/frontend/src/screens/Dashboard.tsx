@@ -11,6 +11,7 @@ import {
   isDaemonRecoverErrorCode,
   newDaemonRecoverCorrelation,
   postDaemonRecover,
+  projectSupervisorRestartFeedback,
   restartSupervisor,
 } from "../api";
 import type {
@@ -1997,20 +1998,8 @@ function RecoveryActions(props: {
     setMsg(null);
     try {
       const res = await restartSupervisor();
-      const parts: string[] = [];
-      if (res.killed) parts.push(`killed PID ${res.killed_pid}`);
-      if (res.spawned) parts.push(`spawned PID ${res.spawned_pid}`);
-      if (parts.length === 0) parts.push("no-op");
-      const stepErrs = Object.entries(res.per_step_error ?? {});
-      const errSuffix = stepErrs.length > 0
-        ? `; step errors: ${stepErrs.map(([k, v]) => `${k}=${v}`).join(", ")}`
-        : "";
-      setMsg({
-        text: `Supervisor: ${parts.join(", ")}${errSuffix}.`,
-        kind: res.spawned ? "ok" : "error",
-      });
-      // Give the new supervisor a moment to bind IPC, then refetch.
-      setTimeout(() => props.onReloadStatus(), 1500);
+      setMsg(projectSupervisorRestartFeedback(res));
+      props.onReloadStatus();
     } catch (err) {
       setMsg({ text: (err as Error).message, kind: "error" });
     } finally {
@@ -2063,6 +2052,7 @@ function RecoveryActions(props: {
         <span
           class={msg.kind === "error" ? "error" : "info"}
           data-testid="recovery-msg"
+          role={msg.kind === "error" ? "alert" : "status"}
           style="margin-left: 8px"
         >
           {msg.text}
