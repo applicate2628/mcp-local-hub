@@ -774,6 +774,21 @@ func (b *builder) vcpkgInstall() mcp.Tool {
 				argv = append(argv, "--clean-after-build")
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultVcpkgTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, vcpkgBin, argv)
 			if err != nil {
 				return nil, err

@@ -38,7 +38,7 @@ func TestProjectOperationWaitIsCancellableAndIsolated(t *testing.T) {
 	}
 }
 
-func TestConfigureAndCleanWaitForProjectOperation(t *testing.T) {
+func TestMutatingToolsWaitForProjectOperation(t *testing.T) {
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -48,9 +48,14 @@ func TestConfigureAndCleanWaitForProjectOperation(t *testing.T) {
 	copyExe(t, self, filepath.Join(filepath.Dir(fake), exeName("ctest")))
 	t.Setenv("CMAKE_BIN", fake)
 	t.Setenv("MCP_CBUILD_FAKE_ARGV", "1")
-	for _, operation := range []string{"configure", "build", "test", "clean", "purge", "workflow"} {
+	copyExe(t, self, filepath.Join(filepath.Dir(fake), exeName("vcpkg")))
+	t.Setenv("VCPKG_ROOT", filepath.Dir(fake))
+	for _, operation := range []string{"configure", "build", "test", "clean", "purge", "workflow", "vcpkg_install"} {
 		t.Run(operation, func(t *testing.T) {
 			source := t.TempDir()
+			if err := os.WriteFile(filepath.Join(source, "vcpkg.json"), []byte(`{"name":"lock-test","version-string":"1"}`), 0600); err != nil {
+				t.Fatal(err)
+			}
 			dev := writeCleanCache(t, source, "dev")
 			b := &builder{configured: make(map[configuredCacheKey]string)}
 			if _, err := b.settleConfiguredCache(source, "dev", "-- Build files have been written to: "+dev); err != nil {
@@ -71,6 +76,8 @@ func TestConfigureAndCleanWaitForProjectOperation(t *testing.T) {
 				tool = b.cmakeBuild()
 			case "test":
 				tool = b.cmakeTest()
+			case "vcpkg_install":
+				tool = b.vcpkgInstall()
 			}
 			raw, err := json.Marshal(map[string]any{
 				"working_dir": source, "preset": "dev", "purge_build_dir": operation == "purge",

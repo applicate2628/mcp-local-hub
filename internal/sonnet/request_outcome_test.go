@@ -180,3 +180,77 @@ func TestRequestHashPathCaseFollowsPlatformIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestReplayDoesNotRequireProductDiscovery(t *testing.T) {
+	for _, discoveryFailure := range []string{"missing", "ambiguous", "unavailable"} {
+		t.Run(discoveryFailure, func(t *testing.T) {
+			root, storeRoot := writeProject(t), t.TempDir()
+			driver := &fakeDriver{}
+			cfg := testConfig(storeRoot, driver)
+			workingLocator := cfg.Locator
+			discoveryCalls := 0
+			failDiscovery := false
+			cfg.Locator = func() (Product, error) {
+				discoveryCalls++
+				if !failDiscovery {
+					return workingLocator()
+				}
+				switch discoveryFailure {
+				case "missing":
+					return Product{}, errors.New("SONNET_PRODUCT_NOT_FOUND")
+				case "ambiguous":
+					return Product{}, errors.New("SONNET_PRODUCT_AMBIGUOUS")
+				default:
+					return Product{}, nil
+				}
+			}
+			s := NewServer(cfg)
+			defer func() { _ = s.Close(context.Background()) }()
+			req := StartRequest{ProjectRoot: root, ProjectFile: "sample.son", TimeoutSeconds: 10, IdempotencyKey: "durable"}
+			first, err := s.Start(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitTerminal(t, s, first.RunID)
+			failDiscovery = true
+			for _, restart := range []bool{false, true} {
+				if restart {
+					if err := s.Close(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					s = NewServer(cfg)
+					if s.initErr != nil {
+						t.Fatal(s.initErr)
+					}
+				}
+				before := discoveryCalls
+				replay, err := s.Start(context.Background(), req)
+				if err != nil || replay.RunID != first.RunID || replay.RequestDisposition != "replayed" {
+					t.Fatalf("restart=%v replay=%+v err=%v", restart, replay, err)
+				}
+				conflict := req
+				conflict.TimeoutSeconds++
+				if _, err := s.Start(context.Background(), conflict); !errors.Is(err, ErrIdempotencyConflict) {
+					t.Fatalf("restart=%v conflict=%v", restart, err)
+				}
+				if discoveryCalls != before {
+					t.Fatal("replay/conflict attempted product discovery")
+				}
+				fresh := req
+				fresh.IdempotencyKey = "new"
+				if _, err := s.Start(context.Background(), fresh); err == nil {
+					t.Fatal("new request bypassed unavailable product")
+				}
+				if discoveryCalls != before+1 {
+					t.Fatal("new request did not attempt product discovery exactly once")
+				}
+			}
+			driver.mu.Lock()
+			calls := driver.calls
+			driver.mu.Unlock()
+			if calls != 1 || countRunWorkspaces(t, storeRoot) != 1 {
+				t.Fatalf("replay/failure created work: driver calls=%d", calls)
+			}
+		})
+	}
+}

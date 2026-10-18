@@ -318,16 +318,6 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	if err != nil {
 		return StartResponse{}, err
 	}
-	p, err := s.locator()
-	if err != nil {
-		if stableFailureID(err) != "SONNET_INTERNAL_ERROR" {
-			return StartResponse{}, err
-		}
-		return StartResponse{}, fmt.Errorf("SONNET_PRODUCT_NOT_FOUND: %w", err)
-	}
-	if !p.Available || p.Path == "" {
-		return StartResponse{}, errors.New("SONNET_PRODUCT_NOT_FOUND")
-	}
 	s.mu.Lock()
 	if req.IdempotencyKey != "" {
 		if id := s.keys[req.IdempotencyKey]; id != "" {
@@ -343,6 +333,17 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		}
 	}
 	s.mu.Unlock()
+	// Durable replays depend on their recorded request, not current product discovery.
+	p, err := s.locator()
+	if err != nil {
+		if stableFailureID(err) != "SONNET_INTERNAL_ERROR" {
+			return StartResponse{}, err
+		}
+		return StartResponse{}, fmt.Errorf("SONNET_PRODUCT_NOT_FOUND: %w", err)
+	}
+	if !p.Available || p.Path == "" {
+		return StartResponse{}, errors.New("SONNET_PRODUCT_NOT_FOUND")
+	}
 	work, sourceHash, copiedHash, admission, err := s.copyProject(req.ProjectRoot, req.ProjectFile)
 	if err != nil {
 		return StartResponse{}, err
