@@ -10,16 +10,16 @@ import (
 
 // startSupervisorDetachedBreakaway adapts CLI command construction and
 // degraded diagnostics to the sole internal/process attempt-policy owner.
-func startSupervisorDetachedBreakaway(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error), policy processowner.BreakawayPolicy) (*exec.Cmd, error) {
+func startSupervisorDetachedBreakaway(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error), policy processowner.BreakawayPolicy, onStarted ...func(*exec.Cmd)) (*exec.Cmd, error) {
 	return startSupervisorDetachedBreakawayWithStart(cmd, rebuild, onDegrade, policy, func(next *exec.Cmd) error {
 		return next.Start()
-	})
+	}, onStarted...)
 }
 
 // Tests inject Start; production passes exec.Cmd.Start. Attempt count, Windows
 // flags, ERROR_ACCESS_DENIED classification, and fallback admission remain
 // owned entirely by internal/process.
-func startSupervisorDetachedBreakawayWithStart(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error), policy processowner.BreakawayPolicy, start func(*exec.Cmd) error) (*exec.Cmd, error) {
+func startSupervisorDetachedBreakawayWithStart(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error), policy processowner.BreakawayPolicy, start func(*exec.Cmd) error, onStarted ...func(*exec.Cmd)) (*exec.Cmd, error) {
 	result, err := processowner.StartWindowsBreakaway(processowner.BreakawayStartSpec{
 		Policy: policy, OptionalFallback: processowner.BreakawayFallbackFlagless,
 		Build: func(attempt processowner.BreakawayAttempt) *exec.Cmd {
@@ -28,7 +28,17 @@ func startSupervisorDetachedBreakawayWithStart(cmd *exec.Cmd, rebuild func() *ex
 			}
 			return rebuild()
 		},
-		Start: start,
+		Start: func(next *exec.Cmd) error {
+			if err := start(next); err != nil {
+				return err
+			}
+			for _, receive := range onStarted {
+				if receive != nil {
+					receive(next)
+				}
+			}
+			return nil
+		},
 	})
 	if err == nil && result.Attempt != processowner.BreakawayAttemptInitial && onDegrade != nil {
 		onDegrade(result.InitialError)

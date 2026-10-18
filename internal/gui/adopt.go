@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -16,12 +17,15 @@ import (
 )
 
 type adoptRequest struct {
-	Entry          string               `json:"entry"`
-	Client         string               `json:"client"`
-	Clients        []string             `json:"clients"`
-	Name           string               `json:"name"`
-	Port           int                  `json:"port"`
-	SymlinkConsent []adoptSymlinkTarget `json:"symlink_consent"`
+	ActionTimeout              *string              `json:"action_timeout,omitempty"`
+	Entry                      string               `json:"entry"`
+	Client                     string               `json:"client"`
+	Clients                    []string             `json:"clients"`
+	Name                       string               `json:"name"`
+	Port                       int                  `json:"port"`
+	SymlinkConsent             []adoptSymlinkTarget `json:"symlink_consent"`
+	ProjectSourceRoot          string               `json:"project_source_root,omitempty"`
+	ProjectSourcePreimageToken string               `json:"project_source_preimage_token,omitempty"`
 }
 
 type adoptSymlinkTarget struct {
@@ -34,19 +38,102 @@ type adoptSymlinkTarget struct {
 
 type adoptPlanResponse struct {
 	*api.AdoptPlan
-	SymlinkTargets []adoptSymlinkTarget `json:"symlink_targets"`
+	SymlinkTargets             []adoptSymlinkTarget `json:"symlink_targets"`
+	ProjectSourcePreimageToken string               `json:"project_source_preimage_token,omitempty"`
 }
 
 type adoptExecuteResponse struct {
-	Name           string               `json:"name"`
-	Port           int                  `json:"port"`
-	AdoptClients   []string             `json:"adopt_clients"`
-	SymlinkTargets []adoptSymlinkTarget `json:"symlink_targets"`
+	ProjectService *api.ProjectServicePlanInfo `json:"project_service,omitempty"`
+	Name           string                      `json:"name"`
+	Port           int                         `json:"port"`
+	AdoptClients   []string                    `json:"adopt_clients"`
+	SymlinkTargets []adoptSymlinkTarget        `json:"symlink_targets"`
 }
 
 func registerAdoptRoutes(s *Server) {
 	s.mux.HandleFunc("/api/adopt/plan", s.requireSameOrigin(s.adoptPlanHandler))
 	s.mux.HandleFunc("/api/adopt", s.requireSameOrigin(s.adoptHandler))
+	s.mux.HandleFunc("/api/adopt/project-service/plan", s.requireSameOrigin(s.projectServicePlanHandler))
+	s.mux.HandleFunc("/api/adopt/project-service/execute", s.requireSameOrigin(s.projectServiceExecuteHandler))
+}
+
+type projectServiceAdoptRequest struct {
+	adoptRequest
+	ProjectService                          api.ProjectServiceKind   `json:"project_service"`
+	Intent                                  api.ProjectServiceIntent `json:"intent"`
+	MCPProtocolCompatibilityProfile         string                   `json:"mcp_protocol_compatibility_profile,omitempty"`
+	MCPProtocolCompatibilityProfileExplicit bool                     `json:"mcp_protocol_compatibility_profile_explicit,omitempty"`
+}
+
+func (s *Server) projectServicePlanHandler(w http.ResponseWriter, r *http.Request) {
+	s.projectServiceAdoptHandler(w, r, false)
+}
+func (s *Server) projectServiceExecuteHandler(w http.ResponseWriter, r *http.Request) {
+	s.projectServiceAdoptHandler(w, r, true)
+}
+
+// Authorization: the same-origin wrapper owns both explicit control routes.
+// Execute freshly receives the source/plan on the original Server API, then
+// applies only that operation's private plan under its original finite budget.
+func (s *Server) projectServiceAdoptHandler(w http.ResponseWriter, r *http.Request, execute bool) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req projectServiceAdoptRequest
+	if err := decodeJSONBodyLimited(w, r, &req, maxControlBodyBytes); err != nil {
+		writeDecodeBodyError(w, err, "BAD_REQUEST")
+		return
+	}
+	if req.Name != "" || len(req.Clients) != 0 {
+		writeAdoptPlanError(w, errors.New("PROJECT_SERVICE_LEGACY_TARGET_SELECTION_FORBIDDEN"))
+		return
+	}
+	if s.api == nil {
+		writeAdoptExecuteError(w, errors.New("adopt: missing GUI API lifetime owner"), http.StatusInternalServerError, "ADOPT_FAILED")
+		return
+	}
+	ctx, cancel, err := api.ResolveCodexSharedStdioActionContext(r.Context(), req.ActionTimeout)
+	if err != nil {
+		if !writeH6ActionBudgetError(w, err) {
+			writeAdoptPlanError(w, err)
+		}
+		return
+	}
+	defer cancel()
+	plan, err := s.api.BuildProjectServicePlan(ctx, api.ProjectServiceOpts{
+		Service: req.ProjectService, Intent: req.Intent, EntryName: req.Entry, Client: req.Client, ProjectSourceRoot: req.ProjectSourceRoot, Port: req.Port,
+		MCPProtocolCompatibilityProfile: req.MCPProtocolCompatibilityProfile, MCPProtocolCompatibilityProfileExplicit: req.MCPProtocolCompatibilityProfileExplicit,
+	})
+	if err != nil {
+		writeAdoptPlanError(w, err)
+		return
+	}
+	if !execute {
+		writeJSON(w, http.StatusOK, adoptPlanResponse{AdoptPlan: plan, SymlinkTargets: []adoptSymlinkTarget{}, ProjectSourcePreimageToken: plan.ProjectSourcePreimageToken()})
+		return
+	}
+	if err := plan.ValidateProjectSourcePreimageToken(req.ProjectSourcePreimageToken); err != nil {
+		writeGUIProjectAdoptTokenError(w, err)
+		return
+	}
+	// A stopped definition has no client-config write and requires no symlink
+	// consent. Other intents cannot consume this metadata-only execution path.
+	var narration bytes.Buffer
+	err = s.api.ExecuteAdoptWithOpts(plan, &narration, api.ExecuteAdoptOpts{Context: ctx, LeaseOwner: s.adoptLeaseOwner, ReceivingVerifier: s.adoptReceivingVerifier})
+	if err != nil {
+		facts := projectServiceExecutionFacts(err)
+		if errors.Is(err, clients.ErrCodexProjectSourceChanged) {
+			writeAdoptExecuteError(w, err, http.StatusConflict, "CODEX_PROJECT_SOURCE_CHANGED", facts)
+			return
+		}
+		status, code := adoptExecuteErrorStatus(err)
+		writeAdoptExecuteError(w, err, status, code, facts)
+		return
+	}
+	s.events.PublishOperatorAction("project-service", api.CurrentOSUser(), map[string]any{"name": plan.ManifestName, "port": plan.Port, "service": req.ProjectService, "intent": req.Intent, "state": plan.ProjectService.State})
+	writeJSON(w, http.StatusCreated, adoptExecuteResponse{Name: plan.ManifestName, Port: plan.Port, AdoptClients: plan.AdoptClients, SymlinkTargets: []adoptSymlinkTarget{}, ProjectService: plan.ProjectService})
 }
 
 func (s *Server) adoptPlanHandler(w http.ResponseWriter, r *http.Request) {
@@ -60,14 +147,27 @@ func (s *Server) adoptPlanHandler(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
-	plan, targets, err := buildGUIAdoptPlan(&req)
+	actionCtx := r.Context()
+	if req.ActionTimeout != nil {
+		resolved, cancel, err := api.ResolveCodexSharedStdioActionContext(actionCtx, req.ActionTimeout)
+		if err != nil {
+			if !writeH6ActionBudgetError(w, err) {
+				writeAdoptPlanError(w, err)
+			}
+			return
+		}
+		defer cancel()
+		actionCtx = resolved
+	}
+	plan, targets, err := s.buildGUIAdoptPlan(actionCtx, &req)
 	if err != nil {
 		writeAdoptPlanError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, adoptPlanResponse{
-		AdoptPlan:      plan,
-		SymlinkTargets: targets,
+		AdoptPlan:                  plan,
+		SymlinkTargets:             targets,
+		ProjectSourcePreimageToken: plan.ProjectSourcePreimageToken(),
 	})
 }
 
@@ -82,7 +182,28 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
-	plan, targets, err := buildGUIAdoptPlan(&req)
+	actionCtx := r.Context()
+	if req.ActionTimeout != nil {
+		resolved, cancel, err := api.ResolveCodexSharedStdioActionContext(actionCtx, req.ActionTimeout)
+		if err != nil {
+			if !writeH6ActionBudgetError(w, err) {
+				writeAdoptPlanError(w, err)
+			}
+			return
+		}
+		defer cancel()
+		actionCtx = resolved
+	}
+	plan, err := s.buildGUIAdoptAPIPlan(actionCtx, &req)
+	if err != nil {
+		writeAdoptPlanError(w, err)
+		return
+	}
+	if err := plan.ValidateProjectSourcePreimageToken(req.ProjectSourcePreimageToken); err != nil {
+		writeGUIProjectAdoptTokenError(w, err)
+		return
+	}
+	targets, err := adoptSymlinkTargetsForPlan(&req, plan)
 	if err != nil {
 		writeAdoptPlanError(w, err)
 		return
@@ -94,7 +215,12 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var narration bytes.Buffer
-	err = api.NewAPI().ExecuteAdoptWithOpts(plan, &narration, api.ExecuteAdoptOpts{
+	if s.api == nil {
+		writeAdoptExecuteError(w, fmt.Errorf("adopt: missing GUI API lifetime owner"), http.StatusInternalServerError, "ADOPT_FAILED")
+		return
+	}
+	err = s.api.ExecuteAdoptWithOpts(plan, &narration, api.ExecuteAdoptOpts{
+		Context:           actionCtx,
 		SymlinkConsents:   adoptResolvedSymlinkConsents(targets),
 		LeaseOwner:        s.adoptLeaseOwner,
 		ReceivingVerifier: s.adoptReceivingVerifier,
@@ -126,22 +252,48 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func buildGUIAdoptPlan(req *adoptRequest) (*api.AdoptPlan, []adoptSymlinkTarget, error) {
-	plan, err := api.NewAPI().BuildAdoptPlan(api.AdoptOpts{
-		EntryName:    req.Entry,
-		Client:       req.Client,
-		ManifestName: req.Name,
-		Port:         req.Port,
-		Clients:      req.Clients,
-	})
+func (s *Server) buildGUIAdoptPlan(ctx context.Context, req *adoptRequest) (*api.AdoptPlan, []adoptSymlinkTarget, error) {
+	plan, err := s.buildGUIAdoptAPIPlan(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
-	targets, err := adoptSymlinkTargets(plan.AdoptClients)
+	targets, err := adoptSymlinkTargetsForPlan(req, plan)
 	if err != nil {
 		return nil, nil, err
 	}
 	return plan, targets, nil
+}
+
+func (s *Server) buildGUIAdoptAPIPlan(ctx context.Context, req *adoptRequest) (*api.AdoptPlan, error) {
+	if s.api == nil {
+		return nil, errors.New("adopt: missing GUI API lifetime owner")
+	}
+	plan, err := s.api.BuildAdoptPlan(api.AdoptOpts{
+		Context:                ctx,
+		EntryName:              req.Entry,
+		Client:                 req.Client,
+		ManifestName:           req.Name,
+		Port:                   req.Port,
+		Clients:                req.Clients,
+		CodexProjectSourceRoot: req.ProjectSourceRoot,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func adoptSymlinkTargetsForPlan(req *adoptRequest, plan *api.AdoptPlan) ([]adoptSymlinkTarget, error) {
+	clientNames := plan.AdoptClients
+	if req.ProjectSourceRoot != "" {
+		clientNames = make([]string, 0, len(plan.AdoptClients))
+		for _, clientName := range plan.AdoptClients {
+			if clientName != "codex-cli" {
+				clientNames = append(clientNames, clientName)
+			}
+		}
+	}
+	return adoptSymlinkTargets(clientNames)
 }
 
 func adoptSymlinkTargets(clientNames []string) ([]adoptSymlinkTarget, error) {
@@ -165,7 +317,24 @@ func adoptSymlinkTargets(clientNames []string) ([]adoptSymlinkTarget, error) {
 	return targets, nil
 }
 
+// writeH6ActionBudgetError projects only the API-owned input sentinels.
+// Cancellation after admission remains in the existing operation-failure channel.
+func writeH6ActionBudgetError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, api.ErrCodexSharedStdioActionBudgetRequired):
+		writeAPIError(w, api.ErrCodexSharedStdioActionBudgetRequired, http.StatusBadRequest, "H6_ACTION_BUDGET_REQUIRED")
+	case errors.Is(err, api.ErrCodexSharedStdioActionBudgetInvalid):
+		writeAPIError(w, api.ErrCodexSharedStdioActionBudgetInvalid, http.StatusBadRequest, "H6_ACTION_BUDGET_INVALID")
+	default:
+		return false
+	}
+	return true
+}
+
 func writeAdoptPlanError(w http.ResponseWriter, err error) {
+	if writeH6ActionBudgetError(w, err) {
+		return
+	}
 	status, code := adoptPlanErrorStatus(err)
 	// Fail closed: forward the error text ONLY when it is a recognized,
 	// path-free adopt validation / name-conflict message the operator can act
@@ -193,8 +362,10 @@ func adoptPlanErrorIsActionable(msg string) bool {
 	if adoptErrorMessageHasPath(msg) {
 		return false
 	}
-	return adoptActionablePlanErrorRe.MatchString(msg)
+	return adoptActionablePlanErrorRe.MatchString(msg) || projectServiceActionablePlanErrorRe.MatchString(msg)
 }
+
+var projectServiceActionablePlanErrorRe = regexp.MustCompile(`^PROJECT_SERVICE_[A-Z0-9_]+$`)
 
 // adoptActionablePlanErrorRe is the allowlist of stable, path-free phrases the
 // BuildAdoptPlan validation / name-conflict errors carry (see internal/api/
@@ -232,6 +403,9 @@ func adoptErrorMessageHasPath(msg string) bool {
 }
 
 func adoptPlanErrorStatus(err error) (int, string) {
+	if errors.Is(err, api.ErrManifestNameExists) || errors.Is(err, api.ErrManifestNameEmbedded) {
+		return http.StatusConflict, "NAME_CONFLICT"
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "already exists") || strings.Contains(msg, "collides with a shipped") {
 		return http.StatusConflict, "NAME_CONFLICT"
@@ -239,10 +413,31 @@ func adoptPlanErrorStatus(err error) (int, string) {
 	return http.StatusBadRequest, "BAD_INPUT"
 }
 
+func writeGUIProjectAdoptTokenError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, clients.ErrCodexProjectSourcePreviewRequired):
+		writeAPIError(w, err, http.StatusConflict, "CODEX_PROJECT_SOURCE_PREVIEW_REQUIRED")
+	case errors.Is(err, clients.ErrCodexProjectSourceChanged):
+		writeAPIError(w, err, http.StatusConflict, "CODEX_PROJECT_SOURCE_CHANGED")
+	case errors.Is(err, api.ErrProjectAdoptSourcePreimageUnexpected):
+		writeAPIError(w, err, http.StatusBadRequest, "PROJECT_ADOPT_SOURCE_PREIMAGE_UNEXPECTED")
+	case errors.Is(err, api.ErrProjectAdoptRepeatStateInconsistent):
+		writeAPIError(w, err, http.StatusConflict, "PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT")
+	default:
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "ADOPT_FAILED", "/api/adopt")
+	}
+}
+
 func adoptExecuteErrorStatus(err error) (int, string) {
+	if errors.Is(err, api.ErrManifestNameExists) || errors.Is(err, api.ErrManifestNameEmbedded) {
+		return http.StatusConflict, "NAME_CONFLICT"
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "already exists") || strings.Contains(msg, "collides with a shipped") {
 		return http.StatusConflict, "NAME_CONFLICT"
+	}
+	if errors.Is(err, api.ErrSecureWriteReparsePointRefused) {
+		return http.StatusConflict, "SYMLINK_CONSENT_REQUIRED"
 	}
 	if isAdoptSymlinkWriteRefusal(msg) {
 		return http.StatusConflict, "SYMLINK_CONSENT_REQUIRED"
@@ -250,29 +445,78 @@ func adoptExecuteErrorStatus(err error) (int, string) {
 	return http.StatusInternalServerError, "ADOPT_FAILED"
 }
 
-func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code string) {
-	var leaseFailure *api.LeaseFailure
-	if errors.As(err, &leaseFailure) && leaseFailure != nil && leaseFailure.ReasonID != "" {
-		writeJSON(w, status, map[string]string{
-			"error":     leaseFailure.FailureID,
-			"code":      code,
-			"reason_id": string(leaseFailure.ReasonID),
-			"action":    string(leaseFailure.Action),
-		})
+func projectServiceExecutionFacts(err error) map[string]bool {
+	var stage *api.AdoptStageError
+	if !errors.As(err, &stage) || stage == nil {
+		return nil
+	}
+	switch stage.CommitState {
+	case "uncommitted":
+		return map[string]bool{"project_service_uncommitted": true}
+	case "pending":
+		return map[string]bool{"project_service_publication_pending": true}
+	case "committed_unverified":
+		return map[string]bool{"project_service_committed_unverified": true}
+	default:
+		return nil
+	}
+}
+
+func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code string, optionalFacts ...map[string]bool) {
+	if writeH6ActionBudgetError(w, err) {
 		return
+	}
+	var facts map[string]bool
+	for _, selected := range optionalFacts {
+		for key, value := range selected {
+			if facts == nil {
+				facts = make(map[string]bool)
+			}
+			facts[key] = value
+		}
+	}
+	writePublic := func(base map[string]string) {
+		body := make(map[string]any, len(facts)+len(base))
+		for key, value := range facts {
+			body[key] = value
+		}
+		for key, value := range base {
+			body[key] = value
+		}
+		writeJSON(w, status, body)
+	}
+	var leaseFailure *api.LeaseFailure
+	if errors.As(err, &leaseFailure) && leaseFailure != nil {
+		if leaseFailure.ReasonID != "" {
+			writePublic(map[string]string{
+				"error":     leaseFailure.FailureID,
+				"code":      code,
+				"reason_id": string(leaseFailure.ReasonID),
+				"action":    string(leaseFailure.Action),
+			})
+			return
+		}
+		if leaseFailure.FailureID == "E_ADOPT_LEASE_CLEANUP" {
+			writePublic(map[string]string{"error": leaseFailure.FailureID, "code": code})
+			return
+		}
 	}
 	// The public lease cleanup identifier is already redacted and actionable.
 	// Preserve it for the local GUI while every wrapped owner cause stays out of
 	// the wire body and renderer.
 	if err.Error() == "E_ADOPT_LEASE_CLEANUP" {
-		writeJSON(w, status, map[string]string{"error": "E_ADOPT_LEASE_CLEANUP", "code": code})
+		writePublic(map[string]string{"error": "E_ADOPT_LEASE_CLEANUP", "code": code})
+		return
+	}
+	if errors.Is(err, api.ErrSecureWriteReparsePointRefused) {
+		writePublic(map[string]string{"error": api.ErrSecureWriteReparsePointRefused.Error(), "code": code})
 		return
 	}
 	// SYMLINK_CONSENT_REQUIRED deliberately names the resolved symlink target —
 	// the operator already sees resolved_path in the plan, so surfacing it here
 	// is consistent, not a leak.
 	if code == "SYMLINK_CONSENT_REQUIRED" {
-		writeAPIError(w, err, status, code)
+		writePublic(map[string]string{"error": err.Error(), "code": code})
 		return
 	}
 	// Everything else path-bearing or 5xx is redacted. NAME_CONFLICT is
@@ -280,10 +524,10 @@ func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code s
 	// error ("... already exists: C:\path") would ride this lane, so redact it
 	// too when a path is present (fable PR #516 P3-B).
 	if status >= http.StatusInternalServerError || code == "BAD_INPUT" || adoptErrorMessageHasPath(err.Error()) {
-		writeAPIErrorRedacted(w, err, status, code, "/api/adopt")
+		writeAPIErrorRedactedFields(w, err, status, code, "/api/adopt", facts)
 		return
 	}
-	writeAPIError(w, err, status, code)
+	writePublic(map[string]string{"error": err.Error(), "code": code})
 }
 
 func isAdoptSymlinkWriteRefusal(msg string) bool {

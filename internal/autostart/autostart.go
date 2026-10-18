@@ -205,6 +205,30 @@ type Backend interface {
 	StatusSnapshot(opts Options) (StatusSnapshot, error)
 }
 
+// ProjectAutorunDisabled projects only an explicit OFF choice. Callers own the
+// current policy observation and its admission lock. Disable and its independent
+// absence readback are both received, including when deletion partially fails.
+func ProjectAutorunDisabled(enabled *bool, backend Backend, opts Options) error {
+	if enabled == nil || *enabled {
+		return nil
+	}
+	if backend == nil {
+		return errors.New("autostart OFF projection requires a backend")
+	}
+	var result error
+	if err := backend.Disable(); err != nil {
+		result = fmt.Errorf("disable autostart: %w", err)
+	}
+	state, err := backend.Status(opts)
+	if err != nil {
+		return errors.Join(result, fmt.Errorf("read disabled autostart state: %w", err))
+	}
+	if state != StateAbsent {
+		result = errors.Join(result, fmt.Errorf("autostart OFF unconfirmed: state=%s, want %s", state, StateAbsent))
+	}
+	return result
+}
+
 // New returns the autostart Backend for the current OS. The dispatcher
 // is split across build-tag-selected files (windows.go, linux.go,
 // darwin.go) so each platform compiles only its own implementation.

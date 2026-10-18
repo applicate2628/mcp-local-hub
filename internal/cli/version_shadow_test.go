@@ -35,7 +35,7 @@ func TestVersionIdentityDiagnosticUsesCanonicalTarget(t *testing.T) {
 	}
 
 	got := versionIdentityDiagnostic(running, func() (string, error) { return canonical, nil })
-	if !strings.Contains(got, "equivalent canonical binary") {
+	if !strings.Contains(got, "equivalent runtime binary") {
 		t.Fatalf("matching native binaries must be informational; got %q", got)
 	}
 	if strings.Contains(got, "identity differs") || strings.Contains(got, shim) || strings.Contains(got, "PATH") {
@@ -50,7 +50,7 @@ func TestVersionIdentityDiagnosticReportsCanonicalTargetFailure(t *testing.T) {
 	got := versionIdentityDiagnostic("running-mcphub.exe", func() (string, error) {
 		return "", errors.New("home unavailable")
 	})
-	if !strings.Contains(got, "identity-unverified") || !strings.Contains(got, "canonical") {
+	if !strings.Contains(got, "identity-unverified") || !strings.Contains(got, "selected runtime image") || !strings.Contains(got, "home unavailable") {
 		t.Fatalf("canonical target failure must be explicit; got %q", got)
 	}
 }
@@ -91,7 +91,7 @@ func TestBinaryIdentityDiagnostic(t *testing.T) {
 	// Different locations carrying byte-identical binaries are informational,
 	// not an identity-drift warning.
 	got := binaryIdentityDiagnostic(running, shadow)
-	if !strings.Contains(got, "equivalent canonical binary") {
+	if !strings.Contains(got, "equivalent runtime binary") {
 		t.Fatalf("byte-identical alternate path must be informational; got %q", got)
 	}
 	if strings.Contains(got, "identity differs") || strings.Contains(got, "identity-unverified") {
@@ -152,9 +152,12 @@ func TestBinaryIdentityDiagnosticWarnsWhenCanonicalIdentityIsUnreadable(t *testi
 
 func assertIdentityReconciliationCommand(t *testing.T, diagnostic string) {
 	t.Helper()
-	const want = "mcphub setup"
+	const want = "Exit the active Hub"
 	if !strings.Contains(diagnostic, want) {
 		t.Fatalf("actionable diagnostic must contain %q; got %q", want, diagnostic)
+	}
+	if strings.Contains(diagnostic, "mcphub setup") {
+		t.Fatalf("runtime mismatch must not require a permanent local copy: %q", diagnostic)
 	}
 }
 

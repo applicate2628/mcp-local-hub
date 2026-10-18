@@ -1,5 +1,180 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fetchOrThrow } from "./api";
+import {
+  fetchOrThrow,
+  getManifestView,
+  projectSupervisorRestartFeedback,
+  removeClientEntry,
+  restartSupervisor,
+} from "./api";
+
+describe("removeClientEntry", () => {
+  const token = "a".repeat(64);
+  const settled = () => ({
+    operation: "remove-client-entry", server: "memory", client: "kimi-code-cli",
+    outcome: "removed", effective_absent: true, code: "REMOVAL_SETTLED",
+    receipt: { version: 1, before_token: token, after_token: "b".repeat(64), source_count: 1 },
+  });
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("sends positive apply and the exact selected tuple/token", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(settled())));
+    await expect(removeClientEntry("memory", "kimi-code-cli", token)).resolves.toEqual(settled());
+    expect(fetch).toHaveBeenCalledWith("/api/client-entry/remove", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apply: true, server: "memory", client: "kimi-code-cli", source_token: token }),
+    });
+  });
+
+  it.each([
+    {}, { ...settled(), server: "other" }, { ...settled(), client: "other" },
+    { ...settled(), operation: "demigrate" }, { ...settled(), outcome: "applied-unverified" },
+    { ...settled(), effective_absent: false }, { ...settled(), receipt: undefined },
+    { ...settled(), receipt: { ...settled().receipt, version: 0 } },
+    { ...settled(), receipt: { ...settled().receipt, before_token: "different" } },
+    { ...settled(), receipt: { ...settled().receipt, after_token: "" } },
+    { ...settled(), receipt: { ...settled().receipt, source_count: 0 } },
+    { ...settled(), receipt: { ...settled().receipt, source_count: 1.5 } },
+  ])("rejects unconfirmed success row or receipt %j", async (body) => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(body)));
+    await expect(removeClientEntry("memory", "kimi-code-cli", token)).rejects.toThrow(/confirm|receipt/);
+  });
+
+  it.each([204, 207])("does not treat HTTP %s as settled success", async (status) => {
+    globalThis.fetch = vi.fn(async () => status === 204 ? new Response(null, { status }) : new Response(JSON.stringify(settled()), { status }));
+    await expect(removeClientEntry("memory", "kimi-code-cli", token)).rejects.toThrow();
+  });
+
+  it.each(["refused", "failed", "applied-unverified", "rollback-conflict"])("retains the producer's %s outcome", async (outcome) => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ ...settled(), outcome, code: "REMOVAL_ROLLBACK_CONFLICT", receipt: undefined }), { status: 207 }));
+    await expect(removeClientEntry("memory", "kimi-code-cli", token)).rejects.toThrow(`${outcome} [REMOVAL_ROLLBACK_CONFLICT]`);
+  });
+
+  it("rejects malformed JSON rather than accepting empty defaults", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("{"));
+    await expect(removeClientEntry("memory", "kimi-code-cli", token)).rejects.toThrow("not confirmed");
+  });
+
+  it.each([["", "kimi-code-cli", token], ["memory", "", token], ["memory", "kimi-code-cli", ""]])("refuses incomplete selections before posting", async (server, client, sourceToken) => {
+    globalThis.fetch = vi.fn();
+    await expect(removeClientEntry(server, client, sourceToken)).rejects.toThrow("incomplete");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("projectSupervisorRestartFeedback", () => {
+  const actualRestartSample = {
+    killed_pid: 0,
+    killed: false,
+    spawned_pid: 202,
+    spawned: true,
+    outcome: "restarted" as const,
+    ready: true,
+    original_generation: { pid: 101, started_at: "2026-01-01T00:00:00Z" },
+    selected_generation: { pid: 202, started_at: "2026-01-01T00:01:00Z" },
+    original_settled: true,
+    phase: "complete",
+    transfer_committed: false,
+    transferred: false,
+    original_child_disposition: "retained",
+    namespace_disposition: "occupied",
+  };
+
+  it("presents the actual snake_case producer sample as confirmed and retains its facts", () => {
+    const feedback = projectSupervisorRestartFeedback(actualRestartSample);
+
+    expect(feedback.kind).toBe("ok");
+    expect(feedback.text).toContain("Supervisor restart confirmed.");
+    expect(feedback.text).toContain("spawned PID 202");
+  });
+
+  it("keeps a ready failed creation with acquired per-step errors non-green", () => {
+    const feedback = projectSupervisorRestartFeedback({
+      ...actualRestartSample,
+      outcome: "failed",
+      code: "RESTART_FAILED",
+      per_step_error: { settlement: "restart step incomplete" },
+    });
+
+    expect(feedback.kind).toBe("error");
+    expect(feedback.text).toContain("spawned PID 202");
+    expect(feedback.text).toContain("Code: RESTART_FAILED");
+    expect(feedback.text).toContain("settlement: restart step incomplete");
+  });
+
+  it("keeps creation-only and legacy responses unconfirmed", () => {
+    const creationOnly = projectSupervisorRestartFeedback({
+      killed_pid: 101,
+      killed: true,
+      spawned_pid: 202,
+      spawned: true,
+    });
+    const missingReadiness = projectSupervisorRestartFeedback({
+      ...actualRestartSample,
+      ready: undefined,
+    });
+
+    expect(creationOnly.kind).toBe("error");
+    expect(creationOnly.text).toContain("outcome is unconfirmed");
+    expect(creationOnly.text).toContain("killed PID 101");
+    expect(missingReadiness.kind).toBe("error");
+  });
+});
+
+describe("restartSupervisor response errors", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("keeps HTTP failure visible without echoing an unknown response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      code: "RESTART_FAILED",
+      error: "private native body detail",
+    }), { status: 500 }));
+
+    const error = await restartSupervisor().then(() => null, (cause: Error) => cause);
+    expect(error?.message).toContain("RESTART_FAILED");
+    expect(error?.message).not.toContain("private native body detail");
+  });
+
+  it("reports invalid JSON without exposing its raw response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private native body detail", { status: 200 }));
+
+    const error = await restartSupervisor().then(() => null, (cause: Error) => cause);
+    expect(error?.message).toContain("INVALID_JSON");
+    expect(error?.message).not.toContain("private native body detail");
+  });
+});
+
+describe("getManifestView", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses the encoded view endpoint and returns the wire YAML without a hash", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ yaml: "name: mcp-cbuild\n" })));
+    await expect(getManifestView("custom name/one")).resolves.toEqual({ yaml: "name: mcp-cbuild\n" });
+    expect(fetch).toHaveBeenCalledWith("/api/manifest/view?name=custom%20name%2Fone", undefined);
+  });
+
+  it("accepts an empty YAML string", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ yaml: "" })));
+    await expect(getManifestView("empty")).resolves.toEqual({ yaml: "" });
+  });
+
+  it.each([{}, { yaml: null }, { yaml: 42 }])("rejects an absent or non-string YAML field: %j", async (payload) => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(payload)));
+    await expect(getManifestView("bad")).rejects.toThrow("expected string yaml");
+  });
+
+  it("rejects malformed success JSON visibly", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("{"));
+    await expect(getManifestView("bad")).rejects.toThrow("expected object");
+  });
+
+  it("preserves read failures without a second read", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: "internal error reading manifest" }), { status: 500 }));
+    await expect(getManifestView("missing")).rejects.toThrow("internal error reading manifest");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("fetchOrThrow", () => {
   beforeEach(() => {

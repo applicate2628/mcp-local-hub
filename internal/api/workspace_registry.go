@@ -196,24 +196,32 @@ func (r *Registry) Load() error {
 		}
 		return fmt.Errorf("read registry %s: %w", r.path, err)
 	}
+	version, rows, err := decodeRegistryBytes(data, r.path)
+	if err != nil {
+		return err
+	}
+	r.Version = version
+	r.Workspaces = rows
+	return nil
+}
+
+// decodeRegistryBytes is shared by ordinary registry reads and the routing
+// snapshot observer, so both interpret old and empty YAML identically.
+func decodeRegistryBytes(data []byte, path string) (int, []WorkspaceEntry, error) {
 	if len(data) == 0 {
-		r.Version = registryVersion
-		r.Workspaces = nil
-		return nil
+		return registryVersion, nil, nil
 	}
 	var parsed struct {
 		Version    int              `yaml:"version"`
 		Workspaces []WorkspaceEntry `yaml:"workspaces"`
 	}
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return fmt.Errorf("parse registry %s: %w", r.path, err)
+		return 0, nil, fmt.Errorf("parse registry %s: %w", path, err)
 	}
-	r.Version = parsed.Version
-	if r.Version == 0 {
-		r.Version = registryVersion
+	if parsed.Version == 0 {
+		parsed.Version = registryVersion
 	}
-	r.Workspaces = parsed.Workspaces
-	return nil
+	return parsed.Version, parsed.Workspaces, nil
 }
 
 // Save writes the registry atomically through a temp file and rename into

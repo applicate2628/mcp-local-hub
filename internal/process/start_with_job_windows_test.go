@@ -3,6 +3,8 @@
 package process
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,9 +13,206 @@ import (
 	"time"
 	"unicode/utf16"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
+// Synthetic operation hooks exercise the existing capture/action owner only;
+// no real handle, child, Job, native request or native proof is used here.
+func TestCreatorTerminalCoreCapturesActionBeforeRelease(t *testing.T) {
+	for _, name := range []string{"request-succeeded", "request-access-denied", "pending-root", "natural-empty", "natural-listed-signaled", "missing-context"} {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+			memberClosed := false
+			job := &Job{handle: windows.Handle(1)}
+			job.terminationOps = &jobTerminationOps{
+				accounting: func(*Job) (jobObjectBasicAccountingInformation, error) {
+					active := uint32(1)
+					if requests != 0 || name == "natural-empty" || name == "natural-listed-signaled" {
+						active = 0
+					}
+					return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: active}, nil
+				},
+				listMembers: func(*Job) (jobProcessIDList, error) {
+					if name == "natural-empty" {
+						return jobProcessIDList{}, nil
+					}
+					return jobProcessIDList{Assigned: 1, PIDs: []uint32{7}}, nil
+				},
+				openProcess: func(uint32) (windows.Handle, error) { return windows.Handle(3), nil },
+				isMember:    func(windows.Handle, *Job) (bool, error) { return true, nil },
+				terminate: func(*Job) error {
+					if memberClosed {
+						t.Fatal("member handle released before action observation")
+					}
+					requests++
+					if name == "request-access-denied" {
+						return windows.ERROR_ACCESS_DENIED
+					}
+					return nil
+				},
+				wait: func(handle windows.Handle) (uint32, error) {
+					if name == "pending-root" && handle == windows.Handle(2) {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
+					return uint32(windows.WAIT_OBJECT_0), nil
+				},
+				closeProcess: func(windows.Handle) error { memberClosed = true; return nil },
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var supplied context.Context = ctx
+			if name == "missing-context" {
+				supplied = nil
+			}
+			observation, err := job.completeCreatorAfterExit(supplied, containedJobOriginal{job: job, handle: windows.Handle(2), pid: 7, atCreate: true})
+			switch name {
+			case "request-succeeded":
+				if err != nil || requests != 1 || observation.terminalAction != creatorTerminalRequestSucceeded || !observation.ObservedCurrentMembersExited {
+					t.Fatalf("request/closure observation mismatch: %+v %v", observation, err)
+				}
+			case "request-access-denied":
+				if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || !errors.Is(observation.terminalActionErr, windows.ERROR_ACCESS_DENIED) || observation.terminalAction != creatorTerminalRequestFailed || requests != 1 {
+					t.Fatalf("legacy-normalized request error was hidden: %+v %v", observation, err)
+				}
+			case "natural-empty", "natural-listed-signaled":
+				if err != nil || requests != 0 || observation.terminalAction != creatorTerminalNotRequested || !observation.ObservedCurrentMembersExited {
+					t.Fatalf("authoritative empty result invented force: %+v %v", observation, err)
+				}
+			default:
+				if err == nil || requests != 0 || observation.ObservedCurrentMembersExited {
+					t.Fatalf("invalid terminal premise reached action: %+v %v", observation, err)
+				}
+			}
+		})
+	}
+}
+
 const startWithJobEnvironmentHelper = "MCPHUB_PR591_START_ENV_HELPER"
+
+// This fake exercises the exact retained-only post-start decision without an
+// OS call. It proves no native creation/identity or resource-closure fact.
+func TestPreparedCreatorRequiresCompleteOriginalBinding(t *testing.T) {
+	for _, name := range []string{"valid", "capture-error", "missing-time", "missing-handle", "start-error"} {
+		t.Run(name, func(t *testing.T) {
+			job := &Job{handle: windows.Handle(1)}
+			cmd := &exec.Cmd{Path: "synthetic-created-owner", Process: &os.Process{Pid: 7}}
+			child := &provisionalWindowsChild{windowsContainedChild: &windowsContainedChild{cmd: cmd, job: job, process: windows.Handle(2), thread: windows.Handle(3), original: containedJobOriginal{job: job, handle: windows.Handle(2), pid: 7, atCreate: true}}, creationTime: "2026-10-07T09:00:00Z"}
+			cause := errors.New("synthetic creator binding capture failure")
+			switch name {
+			case "capture-error":
+				child.creationErr = cause
+			case "missing-time":
+				child.creationTime = ""
+			case "missing-handle":
+				child.process = 0
+			}
+			starts := 0
+			err := child.startPreparedCreator(func() error {
+				starts++
+				if name == "start-error" {
+					return cause
+				}
+				return nil
+			})
+			if starts != 1 {
+				t.Fatal("original start was repeated")
+			}
+			if name == "valid" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if name == "start-error" {
+				if !errors.Is(err, cause) || errors.Is(err, ErrSpawnPostCreate) {
+					t.Fatal("pre-child error classification changed")
+				}
+			} else {
+				if !errors.Is(err, ErrSpawnPostCreate) {
+					t.Fatal("degraded original binding reported start success")
+				}
+				if name == "capture-error" && !errors.Is(err, cause) {
+					t.Fatal("original capture cause was lost")
+				}
+				identity, _ := child.creatorStartupSnapshot()
+				if identity.OriginalPID != 7 || identity.Known {
+					t.Fatal("startup original identity was lost or relabelled known exit")
+				}
+			}
+		})
+	}
+}
+
+type creatorStartupSpoofCause struct{ queried *bool }
+
+func (e *creatorStartupSpoofCause) Error() string { return "synthetic nested callback snapshot" }
+func (e *creatorStartupSpoofCause) Snapshot() CreatorTerminalSnapshot {
+	*e.queried = true
+	return CreatorTerminalSnapshot{Root: CreatorRootExitSnapshot{Known: true, OriginalPID: 999}, HandlesClosed: true, CurrentMembersExited: true, StartupReleaseKnown: true, StartupResourcesReleased: true}
+}
+
+// This guard owns one native empty Job and creates no child. It is authored
+// only here; executing it requires separate Root private-Windows admission.
+func TestStartProvisionalWithJobRetentionFailureKeepsSameOwner(t *testing.T) {
+	for _, name := range []string{"error", "panic", "nested-snapshot"} {
+		t.Run(name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			callerJob := job
+			defer func() {
+				if callerJob != nil {
+					_ = callerJob.Close()
+				}
+			}()
+			cmd := &exec.Cmd{Path: "uninvoked-creator-command", Args: []string{"uninvoked-creator-command"}}
+			var cause error = errors.New("synthetic retention failure")
+			queried := false
+			if name == "nested-snapshot" {
+				cause = &creatorStartupSpoofCause{queried: &queried}
+			}
+			var retained *ProvisionalProcess
+			owner, err := StartProvisionalWithJob(job, cmd, func(p *ProvisionalProcess) error {
+				callerJob = nil
+				retained = p
+				if p.job != job || p.owner == nil || cmd.Process != nil {
+					return errors.New("retention did not precede process creation on same Job owner")
+				}
+				if name == "panic" {
+					panic(cause)
+				}
+				return cause
+			})
+			if owner != nil {
+				callerJob = nil
+			}
+			if owner == nil || owner != retained || !errors.Is(err, cause) || cmd.Process != nil {
+				t.Fatalf("post-admission retention failure lost original owner/cause: owner=%v error=%v", owner, err)
+			}
+			if !owner.closeAttempted || owner.closeErr != nil || job.Handle() != 0 {
+				t.Fatal("proved-empty retained Job did not preserve its actual remembered close")
+			}
+			projection, ok := err.(interface {
+				Snapshot() CreatorTerminalSnapshot
+			})
+			if !ok {
+				t.Fatal("process-owned outer startup disposition is missing")
+			}
+			view := projection.Snapshot()
+			if !view.StartupReleaseKnown || !view.StartupResourcesReleased || view.StartupReleaseError != nil || view.Root.Known || view.Root.OriginalPID != 0 || view.HandlesClosed || view.CurrentMembersExited || queried {
+				t.Fatalf("startup disposition was fabricated or nested: %+v", view)
+			}
+			if owner.creatorTerminal != nil || owner.creatorSettlement != nil {
+				t.Fatal("startup release minted a stronger closure cache")
+			}
+			select {
+			case <-owner.waitDone:
+				t.Fatal("precreate callback failure started a root waiter")
+			default:
+			}
+		})
+	}
+}
 
 func TestStartWithJobWindowsEnvironmentHelper(t *testing.T) {
 	if os.Getenv(startWithJobEnvironmentHelper) != "probe" {

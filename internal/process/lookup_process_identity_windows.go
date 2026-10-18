@@ -82,6 +82,9 @@ func LookupProcessIdentityContext(ctx context.Context, pid int) (ProcessIdentity
 			return ProcessIdentity{}, err
 		}
 		id, err := lookupBackendFn(ctx, pid)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ProcessIdentity{}, ctxErr
+		}
 		if err == nil {
 			return id, nil
 		}
@@ -159,19 +162,35 @@ var wmicPathLookupFn = func() error {
 //     when it is on PATH. If wmic is absent, return a clear error
 //     naming both conditions so operators can either relax the
 //     security policy or install wmic.
-//
-// The probe runs at most once per LookupProcessIdentity call;
-// production callers typically resolve many PIDs per migration tick,
-// so an in-memory cache could be added if profiling shows the probe
-// dominating wall-time. For now correctness > micro-optimization.
 func realLookupBackend(ctx context.Context, pid int) (ProcessIdentity, error) {
+	backend, err := selectIdentityQueryBackend(ctx)
+	if err != nil {
+		if errors.Is(err, errIdentityCollectorsUnavailable) {
+			return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM-locked AND wmic.exe absent: cannot resolve PID %d", pid)
+		}
+		return ProcessIdentity{}, err
+	}
+	if backend == identityQueryPowerShell {
+		return lookupViaPowerShellFn(ctx, pid)
+	}
+	return lookupViaWmicFn(ctx, pid)
+}
+
+// Scalar attempts and operation-local sets share the same selection policy.
+func selectIdentityQueryBackend(ctx context.Context) (identityQueryBackend, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	clmAvailable, probeErr := probePowerShellCLMFn(ctx)
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if probeErr != nil {
 		// Probe transport failed (powershell.exe missing, language-mode
 		// shell-out hung, etc.). Do NOT silently fall through to wmic;
 		// the operator needs to see the probe defect, not a downgraded
 		// answer from a fallback they did not opt into.
-		return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM probe failed: %w", probeErr)
+		return 0, fmt.Errorf("process: PowerShell CLM probe failed: %w", probeErr)
 	}
 	if clmAvailable {
 		// FullLanguage mode confirmed — PowerShell is canonical.
@@ -179,15 +198,21 @@ func realLookupBackend(ctx context.Context, pid int) (ProcessIdentity, error) {
 		// covers transient stalls. wmic is intentionally NOT
 		// consulted: it is a CLM-locked-host fallback, not an
 		// alternative path on healthy hosts.
-		return lookupViaPowerShellFn(ctx, pid)
+		return identityQueryPowerShell, nil
 	}
 	// CLM-locked (probe returned (false, nil)). Use wmic.exe if
 	// present; otherwise emit a clear error naming both conditions
 	// so operators know what to change.
 	if err := wmicPathLookupFn(); err == nil {
-		return lookupViaWmicFn(ctx, pid)
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		return identityQueryWMIC, nil
 	}
-	return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM-locked AND wmic.exe absent: cannot resolve PID %d", pid)
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return 0, errIdentityCollectorsUnavailable
 }
 
 // psCimRecord mirrors the JSON shape produced by ConvertTo-Json
@@ -260,13 +285,17 @@ func lookupViaPowerShell(ctx context.Context, pid int) (ProcessIdentity, error) 
 		rec = arr[0]
 	}
 
+	return identityFromCIMRecord(pid, rec), nil
+}
+
+func identityFromCIMRecord(pid int, rec psCimRecord) ProcessIdentity {
 	return ProcessIdentity{
 		PID:              pid,
 		Basename:         rec.Name,
 		CommandLine:      rec.CommandLine,
 		ExecutablePath:   rec.ExecutablePath,
 		CreationDateUnix: rec.CreationDateUnix,
-	}, nil
+	}
 }
 
 // lookupViaWmic is the legacy fallback for hosts where PowerShell is
@@ -320,21 +349,7 @@ func parseWmicIdentityCSV(out []byte, pid int) (ProcessIdentity, error) {
 	if !headerOK || row == nil {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}
-	createdStr := row["CreationDate"]
-	var createdUnix int64
-	if createdStr != "" {
-		// WMI DATETIME: yyyymmddHHMMSS.mmmmmm+UTCminutes.
-		// We parse only yyyymmddHHMMSS (14 chars); the fractional
-		// seconds and timezone offset are dropped for the Unix
-		// seconds output — acceptable for migration's createdUnix
-		// gate which uses second-level precision.
-		if len(createdStr) >= 14 {
-			t, parseErr := time.Parse("20060102150405", createdStr[:14])
-			if parseErr == nil {
-				createdUnix = t.Unix()
-			}
-		}
-	}
+	createdUnix, _ := normalizeWmicCreationDate(row["CreationDate"], wmicCreationLegacyScalar)
 
 	name := row["Name"]
 	cmdLine := row["CommandLine"]
@@ -343,13 +358,7 @@ func parseWmicIdentityCSV(out []byte, pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}
 
-	return ProcessIdentity{
-		PID:              pid,
-		Basename:         name,
-		CommandLine:      cmdLine,
-		ExecutablePath:   exePath,
-		CreationDateUnix: createdUnix,
-	}, nil
+	return identityFromCIMRecord(pid, psCimRecord{Name: name, CommandLine: cmdLine, ExecutablePath: exePath, CreationDateUnix: createdUnix}), nil
 }
 
 // ProbePowerShellCLM verifies PowerShell is available in FullLanguage
@@ -390,6 +399,9 @@ func probePowerShellCLMContext(ctx context.Context) (bool, error) {
 		"$ExecutionContext.SessionState.LanguageMode")
 	NoConsole(cmdLang)
 	outLang, errLang := cmdLang.Output()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if errLang != nil {
 		return false, fmt.Errorf("powershell language-mode probe: %w", errLang)
 	}
@@ -405,7 +417,11 @@ func probePowerShellCLMContext(ctx context.Context) (bool, error) {
 		"Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId=0' | "+
 			"Select-Object ProcessId | ConvertTo-Json -Compress")
 	NoConsole(cmdCim)
-	if err := cmdCim.Run(); err != nil {
+	errCim := cmdCim.Run()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if errCim != nil {
 		return false, nil
 	}
 

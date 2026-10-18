@@ -32,6 +32,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,8 +46,10 @@ import (
 
 func init() {
 	clients.WriteConfigFile = secureWriteWithOperatorOpt
+	clients.WriteConfigFileRequest = secureWriteConfigRequest
 	clients.CreateConfigFileIfMissing = secureCreateClientConfigIfMissingWithOperatorOpt
 	clients.SecureCreateParentDir = SecureCreateParentDirForConfigLock
+	clients.SecureVerifyParentDir = SecureVerifyExistingParentDirForConfigLock
 }
 
 // secureCreateClientConfigIfMissingWithOperatorOpt is the
@@ -178,16 +181,28 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 // `dir` is the parent directory itself (filepath.Dir(configPath) at the call
 // site), so this creates `dir` and any missing ancestors, not dir's parent.
 func SecureCreateParentDirForConfigLock(dir string) error {
-	err := secureCreateParentDirAnywhereImpl(dir, false /*skipParentGate*/)
+	_, err := secureConfigLockParentPolicy(nil, dir, true)
+	return err
+}
+
+func SecureVerifyExistingParentDirForConfigLock(ctx context.Context, dir string) (bool, error) {
+	if ctx == nil {
+		return false, context.Canceled
+	}
+	return secureConfigLockParentPolicy(ctx, dir, false)
+}
+
+func secureConfigLockParentPolicy(ctx context.Context, dir string, createMissing bool) (bool, error) {
+	exists, err := secureParentDirAnywhereMode(ctx, dir, false, createMissing)
 	if err == nil {
-		return nil
+		return exists, nil
 	}
 	// Same single-owner parent-gate decision as the write lanes (F1).
 	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
-		return refuse
+		return false, refuse
 	}
 	if operatorRequiresSingleUserHome() {
-		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for config-lock parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
+		return false, fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for config-lock parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
 			err, RequireSingleUserHomeEnv)
 	}
 	// Default-relax lane: the deepest-existing-prefix DACL gate rejected but the
@@ -202,7 +217,7 @@ func SecureCreateParentDirForConfigLock(dir string) error {
 	}); logErr != nil {
 		_ = logErr
 	}
-	return secureCreateParentDirAnywhereImpl(dir, true /*skipParentGate*/)
+	return secureParentDirAnywhereMode(ctx, dir, true, createMissing)
 }
 
 // AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in
@@ -763,7 +778,52 @@ func wrapParentGateRefusal(path string, verr error) error {
 // hardening still applies at temp-create time, closing the race window the
 // previous os.CreateTemp + path-based SetNamedSecurityInfo path left open.
 func secureWritePathBased(path string, contents []byte) error {
-	err := SecureWriteClientConfig(path, contents)
+	return secureWriteWithParentPolicy(path, func(skip bool) error { return secureWriteClientConfigImpl(path, contents, skip) })
+}
+
+func secureWriteConfigRequest(req clients.ConfigWriteRequest) error {
+	if req.ExpectedSnapshot == nil {
+		return secureWriteWithOperatorOpt(req.Path, req.Contents)
+	}
+	if expectedSnapshotWriterEntryHook != nil {
+		expectedSnapshotWriterEntryHook()
+	}
+	return secureWriteWithParentPolicy(req.Path, func(skip bool) error { return secureWriteExpectedSnapshot(req, skip) })
+}
+
+// A conditional client operation never uses ambient symlink opt-in or the
+// path/bytes writer. Its scoped consent must name the original logical path
+// and the full target received by the existing resolve facade.
+func validateConditionalClientConfigConsent(o *clientConfigConditionalWriteObservation) error {
+	if len(o.links) == 0 {
+		if o.logical != o.referent || o.consent != nil {
+			return clients.ErrConfigWriteSnapshotConflict
+		}
+		return nil
+	}
+	if o.consent == nil || operatorRequiresSingleUserHome() {
+		return errors.New("secure write: conditional symlink publication requires scoped consent with strict mode inactive")
+	}
+	resolved, pinned, was := ResolveClientConfigSymlink(o.logical)
+	if !was || o.consent.OriginalPath != o.logical || o.consent.PinnedResolvedPath != pinned || resolved != o.referent {
+		return fmt.Errorf("secure write: conditional symlink source or operator-consented full target changed: %w", clients.ErrConfigWriteSnapshotConflict)
+	}
+	// Preserve the existing scoped-consent WARN audit at the actual conditional
+	// publication boundary. As in the original consent writer, audit failure is
+	// best-effort and cannot erase the original publication outcome.
+	if logErr := LogHubMcpEvent("warn", "client-write-symlink-resolved-via-scoped-consent", map[string]any{
+		"path":     o.logical,
+		"resolved": resolved,
+		"client":   o.consent.Client,
+		"reason":   "scoped operator consent (per-write; pinned-full-target verified; write follows symlink target via pinned parent handle)",
+	}); logErr != nil {
+		_ = logErr
+	}
+	return nil
+}
+
+func secureWriteWithParentPolicy(path string, write func(bool) error) error {
+	err := write(false)
 	if err == nil {
 		return nil
 	}
@@ -796,7 +856,7 @@ func secureWritePathBased(path string, contents []byte) error {
 		// fallback write still proceeds.
 		_ = logErr
 	}
-	return secureWriteClientConfigSkipParentGate(path, contents)
+	return write(true)
 }
 
 // resolveSymlinkForSecureWrite inspects path. If path is a symlink

@@ -46,5 +46,9 @@ import (
 // single-layer shape sets it explicitly after calling this helper.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
-	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(sandboxHome))
+	restore, err := clients.ApplyClientConfigSandboxEnvironment(sandboxHome)
+	if err != nil {
+		t.Fatalf("prepare client config sandbox: %v", err)
+	}
+	t.Cleanup(restore)
 }

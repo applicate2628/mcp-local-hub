@@ -37,7 +37,11 @@ import (
 // LOCALAPPDATA, below sandboxHome.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
-	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(sandboxHome))
+	restore, err := clients.ApplyClientConfigSandboxEnvironment(sandboxHome)
+	if err != nil {
+		t.Fatalf("prepare client config sandbox: %v", err)
+	}
+	t.Cleanup(restore)
 }
 
 // sandboxClientConfigHome is the whole-sandbox form for a test that owns its own

@@ -51,6 +51,7 @@ func (f *fakeBackend) StatusSnapshot(opts autostart.Options) (autostart.StatusSn
 // the test can inspect it. Restores the prior factory on cleanup.
 func withFakeBackend(t *testing.T, fb *fakeBackend) {
 	t.Helper()
+	t.Setenv("LOCALAPPDATA", apitest.HardenedTempDir(t))
 	prev := autostartBackendFactoryFn
 	autostartBackendFactoryFn = func() (autostart.Backend, error) { return fb, nil }
 	prevPolicy := autostartStatusOptionsFn

@@ -151,7 +151,17 @@ func verifyWindowsDACLFromHandleWriteOrAdmin(h windows.Handle) error {
 // the public verifiers above pin which access-bit mask flags an
 // ALLOW ACE as a violation.
 func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32) error {
-	violations, err := windowsDACLAllowlistViolationsFromHandle(h, significantBits)
+	return verifyWindowsDACLFromHandleMaskedObserved(h, significantBits, nil, "")
+}
+
+func verifyWindowsDACLFromHandleMaskedObserved(h windows.Handle, significantBits uint32, b *stateFileReadBuilder, slot string) error {
+	var violations []DACLAllowlistViolation
+	var err error
+	if b == nil {
+		violations, err = windowsDACLAllowlistViolationsFromHandle(h, significantBits)
+	} else {
+		violations, err = windowsDACLAllowlistViolationsObserved(h, significantBits, b, slot)
+	}
 	if err != nil {
 		return err
 	}
@@ -177,6 +187,10 @@ func windowsDACLAllowlistViolationsFromHandle(h windows.Handle, significantBits 
 	if err != nil {
 		return nil, fmt.Errorf("get security info: %w", err)
 	}
+	return windowsDACLAllowlistViolationsFromDescriptor(sd, significantBits, allowlist, sidString)
+}
+
+func windowsDACLAllowlistViolationsFromDescriptor(sd *windows.SECURITY_DESCRIPTOR, significantBits uint32, allowlist []*windows.SID, formatSID func(*windows.SID) string) ([]DACLAllowlistViolation, error) {
 
 	ownerSID, _, err := sd.Owner()
 	if err != nil {
@@ -305,7 +319,7 @@ func windowsDACLAllowlistViolationsFromHandle(h windows.Handle, significantBits 
 		}
 		sid := sidFromAce(ace)
 		if !sidInAllowlist(sid, allowlist) {
-			name := sidString(sid)
+			name := formatSID(sid)
 			violations = append(violations, DACLAllowlistViolation{SID: name, Mask: mapped & significantBits})
 		}
 	}

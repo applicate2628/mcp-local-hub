@@ -32,6 +32,8 @@ func TestRegistrationDiagnosticRegistryExactAndUnique(t *testing.T) {
 		RegistrationCodeUnregisterProxyKillFailed,
 		RegistrationCodeUnregisterTaskDeleteFailed,
 		RegistrationCodeUnregisterClientRemoveFailed,
+		RegistrationCodeUnregisterClientPreserved,
+		RegistrationCodeUnregisterClientReadFailed,
 		RegistrationCodeLSPEnsureFailed,
 		RegistrationCodeUnknown,
 	}

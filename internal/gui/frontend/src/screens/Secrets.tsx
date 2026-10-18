@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { RouterState } from "../hooks/useRouter";
 import { useSecretsSnapshot } from "../lib/use-secrets-snapshot";
-import { secretsInit, restartSecret } from "../lib/secrets-api";
-import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef, APIError } from "../lib/secrets-api";
+import { secretsInit, restartSecret, checkSecretsInitCapability, secretsInitErrorMessage } from "../lib/secrets-api";
+import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef } from "../lib/secrets-api";
 import { AddSecretModal } from "../components/AddSecretModal";
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
 import { DeleteSecretModal } from "../components/DeleteSecretModal";
@@ -108,6 +108,16 @@ function EditVaultBanner() {
 function NotInitView(props: { refresh: () => Promise<void> }) {
   const [err, setErr] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [capability, setCapability] = useState<"checking" | "ready" | "unsupported">("checking");
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    checkSecretsInitCapability(controller.signal).then(
+      () => { if (active) setCapability("ready"); },
+      () => { if (active) setCapability("unsupported"); },
+    );
+    return () => { active = false; controller.abort(); };
+  }, []);
   return (
     <div class="empty-state">
       <p><strong>Secrets vault is not initialized.</strong></p>
@@ -116,32 +126,20 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
         directory. <strong>If you lose this file, all encrypted secrets are
         unrecoverable.</strong> Back it up via password manager or secure copy.
       </p>
+      {capability === "checking" && <p role="status">Checking initialization availability…</p>}
+      {capability === "unsupported" && <p role="alert">{secretsInitErrorMessage({ code: "SECRETS_INIT_UNSUPPORTED" })}</p>}
       <button
         type="button"
         class="btn btn-primary"
-        disabled={working}
+        disabled={working || capability !== "ready" || err !== null}
         onClick={async () => {
+          if (working || capability !== "ready" || err !== null) return;
           setWorking(true);
-          setErr(null);
           try {
-            const result = await secretsInit();
-            // Codex P3: case 2b returns 200 with code+error populated;
-            // surface that as a retry hint instead of silently refreshing.
-            if (result.code === "SECRETS_INIT_FAILED" && result.cleanup_status === "ok") {
-              setErr(`${result.error ?? "init failed"} — please try again.`);
-              return; // do not refresh; vault is still missing
-            }
+            await secretsInit();
             await props.refresh();
           } catch (e) {
-            // Codex P3: case 2c — 500 with cleanup_status=failed; mention the
-            // orphan_path so user knows manual cleanup is needed.
-            const err = e as APIError;
-            const body = (err.body ?? {}) as { orphan_path?: string };
-            if (err.code === "SECRETS_INIT_FAILED" && body.orphan_path) {
-              setErr(`${err.message} — manual cleanup required for ${body.orphan_path}.`);
-            } else {
-              setErr((e as Error).message);
-            }
+            setErr(secretsInitErrorMessage(e));
           } finally {
             setWorking(false);
           }
@@ -149,11 +147,10 @@ function NotInitView(props: { refresh: () => Promise<void> }) {
       >
         {working ? "Initializing…" : "Initialize secrets vault"}
       </button>
-      {err && <p class="error">Init failed: {err}</p>}
+      {err && <p class="error" role="alert">{err}</p>}
     </div>
   );
 }
-
 function InitEmptyView(props: { refresh: () => Promise<void>; prefillKey?: string }) {
   const [open, setOpen] = useState(false);
   const [prefill, setPrefill] = useState<string | undefined>(undefined);

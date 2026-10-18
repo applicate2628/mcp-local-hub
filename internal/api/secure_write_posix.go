@@ -33,6 +33,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"mcp-local-hub/internal/clients"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -92,8 +94,12 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 // still the load-bearing boundary; the dirfd-relative create + atomic
 // renameat + post-rename verify all still apply, so the dirfd-anchored
 // TOCTOU guarantees are preserved.
-func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
+func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base string, contents []byte, skipParentGate bool, expected ...*clients.ConfigWriteRequest) error {
 	observeResolvedParentEntry() // AF-1 T5 observation; no-op (compiled out) in production.
+	guard := expectedConfigWriteRequest(expected)
+	if err := verifyExpectedSnapshotPosix(dirFd, base, guard); err != nil {
+		return err
+	}
 	if base == "" {
 		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
 	}
@@ -168,6 +174,13 @@ func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base s
 	// 8. Atomic rename relative to dirFd. POSIX renameat replaces an
 	// existing destination atomically; the final-component path
 	// resolution is anchored to dirFd (not a re-walk).
+	if guard != nil && expectedSnapshotBeforePublishHook != nil {
+		expectedSnapshotBeforePublishHook()
+	}
+	if err := verifyExpectedSnapshotPosix(dirFd, base, guard); err != nil {
+		cleanup()
+		return err
+	}
 	if err := unix.Renameat(dirFd, tempName, dirFd, base); err != nil {
 		cleanup()
 		return fmt.Errorf("secure write: renameat %s -> %s: %w", tempName, base, err)
@@ -209,6 +222,35 @@ func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base s
 			fmt.Errorf("secure write: post-rename verify %s: %w", base, err))
 	}
 	return nil
+}
+
+func secureWriteExpectedSnapshot(req clients.ConfigWriteRequest, skip bool) error {
+	if req.ExpectedSnapshot == nil {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := req.ExpectedSnapshot.ValidateBinding(req.Context, req.Path); err != nil {
+		return err
+	}
+	return secureWriteClientConfigToResolvedParent(int(req.ExpectedSnapshot.BorrowedParentHandle()), filepath.Dir(req.Path), filepath.Base(req.Path), req.Contents, skip, &req)
+}
+
+func verifyExpectedSnapshotPosix(parent int, base string, req *clients.ConfigWriteRequest) error {
+	if req == nil {
+		return nil
+	}
+	if req.ExpectedSnapshot == nil {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := req.ExpectedSnapshot.ValidateBinding(req.Context, req.Path); err != nil {
+		return err
+	}
+	fd, err := unix.Openat(parent, base, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	f := os.NewFile(uintptr(fd), req.Path)
+	defer f.Close()
+	return req.ExpectedSnapshot.VerifyCurrentFile(req.Context, f)
 }
 
 func openPostRenameVerifyFdPosix(dirFd int, base string) (int, error) {

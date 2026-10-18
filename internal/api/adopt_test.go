@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -25,7 +27,7 @@ import (
 func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifestRoot, stateRoot string) {
 	t.Helper()
 	previousReadinessVerifier := adoptReadinessVerifierFn
-	adoptReadinessVerifierFn = func(*API, []string) error { return nil }
+	adoptReadinessVerifierFn = func(context.Context, *API, []string) error { return nil }
 	t.Cleanup(func() { adoptReadinessVerifierFn = previousReadinessVerifier })
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -62,7 +64,7 @@ func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifes
 		t.Fatalf("seed codex config: %v", err)
 	}
 
-	manifestRoot = defaultManifestDir()
+	manifestRoot = mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
 		t.Fatalf("mkdir default manifest dir: %v", err)
 	}
@@ -297,7 +299,7 @@ args = ["version"]
 				t.Fatalf("BuildAdoptPlan: %v", err)
 			}
 			previous := adoptReceivingVerifierFn
-			adoptReceivingVerifierFn = func(_ *API, _ *AdoptPlan, _ *AdoptProvenanceRecord) error {
+			adoptReceivingVerifierFn = func(_ context.Context, _ *API, _ *AdoptPlan, _ *AdoptProvenanceRecord) error {
 				return newAdoptStageError(stage, "committed_unverified", fmt.Errorf("injected %s receiver failure", stage))
 			}
 			t.Cleanup(func() { adoptReceivingVerifierFn = previous })
@@ -1220,7 +1222,7 @@ func TestPickNextFreeAdoptPortSkipsDiskEmbedIntentAndBoundPorts(t *testing.T) {
 		used[embedPort] = true
 	}
 	t.Cleanup(func() { collectEmbeddedManifestPortsFn = prevEmbeddedCollector })
-	manifestRoot := defaultManifestDir()
+	manifestRoot := mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
 		t.Fatalf("mkdir default manifest dir: %v", err)
 	}
@@ -1468,7 +1470,7 @@ func isolateAdoptPortAllocatorForTest(t *testing.T) string {
 	}
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
 	prevManifestDir := adoptManifestDirFn
-	adoptManifestDirFn = func() string { return manifestRoot }
+	adoptManifestDirFn = func() (string, error) { return manifestRoot, nil }
 	t.Cleanup(func() { adoptManifestDirFn = prevManifestDir })
 	prevEmbeddedCollector := collectEmbeddedManifestPortsFn
 	collectEmbeddedManifestPortsFn = func(map[int]bool) {}
@@ -2169,5 +2171,81 @@ func writeJSONForAdoptTest(t *testing.T, path string, v any) {
 	}
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestCodexSharedStdioActionBudgetIngress(t *testing.T) {
+	for _, value := range []string{"", "1", "0s", "-1s", "999999999999999999999h"} {
+		t.Run(value, func(t *testing.T) {
+			ctx, cancel, err := ResolveCodexSharedStdioActionContext(context.Background(), &value)
+			if !errors.Is(err, ErrCodexSharedStdioActionBudgetInvalid) || ctx != nil || cancel != nil {
+				t.Fatal("invalid explicit input produced an action context")
+			}
+		})
+	}
+	if _, _, err := ResolveCodexSharedStdioActionContext(nil, nil); !errors.Is(err, ErrCodexSharedStdioActionBudgetRequired) {
+		t.Fatal("nil parent must require input")
+	}
+	if _, _, err := ResolveCodexSharedStdioActionContext(context.Background(), nil); !errors.Is(err, ErrCodexSharedStdioActionBudgetRequired) {
+		t.Fatal("unbounded omission must require input")
+	}
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+	if _, _, err := ResolveCodexSharedStdioActionContext(parent, nil); !errors.Is(err, context.Canceled) {
+		t.Fatal("parent cancellation cause was lost")
+	}
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	if _, _, err := ResolveCodexSharedStdioActionContext(expired, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("expired parent was admitted")
+	}
+
+	finite, cancelFinite := context.WithTimeout(context.Background(), time.Minute)
+	defer cancelFinite()
+	same, cancelSame, err := ResolveCodexSharedStdioActionContext(finite, nil)
+	if err != nil || same != finite || cancelSame == nil {
+		t.Fatal("finite omitted parent was replaced")
+	}
+	cancelSame()
+	if finite.Err() != nil {
+		t.Fatal("omitted input acquired cancellation ownership of its parent")
+	}
+	invalid := ""
+	if _, _, err := ResolveCodexSharedStdioActionContext(finite, &invalid); !errors.Is(err, ErrCodexSharedStdioActionBudgetInvalid) {
+		t.Fatal("finite parent hid invalid explicit input")
+	}
+	duration := "2m"
+	child, cancelChild, err := ResolveCodexSharedStdioActionContext(finite, &duration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentDeadline, _ := finite.Deadline()
+	childDeadline, ok := child.Deadline()
+	if !ok || !childDeadline.Equal(parentDeadline) {
+		t.Fatal("action duration extended the tighter parent")
+	}
+	cancelChild()
+	if !errors.Is(child.Err(), context.Canceled) || finite.Err() != nil {
+		t.Fatal("derived cancellation did not stay with its ingress owner")
+	}
+}
+
+func TestCodexSharedStdioPassiveKeepDoesNotResolve(t *testing.T) {
+	rec := AdoptProvenanceRecord{Clients: []AdoptClientProvenance{{
+		Client:       "codex-cli",
+		ConfigTarget: &AdoptClientConfigTargetV1{Kind: adoptClientConfigTargetKindCodexSharedStdio},
+	}}}
+	// This descriptor is intentionally incomplete DATA: passive cleanup must KEEP
+	// even corrupt/unavailable shared evidence without asking any native owner.
+	if adoptRowProvablyUnmutatedWithResolver(rec, adoptClientTargetResolver{}) {
+		t.Fatal("passive predicate invented no-effect proof")
+	}
+	lookedUp := false
+	verdict := classifyDeadAdoptingRowWithLookup(rec, func(string) (clients.Client, string, bool) {
+		lookedUp = true
+		return nil, "", false
+	})
+	if lookedUp || verdict != adoptRowRecoveryKeep {
+		t.Fatal("passive shared-kind classification reached a client lookup")
 	}
 }

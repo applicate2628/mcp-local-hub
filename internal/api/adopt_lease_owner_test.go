@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -228,14 +230,29 @@ func TestAdoptLeaseUnlockFailureIsTypedAndReleased(t *testing.T) {
 		t.Fatalf("acquire: acquired=%v err=%v", acquired, err)
 	}
 	previous := adoptLeaseUnlockFailureHook
-	adoptLeaseUnlockFailureHook = func() error { return errors.New("injected unlock-observation failure") }
+	cleanupCause := errors.New("synthetic-private-unlock-observation-failure")
+	adoptLeaseUnlockFailureHook = func() error { return cleanupCause }
 	t.Cleanup(func() { adoptLeaseUnlockFailureHook = previous })
-	if err := lease.Unlock(); err == nil {
+	unlockErr := lease.Unlock()
+	if unlockErr == nil {
 		t.Fatal("Unlock succeeded despite injected owner cleanup failure")
 	} else {
 		var leaseFailure *LeaseFailure
-		if !errors.As(err, &leaseFailure) || leaseFailure.FailureID != adoptLeaseFailureCleanup {
-			t.Fatalf("Unlock error=%v, want typed %s", err, adoptLeaseFailureCleanup)
+		if !errors.As(unlockErr, &leaseFailure) || leaseFailure.FailureID != adoptLeaseFailureCleanup || leaseFailure.ReasonID != "" {
+			t.Fatalf("Unlock error=%v, want typed empty-reason %s", unlockErr, adoptLeaseFailureCleanup)
+		}
+		stage := newAdoptStageError("lease-release", "pending", unlockErr)
+		operation := &projectServicePlan{}
+		retained := operation.retainFailure(errors.Join(stage, context.Canceled))
+		var retainedLease *LeaseFailure
+		var retainedStage *AdoptStageError
+		var failure *projectServiceLaunchObservationFailure
+		if !errors.As(retained, &retainedLease) || retainedLease != leaseFailure || !errors.As(retained, &retainedStage) || retainedStage != stage || !errors.As(retained, &failure) || failure.operation != operation || !errors.Is(retained, cleanupCause) || !errors.Is(retained, context.Canceled) {
+			t.Fatal("private custody lost actual unlock cleanup, stage or joined causes")
+		}
+		encoded, jsonErr := json.Marshal(retained)
+		if jsonErr != nil || string(encoded) != "{}" || fmt.Sprintf("%#v", retained) != "PROJECT_SERVICE_LAUNCH_OBSERVATION_UNQUALIFIED" {
+			t.Fatal("private custody exposed the actual unlock failure")
 		}
 	}
 	adoptLeaseUnlockFailureHook = previous

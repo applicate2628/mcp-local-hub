@@ -3,6 +3,12 @@
 package cli
 
 import (
+	"errors"
+	"os"
+	"time"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 	"os/exec"
 	"syscall"
 )
@@ -22,4 +28,36 @@ func configureSupervisorDetach(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setsid = true
+}
+
+func captureGUISupervisorGeneration(proc *os.Process) (api.SupervisorLockOwner, error) {
+	if proc == nil {
+		return api.SupervisorLockOwner{}, errSupervisorControlBinding
+	}
+	started, ok := process.ProcessStartTime(proc.Pid)
+	if !ok || started.IsZero() {
+		return api.SupervisorLockOwner{}, process.ErrProcessIdentityUnsupported
+	}
+	return api.SupervisorLockOwner{PID: proc.Pid, StartedAt: started.UTC().Format(time.RFC3339Nano)}, nil
+}
+
+func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectation, owner api.SupervisorLockOwner) error {
+	if err := process.VerifyPIDIdentity(process.PIDIdentityProof{PID: owner.PID, StartedAt: owner.StartedAt, ExecutablePath: expected.ProductPath}); err != nil {
+		return err
+	}
+	sameUser, err := process.ProcessOwnerMatchesCurrent(owner.PID)
+	if err != nil {
+		return err
+	}
+	if !sameUser {
+		return errors.New("created supervisor current user mismatch")
+	}
+	digest, err := startedSupervisorDigest(expected.ProductPath)
+	if err != nil {
+		return err
+	}
+	if digest != expected.ProductSHA256 {
+		return errors.New("created supervisor executable identity changed")
+	}
+	return nil
 }

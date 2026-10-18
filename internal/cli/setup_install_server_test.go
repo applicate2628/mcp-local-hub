@@ -17,13 +17,19 @@ package cli
 // per the lane guardrails); run it centrally on a clean host.
 
 import (
+	"encoding/json"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/gui"
 )
 
 // seedSetupInstallManifests seeds a hermetic installed-server catalog via
@@ -47,10 +53,9 @@ func seedSetupInstallManifests(t *testing.T, names ...string) {
 
 // stubSetupSideEffects replaces the bootstrap / LSP-router / watchdog seams
 // with no-ops so `setup` neither copies a binary nor touches Task Scheduler /
-// client configs, and intercepts the install step. It returns a pointer to a
-// string recording which server the (intercepted) install step was asked to
-// install ("<not-called>" until the seam fires).
-func stubSetupSideEffects(t *testing.T) *string {
+// client configs, and intercepts the install step. It returns the observed
+// server name and the fully constructed InstallOpts passed to the seam.
+func stubSetupSideEffects(t *testing.T) (*string, *api.InstallOpts) {
 	t.Helper()
 	origBootstrap := setupBootstrapFn
 	origRouter := setupLSPClientRouterFn
@@ -70,12 +75,14 @@ func stubSetupSideEffects(t *testing.T) *string {
 
 	installed := new(string)
 	*installed = "<not-called>"
-	setupInstallServerFn = func(server string, w io.Writer) error {
-		*installed = server
-		_, _ = io.WriteString(w, "installed "+server+"\n")
+	observed := new(api.InstallOpts)
+	setupInstallServerFn = func(opts api.InstallOpts) error {
+		*installed = opts.Server
+		*observed = opts
+		_, _ = io.WriteString(opts.Writer, "installed "+opts.Server+"\n")
 		return nil
 	}
-	return installed
+	return installed, observed
 }
 
 // TestSetupCommand_ServerInstallsKnownManifest verifies that
@@ -83,7 +90,7 @@ func stubSetupSideEffects(t *testing.T) *string {
 // install seam (the same code path the install command uses).
 func TestSetupCommand_ServerInstallsKnownManifest(t *testing.T) {
 	seedSetupInstallManifests(t, "serena", "memory")
-	installed := stubSetupSideEffects(t)
+	installed, _ := stubSetupSideEffects(t)
 
 	stdout, _, err := runSetupCmd(t, "--server", "serena")
 	if err != nil {
@@ -120,7 +127,7 @@ func TestSetupCommand_ServerUnknownFailsLoudBeforeMutation(t *testing.T) {
 	setupLSPClientRouterFn = func(bool) (*api.LSPClientRouterReport, error) {
 		return &api.LSPClientRouterReport{}, nil
 	}
-	setupInstallServerFn = func(string, io.Writer) error { installCalls++; return nil }
+	setupInstallServerFn = func(api.InstallOpts) error { installCalls++; return nil }
 
 	_, _, err := runSetupCmd(t, "--server", "does-not-exist")
 	if err == nil {
@@ -141,13 +148,72 @@ func TestSetupCommand_ServerUnknownFailsLoudBeforeMutation(t *testing.T) {
 // leaves the default flow unchanged: the install seam is never called.
 func TestSetupCommand_NoServerFlagSkipsInstall(t *testing.T) {
 	seedSetupInstallManifests(t, "serena")
-	installed := stubSetupSideEffects(t)
+	installed, _ := stubSetupSideEffects(t)
 
 	if _, _, err := runSetupCmd(t); err != nil {
 		t.Fatalf("setup (no --server): %v", err)
 	}
 	if *installed != "<not-called>" {
 		t.Fatalf("install seam ran for %q with no --server flag; want no call", *installed)
+	}
+}
+
+func TestSetupCommand_ServerSuppliesVerifiedLiveGUIPort(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		explicitListener bool
+	}{
+		{name: "explicit_nondefault", explicitListener: true},
+		{name: "auto_assigned", explicitListener: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seedSetupInstallManifests(t, "serena")
+			installed, observed := stubSetupSideEffects(t)
+			root := t.TempDir()
+			t.Setenv("LOCALAPPDATA", root)
+			t.Setenv("XDG_STATE_HOME", root)
+			t.Setenv("HOME", root)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/ping" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+			})
+			srv := httptest.NewUnstartedServer(handler)
+			if tc.explicitListener {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatalf("bind explicit GUI test listener: %v", err)
+				}
+				srv.Listener = listener
+			}
+			srv.Start()
+			t.Cleanup(srv.Close)
+			livePort := installTestPortFromURL(t, srv.URL)
+			if livePort == config.ReservedGUIPort {
+				t.Fatalf("test listener unexpectedly used default GUI port %d", livePort)
+			}
+			appDir := filepath.Join(root, "mcp-local-hub")
+			if err := os.MkdirAll(appDir, 0o700); err != nil {
+				t.Fatalf("mkdir GUI state dir: %v", err)
+			}
+			if err := gui.WritePidport(filepath.Join(appDir, "gui.pidport"), os.Getpid(), livePort); err != nil {
+				t.Fatalf("write GUI pidport: %v", err)
+			}
+
+			if _, _, err := runSetupCmd(t, "--server", "serena"); err != nil {
+				t.Fatalf("setup --server serena: %v", err)
+			}
+			if *installed != "serena" {
+				t.Fatalf("install seam got %q, want serena", *installed)
+			}
+			if observed.GUIPort != livePort {
+				t.Fatalf("constructed InstallOpts.GUIPort = %d, want verified live port %d", observed.GUIPort, livePort)
+			}
+		})
 	}
 }
 

@@ -12,15 +12,31 @@ import { ToastContainer } from "../components/Toast";
 import { clearAllToasts } from "../lib/toast-store";
 import type { DeAdoptPlan, DeAdoptRouting, ScanResult } from "../types";
 
+const fixtureRoots = {
+  winHome1: "C:\\Users\\test",
+} as const;
+
 // happy-dom doesn't ship EventSource. DiscoveryScreen subscribes to
 // /api/events for daemon-state / clients-rescan; minimal stub.
 class StubEventSource {
+  static current: StubEventSource | null = null;
   url: string;
+  private listeners = new Map<string, Set<(ev: MessageEvent) => void>>();
   constructor(url: string) {
     this.url = url;
+    StubEventSource.current = this;
   }
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  addEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    const listeners = this.listeners.get(name) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(name, listeners);
+  }
+  removeEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+  emit(name: string): void {
+    for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name));
+  }
   close(): void {}
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource =
@@ -219,6 +235,7 @@ const POLL_MS = 10_000;
 describe("DiscoveryScreen — auto-refresh + Rescan", () => {
   beforeEach(() => {
     cleanup();
+    StubEventSource.current = null;
     vi.restoreAllMocks();
     vi.useFakeTimers();
     clearAllToasts();
@@ -293,6 +310,83 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
   });
 
+  it("shows a scan failure and retries it once into recovered Discovery rows", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1
+            ? jsonResponse(500, { error: "internal error", code: "SCAN_FAILED" })
+            : jsonResponse(200, scan("recovered-memory"));
+        },
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    await vi.waitFor(() => expect(screen.getByText("/api/scan: internal error")).toBeTruthy());
+    expect(scanCalls).toBe(1);
+    expect(screen.getByRole("alert").textContent).toBe("/api/scan: internal error");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() => expect(screen.getByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.queryByText("/api/scan: internal error")).toBeNull();
+  });
+
+  it("keeps Loading through an authoritative nonempty scan without the global empty message", async () => {
+    const pendingScan = deferred<Response>();
+    const globalEmptyMessage = "No MCP servers found across any client config.";
+    const observedBodies: string[] = [];
+    const observer = new MutationObserver(() => {
+      observedBodies.push(document.body.textContent ?? "");
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => pendingScan.promise,
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    expect(screen.getByRole("status").textContent).toContain("Loading discovery results");
+    expect(screen.queryByText(globalEmptyMessage)).toBeNull();
+
+    await act(async () => {
+      pendingScan.resolve(jsonResponse(200, scan("known-memory")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.getByText("known-memory")).toBeTruthy());
+    observer.disconnect();
+
+    expect(observedBodies.some((body) => body.includes(globalEmptyMessage))).toBe(false);
+  });
+
+  it("renders the global empty message after an authoritative empty scan settles", async () => {
+    const globalEmptyMessage = "No MCP servers found across any client config.";
+    const emptyScan: ScanResult = {
+      at: "2026-06-15T00:00:00Z",
+      entries: [],
+      client_config_presence: {},
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, emptyScan),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".empty-state")?.textContent).toContain(globalEmptyMessage);
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 
   it("ignores an older overlapping refresh that resolves after a newer one", async () => {
     const older = deferred<Response>();
@@ -320,6 +414,12 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       await Promise.resolve();
     });
     await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+
+    await act(async () => {
+      vi.advanceTimersByTime(4_000);
+    });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
 
     await act(async () => {
       older.resolve(jsonResponse(200, scan("stale-memory")));
@@ -329,6 +429,57 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     });
     await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
     expect(screen.queryByText("fresh-memory")).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    const age = screen.getByTestId("scan-updated-ago").textContent ?? "";
+    expect(Number(age.match(/updated (\d+)s ago/)?.[1])).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resets age when an SSE-triggered direct reload publishes a new scan", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan(++scanCalls === 1 ? "first-memory" : "fresh-memory")),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+  });
+
+  it("keeps the failed SSE reload error-only and resets age on accepted recovery", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 2
+            ? jsonResponse(500, { error: "scan unavailable" })
+            : jsonResponse(200, scan(scanCalls === 1 ? "first-memory" : "recovered-memory"));
+        },
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(document.querySelector(".discovery .error")?.textContent).toBeTruthy());
+    expect(screen.queryByText("first-memory")).toBeNull();
+    expect(screen.queryByTestId("scan-updated-ago")).toBeNull();
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(3);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
   });
 
   it("shows Adopt into hub only on unknown stdio rows", async () => {
@@ -349,6 +500,154 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(
       within(externalRow as HTMLElement).queryByRole("button", { name: "Adopt into hub" }),
     ).toBeNull();
+  });
+
+  it("guards both unmanaged Dismiss buttons and reloads only after confirmation", async () => {
+    const dismissRequests: Array<{ method?: string; body: unknown }> = [];
+    let dismissed = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, {
+          unknown: dismissed ? ["context7"] : [],
+        }),
+        "/api/dismiss": (init) => {
+          dismissRequests.push({
+            method: init?.method,
+            body: JSON.parse(String(init?.body ?? "{}")),
+          });
+          dismissed = true;
+          return new Response(null, { status: 204 });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const unknownRow = (await screen.findByText("local-stdio")).closest("li");
+    const externalRow = screen.getByText("context7").closest("li");
+    expect(unknownRow).not.toBeNull();
+    expect(externalRow).not.toBeNull();
+
+    fireEvent.click(within(unknownRow as HTMLElement).getByRole("button", { name: "Dismiss" }));
+    expect(dismissRequests).toHaveLength(0);
+    let modal = await screen.findByTestId("dismiss-confirm-modal");
+    expect((modal as HTMLDialogElement).open).toBe(true);
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Cancel" }));
+    expect(dismissRequests).toHaveLength(0);
+    expect(screen.queryByTestId("dismiss-confirm-modal")).toBeNull();
+
+    fireEvent.click(within(externalRow as HTMLElement).getByRole("button", { name: "Dismiss" }));
+    modal = await screen.findByTestId("dismiss-confirm-modal");
+    fireEvent.click(within(modal).getByRole("button", { name: "Dismiss" }));
+
+    await vi.waitFor(() => expect(dismissRequests).toEqual([
+      { method: "POST", body: { server: "context7" } },
+    ]));
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/dismiss")).toHaveLength(1);
+    await vi.waitFor(() => expect(screen.queryByText("Dismissed (1)")).toBeTruthy());
+    const dismissedGroup = screen.getByText("Dismissed (1)").closest("details");
+    expect(dismissedGroup).not.toBeNull();
+    expect(within(dismissedGroup as HTMLElement).getByText("context7")).toBeTruthy();
+  });
+
+  it("restores one dismissed entry through DELETE and authoritative reload", async () => {
+    const restoreRequests: Array<{ method?: string; body: unknown }> = [];
+    let dismissed = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, {
+          unknown: dismissed ? ["context7"] : [],
+        }),
+        "/api/dismiss": (init) => {
+          restoreRequests.push({
+            method: init?.method,
+            body: JSON.parse(String(init?.body ?? "{}")),
+          });
+          dismissed = false;
+          return new Response(null, { status: 204 });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const dismissedGroup = (await screen.findByText("Dismissed (1)")).closest("details");
+    expect(dismissedGroup).not.toBeNull();
+    fireEvent.click(within(dismissedGroup as HTMLElement).getByRole("button", { name: "Restore" }));
+
+    await vi.waitFor(() => expect(restoreRequests).toEqual([
+      { method: "DELETE", body: { server: "context7" } },
+    ]));
+    await vi.waitFor(() => expect(screen.queryByText("Dismissed (1)")).toBeNull());
+    const restoredRow = screen.getByText("context7").closest("li");
+    expect(restoredRow).not.toBeNull();
+    expect(within(restoredRow as HTMLElement).getByTestId("external-badge-context7")).toBeTruthy();
+  });
+
+  it("keeps a dismissed row visible when Restore DELETE is rejected", async () => {
+    const restoreRequests: Array<{ method?: string; body: unknown }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: ["context7"] }),
+        "/api/dismiss": (init) => {
+          restoreRequests.push({
+            method: init?.method,
+            body: JSON.parse(String(init?.body ?? "{}")),
+          });
+          return jsonResponse(500, { error: "restore failed" });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const dismissedGroup = (await screen.findByText("Dismissed (1)")).closest("details");
+    fireEvent.click(within(dismissedGroup as HTMLElement).getByRole("button", { name: "Restore" }));
+
+    await vi.waitFor(() => expect(restoreRequests).toEqual([
+      { method: "DELETE", body: { server: "context7" } },
+    ]));
+    expect(await screen.findByText(/Restore context7:.*restore failed/)).toBeTruthy();
+    expect(screen.getByText("Dismissed (1)")).toBeTruthy();
+    expect(within(dismissedGroup as HTMLElement).getByText("context7")).toBeTruthy();
+  });
+
+  it("keeps the dismissed row until a successful reload and surfaces reload failure", async () => {
+    const reload = deferred<Response>();
+    let scanCalls = 0;
+    let dismissed = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1
+            ? jsonResponse(200, unmanagedDiscoveryScan())
+            : reload.promise;
+        },
+        "/api/dismissed": () => jsonResponse(200, {
+          unknown: dismissed ? ["context7"] : [],
+        }),
+        "/api/dismiss": () => {
+          dismissed = false;
+          return new Response(null, { status: 204 });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const dismissedGroup = (await screen.findByText("Dismissed (1)")).closest("details");
+    fireEvent.click(within(dismissedGroup as HTMLElement).getByRole("button", { name: "Restore" }));
+
+    await vi.waitFor(() => expect(scanCalls).toBe(2));
+    expect(screen.getByText("Dismissed (1)")).toBeTruthy();
+    expect(within(dismissedGroup as HTMLElement).getByText("context7")).toBeTruthy();
+
+    await act(async () => {
+      reload.resolve(jsonResponse(500, { error: "scan reload failed" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(screen.queryByText(/scan reload failed/)).toBeTruthy());
   });
 
   it("omits Adopt into hub for unknown stdio rows from unsupported adopt clients", async () => {
@@ -391,7 +690,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
             SecretRoutedKeys: ["LOCAL_STDIO_API_KEY"],
             ManifestYAML: "name: local-stdio\n",
             symlink_targets: [
-              { client: "codex-cli", resolved_path: "C:\\Users\\d\\.codex\\config.toml" },
+              { client: "codex-cli", resolved_path: `${fixtureRoots.winHome1}\\.codex\\config.toml` },
             ],
           });
         },
@@ -437,7 +736,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       name: "local-stdio",
       port: 9325,
       symlink_consent: [
-        { client: "codex-cli", resolved_path: "C:\\Users\\d\\.codex\\config.toml" },
+        { client: "codex-cli", resolved_path: `${fixtureRoots.winHome1}\\.codex\\config.toml` },
       ],
     });
     await vi.waitFor(() => expect(scanCalls).toBeGreaterThan(beforeConfirmScanCalls));
@@ -487,6 +786,31 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(
       await within(row as HTMLElement).findByText("Couldn't check de-adopt eligibility."),
     ).toBeTruthy();
+  });
+
+  it("renders a truthful error instead of global empty when the only can-migrate row cannot be classified", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan("eligibility-error")),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(503, { error: "eligibility service unavailable" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalled();
+      expect(document.querySelector(".empty-state")).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Couldn't check de-adopt eligibility.",
+      );
+    });
+    expect(screen.queryByText("eligibility-error")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Migrate selected/ })).toBeNull();
   });
 
   it("fetches eligibility and renders de-adopt for a recoverable non-via-hub row", async () => {

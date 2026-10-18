@@ -1,15 +1,20 @@
 package cli
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/buildinfo"
+	"mcp-local-hub/internal/cbuild"
 	"mcp-local-hub/internal/drmemory"
 	"mcp-local-hub/internal/gdb"
 	"mcp-local-hub/internal/godbolt"
+	"mcp-local-hub/internal/kimi"
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/oneapirun"
 	"mcp-local-hub/internal/perftools"
+	"mcp-local-hub/internal/sonnet"
 	"mcp-local-hub/internal/vcpkgmcp"
 	"mcp-local-hub/internal/vtune"
 )
@@ -60,6 +65,8 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 		SilenceErrors: true,
 		Version:       version,
 	}
+	root.SetOut(os.Stdout)
+	root.SetErr(os.Stderr)
 
 	// Groups must be registered BEFORE any command claiming them: cobra's
 	// AddCommand panics on a GroupID with no matching group.
@@ -82,6 +89,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	addGrouped(root, groupServers,
 		newScanCmd(),
 		newAdoptCmd(),
+		newAttachClientCmd(),
 		newDeAdoptCmd(),
 		newMigrateCmd(),
 		newManifestCmd(),
@@ -97,6 +105,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	)
 	addGrouped(root, groupRuntime,
 		newGuiCmd(),
+		newQuitCmd(),
 		newStatusCmd(),
 		newRestartCmd(),
 		newStopCmd(),
@@ -136,6 +145,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	// runtime error that calls for it, or carries an explicit
 	// accepted-loss note in its own constructor.
 	root.AddCommand(
+		cbuild.NewCommand(),
 		newDaemonCmd(),
 		newRouteCmd(),
 		newRelayCmd(),
@@ -164,10 +174,12 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 		lldb.NewCommand(),
 		gdb.NewCommand(),
 		godbolt.NewCommand(),
+		kimi.NewCommand(),
 		perftools.NewCommand(),
 		oneapirun.NewCommand(),
 		drmemory.NewCommand(),
 		vtune.NewCommand(),
+		sonnet.NewCommand(),
 		vcpkgmcp.NewCommand(),
 	)
 

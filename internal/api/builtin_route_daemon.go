@@ -82,6 +82,21 @@ func BuildBuiltinRouteDaemon(command string, port int) SupervisorDaemon {
 	}
 }
 
+// recognizeBuiltinRouteDaemon receives the existing built-in role without
+// rewriting the observation. Reserved but noncanonical rows must not fall
+// through as ordinary manifest-backed daemons.
+func recognizeBuiltinRouteDaemon(d SupervisorDaemon) (bool, error) {
+	key := canonicalIntentTaskKey(d.TaskName)
+	if key != BuiltinRouteTaskName && d.Server != BuiltinRouteServer {
+		return false, nil
+	}
+	d.TaskName = key
+	if !reflect.DeepEqual(d, BuildBuiltinRouteDaemon(d.Command, d.Port)) {
+		return false, fmt.Errorf("noncanonical built-in route descriptor")
+	}
+	return true, nil
+}
+
 // ErrBuiltinRouteTaskNameCollision is returned by EnsureBuiltinRouteDaemon
 // when an existing supervisor-intent row carries the reserved
 // BuiltinRouteTaskName canonical key but its Server/Daemon identity does NOT

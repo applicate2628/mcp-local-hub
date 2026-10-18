@@ -35,6 +35,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -99,6 +100,13 @@ func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStri
 // LSPWorkspaceRootTrustedWithAuditSink instead, passing
 // RouteReadOnlyStderrSink.
 func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation)) ([]byte, error) {
+	return readStateFileInodeAnchoredWithObservation(path, requiresStrict, maxBytes, auditFallbacks, consume, auditSink, parentFallbacksObserved, nil, nil)
+}
+
+func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation), ctx context.Context, b *stateFileReadBuilder) ([]byte, error) {
+	if err := observedStateReadBoundary(ctx, b, "parent-open"); err != nil {
+		return nil, err
+	}
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -117,18 +125,38 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	)
 	if err != nil {
 		if windowsAnchoredReadErrIsNotExist(err) {
-			return nil, &os.PathError{Op: "open", Path: parentDir, Err: os.ErrNotExist}
+			missing := &os.PathError{Op: "open", Path: parentDir, Err: os.ErrNotExist}
+			if b != nil {
+				b.recordAbsence(StateFileReadParentNotFound, err, missing)
+			}
+			return nil, missing
 		}
 		return nil, fmt.Errorf("open parent %s: %w", parentDir, err)
 	}
-	defer windows.CloseHandle(parentHandle)
+	if b == nil {
+		defer windows.CloseHandle(parentHandle)
+	} else {
+		b.acquire("parent", func() error { return windows.CloseHandle(parentHandle) })
+		defer b.closeResource("parent")
+		if err := observedStateReadBoundary(ctx, b, "parent-identity"); err != nil {
+			return nil, err
+		}
+		var parentInfo windows.ByHandleFileInformation
+		if err := windows.GetFileInformationByHandle(parentHandle, &parentInfo); err != nil {
+			return nil, err
+		}
+		b.identity("parent", observedStateReadWindowsIdentity(parentInfo))
+	}
+	if err := observedStateReadBoundary(ctx, b, "parent-policy"); err != nil {
+		return nil, err
+	}
 
 	// Parent-DACL gate. Strict mode rejects any non-allowlisted ACE
 	// (same as the old verify); default-relax now tolerates BOTH
 	// read-only and write/DAC-edit broadening because the read
 	// below is inode-anchored.
 	var parentFallbacks []stateReadParentFallbackObservation
-	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
+	if err := verifyWindowsDACLFromHandleMaskedObserved(parentHandle, windowsDACLSignificantBits, b, "parent-policy"); err != nil {
 		if requiresStrict() {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
 				parentDir, err, RequireSingleUserHomeEnv)
@@ -140,7 +168,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		// read-only-broadening in the audit log so operators can
 		// review the more-permissive case.
 		reason := "default-relax-on-solo-host (parent grants read-only access to non-allowlisted SID)"
-		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(parentHandle); wrErr != nil {
+		if wrErr := verifyWindowsDACLFromHandleMaskedObserved(parentHandle, windowsDACLWriteOrAdminBits, b, "parent-policy"); wrErr != nil {
 			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read because subsequent ReadFile is bound to the file handle, not the path)"
 		}
 		if auditFallbacks {
@@ -167,6 +195,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	// after the verify steps below. SYNCHRONIZE is added by
 	// ntOpenRelative internally.
 	desiredAccess := uint32(windows.FILE_READ_DATA | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	if err := observedStateReadBoundary(ctx, b, "leaf-open"); err != nil {
+		return nil, err
+	}
 	if consume {
 		desiredAccess |= windows.DELETE
 	}
@@ -177,7 +208,11 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	)
 	if err != nil {
 		if windowsAnchoredReadErrIsNotExist(err) {
-			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+			missing := &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+			if b != nil {
+				b.recordAbsence(StateFileReadLeafNotFound, err, missing)
+			}
+			return nil, missing
 		}
 		// FILE_NON_DIRECTORY_FILE inside ntOpenRelative makes NT
 		// fail the open with STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
@@ -191,12 +226,23 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		}
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer windows.CloseHandle(fileHandle)
+	if b == nil {
+		defer windows.CloseHandle(fileHandle)
+	} else {
+		b.acquire("leaf", func() error { return windows.CloseHandle(fileHandle) })
+		defer b.closeResource("leaf")
+	}
+	if err := observedStateReadBoundary(ctx, b, "leaf-identity"); err != nil {
+		return nil, err
+	}
 
 	// Reject reparse points / symlinks via the file attributes.
 	var fi windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(fileHandle, &fi); err != nil {
 		return nil, fmt.Errorf("file info %s: %w", path, err)
+	}
+	if b != nil {
+		b.identity("leaf", observedStateReadWindowsIdentity(fi))
 	}
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return nil, ErrIrregularFile
@@ -209,7 +255,10 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	// invariant. Default-relax mirrors the write side: inherited
 	// non-allowlisted principals on normal temp/state files warn but
 	// do not block the handle-bound read. Wrong-owner remains hard.
-	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
+	if err := observedStateReadBoundary(ctx, b, "leaf-policy"); err != nil {
+		return nil, err
+	}
+	if err := verifyWindowsDACLFromHandleMaskedObserved(fileHandle, windowsDACLSignificantBits, b, "leaf-policy"); err != nil {
 		if requiresStrict() {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)",
 				path, err, RequireSingleUserHomeEnv)
@@ -217,7 +266,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		if errors.Is(err, ErrWrongOwner) {
 			return nil, err
 		}
-		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
+		if wrErr := verifyWindowsDACLFromHandleMaskedObserved(fileHandle, windowsDACLWriteOrAdminBits, b, "leaf-policy"); wrErr != nil {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
 		}
 		if isSecretBearingStateFilePath(path) {
@@ -245,6 +294,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, fmt.Errorf("consume state secret %s: opened file has %d links, want exactly one", path, fi.NumberOfLinks)
 		}
 	}
+	if b != nil {
+		b.view.PolicyQualified = true
+	}
 
 	// Read the content via the verified handle. windows.ReadFile
 	// fills a single buffer; loop until EOF or the size cap fires.
@@ -263,6 +315,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	buf := make([]byte, 0, fileSize)
 	readSucceeded := false
 	defer func() {
+		if b != nil {
+			b.captureBytes(buf)
+		}
 		if !readSucceeded {
 			zeroStateSecretBytes(buf)
 		}
@@ -270,8 +325,17 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	chunk := make([]byte, 4096)
 	defer zeroStateSecretBytes(chunk)
 	for {
+		if err := observedStateReadBoundary(ctx, b, "read"); err != nil {
+			return nil, err
+		}
 		var read uint32
 		err := windows.ReadFile(fileHandle, chunk, &read, nil)
+		if contextErr := observedStateReadBoundary(ctx, b, "read"); contextErr != nil {
+			if read > 0 {
+				buf = append(buf, chunk[:read]...)
+			}
+			return nil, errors.Join(err, contextErr)
+		}
 		if err != nil {
 			// ERROR_HANDLE_EOF (38) or zero-read on a regular file
 			// means EOF — both signal "we got everything".
@@ -292,6 +356,17 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	// file returns an empty non-nil slice, not nil.
 	if buf == nil {
 		buf = []byte{}
+	}
+	if b != nil && b.leafCapture != nil {
+		if err := observedStateReadBoundary(ctx, b, "leaf-compensation-capture"); err != nil {
+			return nil, err
+		}
+		if err := b.leafCapture(uintptr(fileHandle), buf); err != nil {
+			return nil, err
+		}
+		if err := observedStateReadBoundary(ctx, b, "leaf-compensation-capture"); err != nil {
+			return nil, err
+		}
 	}
 	readSucceeded = true
 	return buf, nil

@@ -51,7 +51,7 @@
 //     { Flags: REPLACE_IF_EXISTS|POSIX_SEMANTICS,
 //       RootDirectory: dirHandle, FileName: base }).
 //     fileHandle stays open across the rename (codex r5 MED).
-//  8. Close fileHandle.
+//  8. Retain fileHandle through post-rename verification and owned cleanup.
 //  9. Re-open destination via dirHandle (FILE_OPEN with
 //     FILE_OPEN_REPARSE_POINT so the open does NOT silently follow a
 //     reparse point swapped in between rename and re-open) and
@@ -59,7 +59,7 @@
 //     (defined in hub_mcp_state_dacl_windows.go). Combined with the
 //     atomic rename's FILE_RENAME_POSIX_SEMANTICS this guarantees the
 //     post-rename handle refers to the file we wrote.
-// 10. Close verifyHandle; close dirHandle.
+// 10. Close verifyHandle; close fileHandle once; close dirHandle.
 //
 // On any error after step 4 the temp file is marked DELETE-on-close
 // via NtSetInformationFile(FileDispositionInformation). The fileHandle
@@ -68,6 +68,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -76,6 +78,8 @@ import (
 	"path/filepath"
 	"time"
 	"unsafe"
+
+	"mcp-local-hub/internal/clients"
 
 	"golang.org/x/sys/windows"
 )
@@ -124,6 +128,10 @@ const fileInformationClassRenameEx uint32 = 65
 // across the DACL tighten (ACL changes do not revoke existing
 // handles). Reusing the hardened pipeline closes that window.
 func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bool) error {
+	return secureWriteClientConfigImplObserved(path, contents, skipParentGate, nil)
+}
+
+func secureWriteClientConfigImplObserved(path string, contents []byte, skipParentGate bool, observation *stateFileIOCapture) (retErr error) {
 	observeStringEntry() // AF-1 T5 observation; no-op (compiled out) in production.
 	parentDir, base := filepath.Split(path)
 	if parentDir == "" {
@@ -143,13 +151,18 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 	if err != nil {
 		return fmt.Errorf("secure write: open parent %s: %w", parentDir, err)
 	}
-	defer windows.CloseHandle(dirHandle)
+	observation.acquired("parent")
+	defer func() {
+		closeErr := windows.CloseHandle(dirHandle)
+		observation.closed("parent", closeErr)
+		retErr = errors.Join(retErr, closeErr)
+	}()
 
 	// Steps 2-10 run against the held parent handle. The shared owner
 	// (secureWriteClientConfigToResolvedParent) does NOT close dirHandle —
 	// this caller owns it via the defer above. parentDirForDiag carries the
 	// human-readable parent path for the ErrSecureWriteParentInsecure wrap.
-	return secureWriteClientConfigToResolvedParent(dirHandle, parentDir, base, contents, skipParentGate)
+	return secureWriteClientConfigToResolvedParentObserved(dirHandle, parentDir, base, contents, skipParentGate, observation, nil)
 }
 
 // secureWriteClientConfigToResolvedParent runs the hardened post-parent-open
@@ -172,8 +185,16 @@ func secureWriteClientConfigImpl(path string, contents []byte, skipParentGate bo
 // temp create relative to dirHandle, atomic rename across the held handle,
 // post-rename DACL re-verify — still applies, so there is NO race window
 // between temp create and DACL apply and NO TOCTOU window on the parent.
-func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDirForDiag, base string, contents []byte, skipParentGate bool) error {
+func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDirForDiag, base string, contents []byte, skipParentGate bool, expected ...*clients.ConfigWriteRequest) error {
+	return secureWriteClientConfigToResolvedParentObserved(dirHandle, parentDirForDiag, base, contents, skipParentGate, nil, nil, expected...)
+}
+
+func secureWriteClientConfigToResolvedParentObserved(dirHandle windows.Handle, parentDirForDiag, base string, contents []byte, skipParentGate bool, observation *stateFileIOCapture, beforePublish func() error, expected ...*clients.ConfigWriteRequest) (retErr error) {
 	observeResolvedParentEntry() // AF-1 T5 observation; no-op (compiled out) in production.
+	guard := expectedConfigWriteRequest(expected)
+	if err := verifyExpectedSnapshotWindowsObserved(dirHandle, base, guard, observation, "expected-snapshot-entry"); err != nil {
+		return err
+	}
 	if base == "" {
 		return fmt.Errorf("secure write: empty base name (parent %q)", parentDirForDiag)
 	}
@@ -252,17 +273,25 @@ func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDir
 		return fmt.Errorf("secure write: ntcreate temp %s: %w", tempName, err)
 	}
 	closed := false
+	var cleanupErr error
+	observation.acquired("temp")
 	defer func() {
 		if !closed {
-			windows.CloseHandle(fileHandle)
+			closed = true
+			closeErr := windows.CloseHandle(fileHandle)
+			observation.closed("temp", closeErr)
+			retErr = errors.Join(retErr, cleanupErr, closeErr)
 		}
 	}()
 
-	// cleanup marks the temp file for delete-on-close. Errors are
-	// ignored — the caller already has a failure to surface, and the
-	// fileHandle close (via defer) then drops the inode.
+	// Cleanup marks only our retained created object. Its lifetime owner closes
+	// it once; cleanup failure stays visible with or without an observation.
 	cleanup := func() {
-		_ = setFileDeleteOnClose(fileHandle)
+		deleteErr := setFileDeleteOnClose(fileHandle)
+		cleanupErr = errors.Join(cleanupErr, deleteErr)
+		if observation != nil {
+			observation.cleanup = errors.Join(observation.cleanup, deleteErr)
+		}
 	}
 
 	// 5. SetSecurityInfo handle-bound — defense-in-depth re-apply of
@@ -283,35 +312,63 @@ func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDir
 	}
 
 	// 6. WriteFile + FlushFileBuffers.
-	if err := windowsWriteAll(fileHandle, contents); err != nil {
-		cleanup()
-		return fmt.Errorf("secure write: write temp: %w", err)
+	if observation != nil {
+		observation.write.entered = true
 	}
-	if err := windows.FlushFileBuffers(fileHandle); err != nil {
+	writeErr := windowsWriteAll(fileHandle, contents)
+	if observation != nil {
+		observation.write.returned = true
+		observation.write.err = writeErr
+	}
+	if writeErr != nil {
 		cleanup()
-		return fmt.Errorf("secure write: flush temp: %w", err)
+		return fmt.Errorf("secure write: write temp: %w", writeErr)
+	}
+	if observation != nil {
+		observation.flush.entered = true
+	}
+	flushErr := windows.FlushFileBuffers(fileHandle)
+	if observation != nil {
+		observation.flush.returned = true
+		observation.flush.err = flushErr
+	}
+	if flushErr != nil {
+		cleanup()
+		return fmt.Errorf("secure write: flush temp: %w", flushErr)
 	}
 
 	// 7. NtSetInformationFile(FileRenameInformationEx) — atomic rename
 	//    relative to dirHandle. fileHandle MUST stay open across the
 	//    call (codex r5 MED).
-	if err := ntRenameRelative(fileHandle, dirHandle, base); err != nil {
+	if guard != nil && expectedSnapshotBeforePublishHook != nil {
+		expectedSnapshotBeforePublishHook()
+	}
+	if beforePublish != nil {
+		if err := beforePublish(); err != nil {
+			cleanup()
+			return err
+		}
+	}
+	if err := verifyExpectedSnapshotWindowsObserved(dirHandle, base, guard, observation, "expected-snapshot-prepublish"); err != nil {
 		cleanup()
-		return fmt.Errorf("secure write: ntrename %s -> %s: %w", tempName, base, err)
+		return err
+	}
+	if observation != nil {
+		observation.rename.entered = true
+	}
+	renameErr := ntRenameRelative(fileHandle, dirHandle, base)
+	if observation != nil {
+		observation.rename.returned = true
+		observation.rename.err = renameErr
+	}
+	if renameErr != nil {
+		cleanup()
+		return fmt.Errorf("secure write: ntrename %s -> %s: %w", tempName, base, renameErr)
 	}
 
-	// 8. Close the file handle (rename complete, safe to release).
-	//    Mark `closed` BEFORE checking the return value: after
-	//    CloseHandle returns, the handle is in an indeterminate state
-	//    regardless of err (Windows KB244617 handle-recycle risk).
-	//    Calling CloseHandle twice on the same value can target an
-	//    unrelated kernel object that the same numeric handle was
-	//    recycled to.
-	closeErr := windows.CloseHandle(fileHandle)
-	closed = true
-	if closeErr != nil {
-		return fmt.Errorf("secure write: close temp: %w", closeErr)
-	}
+	// Retain the original DELETE-capable created handle through verification.
+	// A replacement at base is not ours; failure cleanup may mark only this
+	// original object, whose single close remains owned by the defer above.
 
 	// 9. Re-open destination via SAME dirHandle and re-verify DACL.
 	//    GENERIC_READ + READ_CONTROL is needed for GetSecurityInfo to
@@ -320,29 +377,230 @@ func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDir
 	//    After step 7's atomic rename a COMPLETE owner-only file is published
 	//    at `base`. Re-open can fail transiently (sharing violation, momentary
 	//    access-denied, scanner hiccup), so do not erase the published file
-	//    unless we actually re-open it and prove the DACL is wrong. A
-	//    definitive DACL verify failure below still uses the handle-relative
-	//    cleanup path.
+	//    on that failure. Definitive verification failure below marks only the
+	//    original held object; reopening base never grants deletion authority.
 	verifyHandle, err := openPostRenameVerifyHandleWindows(dirHandle, base)
 	if err != nil {
 		return fmt.Errorf("secure write: re-open %s: %w", base, err)
 	}
-	defer windows.CloseHandle(verifyHandle)
+	observation.acquired("verify")
+	defer func() {
+		closeErr := windows.CloseHandle(verifyHandle)
+		observation.closed("verify", closeErr)
+		retErr = errors.Join(retErr, closeErr)
+	}()
 	// Test-only seam (secure_write_client_config.go): force a post-rename
 	// verify failure so the "no file on error" cleanup path is
 	// exercisable without platform-specific DACL synthesis. nil in
 	// production → the real verify below runs.
 	if postRenameVerifyFailHook != nil {
 		if herr := postRenameVerifyFailHook(); herr != nil {
-			return postRenameFailureWindows(dirHandle, base,
-				fmt.Errorf("secure write: post-rename verify %s: %w", base, herr))
+			return postRenameFailureWindowsObserved(fileHandle,
+				fmt.Errorf("secure write: post-rename verify %s: %w", base, herr), observation)
 		}
 	}
 	if err := verifyWindowsDACLFromHandle(verifyHandle); err != nil {
-		return postRenameFailureWindows(dirHandle, base,
-			fmt.Errorf("secure write: post-rename DACL verify %s: %w", base, err))
+		return postRenameFailureWindowsObserved(fileHandle,
+			fmt.Errorf("secure write: post-rename DACL verify %s: %w", base, err), observation)
 	}
 	return nil
+}
+
+func secureWriteExpectedSnapshot(req clients.ConfigWriteRequest, skip bool) error {
+	if req.ExpectedSnapshot == nil {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := req.ExpectedSnapshot.ValidateBinding(req.Context, req.Path); err != nil {
+		return err
+	}
+	return secureWriteClientConfigToResolvedParent(windows.Handle(req.ExpectedSnapshot.BorrowedParentHandle()), filepath.Dir(req.Path), filepath.Base(req.Path), req.Contents, skip, &req)
+}
+
+// The existing paired client coordinator invokes this scope while its global
+// and project locks are held. The callback is synchronous and receives only the
+// genuine global snapshot and the request-shaped per-operation writer. The API
+// owns every capture and closes them before returning to the getter owner.
+// This forward publication is Windows-specific, like its original publisher;
+// it adds no route, target codec or other-platform fallback.
+func withClientConfigConditionalWriterObserved(ctx context.Context, sources []*clients.CodexConfiguredProjectProfile, projects []clients.Client, evidence clients.CodexSharedStdioReplayEvidenceV1, consent *ResolvedSymlinkConsent, apply func(*clients.ConfigWriteSnapshot, func(clients.ConfigWriteRequest) error) (clients.CodexSharedStdioMutationResult, error)) (observation *clientConfigConditionalWriteObservation, result clients.CodexSharedStdioMutationResult, retErr error) {
+	observation = &clientConfigConditionalWriteObservation{ctx: ctx, sources: append([]*clients.CodexConfiguredProjectProfile(nil), sources...), projects: append([]clients.Client(nil), projects...), evidence: clients.CloneCodexSharedStdioReplayEvidence(evidence)}
+	defer func() {
+		observation.active = false
+		observation.result = result
+		if observation.primaryError == nil {
+			observation.primaryError = retErr
+		}
+		retErr = errors.Join(retErr, observation.closeObserved())
+	}()
+	if ctx == nil || apply == nil || len(sources) == 0 || len(sources) != len(projects) || len(sources) != len(evidence.Sources) {
+		return observation, result, clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return observation, result, err
+	}
+	if _, finite := ctx.Deadline(); !finite {
+		return observation, result, errors.New("secure write: original finite invocation context required")
+	}
+	if consent != nil {
+		copy := *consent
+		observation.consent = &copy
+	}
+	for i, source := range observation.sources {
+		if source == nil || observation.projects[i] == nil {
+			return observation, result, clients.ErrConfigWriteSnapshotConflict
+		}
+		global, project, err := source.ConfiguredSourcePreimages()
+		if err != nil {
+			return observation, result, err
+		}
+		logical, referent, links, err := source.ConfiguredGlobalSourcePath()
+		if err != nil {
+			return observation, result, err
+		}
+		if i == 0 {
+			observation.globalSource = global
+			observation.logical = logical
+			observation.referent = referent
+			observation.links = links
+		} else if logical != observation.logical || referent != observation.referent || !bytes.Equal(global, observation.globalSource) {
+			return observation, result, clients.ErrConfigWriteSnapshotConflict
+		}
+		observation.projectSources = append(observation.projectSources, project)
+	}
+	observation.global = captureConditionalClientConfigInput(ctx, observation.referent, observation.globalSource)
+	if observation.global.captureError != nil {
+		return observation, result, observation.global.captureError
+	}
+	if observation.global.snapshot == nil {
+		return observation, result, clients.ErrConfigWriteSnapshotConflict
+	}
+	for i, project := range observation.projects {
+		input := captureConditionalClientConfigInput(ctx, project.ConfigPath(), observation.projectSources[i])
+		observation.projectInputs = append(observation.projectInputs, input)
+		if input.captureError != nil {
+			return observation, result, input.captureError
+		}
+		if input.snapshot == nil {
+			return observation, result, clients.ErrConfigWriteSnapshotConflict
+		}
+	}
+	observation.active = true
+	observation.clientEntered = true
+	result, observation.clientError = apply(observation.global.snapshot, observation.publish)
+	observation.clientReturned = true
+	observation.active = false
+	if observation.clientError != nil && observation.primaryError == nil {
+		observation.primaryError = observation.clientError
+	}
+	if !observation.publicationEntered && observation.clientError == nil {
+		if result.State != clients.CodexSharedStdioNoChange || (result.DesiredToken != clients.CodexSharedStdioBefore && result.DesiredToken != clients.CodexSharedStdioApplied) || result.ExpectedConfigSHA256 != preparedSerenaHash(observation.globalSource) {
+			observation.publicationError = errors.New("secure write: conditional callback did not qualify publication or no-change")
+		} else if err := observation.validateInputs(); err != nil {
+			observation.publicationError = err
+		} else {
+			observation.readback = captureConditionalClientConfigInput(ctx, observation.referent, observation.globalSource)
+			observation.readbackError = observation.readback.captureError
+		}
+	}
+	return observation, result, errors.Join(observation.primaryError, observation.clientError, observation.publicationError, observation.readbackError)
+}
+
+// One semantic check is invoked at the original commit boundary, or once for a
+// qualified no-write arm. It never substitutes replay location for current inode.
+func (o *clientConfigConditionalWriteObservation) validateInputs() error {
+	if err := o.ctx.Err(); err != nil {
+		return err
+	}
+	for i, source := range o.sources {
+		if err := source.ValidateConfiguredGlobalBinding(o.ctx); err != nil {
+			return err
+		}
+		if err := source.ValidateConfiguredProjectSourceSnapshot(o.ctx, o.projects[i], o.projectInputs[i].snapshot); err != nil {
+			return err
+		}
+		if err := source.ValidateSharedStdioReplaySource(o.ctx, o.evidence.Sources[i], o.evidence.GlobalLocation); err != nil {
+			return err
+		}
+	}
+	return validateConditionalClientConfigConsent(o)
+}
+func (o *clientConfigConditionalWriteObservation) publish(req clients.ConfigWriteRequest) (retErr error) {
+	if o == nil || !o.active {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	defer func() {
+		o.publicationError = errors.Join(o.publicationError, retErr)
+		if retErr != nil && o.primaryError == nil {
+			o.primaryError = retErr
+		}
+	}()
+	if o.publicationEntered || req.Context != o.ctx || req.Path != o.referent || req.ExpectedSnapshot == nil || req.ExpectedSnapshot != o.global.snapshot || req.FreshCreationEvidence != nil {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := req.ExpectedSnapshot.ValidateObservedCapture(o.ctx, o.referent); err != nil {
+		return err
+	}
+	o.request = req
+	o.request.Contents = append([]byte(nil), req.Contents...)
+	o.publicationEntered = true
+	// One semantic guard at the original publication boundary. The project
+	// validator proves its exact constructor/profile/capture/current-file
+	// relationship; a matching ConfigPath or hash alone cannot qualify it.
+	beforePublish := o.validateInputs
+	writeErr := secureWriteWithParentPolicy(o.referent, func(skip bool) error {
+		attempt := clientConfigConditionalNativeWrite{capture: newStateFileIOCapture(), entered: true}
+		o.native = append(o.native, attempt)
+		index := len(o.native) - 1
+		err := secureWriteClientConfigToResolvedParentObserved(windows.Handle(o.global.snapshot.BorrowedParentHandle()), filepath.Dir(o.referent), filepath.Base(o.referent), o.request.Contents, skip, o.native[index].capture, beforePublish, &o.request)
+		o.native[index].returned = true
+		o.native[index].err = err
+		return err
+	})
+	o.publicationReturned = true
+	if writeErr != nil && o.primaryError == nil {
+		o.primaryError = writeErr
+	}
+	// Successful rename is retained as an event, including when later native
+	// verification or close fails. It does not imply that the file still exists.
+	for _, attempt := range o.native {
+		rename := attempt.capture.rename
+		if rename.entered && rename.returned && rename.err == nil {
+			o.readback = captureConditionalClientConfigInput(o.ctx, o.referent, o.request.Contents)
+			o.readbackError = o.readback.captureError
+			break
+		}
+	}
+	return errors.Join(writeErr, o.readbackError)
+}
+
+func verifyExpectedSnapshotWindows(parent windows.Handle, base string, req *clients.ConfigWriteRequest) error {
+	return verifyExpectedSnapshotWindowsObserved(parent, base, req, nil, "")
+}
+func verifyExpectedSnapshotWindowsObserved(parent windows.Handle, base string, req *clients.ConfigWriteRequest, capture *stateFileIOCapture, slot string) (retErr error) {
+	if req == nil {
+		return nil
+	}
+	if req.ExpectedSnapshot == nil {
+		return clients.ErrConfigWriteSnapshotConflict
+	}
+	if err := req.ExpectedSnapshot.ValidateBinding(req.Context, req.Path); err != nil {
+		return err
+	}
+	h, err := ntOpenRelative(parent, base, windows.FILE_GENERIC_READ)
+	if err != nil {
+		return err
+	}
+	f := os.NewFile(uintptr(h), req.Path)
+	if f == nil {
+		return errors.Join(errors.New("STATE_EXPECTED_SNAPSHOT_FILE_UNAVAILABLE"), windows.CloseHandle(h))
+	}
+	capture.acquired(slot)
+	defer func() {
+		closeErr := f.Close()
+		capture.closed(slot, closeErr)
+		retErr = errors.Join(retErr, closeErr)
+	}()
+	return req.ExpectedSnapshot.VerifyCurrentFile(req.Context, f)
 }
 
 func openPostRenameVerifyHandleWindows(dirHandle windows.Handle, base string) (windows.Handle, error) {
@@ -395,45 +653,18 @@ func isRetryablePostRenameOpenErrWindows(err error) bool {
 		ntStatusIs(err, windows.STATUS_RETRY)
 }
 
-// postRenameFailureWindows is the "no file on error" cleanup for a
-// definitive post-rename DACL verify failure. It best-effort DELETEs the
-// just-published `base` file via a dirHandle-relative open
-// (FILE_OPEN_REPARSE_POINT so a swapped reparse point is NOT followed —
-// same anti-TOCTOU discipline the write pipeline uses). If the delete itself
-// fails the published file genuinely REMAINS, so that fact is folded into
-// the returned error rather than hidden. origErr is always preserved as the
-// primary cause.
-func postRenameFailureWindows(dirHandle windows.Handle, base string, origErr error) error {
-	if derr := deleteRelative(dirHandle, base); derr != nil {
-		return fmt.Errorf("%w; AND the published file could not be removed (it may remain at the destination): %v", origErr, derr)
+// Definitive failure marks only the operation-created object whose original
+// DELETE handle is still held. The caller owns its one close attempt. A current
+// basename, including a foreign replacement, supplies no deletion authority.
+func postRenameFailureWindowsObserved(ownedFile windows.Handle, origErr error, observation *stateFileIOCapture) error {
+	deleteErr := setFileDeleteOnClose(ownedFile)
+	if observation != nil {
+		observation.cleanup = errors.Join(observation.cleanup, deleteErr)
+	}
+	if deleteErr != nil {
+		return errors.Join(origErr, fmt.Errorf("secure write: mark original published object delete-on-close (owned cleanup remains unsettled): %w", deleteErr))
 	}
 	return origErr
-}
-
-// deleteRelative removes `name` under `dirHandle` by opening it
-// DELETE-relative (no reparse follow) and marking it delete-on-close,
-// then closing the handle to drop the inode. Mirrors the handle-
-// relative discipline of the rest of the pipeline: the open is anchored
-// to dirHandle (not a fresh path walk from root) and uses
-// FILE_OPEN_REPARSE_POINT so it can never follow a symlink/junction
-// swapped into the slot. A "not found" open is treated as success — the
-// file is already gone, which is the desired post-condition.
-func deleteRelative(dirHandle windows.Handle, name string) error {
-	h, err := ntOpenRelative(dirHandle, name, windows.DELETE)
-	if err != nil {
-		if isNotFoundErr(err) {
-			return nil
-		}
-		return fmt.Errorf("open %s for delete: %w", name, err)
-	}
-	if derr := setFileDeleteOnClose(h); derr != nil {
-		_ = windows.CloseHandle(h)
-		return fmt.Errorf("mark %s delete-on-close: %w", name, derr)
-	}
-	if cerr := windows.CloseHandle(h); cerr != nil {
-		return fmt.Errorf("close %s after delete-mark: %w", name, cerr)
-	}
-	return nil
 }
 
 // openDirHandleNoReparse opens a directory with FILE_LIST_DIRECTORY +
@@ -553,6 +784,22 @@ func ntCreateRelativeWithShareAccess(
 	securityDescriptor *windows.SECURITY_DESCRIPTOR,
 	shareAccess uint32,
 ) (windows.Handle, error) {
+	return ntCreateRelativeWithShareAccessObserved(dirHandle, name, desiredAccess, disposition, createOptions, securityDescriptor, shareAccess, nil, "")
+}
+
+func ntCreateRelativeObserved(dirHandle windows.Handle, name string, desiredAccess, disposition, createOptions uint32, securityDescriptor *windows.SECURITY_DESCRIPTOR, b *stateFileReadBuilder, slot string) (windows.Handle, error) {
+	return ntCreateRelativeWithShareAccessObserved(dirHandle, name, desiredAccess, disposition, createOptions, securityDescriptor, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, b, slot)
+}
+
+func ntCreateRelativeWithShareAccessObserved(dirHandle windows.Handle, name string, desiredAccess, disposition, createOptions uint32, securityDescriptor *windows.SECURITY_DESCRIPTOR, shareAccess uint32, b *stateFileReadBuilder, slot string) (windows.Handle, error) {
+	if b != nil {
+		if err := b.checkContext(); err != nil {
+			return windows.InvalidHandle, err
+		}
+		if b.resource(slot) == nil {
+			b.prearmResource(slot)
+		}
+	}
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return windows.InvalidHandle, fmt.Errorf("nt unicode %q: %w", name, err)
@@ -580,7 +827,20 @@ func ntCreateRelativeWithShareAccess(
 		0,
 		0,
 	); err != nil {
+		if b != nil && handle != 0 && handle != windows.InvalidHandle {
+			b.resource(slot).view.Ownership = "borrowed"
+			b.borrowedErr = errors.Join(b.borrowedErr, errors.New("failed directory native call returned undefined handle; no close authority"))
+		}
 		return windows.InvalidHandle, err
+	}
+	if b != nil {
+		if handle == 0 || handle == windows.InvalidHandle {
+			return windows.InvalidHandle, errors.New("successful directory native call has no original handle")
+		}
+		registerParentDirectory(b, slot, handle)
+		if err := b.checkContext(); err != nil {
+			return windows.InvalidHandle, errors.Join(err, closeParentDirectory(b, slot, handle))
+		}
 	}
 	return handle, nil
 }
@@ -823,7 +1083,7 @@ func refusePreexistingReparsePoint(dirHandle windows.Handle, name string) error 
 		return fmt.Errorf("get file info %s: %w", name, err)
 	}
 	if fi.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return fmt.Errorf("pre-existing reparse point refused")
+		return ErrSecureWriteReparsePointRefused
 	}
 	return nil
 }

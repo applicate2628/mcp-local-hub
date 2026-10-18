@@ -43,6 +43,8 @@ lose access. Copy via password manager / encrypted USB / trusted scp
 when moving to a new machine.
 
 Subcommands:
+  secrets recovery list                 # historical attempt identifiers and states
+  secrets recovery inspect --attempt-id ID # historical evidence; read-only
   secrets init                          # generate .age-key + empty secrets.age
   secrets set <key>                     # interactive prompt (hidden input)
   secrets set <key> --from-stdin        # read value from stdin (scripts/pipes)
@@ -62,6 +64,7 @@ Manifest env-reference prefixes:
 
 See also: install (fails preflight if a secret: reference is missing).`,
 	}
+	root.AddCommand(newSecretsRecoveryCmd())
 	root.AddCommand(newSecretsInitCmd())
 	root.AddCommand(newSecretsSetCmd())
 	root.AddCommand(newSecretsGetCmd())

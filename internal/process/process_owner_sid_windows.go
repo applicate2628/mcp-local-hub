@@ -71,7 +71,7 @@ func currentProcessUserSID() (*windows.SID, error) {
 // OpenProcess error (e.g. ERROR_ACCESS_DENIED on a LIVE process whose token we
 // may not open) stays a wrapped error → the caller fails closed and refuses to
 // kill a live process whose owner it cannot verify.
-func processOwnerUserSID(pid int) (*windows.SID, error) {
+func processOwnerUserSID(pid int) (sid *windows.SID, retErr error) {
 	if pid <= 0 {
 		return nil, fmt.Errorf("process: invalid PID %d", pid)
 	}
@@ -82,22 +82,37 @@ func processOwnerUserSID(pid int) (*windows.SID, error) {
 		}
 		return nil, fmt.Errorf("process: OpenProcess(PID %d): %w", pid, err)
 	}
-	defer windows.CloseHandle(h)
+	defer func() {
+		if err := windows.CloseHandle(h); err != nil {
+			sid = nil
+			retErr = errors.Join(retErr, fmt.Errorf("process: close owner query: %w", err))
+		}
+	}()
+	return processHandleOwnerUserSID(h)
+}
 
+// processHandleOwnerUserSID reads/copies the token of the retained generation;
+// it does not reopen a PID or borrow termination access.
+func processHandleOwnerUserSID(h windows.Handle) (sid *windows.SID, retErr error) {
 	var token windows.Token
 	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &token); err != nil {
-		return nil, fmt.Errorf("process: OpenProcessToken(PID %d): %w", pid, err)
+		return nil, fmt.Errorf("process: OpenProcessToken: %w", err)
 	}
-	defer token.Close()
+	defer func() {
+		if err := token.Close(); err != nil {
+			sid = nil
+			retErr = errors.Join(retErr, fmt.Errorf("process: close owner token: %w", err))
+		}
+	}()
 
 	u, err := token.GetTokenUser()
 	if err != nil {
-		return nil, fmt.Errorf("process: GetTokenInformation(TokenUser, PID %d): %w", pid, err)
+		return nil, fmt.Errorf("process: GetTokenInformation(TokenUser): %w", err)
 	}
 	// Copy so the returned SID outlives the *Tokenuser buffer.
-	sid, err := u.User.Sid.Copy()
+	sid, err = u.User.Sid.Copy()
 	if err != nil {
-		return nil, fmt.Errorf("process: copy SID (PID %d): %w", pid, err)
+		return nil, fmt.Errorf("process: copy SID: %w", err)
 	}
 	return sid, nil
 }

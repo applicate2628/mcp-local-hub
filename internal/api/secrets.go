@@ -69,9 +69,65 @@ func (e *SecretsDeleteError) Error() string { return e.Message }
 // Promoted to exported up front (plan-R2 P1) so Task 1 tests compile;
 // fields are populated per memo §5.1 case 2b/2c.
 type SecretsInitFailed struct {
-	CleanupStatus string // "ok" | "failed"
-	OrphanPath    string // populated only on cleanup-failed
-	Cause         error
+	CleanupStatus     string // "ok" | "failed"
+	OrphanPath        string // populated only on cleanup-failed
+	Cause             error
+	cleanupTargets    *secretsInitCleanupTargets
+	recoveryReference PublicRecoveryReference
+}
+
+type secretsInitRemovalOutcome string
+
+const (
+	secretsInitRemoved      secretsInitRemovalOutcome = "removed"
+	secretsInitAbsent       secretsInitRemovalOutcome = "absent"
+	secretsInitRemoveFailed secretsInitRemovalOutcome = "remove_failed"
+)
+
+type secretsInitTargetOutcome struct {
+	Path        string
+	Outcome     secretsInitRemovalOutcome
+	RemoveError error
+}
+
+type secretsInitCleanupTargets struct {
+	Vault secretsInitTargetOutcome
+	Key   secretsInitTargetOutcome
+}
+
+func secretsInitRemoveTarget(path string, remove func(string) error) secretsInitTargetOutcome {
+	rmErr := remove(path)
+	outcome := secretsInitRemoved
+	if rmErr != nil {
+		outcome = secretsInitRemoveFailed
+		if os.IsNotExist(rmErr) {
+			outcome = secretsInitAbsent
+		}
+	}
+	return secretsInitTargetOutcome{Path: path, Outcome: outcome, RemoveError: rmErr}
+}
+
+func (targets *secretsInitCleanupTargets) legacyProjection() (status, orphanPath string, projectable bool) {
+	if targets == nil {
+		return "", "", false
+	}
+	for _, target := range [...]secretsInitTargetOutcome{targets.Vault, targets.Key} {
+		if target.Path == "" {
+			return "", "", false
+		}
+		switch target.Outcome {
+		case secretsInitRemoved, secretsInitAbsent, secretsInitRemoveFailed:
+		default:
+			return "", "", false
+		}
+	}
+	if targets.Vault.Outcome == secretsInitRemoveFailed {
+		return "failed", targets.Vault.Path, true
+	}
+	if targets.Key.Outcome == secretsInitRemoveFailed {
+		return "failed", targets.Key.Path, true
+	}
+	return "ok", "", true
 }
 
 func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
@@ -80,6 +136,13 @@ func (e *SecretsInitFailed) Error() string { return e.Cause.Error() }
 // inspect the underlying InitVault failure (disk full, permission, etc.)
 // without parsing Error() strings.
 func (e *SecretsInitFailed) Unwrap() error { return e.Cause }
+
+func (e *SecretsInitFailed) RecoveryReference() PublicRecoveryReference {
+	if e.recoveryReference.Status == "" {
+		return PublicRecoveryReference{Status: "unavailable"}
+	}
+	return e.recoveryReference
+}
 
 // initVaultFn is the function the wrapper calls to perform the
 // underlying init. Tests override this to inject failures and verify
@@ -106,11 +169,34 @@ var vaultMutex sync.Mutex
 //	case 2c → returns SecretsInitFailed{CleanupStatus:"failed"}, handler maps to 500
 //	cases 3/4 → returns 409-style typed errors via wrapper return value
 func (a *API) SecretsInit() (SecretsInitResult, error) {
+	return a.secretsInitWithRemove(os.Remove)
+}
+
+func (a *API) secretsInitWithRemove(remove func(string) error) (SecretsInitResult, error) {
+	return a.secretsInitWithRecovery(remove, newSecretsInitRecoveryOwner)
+}
+
+func (a *API) secretsInitWithRecovery(remove func(string) error, ownerFactory func() (*secretsInitRecoveryOwner, error)) (SecretsInitResult, error) {
+	if remove == nil {
+		return SecretsInitResult{}, errors.New("secrets init: removal dependency is required")
+	}
+	if ownerFactory == nil {
+		return SecretsInitResult{}, errors.New("secrets init: recovery dependency is required")
+	}
 	vaultMutex.Lock()
 	defer vaultMutex.Unlock()
 
 	keyPath := secrets.DefaultKeyPath()
 	vaultPath := secrets.DefaultVaultPath()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return SecretsInitResult{}, err
+	}
+	capture, err := captureSecretsInitRecoveryTargets(keyPath, vaultPath, cwd)
+	if err != nil {
+		return SecretsInitResult{}, err
+	}
+	keyPath, vaultPath = capture.key.AbsolutePath, capture.vault.AbsolutePath
 
 	// Cross-process serialization: hold the vault flock for the whole
 	// classify → init → cleanup sequence so a concurrent CLI `secrets init`
@@ -137,6 +223,15 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 			}
 		}
 
+		owner, err := ownerFactory()
+		if err != nil {
+			return recoveryPersistenceFailure(err, nil, PublicRecoveryReference{})
+		}
+		reservation, err := owner.Reserve(capture)
+		if err != nil {
+			return recoveryPersistenceFailure(err, nil, PublicRecoveryReference{})
+		}
+
 		// Case 2: both missing. Ensure parent dir exists (Codex memo-R8 P1:
 		// secrets.InitVault does not MkdirAll itself; CLI does it explicitly).
 		if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
@@ -149,6 +244,10 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 			// them — we did NOT, and must NOT clean them up. Route to
 			// SECRETS_INIT_BLOCKED (cases 3/4 path) instead.
 			if initVaultRefused(err) {
+				ref, persistenceErr := owner.Complete(reservation, "init_refused", nil)
+				if persistenceErr != nil {
+					return recoveryPersistenceFailure(persistenceErr, err, ref)
+				}
 				return &SecretsInitBlocked{
 					KeyExists:   fileExists(keyPath),
 					VaultExists: fileExists(vaultPath),
@@ -157,29 +256,28 @@ func (a *API) SecretsInit() (SecretsInitResult, error) {
 			// Genuine partial init we own. Clean up whatever InitVault may
 			// have created. Order: vault first (because the key file alone
 			// is benign; an orphan vault is the harder-to-explain artifact).
-			cleanupOK := true
-			var orphan string
-			if rmErr := os.Remove(vaultPath); rmErr != nil && !os.IsNotExist(rmErr) {
-				cleanupOK = false
-				orphan = vaultPath
+			cleanupTargets := &secretsInitCleanupTargets{
+				Vault: secretsInitRemoveTarget(vaultPath, remove),
+				Key:   secretsInitRemoveTarget(keyPath, remove),
 			}
-			if rmErr := os.Remove(keyPath); rmErr != nil && !os.IsNotExist(rmErr) {
-				cleanupOK = false
-				if orphan == "" {
-					orphan = keyPath
-				}
+			// Both resolved filenames and terminal outcomes come from these actual calls.
+			cleanupStatus, orphanPath, _ := cleanupTargets.legacyProjection()
+			failed := &SecretsInitFailed{
+				CleanupStatus:  cleanupStatus,
+				OrphanPath:     orphanPath,
+				Cause:          err,
+				cleanupTargets: cleanupTargets,
 			}
-			if cleanupOK {
-				return &SecretsInitFailed{
-					CleanupStatus: "ok",
-					Cause:         err,
-				}
+			ref, persistenceErr := owner.Complete(reservation, "init_failed", cleanupTargets)
+			failed.recoveryReference = ref
+			if persistenceErr != nil {
+				return recoveryPersistenceFailure(persistenceErr, failed, ref)
 			}
-			return &SecretsInitFailed{
-				CleanupStatus: "failed",
-				OrphanPath:    orphan,
-				Cause:         err,
-			}
+			return failed
+		}
+		ref, persistenceErr := owner.retire(reservation)
+		if persistenceErr != nil {
+			return recoveryPersistenceFailure(persistenceErr, nil, ref)
 		}
 		result = SecretsInitResult{VaultState: "ok"}
 		return nil

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,9 +61,9 @@ func TestResolveSymlinkWrite_ResolvePhase(t *testing.T) {
 	fw := &fakeSymlinkResolveWriter{
 		resolveResult: &ResolveSymlinkResult{
 			Client:         "codex-cli",
-			OriginalPath:   "/home/u/.codex/config.toml",
-			ResolvedTarget: "/e/env/Agents/.codex/config.toml",
-			PinnedRealPath: "/e/env/Agents/.codex",
+			OriginalPath:   "/client/.codex/config.toml",
+			ResolvedTarget: "/target/.codex/config.toml",
+			PinnedRealPath: "/target/.codex",
 			ContentHash:    "abc123",
 			IsSymlink:      true,
 		},
@@ -81,7 +82,7 @@ func TestResolveSymlinkWrite_ResolvePhase(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.PinnedRealPath != "/e/env/Agents/.codex" || resp.ContentHash != "abc123" || !resp.IsSymlink {
+	if resp.PinnedRealPath != "/target/.codex" || resp.ContentHash != "abc123" || !resp.IsSymlink {
 		t.Errorf("resolve resp=%+v, want pinned path + hash + isSymlink", resp)
 	}
 }
@@ -92,8 +93,8 @@ func TestResolveSymlinkWrite_WritePhase(t *testing.T) {
 	fw := &fakeSymlinkResolveWriter{
 		writeResult: &WriteSymlinkResult{
 			Client:       "codex-cli",
-			OriginalPath: "/home/u/.codex/config.toml",
-			WrittenPath:  "/e/env/Agents/.codex/config.toml",
+			OriginalPath: "/client/.codex/config.toml",
+			WrittenPath:  "/target/.codex/config.toml",
 			Written:      true,
 		},
 	}
@@ -101,12 +102,12 @@ func TestResolveSymlinkWrite_WritePhase(t *testing.T) {
 	s.symlinkWriter = fw
 
 	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/e/env/Agents/.codex","content_hash":"abc123"}`, nil)
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/target/.codex","content_hash":"abc123"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, body=%q", rec.Code, rec.Body.String())
 	}
-	if fw.writeClient != "codex-cli" || fw.writePinned != "/e/env/Agents/.codex" || fw.writeHash != "abc123" {
-		t.Errorf("Write got (%q,%q,%q), want (codex-cli, /e/env/Agents/.codex, abc123)", fw.writeClient, fw.writePinned, fw.writeHash)
+	if fw.writeClient != "codex-cli" || fw.writePinned != "/target/.codex" || fw.writeHash != "abc123" {
+		t.Errorf("Write got (%q,%q,%q), want (codex-cli, /target/.codex, abc123)", fw.writeClient, fw.writePinned, fw.writeHash)
 	}
 	var resp WriteSymlinkResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -144,7 +145,7 @@ func TestResolveSymlinkWrite_WriteRequiresContentHash(t *testing.T) {
 	s.symlinkWriter = fw
 
 	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/e/env/Agents/.codex"}`, nil)
+		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/target/.codex"}`, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400; body=%q", rec.Code, rec.Body.String())
 	}
@@ -160,7 +161,7 @@ func TestResolveSymlinkWrite_WriteRequiresContentHash(t *testing.T) {
 // (the GUI refreshes its scan instead of offering a follow).
 func TestResolveSymlinkWrite_NotSymlinkMaps412(t *testing.T) {
 	fw := &fakeSymlinkResolveWriter{
-		resolveErr: fmt.Errorf("%w: /home/u/.codex/config.toml", errSymlinkNotApplicable),
+		resolveErr: fmt.Errorf("%w: /client/.codex/config.toml", errSymlinkNotApplicable),
 	}
 	s := NewServer(Config{})
 	s.symlinkWriter = fw
@@ -227,30 +228,68 @@ func TestResolveSymlinkWrite_UnknownClientMaps404(t *testing.T) {
 	}
 }
 
-// TestResolveSymlinkWrite_StrictRefusalMaps500 pins that the strict-mode
-// (or any secure-write) refusal maps to 500 WRITE_REFUSED with the underlying
-// message propagated for the GUI to render.
-func TestResolveSymlinkWrite_StrictRefusalMaps500(t *testing.T) {
-	fw := &fakeSymlinkResolveWriter{
-		writeErr: fmt.Errorf("write codex-cli via consent: secure write: strict mode is active (via MCPHUB_REQUIRE_SINGLE_USER_HOME=1)"),
+// The default 500 can arise in either phase. It must retain the exact cause in
+// the server log but never serialize path-bearing diagnostics to the caller.
+func TestResolveSymlinkWrite_Refused500RedactsWireAndLogsCause(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		cause        error
+		resolve      bool
+		pathFragment string
+	}{
+		{
+			name:         "resolve failure",
+			body:         `{"client":"codex-cli","confirm":false}`,
+			cause:        errors.New("resolve <user-home>/.codex/config.toml: permission denied"),
+			resolve:      true,
+			pathFragment: "<user-home>",
+		},
+		{
+			name:         "confirmed write refusal",
+			body:         `{"client":"codex-cli","confirm":true,"pinned_real_path":"/x","content_hash":"abc123"}`,
+			cause:        errors.New("write codex-cli via consent: <real-target>/.codex/config.toml: policy refusal"),
+			pathFragment: "<real-target>",
+		},
 	}
-	s := NewServer(Config{})
-	s.symlinkWriter = fw
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fw := &fakeSymlinkResolveWriter{}
+			if tc.resolve {
+				fw.resolveErr = tc.cause
+			} else {
+				fw.writeErr = tc.cause
+			}
+			s := NewServer(Config{})
+			s.symlinkWriter = fw
 
-	rec := postResolveSymlink(t, s,
-		`{"client":"codex-cli","confirm":true,"pinned_real_path":"/x","content_hash":"abc123"}`, nil)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status=%d, want 500", rec.Code)
-	}
-	var m map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if m["code"] != "WRITE_REFUSED" {
-		t.Errorf("code=%q, want WRITE_REFUSED", m["code"])
-	}
-	if !bytes.Contains([]byte(m["error"]), []byte("MCPHUB_REQUIRE_SINGLE_USER_HOME")) {
-		t.Errorf("error body missing strict-mode hint: %q", m["error"])
+			var logs bytes.Buffer
+			priorLogOutput := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(priorLogOutput)
+
+			rec := postResolveSymlink(t, s, tc.body, nil)
+			t.Logf("wire bytes: %q", rec.Body.Bytes())
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status=%d, want 500", rec.Code)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type=%q, want application/json", got)
+			}
+			var response map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(response) != 2 || response["code"] != "WRITE_REFUSED" || response["error"] != "internal error" {
+				t.Errorf("response=%v, want fixed internal error and WRITE_REFUSED", response)
+			}
+			if bytes.Contains(rec.Body.Bytes(), []byte(tc.pathFragment)) || bytes.Contains(rec.Body.Bytes(), []byte(tc.cause.Error())) {
+				t.Errorf("raw response contains path or exact cause: %q", rec.Body.Bytes())
+			}
+			if !bytes.Contains(logs.Bytes(), []byte("/api/resolve-symlink-and-write")) || !bytes.Contains(logs.Bytes(), []byte(tc.cause.Error())) {
+				t.Error("server log missing route context or exact cause")
+			}
+		})
 	}
 }
 

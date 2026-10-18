@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ args = ["version"]
 	}
 
 	result, err := NewAPI().ExecuteAdoptResultWithOpts(plan, &bytes.Buffer{}, ExecuteAdoptOpts{
-		ReceivingVerifier: func(*API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
+		ReceivingVerifier: func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("ExecuteAdoptWithOpts: %v", err)

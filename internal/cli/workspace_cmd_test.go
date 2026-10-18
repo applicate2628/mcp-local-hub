@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1956,4 +1957,161 @@ func mapKeys(m map[string]workspaceListJSONRow) []string {
 // without dragging the yaml import into every test file.
 func yamlUnmarshalForTest(data []byte, v any) error {
 	return yaml.Unmarshal(data, v)
+}
+
+// This is a SOURCE fixture for a separately admitted native preparation run.
+// It requires a product-role/source-qualified test image and the real managed
+// preparation inputs. A normal unqualified test image MUST fail its original
+// admission rather than substitute an image, ready record or invocation.
+// Transport, trust acknowledgement, client projection and runtime settlement
+// are explicit existing MODEL seams; this is not a native Functional oracle.
+func TestWorkspaceRegisterSerena_NativePreparationProducerToTerminalFrame(t *testing.T) {
+	image, err := api.SelfMcphubExecutable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := &api.SupervisorIntentFile{Version: 1, IntentGeneration: 15, OwnerMode: api.OwnerModeSupervise}
+	// The admitted packet shape has eight unrelated native rows and route-front.
+	for i := 0; i < 8; i++ {
+		before.Daemons = append(before.Daemons, api.SupervisorDaemon{
+			TaskName: fmt.Sprintf(`\mcp-local-hub-fixture-native-%d`, i), Server: "fixture-native", Daemon: fmt.Sprint(i),
+			Command: image, Args: []string{"fixture-native", fmt.Sprint(i)}, Port: DefaultRouteDaemonPort + i + 1,
+		})
+	}
+	before.Daemons = append(before.Daemons, api.BuildBuiltinRouteDaemon(image, DefaultRouteDaemonPort))
+	fx := newReconcileTestFixture(t, before)
+	before, err = api.ReadSupervisorIntent(filepath.Join(fx.deps.stateDir, "supervisor-intent.json"))
+	if err != nil || before.HasRuntimeSpecRow() {
+		t.Fatal("original absence capture failed")
+	}
+	restoreRoot := api.SetDaemonStateRootForTest(fx.deps.stateDir)
+	t.Cleanup(restoreRoot)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", fx.deps.stateDir)
+	lock, err := api.AcquireSupervisorLock(filepath.Join(fx.deps.stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lock.Release)
+	fx.deps.supervisorLock = lock
+	owner, err := api.ReadSupervisorLockOwner(filepath.Join(fx.deps.stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := NewSupervisorIPCListener(api.SupervisorIPCAddress(fx.deps.stateDir), owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := newIPCSession(listener, nil)
+	session.acceptDone = make(chan struct{})
+	go func() {
+		defer close(session.acceptDone)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			if !session.register(conn) {
+				_ = conn.Close()
+				return
+			}
+			go func() { defer session.finish(conn); serveIPCConn(conn, listener, fx.deps, ipcAcceptTiming{}) }()
+		}
+	}()
+	defer session.stop() // settle real handlers before the fixture restores any globals
+	admitted, err := api.RuntimeMcphubExecutable()
+	if err != nil || admitted != image {
+		t.Fatalf("original product-image fixture prerequisite unreceived: %v", err)
+	}
+	// Only the independent route seeder is outside this fixture's effect set.
+	// The real repair/prepare/materializer/intent publisher remain unmodified.
+	t.Cleanup(setBuiltinRouteSeedingDisabledForTest())
+	installSchedulerListFake(t, nil)
+	previousBless := serenaRegisterBlessTrustedRootFn
+	serenaRegisterBlessTrustedRootFn = func(string) error { return nil }
+	t.Cleanup(func() { serenaRegisterBlessTrustedRootFn = previousBless })
+	stubCLISerenaProjection(t, DefaultRouteDaemonPort, api.SerenaEndpointModeGUICompat, nil)
+	// Preserve the actual independent registry/intent generation readback.
+	previousSettled := serenaRegisterSettledCheckFn
+	serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = previousSettled })
+	var targetReceived api.ReconcileTarget
+	var responses []api.ReconcileResponse
+	var settlementProbes int
+	fx.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+		settlementProbes++
+		return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: supervisorLivenessProofPortOwnerPID}
+	}
+	previousReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		if !apply || ctx == nil || ctx.Err() != nil {
+			t.Fatal("original target-bearing Apply lost its context")
+		}
+		if targetReceived.WorkspaceKey == "" {
+			targetReceived = target
+		} else if targetReceived != target {
+			t.Fatal("repeat changed the persisted target generation")
+		}
+		// MODEL runtime observation supplies no prepared package authority.
+		registered, parseErr := time.Parse(time.RFC3339Nano, target.RegisteredAt)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		fx.ctrl.tracker.MarkSpawned(target.TaskName, 6042, registered.Add(time.Second))
+		// The actual producer target crosses the real HELLO/request/frame/receiver
+		// channel. No direct decode bypasses error-plus-result receiving here.
+		response, receiveErr := api.DialSupervisorIPCReconcileTarget(ctx, apply, target)
+		if receiveErr != nil {
+			return response, receiveErr
+		}
+		// The handler serializes this result only after the original returned
+		// invocation's CloseObserved/Validate receiving. Any original close cause
+		// must remain in this existing channel, including after an append.
+		if response.SerenaRepairError != "" || response.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeCompleted {
+			t.Fatalf("original prepare/publish/close receiving incomplete: %s", response.SerenaRepairError)
+		}
+		if response.TargetSettlement == nil || response.TargetSettlement.Target != target || response.TargetSettlement.State != api.ReconcileTargetSettlementReady || settlementProbes == 0 {
+			t.Fatal("terminal frame preceded exact target settlement")
+		}
+		responses = append(responses, response)
+		return response, nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = previousReconcile })
+	workspace := makeWorkspaceDir(t, fx.deps.stateDir, []string{"python"})
+	if _, err = runWorkspaceCmd(t, "register", workspace, "--backend", "serena"); err != nil {
+		t.Fatalf("original workspace producer: %v", err)
+	}
+	if len(responses) != 1 || responses[0].SerenaOrphansRepaired != 1 {
+		t.Fatal("positive original producer did not receive exactly one append")
+	}
+	path := filepath.Join(fx.deps.stateDir, "supervisor-intent.json")
+	first, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.IntentGeneration != before.IntentGeneration+1 || first.Version != 2 || len(first.Daemons) != len(before.Daemons)+1 || first.OwnerMode != before.OwnerMode {
+		t.Fatal("selected append changed the original generation/metadata shape")
+	}
+	for i, d := range before.Daemons {
+		oldRaw, e1 := json.Marshal(d)
+		newRaw, e2 := json.Marshal(first.Daemons[i])
+		if e1 != nil || e2 != nil || !bytes.Equal(oldRaw, newRaw) {
+			t.Fatal("prepared append changed an unrelated descriptor")
+		}
+	}
+	selected := first.SpecBearingSerenaDaemonForWorkspaceKey(targetReceived.WorkspaceKey)
+	if selected == nil || selected.RuntimeSpec == nil || selected.RuntimeSpec.PreparedRuntime == nil || selected.Workspace != targetReceived.WorkspacePath || selected.Port != targetReceived.ExpectedPort {
+		t.Fatal("original prepared descriptor/source binding missing")
+	}
+	repeatCtx, cancelRepeat := context.WithTimeout(context.Background(), api.DefaultTargetedReconcileTimeout)
+	defer cancelRepeat()
+	if _, err = serenaRegisterReconcileFn(repeatCtx, true, targetReceived); err != nil {
+		t.Fatalf("same-target reconcile repeat: %v", err)
+	}
+	second, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(responses) != 2 || responses[1].SerenaOrphansRepaired != 0 || second.IntentGeneration != first.IntentGeneration || len(second.Daemons) != len(first.Daemons) {
+		t.Fatal("repeat prepared/appended a second descriptor or rewrote generation")
+	}
 }

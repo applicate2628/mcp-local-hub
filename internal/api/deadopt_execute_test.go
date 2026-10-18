@@ -140,6 +140,712 @@ func TestExecuteDeAdoptProviderRestoresOnlyAfterManagedStopSettlement(t *testing
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
+func TestExecuteDeAdoptProviderPreInstallMissingIntent(t *testing.T) {
+	name := "provider-preinstall-missing-intent"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopCalls := 0
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+		source: provider,
+		stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+			stopCalls++
+			return StoppedSettlement{}, errors.New("preinstall recovery must not stop a daemon")
+		},
+	}})
+	if err != nil || report == nil {
+		t.Fatalf("preinstall missing-intent recovery report=%+v err=%v", report, err)
+	}
+	if stopCalls != 0 || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("preinstall missing-intent side effects: stop=%d provider calls=%d enabled=%t", stopCalls, provider.calls, provider.entry.Enabled)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderPreInstallEmptyIntent(t *testing.T) {
+	name := "provider-preinstall-empty-intent"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopCalls := 0
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+		source: provider,
+		stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+			stopCalls++
+			return StoppedSettlement{}, errors.New("preinstall recovery must not stop a daemon")
+		},
+	}})
+	if err != nil || report == nil {
+		t.Fatalf("preinstall empty-intent recovery report=%+v err=%v", report, err)
+	}
+	if stopCalls != 0 || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("preinstall empty-intent side effects: stop=%d provider calls=%d enabled=%t", stopCalls, provider.calls, provider.entry.Enabled)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderPreInstallOwnerContradictionRefused(t *testing.T) {
+	tests := []struct {
+		name         string
+		installState ProviderManagedInstallStateV1
+		daemon       func(AdoptProvenanceRecord) SupervisorDaemon
+		wantRefused  bool
+		wantStop     int
+		wantRetained bool
+	}{
+		{
+			name: "direct identity with mismatching port and hash", installState: ProviderManagedInstallPreInstall, wantRefused: true,
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: `\unrelated-task`, Server: rec.ManifestName, Daemon: adoptDefaultDaemonName, Port: rec.Port + 1, ManifestHash: "mismatch"}
+			},
+		},
+		{
+			name: "direct exact live identity", installState: ProviderManagedInstallPreInstall, wantRefused: true,
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return providerRecoveryExactDaemon(rec)
+			},
+		},
+		{
+			name: "legacy exact task identity", installState: ProviderManagedInstallPreInstall, wantRefused: true,
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: canonicalIntentTaskKey(supervisorTaskNameForManifestDaemon(rec.ManifestName, adoptDefaultDaemonName)), Port: rec.Port + 1, ManifestHash: "mismatch"}
+			},
+		},
+		{
+			name: "legacy different task identity", installState: ProviderManagedInstallPreInstall, wantRetained: true,
+			daemon: func(AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: canonicalIntentTaskKey(supervisorTaskNameForManifestDaemon("unrelated-provider", adoptDefaultDaemonName))}
+			},
+		},
+		{
+			name: "may-have-applied exact owner uses stop", installState: ProviderManagedInstallMayHaveApplied, wantStop: 1,
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return providerRecoveryExactDaemon(rec)
+			},
+		},
+		{
+			name: "legacy unknown exact owner uses stop", installState: ProviderManagedInstallUnknown, wantStop: 1,
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return providerRecoveryExactDaemon(rec)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-owner-" + strings.ReplaceAll(tc.name, " ", "-")
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+			rec.ProviderSource.ManagedInstallState = tc.installState
+			writeDeAdoptExecutorRecord(t, rec)
+			intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{tc.daemon(rec)}}
+			if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopCalls := 0
+			closeCalls := 0
+			report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: provider,
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped}, nil
+				},
+				close: func(manifestName string) error {
+					closeCalls++
+					return CloseAdoptProvenance(manifestName)
+				},
+			}})
+			if tc.wantRefused {
+				if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED: preinstall_owner_present") {
+					t.Fatalf("contradiction error=%v, want preinstall_owner_present", err)
+				}
+				if report != nil || stopCalls != 0 || provider.calls != 0 || closeCalls != 0 {
+					t.Fatalf("contradiction side effects: report=%+v stop=%d provider=%d close=%d", report, stopCalls, provider.calls, closeCalls)
+				}
+				if _, statErr := os.Stat(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); statErr != nil {
+					t.Fatalf("contradiction deleted manifest: %v", statErr)
+				}
+				persisted, found, readErr := ReadAdoptProvenance(name)
+				if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != tc.installState {
+					t.Fatalf("contradiction changed durable state: found=%t row=%+v err=%v", found, persisted, readErr)
+				}
+				persistedIntent, readErr := ReadSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf))
+				if readErr != nil || len(persistedIntent.Daemons) != 1 {
+					t.Fatalf("contradiction changed intent: intent=%+v err=%v", persistedIntent, readErr)
+				}
+				return
+			}
+			if err != nil || report == nil {
+				t.Fatalf("non-contradiction report=%+v err=%v", report, err)
+			}
+			if stopCalls != tc.wantStop || provider.calls != 1 || closeCalls != 1 {
+				t.Fatalf("non-contradiction side effects: stop=%d want=%d provider=%d close=%d", stopCalls, tc.wantStop, provider.calls, closeCalls)
+			}
+			assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+			if tc.wantRetained {
+				persistedIntent, readErr := ReadSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf))
+				if readErr != nil || len(persistedIntent.Daemons) != 1 || persistedIntent.Daemons[0].TaskName != intent.Daemons[0].TaskName {
+					t.Fatalf("unrelated legacy intent row not retained: intent=%+v err=%v", persistedIntent, readErr)
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteDeAdoptProviderPreInstallSimultaneousOwnedRowsRefuse(t *testing.T) {
+	name := "provider-simultaneous-owned-rows"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+	exact := providerRecoveryExactDaemon(rec)
+	stale := exact
+	stale.Port++
+	stale.ManifestHash = "stale-manifest-hash"
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{exact, stale}}
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopCalls := 0
+	closeCalls := 0
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+		source: provider,
+		stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+			stopCalls++
+			return StoppedSettlement{}, errors.New("simultaneous owners must not be stopped")
+		},
+		close: func(manifestName string) error {
+			closeCalls++
+			return CloseAdoptProvenance(manifestName)
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED: preinstall_owner_present") {
+		t.Fatalf("simultaneous-owner error=%v, want preinstall_owner_present", err)
+	}
+	if report != nil || stopCalls != 0 || provider.calls != 0 || closeCalls != 0 {
+		t.Fatalf("simultaneous-owner side effects: report=%+v stop=%d provider=%d close=%d", report, stopCalls, provider.calls, closeCalls)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); statErr != nil {
+		t.Fatalf("simultaneous-owner refusal deleted manifest: %v", statErr)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall {
+		t.Fatalf("simultaneous-owner refusal changed durable state: found=%t row=%+v err=%v", found, persisted, readErr)
+	}
+	persistedIntent, readErr := ReadSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf))
+	if readErr != nil || !reflect.DeepEqual(persistedIntent.Daemons, intent.Daemons) {
+		t.Fatalf("simultaneous-owner refusal changed intent: got=%+v want=%+v err=%v", persistedIntent, intent, readErr)
+	}
+}
+
+func TestProviderManagedInstallAndNoStopRecoveryAreLeaseExclusive(t *testing.T) {
+	t.Run("managed install wins lease", func(t *testing.T) {
+		name := "provider-install-wins-lease"
+		plan, adoptProvider, observer := providerManagedInstallTestPlan(t, name)
+		installEntered := make(chan struct{})
+		releaseInstall := make(chan struct{})
+		adoptSettled := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseInstall) }) }
+		t.Cleanup(func() {
+			release()
+			select {
+			case <-adoptSettled:
+			case <-time.After(5 * time.Second):
+				t.Errorf("adopt worker did not settle during cleanup")
+			}
+		})
+		installErr := errors.New("injected install boundary stop")
+		installCalls := 0
+		adoptDone := make(chan error, 1)
+		go func() {
+			defer close(adoptSettled)
+			adoptDone <- NewAPI().ExecuteAdoptWithOpts(plan, io.Discard, ExecuteAdoptOpts{
+				providerDeps: providerTransactionDeps{source: adoptProvider, observer: observer},
+				installFn: func(context.Context, *API, InstallOpts) error {
+					installCalls++
+					close(installEntered)
+					<-releaseInstall
+					return installErr
+				},
+			})
+		}()
+		select {
+		case <-installEntered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("adopt did not reach the Install boundary")
+		}
+
+		recoveryPlan, err := NewAPI().BuildDeAdoptPlan(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recoveryProvider := &providerLifecycleFake{entry: adoptProvider.entry}
+		stopCalls := 0
+		report, recoveryErr := NewAPI().executeDeAdoptPlanWithOpts(recoveryPlan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+			source: recoveryProvider,
+			stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+				stopCalls++
+				return StoppedSettlement{}, errors.New("recovery must not stop while adopt owns the lease")
+			},
+		}})
+		if recoveryErr == nil || !strings.Contains(recoveryErr.Error(), "concurrent operation") || report != nil {
+			t.Fatalf("recovery while Install owns lease: report=%+v err=%v", report, recoveryErr)
+		}
+		if stopCalls != 0 || recoveryProvider.calls != 0 {
+			t.Fatalf("recovery advanced while Install owned lease: stop=%d provider=%d", stopCalls, recoveryProvider.calls)
+		}
+
+		release()
+		select {
+		case adoptErr := <-adoptDone:
+			if !errors.Is(adoptErr, installErr) || installCalls != 1 {
+				t.Fatalf("adopt result=%v install calls=%d, want injected Install failure after one call", adoptErr, installCalls)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("adopt did not settle after releasing Install boundary")
+		}
+	})
+
+	t.Run("no-stop recovery wins lease", func(t *testing.T) {
+		name := "provider-recovery-wins-lease"
+		manifestRoot, stateRoot, rec, recoveryProvider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+		plan, err := NewAPI().BuildDeAdoptPlan(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hookEntered := make(chan struct{})
+		releaseHook := make(chan struct{})
+		recoverySettled := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseHook) }) }
+		previousHook := deAdoptBeforeManifestDeleteHook
+		deAdoptBeforeManifestDeleteHook = func() {
+			close(hookEntered)
+			<-releaseHook
+		}
+		t.Cleanup(func() {
+			release()
+			select {
+			case <-recoverySettled:
+			case <-time.After(5 * time.Second):
+				t.Errorf("recovery worker did not settle during cleanup")
+			}
+			deAdoptBeforeManifestDeleteHook = previousHook
+		})
+
+		stopCalls := 0
+		closeCalls := 0
+		type recoveryResult struct {
+			report *DeAdoptReport
+			err    error
+		}
+		recoveryDone := make(chan recoveryResult, 1)
+		go func() {
+			defer close(recoverySettled)
+			report, executeErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: recoveryProvider,
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("preinstall recovery must not stop")
+				},
+				close: func(manifestName string) error {
+					closeCalls++
+					return CloseAdoptProvenance(manifestName)
+				},
+			}})
+			recoveryDone <- recoveryResult{report: report, err: executeErr}
+		}()
+		select {
+		case <-hookEntered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("recovery did not reach the lease-held before-delete boundary")
+		}
+
+		installCalls := 0
+		adoptErr := NewAPI().ExecuteAdoptWithOpts(&AdoptPlan{ManifestName: name}, io.Discard, ExecuteAdoptOpts{
+			installFn: func(context.Context, *API, InstallOpts) error {
+				installCalls++
+				return errors.New("Install must not run while recovery owns the lease")
+			},
+		})
+		if adoptErr == nil || !strings.Contains(adoptErr.Error(), adoptLeaseFailureBusy) || installCalls != 0 {
+			t.Fatalf("adopt while recovery owns lease: err=%v install calls=%d", adoptErr, installCalls)
+		}
+
+		release()
+		select {
+		case got := <-recoveryDone:
+			if got.err != nil || got.report == nil || stopCalls != 0 || recoveryProvider.calls != 1 || closeCalls != 1 {
+				t.Fatalf("recovery result=%+v err=%v stop=%d provider=%d close=%d", got.report, got.err, stopCalls, recoveryProvider.calls, closeCalls)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("recovery did not settle after releasing before-delete boundary")
+		}
+		assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	})
+}
+
+func TestExecuteDeAdoptProviderPreInstallLateForeignOwnerAfterClaimRefuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		daemon func(AdoptProvenanceRecord) SupervisorDaemon
+	}{
+		{
+			name: "direct owner",
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{Server: rec.ManifestName, Daemon: adoptDefaultDaemonName, Port: rec.Port + 1, ManifestHash: "late-stale"}
+			},
+		},
+		{
+			name: "legacy task-only owner",
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: canonicalIntentTaskKey(supervisorTaskNameForManifestDaemon(rec.ManifestName, adoptDefaultDaemonName))}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-late-owner-" + strings.ReplaceAll(tc.name, " ", "-")
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{tc.daemon(rec)}}
+			intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
+			previousHook := deAdoptBeforeManifestDeleteHook
+			hookCalls := 0
+			deAdoptBeforeManifestDeleteHook = func() {
+				hookCalls++
+				if err := WriteSupervisorIntent(intentPath, intent); err != nil {
+					t.Fatalf("inject late owner: %v", err)
+				}
+			}
+			t.Cleanup(func() { deAdoptBeforeManifestDeleteHook = previousHook })
+
+			stopCalls := 0
+			closeCalls := 0
+			report, executeErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: provider,
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("late owner must not be stopped")
+				},
+				close: func(manifestName string) error {
+					closeCalls++
+					return CloseAdoptProvenance(manifestName)
+				},
+			}})
+			if executeErr == nil || !strings.Contains(executeErr.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+				t.Fatalf("late-owner error=%v, want lifecycle refusal", executeErr)
+			}
+			if report != nil || hookCalls != 1 || stopCalls != 0 || provider.calls != 0 || closeCalls != 0 {
+				t.Fatalf("late-owner side effects: report=%+v hook=%d stop=%d provider=%d close=%d", report, hookCalls, stopCalls, provider.calls, closeCalls)
+			}
+			if _, statErr := os.Stat(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); !os.IsNotExist(statErr) {
+				t.Fatalf("late-owner refusal did not retain the claim's exact-manifest deletion: %v", statErr)
+			}
+			persisted, found, readErr := ReadAdoptProvenance(name)
+			if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall {
+				t.Fatalf("late-owner refusal changed durable state: found=%t row=%+v err=%v", found, persisted, readErr)
+			}
+			persistedIntent, readErr := ReadSupervisorIntent(intentPath)
+			if readErr != nil || !reflect.DeepEqual(persistedIntent.Daemons, intent.Daemons) {
+				t.Fatalf("late-owner refusal changed intent: got=%+v want=%+v err=%v", persistedIntent, intent, readErr)
+			}
+		})
+	}
+}
+
+func TestExecuteDeAdoptProviderPreInstallIntentReadFailureBeforeE2Retries(t *testing.T) {
+	name := "provider-preinstall-e2-interruption"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateAdopting)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := errors.New("injected intent interruption after E2")
+	stopCalls := 0
+	_, firstErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+		source: provider,
+		loadIntent: func() (*SupervisorIntentFile, error) {
+			return nil, interrupted
+		},
+		stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+			stopCalls++
+			return StoppedSettlement{}, errors.New("preinstall recovery must not stop a daemon")
+		},
+	}})
+	if !errors.Is(firstErr, interrupted) {
+		t.Errorf("first attempt error=%v, want injected post-E2 interruption", firstErr)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.ProviderSource == nil || persisted.OperationState != AdoptOperationStateAdopting || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall {
+		t.Fatalf("state after pre-E2 intent read failure: found=%t row=%+v err=%v", found, persisted, readErr)
+	}
+
+	retryPlan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || retryPlan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("reconstructed retry plan=%+v err=%v", retryPlan, err)
+	}
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(retryPlan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+		source: provider,
+		stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+			stopCalls++
+			return StoppedSettlement{}, errors.New("preinstall retry must not stop a daemon")
+		},
+	}})
+	if err != nil || report == nil {
+		t.Fatalf("retry after E2 interruption report=%+v err=%v", report, err)
+	}
+	if stopCalls != 0 || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("retry side effects: stop=%d provider=%d enabled=%t", stopCalls, provider.calls, provider.entry.Enabled)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderPreInstallColdRetryAfterE2WithMissingManifest(t *testing.T) {
+	name := "provider-preinstall-e2-cold-missing-manifest"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateAdopting)
+	manifestPath := filepath.Join(manifestRoot, name, "manifest.yaml")
+	if err := os.Remove(manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || !initial.providerRecovery {
+		t.Fatalf("initial missing-manifest recovery plan=%+v err=%v", initial, err)
+	}
+	if err := MarkAdoptProvenanceDeAdopting(name); err != nil {
+		t.Fatalf("persist E2: %v", err)
+	}
+
+	coldRetry, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || coldRetry.Routing != DeAdoptRoutingResume || !coldRetry.providerRecovery {
+		t.Fatalf("cold missing-manifest retry plan=%+v err=%v", coldRetry, err)
+	}
+	stopCalls := 0
+	closeCalls := 0
+	var report *DeAdoptReport
+	var executeErr error
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		report, executeErr = NewAPI().executeDeAdoptPlanWithOpts(coldRetry, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+			source: provider,
+			stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+				stopCalls++
+				t.Fatal("preinstall missing-intent recovery must not stop a daemon")
+				return StoppedSettlement{}, nil
+			},
+			close: func(manifestName string) error {
+				closeCalls++
+				return CloseAdoptProvenance(manifestName)
+			},
+		}})
+	}()
+	if recovered != nil {
+		t.Fatalf("cold missing-intent recovery panicked: %v", recovered)
+	}
+	if executeErr != nil || report == nil || provider.calls != 1 || !provider.entry.Enabled || stopCalls != 0 || closeCalls != 1 {
+		t.Fatalf("cold missing-intent retry report=%+v err=%v provider=%+v calls=%d stop=%d close=%d", report, executeErr, provider.entry, provider.calls, stopCalls, closeCalls)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderPreInstallColdRetryAbsenceOwnerContract(t *testing.T) {
+	readFailure := errors.New("injected cold supervisor intent read failure")
+	tests := []struct {
+		name        string
+		daemon      func(AdoptProvenanceRecord) SupervisorDaemon
+		readErr     error
+		wantSuccess bool
+	}{
+		{name: "valid empty intent", wantSuccess: true},
+		{
+			name: "mismatching direct owner refuses",
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: `\unrelated-task`, Server: rec.ManifestName, Daemon: adoptDefaultDaemonName, Port: rec.Port + 1, ManifestHash: "mismatch"}
+			},
+		},
+		{
+			name: "legacy task-only owner refuses",
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return SupervisorDaemon{TaskName: canonicalIntentTaskKey(supervisorTaskNameForManifestDaemon(rec.ManifestName, adoptDefaultDaemonName))}
+			},
+		},
+		{
+			name: "exact owner refuses",
+			daemon: func(rec AdoptProvenanceRecord) SupervisorDaemon {
+				return providerRecoveryExactDaemon(rec)
+			},
+		},
+		{name: "intent read error refuses", readErr: readFailure},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-cold-owner-" + strings.ReplaceAll(tc.name, " ", "-")
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateAdopting)
+			manifestPath := filepath.Join(manifestRoot, name, "manifest.yaml")
+			if err := os.Remove(manifestPath); err != nil {
+				t.Fatal(err)
+			}
+			keepPath := filepath.Join(filepath.Dir(manifestPath), "foreign.keep")
+			if err := os.WriteFile(keepPath, []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			intent := &SupervisorIntentFile{Version: 1}
+			if tc.daemon != nil {
+				intent.Daemons = []SupervisorDaemon{tc.daemon(rec)}
+			}
+			intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
+			if err := WriteSupervisorIntent(intentPath, intent); err != nil {
+				t.Fatal(err)
+			}
+			if err := MarkAdoptProvenanceDeAdopting(name); err != nil {
+				t.Fatalf("persist E2: %v", err)
+			}
+			coldRetry, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil || coldRetry.Routing != DeAdoptRoutingResume || !coldRetry.providerRecovery {
+				t.Fatalf("cold retry plan=%+v err=%v", coldRetry, err)
+			}
+
+			stopCalls := 0
+			closeCalls := 0
+			deps := providerTransactionDeps{
+				source: provider,
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("cold preinstall recovery must not stop a daemon")
+				},
+				close: func(manifestName string) error {
+					closeCalls++
+					return CloseAdoptProvenance(manifestName)
+				},
+			}
+			if tc.readErr != nil {
+				deps.loadIntent = func() (*SupervisorIntentFile, error) { return nil, tc.readErr }
+			}
+			report, executeErr := NewAPI().executeDeAdoptPlanWithOpts(coldRetry, io.Discard, ExecuteDeAdoptOpts{providerDeps: deps})
+			if tc.wantSuccess {
+				if executeErr != nil || report == nil || stopCalls != 0 || provider.calls != 1 || closeCalls != 1 || !provider.entry.Enabled {
+					t.Fatalf("valid empty cold retry report=%+v err=%v stop=%d provider=%d close=%d enabled=%t", report, executeErr, stopCalls, provider.calls, closeCalls, provider.entry.Enabled)
+				}
+				if got, err := os.ReadFile(keepPath); err != nil || string(got) != "preserve" {
+					t.Fatalf("successful absence path changed foreign marker: %q err=%v", got, err)
+				}
+				assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+				return
+			}
+
+			if tc.readErr != nil {
+				if !errors.Is(executeErr, tc.readErr) {
+					t.Fatalf("intent read error=%v, want preserved cause %v", executeErr, tc.readErr)
+				}
+			} else if executeErr == nil || !strings.Contains(executeErr.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+				t.Fatalf("owner contradiction error=%v, want standard unsupported failure", executeErr)
+			}
+			if report != nil || stopCalls != 0 || provider.calls != 0 || closeCalls != 0 {
+				t.Fatalf("refusal side effects: report=%+v stop=%d provider=%d close=%d", report, stopCalls, provider.calls, closeCalls)
+			}
+			persisted, found, readErr := ReadAdoptProvenance(name)
+			if readErr != nil || !found || persisted == nil || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall {
+				t.Fatalf("refusal changed durable phase: found=%t row=%+v err=%v", found, persisted, readErr)
+			}
+			if got, err := os.ReadFile(keepPath); err != nil || string(got) != "preserve" {
+				t.Fatalf("refusal deleted or changed foreign marker: %q err=%v", got, err)
+			}
+			persistedIntent, readErr := ReadSupervisorIntent(intentPath)
+			if readErr != nil || len(persistedIntent.Daemons) != len(intent.Daemons) {
+				t.Fatalf("refusal changed intent: got=%+v want=%+v err=%v", persistedIntent, intent, readErr)
+			}
+		})
+	}
+}
+
+func TestExecuteDeAdoptProviderPreInstallIntentReadErrorRetries(t *testing.T) {
+	tests := []struct {
+		name         string
+		installState ProviderManagedInstallStateV1
+		wantComplete bool
+	}{
+		{"preinstall retries absence", ProviderManagedInstallPreInstall, true},
+		{"legacy unknown remains refused", ProviderManagedInstallUnknown, false},
+		{"may-have-applied remains refused", ProviderManagedInstallMayHaveApplied, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-intent-retry-" + strings.ReplaceAll(tc.name, " ", "-")
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateDeAdopting)
+			rec.ProviderSource.ManagedInstallState = tc.installState
+			writeDeAdoptExecutorRecord(t, rec)
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transient := errors.New("injected supervisor intent read failure")
+			stopCalls := 0
+			_, firstErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: provider,
+				loadIntent: func() (*SupervisorIntentFile, error) {
+					return nil, transient
+				},
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("intent uncertainty must not stop a daemon")
+				},
+			}})
+			if !errors.Is(firstErr, transient) {
+				t.Fatalf("first intent-read error=%v, want visible injected cause", firstErr)
+			}
+			persisted, found, readErr := ReadAdoptProvenance(name)
+			if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != tc.installState {
+				t.Fatalf("state after intent uncertainty: found=%t row=%+v err=%v", found, persisted, readErr)
+			}
+
+			retryPlan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil || retryPlan.Routing != DeAdoptRoutingResume {
+				t.Fatalf("retry plan=%+v err=%v", retryPlan, err)
+			}
+			report, retryErr := NewAPI().executeDeAdoptPlanWithOpts(retryPlan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: provider,
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("absent intent must not stop a daemon")
+				},
+			}})
+			if tc.wantComplete {
+				if retryErr != nil || report == nil || stopCalls != 0 || provider.calls != 1 || !provider.entry.Enabled {
+					t.Fatalf("preinstall retry report=%+v err=%v stop=%d provider=%d enabled=%t", report, retryErr, stopCalls, provider.calls, provider.entry.Enabled)
+				}
+				assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+				return
+			}
+			if retryErr == nil || !strings.Contains(retryErr.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") || stopCalls != 0 || provider.calls != 0 {
+				t.Fatalf("non-preinstall absent retry report=%+v err=%v stop=%d provider=%d", report, retryErr, stopCalls, provider.calls)
+			}
+			if _, statErr := os.Stat(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); statErr != nil {
+				t.Fatalf("non-preinstall refusal deleted manifest: %v", statErr)
+			}
+			persisted, found, readErr = ReadAdoptProvenance(name)
+			if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" || persisted.ProviderSource.ManagedInstallState != tc.installState {
+				t.Fatalf("non-preinstall retry changed state: found=%t row=%+v err=%v", found, persisted, readErr)
+			}
+		})
+	}
+}
+
 func TestExecuteDeAdoptProviderStopFailurePreservesDisabledRecovery(t *testing.T) {
 	name := "provider-deadopt-stop-failure"
 	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
@@ -1160,7 +1866,7 @@ func TestDeAdoptManifestVaultReferenceKeysCoversEnvURLAndHeaders(t *testing.T) {
 
 func TestExecuteDeAdoptT9T10T14FailureBlocksWholeCloseAndRedacts(t *testing.T) {
 	name := "deadopt-execute-blocked"
-	const snapshotSecret = "SNAPSHOT_SECRET_MUST_NOT_LEAK"
+	const snapshotSecret = "canary-one"
 	snapshot := []byte("[mcp_servers." + name + "]\ncommand = \"native-command\"\n[mcp_servers." + name + ".env]\nAPI_KEY = \"" + snapshotSecret + "\"\n")
 	codexPath, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
 		state:           AdoptOperationStateAdopted,
@@ -1390,6 +2096,135 @@ func TestExecuteDeAdoptResumeRechecksRecreatedManifestAtE4(t *testing.T) {
 	}
 }
 
+func TestExecuteDeAdoptProviderRecoverySameNameManifestCreatePreservesRoutedSecret(t *testing.T) {
+	name := "provider-recovery-same-name-recreate"
+	const routedKey = "PROVIDER_RECOVERY_RECREATE_ROUTED_KEY"
+	tests := []struct {
+		name            string
+		replacementName string
+	}{
+		{name: "same-name", replacementName: name},
+		{name: "different-name", replacementName: name + "-replacement"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			replacementName := tt.replacementName
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+			rec.RoutedSecretKeys = []string{routedKey}
+			writeDeAdoptExecutorRecord(t, *rec)
+			if err := os.Remove(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); err != nil {
+				t.Fatalf("remove adopt-created manifest before recovery: %v", err)
+			}
+			seedDeAdoptVault(t, map[string]string{routedKey: "synthetic-recreated-owner-value"})
+
+			replacement := []byte("name: " + replacementName + "\nkind: global\ntransport: stdio-bridge\ncommand: go\nbase_args: [version]\nenv:\n  TOKEN: secret:" + routedKey + "\ndaemons:\n  - name: default\n    port: 31994\nclient_bindings: []\n")
+			validationRoot := t.TempDir()
+			if err := NewAPI().ManifestCreateIn(validationRoot, replacementName, string(replacement)); err != nil {
+				t.Fatalf("replacement is not a valid ManifestCreate input: %v", err)
+			}
+			validated, err := os.ReadFile(filepath.Join(validationRoot, replacementName, "manifest.yaml"))
+			if err != nil || !bytes.Equal(validated, replacement) {
+				t.Fatalf("replacement prevalidation bytes: equal=%t err=%v", bytes.Equal(validated, replacement), err)
+			}
+			parsed, err := config.ParseManifest(bytes.NewReader(validated))
+			if err != nil || parsed.Env["TOKEN"] != "secret:"+routedKey {
+				t.Fatalf("replacement prevalidation parse: env=%+v err=%v", parsed, err)
+			}
+
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil || !plan.providerRecovery {
+				t.Fatalf("provider recovery plan: recovery=%t err=%v", plan != nil && plan.providerRecovery, err)
+			}
+			restoreEntered := make(chan struct{})
+			releaseRestore := make(chan struct{})
+			recoverySettled := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(releaseRestore) }) }
+			provider.onCAS = func() {
+				close(restoreEntered)
+				<-releaseRestore
+			}
+			t.Cleanup(func() {
+				release()
+				select {
+				case <-recoverySettled:
+				case <-time.After(5 * time.Second):
+					t.Errorf("provider recovery did not settle during cleanup")
+				}
+			})
+
+			type recoveryResult struct {
+				report *DeAdoptReport
+				err    error
+			}
+			recoveryDone := make(chan recoveryResult, 1)
+			go func() {
+				defer close(recoverySettled)
+				report, executeErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
+				recoveryDone <- recoveryResult{report: report, err: executeErr}
+			}()
+			select {
+			case <-restoreEntered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider recovery did not reach restore after the absence probe")
+			}
+
+			paused, found, err := ReadAdoptProvenance(name)
+			if err != nil || !found || paused.OperationState != AdoptOperationStateDeAdopting || paused.ProviderSource == nil || paused.ProviderSource.DeAdoptPhase != "managed_removed" || !reflect.DeepEqual(paused.RoutedSecretKeys, []string{routedKey}) {
+				t.Fatalf("paused recovery is not a production-valid routed-key phase: found=%t rec=%+v err=%v", found, paused, err)
+			}
+			manifestPath := filepath.Join(manifestRoot, replacementName, "manifest.yaml")
+			if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+				t.Fatalf("replacement target was not absent at create point: %v", err)
+			}
+			createErr := NewAPI().ManifestCreate(replacementName, string(replacement))
+			if createErr == nil {
+				created, err := os.ReadFile(manifestPath)
+				if err != nil || !bytes.Equal(created, replacement) {
+					t.Fatalf("ManifestCreate did not persist exact replacement: equal=%t err=%v", bytes.Equal(created, replacement), err)
+				}
+			}
+			release()
+			var result recoveryResult
+			select {
+			case result = <-recoveryDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider recovery did not settle after recreate")
+			}
+			if result.err != nil || result.report == nil || provider.calls != 1 || !provider.entry.Enabled {
+				t.Fatalf("provider recovery result=%+v err=%v provider=%d enabled=%t", result.report, result.err, provider.calls, provider.entry.Enabled)
+			}
+			if createErr != nil {
+				if replacementName != rec.ManifestName {
+					t.Fatalf("different-name ManifestCreate refused during provider recovery: %v", createErr)
+				}
+				if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+					t.Fatalf("refused ManifestCreate left a manifest: %v", err)
+				}
+				assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
+				return
+			}
+
+			created, err := os.ReadFile(manifestPath)
+			if err != nil || !bytes.Equal(created, replacement) {
+				t.Fatalf("successful replacement changed during recovery: equal=%t err=%v", bytes.Equal(created, replacement), err)
+			}
+			parsed, err = config.ParseManifest(bytes.NewReader(created))
+			if err != nil || parsed.Env["TOKEN"] != "secret:"+routedKey {
+				t.Fatalf("successful replacement is not functional: env=%+v err=%v", parsed, err)
+			}
+			if got := deAdoptVaultKeys(t); !reflect.DeepEqual(got, []string{routedKey}) {
+				t.Fatalf("replacement lost its routed secret: got=%#v want=[%s]", got, routedKey)
+			}
+			if persisted, found, err := ReadAdoptProvenance(name); err != nil || found || persisted != nil {
+				t.Fatalf("old recovery provenance was not closed: found=%t rec=%+v err=%v", found, persisted, err)
+			}
+		})
+	}
+}
+
 func TestExecuteDeAdoptSnapshotDeletedManifestPresentRetryBlocksClose(t *testing.T) {
 	name := "deadopt-execute-snapshot-deleted-manifest-present"
 	snapshot := []byte(deAdoptNativeConfig(name, "already-restored"))
@@ -1415,7 +2250,7 @@ func TestExecuteDeAdoptSnapshotDeletedManifestPresentRetryBlocksClose(t *testing
 
 func TestExecuteDeAdoptErrorAndReportSerializationRedactsSensitiveState(t *testing.T) {
 	name := "deadopt-execute-error-serialization"
-	const snapshotSecret = "SERIALIZED_SNAPSHOT_SECRET_MUST_NOT_LEAK"
+	const snapshotSecret = "canary-two"
 	snapshot := []byte("[mcp_servers." + name + "]\ncommand = \"native-command\"\n[mcp_servers." + name + ".env]\nAPI_KEY = \"" + snapshotSecret + "\"\n")
 	_, _, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
 		state:                AdoptOperationStateAdopted,
@@ -1537,6 +2372,116 @@ func writeDeAdoptExecutorRecord(t *testing.T, rec AdoptProvenanceRecord) {
 		Records: []AdoptProvenanceRecord{rec},
 	}); err != nil {
 		t.Fatalf("write de-adopt executor record: %v", err)
+	}
+}
+
+func TestExecuteDeAdoptProviderAdoptingManagedInstallGate(t *testing.T) {
+	tests := []struct {
+		name         string
+		installState ProviderManagedInstallStateV1
+		wantComplete bool
+	}{
+		{"preinstall absence completes", ProviderManagedInstallPreInstall, true},
+		{"legacy unknown refuses", ProviderManagedInstallUnknown, false},
+		{"may-have-applied refuses", ProviderManagedInstallMayHaveApplied, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-adopting-recovery-" + strings.ReplaceAll(tc.name, " ", "-")
+			manifestRoot, stateRoot, rec, provider := setupProviderPreInstallDeAdoptFixture(t, name, AdoptOperationStateAdopting)
+			rec.ProviderSource.ManagedInstallState = tc.installState
+			writeDeAdoptExecutorRecord(t, rec)
+			before, found, err := ReadAdoptProvenance(name)
+			if err != nil || !found || before.ProviderSource == nil {
+				t.Fatalf("authoritative provenance before attempt: found=%t rec=%+v err=%v", found, before, err)
+			}
+			if err := os.Remove(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); err != nil {
+				t.Fatalf("remove fixture-created manifest: %v", err)
+			}
+			codexCLI, ok := clients.AllClients()["codex-cli"]
+			if !ok {
+				t.Fatal("codex-cli adapter missing from clients.AllClients()")
+			}
+			configPath := codexCLI.ConfigPath()
+			configBefore, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("read codex-cli config before de-adopt: %v", err)
+			}
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopCalls := 0
+			report, execErr := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{
+				source: provider,
+				loadIntent: func() (*SupervisorIntentFile, error) {
+					return &SupervisorIntentFile{Version: 1}, nil
+				},
+				stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+					stopCalls++
+					return StoppedSettlement{}, errors.New("absent daemon must not be stopped")
+				},
+			}})
+			configAfter, readErr := os.ReadFile(configPath)
+			if readErr != nil || !bytes.Equal(configAfter, configBefore) {
+				t.Fatalf("codex-cli config changed: path=%q before=%d bytes after=%d bytes err=%v", configPath, len(configBefore), len(configAfter), readErr)
+			}
+			if tc.wantComplete {
+				if execErr != nil || report == nil || stopCalls != 0 || provider.calls != 1 || !provider.entry.Enabled {
+					t.Fatalf("preinstall adopting recovery report=%+v err=%v stop=%d provider=%d enabled=%t", report, execErr, stopCalls, provider.calls, provider.entry.Enabled)
+				}
+				assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+				return
+			}
+			if execErr == nil || stopCalls != 0 || provider.calls != 0 {
+				t.Fatalf("non-preinstall adopting recovery report=%+v err=%v stop=%d provider=%d", report, execErr, stopCalls, provider.calls)
+			}
+			persisted, found, readErr := ReadAdoptProvenance(name)
+			if readErr != nil || !found || !reflect.DeepEqual(persisted, before) {
+				t.Fatalf("refusal changed durable provenance: found=%t before=%+v after=%+v err=%v", found, before, persisted, readErr)
+			}
+		})
+	}
+}
+
+func setupProviderPreInstallDeAdoptFixture(t *testing.T, name string, state AdoptOperationState) (manifestRoot, stateRoot string, rec AdoptProvenanceRecord, provider *providerLifecycleFake) {
+	t.Helper()
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec = setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: state, originalState: AdoptOriginalStatePresent,
+		liveConfig: string(snapshot), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: true, manifestBytes: deAdoptManagedManifest(name, 0),
+	})
+	rec.ProviderSource = &ProviderSourceProvenanceV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name,
+		Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation",
+		PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true,
+		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied",
+		ManagedInstallState: ProviderManagedInstallPreInstall,
+	}
+	writeDeAdoptExecutorRecord(t, rec)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	provider = &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name,
+		Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd,
+		Scope: clients.ProviderMCPScopeUser, Enabled: false,
+		ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled",
+		ActivationEnabledPresent: true, ActivationEnabled: false,
+		DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone,
+		PolicyFingerprint: "policy",
+	}}
+	return manifestRoot, stateRoot, rec, provider
+}
+
+func providerRecoveryExactDaemon(rec AdoptProvenanceRecord) SupervisorDaemon {
+	return SupervisorDaemon{
+		TaskName: canonicalIntentTaskKey(supervisorTaskNameForManifestDaemon(rec.ManifestName, adoptDefaultDaemonName)),
+		Server:   rec.ManifestName, Daemon: adoptDefaultDaemonName,
+		Port: rec.Port, ManifestHash: rec.ExpectedManifestHash,
 	}
 }
 

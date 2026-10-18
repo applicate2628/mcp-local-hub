@@ -47,6 +47,8 @@ import (
 // build/install time (BuildSupervisorDaemonsForSerena + the
 // InstallParsedManifest native-http contract gate).
 func newDaemonSerenaProxyCmd() *cobra.Command {
+	var preparedTask preparedTaskFlag
+	var preparedDeadline preparedDeadlineFlag
 	var (
 		portFlag      int
 		workspaceFlag string
@@ -58,6 +60,27 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 		Short:  "Launch a per-workspace serena native-http daemon",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			taskNameFlag = preparedTask.value
+			if preparedDeadline.count != 0 {
+				start, cancel, contextErr := preparedFlagContext(cmd.Context(), &preparedTask, &preparedDeadline)
+				if contextErr != nil {
+					return contextErr
+				}
+				defer cancel()
+				a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+				launch, launchErr := a.ObservePreparedSerenaLaunch(start, taskNameFlag)
+				if launchErr != nil {
+					return launchErr
+				}
+				row, rowErr := launch.Descriptor(start)
+				if rowErr != nil {
+					return rowErr
+				}
+				if row.RuntimeSpec == nil || row.RuntimeSpec.SpecVersion != api.SerenaPreparedRuntimeSpecVersion || row.Workspace != filepath.Clean(workspaceFlag) || row.Port != portFlag || row.Server != serverFlag || api.EffectiveStartupBindDeadlineSeconds(row) != preparedDeadline.value {
+					return errors.New("prepared workspace launch selector disagrees with descriptor")
+				}
+				return runPreparedSerenaWrapper(cmd.Context(), start, a, launch, row, filepath.Join(logBaseDir(), serverFlag+"-"+row.Daemon+".log"))
+			}
 			if portFlag <= 0 {
 				return fmt.Errorf("--port is required and must be > 0")
 			}
@@ -147,13 +170,36 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			// plus the internal upstream port the child binds.
 			childArgs := serenaProxyChildArgs(spec)
 
-			h, err := daemon.NewHTTPHost(serenaProxyHTTPHostConfig(desc, childArgs, env, unsetEnv, logPath))
+			cfg := serenaProxyHTTPHostConfig(desc, childArgs, env, unsetEnv, logPath)
+			ctx := cmd.Context()
+			startCtx := ctx
+			var h *daemon.HTTPHost
+			if spec.SpecVersion == api.SerenaPreparedRuntimeSpecVersion {
+				owner, ownerErr := api.NewAPI().PreparedSerenaConsumerOwner()
+				if ownerErr != nil {
+					return ownerErr
+				}
+				var cancel context.CancelFunc
+				startCtx, cancel, err = api.PreparedSerenaStartContext(ctx, cfg.OuterBindDeadline)
+				if err != nil {
+					return err
+				}
+				defer cancel()
+				h, _, err = newPreparedConsumerHTTPHost(startCtx, owner, *desc, cfg)
+			} else {
+				h, err = daemon.NewHTTPHost(cfg)
+			}
 			if err != nil {
 				return fmt.Errorf("NewHTTPHost: %w", err)
 			}
+			if spec.SpecVersion == api.SerenaPreparedRuntimeSpecVersion {
+				defer func() {
+					_, closeErr := h.StopObserved(context.Background())
+					err = errors.Join(err, closeErr)
+				}()
+			}
 
-			ctx := cmd.Context()
-			if err := h.Start(ctx); err != nil {
+			if err := h.Start(startCtx); err != nil {
 				return fmt.Errorf("httphost.Start: %w%s", err, formatChildExit(h.ExitState()))
 			}
 
@@ -195,7 +241,9 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 	c.Flags().IntVar(&portFlag, "port", 0, "TCP port to bind on 127.0.0.1 (required; per-workspace from registry)")
 	c.Flags().StringVar(&workspaceFlag, "workspace", "", "absolute workspace path (required)")
 	c.Flags().StringVar(&serverFlag, "server", "serena", "manifest name to load (defaults to serena)")
-	c.Flags().StringVar(&taskNameFlag, "task-name", "", "canonical supervisor-intent task name of THIS daemon (required; the proxy reads its own RuntimeSpec descriptor by this key)")
+	c.Flags().Var(&preparedTask, "task-name", "canonical supervisor-intent task name of THIS daemon")
+	c.Flags().Var(&preparedDeadline, "startup-bind-deadline-seconds", "original prepared startup bound")
+	_ = c.Flags().MarkHidden("startup-bind-deadline-seconds")
 	return c
 }
 
@@ -260,8 +308,11 @@ func loadSerenaProxyDescriptor(taskName, canonicalWorkspace string, flagPort int
 		return nil, fmt.Errorf("serena-proxy: descriptor %q carries no runtime_spec (pre-redesign or stale row); reinstall the serena dynamic pool", taskName)
 	}
 	spec := d.RuntimeSpec
-	if spec.SpecVersion != api.DaemonRuntimeSpecVersion {
+	if spec.SpecVersion != api.DaemonRuntimeSpecVersion && spec.SpecVersion != api.SerenaPreparedRuntimeSpecVersion {
 		return nil, fmt.Errorf("serena-proxy: unsupported runtime spec_version %d for task %q (this binary supports %d); reinstall the serena dynamic pool", spec.SpecVersion, taskName, api.DaemonRuntimeSpecVersion)
+	}
+	if spec.SpecVersion == api.SerenaPreparedRuntimeSpecVersion && spec.PreparedRuntime == nil {
+		return nil, fmt.Errorf("serena-proxy: prepared runtime binding missing for task %q", taskName)
 	}
 
 	// Descriptor/flag consistency contract (§3.2): argv, top-level descriptor

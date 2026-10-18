@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +18,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/scheduler"
 )
 
 var (
@@ -41,75 +41,15 @@ func (f *productPairTaskFake) InventoryExport() error {
 	return f.inventoryErr
 }
 
-func TestRunInstallUpgradeRecoversTypedPrePromotionPairFailuresExactlyOnce(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*WindowsProductPairTxn, *productPairTaskFake, *WindowsProductPairTxnDeps, string)
-	}{
-		{"missing publisher", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps, _ string) {
-			deps.PublishCommitted = nil
-			txn.Opts.Deps = *deps
-		}},
-		{"staged admission", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps, _ string) {
-			deps.AdmitPair = func(binaryadmission.WindowsArtifact, binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error) {
-				return binaryadmission.WindowsProductPair{}, errors.New("staged admission")
-			}
-			txn.Opts.Deps = *deps
-		}},
-		{"cli snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
-			txn.Opts.CLIPath = dir
-		}},
-		{"windowless snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
-			txn.Opts.WindowlessPath = dir
-		}},
-		{"receipt snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
-			txn.Opts.ReceiptPath = dir
-		}},
-		{"task inventory", func(_ *WindowsProductPairTxn, tasks *productPairTaskFake, _ *WindowsProductPairTxnDeps, _ string) {
-			tasks.inventoryErr = errors.New("task inventory")
-		}},
-		{"invalid mode", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, _ string) {
-			txn.Opts.Mode = "invalid"
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			paths := productPairFixturePaths(dir)
-			writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
-			writePairFixture(t, paths.stagedCLI, []byte("staged-cli"))
-			writePairFixture(t, paths.stagedWindowless, []byte("staged-windowless"))
-			var order []string
-			tasks := &productPairTaskFake{order: &order}
-			deps := productPairTestDeps(&order)
-			promotions := 0
-			pairRestarts := 0
-			deps.Promote = func(string, string, string) (WindowsProductPairPromotion, error) {
-				promotions++
-				return WindowsProductPairPromotion{}, errors.New("promotion must not run")
-			}
-			deps.RestartPrior = func(string) error { pairRestarts++; return nil }
-			txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}
-			tc.mutate(txn, tasks, &deps, dir)
-
-			legacy := &fakeUpgradeDeps{quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true}, exitResult: api.IPCResponse{ID: 2, OK: true, Final: true}}
-			err := RunInstallUpgrade(context.Background(), UpgradeOpts{WindowsProductPair: txn, BinaryPath: paths.priorCLI, PipePath: "pair-prepromotion", Deps: legacy, WaitSupervisorLockReleased: func(context.Context, time.Duration) error { return nil }})
-			var pre *WindowsProductPairPrePromotionError
-			if !errors.As(err, &pre) {
-				t.Fatalf("error=%v, want typed pre-promotion error", err)
-			}
-			if promotions != 0 || pairRestarts != 0 {
-				t.Fatalf("pre-promotion mutated pair: promotions=%d pair_restarts=%d", promotions, pairRestarts)
-			}
-			starts := 0
-			for _, call := range legacy.calls {
-				if call == "start" {
-					starts++
-				}
-			}
-			if starts != 1 || !tasks.closed {
-				t.Fatalf("outer recovery starts=%d closed=%v calls=%v", starts, tasks.closed, legacy.calls)
-			}
-		})
+func productPairTestGracefulLifecycle() *windowsProductPairLifecycleHooks {
+	return &windowsProductPairLifecycleHooks{
+		Observe: func(context.Context, string, []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
+			return windowsProductQuiescenceObservationV1{
+				Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorGracefullySettled, Generation: &windowsProductSupervisorGenerationV1{PID: 71, StartedAt: "2026-09-01T00:00:00Z", IPCRequestVersion: 0}},
+				GUIOwner:   windowsProductGUIOwnerConfirmedAbsent,
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 0, 0, 1, 0, time.UTC) },
 	}
 }
 func (f *productPairTaskFake) RewriteCommand() error {
@@ -119,6 +59,12 @@ func (f *productPairTaskFake) RewriteCommand() error {
 func (f *productPairTaskFake) VerifyRuntime() error {
 	*f.order = append(*f.order, "tasks-readback")
 	return nil
+}
+func (f *productPairTaskFake) VerifyRuntimeSHA256() (string, error) {
+	if err := f.VerifyRuntime(); err != nil {
+		return "", err
+	}
+	return strings.Repeat("e", sha256.Size*2), nil
 }
 func (f *productPairTaskFake) RestoreImport() error {
 	f.restored = true
@@ -131,141 +77,14 @@ func (f *productPairTaskFake) RecoveryDescriptor() (WindowsProductPairTaskRecove
 }
 func (f *productPairTaskFake) DiscardRecoveryStore() error { f.discarded = true; return nil }
 
-func TestWindowsProductPairTxnRefusesPromotionBeforeExactJournalReadback(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("staged-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("staged-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	deps.WriteRecoveryJournal = func(path string, raw []byte) error {
-		order = append(order, "journal-write")
-		if path != filepath.Join(filepath.Dir(paths.receipt), WindowsProductPairRecoveryFileLeaf) {
-			t.Fatalf("journal path=%q", path)
-		}
-		return nil
-	}
-	deps.ReadRecoveryJournal = func(string) ([]byte, error) {
-		order = append(order, "journal-readback")
-		return []byte(`{"schema":"tampered"}`), nil
-	}
-	promotions := 0
-	deps.Promote = func(string, string, string) (WindowsProductPairPromotion, error) {
-		promotions++
-		return WindowsProductPairPromotion{}, errors.New("promotion must remain unreachable")
-	}
-	_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-		StateDir: filepath.Dir(paths.receipt), CLIPath: paths.priorCLI, WindowlessPath: paths.windowless,
-		StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-		Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
-	}}).Run(context.Background())
-	if err == nil || !errors.Is(err, ErrWindowsProductPairRecoveryPrepare) {
-		t.Fatalf("error=%v, want durable recovery prepare failure", err)
-	}
-	if promotions != 0 || !tasks.closed || tasks.discarded {
-		t.Fatalf("promotions=%d closed=%v discarded=%v", promotions, tasks.closed, tasks.discarded)
-	}
-	wantPrefix := []string{"admit-staged", "tasks-snapshot", "journal-write", "journal-readback", "journal-readback"}
-	if !reflect.DeepEqual(order, wantPrefix) {
-		t.Fatalf("order=%v want=%v", order, wantPrefix)
-	}
+type productTaskCloseCounter struct {
+	WindowsProductTaskTxn
+	closes int
 }
 
-func TestWindowsProductPairTxnOrdersAdapterTasksCLIReadbackReadinessAndReceipt(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	priorReceipt := []byte("{\"schema\":\"upgrade-receipt-v1\",\"sha256\":\"prior\"}\n")
-	writePairFixture(t, paths.receipt, priorReceipt)
-
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	committed, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-		CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI,
-		StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-		Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
-	}}).Run(context.Background())
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if committed.Schema != WindowsProductPairCommittedSchemaV1 {
-		t.Fatalf("commit schema=%q", committed.Schema)
-	}
-	wantOrder := []string{"admit-staged", "tasks-snapshot", "promote-windowless", "readback-windowless", "tasks-rewrite", "tasks-readback", "promote-cli", "readback-pair", "start-supervisor", "supervisor-ready", "receipt", "receipt-readback", "publish-committed"}
-	if !reflect.DeepEqual(order, wantOrder) {
-		t.Fatalf("order=%v want=%v", order, wantOrder)
-	}
-	raw, err := os.ReadFile(paths.receipt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := DecodeUpgradeReceipt(raw)
-	if err != nil || decoded.V2 == nil || decoded.V2.Artifacts.CLI.SHA256 != productPairTestCLISHA || decoded.V2.Artifacts.Windowless.SHA256 != productPairTestWindowlessSHA {
-		t.Fatalf("receipt=%+v err=%v raw=%s", decoded, err, raw)
-	}
-	var receiptEnvelope struct {
-		Mode WindowsProductPairMode `json:"mode"`
-	}
-	if err := json.Unmarshal(raw, &receiptEnvelope); err != nil || receiptEnvelope.Mode != WindowsProductPairModeUpgrade {
-		t.Fatalf("receipt mode=%q err=%v raw=%s", receiptEnvelope.Mode, err, raw)
-	}
-}
-
-func TestWindowsProductPairTxnFaultMatrixRestoresExactPriorPairTasksAndReceipt(t *testing.T) {
-	stages := []WindowsProductPairStage{
-		WindowsProductPairStageWindowlessPromoted,
-		WindowsProductPairStageWindowlessReadBack,
-		WindowsProductPairStageTasksRewritten,
-		WindowsProductPairStageTasksReadBack,
-		WindowsProductPairStageCLIPromoted,
-		WindowsProductPairStagePairReadBack,
-		WindowsProductPairStageSupervisorStarted,
-		WindowsProductPairStageSupervisorReady,
-		WindowsProductPairStageReceiptWritten,
-	}
-	for _, faultStage := range stages {
-		t.Run(string(faultStage), func(t *testing.T) {
-			dir := t.TempDir()
-			paths := productPairFixturePaths(dir)
-			priorCLI := []byte("old-0.4.35-gui-cli")
-			priorReceipt := []byte("{ \"schema\": \"upgrade-receipt-v2\", \"sentinel\": true }\r\n")
-			writePairFixture(t, paths.priorCLI, priorCLI)
-			writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-			writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-			writePairFixture(t, paths.receipt, priorReceipt)
-
-			var order []string
-			tasks := &productPairTaskFake{order: &order}
-			deps := productPairTestDeps(&order)
-			deps.Fault = func(stage WindowsProductPairStage) error {
-				if stage == faultStage {
-					return errors.New("injected " + string(stage))
-				}
-				return nil
-			}
-			_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-				CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI,
-				StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-				Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
-			}}).Run(context.Background())
-			if err == nil {
-				t.Fatal("fault unexpectedly committed")
-			}
-			assertPairFile(t, paths.priorCLI, priorCLI)
-			if _, statErr := os.Stat(paths.windowless); !os.IsNotExist(statErr) {
-				t.Fatalf("absent prior companion was not removed: %v", statErr)
-			}
-			assertPairFile(t, paths.receipt, priorReceipt)
-			if !tasks.restored && faultStage != WindowsProductPairStageWindowlessPromoted && faultStage != WindowsProductPairStageWindowlessReadBack {
-				t.Fatalf("task XML not restored after %s", faultStage)
-			}
-		})
-	}
+func (c *productTaskCloseCounter) Close() error {
+	c.closes++
+	return c.WindowsProductTaskTxn.Close()
 }
 
 func TestDecodeUpgradeReceiptReadsV1AndV2(t *testing.T) {
@@ -279,125 +98,652 @@ func TestDecodeUpgradeReceiptReadsV1AndV2(t *testing.T) {
 	}
 }
 
-func TestRunInstallUpgradeDelegatesPairMutationAfterLegacyReleaseToSoleOwner(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	released := false
-	legacy := &fakeUpgradeDeps{
-		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true},
-		exitResult:    api.IPCResponse{ID: 2, OK: true, Final: true},
-	}
-	deps := productPairTestDeps(&order)
-	admitPair := deps.AdmitPair
-	deps.AdmitPair = func(cli, windowless binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error) {
-		if !released {
-			return binaryadmission.WindowsProductPair{}, errors.New("pair owner invoked before prior supervisor release")
-		}
-		return admitPair(cli, windowless)
-	}
-	txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-		CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI,
-		StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-		Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
-	}}
-	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
-		WindowsProductPair: txn,
-		BinaryPath:         paths.priorCLI,
-		PipePath:           "test-pipe",
-		Deps:               legacy,
-		WaitSupervisorLockReleased: func(context.Context, time.Duration) error {
-			released = true
-			return nil
+func TestDecodeUpgradeReceiptReadsV3ProductReceipt(t *testing.T) {
+	raw := []byte(`{
+		"schema":"upgrade-receipt-v3",
+		"transaction_id":"0123456789abcdef0123456789abcdef",
+		"mode":"upgrade",
+		"admission":"local-product",
+		"artifact":{
+			"role":"product",
+			"subsystem":2,
+			"machine":34404,
+			"version":"0.4.38",
+			"commit":"0123456789abcdef0123456789abcdef01234567",
+			"build_date":"2026-09-11T00:00:00Z",
+			"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		},
-	}); err != nil {
-		t.Fatalf("RunInstallUpgrade pair path: %v", err)
-	}
-	if len(order) == 0 || order[0] != "admit-staged" {
-		t.Fatalf("pair owner not invoked: %v", order)
-	}
-	if !legacy.quiesceCalled || !legacy.exitCalled || !released {
-		t.Fatalf("legacy release not completed: quiesce=%v exit=%v released=%v", legacy.quiesceCalled, legacy.exitCalled, released)
-	}
-	if legacy.renameAsideCalled || legacy.startCalled {
-		t.Fatalf("parallel legacy mutation owner invoked: rename=%v start=%v", legacy.renameAsideCalled, legacy.startCalled)
+		"task_set_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"retired":{
+			"windowless_absent":true,
+			"admission_helper_absent_from_payload":true,
+			"rollback_images_absent":true
+		},
+		"installed_at":"2026-09-11T00:00:01Z"
+	}`)
+
+	if _, err := DecodeUpgradeReceipt(raw); err != nil {
+		t.Fatalf("decode V3 product receipt: %v", err)
 	}
 }
 
-func TestRunInstallUpgradeClosesPairOwnerWhenLegacyPreconditionsFail(t *testing.T) {
+func TestWindowsProductTxnCommitsV3AfterTaskReadbackAndLegacyRetirement(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	product := filepath.Join(dir, "mcphub.exe")
+	legacy := filepath.Join(dir, "mcphub-windowless.exe")
+	staged := filepath.Join(dir, "mcphub.exe.stage")
+	writePairFixture(t, staged, []byte("new-product"))
+	writePairFixture(t, legacy, []byte("legacy-windowless"))
 	var order []string
 	tasks := &productPairTaskFake{order: &order}
-	txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{Tasks: tasks}}
-	err := RunInstallUpgrade(context.Background(), UpgradeOpts{WindowsProductPair: txn})
-	if err == nil {
-		t.Fatal("missing legacy dependencies unexpectedly succeeded")
+	deps := productTxnTestDeps(&order)
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
+		StagedProduct: staged, Mode: WindowsProductPairModeCanonicalize,
+		ReplacementAuthority: windowsProductReplacementAuthority{
+			Disposition: windowsProductPairDispositionV1{CLI: windowsProductTargetCreate, Windowless: windowsProductTargetIdentical},
+		},
+		Tasks: tasks, Deps: deps,
+	}}
+	committed, err := txn.Run(context.Background())
+	if err != nil {
+		t.Fatalf("run Product/V3 transaction: %v", err)
 	}
-	if !tasks.closed {
-		t.Fatal("pre-pair legacy failure leaked the pair task owner")
+	if committed.Outcome != WindowsProductPairCommittedOutcome || committed.Artifact.Role != binaryadmission.WindowsArtifactRoleProduct {
+		t.Fatalf("committed=%+v", committed)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy target remains: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeUpgradeReceipt(raw)
+	if err != nil || decoded.V3 == nil || decoded.V3.Artifact.SHA256 != committed.Artifact.SHA256 {
+		t.Fatalf("receipt=%+v err=%v", decoded, err)
+	}
+	if !recoveryStepsOrdered(order, []string{"tasks-snapshot", "promote-cli", "tasks-rewrite", "tasks-readback", "publish-product"}) {
+		t.Fatalf("order=%v", order)
 	}
 }
 
-func TestCanonicalizeWindowsProductPairDelegatesAllMutationToSoleOwner(t *testing.T) {
-	withTempStateDir(t)
-	sourceCLI := writeAdmissionProductPairFixture(t, "CANONICALIZE")
-	targetDir := t.TempDir()
-	targetCLI := filepath.Join(targetDir, "mcphub.exe")
-	targetWindowless := filepath.Join(targetDir, "mcphub-windowless.exe")
-	priorCLI := []byte("prior-cli-exact")
-	writePairFixture(t, targetCLI, priorCLI)
+func TestWindowsProductTxnPrePrepareStoreDisposition(t *testing.T) {
+	stateDir := t.TempDir()
+	req := windowsProductTxnRequest{
+		Context:              context.Background(),
+		StateDir:             stateDir,
+		ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+		LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+		StagedProduct:        writeAdmissionPEFixture(t, binaryadmission.WindowsCUISubsystem, false),
+		Mode:                 WindowsProductPairModeCanonicalize,
+	}
+	txn, err := newWindowsProductTxn(req)
+	if err != nil {
+		t.Fatalf("begin task transaction: %v", err)
+	}
+	owner := txn.Opts.Tasks.(*windowsProductPairTaskOwner)
+	counter := &productTaskCloseCounter{WindowsProductTaskTxn: owner}
+	txn.Opts.Tasks = counter
+	t.Cleanup(func() {
+		_ = owner.Close()
+		_ = owner.store.Close()
+	})
 
-	originalFactory := newWindowsProductPairTxnFn
-	t.Cleanup(func() { newWindowsProductPairTxnFn = originalFactory })
+	_, err = txn.Run(context.Background())
+	var prePromotion *WindowsProductPairPrePromotionError
+	if !errors.As(err, &prePromotion) || !strings.Contains(err.Error(), binaryadmission.WindowsPESubsystemErrorID) {
+		t.Fatalf("Prepare error=%v, want typed PE admission refusal", err)
+	}
+	if counter.closes != 1 {
+		t.Fatalf("task lock Close calls=%d, want exactly one in Run", counter.closes)
+	}
+	if _, err := os.Stat(owner.store.RootPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unjournaled Prepare failure retained task store: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	req.Context = ctx
+	next, err := newWindowsProductTxn(req)
+	if err != nil {
+		t.Fatalf("reacquire task transaction after failed Prepare: %v", err)
+	}
+	if err := next.Close(); err != nil {
+		t.Fatalf("close reacquired task transaction: %v", err)
+	}
+	if err := next.Opts.Tasks.(*windowsProductPairTaskOwner).store.Close(); err != nil {
+		t.Fatalf("close reacquired task store: %v", err)
+	}
+}
+
+func TestWindowsProductTxnClosePreservesStoreOnAmbiguousJournalPopulation(t *testing.T) {
+	stateDir := t.TempDir()
+	req := windowsProductTxnRequest{
+		Context: context.Background(), StateDir: stateDir,
+		ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+		LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+		StagedProduct:        writeAdmissionPEFixture(t, binaryadmission.WindowsCUISubsystem, false),
+		Mode:                 WindowsProductPairModeUpgrade,
+	}
+	txn, err := newWindowsProductTxn(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := txn.Opts.Tasks.(*windowsProductPairTaskOwner).store
+	t.Cleanup(func() { _ = store.Close() })
+	if err := os.WriteFile(filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3), []byte("test-owned pending journal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(stateDir, WindowsProductPairRecoveryFileLeaf), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err = txn.Close()
+	if err == nil || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
+		t.Fatalf("ambiguous second journal Close error=%v, want typed uncertainty", err)
+	}
+	if _, statErr := os.Stat(store.RootPath()); statErr != nil {
+		t.Fatalf("journal-bound store was discarded: %v", statErr)
+	}
+}
+
+func TestWindowsProductTxnConstructorJoinsStoreCleanupFailure(t *testing.T) {
+	t.Run("later task begin failure", func(t *testing.T) {
+		stateDir := t.TempDir()
+		beginErr := errors.New("test-owned task begin refusal")
+		var storeRoot string
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+			Context: context.Background(), StateDir: stateDir,
+			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+			StagedProduct:        filepath.Join(stateDir, "candidate.exe"),
+			Mode:                 WindowsProductPairModeUpgrade,
+		}, func(root string) (*windowsProductPairTaskStore, error) {
+			store, err := newWindowsProductPairTaskStore(root)
+			if err != nil {
+				return nil, err
+			}
+			storeRoot = store.RootPath()
+			if err := os.WriteFile(filepath.Join(storeRoot, "test-owned-unrecognized-leaf"), []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return store, nil
+		}, func(context.Context, string, string, string, scheduler.RetainedTaskXMLStore) (*scheduler.OwnedEntrypointTaskTxn, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
+			t.Fatalf("constructor error=%v, want begin cause and cleanup failure", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(storeRoot, "test-owned-unrecognized-leaf")); statErr != nil {
+			t.Fatalf("failed cleanup erased unrecognized leaf: %v", statErr)
+		}
+	})
+
+	t.Run("partial store acquisition error", func(t *testing.T) {
+		stateDir := t.TempDir()
+		acquisitionErr := errors.New("test-owned task store acquisition refusal")
+		retainedXML := []byte("<Task><RegistrationInfo><URI>owned</URI></RegistrationInfo></Task>")
+		var storeRoot, retainedRef string
+		var partialStore *windowsProductPairTaskStore
+		_, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+			Context: context.Background(), StateDir: stateDir,
+			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
+			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
+			StagedProduct:        filepath.Join(stateDir, "candidate.exe"),
+			Mode:                 WindowsProductPairModeUpgrade,
+		}, func(root string) (*windowsProductPairTaskStore, error) {
+			store, err := newWindowsProductPairTaskStore(root)
+			if err != nil {
+				return nil, err
+			}
+			partialStore = store
+			storeRoot = store.RootPath()
+			retainedRef, err = store.Retain(context.Background(), retainedXML)
+			if err != nil {
+				t.Fatalf("materialize real retained task XML: %v", err)
+			}
+			if got, readErr := os.ReadFile(filepath.Join(storeRoot, retainedRef)); readErr != nil || !bytes.Equal(got, retainedXML) {
+				t.Fatalf("real retained task XML was not present before constructor cleanup: bytes=%q error=%v", got, readErr)
+			}
+			if err := os.WriteFile(filepath.Join(storeRoot, "test-owned-unrecognized-leaf"), []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return store, acquisitionErr
+		}, func(context.Context, string, string, string, scheduler.RetainedTaskXMLStore) (*scheduler.OwnedEntrypointTaskTxn, error) {
+			t.Fatal("task begin ran after store acquisition returned an error")
+			return nil, nil
+		})
+		if err == nil || !errors.Is(err, acquisitionErr) || !strings.Contains(err.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED") {
+			t.Fatalf("constructor error=%v, want original acquisition cause joined with cleanup uncertainty", err)
+		}
+		if partialStore == nil {
+			t.Fatal("partial physical store was not returned to the constructor")
+		}
+		retainedPath := filepath.Join(storeRoot, retainedRef)
+		if _, statErr := os.Lstat(retainedPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("constructor did not dispose selected retained XML material: stat error=%v", statErr)
+		}
+		unrecognizedPath := filepath.Join(storeRoot, "test-owned-unrecognized-leaf")
+		if got, readErr := os.ReadFile(unrecognizedPath); readErr != nil || string(got) != "preserve" {
+			t.Fatalf("constructor cleanup changed unrelated material: bytes=%q error=%v", got, readErr)
+		}
+		if _, statErr := os.Stat(storeRoot); statErr != nil {
+			t.Fatalf("unrelated material's containing root was removed: %v", statErr)
+		}
+		if _, retainErr := partialStore.Retain(context.Background(), []byte("after-close")); retainErr == nil || !strings.Contains(retainErr.Error(), "closed") {
+			t.Fatalf("partial store remained usable after selected cleanup: error=%v", retainErr)
+		}
+	})
+}
+
+func TestWindowsProductTxnPredecisionFaultRestoresProductTasksLegacyAndReceipt(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	product := filepath.Join(dir, "mcphub.exe")
+	legacy := filepath.Join(dir, "mcphub-windowless.exe")
+	staged := filepath.Join(dir, "mcphub.exe.stage")
+	priorReceipt := filepath.Join(stateDir, UpgradeReceiptSchemaV2+".json")
+	writePairFixture(t, staged, []byte("new-product"))
+	writePairFixture(t, legacy, []byte("legacy-windowless"))
+	writePairFixture(t, priorReceipt, []byte("prior-v2-receipt"))
 	var order []string
-	newWindowsProductPairTxnFn = func(req windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
-		return &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-			CLIPath: req.CLIPath, WindowlessPath: req.WindowlessPath,
-			StagedCLI: req.StagedCLI, StagedWindowless: req.StagedWindowless,
-			ReceiptPath: filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json"),
-			Mode:        WindowsProductPairModeCanonicalize,
-			Tasks:       &productPairTaskFake{order: &order}, Deps: productPairTestDeps(&order),
-		}}, nil
+	tasks := &productPairTaskFake{order: &order}
+	deps := productTxnTestDeps(&order)
+	deps.Fault = func(stage WindowsProductStage) error {
+		if stage == WindowsProductStageLegacyRetired {
+			return errors.New("injected legacy-retired fault")
+		}
+		return nil
 	}
-	var out bytes.Buffer
-	if err := canonicalizeBinaryToTarget(&out, sourceCLI, targetCLI); err != nil {
-		t.Fatalf("canonicalize pair: %v", err)
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
+		StagedProduct: staged, Mode: WindowsProductPairModeCanonicalize,
+		ReplacementAuthority: windowsProductReplacementAuthority{
+			Disposition: windowsProductPairDispositionV1{CLI: windowsProductTargetCreate, Windowless: windowsProductTargetIdentical},
+		},
+		Tasks: tasks, Deps: deps,
+	}}
+	if _, err := txn.Run(context.Background()); err == nil {
+		t.Fatal("fault unexpectedly committed")
 	}
-	assertPairFile(t, targetCLI, mustReadPairFile(t, sourceCLI))
-	assertPairFile(t, targetWindowless, mustReadPairFile(t, filepath.Join(filepath.Dir(sourceCLI), "mcphub-windowless.exe")))
-	if !strings.Contains(out.String(), "product pair canonicalized") || len(order) == 0 {
-		t.Fatalf("output=%q order=%v", out.String(), order)
+	if _, err := os.Stat(product); !os.IsNotExist(err) {
+		t.Fatalf("prior-absent product was not restored: %v", err)
 	}
-	if bytes.Equal(mustReadPairFile(t, targetCLI), priorCLI) {
-		t.Fatal("canonical CLI remained at prior bytes")
+	assertPairFile(t, legacy, []byte("legacy-windowless"))
+	assertPairFile(t, priorReceipt, []byte("prior-v2-receipt"))
+	if !tasks.restored {
+		t.Fatal("task XML was not restored")
+	}
+	for _, step := range order {
+		if step == "publish-product" {
+			t.Fatalf("predecision fault published committed event: %v", order)
+		}
 	}
 }
 
-func TestWindowsProductPairTaskStoreExactReadbackAndCleanup(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	store, err := newWindowsProductPairTaskStore(stateDir)
+func TestWindowsProductTxnPostdecisionEventFailureNeverRollsBack(t *testing.T) {
+	txn, paths, order := newProductTxnFixture(t)
+	txn.Opts.Deps.PublishCommitted = func(WindowsProductCommitEvent) (string, error) {
+		*order = append(*order, "publish-product")
+		return strings.Repeat("f", sha256.Size*2), errors.New("event sink unavailable")
+	}
+	committed, err := txn.Run(context.Background())
+	if !errors.Is(err, ErrWindowsProductPairCommittedObservabilityFailed) {
+		t.Fatalf("error=%v", err)
+	}
+	if committed.Outcome != WindowsProductPairCommittedObservabilityFailed {
+		t.Fatalf("committed=%+v", committed)
+	}
+	assertPairFile(t, paths.product, []byte("new-product"))
+	if _, statErr := os.Stat(paths.legacy); !os.IsNotExist(statErr) {
+		t.Fatalf("postdecision event failure restored legacy target: %v", statErr)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	journal, decodeErr := decodeWindowsProductRecoveryJournalV3(raw)
+	if decodeErr != nil || journal.Phase != WindowsProductRecoveryCommitDecided {
+		t.Fatalf("journal=%+v err=%v", journal, decodeErr)
+	}
+}
+
+func TestWindowsProductTxnPostdecisionCleanupFailureRetainsCommitDecision(t *testing.T) {
+	txn, paths, _ := newProductTxnFixture(t)
+	remove := txn.Opts.Deps.RemoveExact
+	txn.Opts.Deps.RemoveExact = func(path string) error {
+		if strings.Contains(filepath.Base(path), ".old-") {
+			return errors.New("mapped retained image")
+		}
+		return remove(path)
+	}
+	committed, err := txn.Run(context.Background())
+	if !errors.Is(err, ErrWindowsProductCleanupPending) {
+		t.Fatalf("error=%v", err)
+	}
+	if committed.Outcome != WindowsProductPairCommittedCleanupFailed {
+		t.Fatalf("committed=%+v", committed)
+	}
+	assertPairFile(t, paths.product, []byte("new-product"))
+	if _, statErr := os.Stat(paths.legacy); !os.IsNotExist(statErr) {
+		t.Fatalf("postdecision cleanup failure restored legacy target: %v", statErr)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	journal, decodeErr := decodeWindowsProductRecoveryJournalV3(raw)
+	if decodeErr != nil || journal.Phase != WindowsProductRecoveryCommitDecided {
+		t.Fatalf("journal=%+v err=%v", journal, decodeErr)
+	}
+}
+
+type productTxnFixturePaths struct {
+	stateDir string
+	product  string
+	legacy   string
+	staged   string
+}
+
+func newProductTxnFixture(t *testing.T) (*WindowsProductTxn, productTxnFixturePaths, *[]string) {
+	t.Helper()
+	dir := t.TempDir()
+	paths := productTxnFixturePaths{
+		stateDir: filepath.Join(dir, "state"),
+		product:  filepath.Join(dir, "mcphub.exe"),
+		legacy:   filepath.Join(dir, "mcphub-windowless.exe"),
+		staged:   filepath.Join(dir, "mcphub.exe.stage"),
+	}
+	if err := os.MkdirAll(paths.stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writePairFixture(t, paths.staged, []byte("new-product"))
+	writePairFixture(t, paths.legacy, []byte("legacy-windowless"))
+	order := new([]string)
+	tasks := &productPairTaskFake{order: order}
+	deps := productTxnTestDeps(order)
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		StateDir: paths.stateDir, ProductPath: paths.product,
+		LegacyWindowlessPath: paths.legacy, StagedProduct: paths.staged,
+		Mode: WindowsProductPairModeCanonicalize,
+		ReplacementAuthority: windowsProductReplacementAuthority{
+			Disposition: windowsProductPairDispositionV1{CLI: windowsProductTargetCreate, Windowless: windowsProductTargetIdentical},
+		},
+		Tasks: tasks, Deps: deps,
+	}}
+	return txn, paths, order
+}
+
+func TestWindowsProductTxnPreparePersistsGUIOwnedLivePreimageBeforeStop(t *testing.T) {
+	txn, paths, _ := newProductTxnFixture(t)
+	writePairFixture(t, paths.product, []byte("prior-product"))
+	txn.Opts.Mode = WindowsProductPairModeUpgrade
+	txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+	txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		Supervisor: windowsProductSupervisorSettlementV1{
+			State:      windowsProductSupervisorGracefullySettled,
+			Generation: &windowsProductSupervisorGenerationV1{PID: 4123, StartedAt: "2026-09-29T00:00:00Z"},
+		},
+		Ports: []windowsProductPortSettlementV1{}, GUIOwner: "confirmed-present",
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatalf("write-ahead prepare rejected live GUI/fleet: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := store.root
-	want := []byte("<Task><Actions><Exec><Command>exact</Command></Exec></Actions></Task>\r\n")
-	ref, err := store.Retain(context.Background(), want)
+	j, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil || string(j.Phase) != "gui_owned_stop_pending" || j.PreSettlement == nil ||
+		j.PreSettlement.GUIOwner != "confirmed-present" || j.PreSettlement.Supervisor.Generation == nil ||
+		j.PreSettlement.Supervisor.Generation.PID != 4123 || j.PriorFleetReaped {
+		t.Fatalf("pre-stop journal lost live restoration obligation: phase=%q pre=%+v reaped=%v err=%v", j.Phase, j.PreSettlement, j.PriorFleetReaped, err)
+	}
+}
+
+func TestWindowsProductTxnGUIOwnedTransitionPreservesOriginalLivePreimage(t *testing.T) {
+	txn, paths, _ := newProductTxnFixture(t)
+	prior := []byte("prior-product")
+	writePairFixture(t, paths.product, prior)
+	txn.Opts.Mode = WindowsProductPairModeUpgrade
+	txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+	live := windowsProductSupervisorSettlementV1{State: windowsProductSupervisorGracefullySettled,
+		Generation: &windowsProductSupervisorGenerationV1{PID: 4123, StartedAt: "2026-09-29T00:00:00Z"}}
+	txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		Supervisor: live, Ports: []windowsProductPortSettlementV1{}, GUIOwner: windowsProductGUIOwnerConfirmedPresent,
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	priorProductHash := sha256.Sum256(prior)
+	priorLegacyHash := sha256.Sum256([]byte("legacy-windowless"))
+	receipt, err := mintWindowsProductQuiescenceReceipt(paths.product, paths.legacy,
+		windowsProductPairPreflightV1{
+			PriorCLI:        windowsProductPreimageV1{Present: true, SHA256: fmt.Sprintf("%x", priorProductHash)},
+			PriorWindowless: windowsProductPreimageV1{Present: true, SHA256: fmt.Sprintf("%x", priorLegacyHash)},
+		}, windowsProductQuiescenceObservationV1{
+			Supervisor: live, Ports: []windowsProductPortSettlementV1{},
+			GUIOwner: windowsProductGUIOwnerConfirmedAbsent, SupervisorLockReleased: true,
+		}, func() time.Time { return time.Date(2026, 9, 29, 0, 0, 1, 0, time.UTC) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.Load(context.Background(), ref)
-	if err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("load bytes=%q err=%v", got, err)
+	if err := txn.SettleGUIOwnedStop(receipt); err != nil {
+		t.Fatalf("settle GUI-owned stop: %v", err)
 	}
-	if err := store.Close(); err != nil {
+	raw, err := os.ReadFile(filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("rollback store survived Close: %v", err)
+	j, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil || j.Phase != WindowsProductRecoveryPrepared || !j.PriorFleetReaped ||
+		j.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent ||
+		j.Quiescence == nil || j.Quiescence.GUIOwner != windowsProductGUIOwnerConfirmedAbsent ||
+		j.PreSettlement.Supervisor.Generation.PID != 4123 {
+		t.Fatalf("settled journal lost write-ahead preimage: phase=%q pre=%+v q=%+v err=%v", j.Phase, j.PreSettlement, j.Quiescence, err)
 	}
+}
+
+func TestWindowsProductRecoveryLegacyPreparedRejectsPresentGUI(t *testing.T) {
+	txn, paths, _ := newProductTxnFixture(t)
+	writePairFixture(t, paths.product, []byte("prior-product"))
+	txn.Opts.Mode = WindowsProductPairModeUpgrade
+	txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+	txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorGracefullySettled,
+			Generation: &windowsProductSupervisorGenerationV1{PID: 4123, StartedAt: "2026-09-29T00:00:00Z"}},
+		Ports: []windowsProductPortSettlementV1{}, GUIOwner: windowsProductGUIOwnerConfirmedPresent,
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	j := txn.prepared.journal
+	j.Phase = WindowsProductRecoveryPrepared
+	if err := validateWindowsProductRecoveryJournalV3(j); err == nil {
+		t.Fatal("legacy prepared phase accepted an unsettled present GUI")
+	}
+}
+
+func TestWindowsProductTxnGUIOwnedPrepareWriteOrReadFailureLeavesUnprepared(t *testing.T) {
+	for _, failure := range []string{"write", "read"} {
+		t.Run(failure, func(t *testing.T) {
+			txn, paths, _ := newProductTxnFixture(t)
+			writePairFixture(t, paths.product, []byte("prior-product"))
+			txn.Opts.Mode = WindowsProductPairModeUpgrade
+			txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+			txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+				Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorGracefullySettled,
+					Generation: &windowsProductSupervisorGenerationV1{PID: 4123, StartedAt: "2026-09-29T00:00:00Z"}},
+				Ports: []windowsProductPortSettlementV1{}, GUIOwner: windowsProductGUIOwnerConfirmedPresent,
+			}
+			if failure == "write" {
+				txn.Opts.Deps.WriteRecoveryJournal = func(string, []byte) error { return errors.New("injected write failure") }
+			} else {
+				txn.Opts.Deps.ReadRecoveryJournal = func(string) ([]byte, error) { return nil, errors.New("injected read failure") }
+			}
+			if err := txn.Prepare(); err == nil || !errors.Is(err, ErrWindowsProductPairRecoveryPrepare) {
+				t.Fatalf("%s failure was not reported as preparation failure: %v", failure, err)
+			}
+			if txn.prepared != nil {
+				t.Fatalf("%s failure armed GUI stop", failure)
+			}
+			assertPairFile(t, paths.product, []byte("prior-product"))
+		})
+	}
+}
+
+func TestWindowsProductTxnGUIOwnedInProcessRollbackRetainsJournalUntilFleetProof(t *testing.T) {
+	txn, paths, _ := newProductTxnFixture(t)
+	writePairFixture(t, paths.product, []byte("prior-product"))
+	txn.Opts.Mode = WindowsProductPairModeUpgrade
+	txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+	txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorGracefullySettled,
+			Generation: &windowsProductSupervisorGenerationV1{PID: 4123, StartedAt: "2026-09-29T00:00:00Z"}},
+		Ports: []windowsProductPortSettlementV1{}, GUIOwner: windowsProductGUIOwnerConfirmedPresent,
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3)
+	if err := txn.rollback(errors.New("injected stop failure")); !errors.Is(err, ErrWindowsProductRecoveryPending) {
+		t.Fatalf("missing in-process fleet proof did not retain pending error: %v", err)
+	}
+	if _, err := os.Stat(journalPath); err != nil {
+		t.Fatalf("pending rollback journal lost: %v", err)
+	}
+	txn.prepared.deps.RecoverPriorSettlement = func(j windowsProductRecoveryJournalV3) error {
+		if j.PreSettlement == nil || j.PreSettlement.Supervisor.Generation == nil || j.PreSettlement.Supervisor.Generation.PID != 4123 {
+			t.Fatalf("in-process callback lost live preimage: %+v", j.PreSettlement)
+		}
+		assertPairFile(t, paths.product, []byte("prior-product"))
+		return nil
+	}
+	if err := txn.rollback(errors.New("injected stop failure")); errors.Is(err, ErrWindowsProductRecoveryPending) {
+		t.Fatalf("verified prior fleet stayed pending: %v", err)
+	}
+	if _, err := os.Stat(journalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("settled rollback journal remains: %v", err)
+	}
+}
+
+func TestRunInstallUpgradePersistsInitialV3JournalBeforeLifecycleMutation(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	product := filepath.Join(dir, "mcphub.exe")
+	legacy := filepath.Join(dir, "mcphub-windowless.exe")
+	staged := filepath.Join(dir, "mcphub.exe.stage")
+	writePairFixture(t, staged, []byte("new-product"))
+	var order []string
+	tasks := &productPairTaskFake{order: &order}
+	deps := productTxnTestDeps(&order)
+	writeJournal := deps.WriteRecoveryJournal
+	firstJournal := true
+	deps.WriteRecoveryJournal = func(path string, raw []byte) error {
+		order = append(order, "journal")
+		if firstJournal {
+			firstJournal = false
+			journal, err := decodeWindowsProductRecoveryJournalV3(raw)
+			if err != nil {
+				return err
+			}
+			if journal.Phase != WindowsProductRecoveryPrepared || journal.Quiescence != nil ||
+				journal.PriorFleetReaped || journal.TaskSetSHA256 != "" {
+				return fmt.Errorf("initial journal is not pre-settlement prepared: %+v", journal)
+			}
+		}
+		return writeJournal(path, raw)
+	}
+	txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		StateDir: stateDir, ProductPath: product, LegacyWindowlessPath: legacy,
+		StagedProduct: staged, Mode: WindowsProductPairModeUpgrade,
+		Tasks: tasks, Deps: deps,
+	}}
+	lifecycle := &windowsProductPairLifecycleHooks{
+		Observe: func(context.Context, string, []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
+			order = append(order, "observe")
+			return windowsProductQuiescenceObservationV1{
+				Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent},
+				GUIOwner:   windowsProductGUIOwnerConfirmedAbsent, SupervisorLockReleased: true,
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC) },
+	}
+	upgradeDeps := &fakeUpgradeDeps{}
+	var preparedOutputErr error
+	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		WindowsProduct: txn, WindowsProductPairLifecycle: lifecycle,
+		OnProductPrepared: func() error {
+			raw, err := os.ReadFile(filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3))
+			if err != nil {
+				t.Fatalf("prepared stage before journal readback: %v", err)
+			}
+			journal, err := decodeWindowsProductRecoveryJournalV3(raw)
+			if err != nil || journal.Phase != WindowsProductRecoveryPrepared {
+				t.Fatalf("prepared stage journal=(%+v,%v)", journal, err)
+			}
+			order = append(order, "prepared-stage")
+			return upgradeGUIPreparedStageReporter(upgradeGUIOutputFailure{err: errors.New("synthetic prepared output failure")}, &preparedOutputErr)()
+		},
+		BinaryPath: product, Deps: upgradeDeps,
+	}); err != nil {
+		t.Fatalf("run upgrade: %v", err)
+	}
+	if !recoveryStepsOrdered(order, []string{"observe", "tasks-snapshot", "journal", "prepared-stage", "promote-cli"}) {
+		t.Fatalf("initial journal was not persisted before mutation: %v", order)
+	}
+	if preparedOutputErr == nil || !strings.Contains(preparedOutputErr.Error(), "UPGRADE_GUI_STAGE_OUTPUT_UNCONFIRMED") {
+		t.Fatalf("Product did not retain prepared output failure after transaction: %v", preparedOutputErr)
+	}
+}
+
+func productTxnTestDeps(order *[]string) WindowsProductTxnDeps {
+	pair := productPairTestDeps(order)
+	return withWindowsProductDefaults(WindowsProductTxnDeps{
+		AdmitProduct: func(input binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
+			digest, err := hashRecoveryFile(input.Path)
+			if err != nil {
+				return binaryadmission.WindowsArtifact{}, err
+			}
+			if input.SHA256 != "" && input.SHA256 != digest {
+				return binaryadmission.WindowsArtifact{}, errors.New("product SHA mismatch")
+			}
+			return binaryadmission.WindowsArtifact{
+				Path: input.Path, Role: binaryadmission.WindowsArtifactRoleProduct,
+				Machine: 34404, Subsystem: binaryadmission.WindowsGUISubsystem,
+				Version: "0.4.38", Commit: strings.Repeat("a", 40),
+				BuildDate: "2026-09-11T00:00:00Z", SHA256: digest,
+			}, nil
+		},
+		AdmitLegacyWindowless: func(input binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
+			digest, err := hashRecoveryFile(input.Path)
+			if err != nil {
+				return binaryadmission.WindowsArtifact{}, err
+			}
+			if input.SHA256 != digest {
+				return binaryadmission.WindowsArtifact{}, errors.New("legacy SHA mismatch")
+			}
+			input.SHA256 = digest
+			return input, nil
+		},
+		Promote: pair.Promote, RestorePromotion: pair.RestorePromotion,
+		ListGeneratedAsides: listGeneratedRenameAsideBasenames,
+		PublishCommitted: func(WindowsProductCommitEvent) (string, error) {
+			*order = append(*order, "publish-product")
+			return strings.Repeat("f", sha256.Size*2), nil
+		},
+		Now: func() time.Time { return time.Date(2026, 9, 11, 0, 0, 1, 0, time.UTC) },
+	})
 }
 
 type productPairPaths struct{ priorCLI, windowless, stagedCLI, stagedWindowless, receipt string }
@@ -470,7 +816,10 @@ func productPairTestDeps(order *[]string) WindowsProductPairTxnDeps {
 			*order = append(*order, "readback-windowless")
 			return nil
 		},
-		StartSupervisor: func(string) error { *order = append(*order, "start-supervisor"); return nil },
+		StartSupervisor: func(string) (SupervisorLaunch, error) {
+			*order = append(*order, "start-supervisor")
+			return &fixtureSupervisorLaunch{}, nil
+		},
 		SettleSuccessor: func(string) error { *order = append(*order, "settle-successor"); return nil },
 		WaitSupervisorReady: func(context.Context, string, binaryadmission.WindowsProductPair) error {
 			*order = append(*order, "supervisor-ready")
@@ -489,39 +838,6 @@ func productPairTestDeps(order *[]string) WindowsProductPairTxnDeps {
 			return "event-sha", nil
 		},
 		Now: func() time.Time { return time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC) },
-	}
-}
-
-func TestWindowsProductPairTxnEventFailureAfterReceiptDoesNotRollbackCommittedPair(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	deps.PublishCommitted = func(WindowsProductPairCommitEvent) (string, error) {
-		order = append(order, "publish-failed")
-		return "event-sha", errors.New("injected event carrier failure")
-	}
-	result, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-		CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI,
-		StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-		Mode: WindowsProductPairModeCanonicalize, Tasks: tasks, Deps: deps,
-	}}).Run(context.Background())
-	if err == nil || !errors.Is(err, ErrWindowsProductPairCommittedObservabilityFailed) {
-		t.Fatalf("error=%v, want committed observability failure", err)
-	}
-	if result.Outcome != WindowsProductPairCommittedObservabilityFailed || result.ReceiptSHA256 == "" {
-		t.Fatalf("result=%+v", result)
-	}
-	if tasks.restored {
-		t.Fatal("receipt-authoritative committed pair was rolled back after event failure")
-	}
-	assertPairFile(t, paths.priorCLI, []byte("new-cli"))
-	if _, decodeErr := DecodeUpgradeReceipt(mustReadPairFile(t, paths.receipt)); decodeErr != nil {
-		t.Fatalf("authoritative receipt missing after event failure: %v", decodeErr)
 	}
 }
 
@@ -581,307 +897,6 @@ func TestWindowsProductPairCommitReconciliationIsReceiptBoundAndIdempotent(t *te
 	}
 }
 
-func TestWindowsProductPairTxnCleanupFailureAfterReceiptIsCommittedAndNeverRollsBack(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order, closeErr: errors.New("injected task owner cleanup failure")}
-	result, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-		CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI,
-		StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-		Mode: WindowsProductPairModeSetup, Tasks: tasks, Deps: productPairTestDeps(&order),
-	}}).Run(context.Background())
-	if !errors.Is(err, ErrWindowsProductPairCommittedCleanupFailed) || result.Outcome != WindowsProductPairCommittedCleanupFailed || result.ReceiptSHA256 == "" {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	if tasks.restored {
-		t.Fatal("committed pair rolled back after post-receipt cleanup failure")
-	}
-	assertPairFile(t, paths.priorCLI, []byte("new-cli"))
-}
-
-func TestWindowsProductPairTxnSweepsExactAdmittedTargetsAfterCommit(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	paths.priorCLI = filepath.Join(dir, "terminal-product.bin")
-	paths.windowless = filepath.Join(dir, "explorer-product.payload")
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	var swept []string
-	deps.SweepOldTargets = func(targets []string, _ ...func(string, error)) error {
-		swept = append([]string(nil), targets...)
-		return nil
-	}
-	if _, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(swept, []string{paths.priorCLI, paths.windowless}) {
-		t.Fatalf("swept targets=%v", swept)
-	}
-}
-
-func TestWindowsProductPairRollbackCleanupFailureDoesNotRestartPrior(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	prior := []byte("old-cli")
-	writePairFixture(t, paths.priorCLI, prior)
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	restarts := 0
-	deps.RestartPrior = func(string) error { restarts++; return nil }
-	deps.RestorePromotion = func(p WindowsProductPairPromotion) (string, error) {
-		body, err := os.ReadFile(p.RetainedPrior)
-		if err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(p.Target, body, 0o600); err != nil {
-			return "", err
-		}
-		return p.Target + ".not-a-generated-aside", nil
-	}
-	deps.Fault = func(stage WindowsProductPairStage) error {
-		if stage == WindowsProductPairStageCLIPromoted {
-			return errors.New("force rollback")
-		}
-		return nil
-	}
-	_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "displaced successor is not an exact generated aside") {
-		t.Fatalf("err=%v", err)
-	}
-	if restarts != 0 {
-		t.Fatalf("prior restarts=%d, want 0 while rollback cleanup is incomplete", restarts)
-	}
-	assertPairFile(t, paths.priorCLI, prior)
-}
-
-func TestWindowsProductPairRollbackRestorationFailureDoesNotRestartPrior(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		faultStage WindowsProductPairStage
-		inject     func(*testing.T, productPairPaths, *productPairTaskFake, *WindowsProductPairTxnDeps)
-		wantCause  string
-	}{
-		{
-			name:       "artifact",
-			faultStage: WindowsProductPairStageCLIPromoted,
-			inject: func(_ *testing.T, _ productPairPaths, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps) {
-				deps.RestorePromotion = func(WindowsProductPairPromotion) (string, error) {
-					return "", errors.New("injected artifact restore failure")
-				}
-			},
-			wantCause: "injected artifact restore failure",
-		},
-		{
-			name:       "task XML",
-			faultStage: WindowsProductPairStageCLIPromoted,
-			inject: func(_ *testing.T, _ productPairPaths, tasks *productPairTaskFake, _ *WindowsProductPairTxnDeps) {
-				tasks.restoreErr = errors.New("injected task restore failure")
-			},
-			wantCause: "injected task restore failure",
-		},
-		{
-			name:       "receipt",
-			faultStage: WindowsProductPairStageReceiptWritten,
-			inject:     func(*testing.T, productPairPaths, *productPairTaskFake, *WindowsProductPairTxnDeps) {},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			paths := productPairFixturePaths(dir)
-			writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
-			writePairFixture(t, paths.windowless, []byte("prior-windowless"))
-			writePairFixture(t, paths.stagedCLI, []byte("successor-cli"))
-			writePairFixture(t, paths.stagedWindowless, []byte("successor-windowless"))
-			writePairFixture(t, paths.receipt, []byte("prior-receipt"))
-			var order []string
-			tasks := &productPairTaskFake{order: &order}
-			deps := productPairTestDeps(&order)
-			tc.inject(t, paths, tasks, &deps)
-			restarts := 0
-			deps.RestartPrior = func(string) error { restarts++; return nil }
-			triggerErr := errors.New("trigger rollback after " + string(tc.faultStage))
-			deps.Fault = func(stage WindowsProductPairStage) error {
-				if stage != tc.faultStage {
-					return nil
-				}
-				if tc.name == "receipt" {
-					if err := os.Remove(paths.receipt); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.Mkdir(paths.receipt, 0o700); err != nil {
-						t.Fatal(err)
-					}
-				}
-				return triggerErr
-			}
-			_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
-				StateDir: filepath.Dir(paths.receipt), CLIPath: paths.priorCLI, WindowlessPath: paths.windowless,
-				StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
-				Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
-			}}).Run(context.Background())
-			if err == nil || !errors.Is(err, ErrWindowsProductPairRecoveryRollback) || (tc.wantCause != "" && !strings.Contains(err.Error(), tc.wantCause)) {
-				t.Fatalf("error=%v, want typed rollback failure containing %q", err, tc.wantCause)
-			}
-			if !errors.Is(err, triggerErr) {
-				t.Fatalf("rollback error lost original trigger: %v", err)
-			}
-			if restarts != 0 {
-				t.Fatalf("prior restarts=%d, want 0 while exact restoration is incomplete", restarts)
-			}
-			if !tasks.closed || tasks.discarded {
-				t.Fatalf("task owner closed=%v discarded=%v, want lock release with retained recovery store", tasks.closed, tasks.discarded)
-			}
-			if _, statErr := os.Stat(filepath.Join(filepath.Dir(paths.receipt), WindowsProductPairRecoveryFileLeaf)); statErr != nil {
-				t.Fatalf("nonterminal recovery journal not retained: %v", statErr)
-			}
-		})
-	}
-}
-
-func TestWindowsProductPairTxnRollsBackPartialPromotionResult(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		role string
-	}{
-		{name: "windowless", role: "windowless"},
-		{name: "cli", role: "cli"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			paths := productPairFixturePaths(dir)
-			oldCLI, oldWindowless := []byte("old-cli"), []byte("old-windowless")
-			writePairFixture(t, paths.priorCLI, oldCLI)
-			writePairFixture(t, paths.windowless, oldWindowless)
-			writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-			writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-			var order []string
-			tasks := &productPairTaskFake{order: &order}
-			deps := productPairTestDeps(&order)
-			basePromote := deps.Promote
-			deps.Promote = func(src, dst, sha string) (WindowsProductPairPromotion, error) {
-				promotion, err := basePromote(src, dst, sha)
-				if err != nil {
-					return promotion, err
-				}
-				if (tc.role == "windowless" && dst == paths.windowless) || (tc.role == "cli" && dst == paths.priorCLI) {
-					return promotion, errors.New("injected partial promotion after replace")
-				}
-				return promotion, nil
-			}
-			restarts := 0
-			deps.RestartPrior = func(string) error { restarts++; return nil }
-			_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background())
-			if err == nil || !strings.Contains(err.Error(), "injected partial promotion") {
-				t.Fatalf("err=%v", err)
-			}
-			assertPairFile(t, paths.priorCLI, oldCLI)
-			assertPairFile(t, paths.windowless, oldWindowless)
-			if restarts != 1 {
-				t.Fatalf("prior restarts=%d, want 1", restarts)
-			}
-		})
-	}
-}
-
-func TestRunInstallUpgradeDoesNotOuterRecoverPostPromotionPairRollback(t *testing.T) {
-	dir := t.TempDir()
-	paths := productPairFixturePaths(dir)
-	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
-	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
-	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
-	var order []string
-	tasks := &productPairTaskFake{order: &order}
-	deps := productPairTestDeps(&order)
-	pairRestarts := 0
-	deps.RestartPrior = func(string) error { pairRestarts++; return nil }
-	deps.Fault = func(stage WindowsProductPairStage) error {
-		if stage == WindowsProductPairStageCLIPromoted {
-			return errors.New("post-promotion fault")
-		}
-		return nil
-	}
-	txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}
-	legacy := &fakeUpgradeDeps{quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true}, exitResult: api.IPCResponse{ID: 2, OK: true, Final: true}}
-	err := RunInstallUpgrade(context.Background(), UpgradeOpts{WindowsProductPair: txn, BinaryPath: paths.priorCLI, PipePath: "pair-postpromotion", Deps: legacy, WaitSupervisorLockReleased: func(context.Context, time.Duration) error { return nil }})
-	if err == nil {
-		t.Fatal("post-promotion failure unexpectedly succeeded")
-	}
-	if pairRestarts != 1 || legacy.startCalled {
-		t.Fatalf("pair restarts=%d outer starts=%v calls=%v", pairRestarts, legacy.startCalled, legacy.calls)
-	}
-}
-
-func TestWindowsProductPairDefaultPromotionRestoresMappedImage(t *testing.T) {
-	if marker := os.Getenv("MCPHUB_PAIR_MAPPED_HELPER"); marker != "" {
-		if err := os.WriteFile(marker, []byte("ready"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(30 * time.Second)
-		return
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	target := filepath.Join(dir, "mcphub.exe")
-	staged := filepath.Join(dir, "mcphub.exe.stage")
-	marker := filepath.Join(dir, "mapped-ready")
-	if err := os.WriteFile(target, prior, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	newBytes := append(bytes.Clone(prior), []byte("new-image-marker")...)
-	if err := os.WriteFile(staged, newBytes, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	child := exec.Command(target, "-test.run=^TestWindowsProductPairDefaultPromotionRestoresMappedImage$")
-	child.Env = append(os.Environ(), "MCPHUB_PAIR_MAPPED_HELPER="+marker)
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		_, _ = child.Process.Wait()
-	})
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("mapped-image helper did not become ready")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	deps := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{})
-	newSHA := fmt.Sprintf("%x", sha256.Sum256(newBytes))
-	promotion, err := deps.Promote(staged, target, newSHA)
-	if err != nil {
-		t.Fatalf("promote over mapped image: %v", err)
-	}
-	assertPairFile(t, promotion.RetainedPrior, prior)
-	assertPairFile(t, target, newBytes)
-	if _, err := deps.RestorePromotion(promotion); err != nil {
-		t.Fatalf("restore mapped prior through rename-aside: %v", err)
-	}
-	assertPairFile(t, target, prior)
-}
-
 func writePairFixture(t *testing.T, path string, body []byte) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -906,4 +921,45 @@ func mustReadPairFile(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestWindowsProductPairTaskStorePrivateJournalClosePreservesBytes(t *testing.T) {
+	for _, uncertain := range []bool{false, true} {
+		t.Run(fmt.Sprintf("uncertain=%t", uncertain), func(t *testing.T) {
+			stateDir := withTempStateDir(t)
+			store, err := newWindowsProductPairTaskStore(stateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			xml := []byte("<Task>synthetic journal retention</Task>")
+			ref, err := store.Retain(context.Background(), xml)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3)
+			if uncertain {
+				if err := os.Mkdir(journal, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(journal, []byte("synthetic pending journal"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tasks := &productPairTaskFake{}
+			txn := &WindowsProductTxn{constructorStore: store, Opts: WindowsProductTxnOpts{StateDir: stateDir, Tasks: tasks}}
+			closeErr := txn.Close()
+			if uncertain && (closeErr == nil || !strings.Contains(closeErr.Error(), "UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED")) {
+				t.Fatalf("uncertain journal cleanup was accepted: %v", closeErr)
+			}
+			if !uncertain && closeErr != nil {
+				t.Fatalf("journal-preserving close: %v", closeErr)
+			}
+			if !tasks.closed {
+				t.Fatal("coordinator did not close its task lease")
+			}
+			got, err := store.Load(context.Background(), ref)
+			if err != nil || !bytes.Equal(got, xml) {
+				t.Fatalf("journal-linked store bytes were discarded: %v", err)
+			}
+		})
+	}
 }

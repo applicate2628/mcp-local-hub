@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// dismissRequest is the /api/dismiss POST body. Matches the Migration
-// screen's Unknown-group row: one server name per click.
+// dismissRequest is the /api/dismiss POST and DELETE body. Matches the
+// Migration screen's row actions: one server name per click.
 type dismissRequest struct {
 	Server string `json:"server"`
 }
@@ -25,8 +25,8 @@ type dismissedResponse struct {
 
 func registerDismissRoutes(s *Server) {
 	s.mux.HandleFunc("/api/dismiss", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", "POST")
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			w.Header().Set("Allow", "POST, DELETE")
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -43,9 +43,16 @@ func registerDismissRoutes(s *Server) {
 			writeAPIError(w, fmt.Errorf("server must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
 			return
 		}
-		if err := s.dismisser.DismissUnknown(name); err != nil {
-			writeAPIError(w, err, http.StatusInternalServerError, "DISMISS_FAILED")
-			return
+		if r.Method == http.MethodDelete {
+			if err := s.dismisser.UndismissUnknown(name); err != nil {
+				writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "UNDISMISS_FAILED", "/api/dismiss DELETE")
+				return
+			}
+		} else {
+			if err := s.dismisser.DismissUnknown(name); err != nil {
+				writeAPIError(w, err, http.StatusInternalServerError, "DISMISS_FAILED")
+				return
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))

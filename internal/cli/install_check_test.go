@@ -11,7 +11,9 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -168,4 +170,85 @@ func dirEntryNames(entries []os.DirEntry) []string {
 		out = append(out, e.Name())
 	}
 	return out
+}
+
+// A project apply delegates to the existing API read/admission owner even when
+// bare command discovery fails. The missing manifest makes that boundary inert:
+// no backend, configuration, scheduler or bootstrap operation can be reached.
+func TestProjectInstallReachesAdmissionWithoutBareRuntimePath(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		loose bool
+	}{
+		{name: "missing bare command"},
+		{name: "relative current directory image", loose: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			project := t.TempDir()
+			catalog := t.TempDir()
+			cwd := t.TempDir()
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("HOME", home)
+			t.Setenv("LOCALAPPDATA", filepath.Join(home, "Local"))
+			t.Setenv("APPDATA", filepath.Join(home, "Roaming"))
+			t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+			t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+			t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", catalog)
+			t.Setenv("GODEBUG", "execerrdot=1")
+			t.Setenv("PATH", "")
+			t.Chdir(cwd)
+
+			loosePath := filepath.Join(cwd, mcphubShortName)
+			marker := []byte("inert fixture; never execute\n")
+			wantLookup := exec.ErrNotFound
+			if tc.loose {
+				if err := os.WriteFile(loosePath, marker, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", ".")
+				wantLookup = exec.ErrDot
+			}
+			if _, err := exec.LookPath(mcphubShortName); !errors.Is(err, wantLookup) {
+				t.Fatalf("bare lookup precondition = %v, want %v", err, wantLookup)
+			}
+
+			const server = "project-runtime-admission-fixture"
+			cmd := newInstallCmdReal()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetArgs([]string{
+				"--server", server, "--daemon", "default", "--clients", "codex-cli",
+				"--project-client-root", project, "--project-client-entry", "fixture",
+				"--project-client-policy-source", "native-defaults",
+				"--create-project-client", "--project-client-plan-sha256", strings.Repeat("0", 64),
+			})
+			err := cmd.Execute()
+			var pathErr *os.PathError
+			wantPath := filepath.Join(catalog, server, "manifest.yaml")
+			if !errors.Is(err, os.ErrNotExist) || !errors.As(err, &pathErr) || pathErr.Path != wantPath {
+				t.Fatalf("project apply must retain the API manifest read refusal, got %v; output: %s", err, out.String())
+			}
+
+			for _, dir := range []string{home, project, catalog} {
+				entries, err := os.ReadDir(dir)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("project refusal mutated %s: entries=%v error=%v", dir, entries, err)
+				}
+			}
+			entries, err := os.ReadDir(cwd)
+			wantEntries := 0
+			if tc.loose {
+				wantEntries = 1
+				got, readErr := os.ReadFile(loosePath)
+				if readErr != nil || !bytes.Equal(got, marker) {
+					t.Fatalf("unrelated cwd image changed: bytes=%q error=%v", got, readErr)
+				}
+			}
+			if err != nil || len(entries) != wantEntries {
+				t.Fatalf("project refusal mutated cwd: entries=%v error=%v", entries, err)
+			}
+		})
+	}
 }

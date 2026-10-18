@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generator for the six `mcphub-<platform>-<arch>` sub-packages.
+// Generator for the release's `mcphub-<platform>-<arch>` sub-packages.
 //
 // The platform sub-packages are NEVER hand-edited. This generator emits each
 // `npm/packages/<platform>-<arch>/package.json` (+ a README and a .gitkeep)
@@ -8,13 +8,14 @@
 //   * the `version` field of npm/package.json (the version authority).
 //
 // Re-run after bumping the version (or via npm/sync-version.js, which sets the
-// version first) so all seven package.json files stay byte-identical to a
+// version first) so the generated package.json files stay byte-identical to a
 // fresh generation. CI re-runs this and asserts `git diff --exit-code` is
 // clean, so a hand-edit or a missed regeneration fails the build.
 //
-// The binary itself is NOT committed and NOT produced here — the release job
-// drops `mcphub`/`mcphub.exe` into each sub-package's bin/ at publish time
-// (Phase 3+). Until then each bin/ holds only a .gitkeep.
+// Native payloads are NOT committed and NOT produced here — the release job
+// drops `mcphub` on POSIX, or admitted `mcphub.exe` plus its generated
+// identity manifest on Windows, into each sub-package's bin/ at publish time.
+// Until then each bin/ holds only a .gitkeep.
 
 "use strict";
 
@@ -28,7 +29,7 @@ const path = require("node:path");
 const PACKAGE_SCOPE = "@applicate2628";
 
 // The platform sub-package name. The meta package (`mcp-local-hub`) is
-// UNSCOPED so the install command stays short; the six platform packages are
+// UNSCOPED so the install command stays short; platform packages are
 // SCOPED under the publisher namespace so a brand-new account publishing a
 // family of near-identical names does not trip npm's spam-detection heuristic
 // (the esbuild / swc / turbo layout). Single source of truth for the shape.
@@ -38,11 +39,6 @@ function platformPackageName(nodeOs, nodeCpu) {
 
 const TARGETS = [
   { nodeOs: "win32", nodeCpu: "x64", goos: "windows", goarch: "amd64", tier: "GA" },
-  { nodeOs: "win32", nodeCpu: "arm64", goos: "windows", goarch: "arm64", tier: "best-effort" },
-  { nodeOs: "darwin", nodeCpu: "x64", goos: "darwin", goarch: "amd64", tier: "best-effort" },
-  { nodeOs: "darwin", nodeCpu: "arm64", goos: "darwin", goarch: "arm64", tier: "best-effort" },
-  { nodeOs: "linux", nodeCpu: "x64", goos: "linux", goarch: "amd64", tier: "best-effort" },
-  { nodeOs: "linux", nodeCpu: "arm64", goos: "linux", goarch: "arm64", tier: "best-effort" },
 ];
 
 const NPM_DIR = __dirname;
@@ -68,12 +64,23 @@ function readWindowsArtifactContract() {
   const artifacts = Array.isArray(contract.artifacts) ? contract.artifacts : [];
   const npmPayload = artifacts.filter((artifact) => artifact.npmPayload === true);
   const npmBins = npmPayload.filter((artifact) => artifact.npmBin === true);
-  if (contract.schemaVersion !== 1 || artifacts.length !== 3 || npmPayload.length !== 3 || npmBins.length !== 1) {
+  const identityManifest = contract.identityManifest || {};
+  if (
+    contract.schemaVersion !== 2 ||
+    artifacts.length !== 1 ||
+    npmPayload.length !== 1 ||
+    npmBins.length !== 0 ||
+    npmPayload[0].role !== "product" ||
+    npmPayload[0].filename !== "mcphub.exe" ||
+    npmPayload[0].subsystem !== 2 ||
+    identityManifest.filename !== "windows-product-identity.json" ||
+    identityManifest.schema !== "windows-product-identity-v1"
+  ) {
     throw new Error(
-      "windows-product-artifacts.json must declare schemaVersion 1, exactly three npm payloads, and one npm bin",
+      "windows-product-artifacts.json must declare schemaVersion 2, one GUI product, no platform bin, and the V1 identity manifest",
     );
   }
-  return { npmPayload, npmBin: npmBins[0] };
+  return { npmPayload, identityManifest };
 }
 
 function tierBlurb(tier) {
@@ -86,9 +93,8 @@ function subPackageJson(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
   const name = platformPackageName(nodeOs, nodeCpu);
   const windowsContract = nodeOs === "win32" ? readWindowsArtifactContract() : null;
-  const bin = windowsContract ? windowsContract.npmBin.filename : binaryBasename(nodeOs);
   // Stable key order so output is deterministic across Node versions.
-  return {
+  const manifest = {
     name,
     version: meta.version,
     description:
@@ -109,19 +115,26 @@ function subPackageJson(meta, target) {
     publishConfig: { access: "public" },
     os: [nodeOs],
     cpu: [nodeCpu],
-    bin: { mcphub: `bin/${bin}` },
-    files: windowsContract
-      ? [...windowsContract.npmPayload.map((artifact) => `bin/${artifact.filename}`), "README.md"]
-      : [`bin/${bin}`, "README.md"],
-    engines: meta.engines,
   };
+  if (!windowsContract) {
+    manifest.bin = { mcphub: `bin/${binaryBasename(nodeOs)}` };
+  }
+  manifest.files = windowsContract
+    ? [
+        ...windowsContract.npmPayload.map((artifact) => `bin/${artifact.filename}`),
+        `bin/${windowsContract.identityManifest.filename}`,
+        "README.md",
+      ]
+    : [`bin/${binaryBasename(nodeOs)}`, "README.md"];
+  manifest.engines = meta.engines;
+  return manifest;
 }
 
 function subPackageReadme(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
   const name = platformPackageName(nodeOs, nodeCpu);
   const windowsContract = nodeOs === "win32" ? readWindowsArtifactContract() : null;
-  const bin = windowsContract ? windowsContract.npmBin.filename : binaryBasename(nodeOs);
+  const bin = binaryBasename(nodeOs);
   const payloadDescription = windowsContract
     ? windowsContract.npmPayload
         .map(
@@ -129,8 +142,11 @@ function subPackageReadme(meta, target) {
             `  - \`bin/${artifact.filename}\` (${artifact.role}, PE subsystem ${artifact.subsystem})\n`,
         )
         .join("") +
-      `- The npm \`mcphub\` command resolves only to \`bin/${bin}\`; ` +
-      `the windowless adapter is reserved for supported GUI/Explorer entry points.\n\n`
+      `  - \`bin/${windowsContract.identityManifest.filename}\` ` +
+      `(${windowsContract.identityManifest.schema}, non-executable admitted identity)\n` +
+      `- This Windows platform package deliberately declares no npm \`bin\`; ` +
+      `the meta package alone owns the public \`mcphub\` Node shim so it can wait, ` +
+      `relay standard streams, and return the native child's status.\n\n`
     : `- Binary: \`bin/${bin}\` — injected by the release job at publish time, ` +
       `NOT committed to git.\n\n`;
   return (
@@ -191,6 +207,22 @@ function main() {
         "do not match the generated targets/version.\n" +
         `  expected: ${JSON.stringify(expectedDeps)}\n` +
         `  actual:   ${JSON.stringify(actualDeps)}\n`,
+    );
+    process.exit(1);
+  }
+
+  // A retired target directory is still a publishable package source. Fail
+  // instead of silently leaving it beside the current generated release set.
+  fs.mkdirSync(PACKAGES_DIR, { recursive: true });
+  const expectedDirs = new Set(TARGETS.map((t) => `${t.nodeOs}-${t.nodeCpu}`));
+  const unexpectedDirs = fs
+    .readdirSync(PACKAGES_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !expectedDirs.has(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  if (unexpectedDirs.length > 0) {
+    process.stderr.write(
+      `generate-platform-packages: unexpected generated target directory: ${unexpectedDirs.join(", ")}\n`,
     );
     process.exit(1);
   }

@@ -162,12 +162,11 @@ func resolveWindowsOwnedEntrypoint(opts Options) (string, error) {
 		return "", err
 	}
 	// An explicit path is an already-resolved test/operator contract. The
-	// production default is canonical mcphub.exe and must route owned logon
-	// launches through its exact sibling adapter.
+	// production default is the same canonical mcphub.exe product image.
 	if opts.MCPHubPath != "" {
 		return cmd, nil
 	}
-	return scheduler.WindowsOwnedEntrypointPath(cmd), nil
+	return cmd, nil
 }
 
 // Disable removes the autostart Task Scheduler entry. Idempotent —

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -99,6 +100,173 @@ func TestWriteAdoptExecuteErrorProjectsLeaseNamespaceReasonWithoutCause(t *testi
 			t.Fatalf("GUI response leaked %q in %s", forbidden, body)
 		}
 	}
+	common := httptest.NewRecorder()
+	private := &adoptOpaqueFailureFixture{cause: errors.Join(err, fs.ErrExist, &api.LeaseFailure{FailureID: "E_ADOPT_LEASE_CLEANUP"})}
+	if status, code := adoptExecuteErrorStatus(private); status != http.StatusInternalServerError || code != "ADOPT_FAILED" {
+		t.Fatal("generic filesystem existence cause changed the lease classification")
+	}
+	writeAdoptExecuteError(common, private, http.StatusInternalServerError, "ADOPT_FAILED", projectServiceExecutionFacts(private))
+	commonBody := decodeAdoptJSON(t, common)
+	if commonBody["project_service_uncommitted"] != true || commonBody["reason_id"] != "namespace-legacy-dacl" || commonBody["action"] != "migrate-legacy-lease-namespace" {
+		t.Fatal("common partial outcome replaced the original lease failure channel")
+	}
+}
+
+type adoptOpaqueFailureFixture struct{ cause error }
+
+func (*adoptOpaqueFailureFixture) Error() string {
+	return "synthetic opaque failure"
+}
+func (e *adoptOpaqueFailureFixture) Unwrap() error {
+	return e.cause
+}
+
+func TestAdoptManifestNameConflictSurvivesOpaqueFailure(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "synthetic-private-name-conflict")
+	const name = "common-producer-name-conflict-fixture"
+	path := filepath.Join(root, name, "manifest.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("synthetic-private-manifest-preimage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	disk := api.NewAPI().ManifestCreateIn(root, name, "must not replace the existing file")
+	if !errors.Is(disk, api.ErrManifestNameExists) {
+		t.Fatal("real manifest owner did not issue the expected typed conflict")
+	}
+	for _, row := range []struct {
+		name  string
+		cause error
+	}{
+		{name: "disk", cause: disk},
+		{name: "embedded", cause: fmt.Errorf("%s: %w", root, api.ErrManifestNameEmbedded)},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			stage := &api.AdoptStageError{Stage: "manifest-create", CommitState: "pending", Cause: row.cause}
+			// The GUI cannot construct the API's private operation. An opaque
+			// error tests this consumer's typed contract without exporting one.
+			for _, err := range []error{stage, &adoptOpaqueFailureFixture{cause: errors.Join(stage, context.Canceled)}} {
+				planStatus, planCode := adoptPlanErrorStatus(err)
+				executeStatus, executeCode := adoptExecuteErrorStatus(err)
+				if planStatus != http.StatusConflict || executeStatus != http.StatusConflict || planCode != "NAME_CONFLICT" || executeCode != "NAME_CONFLICT" {
+					t.Fatal("manifest name conflict changed classification through an opaque boundary")
+				}
+				plan := httptest.NewRecorder()
+				writeAdoptPlanError(plan, err)
+				execute := httptest.NewRecorder()
+				writeAdoptExecuteError(execute, err, executeStatus, executeCode, projectServiceExecutionFacts(err))
+				if plan.Code != http.StatusConflict || execute.Code != http.StatusConflict || decodeAdoptJSON(t, plan)["code"] != "NAME_CONFLICT" || decodeAdoptJSON(t, execute)["code"] != "NAME_CONFLICT" || decodeAdoptJSON(t, execute)["project_service_publication_pending"] != true {
+					t.Fatal("HTTP response lost typed conflict or pending publication facts")
+				}
+				if strings.Contains(plan.Body.String(), "synthetic-private-name-conflict") || strings.Contains(execute.Body.String(), "synthetic-private-name-conflict") {
+					t.Fatal("HTTP error exposed the manifest owner's private path")
+				}
+			}
+		})
+	}
+}
+
+func TestWriteAdoptExecuteErrorProjectsOpaqueActionBudget(t *testing.T) {
+	for _, row := range []struct {
+		cause error
+		code  string
+	}{
+		{cause: api.ErrCodexSharedStdioActionBudgetRequired, code: "H6_ACTION_BUDGET_REQUIRED"},
+		{cause: api.ErrCodexSharedStdioActionBudgetInvalid, code: "H6_ACTION_BUDGET_INVALID"},
+	} {
+		t.Run(row.code, func(t *testing.T) {
+			err := &adoptOpaqueFailureFixture{cause: errors.Join(row.cause, &api.LeaseFailure{FailureID: "E_ADOPT_LEASE_CLEANUP"})}
+			response := httptest.NewRecorder()
+			writeAdoptExecuteError(response, err, http.StatusInternalServerError, "ADOPT_FAILED")
+			if response.Code != http.StatusBadRequest || decodeAdoptJSON(t, response)["code"] != row.code {
+				t.Fatal("opaque failure changed the existing typed action-budget projection")
+			}
+		})
+	}
+}
+
+func TestWriteAdoptExecuteErrorProjectsFirstTypedLeaseCleanup(t *testing.T) {
+	cleanup := &api.LeaseFailure{FailureID: "E_ADOPT_LEASE_CLEANUP"}
+	unknown := &api.LeaseFailure{FailureID: "synthetic-private-unknown-lease-id"}
+	namespace := &api.LeaseFailure{FailureID: "E_ADOPT_LEASE_NAMESPACE_REFUSED", ReasonID: api.AdoptLeaseReasonNamespaceLegacyDACL, Action: api.AdoptLeaseActionMigrateLegacy}
+	for _, row := range []struct {
+		name        string
+		cause       error
+		wantError   string
+		nameClash   bool
+		legacyOuter bool
+	}{
+		{name: "cleanup", cause: cleanup, wantError: "E_ADOPT_LEASE_CLEANUP"},
+		{name: "cleanup-joined", cause: errors.Join(cleanup, errors.New("synthetic-private-cleanup-cause")), wantError: "E_ADOPT_LEASE_CLEANUP"},
+		{name: "first-cleanup", cause: errors.Join(cleanup, namespace), wantError: "E_ADOPT_LEASE_CLEANUP"},
+		{name: "first-unknown", cause: errors.Join(unknown, cleanup), wantError: "internal error"},
+		{name: "empty-id", cause: &api.LeaseFailure{}, wantError: "internal error"},
+		{name: "private-string-mimic", cause: errors.New("synthetic-private E_ADOPT_LEASE_CLEANUP"), wantError: "internal error"},
+		{name: "generic-exists", cause: fs.ErrExist, wantError: "internal error"},
+		{name: "manifest-with-cleanup", cause: errors.Join(api.ErrManifestNameExists, cleanup), wantError: "E_ADOPT_LEASE_CLEANUP", nameClash: true},
+		{name: "legacy-exact-outer", cause: errors.New("E_ADOPT_LEASE_CLEANUP"), wantError: "E_ADOPT_LEASE_CLEANUP", legacyOuter: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			stage := &api.AdoptStageError{Stage: "lease-release", CommitState: "pending", Cause: row.cause}
+			var err error = &adoptOpaqueFailureFixture{cause: errors.Join(stage, context.Canceled)}
+			if row.legacyOuter {
+				err = row.cause
+			}
+			status, code := adoptExecuteErrorStatus(err)
+			wantStatus, wantCode := http.StatusInternalServerError, "ADOPT_FAILED"
+			if row.nameClash {
+				wantStatus, wantCode = http.StatusConflict, "NAME_CONFLICT"
+			}
+			response := httptest.NewRecorder()
+			writeAdoptExecuteError(response, err, status, code, projectServiceExecutionFacts(err))
+			body := decodeAdoptJSON(t, response)
+			if response.Code != wantStatus || body["code"] != wantCode || body["error"] != row.wantError {
+				t.Fatalf("typed lease projection changed selected outcome: status=%d body=%#v", response.Code, body)
+			}
+			if !row.legacyOuter && body["project_service_publication_pending"] != true {
+				t.Fatal("typed projection lost the actual stage commit fact")
+			}
+			if _, exists := body["reason_id"]; exists {
+				t.Fatal("projection selected a later namespace lease instead of the first failure")
+			}
+			if strings.Contains(response.Body.String(), "synthetic-private") {
+				t.Fatal("unknown identifier or private cause reached the HTTP body")
+			}
+		})
+	}
+}
+
+func TestAdoptTypedReparseRefusalPreservesSafeProjection(t *testing.T) {
+	for _, row := range []struct {
+		name  string
+		cause error
+		typed bool
+	}{
+		{name: "actual-identity", cause: api.ErrSecureWriteReparsePointRefused, typed: true},
+		{name: "parent-insecure", cause: api.ErrSecureWriteParentInsecure},
+		{name: "private-string-mimic", cause: errors.New("synthetic-private pre-existing reparse point refused")},
+		{name: "ordinary-access", cause: fmt.Errorf("synthetic-private path: %w", fs.ErrPermission)},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			err := &adoptOpaqueFailureFixture{cause: &api.AdoptStageError{Stage: "provenance-capture", CommitState: "pending", Cause: row.cause}}
+			planStatus, planCode := adoptPlanErrorStatus(err)
+			if planStatus != http.StatusBadRequest || planCode != "BAD_INPUT" {
+				t.Fatal("execute-only reparse identity changed plan classification")
+			}
+			status, code := adoptExecuteErrorStatus(err)
+			wantStatus, wantCode, wantError := http.StatusInternalServerError, "ADOPT_FAILED", "internal error"
+			if row.typed {
+				wantStatus, wantCode, wantError = http.StatusConflict, "SYMLINK_CONSENT_REQUIRED", "pre-existing reparse point refused"
+			}
+			response := httptest.NewRecorder()
+			writeAdoptExecuteError(response, err, status, code, projectServiceExecutionFacts(err))
+			body := decodeAdoptJSON(t, response)
+			if response.Code != wantStatus || body["code"] != wantCode || body["error"] != wantError || body["project_service_publication_pending"] != true || strings.Contains(response.Body.String(), "synthetic-private") {
+				t.Fatal("typed reparse status/body lost its safe class or changed a neighboring failure")
+			}
+		})
+	}
 }
 
 func guiAdoptDefaultManifestDir(t *testing.T) string {
@@ -130,6 +298,52 @@ func postAdoptTest(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestProjectServiceRoutesAreExplicitAndRejectUnknownSelectors(t *testing.T) {
+	cases := []struct{ path, body, want string }{
+		{"/api/adopt/project-service/plan", `{"project_service":"unknown","intent":"define-stopped","entry":"fixture","client":"unsupported-client","action_timeout":"1s"}`, "PROJECT_SERVICE_KIND_INVALID"},
+		{"/api/adopt/project-service/execute", `{"project_service":"graft","intent":"unknown","entry":"fixture","client":"unsupported-client","action_timeout":"1s"}`, "PROJECT_SERVICE_INTENT_INVALID"},
+	}
+	for _, test := range cases {
+		t.Run(test.path, func(t *testing.T) {
+			s := newEphemeralServer(t, Config{})
+			get := httptest.NewRecorder()
+			s.mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, test.path, nil))
+			if get.Code != http.StatusMethodNotAllowed || get.Header().Get("Allow") != "POST" {
+				t.Fatal("explicit project-service route is missing or changed its method contract")
+			}
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			s.mux.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("unknown explicit selector reached another operation: status=%d body=%s", response.Code, response.Body.String())
+			}
+			s.api = nil
+			missingOwner := httptest.NewRecorder()
+			s.mux.ServeHTTP(missingOwner, httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(`{"project_service":"graft","intent":"define-stopped"}`)))
+			if missingOwner.Code != http.StatusInternalServerError {
+				t.Fatal("common route substituted a fresh API for its missing original lifetime owner")
+			}
+		})
+	}
+}
+
+func TestProjectServicePartialPublicationSurvivesRedactedHTTPFailure(t *testing.T) {
+	err := &api.AdoptStageError{Stage: "manifest-verify", CommitState: "committed_unverified", Cause: errors.New("synthetic-private-provider-cause")}
+	response := httptest.NewRecorder()
+	private := &adoptOpaqueFailureFixture{cause: err}
+	writeAdoptExecuteError(response, private, http.StatusInternalServerError, "ADOPT_FAILED", projectServiceExecutionFacts(private))
+	body := decodeAdoptJSON(t, response)
+	if body["project_service_committed_unverified"] != true || body["error"] != "internal error" || strings.Contains(response.Body.String(), "synthetic-private-provider-cause") {
+		t.Fatal("redaction erased the actual partial publication or exposed its cause")
+	}
+	legacy := httptest.NewRecorder()
+	writeAdoptExecuteError(legacy, err, http.StatusInternalServerError, "ADOPT_FAILED")
+	if _, exists := decodeAdoptJSON(t, legacy)["project_service_committed_unverified"]; exists {
+		t.Fatal("ordinary route acquired an unrequested project-service field")
+	}
 }
 
 func setupReadyGUIAdoptSupervisor(t *testing.T) {
@@ -590,7 +804,7 @@ args = ["version"]
 `)
 	canaryPath := filepath.Join(t.TempDir(), "gui-lease-cleanup.lease")
 	canary := canaryPath + " token=" + "gui-unlock-" + "canary" + "\x1b[2J"
-	s := newEphemeralServer(t, Config{AdoptLeaseOwner: guiCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, AdoptReceivingVerifier: func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil }})
+	s := newEphemeralServer(t, Config{AdoptLeaseOwner: guiCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, AdoptReceivingVerifier: func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil }})
 	req := httptest.NewRequest(http.MethodPost, "/api/adopt", strings.NewReader(`{"entry":"gui-lease-cleanup","client":"codex-cli","port":9343}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -764,5 +978,37 @@ args = ["version"]
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no operator-action event published after a successful adopt")
+	}
+}
+
+func TestH6ActionBudgetHTTPWireAndSafeInputErrors(t *testing.T) {
+	for _, body := range []string{"{}", "{\"action_timeout\":null}"} {
+		var adopt adoptRequest
+		var deadopt deAdoptRequest
+		if json.Unmarshal([]byte(body), &adopt) != nil || json.Unmarshal([]byte(body), &deadopt) != nil || adopt.ActionTimeout != nil || deadopt.ActionTimeout != nil {
+			t.Fatal("omission/null manufactured an action operand")
+		}
+	}
+	var adopt adoptRequest
+	var deadopt deAdoptRequest
+	if json.Unmarshal([]byte("{\"action_timeout\":42}"), &adopt) == nil || json.Unmarshal([]byte("{\"action_timeout\":42}"), &deadopt) == nil {
+		t.Fatal("non-string duration bypassed ordinary decoding")
+	}
+	server := &Server{}
+	for _, handler := range []http.HandlerFunc{server.adoptPlanHandler, server.adoptHandler, server.deAdoptPlanHandler, server.deAdoptHandler} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{\"action_timeout\":\"\"}"))
+		handler(recorder, request)
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "\"code\":\"H6_ACTION_BUDGET_INVALID\"") {
+			t.Fatal("explicit blank action timeout did not use the fixed400 input channel")
+		}
+	}
+	recorder := httptest.NewRecorder()
+	canary := "fixture-private-budget-cause"
+	if !writeH6ActionBudgetError(recorder, fmt.Errorf("%s: %w", canary, api.ErrCodexSharedStdioActionBudgetRequired)) {
+		t.Fatal("wrapped required-input identity was lost")
+	}
+	if recorder.Code != http.StatusBadRequest || strings.Contains(recorder.Body.String(), canary) || !strings.Contains(recorder.Body.String(), "H6_ACTION_BUDGET_REQUIRED") {
+		t.Fatal("budget projection leaked a cause or lost its stable input class")
 	}
 }

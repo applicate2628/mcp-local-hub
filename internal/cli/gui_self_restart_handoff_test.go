@@ -278,10 +278,15 @@ type phaseGCLILease struct{ releases int }
 
 func (l *phaseGCLILease) Release() { l.releases++ }
 
-type phaseGSupervisorStopper struct{ stops int }
+type phaseGSupervisorStopper struct{ stops, quiesces int }
 
 func (s *phaseGSupervisorStopper) Stop(context.Context, int) error {
 	s.stops++
+	return nil
+}
+
+func (s *phaseGSupervisorStopper) Quiesce(context.Context) error {
+	s.quiesces++
 	return nil
 }
 
@@ -294,8 +299,8 @@ func TestRestartV3_SuccessfulHandoffExitSkipsManagerStop(t *testing.T) {
 	if err := stopSupervisorManagerUnlessSelfRestart(context.Background(), manager, &exitRequested); err != nil {
 		t.Fatalf("stopSupervisorManagerUnlessSelfRestart: %v", err)
 	}
-	if exits != 1 || !exitRequested.Load() || manager.stops != 0 {
-		t.Fatalf("exits=%d requested=%t manager stops=%d, want 1/true/0", exits, exitRequested.Load(), manager.stops)
+	if exits != 1 || !exitRequested.Load() || manager.stops != 0 || manager.quiesces != 1 {
+		t.Fatalf("exits=%d requested=%t manager stops=%d quiesces=%d, want 1/true/0/1", exits, exitRequested.Load(), manager.stops, manager.quiesces)
 	}
 }
 

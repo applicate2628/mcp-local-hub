@@ -1,10 +1,12 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries simulates many
@@ -70,5 +72,69 @@ func TestWithVaultLock_ConcurrentSetNoLostOrCorruptEntries(t *testing.T) {
 		if got != want {
 			t.Errorf("key %s = %q, want %q", key, got, want)
 		}
+	}
+}
+
+func TestTryWithVaultLock_ContentionErrorAndRelease(t *testing.T) {
+	vaultPath := filepath.Join(t.TempDir(), "secrets.age")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	holderDone := make(chan error, 1)
+	var releaseOnce sync.Once
+	releaseHolder := func() { releaseOnce.Do(func() { close(release) }) }
+	holderJoined := false
+	t.Cleanup(func() {
+		releaseHolder()
+		if !holderJoined {
+			select {
+			case <-holderDone:
+				holderJoined = true
+			case <-time.After(2 * time.Second):
+				t.Errorf("blocking holder did not settle during cleanup")
+			}
+		}
+	})
+	go func() {
+		holderDone <- WithVaultLock(vaultPath, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case err := <-holderDone:
+		holderJoined = true
+		t.Fatalf("blocking holder exited before contention probe: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking holder did not acquire vault lock")
+	}
+	called := false
+	locked, err := TryWithVaultLock(vaultPath, func() error {
+		called = true
+		return nil
+	})
+	if locked || err != nil || called {
+		t.Fatalf("contended try = locked:%t err:%v called:%t, want false/nil/false", locked, err, called)
+	}
+	releaseHolder()
+	select {
+	case err := <-holderDone:
+		holderJoined = true
+		if err != nil {
+			t.Fatalf("release blocking holder: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking holder did not release")
+	}
+
+	sentinel := errors.New("callback failure")
+	locked, err = TryWithVaultLock(vaultPath, func() error { return sentinel })
+	if !locked || !errors.Is(err, sentinel) {
+		t.Fatalf("callback failure = locked:%t err:%v, want true/sentinel", locked, err)
+	}
+	locked, err = TryWithVaultLock(vaultPath, func() error { return nil })
+	if !locked || err != nil {
+		t.Fatalf("post-error reacquire = locked:%t err:%v, want true/nil", locked, err)
 	}
 }

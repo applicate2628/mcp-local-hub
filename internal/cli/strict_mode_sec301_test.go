@@ -91,6 +91,7 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 
 	deps := StrictModeDeps{
 		StateDir:         dir,
+		GUISettingsPath:  filepath.Join(dir, "gui-preferences.yaml"),
 		IntentPath:       intentPath,
 		BreadcrumbPath:   filepath.Join(dir, "strict-mode-mutation-incomplete.json"),
 		AutostartBackend: &fakeAutostartBackend{currentStrict: true, installed: true},

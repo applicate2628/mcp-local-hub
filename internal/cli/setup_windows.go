@@ -21,8 +21,7 @@ import (
 )
 
 func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error) {
-	windowlessSource := scheduler.WindowsOwnedEntrypointPath(curExe)
-	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
+	legacyWindowlessTarget := scheduler.WindowsLegacyEntrypointPath(target)
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("resolve state-dir for Windows setup product pair: %w", err)
@@ -35,18 +34,18 @@ func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error)
 		return errors.New("acquire Windows setup product-pair fence: another product-pair transaction is active")
 	}
 	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows setup product-pair fence")
-	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(context.Background(), stateDir, target, windowlessTarget))
+	settled, err := reconcileWiredWindowsProductRecovery(windowsProductRecoveryRuntimeRequest(context.Background(), stateDir, target, legacyWindowlessTarget))
 	if err != nil {
 		return fmt.Errorf("recover Windows setup product pair: %w", err)
 	}
 	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
-		fmt.Fprintf(w, "\u2713 mcphub Windows product pair crash recovery kept committed pair at %s\n", filepath.Dir(target))
+		fmt.Fprintf(w, "\u2713 mcphub Windows product crash recovery kept committed product at %s\n", filepath.Dir(target))
 		return nil
 	}
-	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, curExe, windowlessSource, target, windowlessTarget, WindowsProductPairModeSetup); err != nil {
+	if reconciled, err := reconcileWindowsProductReceipt(stateDir, curExe, target, WindowsProductPairModeSetup); err != nil {
 		return err
 	} else if reconciled {
-		fmt.Fprintf(w, "\u2713 mcphub Windows product pair already committed at %s; committed event reconciled\n", filepath.Dir(target))
+		fmt.Fprintf(w, "\u2713 mcphub Windows product already committed at %s; committed event reconciled\n", filepath.Dir(target))
 		return nil
 	}
 	stagedCLI, err := stageWindowsProductCandidate(curExe, target)
@@ -54,26 +53,26 @@ func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error)
 		return fmt.Errorf("stage setup canonical CLI: %w", err)
 	}
 	defer os.Remove(stagedCLI)
-	stagedWindowless, err := stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	authority, err := windowsSingleProductNonUpgradeReplacementAuthority(stagedCLI, target)
 	if err != nil {
-		return fmt.Errorf("stage setup windowless adapter: %w", err)
+		return fmt.Errorf("preflight Windows setup product pair: %w", err)
 	}
-	defer os.Remove(stagedWindowless)
-	txn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
-		Context: context.Background(), StateDir: stateDir, CLIPath: target, WindowlessPath: windowlessTarget,
-		StagedCLI: stagedCLI, StagedWindowless: stagedWindowless, Mode: WindowsProductPairModeSetup,
+	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
+		Context: context.Background(), StateDir: stateDir, ProductPath: target,
+		LegacyWindowlessPath: legacyWindowlessTarget, StagedProduct: stagedCLI, Mode: WindowsProductPairModeSetup,
+		ReplacementAuthority: authority,
 	})
 	if err != nil {
-		return fmt.Errorf("construct Windows setup product pair transaction: %w", err)
+		return fmt.Errorf("construct Windows setup product transaction: %w", err)
 	}
 	result, err := txn.Run(context.Background())
 	if err != nil {
-		return fmt.Errorf("install Windows setup product pair: %w", err)
+		return fmt.Errorf("install Windows setup product: %w", err)
 	}
 	if result.Outcome != WindowsProductPairCommittedOutcome {
-		return fmt.Errorf("install Windows setup product pair: unexpected terminal outcome %q", result.Outcome)
+		return fmt.Errorf("install Windows setup product: unexpected terminal outcome %q", result.Outcome)
 	}
-	fmt.Fprintf(w, "\u2713 mcphub Windows product pair installed at %s\n", filepath.Dir(target))
+	fmt.Fprintf(w, "\u2713 mcphub Windows product installed at %s\n", filepath.Dir(target))
 	return nil
 }
 

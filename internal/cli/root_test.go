@@ -103,6 +103,17 @@ func TestNewRootCmd_EveryVisibleCommandHasARegisteredGroup(t *testing.T) {
 	}
 }
 
+func TestNewRootCmd_CBuildIsHiddenAndCallable(t *testing.T) {
+	root := NewRootCmd()
+	cmd, _, err := root.Find([]string{"cbuild"})
+	if err != nil || cmd == nil || cmd.Name() != "cbuild" {
+		t.Fatalf("find cbuild: command=%v err=%v", cmd, err)
+	}
+	if !cmd.Hidden || cmd.Args == nil {
+		t.Fatalf("cbuild hidden=%v argsValidator=%v, want hidden command with argument validation", cmd.Hidden, cmd.Args != nil)
+	}
+}
+
 func TestNewRootCmd_GUIOwnerUnknownConfirmationWorkerIsHiddenAndCallable(t *testing.T) {
 	root := NewRootCmd()
 	const name = "gui-owner-unknown-confirmation-worker"

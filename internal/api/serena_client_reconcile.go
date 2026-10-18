@@ -338,7 +338,8 @@ func ProjectSerenaWorkspaceSnapshot(in SerenaWorkspaceProjectionInputV1) (Serena
 		}
 		if status.ReadinessObservation == nil {
 			legacySnapshotUnready := in.Mode == SerenaWorkspaceProjectionModeSnapshot && readiness.PIDGeneration == 0 && readiness.ServiceState == ServiceStateStarting && readiness.Stage == ReadinessStageWrapperStart && !readiness.Settled
-			if !legacySnapshotUnready {
+			legacyStopped := status.State == "Stopped" && status.PID == 0 && readiness.ProcessState == "Stopped" && readiness.PID == 0 && readiness.PIDGeneration == 0 && readiness.ServiceState == ServiceStateStopped && readiness.Stage == ReadinessStageWrapperStart && readiness.Settled && readiness.Failure == nil
+			if !legacySnapshotUnready && !legacyStopped {
 				return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchGeneration, &intent, status, &readiness)
 			}
 		} else if status.ReadinessObservation.CurrentPIDGeneration == 0 || status.ReadinessObservation.ObservedPIDGeneration == 0 || readiness.PIDGeneration == 0 || status.ReadinessObservation.CurrentPIDGeneration != status.ReadinessObservation.ObservedPIDGeneration || status.ReadinessObservation.ObservedPIDGeneration != readiness.PIDGeneration {

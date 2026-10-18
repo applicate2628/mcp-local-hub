@@ -9,6 +9,7 @@ import (
 )
 
 type deAdoptRequest struct {
+	ActionTimeout         *string  `json:"action_timeout,omitempty"`
 	Server                string   `json:"server"`
 	AcceptConflictClients []string `json:"accept_conflict_clients"`
 }
@@ -39,8 +40,23 @@ func (s *Server) deAdoptPlanHandler(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
-	plan, err := api.NewAPI().BuildDeAdoptPlan(req.Server)
+	actionCtx := r.Context()
+	if req.ActionTimeout != nil {
+		resolved, cancel, err := api.ResolveCodexSharedStdioActionContext(actionCtx, req.ActionTimeout)
+		if err != nil {
+			if !writeH6ActionBudgetError(w, err) {
+				writeAPIErrorRedacted(w, err, http.StatusBadRequest, "DEADOPT_PLAN_FAILED", "/api/deadopt/plan")
+			}
+			return
+		}
+		defer cancel()
+		actionCtx = resolved
+	}
+	plan, err := api.NewAPI().BuildDeAdoptPlanWithContext(actionCtx, req.Server)
 	if err != nil {
+		if writeH6ActionBudgetError(w, err) {
+			return
+		}
 		writeAPIErrorRedacted(w, err, http.StatusBadRequest, "DEADOPT_PLAN_FAILED", "/api/deadopt/plan")
 		return
 	}
@@ -58,11 +74,27 @@ func (s *Server) deAdoptHandler(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
+	actionCtx := r.Context()
+	if req.ActionTimeout != nil {
+		resolved, cancel, err := api.ResolveCodexSharedStdioActionContext(actionCtx, req.ActionTimeout)
+		if err != nil {
+			if !writeH6ActionBudgetError(w, err) {
+				writeAPIErrorRedacted(w, err, http.StatusBadRequest, "DEADOPT_PLAN_FAILED", "/api/deadopt/plan")
+			}
+			return
+		}
+		defer cancel()
+		actionCtx = resolved
+	}
 	var narration bytes.Buffer
 	report, err := api.NewAPI().ExecuteDeAdoptWithOpts(req.Server, &narration, api.ExecuteDeAdoptOpts{
+		Context:               actionCtx,
 		AcceptConflictClients: req.AcceptConflictClients,
 	})
 	if err != nil {
+		if writeH6ActionBudgetError(w, err) {
+			return
+		}
 		if narration.Len() != 0 {
 			log.Printf("/api/deadopt execution output before failure:\n%s", narration.String())
 		}
@@ -87,8 +119,11 @@ func (s *Server) deAdoptEligibleHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	plan, err := api.NewAPI().BuildDeAdoptPlan(r.URL.Query().Get("server"))
+	plan, err := api.NewAPI().BuildDeAdoptPlanWithContext(r.Context(), r.URL.Query().Get("server"))
 	if err != nil {
+		if writeH6ActionBudgetError(w, err) {
+			return
+		}
 		writeAPIErrorRedacted(w, err, http.StatusBadRequest, "DEADOPT_ELIGIBILITY_FAILED", "/api/deadopt/eligible")
 		return
 	}

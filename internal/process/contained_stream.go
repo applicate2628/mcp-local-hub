@@ -44,8 +44,11 @@ const maxContainedCleanupTimeout time.Duration = time.Duration(math.MaxUint32) *
 // Stderr is borrowed for the duration of RunContainedStream and is never
 // closed by the runner.
 type ContainedStreamOptions struct {
-	CleanupTimeout time.Duration
-	Stderr         io.Writer
+	CleanupTimeout          time.Duration
+	Stderr                  io.Writer
+	AbsoluteCleanupDeadline time.Time
+	StdoutByteLimit         int64
+	StderrByteLimit         int64
 }
 
 // ContainedRunError preserves a primary lifecycle cause plus an optional
@@ -153,6 +156,7 @@ type ownedCloser struct {
 	mu     sync.Mutex
 	closer io.Closer
 	closed bool
+	err    error
 }
 
 func ownCloser(c io.Closer) *ownedCloser {
@@ -172,7 +176,17 @@ func (c *ownedCloser) close() error {
 	if c.closer == nil {
 		return nil
 	}
-	return c.closer.Close()
+	c.err = c.closer.Close()
+	return c.err
+}
+
+func (c *ownedCloser) snapshot() ContainedStreamSlot {
+	if c == nil {
+		return ContainedStreamSlot{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return ContainedStreamSlot{Acquired: c.closer != nil, CloseAttempted: c.closed, Closed: c.closed && c.err == nil, CloseError: c.err}
 }
 
 func closeOwned(closers ...*ownedCloser) error {
@@ -256,6 +270,53 @@ func runContainedStreamWithDependencies(
 	consumeStdout func(io.Reader) error,
 	deps containedStreamDependencies,
 ) error {
+	return runContainedStreamCore(ctx, cmd, options, consumeStdout, deps, nil)
+}
+
+func runContainedStreamCore(
+	ctx context.Context,
+	cmd *exec.Cmd,
+	options ContainedStreamOptions,
+	consumeStdout func(io.Reader) error,
+	deps containedStreamDependencies,
+	receipt *ContainedStreamReceiptV1,
+) (returned error) {
+	var child containedChild
+	var native ContainedNativeSnapshot
+	var nativeSettled bool
+	var stdinCloser, stdoutReadCloser, stdoutWriteCloser, stderrReadCloser, stderrWriteCloser *ownedCloser
+	var stdoutCount, stderrCount *containedCountingReader
+	var stdoutCompleted, stderrCompleted, waitCompleted bool
+	var stdoutErr, stderrErr error
+	var finalWait containedWaitResult
+	var startupObservationErr error
+	defer func() {
+		if receipt == nil {
+			return
+		}
+		receipt.IOSettlement = ContainedIOSettlement{Stdin: stdinCloser.snapshot(), StdoutRead: stdoutReadCloser.snapshot(), StdoutWrite: stdoutWriteCloser.snapshot(), StderrRead: stderrReadCloser.snapshot(), StderrWrite: stderrWriteCloser.snapshot(), Stdout: stdoutCount.snapshot(stdoutCompleted, stdoutErr), Stderr: stderrCount.snapshot(stderrCompleted, stderrErr)}
+		receipt.RootWaitKnown = waitCompleted && finalWait.exited
+		receipt.RootExitCode = finalWait.exitCode
+		receipt.RootExitError = finalWait.err
+		if nativeSettled {
+			if !native.RootIdentity.Known && receipt.RootIdentity.Known {
+				native.RootIdentity = receipt.RootIdentity
+			}
+			native.RootWaitKnown = receipt.RootWaitKnown
+			native.RootExitCode = receipt.RootExitCode
+			receipt.NativeSettlement = &ContainedProcessSettlement{owner: child, snapshot: native}
+			receipt.RootIdentity = native.RootIdentity
+			receipt.TerminalAction = native.TerminalAction
+		}
+		var e *ContainedRunError
+		if errors.As(returned, &e) {
+			receipt.Stage = e.Stage
+			receipt.PrimaryError = e.Cause
+			receipt.CleanupError = e.CleanupCause
+		} else {
+			receipt.PrimaryError = returned
+		}
+	}()
 	cleanupTimeoutMs, err := validateContainedStream(ctx, cmd, options, consumeStdout)
 	if err != nil {
 		return err
@@ -263,8 +324,17 @@ func runContainedStreamWithDependencies(
 	if deps.newChild == nil || deps.pipe == nil || deps.openNull == nil {
 		return &ContainedRunError{Stage: ContainedStageValidate, Cause: errInvalidContainedRun}
 	}
+	if receipt != nil && (options.AbsoluteCleanupDeadline.IsZero() || !time.Now().Before(options.AbsoluteCleanupDeadline) || options.StdoutByteLimit <= 0 || options.StderrByteLimit <= 0 || options.Stderr == nil) {
+		return &ContainedRunError{Stage: ContainedStageValidate, Cause: errInvalidContainedRun}
+	}
+	if receipt != nil {
+		workDeadline, finite := ctx.Deadline()
+		if !finite || options.AbsoluteCleanupDeadline.Before(workDeadline) || options.AbsoluteCleanupDeadline.After(workDeadline.Add(options.CleanupTimeout)) {
+			return &ContainedRunError{Stage: ContainedStageValidate, Cause: errInvalidContainedRun}
+		}
+	}
 
-	child, err := deps.newChild(cmd)
+	child, err = deps.newChild(cmd)
 	if err != nil {
 		return &ContainedRunError{
 			Stage: ContainedStageContainment,
@@ -277,7 +347,38 @@ func runContainedStreamWithDependencies(
 			Cause: errors.Join(ErrContainmentUnavailable, errInvalidContainedRun),
 		}
 	}
-	childCloser := ownCloser(closerFunc(child.close))
+	observe, observedAvailable := child.(containedObservedChild)
+	settleNative := func(natural bool) error {
+		if receipt == nil || nativeSettled {
+			return nil
+		}
+		nativeSettled = true
+		if !observedAvailable {
+			native.Error = ErrContainmentUnavailable
+			return native.Error
+		}
+		cleanupCtx, cancel := containedCleanupContext(options.AbsoluteCleanupDeadline)
+		defer cancel()
+		var settleErr error
+		native, settleErr = observe.settleContained(cleanupCtx, natural)
+		native.Error = errors.Join(native.Error, settleErr)
+		return settleErr
+	}
+	childCloser := ownCloser(closerFunc(func() error {
+		e := settleNative(false)
+		closeErr := child.close()
+		if receipt != nil {
+			native.HandlesClosed = closeErr == nil
+			native.Error = errors.Join(native.Error, closeErr)
+		}
+		return errors.Join(e, closeErr)
+	}))
+	if receipt != nil && !observedAvailable {
+		return containedError(ContainedStageContainment, ErrContainmentUnavailable, childCloser.close())
+	}
+	if receipt != nil {
+		observe.prepareContainedObservation()
+	}
 
 	stdoutRead, stdoutWrite, err := deps.pipe()
 	if err != nil {
@@ -287,8 +388,8 @@ func runContainedStreamWithDependencies(
 			closeOwned(childCloser),
 		)
 	}
-	stdoutReadCloser := ownCloser(stdoutRead)
-	stdoutWriteCloser := ownCloser(stdoutWrite)
+	stdoutReadCloser = ownCloser(stdoutRead)
+	stdoutWriteCloser = ownCloser(stdoutWrite)
 
 	stderrRead, stderrWrite, err := deps.pipe()
 	if err != nil {
@@ -298,8 +399,8 @@ func runContainedStreamWithDependencies(
 			closeOwned(stdoutWriteCloser, stdoutReadCloser, childCloser),
 		)
 	}
-	stderrReadCloser := ownCloser(stderrRead)
-	stderrWriteCloser := ownCloser(stderrWrite)
+	stderrReadCloser = ownCloser(stderrRead)
+	stderrWriteCloser = ownCloser(stderrWrite)
 
 	stdin, err := deps.openNull()
 	if err != nil {
@@ -309,8 +410,11 @@ func runContainedStreamWithDependencies(
 			closeOwned(stderrWriteCloser, stderrReadCloser, stdoutWriteCloser, stdoutReadCloser, childCloser),
 		)
 	}
-	stdinCloser := ownCloser(stdin)
+	stdinCloser = ownCloser(stdin)
 
+	if receipt != nil {
+		receipt.StartAttempted = true
+	}
 	if err := child.start(cmd, stdin, stdoutWrite, stderrWrite); err != nil {
 		stage := ContainedStageStart
 		cause := err
@@ -328,10 +432,15 @@ func runContainedStreamWithDependencies(
 			closeOwned(stdinCloser, stderrWriteCloser, stderrReadCloser, stdoutWriteCloser, stdoutReadCloser, childCloser),
 		)
 	}
+	if receipt != nil {
+		var identityErr error
+		receipt.RootIdentity, identityErr = observe.containedRootIdentity()
+		startupObservationErr = identityErr
+	}
 
 	// The child owns duplicated standard handles now. Closing the parent's
 	// copies is mandatory for EOF and never transfers reader ownership.
-	cleanupErr := closeOwned(stdinCloser, stderrWriteCloser, stdoutWriteCloser)
+	cleanupErr := errors.Join(startupObservationErr, closeOwned(stdinCloser, stderrWriteCloser, stdoutWriteCloser))
 
 	type streamResult struct {
 		err error
@@ -340,15 +449,23 @@ func runContainedStreamWithDependencies(
 	stderrDone := make(chan streamResult, 1)
 	waitDone := make(chan containedWaitResult, 1)
 
+	var stdoutSource io.Reader = stdoutRead
+	var stderrSource io.Reader = stderrRead
+	if receipt != nil {
+		stdoutCount = &containedCountingReader{reader: stdoutRead, state: ContainedIOStream{WorkerStarted: true, Limit: options.StdoutByteLimit}}
+		stderrCount = &containedCountingReader{reader: stderrRead, state: ContainedIOStream{WorkerStarted: true, Limit: options.StderrByteLimit}}
+		stdoutSource = stdoutCount
+		stderrSource = stderrCount
+	}
 	go func() {
-		stdoutDone <- streamResult{err: consumeStdout(stdoutRead)}
+		stdoutDone <- streamResult{err: consumeStdout(stdoutSource)}
 	}()
 	stderrTarget := options.Stderr
 	if stderrTarget == nil {
 		stderrTarget = io.Discard
 	}
 	go func() {
-		_, copyErr := io.Copy(stderrTarget, stderrRead)
+		_, copyErr := io.Copy(stderrTarget, stderrSource)
 		stderrDone <- streamResult{err: copyErr}
 	}()
 	go func() {
@@ -359,9 +476,6 @@ func runContainedStreamWithDependencies(
 		stdoutResult            streamResult
 		stderrResult            streamResult
 		waitResult              containedWaitResult
-		stdoutCompleted         bool
-		stderrCompleted         bool
-		waitCompleted           bool
 		ctxErr                  error
 		teardown                = cleanupErr != nil
 		readersClosed           bool
@@ -392,10 +506,15 @@ func runContainedStreamWithDependencies(
 		}
 	}
 
-	cleanupDeadline := time.Now().Add(time.Duration(cleanupTimeoutMs) * time.Millisecond)
+	cleanupDeadline := options.AbsoluteCleanupDeadline
+	if receipt == nil {
+		cleanupDeadline = time.Now().Add(time.Duration(cleanupTimeoutMs) * time.Millisecond)
+	}
 	_, deadlineAware := child.(containedDeadlineChild)
 	var terminateErr error
-	if deadlineChild, ok := child.(containedDeadlineChild); ok {
+	if receipt != nil {
+		terminateErr = settleNative(waitCompleted && waitResult.exited && ctxErr == nil && stdoutResult.err == nil && stderrResult.err == nil)
+	} else if deadlineChild, ok := child.(containedDeadlineChild); ok {
 		terminateErr = deadlineChild.terminateBy(cleanupDeadline)
 	} else {
 		terminateErr = child.terminate(cleanupTimeoutMs)
@@ -404,7 +523,11 @@ func runContainedStreamWithDependencies(
 		cleanupErr = errors.Join(cleanupErr, terminateErr)
 		// Kill-on-close is the final Windows backstop; on POSIX this is a
 		// harmless no-op. Closing readers then releases owner-blocked I/O.
-		cleanupErr = errors.Join(cleanupErr, childCloser.close())
+		if receipt != nil {
+			cleanupErr = errors.Join(cleanupErr, observe.closeContainedJobBackstop())
+		} else {
+			cleanupErr = errors.Join(cleanupErr, childCloser.close())
+		}
 		cleanupErr = errors.Join(cleanupErr, closeOwned(stdoutReadCloser, stderrReadCloser))
 		readersClosed = true
 	}
@@ -497,13 +620,18 @@ joinLoop:
 		cleanupErr = errors.Join(cleanupErr, closeOwned(stdoutReadCloser, stderrReadCloser))
 	}
 	cleanupErr = errors.Join(cleanupErr, childCloser.close())
+	stdoutErr, stderrErr = stdoutResult.err, stderrResult.err
+	finalWait = waitResult
 
 	var primaryStage ContainedRunStage
 	var primary error
 	var exitCode *int
 
 	// A genuine consumer failure outranks cancellation and process outcomes.
-	if stdoutResult.err != nil && stdoutBeforeReaderClose {
+	if startupObservationErr != nil {
+		primaryStage = ContainedStageStart
+		primary = startupObservationErr
+	} else if stdoutResult.err != nil && stdoutBeforeReaderClose {
 		primaryStage = ContainedStageStdout
 		primary = stdoutResult.err
 	} else if ctxErr != nil {

@@ -8,7 +8,10 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-const clientConfigSettlementSchemaV1 = "client-config-settlement-v1"
+const (
+	clientConfigSettlementSchemaV1 = "client-config-settlement-v1"
+	clientConfigSettlementSchemaV2 = "client-config-settlement-v2"
+)
 
 var (
 	ErrClientConfigSettlementInvalid     = errors.New("CLIENT_CONFIG_SETTLEMENT_INVALID")
@@ -25,18 +28,19 @@ const (
 // ClientConfigSettlementV1 is the portable exact-readback outcome of one
 // client-config mutation. It contains logical identities and classes only.
 type ClientConfigSettlementV1 struct {
-	SchemaVersion    string `json:"schema_version"`
-	Operation        string `json:"operation"`
-	Phase            string `json:"phase"`
-	Client           string `json:"client"`
-	LogicalSource    string `json:"logical_source"`
-	TargetEntry      string `json:"target_entry"`
-	WriteTarget      string `json:"write_target"`
-	DesiredTransport string `json:"desired_transport"`
-	CollisionReason  string `json:"collision_reason,omitempty"`
-	Action           string `json:"action"`
-	Outcome          string `json:"outcome"`
-	Readback         string `json:"readback"`
+	SchemaVersion         string `json:"schema_version"`
+	Operation             string `json:"operation"`
+	Phase                 string `json:"phase"`
+	Client                string `json:"client"`
+	LogicalSource         string `json:"logical_source"`
+	TargetEntry           string `json:"target_entry"`
+	WriteTarget           string `json:"write_target"`
+	DesiredTransport      string `json:"desired_transport"`
+	CollisionReason       string `json:"collision_reason,omitempty"`
+	Action                string `json:"action"`
+	Outcome               string `json:"outcome"`
+	Readback              string `json:"readback"`
+	ProjectIdentitySHA256 string `json:"project_identity_sha256,omitempty"`
 }
 
 // IsCommittedWrite reports whether this exact-readback receipt may be exposed
@@ -54,13 +58,19 @@ func (s ClientConfigSettlementV1) IsSettled() bool {
 }
 
 func (s ClientConfigSettlementV1) isValid() bool {
-	return s.SchemaVersion == clientConfigSettlementSchemaV1 &&
-		(s.Operation == string(ClientConfigOperationInstall) || s.Operation == string(ClientConfigOperationAdopt)) &&
-		s.Phase == "settled" && s.Client == "codex-cli" &&
-		s.LogicalSource != "" && s.TargetEntry != "" &&
-		s.WriteTarget == "codex_global" && s.DesiredTransport == string(clients.CodexTransportHTTP) &&
-		s.CollisionReason == "cross_layer_opposite_transport" && s.Action == "relocate" &&
-		s.Readback == string(clients.CodexHTTPRelocationReadbackExact)
+	common := (s.Operation == string(ClientConfigOperationInstall) || s.Operation == string(ClientConfigOperationAdopt)) &&
+		s.Phase == "settled" && s.Client == "codex-cli" && s.LogicalSource != "" && s.TargetEntry != "" &&
+		s.DesiredTransport == string(clients.CodexTransportHTTP) && s.Readback == string(clients.CodexHTTPRelocationReadbackExact)
+	if !common {
+		return false
+	}
+	if s.SchemaVersion == clientConfigSettlementSchemaV1 {
+		return s.WriteTarget == "codex_global" && s.CollisionReason == "cross_layer_opposite_transport" &&
+			s.Action == "relocate" && s.ProjectIdentitySHA256 == ""
+	}
+	_, validFingerprint := decodeLowerProjectAdoptSHA256(s.ProjectIdentitySHA256)
+	return s.SchemaVersion == clientConfigSettlementSchemaV2 && s.WriteTarget == "codex_project" &&
+		s.CollisionReason == "" && s.Action == "replace" && validFingerprint
 }
 
 type clientConfigSettlementEmitter func(ClientConfigSettlementV1) error
@@ -79,20 +89,33 @@ func NewClientConfigSettlementOwnerV1() ClientConfigSettlementOwnerV1 {
 // mutation emits exactly once; an event failure retains the valid row and
 // fails loudly so callers can preserve evidence but must withhold success.
 func (o ClientConfigSettlementOwnerV1) Accept(operation ClientConfigOperationV1, lower clients.CodexHTTPRelocationResult) (ClientConfigSettlementV1, error) {
-	if operation != ClientConfigOperationInstall && operation != ClientConfigOperationAdopt ||
-		lower.LogicalSource == "" || lower.TargetEntry == "" ||
-		lower.WriteTarget != "codex_global" || lower.DesiredTransport != clients.CodexTransportHTTP ||
-		lower.CollisionReason != "cross_layer_opposite_transport" || lower.Action != "relocate" ||
-		lower.Readback != clients.CodexHTTPRelocationReadbackExact ||
+	return o.accept(operation, lower, "")
+}
+
+func (o ClientConfigSettlementOwnerV1) AcceptProject(operation ClientConfigOperationV1, lower clients.CodexHTTPRelocationResult, projectIdentitySHA256 string) (ClientConfigSettlementV1, error) {
+	return o.accept(operation, lower, projectIdentitySHA256)
+}
+
+func (o ClientConfigSettlementOwnerV1) accept(operation ClientConfigOperationV1, lower clients.CodexHTTPRelocationResult, projectIdentitySHA256 string) (ClientConfigSettlementV1, error) {
+	project := projectIdentitySHA256 != ""
+	validShape := lower.WriteTarget == "codex_global" && lower.CollisionReason == "cross_layer_opposite_transport" && lower.Action == "relocate"
+	schemaVersion := clientConfigSettlementSchemaV1
+	if project {
+		_, validFingerprint := decodeLowerProjectAdoptSHA256(projectIdentitySHA256)
+		validShape = validFingerprint && lower.WriteTarget == "codex_project" && lower.CollisionReason == "" && lower.Action == "replace"
+		schemaVersion = clientConfigSettlementSchemaV2
+	}
+	if operation != ClientConfigOperationInstall && operation != ClientConfigOperationAdopt || lower.LogicalSource == "" || lower.TargetEntry == "" ||
+		lower.DesiredTransport != clients.CodexTransportHTTP || lower.Readback != clients.CodexHTTPRelocationReadbackExact || !validShape ||
 		(lower.Outcome != clients.CodexHTTPRelocationCommitted && lower.Outcome != clients.CodexHTTPRelocationAlreadyConfigured) {
 		return ClientConfigSettlementV1{}, ErrClientConfigSettlementInvalid
 	}
 	row := ClientConfigSettlementV1{
-		SchemaVersion: clientConfigSettlementSchemaV1, Operation: string(operation), Phase: "settled",
+		SchemaVersion: schemaVersion, Operation: string(operation), Phase: "settled",
 		Client: "codex-cli", LogicalSource: lower.LogicalSource, TargetEntry: lower.TargetEntry,
 		WriteTarget: lower.WriteTarget, DesiredTransport: string(lower.DesiredTransport),
 		CollisionReason: lower.CollisionReason, Action: lower.Action, Outcome: string(lower.Outcome),
-		Readback: string(lower.Readback),
+		Readback: string(lower.Readback), ProjectIdentitySHA256: projectIdentitySHA256,
 	}
 	if lower.Outcome != clients.CodexHTTPRelocationCommitted {
 		return row, nil
@@ -120,19 +143,23 @@ func emitClientConfigSettled(settlement ClientConfigSettlementV1) error {
 	if err != nil {
 		return err
 	}
+	body := map[string]any{
+		"schema_version": settlement.SchemaVersion, "operation": settlement.Operation,
+		"phase": settlement.Phase, "client": settlement.Client,
+		"logical_source": settlement.LogicalSource, "target_entry": settlement.TargetEntry,
+		"write_target": settlement.WriteTarget, "desired_transport": settlement.DesiredTransport,
+		"collision_reason": settlement.CollisionReason, "action": settlement.Action,
+		"outcome": settlement.Outcome, "readback": settlement.Readback,
+	}
+	if settlement.ProjectIdentitySHA256 != "" {
+		body["project_identity_sha256"] = settlement.ProjectIdentitySHA256
+	}
 	emitErr := logger.Emit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		Severity:      SupervisorEventSeverityInfo,
 		Source:        settlement.Operation,
 		Event:         "client-config-settled",
-		Body: map[string]any{
-			"schema_version": settlement.SchemaVersion, "operation": settlement.Operation,
-			"phase": settlement.Phase, "client": settlement.Client,
-			"logical_source": settlement.LogicalSource, "target_entry": settlement.TargetEntry,
-			"write_target": settlement.WriteTarget, "desired_transport": settlement.DesiredTransport,
-			"collision_reason": settlement.CollisionReason, "action": settlement.Action,
-			"outcome": settlement.Outcome, "readback": settlement.Readback,
-		},
+		Body:          body,
 	})
 	if closeErr := logger.Close(); closeErr != nil && emitErr == nil {
 		return closeErr

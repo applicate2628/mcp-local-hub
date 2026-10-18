@@ -1,11 +1,47 @@
 package clients
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestAttachExisting_PreparedVetoReportsUnconfirmedConfigLockRelease(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+	t.Setenv("MIMOCODE_CONFIG", "")
+	t.Setenv("MIMOCODE_CONFIG_DIR", "")
+	t.Setenv("MIMOCODE_CONFIG_CONTENT", "")
+	path := filepath.Join(root, "mimocode.json")
+	before := []byte(attachOriginDirectFixture)
+	if err := os.WriteFile(path, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	releaseCause := injectMutationOutcomeReleaseFailure(t, path)
+	mutator := newLockingClient(&mimoCodeClient{path: path}).(ConditionalEntryMutator)
+	prepared := false
+	prewriteVeto := errors.New("injected final admission veto after prepare")
+	observed := mutator.ConditionalEntryMutation(ConditionalEntryMutationRequest{
+		EntryName: "codegraph", Operation: EntryMutationAdd,
+		Entry:        MCPEntry{Name: "codegraph", URL: "http://127.0.0.1:9128/mcp"},
+		ExpectedLive: func(entry *MCPEntry) bool { return entry != nil && entry.URL == "" && !entry.Disabled },
+		Context:      context.Background(), LockWaitTimeout: time.Second,
+		ConfigWriter:   func(string, []byte) error { t.Fatal("vetoed mutation reached writer"); return nil },
+		BeforeMutation: func(EntryMutationPreparation) error { prepared = true; return prewriteVeto },
+	})
+	if !prepared || observed.Invoked || !errors.Is(observed.PreparationErr, prewriteVeto) || observed.ReleaseConfirmed || !errors.Is(observed.ReleaseErr, releaseCause) || !errors.Is(observed.ReleaseErr, ErrConfigLockReleaseUnconfirmed) {
+		t.Fatalf("prepared veto must carry separate unconfirmed release: prepared=%v observed=%+v", prepared, observed)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("prepared veto changed selected bytes: err=%v", err)
+	}
+}
 
 // TestAllClientsAreLockWrapped guards against a future constructor (or an
 // AllClients entry) returning an UNWRAPPED adapter: every production client

@@ -39,6 +39,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,14 +50,26 @@ import (
 )
 
 func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
+	_, err := secureParentDirAnywhereMode(nil, dir, skipParentGate, true)
+	return err
+}
+
+func secureParentDirAnywhereMode(ctx context.Context, dir string, skipParentGate, createMissing bool) (bool, error) {
+	return secureParentDirAnywhereModeObserved(ctx, dir, skipParentGate, createMissing, nil, nil)
+}
+
+func secureParentDirAnywhereModeObserved(ctx context.Context, dir string, skipParentGate, createMissing bool, b *stateFileReadBuilder, outcome *configParentDescentOutcome) (exists bool, retErr error) {
+	if ctx != nil && ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	cleaned := filepath.Clean(dir)
 	if cleaned == "" || cleaned == "." {
-		return fmt.Errorf("secure mkparent: empty dir")
+		return false, fmt.Errorf("secure mkparent: empty dir")
 	}
 
 	vol := filepath.VolumeName(cleaned)
 	if vol == "" {
-		return fmt.Errorf("secure mkparent: dir %q has no volume name (not an absolute drive/UNC path)", dir)
+		return false, fmt.Errorf("secure mkparent: dir %q has no volume name (not an absolute drive/UNC path)", dir)
 	}
 	// Every directory component below the volume root, INCLUDING the final one
 	// (`dir` is the directory to create, not a file whose base is dropped — this
@@ -68,7 +82,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	if len(parts) == 0 {
 		// The target IS the volume root — pathological for a config parent dir;
 		// nothing to create and no operator-owned prefix to gate.
-		return fmt.Errorf("secure mkparent: dir %q is the volume root; nothing to create", dir)
+		return false, fmt.Errorf("secure mkparent: dir %q is the volume root; nothing to create", dir)
 	}
 
 	// Volume-root anchor: the drive root "C:\" or the UNC share root
@@ -81,17 +95,20 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	// of the first freshly-created component — NOT on every existing prefix from
 	// the root down (bot PR #420 r17 finding B1; mirrors the POSIX leg).
 	anchorPath := vol + `\`
+	anchorSlot := parentDescentSlot(b, "anchor")
 	anchorHandle, err := openDirHandleNoReparse(anchorPath)
 	if err != nil {
-		return fmt.Errorf("secure mkparent: open volume-root anchor %s: %w", anchorPath, err)
+		return false, fmt.Errorf("secure mkparent: open volume-root anchor %s: %w", anchorPath, err)
 	}
+	registerParentDirectory(b, anchorSlot, anchorHandle)
 	if rerr := refuseReparsePointHandle(anchorHandle); rerr != nil {
-		windows.CloseHandle(anchorHandle)
-		return fmt.Errorf("secure mkparent: volume-root anchor %s: %w", anchorPath, rerr)
+		closeErr := closeParentDirectory(b, anchorSlot, anchorHandle)
+		return false, joinParentObserved(b, fmt.Errorf("secure mkparent: volume-root anchor %s: %w", anchorPath, rerr), closeErr)
 	}
 
 	curHandle := anchorHandle
 	curPath := anchorPath
+	curSlot := anchorSlot
 	// curIsAnchor tracks POSITION in the descent (a logical fact that cannot
 	// alias), NOT a raw handle value (a kernel resource Windows recycles after
 	// CloseHandle). It is true ONLY on the first loop iteration — before any
@@ -110,16 +127,30 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	curIsAnchor := true
 	defer func() {
 		if curHandle != windows.InvalidHandle {
-			_ = windows.CloseHandle(curHandle)
+			closeErr := closeParentDirectory(b, curSlot, curHandle)
+			if b != nil {
+				retErr = errors.Join(retErr, closeErr)
+			}
 		}
 	}()
 
 	// Build the restrictive SD once; reused as the create-time security
 	// descriptor for every NtCreateFile directory create so each new dir is born
 	// owner-only.
-	sd, err := buildRestrictiveSecurityDescriptor()
+	var sd *windows.SECURITY_DESCRIPTOR
+	if createMissing {
+		if b == nil {
+			sd, err = buildRestrictiveSecurityDescriptor()
+		} else {
+			var release func() error
+			sd, release, err = buildAllowlistSDObserved(b, parentDescentSlot(b, "create-descriptor"))
+			if release != nil {
+				defer func() { retErr = errors.Join(retErr, release()) }()
+			}
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("secure mkparent: build SD: %w", err)
+		return false, fmt.Errorf("secure mkparent: build SD: %w", err)
 	}
 
 	// Descend every component handle-relative. curHandle stays live until the
@@ -137,10 +168,23 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	// satisfied). Mirrors the POSIX leg's `gated` flag.
 	gated := skipParentGate
 	for _, comp := range parts {
+		if ctx != nil && ctx.Err() != nil {
+			return false, ctx.Err()
+		}
 		nextPath := filepath.Join(curPath, comp)
-		nextHandle, created, err := mkdirOrVerifyRealDirWindows(curHandle, comp, nextPath, sd, false)
+		nextSlot := parentDescentSlot(b, "directory")
+		var nextHandle windows.Handle
+		created := false
+		if createMissing {
+			nextHandle, created, err = mkdirOrVerifyRealDirWindowsObserved(curHandle, comp, nextPath, sd, false, b, nextSlot)
+		} else {
+			nextHandle, err = openExistingRealDirAtObserved(curHandle, comp, b, nextSlot)
+			if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+				return false, nil
+			}
+		}
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		// First freshly-created component: curHandle (its PARENT, still held) is
@@ -160,19 +204,25 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 		// (deeper components are not reached), so removing nextPath is a complete
 		// cleanup.
 		if created && !gated && !curIsAnchor {
-			if verr := verifyWindowsDACLFromHandle(curHandle); verr != nil {
-				_ = windows.CloseHandle(nextHandle)
+			if verr := verifyWindowsDACLFromHandleMaskedObserved(curHandle, windowsDACLSignificantBits, b, curSlot+"-dacl"); verr != nil {
+				closeErr := closeParentDirectory(b, nextSlot, nextHandle)
 				// Remove the just-created empty owner-only child so the refusal leaves
 				// nothing behind. The dir is empty (just created) and owner-only, so an
 				// absolute RemoveDirectory is safe here; a residual cleanup failure is
 				// surfaced but does not mask the gate refusal.
 				if rmErr := os.Remove(nextPath); rmErr != nil {
-					return fmt.Errorf("%w; ALSO failed to remove the just-created child %s: %v", wrapParentGateRefusal(curPath, verr), nextPath, rmErr)
+					if b == nil {
+						return false, fmt.Errorf("%w; ALSO failed to remove the just-created child %s: %v", wrapParentGateRefusal(curPath, verr), nextPath, rmErr)
+					}
+					return false, errors.Join(wrapParentGateRefusal(curPath, verr), fmt.Errorf("failed to remove the just-created child %s: %w", nextPath, rmErr), parentObservedError(b, closeErr))
 				}
-				return wrapParentGateRefusal(curPath, verr)
+				return false, joinParentObserved(b, wrapParentGateRefusal(curPath, verr), closeErr)
 			}
 		}
 		if created {
+			if outcome != nil {
+				outcome.created = append(outcome.created, nextPath)
+			}
 			// Whether or not the prefix needed a (root-skipped) verify, the gate
 			// for the chain has now been resolved at the deepest existing prefix —
 			// no later component can be a deeper existing prefix.
@@ -181,13 +231,14 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 
 		oldHandle := curHandle
 		curHandle = windows.InvalidHandle
-		closeErr := windows.CloseHandle(oldHandle)
+		closeErr := closeParentDirectory(b, curSlot, oldHandle)
 		if closeErr != nil {
-			_ = windows.CloseHandle(nextHandle)
-			return fmt.Errorf("secure mkparent: close verified parent %s: %w", curPath, closeErr)
+			nextCloseErr := closeParentDirectory(b, nextSlot, nextHandle)
+			return false, joinParentObserved(b, fmt.Errorf("secure mkparent: close verified parent %s: %w", curPath, closeErr), nextCloseErr)
 		}
 		curHandle = nextHandle
 		curPath = nextPath
+		curSlot = nextSlot
 		// Past the first iteration curHandle is a DESCENDED directory, never the
 		// volume-root anchor. Flip the position flag so every deeper
 		// deepest-existing-prefix is gated (handle-value reuse is now irrelevant —
@@ -206,9 +257,16 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	// worse, exposed to the same handle-value-reuse aliasing as the in-loop gate.)
 	// Mirrors the POSIX leg's trailing !gated gate.
 	if !gated {
-		if verr := verifyWindowsDACLFromHandle(curHandle); verr != nil {
-			return wrapParentGateRefusal(curPath, verr)
+		if verr := verifyWindowsDACLFromHandleMaskedObserved(curHandle, windowsDACLSignificantBits, b, curSlot+"-dacl"); verr != nil {
+			return false, wrapParentGateRefusal(curPath, verr)
 		}
 	}
-	return nil
+	if outcome != nil {
+		identity, err := queryConfigParentDirectoryIdentity(curHandle)
+		if err != nil {
+			return false, err
+		}
+		outcome.identity = &identity
+	}
+	return true, nil
 }

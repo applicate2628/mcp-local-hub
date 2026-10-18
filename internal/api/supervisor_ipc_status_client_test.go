@@ -8,13 +8,258 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
 )
+
+func TestSupervisorControlReadinessProducerShape(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		present bool
+		value   any
+		valid   bool
+		ready   bool
+	}{{"true", true, true, true, true}, {"false", true, false, true, false}, {"missing", false, nil, false, false}, {"null", true, nil, false, false}, {"string", true, "true", false, false}, {"number", true, 1, false, false}} {
+		t.Run(test.name, func(t *testing.T) {
+			// Same map/JSON spelling as the actual status producer, not a second codec.
+			payload := map[string]any{"state": "running", "daemons": []any{}, "intent_files_loaded": true}
+			if test.present {
+				payload["reconcile_ready"] = test.value
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := decodeSupervisorIPCStatusResultShape(raw)
+			if err != nil || !decoded.ObjectPresent || !decoded.DaemonsPresent || decoded.State != "running" {
+				t.Fatalf("existing shape changed: %+v / %v", decoded, err)
+			}
+			readiness, err := supervisorControlReadinessResult(decoded, nil)
+			if readiness.ReconcileReadyPresent != test.present || readiness.ReconcileReadyValid != test.valid || readiness.ReconcileReady != test.ready {
+				t.Fatalf("readiness=%+v", readiness)
+			}
+			if test.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, ErrSupervisorControlReadinessUnavailable) {
+				t.Fatalf("missing/malformed became known false: %v", err)
+			}
+			if rows, err := decodeSupervisorIPCStatusResult(raw); err != nil || len(rows) != 0 {
+				t.Fatal("legacy decoder began rejecting ignored readiness fields")
+			}
+		})
+	}
+	if _, err := decodeSupervisorIPCStatusResultShape(json.RawMessage(`{"state":"running",`)); err == nil {
+		t.Fatal("malformed enclosing JSON accepted")
+	}
+	decoded, err := decodeSupervisorIPCStatusResultShape(json.RawMessage(`{"state":"running","daemons":[],"reconcile_ready":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := errors.New("synthetic late cancellation/closure")
+	readiness, err := supervisorControlReadinessResult(decoded, late)
+	if !errors.Is(err, late) || !readiness.ReconcileReadyPresent || !readiness.ReconcileReadyValid || !readiness.ReconcileReady {
+		t.Fatal("late failure erased acquired readiness")
+	}
+	missing, err := decodeSupervisorIPCStatusResultShape(json.RawMessage(`{"state":"running","daemons":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisorControlReadinessResult(missing, late); !errors.Is(err, late) || !errors.Is(err, ErrSupervisorControlReadinessUnavailable) {
+		t.Fatal("late error erased actual unavailable-field classification")
+	}
+}
+
+func TestSupervisorControlReadinessRetainsFieldsOnCancellation(t *testing.T) {
+	peer, err := ObserveSupervisorProcessIdentityV1(os.Getpid())
+	if errors.Is(err, ErrSupervisorControlPeerUnsupported) {
+		t.Skip("native strict peer projection unsupported")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stateDir := hardenedTempDir(t)
+	owner := SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	writeSupervisorOwnerForTest(t, stateDir, owner)
+	stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(request IPCRequest) IPCResponse {
+		cancel() // Actual request was already received on the admitted connection.
+		return IPCResponse{ID: request.ID, OK: true, Result: map[string]any{"state": "running", "daemons": []any{}, "reconcile_ready": true}}
+	})
+	defer stop()
+	readiness, err := ReadSupervisorControlReadinessForPeerFromStateDir(ctx, stateDir, owner, peer)
+	if !errors.Is(err, context.Canceled) || !readiness.ReconcileReadyPresent || !readiness.ReconcileReadyValid || !readiness.ReconcileReady {
+		t.Fatalf("actual acquired flags/cancellation lost: %+v / %v", readiness, err)
+	}
+}
+
+func TestSupervisorControlReadinessStrictOneExchange(t *testing.T) {
+	peer, err := ObserveSupervisorProcessIdentityV1(os.Getpid())
+	if errors.Is(err, ErrSupervisorControlPeerUnsupported) {
+		t.Skip("native strict peer projection unsupported")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := hardenedTempDir(t)
+	owner := SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	writeSupervisorOwnerForTest(t, stateDir, owner)
+	var requests atomic.Int32
+	stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(request IPCRequest) IPCResponse {
+		requests.Add(1)
+		if request.Cmd != "status" {
+			t.Error("readiness used a different command")
+		}
+		return IPCResponse{ID: request.ID, OK: true, Result: map[string]any{"state": "running", "daemons": []any{}, "reconcile_ready": false}}
+	})
+	defer stop()
+	readiness, err := ReadSupervisorControlReadinessForPeerFromStateDir(context.Background(), stateDir, owner, peer)
+	if err != nil || !readiness.ReconcileReadyPresent || !readiness.ReconcileReadyValid || readiness.ReconcileReady || requests.Load() != 1 {
+		t.Fatalf("known false/single actual exchange=%+v / %v, requests=%d", readiness, err, requests.Load())
+	}
+	if _, err := ReadSupervisorControlReadinessForPeerFromStateDir(context.Background(), stateDir, owner, SupervisorProcessIdentityV1{}); !errors.Is(err, ErrSupervisorControlPeerIdentity) {
+		t.Fatal("unknown original expected proof did not refuse")
+	}
+}
+
+type readinessCloseResultConn struct {
+	net.Conn
+	fd       uintptr
+	closeErr error
+	closes   int
+}
+
+func (c *readinessCloseResultConn) Fd() uintptr { return c.fd }
+func (c *readinessCloseResultConn) Close() error {
+	c.closes++
+	return errors.Join(c.Conn.Close(), c.closeErr)
+}
+
+func TestSupervisorControlReadinessRetainsActualDecodeOnLateClose(t *testing.T) {
+	peer, err := ObserveSupervisorProcessIdentityV1(os.Getpid())
+	if errors.Is(err, ErrSupervisorControlPeerUnsupported) {
+		t.Skip("native strict peer projection unsupported")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := hardenedTempDir(t)
+	owner := SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(request IPCRequest) IPCResponse {
+		return IPCResponse{ID: request.ID, OK: true, Result: map[string]any{"state": "running", "daemons": []any{}, "reconcile_ready": true}}
+	})
+	defer stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // existing exchange allowance.
+	defer cancel()
+	conn, err := dialSupervisorIPC(ctx, SupervisorIPCAddress(stateDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, ok := conn.(interface{ Fd() uintptr })
+	if !ok {
+		t.Fatal(errors.Join(errors.New("actual native Fd unavailable"), conn.Close()))
+	}
+	closing := errors.New("synthetic provider Close result after real closure")
+	wrapped := &readinessCloseResultConn{Conn: conn, fd: fd.Fd(), closeErr: closing}
+	t.Cleanup(func() {
+		if wrapped.closes == 0 {
+			t.Error("actual exchange abandoned connection")
+			if err := wrapped.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	decoded, exchangeErr := exchangeSupervisorIPCStatusResult(ctx, wrapped, owner, &peer)
+	readiness, err := supervisorControlReadinessResult(decoded, exchangeErr)
+	if !errors.Is(err, closing) || wrapped.closes != 1 || !readiness.ReconcileReadyPresent || !readiness.ReconcileReadyValid || !readiness.ReconcileReady {
+		t.Fatalf("actual decoded fields/Close result lost: %+v / %v", readiness, err)
+	}
+}
+
+const readinessOriginalChildEnv = "MCPHUB_TEST_READINESS_ORIGINAL_CHILD"
+
+func TestSupervisorReadinessOriginalChild(t *testing.T) {
+	if os.Getenv(readinessOriginalChildEnv) != "1" {
+		return
+	}
+	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSupervisorControlReadinessWrongNativePeer(t *testing.T) {
+	if _, err := ObserveSupervisorProcessIdentityV1(os.Getpid()); errors.Is(err, ErrSupervisorControlPeerUnsupported) {
+		t.Skip("native strict peer projection unsupported")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv(readinessOriginalChildEnv) != "" || os.Getenv(callerStartTimeChildStateDirEnv) != "" {
+		t.Fatal("unexpected helper environment")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestSupervisorReadinessOriginalChild$")
+	cmd.Env = append(os.Environ(), readinessOriginalChildEnv+"=1")
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(errors.Join(err, input.Close()))
+	}
+	t.Cleanup(func() {
+		closeErr := input.Close()
+		if err := errors.Join(closeErr, cmd.Wait()); err != nil {
+			t.Errorf("original readiness helper settlement: %v", err)
+		}
+	})
+	peer, err := ObserveSupervisorProcessIdentityV1(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peer.PID != cmd.Process.Pid || peer.PID == os.Getpid() {
+		t.Fatal("original creator/wrong server identities are degenerate")
+	}
+	owner := SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	stateDir := hardenedTempDir(t)
+	writeSupervisorOwnerForTest(t, stateDir, owner)
+	stop := startFakeSupervisorIPCStatusServerWithConnection(t, stateDir, func(conn net.Conn) {
+		helloErr := json.NewEncoder(conn).Encode(map[string]any{"hello": IPCHello{Version: 1, PID: owner.PID, StartedAt: owner.StartedAt}})
+		var one [1]byte
+		for {
+			n, readErr := conn.Read(one[:])
+			if n != 0 {
+				t.Error("wrong readiness peer received a client request")
+				return
+			}
+			if readErr != nil {
+				// Early native refusal may close before the copied hello is read.
+				if !errors.Is(readErr, io.EOF) && !errors.Is(readErr, net.ErrClosed) {
+					t.Error(errors.Join(helloErr, readErr))
+				} else if helloErr != nil {
+					t.Logf("copied hello was refused before delivery; zero-byte EOF received: %v", helloErr)
+				}
+				return
+			}
+		}
+	})
+	defer stop()
+	readiness, err := ReadSupervisorControlReadinessForPeerFromStateDir(context.Background(), stateDir, owner, peer)
+	if !errors.Is(err, ErrSupervisorControlPeerIdentity) || readiness.ReconcileReadyPresent || readiness.ReconcileReadyValid || readiness.ReconcileReady {
+		t.Fatalf("wrong actual peer became readiness: %+v / %v", readiness, err)
+	}
+}
 
 func TestDialSupervisorIPCStatus_HappyPath(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
@@ -369,6 +614,43 @@ func TestDecodeSupervisorIPCStatusResult_PreservesStalePID(t *testing.T) {
 	}
 	if rows[0].StalePID != 22036 {
 		t.Fatalf("StalePID = %d, want 22036 round-tripped", rows[0].StalePID)
+	}
+}
+
+func TestDecodeSupervisorIPCStatusResult_PreservesCrashesInWindow(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Running","crashes_in_window":2}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].CrashesInWindow != 2 {
+		t.Fatalf("CrashesInWindow = %d, want 2", rows[0].CrashesInWindow)
+	}
+}
+
+func TestDecodeSupervisorIPCStatusResult_LegacyMissingCrashesInWindowDefaultsZero(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Running"}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].CrashesInWindow != 0 {
+		t.Fatalf("legacy missing CrashesInWindow = %d, want 0", rows[0].CrashesInWindow)
+	}
+	encoded, err := json.Marshal(rows[0])
+	if err != nil {
+		t.Fatalf("marshal DaemonStatus: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"crashes_in_window":0`) {
+		t.Fatalf("zero-valued DaemonStatus omitted crashes_in_window: %s", encoded)
 	}
 }
 

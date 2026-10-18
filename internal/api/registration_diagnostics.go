@@ -34,6 +34,8 @@ const (
 	RegistrationCodeUnregisterProxyKillFailed      RegistrationDiagnosticCode = "UNREG_PROXY_KILL_FAILED"
 	RegistrationCodeUnregisterTaskDeleteFailed     RegistrationDiagnosticCode = "UNREG_TASK_DELETE_FAILED"
 	RegistrationCodeUnregisterClientRemoveFailed   RegistrationDiagnosticCode = "UNREG_CLIENT_ENTRY_REMOVE_FAILED"
+	RegistrationCodeUnregisterClientPreserved      RegistrationDiagnosticCode = "UNREG_CLIENT_ENTRY_PRESERVED"
+	RegistrationCodeUnregisterClientReadFailed     RegistrationDiagnosticCode = "UNREG_CLIENT_ENTRY_READ_FAILED"
 
 	RegistrationCodeLSPEnsureFailed RegistrationDiagnosticCode = "LSP_ENSURE_FAILED"
 	RegistrationCodeUnknown         RegistrationDiagnosticCode = "REG_UNKNOWN"
@@ -75,6 +77,8 @@ var registrationDiagnosticRegistry = map[RegistrationDiagnosticCode]registration
 	RegistrationCodeUnregisterProxyKillFailed:      {severity: RegistrationSeverityWarning},
 	RegistrationCodeUnregisterTaskDeleteFailed:     {severity: RegistrationSeverityWarning},
 	RegistrationCodeUnregisterClientRemoveFailed:   {severity: RegistrationSeverityWarning},
+	RegistrationCodeUnregisterClientPreserved:      {severity: RegistrationSeverityWarning},
+	RegistrationCodeUnregisterClientReadFailed:     {severity: RegistrationSeverityWarning},
 	RegistrationCodeLSPEnsureFailed:                {severity: RegistrationSeverityError},
 	RegistrationCodeUnknown:                        {severity: RegistrationSeverityError},
 }
@@ -155,6 +159,8 @@ func RegisteredRegistrationDiagnosticCodes() []RegistrationDiagnosticCode {
 		RegistrationCodeUnregisterProxyKillFailed,
 		RegistrationCodeUnregisterTaskDeleteFailed,
 		RegistrationCodeUnregisterClientRemoveFailed,
+		RegistrationCodeUnregisterClientPreserved,
+		RegistrationCodeUnregisterClientReadFailed,
 		RegistrationCodeLSPEnsureFailed,
 		RegistrationCodeUnknown,
 	}
@@ -215,6 +221,10 @@ func RegistrationCompatibilityText(d RegistrationDiagnostic) string {
 		return "delete task failed" + context
 	case RegistrationCodeUnregisterClientRemoveFailed:
 		return "remove client entry failed" + context
+	case RegistrationCodeUnregisterClientPreserved:
+		return "preserved client entry because ownership could not be proven" + context
+	case RegistrationCodeUnregisterClientReadFailed:
+		return "preserved client entry because current configuration could not be read" + context
 	case RegistrationCodeLSPEnsureFailed:
 		return "LSP registration failed" + context
 	case RegistrationCodeUnknown:

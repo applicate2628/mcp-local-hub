@@ -54,6 +54,7 @@ func serenaManifest() *config.ServerManifest {
 }
 
 func TestBuildPlanWithOpts_SerenaInstallWritePlaneUsesRouterURL(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := serenaManifest()
 	wantURL := SerenaRouterClientURL(9125)
 
@@ -78,6 +79,7 @@ func TestBuildPlanWithOpts_SerenaInstallWritePlaneUsesRouterURL(t *testing.T) {
 }
 
 func TestBuildPlanWithOpts_SerenaInstallWritePlaneSkipsWhenGUIPortUnknown(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := serenaManifest()
 
 	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 0})
@@ -96,6 +98,7 @@ func TestBuildPlanWithOpts_SerenaInstallWritePlaneSkipsWhenGUIPortUnknown(t *tes
 }
 
 func TestBuildPlanWithOpts_NonSerenaIgnoresGUIPort(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	withoutPort := genericMultiDaemonManifest()
 	withPort := genericMultiDaemonManifest()
 
@@ -121,6 +124,7 @@ func TestBuildPlanWithOpts_NonSerenaIgnoresGUIPort(t *testing.T) {
 }
 
 func TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := serenaManifest()
 	existingRouterURL := SerenaRouterClientURL(9125)
 
@@ -140,6 +144,7 @@ func TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL(t *testing.T)
 }
 
 func TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	globalPath, err := clients.ConfigPathForName("codex-cli")
 	if err != nil {
 		t.Fatalf("resolve sandboxed Codex config path: %v", err)
@@ -671,6 +676,7 @@ func preparePreflightBinaryChecks(t *testing.T) {
 }
 
 func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	p, err := BuildPlanWithOpts(m, BuildPlanOpts{GUIPort: 9125})
 	if err != nil {
@@ -712,9 +718,10 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	}
 }
 
-func TestBuildPlanWindowsSchedulerUsesWindowlessEntrypointAndIntentKeepsCUI(t *testing.T) {
+func TestBuildPlanWindowsSchedulerAndIntentUseCanonicalProduct(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	if runtime.GOOS != "windows" {
-		t.Skip("Windows product-pair entrypoint contract")
+		t.Skip("Windows product entrypoint contract")
 	}
 	original := testCanonicalMcphubPathOverride
 	canonical := filepath.Join(t.TempDir(), "mcphub.exe")
@@ -724,20 +731,44 @@ func TestBuildPlanWindowsSchedulerUsesWindowlessEntrypointAndIntentKeepsCUI(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTask := scheduler.WindowsOwnedEntrypointPath(canonical)
+	wantTask := canonical
 	for _, task := range plan.SchedulerTasks {
 		if task.Command != wantTask {
-			t.Fatalf("scheduled task %q command=%q want windowless %q", task.Name, task.Command, wantTask)
+			t.Fatalf("scheduled task %q command=%q want canonical product %q", task.Name, task.Command, wantTask)
 		}
 	}
 	for _, intent := range plan.SupervisorIntent {
 		if intent.Command != canonical {
-			t.Fatalf("supervisor intent %q command=%q want CUI %q", intent.Name, intent.Command, canonical)
+			t.Fatalf("supervisor intent %q command=%q want canonical product %q", intent.Name, intent.Command, canonical)
 		}
 	}
 }
 
+func TestRuntimeImageSelectionAdmitsOwnerInsteadOfInvokingHelper(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "invoking", "mcphub.exe")
+	active := filepath.Join(t.TempDir(), "npm-native", "mcphub.exe")
+	owner := &SupervisorRecoveryStatusV1{Server: SupervisorProcessIdentityV1{ImagePath: active}}
+	got, err := selectRuntimeMcphubImage(helper, owner, func(path string) error {
+		if path != active {
+			return errors.New("invoking helper is not the active admitted product")
+		}
+		return nil
+	})
+	if err != nil || got != active {
+		t.Fatalf("ALTERNATE-OWNER path=%q error=%v", got, err)
+	}
+	missing := errors.New("product image missing")
+	got, err = selectRuntimeMcphubImage(helper, owner, func(string) error { return missing })
+	if got != "" || !errors.Is(err, missing) {
+		t.Fatalf("owner admission failure fell back to helper: %q, %v", got, err)
+	}
+	if got, err := selectRuntimeMcphubImage(helper, nil, nil); got != "" || err == nil {
+		t.Fatalf("missing admission owner weakened gate: %q, %v", got, err)
+	}
+}
+
 func TestBuildPlan_AllClientsIncludesOptInClients(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	p, err := BuildPlanWithOpts(m, BuildPlanOpts{IncludeAllClients: true, GUIPort: 9125})
 	if err != nil {
@@ -758,6 +789,7 @@ func TestBuildPlan_AllClientsIncludesOptInClients(t *testing.T) {
 }
 
 func TestBuildPlan_ClientFilterOnlyIncludesRequestedClients(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	p, err := BuildPlanWithOpts(m, BuildPlanOpts{ClientsInclude: []string{"qwen-cli", "vscode"}, GUIPort: 9125})
 	if err != nil {
@@ -782,6 +814,7 @@ func TestBuildPlan_ClientFilterOnlyIncludesRequestedClients(t *testing.T) {
 }
 
 func TestBuildPlan_SingleDaemonFilter_SkipsOthersAndWeeklyRefresh(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	p, err := BuildPlanWithOpts(m, BuildPlanOpts{DaemonFilter: "codex", GUIPort: 9125})
 	if err != nil {
@@ -807,6 +840,7 @@ func TestBuildPlan_SingleDaemonFilter_SkipsOthersAndWeeklyRefresh(t *testing.T) 
 }
 
 func TestBuildPlan_SharedDaemonFilter_IncludesAllReferencingBindings(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	// claude daemon is referenced by every non-Codex binding; all-clients mode
 	// preserves that relationship when explicitly requested.
@@ -832,6 +866,7 @@ func TestBuildPlan_SharedDaemonFilter_IncludesAllReferencingBindings(t *testing.
 }
 
 func TestBuildPlan_UnknownDaemonFilter_Errors(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	_, err := BuildPlan(m, "does-not-exist")
 	if err == nil {
@@ -843,6 +878,7 @@ func TestBuildPlan_UnknownDaemonFilter_Errors(t *testing.T) {
 }
 
 func TestBuildPlan_InvalidClientURLPath_Errors(t *testing.T) {
+	preparePreflightBinaryChecks(t)
 	m := genericMultiDaemonManifest()
 	m.ClientBindings[0].URLPath = "@evil.com/mcp"
 

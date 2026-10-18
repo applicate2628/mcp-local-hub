@@ -12,6 +12,7 @@
 package gui
 
 import (
+	"errors"
 	"path/filepath"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ const (
 // and write two conflicting rows for one shutdown. Reset only via
 // ResetExitReasonDedupForTest — production never resets it.
 var exitReasonOnce sync.Once
+var exitReasonError error
 
 // EmitExitReasonEvent records, AT MOST ONCE per process and as a bounded
 // best-effort row in supervisor-events.log, WHICH trigger began a
@@ -66,27 +68,34 @@ var exitReasonOnce sync.Once
 // never a gate, and MUST NOT delay or fail the exit it is describing beyond
 // the bounded guiExitReasonEmitTimeout.
 func EmitExitReasonEvent(reason GUIExitReason, extra map[string]any) {
-	exitReasonOnce.Do(func() {
-		emitExitReasonEventOnce(reason, extra)
-	})
+	_ = EmitExitReasonEventObserved(reason, extra)
 }
 
-func emitExitReasonEventOnce(reason GUIExitReason, extra map[string]any) {
+// EmitExitReasonEventObserved retains the original first-trigger outcome.
+// Intentional Quit receives it without making the event log its policy store.
+func EmitExitReasonEventObserved(reason GUIExitReason, extra map[string]any) error {
+	exitReasonOnce.Do(func() {
+		exitReasonError = emitExitReasonEventOnce(reason, extra)
+	})
+	return exitReasonError
+}
+
+func emitExitReasonEventOnce(reason GUIExitReason, extra map[string]any) (err error) {
 	stateDir, err := api.DaemonStateDirReadOnly()
 	if err != nil {
-		return
+		return err
 	}
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
-		return
+		return err
 	}
-	defer func() { _ = logger.Close() }()
+	defer func() { err = errors.Join(err, logger.Close()) }()
 	body := extra
 	if body == nil {
 		body = map[string]any{}
 	}
 	body["reason"] = string(reason)
-	_ = logger.EmitWithTimeout(api.SupervisorEvent{
+	return logger.EmitWithTimeout(api.SupervisorEvent{
 		Severity: api.SupervisorEventSeverityInfo,
 		Source:   api.SupervisorEventSourceLifecycle,
 		Event:    "gui-exit-reason",
@@ -103,6 +112,7 @@ func emitExitReasonEventOnce(reason GUIExitReason, extra map[string]any) {
 // per-file copy.
 func ResetExitReasonDedupForTest() {
 	exitReasonOnce = sync.Once{}
+	exitReasonError = nil
 }
 
 // emitExitReasonEventFn is the injectable SEAM for RequestSelfRestartExit's

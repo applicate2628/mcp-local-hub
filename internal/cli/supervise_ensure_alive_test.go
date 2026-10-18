@@ -56,6 +56,26 @@ func ensureAliveTestStateDir(t *testing.T) string {
 	return stateDir
 }
 
+func TestEnsureAliveStoppedGUIRefusesFinalOwnerRelaunch(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	previousGUI, previousLaunch := guiOwnerAliveFn, livenessRelaunchFn
+	guiOwnerAliveFn = func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 0, 0 }
+	launches := 0
+	livenessRelaunchFn = func() error { launches++; return nil }
+	t.Cleanup(func() { guiOwnerAliveFn, livenessRelaunchFn = previousGUI, previousLaunch })
+	stopped, err := api.NewAPI().RecordGUIStop(context.Background(), strings.Repeat("c", 64), "tray-quit")
+	if err != nil || !stopped.Applied {
+		t.Fatalf("stop=%#v %v", stopped, err)
+	}
+	var output bytes.Buffer
+	if err := runEnsureAlive(stateDir, &output); err != nil {
+		t.Fatal(err)
+	}
+	if launches != 0 || !strings.Contains(output.String(), "GUI_STOPPED_BY_USER") {
+		t.Fatalf("resurrected: launches=%d output=%s", launches, output.String())
+	}
+}
+
 func writeGUIOwnerUnknownConfirmationMarkerDirectForTest(path string, at time.Time) error {
 	return api.WriteStateFileBytesAtomic(path, []byte(at.UTC().Format(time.RFC3339Nano)))
 }

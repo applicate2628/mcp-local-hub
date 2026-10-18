@@ -32,8 +32,9 @@ const (
 	ScopeWorkspaceLSP ProjectToggleScope = "workspace-lsp"
 
 	// ScopeProjectObjectMember — Model B: add/remove an object member in a
-	// project-local JSON config (cursor .cursor/mcp.json, vscode .vscode/mcp.json,
-	// claude-code .mcp.json Project scope). The substrate IS the gate.
+	// project-local JSON config (cursor .cursor/mcp.json or vscode
+	// .vscode/mcp.json). The registry capability is the gate; supported
+	// read-only Claude/Codex rows do not authorize this writer.
 	ScopeProjectObjectMember ProjectToggleScope = "project-object-member"
 
 	// ScopeClaudeLocalMembership — Model B-claude Local: MOVE the name between
@@ -59,7 +60,7 @@ const (
 	// OwnerWorkspaceRegister — api.Register/Unregister (Model A).
 	OwnerWorkspaceRegister
 	// OwnerProjectObjectMember — mutateJSONObjectMemberPath at the project
-	// config path (Model B; cursor/vscode/claude-Project).
+	// config path (Model B; cursor/vscode only).
 	OwnerProjectObjectMember
 	// OwnerClaudeLocalMembership — ToggleClaudeMcpjsonMembership (Model B-claude
 	// Local array-move).
@@ -72,11 +73,12 @@ const (
 //
 //   - scope ScopeWorkspaceLSP        → OwnerWorkspaceRegister (client ignored;
 //     A is per-workspace, not per-client-config).
+//
 //   - scope ScopeProjectObjectMember → OwnerProjectObjectMember, but ONLY for a
-//     client that (a) has a project-local object-member scope in the ProjectScope
-//     registry AND (b) is NOT approval-array-gated (cursor, vscode — NOT
-//     claude-code). An unknown client is OwnerUnsupported — the classifier never
-//     invents a path for a client the registry does not cover.
+//     client whose ProjectScope row explicitly authorizes ObjectMemberToggle
+//     (cursor and vscode). A supported read row or unknown client is
+//     OwnerUnsupported — the classifier never infers write authority from scan
+//     support.
 //
 //     claude-code is DELIBERATELY EXCLUDED from the object-member arm even though
 //     it IS in the registry (it stays there for the SCAN/read path, which reads
@@ -89,13 +91,17 @@ const (
 //     claude-local-membership for the claude Project row, shipped #434); narrowing
 //     the WRITE classifier here makes the destructive path unreachable for a
 //     direct API caller or a future frontend regression, not just the current GUI.
-//     cursor/vscode have NO approval array, so object member add/remove IS their
-//     correct enable/disable semantic and they KEEP OwnerProjectObjectMember.
+//     Codex is likewise excluded: its TOML row exists for scan/read only and its
+//     deliberate write routes through adopt. cursor/vscode keep
+//     OwnerProjectObjectMember because their rows explicitly authorize it.
+//
 //   - scope ScopeClaudeLocalMembership → OwnerClaudeLocalMembership, ONLY for
 //     client "claude-code" (the Local substrate is claude-specific). Any other
 //     client is OwnerUnsupported.
+//
 //   - scope ScopeGroupServers        → OwnerGroupServers (client ignored; the
 //     "client" of a group toggle is the group name, carried separately).
+//
 //   - any other scope                → OwnerUnsupported.
 //
 // It is the ONE place ownership is derived, so the GUI cannot branch on a client
@@ -105,19 +111,12 @@ func ProjectToggleOwner(client string, scope ProjectToggleScope) ProjectToggleOw
 	case ScopeWorkspaceLSP:
 		return OwnerWorkspaceRegister
 	case ScopeProjectObjectMember:
-		// An approval-array-gated client (claude-code) MUST use the
-		// ScopeClaudeLocalMembership array-move, never object-member (which would
-		// member-delete the shared checked-in definition). Refuse it here so the
-		// destructive path is unreachable at the single-owner classifier.
-		if clientUsesApprovalArrayToggle(client) {
-			return OwnerUnsupported
-		}
-		if projectScopeForClient(client) != nil {
+		if projectObjectMemberToggleScopeForClient(client) != nil {
 			return OwnerProjectObjectMember
 		}
 		return OwnerUnsupported
 	case ScopeClaudeLocalMembership:
-		if client == claudeCodeClientID {
+		if clientUsesApprovalArrayToggle(client) {
 			return OwnerClaudeLocalMembership
 		}
 		return OwnerUnsupported
@@ -149,10 +148,10 @@ func clientUsesApprovalArrayToggle(client string) bool {
 	return client == claudeCodeClientID
 }
 
-// projectScopeForClient returns the ProjectScope registry row for client, or nil
-// when the client has no project-local object-member scope. It is the lookup the
-// classifier and the object-member writer share so the set of object-member
-// clients has one owner (the projectScopeRegistry).
+// projectScopeForClient returns the broad ProjectScope read/discovery row for
+// client, or nil when the client has no project-local scope. Write callers must
+// use projectObjectMemberToggleScopeForClient instead of inferring authority
+// from this broader lookup.
 func projectScopeForClient(client string) *ProjectScope {
 	for i := range projectScopeRegistry {
 		if projectScopeRegistry[i].Supported && projectScopeRegistry[i].Client == client {
@@ -162,12 +161,23 @@ func projectScopeForClient(client string) *ProjectScope {
 	return nil
 }
 
+// projectObjectMemberToggleScopeForClient is the single capability-bearing
+// lookup shared by the owner classifier and direct JSON object-member writer.
+// ProjectScopes remains the broader read/discovery registry.
+func projectObjectMemberToggleScopeForClient(client string) *ProjectScope {
+	ps := projectScopeForClient(client)
+	if ps == nil || !ps.ObjectMemberToggle {
+		return nil
+	}
+	return ps
+}
+
 // ToggleProjectObjectMember is the Model B leaf writer: it adds (enable) or
 // removes (disable) the `server` object member under the project-local config
 // file for `client` at the given absolute config path, through the SAME
 // comment-preserving hujson + WriteConfigFile → SecureWriteClientConfig pipeline
 // the global adapter writes use (mutateJSONObjectMemberPath). The section key
-// (mcpServers for cursor/claude, servers for vscode) is resolved from the
+// (mcpServers for cursor, servers for vscode) is resolved from the
 // ProjectScope registry — never re-derived — so the writer can never write the
 // wrong top-level key.
 //
@@ -201,9 +211,9 @@ func projectScopeForClient(client string) *ProjectScope {
 // `.cursor/` directory behind on a disable. (Finding 4: parent-create is an
 // ENABLE-only need.)
 func ToggleProjectObjectMember(client, configPath, server string, value any, enable bool) error {
-	ps := projectScopeForClient(client)
+	ps := projectObjectMemberToggleScopeForClient(client)
 	if ps == nil {
-		return fmt.Errorf("client %q has no project-local object-member config scope", client)
+		return fmt.Errorf("client %q does not support project object-member toggles", client)
 	}
 	if !enable {
 		// Disable: removing an absent member is a no-op. If the write-target

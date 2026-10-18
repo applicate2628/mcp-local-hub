@@ -196,7 +196,17 @@ func RequestSelfRestartExit() {
 	selfRestartExitFn()
 }
 
-type retainedRestartGUIProcess struct {
+// RetainedGUIProcess owns the exact process handle returned by one detached GUI
+// launch until the caller either settles the newly-owned tree or transfers
+// lifetime ownership to the operating system. Both bare launch and RestartV3
+// use this one low-level owner.
+type RetainedGUIProcess interface {
+	PID() int
+	TerminateBeforeRelease(context.Context) error
+	DetachAtRelease() error
+}
+
+type retainedGUIProcess struct {
 	mu          sync.Mutex
 	cmd         *exec.Cmd
 	waitStarted bool
@@ -204,30 +214,31 @@ type retainedRestartGUIProcess struct {
 	waitDone    chan struct{}
 }
 
-func (p *retainedRestartGUIProcess) PID() int {
+func (p *retainedGUIProcess) PID() int {
 	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return 0
 	}
 	return p.cmd.Process.Pid
 }
 
-func (p *retainedRestartGUIProcess) TerminateBeforeRelease(ctx context.Context) error {
+func (p *retainedGUIProcess) TerminateBeforeRelease(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("terminate restart child: nil context")
+		return errors.New("terminate detached GUI child: nil context")
 	}
 	p.mu.Lock()
 	if p.detached {
 		p.mu.Unlock()
-		return errors.New("terminate restart child: retained handle already detached")
+		return errors.New("terminate detached GUI child: retained handle already detached")
 	}
 	if !p.waitStarted {
 		if p.cmd == nil || p.cmd.Process == nil {
 			p.mu.Unlock()
-			return errors.New("terminate restart child: no retained process")
+			return errors.New("terminate detached GUI child: no retained process")
 		}
-		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			p.mu.Unlock()
-			return fmt.Errorf("terminate restart child: %w", err)
+		treeErr := processowner.TreeKillByPID(p.cmd.Process.Pid)
+		directErr := p.cmd.Process.Kill()
+		if errors.Is(directErr, os.ErrProcessDone) {
+			directErr = nil
 		}
 		p.waitStarted = true
 		p.waitDone = make(chan struct{})
@@ -237,6 +248,20 @@ func (p *retainedRestartGUIProcess) TerminateBeforeRelease(ctx context.Context) 
 			_ = cmd.Wait()
 			close(done)
 		}()
+		p.mu.Unlock()
+		select {
+		case <-done:
+			return errors.Join(
+				wrapRetainedGUITerminationError("terminate detached GUI child tree", treeErr),
+				wrapRetainedGUITerminationError("terminate detached GUI child", directErr),
+			)
+		case <-ctx.Done():
+			return errors.Join(
+				wrapRetainedGUITerminationError("terminate detached GUI child tree", treeErr),
+				wrapRetainedGUITerminationError("terminate detached GUI child", directErr),
+				ctx.Err(),
+			)
+		}
 	}
 	done := p.waitDone
 	p.mu.Unlock()
@@ -248,7 +273,14 @@ func (p *retainedRestartGUIProcess) TerminateBeforeRelease(ctx context.Context) 
 	}
 }
 
-func (p *retainedRestartGUIProcess) DetachAtRelease() error {
+func wrapRetainedGUITerminationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func (p *retainedGUIProcess) DetachAtRelease() error {
 	if p == nil {
 		return nil
 	}
@@ -267,11 +299,11 @@ func (p *retainedRestartGUIProcess) DetachAtRelease() error {
 	return nil
 }
 
-// newRestartV3GUICmd builds the detached replacement-GUI command for the
-// RestartV3 self-restart. Package-level so the spawn CONFIGURATION can be
+// newDetachedGUICmd builds the one detached-GUI command shape shared by bare
+// launch and RestartV3. Package-level so the spawn configuration can be
 // asserted without starting a GUI.
 //
-// DELIBERATELY uses configureDetachedGUI, NOT configureDetachedSupervisor.
+// The replacement GUI uses configureDetachedGUI for its GUI launch policy.
 // This child is a replacement GUI, not a supervisor, and it re-parses the
 // SAME argv — so under --foreground / --no-tray the operator has explicitly
 // asked for a console-attached GUI, and suppressing the attach would
@@ -286,7 +318,7 @@ func (p *retainedRestartGUIProcess) DetachAtRelease() error {
 // configureDetachedGUI sets and which supervisor_restart_windows.go
 // documents as not propagating. That holds with or without the attach
 // marker, so citing it here would argue from a false premise.
-func newRestartV3GUICmd(exe string, childArgs, childEnv []string) *exec.Cmd {
+func newDetachedGUICmd(exe string, childArgs, childEnv []string) *exec.Cmd {
 	cmd := exec.Command(exe, childArgs...)
 	cmd.Env = childEnv
 	cmd.Stdin = nil
@@ -294,6 +326,26 @@ func newRestartV3GUICmd(exe string, childArgs, childEnv []string) *exec.Cmd {
 	cmd.Stderr = nil
 	configureDetachedGUI(cmd)
 	return cmd
+}
+
+// StartDetachedGUI starts one GUI entry point and retains its exact process
+// handle. The caller must terminate-and-wait the newly-owned tree on failure or
+// release the handle only after application ownership and readiness are proven.
+func StartDetachedGUI(exe string, childArgs, childEnv []string, policy processowner.BreakawayPolicy) (RetainedGUIProcess, error) {
+	if strings.TrimSpace(exe) == "" {
+		return nil, errors.New("start detached GUI: executable path is empty")
+	}
+	args := append([]string(nil), childArgs...)
+	env := append([]string(nil), childEnv...)
+	build := func() *exec.Cmd { return newDetachedGUICmd(exe, args, env) }
+	cmd, err := startDetachedSupervisorTolerant(build, policy)
+	if err != nil {
+		return nil, fmt.Errorf("start retained detached GUI: %w", err)
+	}
+	if cmd == nil || cmd.Process == nil {
+		return nil, errors.New("start retained detached GUI: start returned no process")
+	}
+	return &retainedGUIProcess{cmd: cmd}, nil
 }
 
 // SpawnRestartV3GUI starts the parser-rebuilt CLI argv with a structured,
@@ -315,12 +367,11 @@ func SpawnRestartV3GUI(argv []string, handoff SelfRestartHandoff) (RestartParent
 	}
 	childArgs := append([]string(nil), argv...)
 	childEnv := replaceEnvironmentValue(os.Environ(), SelfRestartHandoffEnv, rawHandoff)
-	build := func() *exec.Cmd { return newRestartV3GUICmd(exe, childArgs, childEnv) }
-	cmd, err := startDetachedSupervisorTolerant(build, processowner.BreakawayPolicyForCurrentProcess())
+	process, err := StartDetachedGUI(exe, childArgs, childEnv, processowner.BreakawayPolicyForCurrentProcess())
 	if err != nil {
 		return nil, fmt.Errorf("start retained replacement gui: %w", err)
 	}
-	return &retainedRestartGUIProcess{cmd: cmd}, nil
+	return process, nil
 }
 
 func replaceEnvironmentValue(environment []string, key, value string) []string {

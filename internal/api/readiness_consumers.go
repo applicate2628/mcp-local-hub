@@ -91,6 +91,7 @@ func readinessObservationFromStatusRow(row DaemonStatus) DaemonReadinessObservat
 		TaskName: row.TaskName, Server: row.Server, Daemon: row.Daemon, Port: row.Port,
 		PID: row.PID, ProcessState: row.State, IntentPresent: true, IntentRunnable: true,
 		WrapperStarted: row.PID > 0,
+		Stopped:        row.State == "Stopped" && row.PID == 0,
 		Policy:         ReadinessPolicyMCPUpstream,
 	}
 }

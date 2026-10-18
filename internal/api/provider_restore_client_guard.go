@@ -12,7 +12,7 @@ import (
 // of the adopting-row garbage-collection classifier.
 func providerRestoreBindingsClear(manifestName string) bool {
 	current, found, err := ReadAdoptProvenance(manifestName)
-	if err != nil || !found || current == nil || current.ProviderSource == nil {
+	if err != nil || !found || current == nil || current.ProviderSource == nil || current.ProjectService != nil {
 		return false
 	}
 	if current.ProviderSource.DeAdoptPhase != "managed_removed" {

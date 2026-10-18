@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/clients"
 )
 
 func sampleProviderSource() *ProviderSourceProvenanceV1 {
@@ -110,11 +113,29 @@ func TestAdoptedEntriesRoundTrip(t *testing.T) {
 	assertAdoptRecordEqual(t, got.Records[0], want)
 }
 
+func TestReadAdoptProvenanceLeavesAbsentStateRootAbsent(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "absent-state")
+	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	_, beforeErr := os.Stat(stateRoot)
+	t.Logf("STATE_ROOT_BEFORE exists=%t", beforeErr == nil)
+	if !os.IsNotExist(beforeErr) {
+		t.Fatalf("precondition: state root stat error = %v, want not-exist", beforeErr)
+	}
+	if rec, found, err := ReadAdoptProvenance("read-only-absent"); err != nil || found || rec != nil {
+		t.Fatalf("ReadAdoptProvenance absent result rec=%v found=%v err=%v", rec, found, err)
+	}
+	_, afterErr := os.Stat(stateRoot)
+	t.Logf("STATE_ROOT_AFTER exists=%t", afterErr == nil)
+	if !os.IsNotExist(afterErr) {
+		t.Fatalf("read-only provenance created or accessed state root %q: %v", stateRoot, afterErr)
+	}
+}
+
 // A3 — schema-version reject (version ∉ {0,1}) and version-0 normalization.
 func TestAdoptedEntriesSchemaVersionReject(t *testing.T) {
 	isolateStateDir(t)
 
-	unsupportedVersion := adoptedEntriesSchemaV2 + 1
+	unsupportedVersion := adoptedEntriesSchemaV3 + 1
 	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, []byte(fmt.Sprintf(`{"version":%d,"records":[]}`, unsupportedVersion))); err != nil {
 		t.Fatalf("seed unsupported-version store: %v", err)
 	}
@@ -142,6 +163,19 @@ func TestAdoptedEntriesConditionalProviderSchemaWrite(t *testing.T) {
 	provider := sampleAdoptRecord()
 	provider.ManifestName = "provider-entry"
 	provider.ProviderSource = sampleProviderSource()
+	project := sampleAdoptRecord()
+	project.ManifestName = "project-entry"
+	projectRoot := t.TempDir()
+	projectIdentity, err := clients.CodexProjectIdentitySHA256ForRoot(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.AdoptClients = []string{"codex-cli"}
+	project.Clients = []AdoptClientProvenance{{
+		Client: "codex-cli", TargetEntryName: project.SourceEntryName,
+		ConfigTarget:  &AdoptClientConfigTargetV1{Kind: adoptClientConfigTargetKindCodexProject, ProjectRoot: projectRoot, ProjectIdentitySHA256: projectIdentity},
+		OriginalState: AdoptOriginalStateAbsent, RestoreMode: AdoptRestoreModeNA,
+	}}
 
 	for _, tc := range []struct {
 		name    string
@@ -150,6 +184,8 @@ func TestAdoptedEntriesConditionalProviderSchemaWrite(t *testing.T) {
 	}{
 		{"ordinary v1", []AdoptProvenanceRecord{ordinary}, adoptedEntriesSchemaV1},
 		{"provider v2", []AdoptProvenanceRecord{ordinary, provider}, adoptedEntriesSchemaV2},
+		{"project v3", []AdoptProvenanceRecord{ordinary, project}, adoptedEntriesSchemaV3},
+		{"project plus provider v3", []AdoptProvenanceRecord{ordinary, provider, project}, adoptedEntriesSchemaV3},
 		{"last provider removed v1", []AdoptProvenanceRecord{ordinary}, adoptedEntriesSchemaV1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,6 +239,118 @@ func TestAdoptedEntriesProviderSchemaReadCompatibility(t *testing.T) {
 	}
 	if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(t, adoptedEntriesSchemaV2, []AdoptProvenanceRecord{ordinary}), adoptedEntriesSchemaV2); err == nil {
 		t.Fatal("v2 store accepted no provider provenance")
+	}
+}
+
+func TestAdoptedEntriesProjectSchemaV3RoundTripAndDowngrade(t *testing.T) {
+	isolateStateDir(t)
+	projectRoot := t.TempDir()
+	projectIdentitySHA256, err := clients.CodexProjectIdentitySHA256ForRoot(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := sampleAdoptRecord()
+	project.AdoptClients = []string{"codex-cli"}
+	project.Clients = []AdoptClientProvenance{{
+		Client:          "codex-cli",
+		TargetEntryName: project.SourceEntryName,
+		ConfigTarget: &AdoptClientConfigTargetV1{
+			Kind:                  adoptClientConfigTargetKindCodexProject,
+			ProjectRoot:           projectRoot,
+			ProjectIdentitySHA256: projectIdentitySHA256,
+		},
+		OriginalState:  AdoptOriginalStatePresent,
+		RestoreMode:    AdoptRestoreModeFunctionalEquivalent,
+		SnapshotRef:    "adopt-provenance/context7/codex-cli.snapshot",
+		SnapshotSHA256: "bbbb2222",
+	}}
+
+	if err := writeAdoptedEntries(&AdoptedEntries{Records: []AdoptProvenanceRecord{project}}); err != nil {
+		t.Fatalf("write project provenance: %v", err)
+	}
+	got, err := readAdoptedEntries()
+	if err != nil {
+		t.Fatalf("read project provenance: %v", err)
+	}
+	if got.Version != adoptedEntriesSchemaV3 {
+		t.Fatalf("project version = %d, want %d", got.Version, adoptedEntriesSchemaV3)
+	}
+	if len(got.Records) != 1 || !reflect.DeepEqual(got.Records[0].Clients, project.Clients) {
+		t.Fatalf("project clients = %#v, want %#v", got.Records, project.Clients)
+	}
+
+	project.Clients[0].ConfigTarget = nil
+	if err := writeAdoptedEntries(&AdoptedEntries{Records: []AdoptProvenanceRecord{project}}); err != nil {
+		t.Fatalf("downgrade project provenance: %v", err)
+	}
+	raw, err := readHubMcpStateFile(adoptedEntriesFileLeaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var downgraded AdoptedEntries
+	if err := json.Unmarshal(raw, &downgraded); err != nil {
+		t.Fatal(err)
+	}
+	if downgraded.Version != adoptedEntriesSchemaV1 {
+		t.Fatalf("downgraded version = %d, want %d", downgraded.Version, adoptedEntriesSchemaV1)
+	}
+}
+
+func TestAdoptedEntriesProjectSchemaV3RejectsInvalidTargetShapes(t *testing.T) {
+	projectRoot := t.TempDir()
+	fingerprint, err := clients.CodexProjectIdentitySHA256ForRoot(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := sampleAdoptRecord()
+	valid.AdoptClients = []string{"codex-cli"}
+	valid.Clients = []AdoptClientProvenance{{
+		Client: "codex-cli", TargetEntryName: valid.SourceEntryName,
+		ConfigTarget:  &AdoptClientConfigTargetV1{Kind: adoptClientConfigTargetKindCodexProject, ProjectRoot: projectRoot, ProjectIdentitySHA256: fingerprint},
+		OriginalState: AdoptOriginalStateAbsent, RestoreMode: AdoptRestoreModeNA,
+	}}
+	marshal := func(version int, rec AdoptProvenanceRecord) []byte {
+		raw, err := json.Marshal(AdoptedEntries{Version: version, Records: []AdoptProvenanceRecord{rec}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	withoutTarget := valid
+	withoutTarget.Clients = append([]AdoptClientProvenance(nil), valid.Clients...)
+	withoutTarget.Clients[0].ConfigTarget = nil
+	if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(adoptedEntriesSchemaV3, withoutTarget), adoptedEntriesSchemaV3); err == nil {
+		t.Fatal("v3 store without project target was accepted")
+	}
+	if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(adoptedEntriesSchemaV2, valid), adoptedEntriesSchemaV3); err == nil {
+		t.Fatal("v2 store carrying project target was accepted")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*AdoptProvenanceRecord)
+	}{
+		{name: "wrong client", mutate: func(rec *AdoptProvenanceRecord) { rec.Clients[0].Client = "claude-code" }},
+		{name: "wrong source", mutate: func(rec *AdoptProvenanceRecord) { rec.SourceClient = "claude-code" }},
+		{name: "wrong target entry", mutate: func(rec *AdoptProvenanceRecord) { rec.Clients[0].TargetEntryName = "other" }},
+		{name: "relative root", mutate: func(rec *AdoptProvenanceRecord) { rec.Clients[0].ConfigTarget.ProjectRoot = "relative" }},
+		{name: "uppercase fingerprint", mutate: func(rec *AdoptProvenanceRecord) {
+			rec.Clients[0].ConfigTarget.ProjectIdentitySHA256 = strings.ToUpper(fingerprint)
+		}},
+		{name: "mismatched fingerprint", mutate: func(rec *AdoptProvenanceRecord) {
+			rec.Clients[0].ConfigTarget.ProjectIdentitySHA256 = strings.Repeat("0", 64)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := valid
+			rec.Clients = append([]AdoptClientProvenance(nil), valid.Clients...)
+			target := *valid.Clients[0].ConfigTarget
+			rec.Clients[0].ConfigTarget = &target
+			tc.mutate(&rec)
+			if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(adoptedEntriesSchemaV3, rec), adoptedEntriesSchemaV3); err == nil || !errors.Is(err, errProjectAdoptConfigTargetInvalid) {
+				t.Fatalf("invalid project target error = %v", err)
+			}
+		})
 	}
 }
 

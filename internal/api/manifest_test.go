@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 )
 
 func TestManifestListReturnsAllYAML(t *testing.T) {
@@ -63,7 +66,7 @@ kind: global
 transport: remote-http
 url: https://mcp.context7.com/mcp
 headers:
-  Authorization: Bearer ${secret:CONTEXT7_TOKEN}
+  Authorization: Bearer ${secret:TEST_KEY}
 client_bindings:
   - client: claude-code
 `
@@ -185,7 +188,10 @@ func TestManifestCreateRefusesWhileDeAdoptLeaseHeld(t *testing.T) {
 	_ = isolateStateDir(t)
 
 	const name = "manifest-create-during-deadopt"
-	manifestRoot := defaultManifestDir()
+	manifestRoot, err := CanonicalManifestDir()
+	if err != nil {
+		t.Fatalf("resolve canonical manifest root: %v", err)
+	}
 	manifestDir := filepath.Join(manifestRoot, name)
 	if err := os.RemoveAll(manifestDir); err != nil {
 		t.Fatalf("remove stale test manifest: %v", err)
@@ -223,6 +229,158 @@ func TestManifestCreateRefusesWhileDeAdoptLeaseHeld(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(manifestDir, "manifest.yaml")); statErr != nil {
 		t.Fatalf("manifest was not created after lease release: %v", statErr)
+	}
+}
+
+func TestCanonicalManifestMutationsRefuseBusyVaultTransaction(t *testing.T) {
+	type mutationCase struct {
+		name       string
+		targetName string
+		seed       bool
+		run        func(*API, string, string, string) error
+	}
+	mutations := []mutationCase{
+		{
+			name:       "create",
+			targetName: "busy-vault-create",
+			run: func(a *API, name, _, replacement string) error {
+				return a.ManifestCreate(name, replacement)
+			},
+		},
+		{
+			name:       "edit",
+			targetName: "busy-vault-edit",
+			seed:       true,
+			run: func(a *API, name, _, replacement string) error {
+				return a.ManifestEdit(name, replacement)
+			},
+		},
+		{
+			name:       "hash-edit",
+			targetName: "busy-vault-hash-edit",
+			seed:       true,
+			run: func(a *API, name, initial, replacement string) error {
+				_, err := a.ManifestEditWithHash(name, replacement, ManifestHashContent([]byte(initial)))
+				return err
+			},
+		},
+		{
+			name:       "delete",
+			targetName: "busy-vault-delete",
+			seed:       true,
+			run: func(a *API, name, _, _ string) error {
+				return a.ManifestDelete(name)
+			},
+		},
+	}
+	for _, contention := range []string{"vault-flock", "vault-mutex"} {
+		for _, mutation := range mutations {
+			contention, mutation := contention, mutation
+			t.Run(contention+"/"+mutation.name, func(t *testing.T) {
+				_, manifestRoot, _ := setupAdoptTestEnv(t, mutation.targetName, "")
+				if _, err := NewAPI().SecretsInit(); err != nil {
+					t.Fatalf("initialize isolated vault: %v", err)
+				}
+				initial := "name: " + mutation.targetName + "\nkind: global\ntransport: stdio-bridge\ncommand: initial\ndaemons:\n  - name: default\n    port: 31995\nclient_bindings: []\n"
+				replacement := "name: " + mutation.targetName + "\nkind: global\ntransport: stdio-bridge\ncommand: replacement\ndaemons:\n  - name: default\n    port: 31996\nclient_bindings: []\n"
+				manifestPath := filepath.Join(manifestRoot, mutation.targetName, "manifest.yaml")
+				if mutation.seed {
+					if err := NewAPI().ManifestCreateIn(manifestRoot, mutation.targetName, initial); err != nil {
+						t.Fatalf("seed manifest: %v", err)
+					}
+				} else if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+					t.Fatalf("create target is not absent: %v", err)
+				}
+
+				entered := make(chan struct{})
+				releaseCh := make(chan struct{})
+				holderDone := make(chan error, 1)
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(releaseCh) }) }
+				holderJoined := false
+				joinHolder := func() error {
+					if holderJoined {
+						return nil
+					}
+					holderJoined = true
+					return <-holderDone
+				}
+				t.Cleanup(func() {
+					release()
+					if !holderJoined {
+						select {
+						case err := <-holderDone:
+							holderJoined = true
+							if err != nil {
+								t.Errorf("release busy-vault holder: %v", err)
+							}
+						case <-time.After(2 * time.Second):
+							t.Errorf("busy-vault holder did not settle")
+						}
+					}
+				})
+				go func() {
+					if contention == "vault-mutex" {
+						vaultMutex.Lock()
+						close(entered)
+						<-releaseCh
+						vaultMutex.Unlock()
+						holderDone <- nil
+						return
+					}
+					holderDone <- secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+						close(entered)
+						<-releaseCh
+						return nil
+					})
+				}()
+				select {
+				case <-entered:
+				case err := <-holderDone:
+					holderJoined = true
+					t.Fatalf("acquire busy-vault holder: %v", err)
+				case <-time.After(2 * time.Second):
+					t.Fatal("busy-vault holder did not acquire")
+				}
+
+				operationDone := make(chan error, 1)
+				go func() { operationDone <- mutation.run(NewAPI(), mutation.targetName, initial, replacement) }()
+				var operationErr error
+				blocked := false
+				select {
+				case operationErr = <-operationDone:
+				case <-time.After(250 * time.Millisecond):
+					blocked = true
+				}
+				release()
+				if blocked {
+					select {
+					case operationErr = <-operationDone:
+					case <-time.After(2 * time.Second):
+						t.Fatal("canonical manifest mutation remained blocked after lock release")
+					}
+				}
+				if err := joinHolder(); err != nil {
+					t.Fatalf("release busy-vault holder: %v", err)
+				}
+				if blocked {
+					t.Errorf("canonical manifest mutation blocked instead of returning retryable busy failure")
+				}
+
+				var leaseFailure *LeaseFailure
+				if !errors.As(operationErr, &leaseFailure) || leaseFailure.FailureID != "E_MANIFEST_MUTATION_BUSY" || !leaseFailure.Retryable {
+					t.Errorf("mutation error = %T %v, want retryable LeaseFailure E_MANIFEST_MUTATION_BUSY", operationErr, operationErr)
+				}
+				if mutation.seed {
+					got, err := os.ReadFile(manifestPath)
+					if err != nil || string(got) != initial {
+						t.Errorf("busy mutation changed/removed manifest: got=%q err=%v", got, err)
+					}
+				} else if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+					t.Errorf("busy create wrote manifest: %v", err)
+				}
+			})
+		}
 	}
 }
 

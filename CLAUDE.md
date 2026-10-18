@@ -275,127 +275,49 @@ surface:
 | `feedback_kosyak_surgical_edits_leave_stale_text.md` | Edit-tool patches left contradictory stale sections |
 | `feedback_kosyak_trusted_ide_diagnostics_blindly.md` | reported IDE diagnostics as compile errors without command-line verify |
 
-## npm publish — CANONICAL pipeline (tag-push CI, NEVER local `npm publish`)
+## npm publish — canonical tag-push CI
 
-The ONLY supported publish path is a **git tag push** that triggers
-`.github/workflows/npm-publish.yml`. Do NOT `npm publish` from a local
-shell — see "Why not local" below. Every prior release (`v0.4.6`,
-`v0.4.7`, `v0.4.8`) went out this way.
+The supported publication path is a git tag push that triggers
+`.github/workflows/npm-publish.yml`. Do not publish from a local npm shell.
+`npm/package.json` owns the release version and exact optional dependency;
+`npm/generate-platform-packages.js` and `npm/sync-version.js --inject` own its
+platform/build propagation.
 
-### The 4 steps
+Receive the approved source, human review and publication-safety checks before
+pushing source or a release tag. Follow the protected branch's ordinary pull
+request/merge rules. A tag `vX.Y.Z` selects the exact received public commit;
+its push triggers the release. An ordinary source branch push does not.
+`workflow_dispatch` with `dry_run=true` is available for pipeline validation;
+a dry-run is not proof of a real registry write.
 
-1. **Bump the version.** `npm/package.json` is the SINGLE version authority.
-   Set `version` + every `optionalDependencies` entry to the new `X.Y.Z`,
-   then propagate:
+This release admits Windows x64. The workflow captures its actual checkout
+commit and UTC build date, uses the existing Go source-snapshot owner, invokes
+the normal marked `build.ps1`, verifies the Product and generated identity
+manifest and checks exact package membership. It publishes
+`@applicate2628/mcp-local-hub-win32-x64` before `mcp-local-hub`, with
+`npm publish --provenance --access public`. Prereleases select the `beta` tag;
+stable releases use the ordinary stable tag. A previous local image or archive
+is not relabelled as the hosted build.
 
-   ```bash
-   V=0.4.9   # must be > the current `npm view mcp-local-hub version` (latest)
-   node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
-   node npm/generate-platform-packages.js   # rewrites the 6 npm/packages/*/package.json
-   node npm/sync-version.js --inject         # pushes $V into build.sh + build.ps1
-   ```
+Authentication is package-bound npm Trusted Publishing through the GitHub-hosted
+job's OIDC identity. Both packages must trust this repository and
+`npm-publish.yml` with no environment binding. The workflow requires
+`contents: read`, `id-token: write`, Node24.21.0 and npm11.19.0. Preserve its
+fail-closed toolchain and authority checks; there is no long-lived-token
+fallback. Do not paste authentication codes into npm configuration.
 
-2. **Commit** the bump (`npm/package.json`, the 6 `npm/packages/*/package.json`,
-   `build.sh`, `build.ps1`) and `git push origin master`.
+### npm owns delivery; local setup is explicit
 
-3. **Tag + push the tag:**
+The public npm `mcphub` shim resolves the native payload from the matching
+installed platform package and preserves argv, standard streams and exit status.
+The shipped `scripts/postinstall.js` is a no-op. Global, local and transitive npm
+installation does not launch the Product or copy it into `~/.local/bin`.
 
-   ```bash
-   git tag v$V && git push origin v$V
-   ```
-
-4. **Watch + verify:**
-
-   ```bash
-   gh run watch "$(gh run list --workflow=npm-publish.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
-   npm view mcp-local-hub version dist-tags   # latest must == $V
-   ```
-
-The workflow cross-builds the 6 platform binaries (win32/darwin/linux ×
-x64/arm64) with `-s -w -X main.version=$V`, drops them into each
-`@applicate2628/mcp-local-hub-<plat>-<arch>` sub-package's `bin/`, asserts
-the binary version, then `npm publish --provenance --access public`-es the
-6 scoped platform packages FIRST (so the meta's `optionalDependencies`
-resolve) and the `mcp-local-hub` meta LAST. Prereleases (`vX.Y.Z-beta.N`)
-auto-route to the `beta` dist-tag, never `latest`.
-
-### Why NOT local `npm publish`
-
-- The npm account has **2FA enabled**, so a local `npm publish` hits
-  `EOTP` ("This operation requires a one-time password") on EVERY package.
-  The web-auth OTP flow (`Open this URL …`) needs an interactive CLI
-  session an automated run cannot complete; a 6-digit TOTP would have to
-  be re-pasted within its short window for all 7 publishes.
-- The local `~/.npmrc` `_authToken` periodically **expires** (`npm whoami`
-  → `E401`). Do not "fix" this by pasting a value into `_authToken` — a
-  64-hex OTP/auth-code is NOT a token and will only `E401` AND clobber a
-  working interactive-login session token.
-- The CI workflow uses the repository's npm automation credential
-  `NPM_TOKEN`, which bypasses the OTP prompt, and `--provenance` (Sigstore
-  attestation) only works from CI (needs the OIDC id-token permission set to
-  write), not locally.
-
-KOSYAK (2026-06-17): wasted a round fumbling local publish (EOTP →
-mis-set the OTP as `_authToken` → E401 → clobbered the session token)
-before remembering the canonical tag-push path that `v0.4.6`/`v0.4.7`
-already used. Tag-push first; never local-publish.
-
-### npm install canonicalizes into `~/.local/bin` (copy-only postinstall, GLOBAL install only)
-
-`~/.local/bin/mcphub[.exe]` is the CANONICAL binary the whole product
-points at (scheduler tasks, the supervisor's own-child spawn, and
-`install --upgrade`'s rename-aside target), and it sits EARLIER on PATH
-than the npm global bin BY DESIGN — npm is only the delivery vehicle. So
-without help, `npm install -g mcp-local-hub@<newer>` left a STALE
-`~/.local/bin` binary shadowing the fresh npm one, and nothing propagated
-the update (bug
-`work-items/bugs/2026-07-22-canonical-local-bin-binary-not-auto-updated-from-npm.md`;
-operator decision: **"npm должен ставить в local тоже"**).
-
-The fix is a **copy-only** `postinstall` in the META package
-(`npm/scripts/postinstall.js`): it resolves the platform binary npm just
-installed (via the shared `npm/lib/platform-binary.js` map — single owner,
-also used by `bin/cli.js`) and spawns it with the binary-only
-`mcphub canonicalize` subcommand (`internal/cli/canonicalize.go`), which
-copies the FRESH binary into `~/.local/bin` and NOTHING else — no PATH
-edit, no scheduled task, no client-config rewrite, no prompt/elevation, no
-fleet reap/restart. It reuses the existing `copyExe` + `setupTargetPath`
-owners and, for the Windows file-lock case (running fleet holds the
-canonical `.exe`), the SAME `api.RenameAsideReplace` swap `install
---upgrade` uses; the new binary takes effect on the next fleet/supervisor
-restart. It is IDEMPOTENT (byte-identical target → no-op, no `.old-<ts>`
-churn).
-
-Security stance reconciled, NOT discarded: the `bin/cli.js` comment now
-reads "no postinstall **DOWNLOAD** step" — a network-free copy of an
-already-installed local file is a different, defensible risk profile than
-the supply-chain-vector downloading postinstall. **FAIL-SAFE is
-load-bearing:** any canonicalize failure (permission, file lock,
-`--ignore-scripts`, missing `~/.local`) is swallowed — the postinstall
-prints a one-line notice pointing at `mcphub setup` and exits 0, so
-`npm install` NEVER breaks. Under `npm install --ignore-scripts` the
-postinstall does not run at all; the documented manual fallback is
-`mcphub setup` (or the hidden `mcphub canonicalize`).
-
-**GLOBAL install only (bot PR #585).** The bot flagged that the hook as
-originally shipped ran on ANY `npm install` — including a **local** install
-of the package into a project's own `node_modules`, or a **transitive**
-install where `mcp-local-hub` is merely some other package's dependency —
-silently mutating the developer's canonical PATH binary on a host that
-never asked for mcphub at all. Operator decision: keep the auto-update
-(reject the bot's remove-the-hook fix), but gate it. The postinstall now
-checks `process.env.npm_config_global === "true"` before doing anything —
-npm mirrors its own resolved `global` config into every lifecycle script's
-environment
-(https://docs.npmjs.com/cli/v11/using-npm/config#environment-variables);
-empirically verified on npm 11.17.0: `npm install -g` sets it to `"true"`,
-while a bare local install and a transitive install both leave it unset.
-Comparing `npm_config_prefix` to `npm_config_global_prefix` was considered
-and rejected — the same probe showed both hold the identical value during a
-LOCAL install too, so that pair cannot distinguish the two cases. A
-non-global run now prints `mcp-local-hub: skipping ~/.local/bin
-canonicalize (not a global install)` and returns before resolving or
-spawning anything.
+`mcphub setup` and `mcphub canonicalize` remain explicit user-selected local
+installation actions. They are not npm execution prerequisites. An authenticated
+running Hub retains its selected executable until the existing handover owner
+completes; starting an npm command does not itself migrate that owner, retire an
+old local image, mutate Tasks or prove permanent npm adoption.
 
 ## CLI entry point + console lifetime (2026-07)
 
@@ -424,23 +346,27 @@ exits 0. That is the lever for CI and piped callers.
 
 ### Windows console contract
 
-Canonical terminal and npm invocation uses CUI-subsystem `mcphub.exe` and
-inherits the caller's terminal handles. The exact startup prefix
-`mcphub --debug-console [command ...]` remains accepted for compatibility and
-is consumed before Cobra parsing. Supported GUI/Explorer/background entrypoints
-use GUI-subsystem `mcphub-windowless.exe`; raw double-click of `mcphub.exe` is
-deprecated and unsupported as a GUI route.
+Every distributable, installable and canonical Windows `mcphub.exe` is the
+single GUI-subsystem2 Product. `windows-product-artifacts.json` owns that
+artifact and the generated non-executable `windows-product-identity.json`.
+Normal Windows product payloads come from `pwsh ./build.ps1` or the equivalent
+release workflow, with original Product role, metadata and PE admission.
+Plain `go build` is a compile check, not Product publication.
 
-Background child creation always applies the shared Windows no-console process
-attributes, even when the parent opted into a debug console. Child argv and
-environment never propagate console intent. A configured GUI editor is admitted
-as a GUI-subsystem executable before launch.
+The same Product serves GUI, terminal and npm entrypoints. The npm Node shim
+waits for the native child and inherits its standard streams, preserving argv,
+stdout, stderr and exit status. Ordinary CLI composition preserves valid output
+handles; if outputs are invalid it attaches the parent console and repairs only
+those outputs, returning a visible failure before command execution if repair
+fails. Ordinary GUI, background and stdio-protocol modes do not allocate a
+console. This contract does not infer terminal behavior from redirected pipes.
 
-Windows product payloads come only from `pwsh ./build.ps1` (or the equivalent
-release workflow). A host-neutral bounded PE reader admits the canonical CLI as
-subsystem 3 and the windowless adapter as subsystem 2 before build publication,
-setup, canonicalize, migration, or upgrade mutation. Plain `go build` remains a
-non-product compile check.
+The exact startup prefix `mcphub --debug-console [command ...]` remains accepted
+and is consumed before Cobra parsing. Explicit debug mode may attach or allocate
+a process-local console for GUI/CLI. Background child creation always applies
+the shared Windows no-console attributes; child argv and environment do not
+propagate console intent. Configured GUI editors are admitted as GUI-subsystem
+executables before launch.
 
 ## GUI frontend (Phase 3B-II onward)
 

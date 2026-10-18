@@ -1,12 +1,112 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/cli"
 )
+
+func TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	calls := 0
+	launchBareGUIFn = func() (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	args, handled, err := prepareInvocation([]string{"mcphub"}, cli.WindowsConsoleDisabled)
+	if err != nil || !handled || calls != 1 || !reflect.DeepEqual(args, []string{"mcphub"}) {
+		t.Fatalf("prepareInvocation=(%q,%t,%v) calls=%d, want original args/handled/nil/1", args, handled, err, calls)
+	}
+}
+
+func TestClassifyWindowsEntrypointMode_CBuildIsStdioProtocol(t *testing.T) {
+	if got := classifyWindowsEntrypointMode([]string{"mcphub", "cbuild"}); got != windowsEntrypointStdioProtocol {
+		t.Fatalf("cbuild entrypoint mode = %d, want windowsEntrypointStdioProtocol", got)
+	}
+}
+
+func TestPrepareInvocationPreservesNonBareAndOptOutRoutes(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	launchBareGUIFn = func() (bool, error) {
+		t.Fatal("bare coordinator called for preserved route")
+		return false, nil
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  string
+	}{
+		{name: "explicit gui", args: []string{"mcphub", "gui"}},
+		{name: "version", args: []string{"mcphub", "version"}},
+		{name: "debug console", args: []string{"mcphub", cli.WindowsDebugConsolePrefix}},
+		{name: "bare opt out", args: []string{"mcphub"}, env: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(NoAutoGUIEnv, tc.env)
+			args, handled, err := prepareInvocation(tc.args, cli.WindowsConsoleDisabled)
+			if err != nil || handled || !reflect.DeepEqual(args, tc.args) {
+				t.Fatalf("prepareInvocation=(%q,%t,%v), want unchanged/unhandled/nil", args, handled, err)
+			}
+		})
+	}
+}
+
+func TestPrepareInvocationBareLaunchFailureRemainsVisible(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	want := errors.New("bare launch failed")
+	launchBareGUIFn = func() (bool, error) { return false, want }
+
+	_, handled, err := prepareInvocation([]string{"mcphub"}, cli.WindowsConsoleDisabled)
+	if handled || !errors.Is(err, want) {
+		t.Fatalf("handled=%t error=%v, want false and launch cause", handled, err)
+	}
+}
+
+func TestPrepareInvocationNormalizedDebugBareStaysInline(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	calls := 0
+	launchBareGUIFn = func() (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	original := []string{"mcphub", cli.WindowsDebugConsolePrefix}
+	policy, normalized := cli.ResolveWindowsConsolePolicy(original)
+	if policy != cli.WindowsConsoleDebugExplicit || !reflect.DeepEqual(normalized, []string{"mcphub"}) {
+		t.Fatalf("normalization premise=(%v,%q), want explicit debug and bare argv", policy, normalized)
+	}
+	args, handled, err := prepareInvocation(normalized, policy)
+	if err != nil || handled || calls != 0 || !reflect.DeepEqual(args, []string{"mcphub", "gui"}) {
+		t.Fatalf("prepare normalized debug=(%q,%t,%v) calls=%d, want routed gui/unhandled/nil/0", args, handled, err, calls)
+	}
+}
+
+func TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	calls := 0
+	launchBareGUIFn = func() (bool, error) {
+		calls++
+		return true, nil
+	}
+
+	policy, normalized := cli.ResolveWindowsConsolePolicy([]string{"mcphub"})
+	args, handled, err := prepareInvocation(normalized, policy)
+	if err != nil || !handled || calls != 1 || !reflect.DeepEqual(args, []string{"mcphub"}) {
+		t.Fatalf("prepare normalized plain bare=(%q,%t,%v) calls=%d, want original/handled/nil/1", args, handled, err, calls)
+	}
+}
 
 func TestRouteBareInvocationProducesTrayEnabledGUIArgs(t *testing.T) {
 	routed := cli.RouteInvocationArgs([]string{"mcphub"})
@@ -140,5 +240,82 @@ func TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam(t *testing.T) {
 	if !shouldAutoLaunchGUIForArgs([]string{"mcphub"}) {
 		t.Fatal("MCPHUB_NO_AUTO_GUI leaked into shouldAutoLaunchGUIForArgs; " +
 			"the pure seam must stay a function of argv alone")
+	}
+}
+
+// Catches a new root command acquiring a console by accident, or an existing
+// GUI/background/protocol command drifting into ordinary CLI handle repair.
+func TestClassifyWindowsEntrypointModeExhaustiveRootCommands(t *testing.T) {
+	wantSpecial := map[string]windowsEntrypointMode{
+		"gui":                                   windowsEntrypointGUI,
+		"supervise":                             windowsEntrypointBackground,
+		"daemon":                                windowsEntrypointBackground,
+		"route":                                 windowsEntrypointBackground,
+		"tray":                                  windowsEntrypointBackground,
+		"workspace-weekly-refresh":              windowsEntrypointBackground,
+		"audit-lock-terminal-worker":            windowsEntrypointBackground,
+		"daemon-recovery-audit-handoff-worker":  windowsEntrypointBackground,
+		"gui-owner-unknown-confirmation-worker": windowsEntrypointBackground,
+		"relay":                                 windowsEntrypointStdioProtocol,
+		"cbuild":                                windowsEntrypointStdioProtocol,
+	}
+	for _, command := range cli.NewRootCmd().Commands() {
+		want := windowsEntrypointCLI
+		if special, ok := wantSpecial[command.Name()]; ok {
+			want = special
+			delete(wantSpecial, command.Name())
+		}
+		if got := classifyWindowsEntrypointMode([]string{"mcphub", command.Name()}); got != want {
+			t.Errorf("command %q mode = %v, want %v", command.Name(), got, want)
+		}
+	}
+	if len(wantSpecial) != 0 {
+		t.Fatalf("special entry commands are not registered at the root: %v", wantSpecial)
+	}
+	for _, args := range [][]string{nil, {"mcphub"}} {
+		if got := classifyWindowsEntrypointMode(args); got != windowsEntrypointGUI {
+			t.Errorf("bare args %q mode = %v, want GUI", args, got)
+		}
+	}
+	for _, args := range [][]string{{"mcphub", "unknown-future-command"}, {"mcphub", "gui-owner-unknown-confirmation-marker-worker"}} {
+		if got := classifyWindowsEntrypointMode(args); got != windowsEntrypointCLI {
+			t.Errorf("safe-default args %q mode = %v, want CLI", args, got)
+		}
+	}
+}
+
+// Catches the existing bare-GUI opt-out being classified as GUI after the
+// product executable becomes a GUI-subsystem image, which would skip ordinary
+// CLI output repair before Cobra prints the command list.
+func TestClassifyWindowsEntrypointModeBareOptOutKeepsCobraHelp(t *testing.T) {
+	previous := launchBareGUIFn
+	t.Cleanup(func() { launchBareGUIFn = previous })
+	for _, optOut := range []string{"1", "true", " TRUE "} {
+		t.Run(optOut, func(t *testing.T) {
+			t.Setenv(NoAutoGUIEnv, optOut)
+			if got := classifyWindowsEntrypointMode([]string{"mcphub"}); got != windowsEntrypointCLI {
+				t.Errorf("bare opt-out mode = %v, want CLI", got)
+			}
+			launchCalls := 0
+			launchBareGUIFn = func() (bool, error) {
+				launchCalls++
+				return true, nil
+			}
+			args, handled, err := prepareInvocation([]string{"mcphub"}, cli.WindowsConsoleDisabled)
+			if err != nil || handled || launchCalls != 0 || !reflect.DeepEqual(args, []string{"mcphub"}) {
+				t.Fatalf("prepare opt-out = (%q,%t,%v) launch calls=%d, want unchanged/unhandled/nil/0", args, handled, err, launchCalls)
+			}
+			root := cli.NewRootCmd()
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs([]string{})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute opted-out bare root: %v", err)
+			}
+			if !strings.Contains(stdout.String(), "Usage:") || stderr.Len() != 0 {
+				t.Fatalf("opt-out help stdout/stderr = %q/%q, want visible command help/empty", stdout.String(), stderr.String())
+			}
+		})
 	}
 }

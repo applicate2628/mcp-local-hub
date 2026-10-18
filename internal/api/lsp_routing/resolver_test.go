@@ -3,128 +3,15 @@ package lsp_routing
 import (
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sync"
+	"strings"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 )
-
-func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(testFile), "resolver.go"), nil, 0)
-	if err != nil {
-		t.Fatalf("ParseFile resolver.go: %v", err)
-	}
-	var refresh *ast.FuncDecl
-	for _, decl := range parsed.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "refresh" {
-			refresh = fn
-			break
-		}
-	}
-	if refresh == nil {
-		t.Fatal("resolver refresh function missing")
-	}
-
-	var capture, deferredRelease token.Pos
-	ast.Inspect(refresh.Body, func(node ast.Node) bool {
-		switch node := node.(type) {
-		case *ast.AssignStmt:
-			if node.Tok != token.DEFINE || len(node.Lhs) != 1 || len(node.Rhs) != 1 {
-				return true
-			}
-			name, ok := node.Lhs[0].(*ast.Ident)
-			if !ok {
-				return true
-			}
-			call, ok := node.Rhs[0].(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			method, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			receiver, ok := method.X.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			registry, ok := receiver.X.(*ast.Ident)
-			if ok && name.Name == "entries" && method.Sel.Name == "LSPEntries" && receiver.Sel.Name == "reg" && registry.Name == "r" {
-				capture = node.Pos()
-			}
-		case *ast.DeferStmt:
-			ast.Inspect(node.Call, func(candidate ast.Node) bool {
-				call, ok := candidate.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				callee, ok := call.Fun.(*ast.Ident)
-				if ok && callee.Name == "unlock" {
-					deferredRelease = node.Pos()
-				}
-				return true
-			})
-		}
-		return true
-	})
-	if !capture.IsValid() || !deferredRelease.IsValid() {
-		t.Fatalf("refresh ordering anchors missing: capture=%d deferredRelease=%d", capture, deferredRelease)
-	}
-	if capture <= deferredRelease {
-		t.Fatal("refresh must register the registry-release defer before capturing LSP entries")
-	}
-}
-
-func TestRefreshSnapshotsRegistryBeforeUnlock(t *testing.T) {
-	dir := t.TempDir()
-	entries := make([]api.WorkspaceEntry, 512)
-	for i := range entries {
-		entries[i] = api.WorkspaceEntry{
-			WorkspaceKey:  fmt.Sprintf("workspace-%04d", i),
-			WorkspacePath: filepath.Join(dir, fmt.Sprintf("workspace-%04d", i)),
-			Language:      "go",
-			Port:          9200 + i,
-		}
-	}
-	regPath := makeRegistryWithLSP(t, dir, entries)
-	reg := api.NewRegistry(regPath)
-	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
-
-	var wg sync.WaitGroup
-	for worker := 0; worker < 4; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for iteration := 0; iteration < 8; iteration++ {
-				resolver.mu.Lock()
-				resolver.loaded = false
-				resolver.mu.Unlock()
-				resolver.refresh()
-			}
-		}()
-	}
-	wg.Wait()
-
-	resolver.mu.RLock()
-	got := len(resolver.cached)
-	resolver.mu.RUnlock()
-	if got != len(entries) {
-		t.Fatalf("cached entries = %d, want %d", got, len(entries))
-	}
-}
 
 func testLanguages() []config.LanguageSpec {
 	return []config.LanguageSpec{
@@ -165,6 +52,139 @@ func makeRegistryWithLSP(t *testing.T, dir string, entries []api.WorkspaceEntry)
 		t.Fatalf("Save: %v", err)
 	}
 	return regPath
+}
+
+func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "go-project")
+	writeFile(t, filepath.Join(project, "go.mod"))
+	file := filepath.Join(project, "main.go")
+	writeFile(t, file)
+	canon := mustCanonical(t, project)
+	regPath := makeRegistryWithLSP(t, root, []api.WorkspaceEntry{{
+		WorkspaceKey: api.WorkspaceKey(canon), WorkspacePath: canon,
+		Language: "go", Backend: "gopls-mcp", Port: 9201,
+	}})
+	fixedMtime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(regPath, fixedMtime, fixedMtime); err != nil {
+		t.Fatal(err)
+	}
+	reg := api.NewRegistry(regPath)
+	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
+	seed, err := resolver.ResolveByPath(file, "go")
+	if err != nil || !seed.Registered || seed.Entry.Port != 9201 {
+		t.Fatalf("seed = %+v, err %v", seed, err)
+	}
+	updated := api.NewRegistry(regPath)
+	if err := updated.PutLSP(api.WorkspaceEntry{
+		WorkspaceKey: api.WorkspaceKey(canon), WorkspacePath: canon,
+		Language: "go", Backend: "gopls-mcp", Port: 9202,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := updated.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(regPath, fixedMtime, fixedMtime); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 32; i++ {
+		got, err := resolver.ResolveByPath(file, "go")
+		if err == nil && got.Registered && got.Entry.Port == 9202 {
+			return
+		}
+	}
+	t.Fatal("updated LSP registration was not observed within 32 lookups with equal mtime")
+}
+
+func TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "go-project")
+	writeFile(t, filepath.Join(project, "go.mod"))
+	canon := mustCanonical(t, project)
+	key := api.WorkspaceKey(canon)
+	regPath := makeRegistryWithLSP(t, root, []api.WorkspaceEntry{{
+		WorkspaceKey: key, WorkspacePath: canon, Language: "go", Port: 9201,
+		ClientEntries: map[string]string{"codex": "original"}, Languages: []string{"go"},
+	}})
+	fixed := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(regPath, fixed, fixed); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath, testLanguages())
+	seed, ok := resolver.RegisteredWorkspace(key, "go")
+	if !ok || seed.Port != 9201 {
+		t.Fatalf("seed = %+v, present %v", seed, ok)
+	}
+	seed.ClientEntries["codex"] = "mutated"
+	seed.Languages[0] = "rust"
+	stable, ok := resolver.RegisteredWorkspace(key, "go")
+	if !ok || stable.ClientEntries["codex"] != "original" || stable.Languages[0] != "go" {
+		t.Fatalf("returned nested fields mutated the cache: %+v", stable)
+	}
+	beforeInfo, err := os.Stat(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := strings.Replace(string(before), "port: 9201", "port: 9202", 1)
+	if after == string(before) || len(after) != len(before) {
+		t.Fatal("test fixture did not produce an equal-sized content change")
+	}
+	if err := os.WriteFile(regPath, []byte(after), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(regPath, fixed, fixed); err != nil {
+		t.Fatal(err)
+	}
+	afterInfo, err := os.Stat(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(beforeInfo, afterInfo) || beforeInfo.Size() != afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
+		t.Fatal("test fixture metadata changed")
+	}
+	for i := 0; i < 32; i++ {
+		entry, present := resolver.RegisteredWorkspace(key, "go")
+		if present && entry.Port == 9202 {
+			return
+		}
+	}
+	t.Fatal("same-identity LSP edit was not observed in 32 lookups")
+}
+
+func TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "go-project")
+	writeFile(t, filepath.Join(project, "go.mod"))
+	canon := mustCanonical(t, project)
+	key := api.WorkspaceKey(canon)
+	rows := []api.WorkspaceEntry{{WorkspaceKey: key, WorkspacePath: canon, Language: "go", Port: 9201}}
+	for i := 0; i < 256; i++ {
+		rows = append(rows, api.WorkspaceEntry{
+			WorkspaceKey:  fmt.Sprintf("other-%03d", i),
+			WorkspacePath: filepath.Join(root, fmt.Sprintf("other-%03d", i)),
+			Language:      "go", Port: 9300 + i,
+			ClientEntries: map[string]string{"codex": "unrelated"}, Languages: []string{"go"},
+		})
+	}
+	regPath := makeRegistryWithLSP(t, root, rows)
+	r := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath, testLanguages())
+	if got, ok := r.RegisteredWorkspace(key, "go"); !ok || got.Port != 9201 {
+		t.Fatalf("seed = %+v, present %v", got, ok)
+	}
+	allocs := testing.AllocsPerRun(64, func() {
+		got, ok := r.RegisteredWorkspace(key, "go")
+		if !ok || got.Port != 9201 {
+			panic("selected LSP row changed")
+		}
+	})
+	if allocs >= 100 {
+		t.Fatalf("single-row lookup allocated %.0f times with 256 unrelated nested rows", allocs)
+	}
 }
 
 func TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration(t *testing.T) {
@@ -422,7 +442,7 @@ func TestResolveByPath_RefreshesRegistryOnMtimeAdvance(t *testing.T) {
 // test (adversarial cross-family review of Increment 1). See that package's
 // doc comment for the full safety argument. This test holds the registry's
 // exclusive lock externally (simulating a concurrent GUI mutation) and proves
-// a read-only LSP resolver's refresh still completes instead of blocking.
+// a read-only LSP observer lookup completes without taking that lock.
 //
 // Mutation-proven: constructing via NewWorkspaceResolver (the locked path)
 // instead of NewReadOnlyWorkspaceResolver reproduces the pre-fix blocking
@@ -469,14 +489,15 @@ func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *te
 	case <-done:
 		// Correct: the read-only resolver never contended for the lock.
 	case <-time.After(3 * time.Second):
-		t.Fatal("read-only LSP resolver blocked on a concurrently-held exclusive registry lock — it must reload unlocked, not contend with a GUI writer")
+		t.Fatal("read-only LSP resolver blocked on a concurrently-held exclusive registry lock — its observer must read without that lock")
 	}
 }
 
 // TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock pins the
 // CONTRASTING, intentional production behavior: the ordinary (non-read-only)
-// LSP resolver's refresh DOES take the registry's exclusive lock. Mirrors
-// the serena_routing package's identically-named test.
+// LSP constructor selects the GUI observer mode; its ObserveView takes the
+// registry's exclusive lock for a required content read. Mirrors the
+// serena_routing package's identically-named lock-mode test.
 func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
 	root := t.TempDir()
 	regPath := filepath.Join(root, "workspaces.yaml")

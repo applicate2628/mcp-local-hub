@@ -11,6 +11,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -44,21 +45,43 @@ func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStri
 // is non-nil only for the default hub-mcp.log path; caller-owned sinks keep
 // their established per-call fallback events.
 func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation)) ([]byte, error) {
+	return readStateFileInodeAnchoredWithObservation(path, requiresStrict, maxBytes, auditFallbacks, consume, auditSink, parentFallbacksObserved, nil, nil)
+}
+
+func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation), ctx context.Context, b *stateFileReadBuilder) ([]byte, error) {
+	if err := observedStateReadBoundary(ctx, b, "parent-open"); err != nil {
+		return nil, err
+	}
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
 	pfd, err := unix.Open(parentPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, &os.PathError{Op: "open", Path: parentPath, Err: os.ErrNotExist}
+			missing := &os.PathError{Op: "open", Path: parentPath, Err: os.ErrNotExist}
+			if b != nil {
+				b.recordAbsence(StateFileReadParentNotFound, err, missing)
+			}
+			return nil, missing
 		}
 		return nil, fmt.Errorf("open parent %s: %w", parentPath, err)
 	}
-	defer unix.Close(pfd)
+	if b == nil {
+		defer unix.Close(pfd)
+	} else {
+		b.acquire("parent", func() error { return unix.Close(pfd) })
+		defer b.closeResource("parent")
+	}
 
 	var pst unix.Stat_t
 	if err := unix.Fstat(pfd, &pst); err != nil {
 		return nil, fmt.Errorf("fstat parent %s: %w", parentPath, err)
+	}
+	if b != nil {
+		b.identity("parent", observedStateReadPOSIXIdentity(pst))
+	}
+	if err := observedStateReadBoundary(ctx, b, "parent-policy"); err != nil {
+		return nil, err
 	}
 	pmode := uint32(pst.Mode)
 	if int(pst.Uid) != os.Getuid() {
@@ -125,21 +148,39 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		parentFallbacksObserved(path, parentFallbacks)
 	}
 
+	if err := observedStateReadBoundary(ctx, b, "leaf-open"); err != nil {
+		return nil, err
+	}
 	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+			missing := &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+			if b != nil {
+				b.recordAbsence(StateFileReadLeafNotFound, err, missing)
+			}
+			return nil, missing
 		}
 		if errors.Is(err, syscall.ELOOP) {
 			return nil, ErrIrregularFile
 		}
 		return nil, err
 	}
-	defer unix.Close(fd)
+	if b == nil {
+		defer unix.Close(fd)
+	} else {
+		b.acquire("leaf", func() error { return unix.Close(fd) })
+		defer b.closeResource("leaf")
+	}
 
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
 		return nil, fmt.Errorf("hub-mcp state verify: fstat: %w", err)
+	}
+	if b != nil {
+		b.identity("leaf", observedStateReadPOSIXIdentity(st))
+	}
+	if err := observedStateReadBoundary(ctx, b, "leaf-policy"); err != nil {
+		return nil, err
 	}
 	mode := os.FileMode(st.Mode & 0o777)
 	switch st.Mode & syscall.S_IFMT {
@@ -171,6 +212,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 				"file_mode": fmt.Sprintf("%04o", mode),
 			})
 		}
+	}
+	if b != nil {
+		b.view.PolicyQualified = true
 	}
 	if consume {
 		// The strict parent and file gates above make the basename owner-only.
@@ -212,6 +256,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	buf := make([]byte, 0, st.Size)
 	readSucceeded := false
 	defer func() {
+		if b != nil {
+			b.captureBytes(buf)
+		}
 		if !readSucceeded {
 			zeroStateSecretBytes(buf)
 		}
@@ -219,7 +266,16 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	chunk := make([]byte, 4096)
 	defer zeroStateSecretBytes(chunk)
 	for {
+		if err := observedStateReadBoundary(ctx, b, "read"); err != nil {
+			return nil, err
+		}
 		n, err := unix.Read(fd, chunk)
+		if contextErr := observedStateReadBoundary(ctx, b, "read"); contextErr != nil {
+			if n > 0 {
+				buf = append(buf, chunk[:n]...)
+			}
+			return nil, errors.Join(err, contextErr)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}

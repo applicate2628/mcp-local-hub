@@ -18,6 +18,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
@@ -41,6 +42,184 @@ func TestLoadSerenaManifestForMigrateCarriesExactRawHash(t *testing.T) {
 	}
 }
 
+func seedMigrateRoutingSettings(t *testing.T, body string) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	neutralizeClientConfigPathEnv(t, home)
+	stateRoot := apitest.HardenedTempDir(t)
+	t.Setenv("LOCALAPPDATA", stateRoot)
+	t.Setenv("XDG_DATA_HOME", stateRoot)
+	path := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir routing settings dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write routing settings: %v", err)
+	}
+	return home
+}
+
+func interceptMigrateSerenaReconcile(t *testing.T, fn func(context.Context, api.SerenaReconcileOpts) (*api.MigrateReport, error)) {
+	t.Helper()
+	original := reconcileSerenaClientsToRouterFn
+	reconcileSerenaClientsToRouterFn = fn
+	t.Cleanup(func() { reconcileSerenaClientsToRouterFn = original })
+}
+
+func TestMigrateSerenaReconcileUsesVerifiedLiveGUIAuthority(t *testing.T) {
+	const livePort = 19425
+	seedMigrateRoutingSettings(t, "mcp_front.routing_target: gui\ngui_server.port: \"9125\"\n")
+	allClients := clients.AllClients()
+	claude := allClients["claude-code"]
+	if claude == nil {
+		t.Fatal("claude-code client adapter unavailable")
+	}
+
+	var observed api.SerenaReconcileOpts
+	interceptMigrateSerenaReconcile(t, func(ctx context.Context, opts api.SerenaReconcileOpts) (*api.MigrateReport, error) {
+		observed = opts
+		opts.PidportPath = "synthetic-gui.pidport"
+		opts.ReadPidport = func(string) (int, int, error) { return 4242, livePort, nil }
+		opts.VerifyIdentity = func(context.Context, int, int) error { return nil }
+		opts.Ping = func(_ context.Context, port int) error {
+			if port != livePort {
+				return fmt.Errorf("readiness probed port %d, want live GUI port %d", port, livePort)
+			}
+			return nil
+		}
+		opts.Clients = map[string]clients.Client{"claude-code": claude}
+		opts.ClientsInclude = []string{"claude-code"}
+		opts.DryRun = true
+		return api.ReconcileSerenaClientsToRouter(ctx, opts)
+	})
+
+	report, err := reconcileSerenaClientsFn(context.Background(), io.Discard)
+	if err != nil {
+		t.Fatalf("GUI migration must accept verified live port drift: %v", err)
+	}
+	if observed.RoutingTarget != nil {
+		t.Fatalf("GUI migration passed frozen persisted target %+v; want nil so the API owns live discovery", *observed.RoutingTarget)
+	}
+	if len(report.Applied) != 1 || report.Applied[0].URL != "http://127.0.0.1:19425/serena/mcp" {
+		t.Fatalf("GUI migration report = %+v, want verified live router URL", report)
+	}
+}
+
+func TestMigrateSerenaReconcileRetainsExactFrontAuthority(t *testing.T) {
+	const frontPort = 19426
+	seedMigrateRoutingSettings(t, "mcp_front.routing_target: front\nmcp_front.routing_generation: \"7\"\nmcp_front.routing_admitted_port: \"19426\"\n")
+	allClients := clients.AllClients()
+	claude := allClients["claude-code"]
+	if claude == nil {
+		t.Fatal("claude-code client adapter unavailable")
+	}
+
+	var observed api.SerenaReconcileOpts
+	interceptMigrateSerenaReconcile(t, func(ctx context.Context, opts api.SerenaReconcileOpts) (*api.MigrateReport, error) {
+		observed = opts
+		opts.PidportPath = "synthetic-gui.pidport"
+		opts.ReadPidport = func(string) (int, int, error) {
+			t.Fatal("FRONT authority consumed GUI pidport metadata")
+			return 0, 0, nil
+		}
+		opts.VerifyIdentity = func(context.Context, int, int) error {
+			t.Fatal("FRONT authority invoked GUI identity verification")
+			return nil
+		}
+		opts.Ping = func(_ context.Context, port int) error {
+			if port != frontPort {
+				return fmt.Errorf("readiness probed port %d, want admitted FRONT port %d", port, frontPort)
+			}
+			return nil
+		}
+		opts.Clients = map[string]clients.Client{"claude-code": claude}
+		opts.ClientsInclude = []string{"claude-code"}
+		opts.DryRun = true
+		return api.ReconcileSerenaClientsToRouter(ctx, opts)
+	})
+
+	report, err := reconcileSerenaClientsFn(context.Background(), io.Discard)
+	if err != nil {
+		t.Fatalf("FRONT migration reconcile: %v", err)
+	}
+	want := api.ClientRoutingTarget{Mode: api.MCPFrontRoutingTargetFront, Port: frontPort, Generation: 7}
+	if observed.RoutingTarget == nil || *observed.RoutingTarget != want {
+		t.Fatalf("FRONT migration target = %+v, want exact %+v", observed.RoutingTarget, want)
+	}
+	if len(report.Applied) != 1 || report.Applied[0].URL != "http://127.0.0.1:19426/serena/mcp" {
+		t.Fatalf("FRONT migration report = %+v, want admitted FRONT router URL", report)
+	}
+}
+
+func TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		readPidport    func(string) (int, int, error)
+		verifyIdentity func(context.Context, int, int) error
+		ping           func(context.Context, int) error
+	}{
+		{
+			name:        "missing",
+			readPidport: func(string) (int, int, error) { return 0, 0, os.ErrNotExist },
+		},
+		{
+			name:           "stale",
+			readPidport:    func(string) (int, int, error) { return 4242, 19425, nil },
+			verifyIdentity: func(context.Context, int, int) error { return errors.New("recorded process is not alive") },
+		},
+		{
+			name:        "zero",
+			readPidport: func(string) (int, int, error) { return 4242, 0, nil },
+		},
+		{
+			name:           "refused_identity",
+			readPidport:    func(string) (int, int, error) { return 4242, 19425, nil },
+			verifyIdentity: func(context.Context, int, int) error { return errors.New("listener owner image refused") },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seedMigrateRoutingSettings(t, "mcp_front.routing_target: gui\ngui_server.port: \"9125\"\n")
+			allClients := clients.AllClients()
+			claude := allClients["claude-code"]
+			if claude == nil {
+				t.Fatal("claude-code client adapter unavailable")
+			}
+			configPath := claude.ConfigPath()
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+				t.Fatalf("mkdir client config dir: %v", err)
+			}
+			before := []byte("{}\n")
+			if err := os.WriteFile(configPath, before, 0o600); err != nil {
+				t.Fatalf("seed client config: %v", err)
+			}
+
+			interceptMigrateSerenaReconcile(t, func(ctx context.Context, opts api.SerenaReconcileOpts) (*api.MigrateReport, error) {
+				opts.PidportPath = "synthetic-gui.pidport"
+				opts.ReadPidport = tc.readPidport
+				opts.VerifyIdentity = tc.verifyIdentity
+				opts.Ping = tc.ping
+				opts.Clients = map[string]clients.Client{"claude-code": claude}
+				opts.ClientsInclude = []string{"claude-code"}
+				return api.ReconcileSerenaClientsToRouter(ctx, opts)
+			})
+
+			_, err := reconcileSerenaClientsFn(context.Background(), io.Discard)
+			if !errors.Is(err, api.ErrSerenaReconcileGUINotLive) {
+				t.Fatalf("error = %v, want ErrSerenaReconcileGUINotLive", err)
+			}
+			after, readErr := os.ReadFile(configPath)
+			if readErr != nil {
+				t.Fatalf("read client config: %v", readErr)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("client config changed after refused GUI observation: before=%q after=%q", before, after)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test harness.
 //
@@ -51,14 +230,20 @@ func TestLoadSerenaManifestForMigrateCarriesExactRawHash(t *testing.T) {
 // supervisor-intent.json.
 // ---------------------------------------------------------------------------
 
-// migrateSerenaTestEnv redirects every state/registry/home resolution into a
-// fresh per-test temp tree and installs a fake canonical mcphub binary so the
-// real api.Preflight (LookPath + ensureCanonicalMcphubPresent) passes for the
-// in-memory dynamic-pool manifest (which carries command: go). Returns the
-// resolved state dir (where supervisor-intent.json lands) and the manifest-
-// override dir (seed serena/manifest.yaml under it).
-func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
+type migrateSerenaTestEnvOptions struct {
+	canonicalRuntimeFixture bool
+}
+
+// migrateSerenaTestEnv redirects state, registry and home resolution into a
+// fresh per-test tree and creates an inert canonical file. Omitted options
+// preserve default runtime-product selection; canonicalRuntimeFixture selects
+// this constructor's file through the restore-bound API test seam. Returns the
+// resolved state directory and manifest override directory.
+func migrateSerenaTestEnv(t *testing.T, opts ...migrateSerenaTestEnvOptions) (stateDir, manifestDir string) {
 	t.Helper()
+	if len(opts) > 1 {
+		t.Fatal("migrateSerenaTestEnv accepts at most one options value")
+	}
 	root := t.TempDir()
 	// Hardened (single-user-safe) supervisor state dir, mirroring production's
 	// owner-only %LOCALAPPDATA%, so the migrate's gated WriteStateFileAtomic
@@ -68,12 +253,12 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// r9 reverted that absent-strict over-reach (an absent intent now relaxes
 	// regardless of broadening), so the hardened root is REDUNDANT for the
 	// strict verdict — retained as the correct production-mirroring posture.
-	// manifestDir/home stay plain (they are not gated by the supervisor
-	// state-file pipeline).
+	// HOME must satisfy the client-parent gate before any descendants are
+	// created. Only manifestDir stays plain, outside the state-file pipeline.
 	stateDir = apitest.HardenedTempDir(t)
 	manifestDir = filepath.Join(root, "manifests")
-	home := filepath.Join(root, "home")
-	for _, d := range []string{manifestDir, home} {
+	home := apitest.HardenedDir(t, filepath.Join(root, "home"))
+	for _, d := range []string{manifestDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -130,10 +315,10 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// (internal/clients/config_path_sandbox_audit.go).
 	neutralizeClientConfigPathEnv(t, home)
 
-	// Install a fake canonical mcphub at <home>/.local/bin/mcphub[.exe] so
-	// ensureCanonicalMcphubPresent (os.Stat) passes inside the real install.
+	// Create the inert canonical fixture at <home>/.local/bin/mcphub[.exe].
+	// Opted-in downstream install tests select it through the existing test seam.
 	canonicalDir := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(canonicalDir, 0o755); err != nil {
+	if err := api.SecureCreateParentDirForConfigLock(canonicalDir); err != nil {
 		t.Fatalf("mkdir canonical dir: %v", err)
 	}
 	canonicalName := "mcphub"
@@ -143,7 +328,54 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	if err := os.WriteFile(filepath.Join(canonicalDir, canonicalName), []byte(""), 0o755); err != nil {
 		t.Fatalf("write fake canonical mcphub: %v", err)
 	}
+	if len(opts) == 1 && opts[0].canonicalRuntimeFixture {
+		restoreCanonical := api.SetTestCanonicalMcphubPath(filepath.Join(canonicalDir, canonicalName))
+		t.Cleanup(restoreCanonical)
+	}
+	// Create the resolved registry parent before callers seed its payload.
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("resolve registry path: %v", err)
+	}
+	if err := api.SecureCreateParentDirForConfigLock(filepath.Dir(regPath)); err != nil {
+		t.Fatalf("create registry parent: %v", err)
+	}
 	return stateDir, manifestDir
+}
+
+func TestMigrateSerenaTestEnv_CanonicalFixtureSelectionRestoresBaseline(t *testing.T) {
+	baseline := filepath.Join(t.TempDir(), "canonical-baseline")
+	if err := os.WriteFile(baseline, []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreBaseline := api.SetTestCanonicalMcphubPath(baseline)
+	t.Cleanup(restoreBaseline)
+
+	t.Run("omitted", func(t *testing.T) {
+		migrateSerenaTestEnv(t)
+		got, err := api.RuntimeMcphubExecutable()
+		if err != nil || got != baseline {
+			t.Fatalf("omitted canonical fixture selection = %q, %v; want baseline %q", got, err, baseline)
+		}
+	})
+	if got, err := api.RuntimeMcphubExecutable(); err != nil || got != baseline {
+		t.Fatalf("after omitted child canonical selection = %q, %v; want baseline %q", got, err, baseline)
+	}
+
+	t.Run("opt-in", func(t *testing.T) {
+		migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
+		want := filepath.Join(os.Getenv("HOME"), ".local", "bin", api.MCPHubBinaryName())
+		got, err := api.RuntimeMcphubExecutable()
+		if err != nil || got != want || got == baseline {
+			t.Fatalf("opt-in canonical fixture selection = %q, %v; want owned fixture %q distinct from baseline %q", got, err, want, baseline)
+		}
+		if info, err := os.Stat(got); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("selected owned canonical fixture is not present as a regular file: %v", err)
+		}
+	})
+	if got, err := api.RuntimeMcphubExecutable(); err != nil || got != baseline {
+		t.Fatalf("after opt-in child canonical selection = %q, %v; want restored baseline %q", got, err, baseline)
+	}
 }
 
 // seedSerenaManifest writes a serena/manifest.yaml into the override dir with
@@ -514,7 +746,7 @@ func TestMigrateSerena_Malformed_Errors(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	reconcileInvoked := false
@@ -583,7 +815,7 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	manifestPath := seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {

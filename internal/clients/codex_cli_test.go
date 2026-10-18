@@ -101,7 +101,7 @@ args = ["hi"]
 	if !strings.Contains(s, `url = "http://localhost:9122/mcp"`) && !strings.Contains(s, `url = 'http://localhost:9122/mcp'`) {
 		t.Errorf("URL not set: %s", s)
 	}
-	// Verify old `command` field was removed from the serena block (wholesale replace).
+	// Verify old transport fields were removed from the serena block.
 	// Quote-agnostic check: just look for the key name inside the block.
 	serenaStart := strings.Index(s, "[mcp_servers.serena]")
 	otherStart := strings.Index(s, "[mcp_servers.other]")
@@ -123,6 +123,11 @@ args = ["server.mjs", "--stdio"]
 tool_timeout_sec = 900
 `)
 	c := &codexCLI{path: path}
+	sourceDocument, err := c.readTOML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceSnapshot := sourceDocument["mcp_servers"].(map[string]any)["security"].(map[string]any)
 
 	backup, err := c.Backup()
 	if err != nil {
@@ -144,13 +149,13 @@ tool_timeout_sec = 900
 		t.Fatalf("readTOML: %v", err)
 	}
 	raw, _ := root["mcp_servers"].(map[string]any)["security"].(map[string]any)
-	matched, err := codexHubEntryMatches(raw, expected)
+	matched, err := codexSourceProvenHTTPMatches(raw, sourceSnapshot, expected)
 	if err != nil || !matched {
-		t.Fatalf("codexHubEntryMatches(timeout=900) = %t, %v; want true, nil", matched, err)
+		t.Fatalf("proven entry match(timeout=900) = %t, %v; want true, nil", matched, err)
 	}
-	matched, err = codexHubEntryMatches(raw, MCPEntry{Name: "security", URL: expected.URL})
+	matched, err = codexHubEntryMatches(raw, expected)
 	if err != nil || matched {
-		t.Fatalf("codexHubEntryMatches(timeout=0) = %t, %v; want false, nil", matched, err)
+		t.Fatalf("unproven entry with omitted startup timeout = %t, %v; want false, nil", matched, err)
 	}
 	if err := c.RestoreEntryFromBackupForRollback(backup, "security"); err != nil {
 		t.Fatalf("RestoreEntryFromBackupForRollback: %v", err)
@@ -685,23 +690,24 @@ url = "http://127.0.0.1:9304/mcp"
 }
 
 func TestCodexInverseRelocationRestoresSourceAndRemovesTargetAtomically(t *testing.T) {
-	path := setupCodexConfig(t, `[mcp_servers.serena-latest-mcphub]
-url = "http://127.0.0.1:9304/mcp"
-startup_timeout_sec = 10
+	path := setupCodexConfig(t, `[mcp_servers.serena-latest]
+command = "uvx"
+args = ["serena", "start-mcp-server"]
 
 [mcp_servers.unrelated]
 url = "http://127.0.0.1:9305/mcp"
 `)
 	c := &codexCLI{path: path}
-	result, err := c.RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation{
+	forward, err := c.RelocateHTTPEntry(CodexHTTPRelocation{
 		SourceEntryName: "serena-latest",
 		TargetEntryName: "serena-latest-mcphub",
-		Target:          MCPEntry{Name: "serena-latest-mcphub", URL: "http://127.0.0.1:9304/mcp"},
-		SourceSnapshot: map[string]any{
-			"command": "uvx",
-			"args":    []any{"serena", "start-mcp-server"},
-		},
+		Entry:           MCPEntry{Name: "serena-latest-mcphub", URL: "http://127.0.0.1:9304/mcp"},
+		ExpectedSource:  CodexTransportStdio,
 	})
+	if err != nil || forward.ExactInverse() == nil {
+		t.Fatalf("forward relocation = %#v, %v", forward, err)
+	}
+	result, err := c.RestoreRelocatedHTTPEntry(*forward.ExactInverse())
 	if err != nil {
 		t.Fatalf("RestoreRelocatedHTTPEntry: %v", err)
 	}

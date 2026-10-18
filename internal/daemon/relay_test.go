@@ -25,6 +25,8 @@ type fakeMCPServer struct {
 	onPOST        func(body []byte, sid string) (status int, contentType string, responseBody []byte)
 	sseHoldUntil  chan struct{}
 	sseEvents     []string // pre-canned events delivered on GET /mcp
+	deletedIDs    []string
+	deleteStatus  int
 	mu            sync.Mutex
 	postCount     atomic.Int32
 	deleteCount   atomic.Int32
@@ -75,7 +77,14 @@ func (f *fakeMCPServer) handler() http.HandlerFunc {
 			}
 		case "DELETE":
 			f.deleteCount.Add(1)
-			w.WriteHeader(http.StatusOK)
+			f.mu.Lock()
+			f.deletedIDs = append(f.deletedIDs, r.Header.Get("MCP-Session-Id"))
+			f.mu.Unlock()
+			status := f.deleteStatus
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -279,6 +288,65 @@ func TestRelay_GracefulShutdownSendsDELETE(t *testing.T) {
 
 	if fake.deleteCount.Load() == 0 {
 		t.Error("expected DELETE /mcp on shutdown, got 0")
+	}
+}
+
+func TestRelay_ShutdownReleasesOwnedSessionReference(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		deleteStatus int
+	}{
+		{name: "delete accepted", deleteStatus: http.StatusOK},
+		{name: "delete HTTP failure", deleteStatus: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := newFakeServer(t)
+			fake.deleteStatus = test.deleteStatus
+			fake.onPOST = func(body []byte, sid string) (int, string, []byte) {
+				return http.StatusOK, "application/json", []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"relay-control"}]}}`)
+			}
+			server := httptest.NewServer(fake.handler())
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			relay := &HTTPToStdioRelay{
+				URL:        server.URL,
+				Stdin:      strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}` + "\n"),
+				Stdout:     &stdout,
+				Stderr:     &stderr,
+				HTTPClient: &http.Client{Timeout: 2 * time.Second},
+			}
+			if err := relay.Run(context.Background()); err != nil {
+				t.Fatalf("relay Run: %v stderr=%s", err, stderr.String())
+			}
+
+			controlRequest, err := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			controlRequest.Header.Set("Content-Type", "application/json")
+			controlRequest.Header.Set("MCP-Session-Id", "direct-control-session")
+			controlResponse, err := server.Client().Do(controlRequest)
+			if err != nil {
+				t.Fatalf("backing control after relay shutdown: %v", err)
+			}
+			defer controlResponse.Body.Close()
+			if controlResponse.StatusCode != http.StatusOK {
+				t.Fatalf("backing control status=%d, want 200", controlResponse.StatusCode)
+			}
+			if fake.deleteCount.Load() != 1 {
+				t.Fatalf("relay owned DELETE count=%d, want exactly 1", fake.deleteCount.Load())
+			}
+			fake.mu.Lock()
+			deletedIDs := append([]string(nil), fake.deletedIDs...)
+			fake.mu.Unlock()
+			if len(deletedIDs) != 1 || deletedIDs[0] != "test-session-123" {
+				t.Fatalf("relay DELETE session IDs=%v, want only test-session-123", deletedIDs)
+			}
+			if got := relay.getSessionID(); got != "" {
+				t.Fatalf("relay session reference HTTPToStdioRelay.sessionID=%q after Run settled", got)
+			}
+		})
 	}
 }
 

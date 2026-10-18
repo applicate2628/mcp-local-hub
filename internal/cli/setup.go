@@ -136,7 +136,7 @@ func samePath(a, b string) bool {
 
 // copySingleBinaryPlatformArtifact is the non-Windows product-copy helper and
 // the historical Windows single-GUI compatibility helper. New Windows setup,
-// canonicalize, and upgrade product paths must use WindowsProductPairTxn.
+// canonicalize, and upgrade product paths must use WindowsProductTxn.
 func copySingleBinaryPlatformArtifact(src, dst string) error {
 	return copyExeWithWindowsAdmission(src, dst, binaryadmission.AdmitWindowsGUI)
 }
@@ -272,17 +272,17 @@ func newSetupCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install the mcphub product to ~/.local/bin, register PATH, install the supervisor-liveness task",
-		Long: `Install the admitted mcphub.exe + mcphub-windowless.exe product pair at
-~/.local/bin on Windows, or canonicalize ~/.local/bin/mcphub on Linux/macOS,
+		Long: `Install the admitted native-GUI mcphub.exe product at ~/.local/bin
+on Windows, or canonicalize ~/.local/bin/mcphub on Linux/macOS,
 ~/.local/bin/mcphub (Linux/macOS), ensure that directory is on user PATH,
 and install the supervisor-liveness scheduled task that relaunches the
 supervisor/GUI owner if it dies mid-session (cadence ~1 min).
 
 What setup does:
-  1. Windows: admits the currently-running CUI mcphub.exe and its exact
-     mcphub-windowless.exe sibling, then installs adapter-first/tasks/CUI-last,
-     reads back the pair and exact-owned task Command nodes, and commits a V2
-     receipt. Linux/macOS: copies the running binary to ~/.local/bin/.
+  1. Windows: admits one Product-role mcphub.exe, installs it before changing
+     exact-owned task Command nodes, retires only an admitted legacy adapter,
+     and commits a read-back V3 receipt. Linux/macOS: copies the running binary
+     to ~/.local/bin/.
   2. Windows: ensures %USERPROFILE%\.local\bin is in HKCU\Environment\Path,
      broadcasts WM_SETTINGCHANGE so new shells pick it up
   3. Linux/macOS: prints the 'export PATH=...' line to paste into shell rc
@@ -341,15 +341,14 @@ Rollback:
   preregistrations for the router's auto-register path.
 
 Why this exists:
-  Direct terminal commands use ~/.local/bin/mcphub.exe. Supported Scheduler
-  tasks and Explorer/background routes use the absolute windowless adapter
-  ~/.local/bin/mcphub-windowless.exe; Task Scheduler does not resolve this
-  product contract through PATH. Setup migrates only admitted exact-owned task
-  Command nodes inside the same pair transaction.
+  Direct terminal commands, supported Scheduler tasks, and Explorer/background
+  routes use the same absolute ~/.local/bin/mcphub.exe Product. Task Scheduler
+  does not resolve this product contract through PATH. Setup migrates only
+  admitted exact-owned task Command nodes inside the same product transaction.
 
 Examples:
   mcphub setup                    # after 'go build', before first 'install'
-  mcphub setup                    # after pulling + rebuilding — settles the canonical product pair
+  mcphub setup                    # after pulling + rebuilding — settles the canonical product
   mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
   mcphub setup --trusted-root <project-root>    # bless one LSP trusted root
@@ -513,11 +512,11 @@ func validateSetupServerArg(server string) error {
 }
 
 // setupInstallServerFn is the test seam for the headless single-server
-// install step. Production leaves it nil and routes through api.Install
-// (the exact `mcphub install --server` code path). Tests set it so setup
-// coverage does not touch real client configs, the supervisor, or
-// scheduler tasks.
-var setupInstallServerFn func(server string, out io.Writer) error
+// install step. Production leaves it nil and routes the fully constructed
+// options through api.Install (the exact `mcphub install --server` code path).
+// Tests set it so setup coverage can inspect those options without touching
+// real client configs, the supervisor, or scheduler tasks.
+var setupInstallServerFn func(opts api.InstallOpts) error
 
 // runSetupInstallServer installs the named server headlessly via the same
 // api.Install path the `mcphub install --server` command uses, with the
@@ -529,13 +528,15 @@ func runSetupInstallServer(out io.Writer, server string) error {
 	if name == "" {
 		return nil
 	}
-	if setupInstallServerFn != nil {
-		return setupInstallServerFn(name, out)
+	opts := api.InstallOpts{
+		Server:  name,
+		Writer:  out,
+		GUIPort: resolveInstallGUIPort(),
 	}
-	return api.NewAPI().Install(api.InstallOpts{
-		Server: name,
-		Writer: out,
-	})
+	if setupInstallServerFn != nil {
+		return setupInstallServerFn(opts)
+	}
+	return api.NewAPI().Install(opts)
 }
 
 func runSetupBootstrap(out io.Writer) error {

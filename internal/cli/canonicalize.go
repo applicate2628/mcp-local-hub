@@ -16,7 +16,7 @@ import (
 
 // newCanonicalizeCmdReal returns the hidden `mcphub canonicalize` command: a
 // minimal, non-interactive product copy into the canonical ~/.local/bin. On
-// Windows the product is the admitted CLI/windowless pair and the same bounded
+// Windows the product is one admitted native-GUI mcphub.exe and the same bounded
 // transaction may migrate only exact-owned task Command nodes. It exists so
 // the npm package's postinstall
 // hook (npm/scripts/postinstall.js) can invoke the FRESHLY-installed platform
@@ -28,14 +28,14 @@ import (
 //   - register PATH (that is a one-time setup concern; the canonical path has
 //     been on PATH since the operator's first `mcphub setup`);
 //   - create, delete, start, or stop a scheduled task (Windows may rewrite the
-//     Command node of an existing exact-owned task inside the pair transaction);
+//     Command node of an existing exact-owned task inside the product transaction);
 //   - rewrite client MCP configs or probe/mutate the OS ephemeral range;
 //   - prompt, request elevation, or refuse when elevated;
 //   - reap or restart the running fleet (it is NOT `install --upgrade`).
 //
 // It reuses the canonical-path owner (setupTargetPath) `mcphub setup` uses.
 // Windows delegates all binary, task, rollback, and receipt mutation to the
-// same WindowsProductPairTxn used by upgrade; non-Windows keeps the established
+// same WindowsProductTxn used by upgrade; non-Windows keeps the established
 // single-binary replacement path.
 func newCanonicalizeCmdReal() *cobra.Command {
 	return &cobra.Command{
@@ -48,13 +48,12 @@ do nothing else.
 Unlike 'mcphub setup', this command does NOT register PATH, create/delete/start/
 stop a scheduled task, rewrite client MCP configs, probe the OS ephemeral range,
 prompt, request elevation, or reap/restart the running fleet. On Windows the
-atomic product-pair transaction may rewrite only the Command node of an existing
-exact-owned current-user mcphub task so it keeps a windowless entry point.
+atomic product transaction may rewrite only the Command node of an existing
+exact-owned current-user mcphub task so it targets the canonical product.
 
-It is the minimal, non-interactive canonicalize step the npm package's
-postinstall hook (npm/scripts/postinstall.js) runs on the freshly installed
-platform binary, so 'npm install -g mcp-local-hub@<newer>' refreshes the
-authoritative ~/.local/bin binary directly. The copy is lock-safe on Windows:
+This is an explicit local-install action. npm starts its admitted native
+platform payload directly and does not require or create this local copy.
+The optional local copy is lock-safe on Windows:
 if the running fleet holds the canonical binary, the prior binary is renamed
 aside to '.old-<ts>' (the same crash-safe swap 'mcphub install --upgrade'
 uses) and the new binary takes effect on the next fleet/supervisor restart.
@@ -62,8 +61,7 @@ uses) and the new binary takes effect on the next fleet/supervisor restart.
 Idempotent: a no-op when the running binary already IS the canonical target,
 or when the canonical binary is already byte-identical to this one.
 
-For hosts installed with 'npm install --ignore-scripts' (which skips the
-postinstall), the manual equivalent is 'mcphub setup'.`,
+Skipping npm lifecycle scripts does not require this action.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,7 +88,7 @@ func canonicalizeBinaryOnly(w io.Writer) error {
 // canonicalizeBinaryToTarget is the pure core of canonicalizeBinaryOnly,
 // parameterized on src/target so it is directly unit-testable without
 // depending on os.Executable(). Windows delegates identity, idempotence,
-// exact-owned tasks, receipt, and event reconciliation to the sole product-pair
+// exact-owned tasks, receipt, and event reconciliation to the sole product
 // owner; non-Windows keeps the established single-binary guards.
 func canonicalizeBinaryToTarget(w io.Writer, src, target string) error {
 	return canonicalizeProductToTarget(w, src, target)

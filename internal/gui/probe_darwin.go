@@ -4,8 +4,14 @@
 package gui
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 )
+
+func waitRetainedProcess(_ context.Context, _ uintptr) (uint32, error) {
+	return 0, errors.Join(ErrProcessExitStatusUnavailable, errMacOSProbeUnsupported)
+}
 
 // macOS lacks /proc/<pid>/{exe,cmdline,stat}, so the Linux probe
 // implementation cannot be reused. Until a libproc/sysctl-based

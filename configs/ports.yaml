@@ -53,4 +53,13 @@ global:
   - server: cst
     daemon: default
     port: 9140
+  - server: kimi
+    daemon: default
+    port: 9142
+  - server: sonnet
+    daemon: default
+    port: 9141
+  - server: mcp-cbuild
+    daemon: default
+    port: 9143
 workspace_scoped: []

@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -58,4 +59,19 @@ type HeldPIDGeneration interface {
 	VerifyIdentity(PIDIdentityProof) error
 	Terminate() (committed bool, err error)
 	Close() error
+}
+
+// HeldPIDExitResult separates a positively signalled original object from an
+// available exit code. Later errors do not erase either acquired fact.
+type HeldPIDExitResult struct {
+	Exited            bool
+	ExitCodeAvailable bool
+	ExitCode          uint32
+}
+
+// HeldPIDExitWaiter is optional so legacy generation owners/mocks retain their
+// original contract. WaitExit borrows the original object; callers own Close.
+type HeldPIDExitWaiter interface {
+	HeldPIDGeneration
+	WaitExit(context.Context) (HeldPIDExitResult, error)
 }

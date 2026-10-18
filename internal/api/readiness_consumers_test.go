@@ -78,6 +78,39 @@ func TestAssessReadinessFromStatusRows_FailsClosedForProcessOnlyRunningRow(t *te
 	}
 }
 
+func TestAssessReadinessFromStatusRows_NilObservationSettlesOnlyStoppedZeroPID(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		state       string
+		pid         int
+		wantStopped bool
+	}{
+		{name: "stopped zero PID", state: "Stopped", wantStopped: true},
+		{name: "stopped positive PID", state: "Stopped", pid: 17},
+		{name: "stopped negative PID", state: "Stopped", pid: -1},
+		{name: "running zero PID", state: "Running"},
+		{name: "unknown zero PID", state: "Unknown"},
+		{name: "missing state", state: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := []DaemonStatus{{TaskName: "readiness-nil-fallback", State: tc.state, PID: tc.pid}}
+			snapshot, err := NewAPI().AssessReadinessFromStatusRows(context.Background(), rows, nil, false, time.Time{})
+			if err != nil {
+				t.Fatalf("AssessReadinessFromStatusRows: %v", err)
+			}
+			if tc.wantStopped {
+				if rows[0].ServiceState != ServiceStateStopped || !rows[0].ReadinessSettled {
+					t.Fatalf("nil stopped row did not settle stopped: snapshot=%#v row=%#v", snapshot, rows[0])
+				}
+				return
+			}
+			if rows[0].ServiceState == ServiceStateStopped || rows[0].ServiceState == ServiceStateRunning {
+				t.Fatalf("invalid nil fallback gained stopped or running credit: snapshot=%#v row=%#v", snapshot, rows[0])
+			}
+		})
+	}
+}
+
 func TestAssessReadinessFromStatusRowsWithOptionsCarriesCallerMigrationEligibility(t *testing.T) {
 	bindings := []BindingObservationV1{{Client: "codex-cli", Requested: true, Present: true, Readable: true, Enabled: true, Route: BindingRouteDirect}}
 	options := ReadinessStatusRowsOptionsV1{

@@ -171,6 +171,20 @@ func demigrateOneBinding(
 	if !adapter.Exists() {
 		return
 	}
+	guard, guardErr := acquireAttachmentBindingGuard(server, binding.Client, adapter, true)
+	if guardErr != nil {
+		report.Failed = append(report.Failed, FailedMigration{Server: server, Client: binding.Client, Err: guardErr.Error()})
+		return
+	}
+	defer func() {
+		if releaseErr := guard.release(); releaseErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{Server: server, Client: binding.Client, Err: "attachment operation lease release unverified"})
+		}
+	}()
+	if guard.alreadyRestored {
+		report.Restored = append(report.Restored, RestoredMigration{Server: server, Client: binding.Client})
+		return
+	}
 	// Iterate every mcp-local-hub backup newest-first.
 	// Rationale: the lexicographically-latest timestamped
 	// backup may hold the entry in hub-managed form (operator

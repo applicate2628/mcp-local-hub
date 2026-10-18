@@ -41,7 +41,7 @@ var (
 	supervisorControlWaitLockReleasedFn = func(ctx context.Context, deps *v5UpgradeDeps, timeout time.Duration) error {
 		return deps.WaitSupervisorLockReleased(ctx, timeout)
 	}
-	supervisorControlStartFn = func(deps *v5UpgradeDeps, target string) error {
+	supervisorControlStartFn = func(deps *v5UpgradeDeps, target string) (SupervisorLaunch, error) {
 		return deps.StartSupervisor(target)
 	}
 	supervisorControlWaitReadyFn = func(ctx context.Context, deps *v5UpgradeDeps, timeout time.Duration, target string, candidate UpgradeCandidateV1) error {
@@ -140,12 +140,12 @@ func replaceLegacySupervisorForControl(ctx context.Context, expectedOwner api.Su
 		return settleLegacySupervisorLockReleaseFailure(deps, target, candidate, expectedOwner, expectedPorts,
 			fmt.Errorf("replace legacy supervisor before control mutation: prior lock release: %w", err))
 	}
-	if err := supervisorControlStartFn(deps, target); err != nil {
-		return recoverCurrentSuccessorAfterLegacyReap(deps, target, candidate, fmt.Errorf("start current successor: %w", err))
-	}
 	readyCtx, cancelReady := supervisorCompatPhaseContext()
 	defer cancelReady()
-	if err := supervisorControlWaitReadyFn(readyCtx, deps, supervisorCompatHandoffTimeout, target, candidate); err != nil {
+	if err := startAndReceiveSupervisorForControl(readyCtx, deps, target, candidate); err != nil {
+		if errors.Is(err, errSupervisorLaunchSettlement) {
+			return err
+		}
 		return recoverCurrentSuccessorAfterLegacyReap(deps, target, candidate, fmt.Errorf("current successor readiness: %w", err))
 	}
 	return nil
@@ -191,12 +191,12 @@ func settleLegacySupervisorLockReleaseFailure(deps *v5UpgradeDeps, target string
 			return fmt.Errorf("%w; exact legacy force fallback completed but expected ports remained bound: %w", trigger, err)
 		}
 	}
-	if err := supervisorControlStartFn(deps, target); err != nil {
-		return recoverCurrentSuccessorAfterLegacyReap(deps, target, candidate, fmt.Errorf("start current successor after exact legacy force fallback: %w", err))
-	}
 	readyCtx, cancelReady := supervisorCompatPhaseContext()
 	defer cancelReady()
-	if err := supervisorControlWaitReadyFn(readyCtx, deps, supervisorCompatHandoffTimeout, target, candidate); err != nil {
+	if err := startAndReceiveSupervisorForControl(readyCtx, deps, target, candidate); err != nil {
+		if errors.Is(err, errSupervisorLaunchSettlement) {
+			return errors.Join(trigger, err)
+		}
 		return recoverCurrentSuccessorAfterLegacyReap(deps, target, candidate, fmt.Errorf("current successor readiness after exact legacy force fallback: %w", err))
 	}
 	return nil
@@ -211,15 +211,22 @@ func supervisorCompatPhaseContext() (context.Context, context.CancelFunc) {
 // joined to the original failure: the caller receives both the failed primary
 // phase and whether a usable current successor was recovered.
 func recoverCurrentSuccessorAfterLegacyReap(deps *v5UpgradeDeps, target string, candidate UpgradeCandidateV1, primary error) error {
-	if err := supervisorControlStartFn(deps, target); err != nil {
-		return errors.Join(primary, fmt.Errorf("bounded successor recovery start: %w", err))
-	}
-	recoveryCtx, cancel := supervisorCompatPhaseContext()
+	ctx, cancel := supervisorCompatPhaseContext()
 	defer cancel()
-	if err := supervisorControlWaitReadyFn(recoveryCtx, deps, supervisorCompatHandoffTimeout, target, candidate); err != nil {
+	if err := startAndReceiveSupervisorForControl(ctx, deps, target, candidate); err != nil {
 		return errors.Join(primary, fmt.Errorf("bounded successor recovery readiness: %w", err))
 	}
 	return fmt.Errorf("%w; current successor recovered after legacy reap", primary)
+}
+
+func startAndReceiveSupervisorForControl(ctx context.Context, deps *v5UpgradeDeps, target string, candidate UpgradeCandidateV1) error {
+	launch, err := supervisorControlStartFn(deps, target)
+	if err != nil {
+		return errors.Join(err, abortStartedSupervisor(launch))
+	}
+	return receiveStartedSupervisor(ctx, launch, supervisorExpectation(filepath.Dir(deps.supervisorLockDir), target, candidate.SHA256), func() error {
+		return supervisorControlWaitReadyFn(ctx, deps, supervisorCompatHandoffTimeout, target, candidate)
+	})
 }
 
 type supervisorCompatReapDeps struct {

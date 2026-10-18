@@ -50,6 +50,7 @@ import (
 // StrictMode=false and omits B's extra daemon and stop. See the commit
 // message for the exact reverted-and-restored transcript.
 func TestEnsureBuiltinRouteDaemonAtStartup_AdoptsObservedGenerationOverStaleCaller(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	stateDir := apitest.HardenedTempDir(t)
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
@@ -146,6 +147,7 @@ func TestEnsureBuiltinRouteDaemonAtStartup_AdoptsObservedGenerationOverStaleCall
 // parameter BEFORE the strict-port check) makes this test fail — the
 // returned value is non-nil.
 func TestEnsureBuiltinRouteDaemonAtStartup_NilInputRoutingTargetFailurePreservesNil(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	stateDir := t.TempDir()
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	settingsPath := api.SettingsPath()
@@ -184,6 +186,7 @@ func TestEnsureBuiltinRouteDaemonAtStartup_NilInputRoutingTargetFailurePreserves
 // Mutation-proven: reverting to the pre-A3-fix ordering makes this test fail
 // — the returned value is non-nil.
 func TestEnsureBuiltinRouteDaemonAtStartup_NilInputPersistFailurePreservesNil(t *testing.T) {
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
 	parent := t.TempDir()
 	stateDir := filepath.Join(parent, "not-a-directory")
 	if err := os.WriteFile(stateDir, []byte("not a directory"), 0o600); err != nil {

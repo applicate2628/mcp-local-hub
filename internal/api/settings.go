@@ -155,12 +155,16 @@ func (a *API) SettingsListIn(path string) (map[string]string, error) {
 			// back to the registry default silently — defaults always pass
 			// their own validators (asserted by TestRegistry_DefaultsValidate).
 			// Go 1.22+ loop-var semantics: &def is per-iteration stable.
-			if err := validate(&def, v); err == nil {
+			validationErr := validate(&def, v)
+			if validationErr == nil {
 				out[def.Key] = v
 				continue
 			}
 			if def.ReadOnly {
 				return nil, fmt.Errorf("invalid persisted read-only setting %s=%q", def.Key, v)
+			}
+			if def.Key == PruneIdleHoursSettingKey {
+				return nil, fmt.Errorf("invalid persisted setting %s=%q: %w", def.Key, v, validationErr)
 			}
 			// Invalid persisted value — fall through to default below.
 		}
@@ -261,6 +265,14 @@ func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) 
 		if err := mutate(raw); err != nil {
 			return err
 		}
+	}
+	// A nil mutation is a locked read/operation, never a settings rewrite.
+	// Both modes retain the same mutex/flock and release-error owner.
+	if mutate == nil {
+		if after != nil {
+			return after(raw)
+		}
+		return nil
 	}
 	data, err := yaml.Marshal(raw)
 	if err != nil {

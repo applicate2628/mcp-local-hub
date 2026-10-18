@@ -137,6 +137,10 @@ func stoppedSettlementResult(taskName string, result StopBatchResultV1, index in
 // fallback: the caller needs proof that the managed replacement is settled
 // before it may restore a provider-owned source.
 func (a *API) stopAdoptOwnedDaemonSettled(ctx context.Context, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	return a.stopOwnedDescriptorSettled(ctx, frozen, nil)
+}
+
+func (a *API) stopOwnedDescriptorSettled(ctx context.Context, frozen SupervisorDaemon, expected *SupervisorLockOwner) (StoppedSettlement, error) {
 	if a == nil {
 		return StoppedSettlement{}, errors.New("adopt-owned stop: API is nil")
 	}
@@ -183,7 +187,12 @@ func (a *API) stopAdoptOwnedDaemonSettled(ctx context.Context, frozen Supervisor
 		SupervisorIntent: intentSnapshot,
 		UnifiedStops:     stopsCopy,
 	}
-	result, err := supervisorStopBatchFn(ctx, command)
+	var result StopBatchResultV1
+	if expected == nil {
+		result, err = supervisorStopBatchFn(ctx, command)
+	} else {
+		result, err = DialSupervisorIPCStopBatchExpected(ctx, command, *expected)
+	}
 	if err != nil {
 		return StoppedSettlement{}, fmt.Errorf("adopt-owned stop: stop batch: %w", err)
 	}

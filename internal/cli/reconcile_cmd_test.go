@@ -167,3 +167,52 @@ func TestReconcileCmd_JSONFlagEmitsValidJSON(t *testing.T) {
 		t.Errorf("decoded drift mismatch: %+v", decoded.Drift)
 	}
 }
+
+type reconcilePartialOutputFailure struct{ cause error }
+
+func (w reconcilePartialOutputFailure) Write([]byte) (int, error) { return 0, w.cause }
+
+func TestReconcileCmdRetainsPartialResultOnError(t *testing.T) {
+	remote := errors.New("controlled remote reconcile failure")
+	output := errors.New("controlled partial output failure")
+	response := api.ReconcileResponse{SerenaOrphansRepaired: 1, SerenaRepairOutcome: api.SerenaIntentRepairOutcomeError, SerenaRepairError: "original close failure"}
+	restore := setReconcileDialFnForTest(func(context.Context, bool) (api.ReconcileResponse, error) { return response, remote })
+	defer restore()
+	for _, mode := range []string{"human", "json", "output-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			cmd := newReconcileCmdReal()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+			args := []string{"--apply"}
+			if mode == "json" {
+				args = append(args, "--json")
+			}
+			if mode == "output-failure" {
+				cmd.SetOut(reconcilePartialOutputFailure{cause: output})
+			}
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if !errors.Is(err, remote) {
+				t.Fatalf("remote cause lost: %v", err)
+			}
+			var retained *reconcileResultError
+			if !errors.As(err, &retained) || retained.response.SerenaOrphansRepaired != 1 {
+				t.Fatalf("caller dropped partial result: %v", err)
+			}
+			if mode == "json" {
+				var got api.ReconcileResponse
+				if json.Unmarshal(buf.Bytes(), &got) != nil || got.SerenaOrphansRepaired != 1 {
+					t.Fatalf("partial JSON unavailable: %s", buf.String())
+				}
+			} else if mode == "human" && (!strings.Contains(buf.String(), "partial Serena repair result: repaired=1") || !strings.Contains(buf.String(), "readiness remains unconfirmed")) {
+				t.Fatalf("partial facts hidden/promoted: %s", buf.String())
+			}
+			if mode == "output-failure" && !errors.Is(err, output) {
+				t.Fatalf("secondary output failure lost: %v", err)
+			}
+		})
+	}
+}

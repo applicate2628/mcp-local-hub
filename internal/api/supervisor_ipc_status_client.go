@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -43,6 +44,57 @@ var ErrSupervisorIPCUnavailable = errors.New("supervisor IPC unavailable")
 // an ABSENT owner sidecar (os.IsNotExist) stays SUPERVISOR_UNAVAILABLE — a
 // present-but-unreadable one is this setup fault.
 var ErrStatusSetupFailure = errors.New("supervisor IPC status: local setup failure")
+
+// These errors classify refusal of the strict creator-bound projection. Legacy
+// owner/hello callers do not acquire this additional native-platform requirement.
+var ErrSupervisorControlPeerIdentity = errors.New("supervisor control peer identity refused")
+var ErrSupervisorControlPeerUnsupported = errors.New("supervisor control peer identity is unsupported")
+
+var ErrSupervisorControlReadinessUnavailable = errors.New("supervisor reconciliation readiness unavailable")
+
+// SupervisorControlReadiness reports the producer's actual Boolean field.
+// Readiness means initial reads attempted/reconcile scheduled, not fleet health.
+type SupervisorControlReadiness struct {
+	ReconcileReadyPresent bool
+	ReconcileReadyValid   bool
+	ReconcileReady        bool
+}
+
+func validateSupervisorControlPeerExpectation(owner SupervisorLockOwner, expected SupervisorProcessIdentityV1) error {
+	if runtime.GOOS != "windows" {
+		return ErrSupervisorControlPeerUnsupported
+	}
+	if !filepath.IsAbs(expected.ImagePath) || filepath.Clean(expected.ImagePath) != expected.ImagePath {
+		return fmt.Errorf("%w: original canonical image required", ErrSupervisorControlPeerIdentity)
+	}
+	created, err := time.Parse(time.RFC3339Nano, expected.CreationTime)
+	if err != nil || created.IsZero() {
+		return fmt.Errorf("%w: original creation time required", ErrSupervisorControlPeerIdentity)
+	}
+	// PID/time/SID/image must be present. Session zero is a valid captured Windows
+	// session; it is compared against the independent original capture below.
+	if err := ValidateSupervisorStatusServerIdentityV1(owner, expected, expected.UserSID, expected.SessionID, expected.ImagePath); err != nil {
+		return fmt.Errorf("%w: original expectation: %w", ErrSupervisorControlPeerIdentity, err)
+	}
+	return nil
+}
+
+// ValidateSupervisorControlPeerConnectionV1 consumes the caller's actual open
+// connection and independent original expectation. It owns no connection and
+// sends no frame; the exchange owner retains deadline/close responsibilities.
+func ValidateSupervisorControlPeerConnectionV1(conn net.Conn, owner SupervisorLockOwner, expected SupervisorProcessIdentityV1) error {
+	if err := validateSupervisorControlPeerExpectation(owner, expected); err != nil {
+		return err
+	}
+	observed, err := observeSupervisorStatusServerIdentityV1(conn, true)
+	if err != nil {
+		return fmt.Errorf("%w: connected kernel identity: %w", ErrSupervisorControlPeerIdentity, err)
+	}
+	if err := ValidateSupervisorStatusServerIdentityV1(owner, observed, expected.UserSID, expected.SessionID, expected.ImagePath); err != nil {
+		return fmt.Errorf("%w: connected peer: %w", ErrSupervisorControlPeerIdentity, err)
+	}
+	return nil
+}
 
 // DialSupervisorIPCStatus is the production IPC client used by the GUI via
 // SupervisorIPCStatusFn. It reads supervisor.lock.owner.json, validates the
@@ -107,37 +159,134 @@ func VerifySupervisorControlGeneration(ctx context.Context, expected SupervisorL
 	if err != nil {
 		return fmt.Errorf("supervisor control generation: resolve state dir: %w", err)
 	}
-	lockPath := filepath.Join(stateDir, "supervisor.lock")
-	current, err := ReadSupervisorLockOwner(lockPath)
-	if err != nil {
-		return fmt.Errorf("supervisor control generation: read owner sidecar: %w", err)
-	}
-	if current != expected {
-		return fmt.Errorf("supervisor control generation changed: got pid=%d started_at=%s want pid=%d started_at=%s", current.PID, current.StartedAt, expected.PID, expected.StartedAt)
-	}
-	_, err = dialSupervisorIPCStatusForOwner(ctx, stateDir, expected)
-	if err != nil {
-		return fmt.Errorf("supervisor control generation: authenticated status: %w", err)
-	}
-	return nil
+	return VerifySupervisorControlGenerationFromStateDir(ctx, stateDir, expected)
 }
 
+// VerifySupervisorControlGenerationFromStateDir verifies one status reply from
+// the captured expected generation in the caller's explicit namespace. It does
+// not require fleet/reconcile readiness or a streaming final frame.
+func VerifySupervisorControlGenerationFromStateDir(ctx context.Context, stateDir string, expected SupervisorLockOwner) error {
+	return verifySupervisorControlGenerationFromStateDir(ctx, stateDir, expected, nil)
+}
+
+// VerifySupervisorControlGenerationForPeerFromStateDir validates the actual
+// connected kernel server against independently captured original creator facts
+// before the same connection's hello/status exchange can admit readiness.
+func VerifySupervisorControlGenerationForPeerFromStateDir(ctx context.Context, stateDir string, owner SupervisorLockOwner, expected SupervisorProcessIdentityV1) error {
+	return verifySupervisorControlGenerationFromStateDir(ctx, stateDir, owner, &expected)
+}
+
+func verifySupervisorControlGenerationFromStateDir(ctx context.Context, stateDir string, expected SupervisorLockOwner, peer *SupervisorProcessIdentityV1) error {
+	_, err := readValidatedSupervisorControlStatus(ctx, stateDir, expected, peer)
+	return err
+}
+
+// ReadSupervisorControlReadinessForPeerFromStateDir consumes ONE original-peer
+// validated exchange. Actual flags survive a later error, which forbids admission.
+func ReadSupervisorControlReadinessForPeerFromStateDir(ctx context.Context, stateDir string, original SupervisorLockOwner, expectedPeer SupervisorProcessIdentityV1) (SupervisorControlReadiness, error) {
+	decoded, err := readValidatedSupervisorControlStatus(ctx, stateDir, original, &expectedPeer)
+	return supervisorControlReadinessResult(decoded, err)
+}
+
+func supervisorControlReadinessResult(decoded decodedSupervisorIPCStatus, err error) (SupervisorControlReadiness, error) {
+	if !decoded.Readiness.ReconcileReadyPresent || !decoded.Readiness.ReconcileReadyValid {
+		if err != nil && !decoded.ObjectPresent {
+			return decoded.Readiness, err
+		}
+		return decoded.Readiness, errors.Join(ErrSupervisorControlReadinessUnavailable, err)
+	}
+	return decoded.Readiness, err
+}
+
+func readValidatedSupervisorControlStatus(ctx context.Context, stateDir string, expected SupervisorLockOwner, peer *SupervisorProcessIdentityV1) (decodedSupervisorIPCStatus, error) {
+	if ctx == nil {
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor control generation: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return decodedSupervisorIPCStatus{}, err
+	}
+	started, parseErr := time.Parse(time.RFC3339Nano, expected.StartedAt)
+	if stateDir == "" || !filepath.IsAbs(stateDir) || expected.PID <= 0 || parseErr != nil || started.IsZero() {
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor control generation: explicit namespace and generation required")
+	}
+	if peer != nil {
+		if err := validateSupervisorControlPeerExpectation(expected, *peer); err != nil {
+			return decodedSupervisorIPCStatus{}, err
+		}
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+	current, err := ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor control generation: read owner sidecar: %w", err)
+	}
+	if current != expected {
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor control generation changed: got pid=%d started_at=%s want pid=%d started_at=%s", current.PID, current.StartedAt, expected.PID, expected.StartedAt)
+	}
+	decoded, err := dialSupervisorIPCStatusResult(ctx, stateDir, expected, peer)
+	if err != nil {
+		return decoded, fmt.Errorf("supervisor control generation: authenticated status: %w", err)
+	}
+	if !decoded.ObjectPresent || !decoded.DaemonsPresent || decoded.State != "running" {
+		return decoded, fmt.Errorf("supervisor control generation: status result is not an explicit running control response")
+	}
+	return decoded, ctx.Err()
+}
+
+// Keep the existing row-returning port used by ordinary status/attach callers.
 func dialSupervisorIPCStatusForOwner(ctx context.Context, stateDir string, owner SupervisorLockOwner) ([]DaemonStatus, error) {
+	decoded, err := dialSupervisorIPCStatusResultForOwner(ctx, stateDir, owner)
+	return decoded.Rows, err
+}
+
+func dialSupervisorIPCStatusResultForOwner(ctx context.Context, stateDir string, owner SupervisorLockOwner) (decodedSupervisorIPCStatus, error) {
+	return dialSupervisorIPCStatusResult(ctx, stateDir, owner, nil)
+}
+
+func dialSupervisorIPCStatusResult(ctx context.Context, stateDir string, owner SupervisorLockOwner, peer *SupervisorProcessIdentityV1) (decoded decodedSupervisorIPCStatus, retErr error) {
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("supervisor IPC status: dial %s: %w: %w", address, ErrSupervisorIPCUnavailable, err)
+			return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: dial %s: %w: %w", address, ErrSupervisorIPCUnavailable, err)
 		}
-		return nil, fmt.Errorf("supervisor IPC status: dial %s: %w", address, err)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: dial %s: %w", address, err)
 	}
-	defer conn.Close()
+	return exchangeSupervisorIPCStatusResult(ctx, conn, owner, peer)
+}
+
+// The sole exchange body owns this actual connection, including late Close
+// receiving. Public projections never verify then reconnect to read readiness.
+func exchangeSupervisorIPCStatusResult(ctx context.Context, conn net.Conn, owner SupervisorLockOwner, peer *SupervisorProcessIdentityV1) (decoded decodedSupervisorIPCStatus, retErr error) {
+	if peer == nil {
+		defer conn.Close()
+	} else {
+		defer func() { retErr = errors.Join(retErr, conn.Close()) }()
+	}
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+		if err := conn.SetDeadline(deadline); peer != nil && err != nil {
+			return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: set deadline: %w", err)
+		}
 	}
 
+	if peer != nil {
+		if err := ValidateSupervisorControlPeerConnectionV1(conn, owner, *peer); err != nil {
+			return decodedSupervisorIPCStatus{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return decodedSupervisorIPCStatus{}, err
+		}
+	}
 	if err := validateSupervisorIPCHello(conn, owner); err != nil {
-		return nil, fmt.Errorf("supervisor IPC status: %w", err)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: %w", err)
+	}
+	if peer != nil {
+		if err := ctx.Err(); err != nil {
+			return decodedSupervisorIPCStatus{}, err
+		}
 	}
 	req := IPCRequest{
 		Version: 1,
@@ -145,26 +294,29 @@ func dialSupervisorIPCStatusForOwner(ctx context.Context, stateDir string, owner
 		Cmd:     "status",
 	}
 	if err := writeSupervisorIPCRequest(conn, req); err != nil {
-		return nil, fmt.Errorf("supervisor IPC status: send status: %w", err)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: send status: %w", err)
 	}
 	resp, err := readSupervisorIPCResponse(conn)
 	if err != nil {
-		return nil, fmt.Errorf("supervisor IPC status: read status response: %w", err)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: read status response: %w", err)
 	}
 	if resp.ID != req.ID {
-		return nil, fmt.Errorf("supervisor IPC status: response id mismatch: got %d want %d", resp.ID, req.ID)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: response id mismatch: got %d want %d", resp.ID, req.ID)
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("supervisor IPC status: %s: %s", resp.Error.Code, resp.Error.Message)
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: %s: %s", resp.Error.Code, resp.Error.Message)
 	}
 	if !resp.OK {
-		return nil, fmt.Errorf("supervisor IPC status: non-OK response without error")
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: non-OK response without error")
 	}
-	rows, err := decodeSupervisorIPCStatusResult(resp.Result)
+	decoded, err = decodeSupervisorIPCStatusResultShape(resp.Result)
 	if err != nil {
-		return nil, fmt.Errorf("supervisor IPC status: decode status result: %w", err)
+		if peer != nil {
+			return decoded, fmt.Errorf("supervisor IPC status: decode status result: %w", err)
+		}
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("supervisor IPC status: decode status result: %w", err)
 	}
-	return rows, nil
+	return decoded, nil
 }
 
 type supervisorIPCRawResponse struct {
@@ -180,6 +332,12 @@ type supervisorIPCStatusResult struct {
 	Daemons []supervisorIPCStatusDaemon `json:"daemons"`
 }
 
+type supervisorIPCRawStatusResult struct {
+	State          string          `json:"state"`
+	Daemons        json.RawMessage `json:"daemons"`
+	ReconcileReady json.RawMessage `json:"reconcile_ready"`
+}
+
 type supervisorIPCStatusDaemon struct {
 	TaskName      string   `json:"task_name"`
 	Server        string   `json:"server"`
@@ -192,6 +350,10 @@ type supervisorIPCStatusDaemon struct {
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
 	IsMaintenance bool     `json:"is_maintenance"`
+	// CrashesInWindow is the supervisor's current in-memory crash count for the
+	// canonical respawn failure window. Zero is a valid observation and remains
+	// present on current producer payloads; a missing legacy field decodes to zero.
+	CrashesInWindow int `json:"crashes_in_window"`
 	// RAMBytes is the daemon's resident set size (working-set bytes),
 	// looked up by the supervisor from the live current_pid for Running
 	// daemons (internal/cli/supervise_status.go). Zero/omitted when RAM
@@ -307,20 +469,56 @@ func readSupervisorIPCLine(conn net.Conn, max int) ([]byte, error) {
 	return nil, fmt.Errorf("frame exceeded %d bytes", max)
 }
 
+type decodedSupervisorIPCStatus struct {
+	State          string
+	ObjectPresent  bool
+	DaemonsPresent bool
+	Rows           []DaemonStatus
+	Readiness      SupervisorControlReadiness
+}
+
 func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error) {
-	var result supervisorIPCStatusResult
+	decoded, err := decodeSupervisorIPCStatusResultShape(raw)
+	return decoded.Rows, err
+}
+
+func decodeSupervisorIPCStatusResultShape(raw json.RawMessage) (decodedSupervisorIPCStatus, error) {
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("missing result")
+		return decodedSupervisorIPCStatus{}, fmt.Errorf("missing result")
 	}
+	var result *supervisorIPCRawStatusResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, err
+		return decodedSupervisorIPCStatus{}, err
 	}
-	rows := make([]DaemonStatus, 0, len(result.Daemons))
-	for _, d := range result.Daemons {
+	decoded := decodedSupervisorIPCStatus{}
+	var daemons []supervisorIPCStatusDaemon
+	if result != nil {
+		decoded.ObjectPresent = true
+		decoded.State = result.State
+		decoded.DaemonsPresent = len(result.Daemons) != 0
+		if len(result.ReconcileReady) != 0 {
+			decoded.Readiness.ReconcileReadyPresent = true
+			var value *bool
+			if err := json.Unmarshal(result.ReconcileReady, &value); err == nil && value != nil {
+				decoded.Readiness.ReconcileReadyValid = true
+				decoded.Readiness.ReconcileReady = *value
+			}
+		}
+		if decoded.DaemonsPresent {
+			if err := json.Unmarshal(result.Daemons, &daemons); err != nil {
+				return decoded, err
+			}
+		}
+	}
+	rows := make([]DaemonStatus, 0, len(daemons))
+	for _, d := range daemons {
 		rows = append(rows, DaemonStatus{
-			Server:   d.Server,
-			Daemon:   d.Daemon,
-			TaskName: d.TaskName,
+			Server:            d.Server,
+			Daemon:            d.Daemon,
+			TaskName:          d.TaskName,
+			CommandInternal:   d.Command,
+			ArgsInternal:      append([]string(nil), d.Args...),
+			StartedAtInternal: d.StartedAt,
 			// DisplayName: human-readable label via the single owner
 			// (ComputeDaemonDisplayName). The supervisor descriptor already
 			// carries the workspace ROOT path (d.Workspace) for serena/LSP
@@ -355,10 +553,12 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// the GUI Dashboard omits the RAM row in that case.
 			RAMBytes:             d.RAMBytes,
 			IsMaintenance:        d.IsMaintenance,
+			CrashesInWindow:      d.CrashesInWindow,
 			ReadinessObservation: d.ReadinessObservation.Decode(),
 		})
 	}
-	return rows, nil
+	decoded.Rows = rows
+	return decoded, nil
 }
 
 // supervisorIPCUptimeSec converts the supervisor's RFC3339(Nano) started_at

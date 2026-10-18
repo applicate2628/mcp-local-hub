@@ -19,7 +19,7 @@ func currentProcessKillOnCloseJob() (bool, error) {
 		return false, nil
 	}
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	if err := windows.QueryInformationJobObject(0, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil); err != nil {
+	if err := queryJobInformation(0, windows.JobObjectExtendedLimitInformation, unsafe.Pointer(&info), uint32(unsafe.Sizeof(info)), nil); err != nil {
 		return false, fmt.Errorf("QueryInformationJobObject(current): %w", err)
 	}
 	return info.BasicLimitInformation.LimitFlags&windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0, nil

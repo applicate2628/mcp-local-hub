@@ -1111,7 +1111,7 @@ export function AddServerScreen(props: {
         return;
       }
       setWarnings(null);
-      setBanner({ kind: "success", text: `Installed ${name}. Daemons will start at next logon (or run "mcphub restart --server ${name}" now).` });
+      setBanner({ kind: "success", text: `Installed ${name}.` });
       pushToast("success", `Installed ${name}.`);
     } catch (err) {
       if (version !== submissionCounter.current) return;

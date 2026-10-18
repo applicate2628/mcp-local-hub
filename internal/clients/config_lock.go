@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -43,7 +44,9 @@ func perPathMutex(configPath string) *sync.Mutex {
 // ONE config file is ever locked per withConfigLock call, and the decorator
 // never nests withConfigLock (the concrete adapter's internal cross-method
 // calls bypass the decorator — see lockingClient), so no two config locks are
-// ever held at once and the cross-file deadlock class is structurally absent.
+// ever held at once for ordinary decorators. The optional attachment policy
+// transaction is the sole composition exception: global mutex/flock first,
+// then the injected project identity owner, with no decorator reentry.
 //
 // The flock is BLOCKING (mirrors api.Registry.Lock at
 // internal/api/workspace_registry.go:200): the live GUI + CLI client-config
@@ -61,9 +64,12 @@ func perPathMutex(configPath string) *sync.Mutex {
 // to distinguish a failed body from a successful body whose lock release could
 // not be confirmed.
 type configLockExecution struct {
-	bodyEntered bool
-	bodyErr     error
-	releaseErr  error
+	bodyEntered      bool
+	bodyErr          error
+	primaryErr       error
+	releaseErr       error
+	releaseConfirmed bool
+	releaseDefined   bool
 }
 
 func (e configLockExecution) bodyApplied() bool {
@@ -71,9 +77,66 @@ func (e configLockExecution) bodyApplied() bool {
 }
 
 func withConfigLockExecution(configPath string, fn func() error) (execution configLockExecution, err error) {
+	return withConfigLockExecutionContext(configPath, nil, fn)
+}
+
+// A non-nil context bounds only attach's acquisition of the established
+// per-path mutex and flock. Legacy callers keep their blocking semantics.
+func withConfigLockExecutionContext(configPath string, ctx context.Context, fn func() error) (execution configLockExecution, err error) {
+	return withConfigLockExecutionContextMode(configPath, ctx, fn, true)
+}
+
+func withConfigLockExecutionContextMode(configPath string, ctx context.Context, fn func() error, createParent bool) (execution configLockExecution, err error) {
+	return withConfigLockExecutionContextPolicy(configPath, ctx, fn, createParent, false)
+}
+
+func withConfigLockExecutionContextPolicy(configPath string, ctx context.Context, fn func() error, createParent, requireFlock bool, afterAcquire ...func()) (execution configLockExecution, err error) {
+	defer func() {
+		if !execution.releaseDefined {
+			execution.primaryErr = err
+		}
+	}()
 	mu := perPathMutex(configPath)
-	mu.Lock()
+	if ctx == nil {
+		mu.Lock()
+	} else {
+		for !mu.TryLock() {
+			select {
+			case <-ctx.Done():
+				return execution, ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
 	defer mu.Unlock()
+	if ctx != nil && ctx.Err() != nil {
+		return execution, ctx.Err()
+	}
+	if !createParent {
+		if SecureVerifyParentDir == nil {
+			return execution, errors.New("config read lock parent verification capability unavailable")
+		}
+		dir, resolveErr := filepath.Abs(filepath.Dir(configPath))
+		if resolveErr != nil {
+			return execution, resolveErr
+		}
+		exists, verifyErr := SecureVerifyParentDir(ctx, dir)
+		if verifyErr != nil {
+			return execution, verifyErr
+		}
+		if ctx != nil && ctx.Err() != nil {
+			return execution, ctx.Err()
+		}
+		if !exists {
+			if requireFlock {
+				return execution, errors.New("attachment policy exclusion requires an existing global parent")
+			}
+			execution.bodyEntered = true
+			execution.bodyErr = fn()
+			execution.releaseConfirmed = true
+			return execution, execution.bodyErr
+		}
+	}
 
 	// Ensure the write-target parent dir exists BEFORE creating the advisory
 	// flock (bot PR #420 finding 3, r15). The flock file lives at
@@ -136,7 +199,7 @@ func withConfigLockExecution(configPath string, fn func() error) (execution conf
 	// skip — the gap stays closed). The flock + the actual file write below use the
 	// SAME process cwd to resolve the original relative configPath, so the secured
 	// absolute dir and the lock/write target are the same physical directory.
-	if dir := filepath.Dir(configPath); dir != "" {
+	if dir := filepath.Dir(configPath); createParent && dir != "" {
 		absDir, absErr := filepath.Abs(dir)
 		if absErr != nil {
 			return execution, fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
@@ -151,16 +214,40 @@ func withConfigLockExecution(configPath string, fn func() error) (execution conf
 		return execution, fmt.Errorf("config lock %s: %w", lockPath, ghost)
 	}
 	fl := flock.New(lockPath)
-	if err := fl.Lock(); err != nil {
+	if ctx == nil {
+		err = fl.Lock()
+	} else {
+		var acquired bool
+		acquired, err = fl.TryLockContext(ctx, 10*time.Millisecond)
+		if err == nil && !acquired {
+			err = ctx.Err()
+			if err == nil {
+				err = errors.New("config lock acquisition returned without ownership")
+			}
+		}
+	}
+	if err != nil {
 		return execution, fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
 	release := newConfigLockRelease(fl, lockPath)
+	execution.releaseDefined = true
 	defer func() {
+		execution.primaryErr = err
 		if releaseErr := release(); releaseErr != nil {
 			execution.releaseErr = releaseErr
 			err = errors.Join(err, fmt.Errorf("release config lock %s: %w", lockPath, releaseErr))
+		} else {
+			execution.releaseConfirmed = true
 		}
 	}()
+	for _, observe := range afterAcquire {
+		if observe != nil {
+			observe()
+		}
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return execution, ctx.Err()
+	}
 
 	execution.bodyEntered = true
 	execution.bodyErr = fn()
@@ -172,6 +259,22 @@ func withConfigLockExecution(configPath string, fn func() error) (execution conf
 func withConfigLock(configPath string, fn func() error) error {
 	_, err := withConfigLockExecution(configPath, fn)
 	return err
+}
+
+// withManagedRegistrationMutationLock is the context-aware conditional-mutation
+// variant. It keeps the established lock and release accounting unchanged while
+// preventing a cancelled managed operation from entering its backup/create or
+// adapter-write body after the lock is acquired.
+func (l *lockingClient) withManagedRegistrationMutationLock(ctx context.Context, fn func() error) (configLockExecution, error) {
+	if l == nil || l.Client == nil || ctx == nil {
+		return configLockExecution{}, context.Canceled
+	}
+	return l.withMutationLockExecution(func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fn()
+	})
 }
 
 // withConfigReadLock is the read-selection variant of withConfigLock used by
@@ -198,8 +301,11 @@ func withConfigReadLock(configPath string, fn func() error) error {
 }
 
 // lockingClient decorates a Client so every config-entry mutation serializes
-// its read-modify-write and settlement result via withConfigMutationLock.
-// InitEmpty, Backup, and BackupKeep retain the error-only withConfigLock path.
+// its read-modify-write and settlement result through the selected lock owner.
+// Global clients retain the adjacent config lock; project-bound Codex uses its
+// injected full-project-identity runner. Global InitEmpty, Backup, and
+// BackupKeep retain the error-only withConfigLock path, while project legacy
+// backup methods refuse before either lock owner.
 // The backup-READ selection/inspection methods (LatestBackupPath,
 // BackupContainsEntry, BackupEntryIsHubManaged) are ALSO serialized under the
 // same per-path lock so the demigrate selection cannot observe a backup
@@ -213,7 +319,90 @@ func withConfigReadLock(configPath string, fn func() error) error {
 // directly, NOT through this decorator — so they never re-enter either lock
 // wrapper and there is no self-deadlock on the same per-path mutex.
 type lockingClient struct {
-	Client // embedded: read-only methods + everything not overridden pass through
+	Client             // embedded: read-only methods + everything not overridden pass through
+	codexProjectRunner CodexProjectConfigLockRunner
+}
+
+func (l *lockingClient) projectCodex() (*codexCLI, bool) {
+	if l == nil {
+		return nil, false
+	}
+	codex, ok := l.Client.(*codexCLI)
+	return codex, ok && codex.isProjectBound()
+}
+
+func (l *lockingClient) projectRunner() (CodexProjectConfigLockRunner, error) {
+	if _, projectBound := l.projectCodex(); !projectBound {
+		return nil, nil
+	}
+	if codexProjectConfigLockRunnerIsNil(l.codexProjectRunner) {
+		return nil, fmt.Errorf("%w: project-bound client has no config lock runner", ErrCodexProjectConfigLockUnavailable)
+	}
+	return l.codexProjectRunner, nil
+}
+
+func (l *lockingClient) withProjectLockExecution(mutation bool, fn func() error) (execution configLockExecution, err error) {
+	runner, runnerErr := l.projectRunner()
+	if runnerErr != nil {
+		return execution, runnerErr
+	}
+	if runner == nil {
+		return execution, fmt.Errorf("%w: project config lock runner was requested for a global client", ErrCodexProjectConfigLockUnavailable)
+	}
+	body := func() error {
+		execution.bodyEntered = true
+		execution.bodyErr = fn()
+		return execution.bodyErr
+	}
+	if mutation {
+		err = runner.RunMutation(body)
+	} else {
+		err = runner.RunRead(body)
+	}
+	if errors.Is(err, ErrCodexProjectConfigLockReleaseUnconfirmed) && !errors.Is(execution.bodyErr, ErrCodexProjectConfigLockReleaseUnconfirmed) {
+		execution.releaseErr = err
+	}
+	return execution, err
+}
+
+func (l *lockingClient) withMutationLockExecution(fn func() error) (configLockExecution, error) {
+	if _, projectBound := l.projectCodex(); projectBound {
+		return l.withProjectLockExecution(true, fn)
+	}
+	return withConfigLockExecution(l.Client.ConfigPath(), fn)
+}
+
+func (l *lockingClient) withMutationLock(fn func() error) error {
+	if _, projectBound := l.projectCodex(); !projectBound {
+		return withConfigMutationLock(l.Client.ConfigPath(), fn)
+	}
+	execution, err := l.withProjectLockExecution(true, fn)
+	if execution.bodyApplied() && execution.releaseErr != nil {
+		return &appliedReleaseUnconfirmedError{err: err}
+	}
+	return err
+}
+
+func (l *lockingClient) withPlainMutationLock(fn func() error) error {
+	if _, projectBound := l.projectCodex(); projectBound {
+		return l.withMutationLock(fn)
+	}
+	return withConfigLock(l.Client.ConfigPath(), fn)
+}
+
+func (l *lockingClient) withReadLock(fn func() error) error {
+	if _, projectBound := l.projectCodex(); !projectBound {
+		return withConfigReadLock(l.Client.ConfigPath(), fn)
+	}
+	_, err := l.withProjectLockExecution(false, fn)
+	return err
+}
+
+func (l *lockingClient) rejectProjectLegacyBackup() error {
+	if _, projectBound := l.projectCodex(); projectBound {
+		return ErrCodexProjectLegacyBackupUnsupported
+	}
+	return nil
 }
 
 // EntryMutationOperation is the single typed operation accepted by
@@ -246,6 +435,14 @@ type ConditionalEntryMutationRequest struct {
 	Operation      EntryMutationOperation
 	Entry          MCPEntry
 	BeforeMutation func(EntryMutationPreparation) error
+	// Context and ConfigWriter are opt-in attach-only controls. A nil value
+	// preserves every legacy caller's lock and concrete writer behavior.
+	Context         context.Context
+	LockWaitTimeout time.Duration
+	ConfigWriter    WriteConfigFileFunc
+	// RemovalSourceToken opts explicit removal into the physical compare/splice
+	// owner. It grants no historical restore or stdio cleanup capability.
+	RemovalSourceToken string
 }
 
 // EntryMutationDependency is one additional live-entry predicate that must
@@ -316,6 +513,9 @@ type EntryMutationObserved struct {
 	PreparationErr       error
 	MutationErr          error
 	ObservationErr       error
+	ReleaseConfirmed     bool
+	ReleaseErr           error
+	RemovalInverse       *physicalEntryInverse
 }
 
 // ConditionalEntryGroupMutationObserved retains the target observation and
@@ -352,8 +552,12 @@ func newLockingClient(c Client) Client {
 	return &lockingClient{Client: c}
 }
 
+func newProjectLockingClient(c Client, runner CodexProjectConfigLockRunner) Client {
+	return &lockingClient{Client: c, codexProjectRunner: runner}
+}
+
 // ConditionalEntryMutation performs the exact read/check/backup/prepare/write/
-// readback sequence under one withConfigLock call. Every pre-invocation failure
+// readback sequence under one selected lock call. Every pre-invocation failure
 // returns Invoked=false; a post-invocation readback is attempted even when the
 // adapter mutation itself returns an error.
 func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationRequest) (observed EntryMutationObserved) {
@@ -370,6 +574,21 @@ func (l *lockingClient) ConditionalEntryGroupMutation(req ConditionalEntryGroupM
 }
 
 func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroupMutationRequest) (observed ConditionalEntryGroupMutationObserved) {
+	physicalRemoval := req.Operation == EntryMutationRemove && req.RemovalSourceToken != ""
+	if req.Context != nil && req.ConfigWriter == nil && !physicalRemoval {
+		observed.PreparationErr = errors.New("conditional entry mutation: bounded lock requires scoped writer")
+		return observed
+	}
+	if req.ConfigWriter != nil {
+		if req.Operation != EntryMutationAdd || req.Context == nil || req.LockWaitTimeout <= 0 {
+			observed.PreparationErr = errors.New("conditional entry mutation: scoped writer requires bounded add")
+			return observed
+		}
+		if _, ok := l.Client.(*mimoCodeClient); !ok {
+			observed.PreparationErr = errors.New("conditional entry mutation: scoped writer unsupported by client")
+			return observed
+		}
+	}
 	if req.EntryName == "" {
 		observed.PreparationErr = errors.New("conditional entry mutation: entry name is empty")
 		return observed
@@ -411,7 +630,9 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 		observed.Dependencies[i].EntryName = dependency.EntryName
 	}
 
-	lockErr := withConfigLock(l.Client.ConfigPath(), func() error {
+	var removalSource *entryRemovalSource
+	var removalReadbackErr error
+	body := func() error {
 		before, readErr := l.Client.GetEntry(req.EntryName)
 		observed.Before = before
 		if readErr != nil {
@@ -424,6 +645,28 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 			observed.ConflictScope = "target"
 			observed.ConflictEntryName = req.EntryName
 			return nil
+		}
+		if physicalRemoval {
+			data, err := l.readConfigBytesForLockedOperation()
+			if err == nil {
+				removalSource, err = l.resolveEntryRemovalSource(data, req.EntryName)
+			}
+			if err != nil || removalSource.fingerprint != req.RemovalSourceToken {
+				if removalSource != nil {
+					removalSource.release()
+				}
+				observed.PreconditionConflict = err == nil || errors.Is(err, ErrEntryMutationPreconditionConflict)
+				if observed.PreconditionConflict {
+					observed.PreparationErr = ErrEntryMutationPreconditionConflict
+				} else if errors.Is(err, ErrEntryRemovalUnsupportedSource) {
+					observed.PreparationErr = err
+				} else {
+					observed.PreparationErr = errors.Join(ErrEntryRemovalInspection, err)
+				}
+				return nil
+			}
+			defer removalSource.release()
+			observed.RemovalInverse = &physicalEntryInverse{client: l, token: removalSource.token, ancestors: removalSource.ancestors, guarded: true}
 		}
 		for i, dependency := range req.Dependencies {
 			dependencyBefore, dependencyErr := l.Client.GetEntry(dependency.EntryName)
@@ -464,14 +707,67 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 			}
 		}
 
+		if req.Context != nil && req.Context.Err() != nil {
+			observed.PreparationErr = req.Context.Err()
+			return nil
+		}
 		observed.Invoked = true
 		switch req.Operation {
 		case EntryMutationAdd:
-			observed.MutationErr = l.Client.AddEntry(req.Entry)
+			observed.MutationErr = AddEntryWithConfigWriter(l.Client, req.Entry, req.ConfigWriter)
 		case EntryMutationRemove:
-			observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
+			if physicalRemoval {
+				data, err := l.readConfigBytesForLockedOperation()
+				var fresh *entryRemovalSource
+				if err == nil {
+					fresh, err = l.resolveEntryRemovalSource(data, req.EntryName)
+				}
+				if err != nil || fresh.fingerprint != removalSource.fingerprint || !os.SameFile(fresh.fileInfo, removalSource.fileInfo) {
+					if fresh != nil {
+						fresh.release()
+					}
+					observed.Invoked = false
+					observed.PreconditionConflict = err == nil || errors.Is(err, ErrEntryMutationPreconditionConflict)
+					if observed.PreconditionConflict {
+						observed.PreparationErr = ErrEntryMutationPreconditionConflict
+					} else if errors.Is(err, ErrEntryRemovalUnsupportedSource) {
+						observed.PreparationErr = err
+					} else {
+						observed.PreparationErr = errors.Join(ErrEntryRemovalInspection, err)
+					}
+					return nil
+				}
+				defer fresh.release()
+				snapshot, snapshotErr := l.newConfigWriteSnapshot(data, fresh.fileInfo, fresh.ancestors, fresh.parentHandle)
+				if snapshotErr != nil {
+					observed.Invoked = false
+					observed.PreparationErr = snapshotErr
+					return nil
+				}
+				observed.MutationErr = writePhysicalRemoval(l.Client, nil, data, fresh.token, ConfigWriteRequest{Context: req.Context, Path: l.Client.ConfigPath(), ExpectedSnapshot: snapshot})
+				// The writer's success and the projected GetEntry view alone do
+				// not establish physical absence (malformed/scalar members can
+				// disappear from that projection). Re-open the committed source.
+				actual, readErr := l.readConfigBytesForLockedOperation()
+				if readErr != nil {
+					removalReadbackErr = readErr
+				} else {
+					owner := l.Client.(physicalEntryTokenOwner)
+					afterToken, present, extractErr := owner.EntryPhysicalToken(actual, req.EntryName)
+					if extractErr != nil {
+						removalReadbackErr = extractErr
+					} else if present || afterToken != nil {
+						removalReadbackErr = errors.New("physical removal readback retained selected member")
+					}
+				}
+			} else {
+				observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
+			}
 		}
 		observed.After, observed.ObservationErr = l.Client.GetEntry(req.EntryName)
+		if removalReadbackErr != nil {
+			observed.ObservationErr = errors.Join(observed.ObservationErr, removalReadbackErr)
+		}
 		for i, dependency := range req.Dependencies {
 			dependencyAfter, dependencyErr := l.Client.GetEntry(dependency.EntryName)
 			observed.Dependencies[i].After = dependencyAfter
@@ -499,7 +795,21 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 			}
 		}
 		return nil
-	})
+	}
+	var lockErr error
+	if req.Context == nil {
+		lockErr = l.withPlainMutationLock(body)
+	} else if _, projectBound := l.projectCodex(); projectBound {
+		observed.PreparationErr = errors.New("conditional entry mutation: bounded project lock unsupported")
+		return observed
+	} else {
+		var execution configLockExecution
+		lockContext, cancel := context.WithTimeout(req.Context, req.LockWaitTimeout)
+		execution, lockErr = withConfigLockExecutionContext(l.Client.ConfigPath(), lockContext, body)
+		cancel()
+		observed.ReleaseConfirmed = execution.releaseConfirmed
+		observed.ReleaseErr = execution.releaseErr
+	}
 	if lockErr != nil && observed.ObservationErr == nil && observed.PreparationErr == nil {
 		observed.PreparationErr = lockErr
 	}
@@ -507,7 +817,7 @@ func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroup
 }
 
 func (l *lockingClient) InitEmpty() (created bool, err error) {
-	werr := withConfigLock(l.Client.ConfigPath(), func() error {
+	werr := l.withPlainMutationLock(func() error {
 		created, err = l.Client.InitEmpty()
 		return err
 	})
@@ -515,6 +825,9 @@ func (l *lockingClient) InitEmpty() (created bool, err error) {
 }
 
 func (l *lockingClient) Backup() (string, error) {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return "", err
+	}
 	var path string
 	err := withConfigLock(l.Client.ConfigPath(), func() error {
 		var e error
@@ -525,6 +838,9 @@ func (l *lockingClient) Backup() (string, error) {
 }
 
 func (l *lockingClient) BackupKeep(keepN int) (string, error) {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return "", err
+	}
 	var path string
 	err := withConfigLock(l.Client.ConfigPath(), func() error {
 		var e error
@@ -535,19 +851,22 @@ func (l *lockingClient) BackupKeep(keepN int) (string, error) {
 }
 
 func (l *lockingClient) Restore(backupPath string) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return err
+	}
+	return l.withMutationLock(func() error {
 		return l.Client.Restore(backupPath)
 	})
 }
 
 func (l *lockingClient) AddEntry(entry MCPEntry) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	return l.withMutationLock(func() error {
 		return l.Client.AddEntry(entry)
 	})
 }
 
 func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	return l.withMutationLock(func() error {
 		scoped, ok := l.Client.(interface {
 			AddEntryWithConfigWriter(MCPEntry, WriteConfigFileFunc) error
 		})
@@ -587,7 +906,7 @@ func (l *lockingClient) ListProviderMCPEntries(ctx context.Context) ([]ProviderM
 }
 
 func (l *lockingClient) CompareAndSetProviderMCPActivation(ctx context.Context, req ProviderMCPActivationCASV1) (result ProviderMCPActivationResultV1, err error) {
-	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	err = l.withMutationLock(func() error {
 		provider, ok := l.Client.(interface {
 			CompareAndSetProviderMCPActivation(context.Context, ProviderMCPActivationCASV1) (ProviderMCPActivationResultV1, error)
 		})
@@ -600,11 +919,11 @@ func (l *lockingClient) CompareAndSetProviderMCPActivation(ctx context.Context, 
 	return result, err
 }
 
-// RelocateHTTPEntry holds the single global config lock around the Codex
-// adapter's relocate/add/readback operation. The concrete body never nests a
-// config lock, so this remains one atomic transaction for the global TOML file.
+// RelocateHTTPEntry holds the selected global or project-identity config lock
+// around the Codex adapter's relocate/add/readback operation. The concrete body
+// never nests a config lock.
 func (l *lockingClient) RelocateHTTPEntry(req CodexHTTPRelocation) (result CodexHTTPRelocationResult, err error) {
-	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	err = l.withMutationLock(func() error {
 		codex, ok := l.Client.(interface {
 			RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
 		})
@@ -614,11 +933,14 @@ func (l *lockingClient) RelocateHTTPEntry(req CodexHTTPRelocation) (result Codex
 		result, err = codex.RelocateHTTPEntry(req)
 		return err
 	})
+	if err != nil {
+		result = CodexHTTPRelocationResult{}
+	}
 	return result, err
 }
 
 func (l *lockingClient) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (result CodexHTTPInverseResult, err error) {
-	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	err = l.withMutationLock(func() error {
 		codex, ok := l.Client.(interface {
 			RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
 		})
@@ -631,26 +953,52 @@ func (l *lockingClient) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation
 	return result, err
 }
 
+func (l *lockingClient) RestoreRelocatedHTTPEntryFromProvenance(req CodexHTTPInverseRelocation, pinnedOriginal []byte, originalSHA256 string) (result CodexHTTPInverseResult, err error) {
+	err = l.withMutationLock(func() error {
+		codex, ok := l.Client.(interface {
+			RestoreRelocatedHTTPEntryFromProvenance(CodexHTTPInverseRelocation, []byte, string) (CodexHTTPInverseResult, error)
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support Codex provenance inverse", l.Client.Name())
+		}
+		result, err = codex.RestoreRelocatedHTTPEntryFromProvenance(req, pinnedOriginal, originalSHA256)
+		return err
+	})
+	if err != nil {
+		result = CodexHTTPInverseResult{}
+	}
+	return result, err
+}
+
 func (l *lockingClient) RemoveEntry(name string) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	return l.withMutationLock(func() error {
 		return l.Client.RemoveEntry(name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackup(backupPath, name string) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return err
+	}
+	return l.withMutationLock(func() error {
 		return l.Client.RestoreEntryFromBackup(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return err
+	}
+	return l.withMutationLock(func() error {
 		return l.Client.RestoreEntryFromBackupForRollback(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	if err := l.rejectProjectLegacyBackup(); err != nil {
+		return err
+	}
+	return l.withMutationLock(func() error {
 		scoped, ok := l.Client.(interface {
 			RestoreEntryFromBackupForRollbackWithConfigWriter(string, string, WriteConfigFileFunc) error
 		})
@@ -676,6 +1024,9 @@ func (l *lockingClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backup
 // withConfigLock cannot self-deadlock on the same per-path mutex.
 
 func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
+	if rejectErr := l.rejectProjectLegacyBackup(); rejectErr != nil {
+		return "", false, rejectErr
+	}
 	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
 		path, ok, err = l.Client.LatestBackupPath()
 		return err
@@ -684,6 +1035,9 @@ func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
 }
 
 func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, err error) {
+	if rejectErr := l.rejectProjectLegacyBackup(); rejectErr != nil {
+		return false, rejectErr
+	}
 	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
 		has, err = l.Client.BackupContainsEntry(backupPath, name)
 		return err
@@ -692,6 +1046,9 @@ func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, 
 }
 
 func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (managed bool, err error) {
+	if rejectErr := l.rejectProjectLegacyBackup(); rejectErr != nil {
+		return false, rejectErr
+	}
 	werr := withConfigReadLock(l.Client.ConfigPath(), func() error {
 		managed, err = l.Client.BackupEntryIsHubManaged(backupPath, name)
 		return err
@@ -780,4 +1137,15 @@ func (l *lockingClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]L
 		return c.FindStdioLanguageServerCandidatesWriteTargetOwned()
 	}
 	return l.Client.FindStdioLanguageServerEntries()
+}
+
+func (l *lockingClient) RelocateSharedStdioEntry(ctx context.Context, req CodexSharedStdioRelocation, scope CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error) {
+	req.Evidence = CloneCodexSharedStdioReplayEvidence(req.Evidence)
+	req.CurrentSources = append([]*CodexConfiguredProjectProfile(nil), req.CurrentSources...)
+	return l.withSharedStdioReplay(ctx, req.SourceEntryName, req.TargetEntryName, req.Target, req.Evidence, req.CurrentSources, scope, CodexSharedStdioApplied)
+}
+func (l *lockingClient) RestoreSharedStdioEntryFromProvenance(ctx context.Context, req CodexSharedStdioInverseRelocation, scope CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error) {
+	req.Evidence = CloneCodexSharedStdioReplayEvidence(req.Evidence)
+	req.CurrentSources = append([]*CodexConfiguredProjectProfile(nil), req.CurrentSources...)
+	return l.withSharedStdioReplay(ctx, req.SourceEntryName, req.TargetEntryName, req.Target, req.Evidence, req.CurrentSources, scope, CodexSharedStdioBefore)
 }

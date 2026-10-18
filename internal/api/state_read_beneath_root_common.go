@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -39,6 +40,20 @@ func (e *StateFileReadError) Error() string {
 
 func (e *StateFileReadError) Unwrap() error {
 	return e.Cause
+}
+
+// Only original native open-missing outcomes gain an absence projection.
+// Other causes keep their ordinary errors.Is traversal through Unwrap.
+func (e *StateFileReadError) Is(target error) bool {
+	if e == nil || target != os.ErrNotExist || e.Category != StateFileReadErrorUnsafeObjectOrIO {
+		return false
+	}
+	switch e.Operation {
+	case "open-root", "open-component", "open-final":
+		return stateReadOpenCauseIsNotExist(e.Cause)
+	default:
+		return false
+	}
 }
 
 func newStateFileReadError(category StateFileReadErrorCategory, operation, component string, cause error) *StateFileReadError {

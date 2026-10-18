@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 	"os/exec"
+	"sync"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -105,6 +106,61 @@ func TestStartSupervisorDetachedBreakaway_AccessDeniedRetriesFlagless(t *testing
 	}
 	if retry.SysProcAttr != nil && retry.SysProcAttr.CreationFlags&windows.CREATE_BREAKAWAY_FROM_JOB != 0 {
 		t.Fatalf("retry command retained CREATE_BREAKAWAY_FROM_JOB, flags=%#x", retry.SysProcAttr.CreationFlags)
+	}
+}
+
+// Holds the actual adapter's synchronous diagnostic, rather than depending on
+// a naturally short post-Start window. Start is synthetic; native creator
+// capture/settlement remains a separate receiving obligation.
+func TestStartSupervisorDetachedBreakawayPublishesBeforeHeldDiagnostic(t *testing.T) {
+	initial, retry := exec.Command("fixture"), exec.Command("fixture")
+	created, diagnostic, release := make(chan *exec.Cmd, 1), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	type outcome struct {
+		command *exec.Cmd
+		err     error
+	}
+	finished := make(chan outcome, 1)
+	starts := 0
+	go func() {
+		command, err := startSupervisorDetachedBreakawayWithStart(initial, func() *exec.Cmd { return retry }, func(error) {
+			close(diagnostic)
+			<-release
+		}, processowner.BreakawayOptional, func(*exec.Cmd) error {
+			starts++
+			if starts == 1 {
+				return windows.ERROR_ACCESS_DENIED
+			}
+			return nil
+		}, func(command *exec.Cmd) { created <- command })
+		finished <- outcome{command, err}
+	}()
+	<-diagnostic
+	select {
+	case command := <-created:
+		if command != retry {
+			t.Error("receipt did not identify actual successful attempt")
+		}
+	default:
+		t.Error("successful Start hidden behind degradation diagnostic")
+	}
+	var early *outcome
+	select {
+	case result := <-finished:
+		early = &result
+		t.Error("diagnostic barrier was not held")
+	default:
+	}
+	releaseOnce.Do(func() { close(release) })
+	var result outcome
+	if early != nil {
+		result = *early
+	} else {
+		result = <-finished
+	}
+	if result.err != nil || result.command != retry || starts != 2 {
+		t.Fatalf("attempt policy changed: %#v starts=%d", result, starts)
 	}
 }
 

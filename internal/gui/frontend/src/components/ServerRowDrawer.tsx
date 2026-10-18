@@ -1,7 +1,7 @@
 // ServerRowDrawer — a Flowbite right-placement Drawer opened per server row
 // in the Servers matrix. Three panes on one daemon-group:
 //
-//   1. Manifest preview — GET /api/manifest/get (reuses api.getManifest) and
+//   1. Manifest preview — GET /api/manifest/view (uses api.getManifestView) and
 //      renders the raw YAML read-only so the operator can eyeball the spec
 //      without leaving the matrix.
 //   2. Lifetime stats — projected from the /api/status DaemonStatus rows the
@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Drawer } from "flowbite";
-import { getManifest } from "../api";
+import { getManifestView } from "../api";
 import { formatBytes, formatUptime } from "../lib/format";
 import { stateShape } from "../lib/status";
 import type { DaemonStatus } from "../types";
@@ -98,7 +98,7 @@ export function ServerRowDrawer(props: ServerRowDrawerProps) {
     let cancelled = false;
     setYaml(null);
     setYamlErr(null);
-    getManifest(serverName)
+    getManifestView(serverName)
       .then((res) => {
         if (!cancelled) setYaml(res.yaml);
       })

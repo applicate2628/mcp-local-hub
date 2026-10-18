@@ -30,7 +30,11 @@
 package clients
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -51,6 +55,119 @@ var WriteConfigFile = fallbackWriteConfigFile
 // WriteConfigFileFunc is the per-call writer shape used when a higher layer has
 // already resolved and authorized a specific client-config write target.
 type WriteConfigFileFunc func(path string, contents []byte) error
+
+var ErrConfigWriteSnapshotConflict = errors.New("config write source snapshot conflict")
+var ErrConfigWriteSnapshotUnsupported = errors.New("config write expected snapshot capability unavailable")
+
+type ConfigWriteRequest struct {
+	FreshCreationEvidence ConfigWriteFreshCreationEvidence
+	Context               context.Context
+	Path                  string
+	Contents              []byte
+	ExpectedSnapshot      *ConfigWriteSnapshot
+}
+
+type ConfigWriteFreshCreationEvidence interface {
+	ValidateFreshCreation(context.Context, string) error
+}
+
+// ConfigWriteSnapshot is package-created, transaction-scoped and never wire
+// data. ParentHandle is borrowed; the transaction owns and closes it.
+type ConfigWriteSnapshot struct {
+	captureTransaction *ConfigWriteCaptureTransaction
+	path               string
+	contents           []byte
+	fileInfo           os.FileInfo
+	parentHandle       uintptr
+	ancestors          string
+	checkBinding       func(string) error
+}
+
+// Test-only expected-input seam: the real identity comparison still executes.
+// Nil in production; it never substitutes a validator or an acquired handle.
+var ConfigWriteExpectedAncestorTestHook func(*ConfigWriteSnapshot) string
+
+func (s *ConfigWriteSnapshot) AncestorIdentityForTest() string {
+	if s == nil {
+		return ""
+	}
+	return s.ancestors
+}
+
+func (s *ConfigWriteSnapshot) BorrowedParentHandle() uintptr {
+	if s == nil {
+		return 0
+	}
+	return s.parentHandle
+}
+
+func (s *ConfigWriteSnapshot) ValidateObservedCapture(ctx context.Context, path string) error {
+	if s == nil || s.captureTransaction == nil {
+		return ErrConfigWriteSnapshotUnsupported
+	}
+	t := s.captureTransaction
+	t.mu.Lock()
+	eligible := t.snapshot == s && !t.closeAttempted && !t.closeRequested && t.primary == nil && t.validationCloseError == nil
+	t.mu.Unlock()
+	if !eligible {
+		return ErrConfigWriteSnapshotConflict
+	}
+	return s.ValidateBinding(ctx, path)
+}
+func (s *ConfigWriteSnapshot) ValidateBinding(ctx context.Context, path string) error {
+	if ctx == nil || s == nil || s.parentHandle == 0 || s.checkBinding == nil {
+		return ErrConfigWriteSnapshotConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil || abs != s.path {
+		return ErrConfigWriteSnapshotConflict
+	}
+	expected := s.ancestors
+	if ConfigWriteExpectedAncestorTestHook != nil {
+		expected = ConfigWriteExpectedAncestorTestHook(s)
+	}
+	return s.checkBinding(expected)
+}
+func (s *ConfigWriteSnapshot) VerifyCurrentFile(ctx context.Context, file *os.File) error {
+	if ctx == nil || s == nil || file == nil {
+		return ErrConfigWriteSnapshotConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(s.fileInfo, info) {
+		return ErrConfigWriteSnapshotConflict
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, s.contents) {
+		return ErrConfigWriteSnapshotConflict
+	}
+	return nil
+}
+
+// API init installs this extension into the existing publisher. A snapshot
+// cannot silently downgrade to the legacy path/bytes port.
+var WriteConfigFileRequest func(ConfigWriteRequest) error
+
+func writeConfigRequestWith(req ConfigWriteRequest) error {
+	if req.ExpectedSnapshot == nil {
+		return writeConfigFileWith(nil, req.Path, req.Contents)
+	}
+	if WriteConfigFileRequest == nil {
+		return ErrConfigWriteSnapshotUnsupported
+	}
+	return WriteConfigFileRequest(req)
+}
 
 func writeConfigFileWith(writer WriteConfigFileFunc, path string, contents []byte) error {
 	if writer == nil {
@@ -108,6 +225,10 @@ var CreateConfigFileIfMissing = fallbackCreateConfigFileIfMissing
 // strict-mode SecureWriteClientConfig reject the very dir just created. The
 // injected production impl creates each component owner-only too.
 var SecureCreateParentDir = fallbackSecureCreateParentDir
+
+// The installed no-create verifier shares the production parent descent owner.
+// Absence of this capability is a refusal, never proof of parent absence.
+var SecureVerifyParentDir func(context.Context, string) (bool, error)
 
 // fallbackWriteConfigFile is the test-friendly default. It creates
 // parent dirs (matching the prior writeJSON / writeTOML behavior in

@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -345,11 +346,16 @@ type ScopedConfigWriterClient interface {
 
 // CodexTransportClient is the narrow Codex-only seam used by adopt planning and
 // execution. ResolveTransportTarget is read-only; RelocateHTTPEntry is one
-// locked global-config transaction and never takes a project config path.
+// locked transaction against the adapter's constructor-bound config and never
+// accepts a config path. NewCodexCLI preserves the global binding, while
+// NewCodexCLIForProject supplies one validated fixed project binding.
 type CodexTransportClient interface {
+	RelocateSharedStdioEntry(context.Context, CodexSharedStdioRelocation, CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error)
+	RestoreSharedStdioEntryFromProvenance(context.Context, CodexSharedStdioInverseRelocation, CodexSharedStdioWriteScope) (CodexSharedStdioMutationResult, error)
 	ResolveTransportTarget(CodexTransportTargetRequest) (CodexTransportTarget, error)
 	RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
 	RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
+	RestoreRelocatedHTTPEntryFromProvenance(CodexHTTPInverseRelocation, []byte, string) (CodexHTTPInverseResult, error)
 }
 
 func AsCodexTransportClient(client Client) (CodexTransportClient, bool) {

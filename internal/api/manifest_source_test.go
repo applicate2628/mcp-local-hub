@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -56,11 +57,17 @@ func TestLoadManifestYAMLEmbedFirst_ReadsFromEmbed(t *testing.T) {
 // appears alongside the embedded set. This keeps the dev flow working
 // without requiring a rebuild on every manifest edit.
 func TestListManifestNamesEmbedFirst_UnionsDiskAdditions(t *testing.T) {
-	// We can't inject a disk manifest into defaultManifestDir() without
-	// mutating the tree, so this is a smoke test: the embed-only
-	// subset must at least be present. A full disk-union test would
-	// require refactoring defaultManifestDir() to be injectable —
-	// deferred to follow-up.
+	root := t.TempDir()
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(root, "bin", "mcphub.exe")))
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", "")
+	const diskOnly = "canonical-disk-only"
+	manifestDir := mustCanonicalManifestDir(t)
+	if err := os.MkdirAll(filepath.Join(manifestDir, diskOnly), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, diskOnly, "manifest.yaml"), []byte(manifestRootTestYAML(diskOnly, 9384, "disk")), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
 		t.Fatalf("listManifestNamesEmbedFirst: %v", err)
@@ -70,9 +77,9 @@ func TestListManifestNamesEmbedFirst_UnionsDiskAdditions(t *testing.T) {
 		embedSet[n] = true
 	}
 	for _, n := range names {
-		// Every name returned must either be in embed or on disk — we
-		// can at least assert the embed subset is a subset of the union.
-		_ = embedSet[n]
+		if n != diskOnly {
+			_ = embedSet[n]
+		}
 	}
 	// Assert the embed subset is contained in the union.
 	for want := range embedSet {
@@ -86,6 +93,9 @@ func TestListManifestNamesEmbedFirst_UnionsDiskAdditions(t *testing.T) {
 		if !found {
 			t.Errorf("embed server %q not present in union list: %+v", want, names)
 		}
+	}
+	if !containsManifestRootTestName(names, diskOnly) {
+		t.Fatalf("canonical disk-only manifest missing from union: %v", names)
 	}
 }
 

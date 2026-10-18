@@ -40,6 +40,7 @@ func AdoptSupportedClients() []string {
 
 // AdoptOpts describes an unmanaged direct stdio entry to absorb into mcphub.
 type AdoptOpts struct {
+	Context           context.Context
 	EntryName         string
 	Client            string
 	ManifestName      string
@@ -52,6 +53,10 @@ type AdoptOpts struct {
 	// together; an empty pair preserves the global-only adopt behavior.
 	CodexProjectRoot string
 	CodexWorkingDir  string
+	// CodexProjectSourceRoot selects one physically validated project Codex
+	// config as the source of the adoption plan. It is independent of the
+	// legacy read-only layer-inspection pair above; empty preserves global mode.
+	CodexProjectSourceRoot string
 	// MCPProtocolCompatibilityProfile is an explicit opt-in for the generated
 	// stdio-bridge daemon. Empty preserves strict current protocol behavior.
 	MCPProtocolCompatibilityProfile string
@@ -63,6 +68,8 @@ type AdoptOpts struct {
 
 // AdoptPlan is the side-effect-free preview returned by BuildAdoptPlan.
 type AdoptPlan struct {
+	ProjectService                  *ProjectServicePlanInfo `json:"project_service,omitempty"`
+	projectService                  *projectServicePlan
 	EntryName                       string
 	SourceClient                    string
 	ManifestName                    string
@@ -75,6 +82,10 @@ type AdoptPlan struct {
 	MCPProtocolCompatibilityProfile string
 	ManifestYAML                    string
 	providerPreview                 *ProviderAdoptPreview
+	projectSource                   *projectAdoptSource
+	projectRepeat                   *projectAdoptRepeat
+	clientTargets                   map[string]adoptClientTargetRef
+	projectSourcePreimageToken      string
 	// TargetEntryNames freezes the physical client-config key for each selected
 	// client. Values equal EntryName unless a Codex project layer contributes an
 	// opposite transport under the logical source name.
@@ -122,6 +133,7 @@ type ProviderAdoptPreview struct {
 }
 
 type ExecuteAdoptOpts struct {
+	Context         context.Context
 	SymlinkConsents []ResolvedSymlinkConsent
 	// LeaseOwner is an in-process composition dependency. Nil binds the
 	// platform production owner; no command, HTTP request, configuration, or
@@ -133,6 +145,7 @@ type ExecuteAdoptOpts struct {
 	ReceivingVerifier AdoptReceivingVerifier
 	result            *AdoptExecutionResultV1
 	providerDeps      providerTransactionDeps
+	installFn         func(context.Context, *API, InstallOpts) error
 }
 
 // AdoptExecutionResultV1 carries only settlements returned by the owning
@@ -145,15 +158,58 @@ type AdoptExecutionResultV1 struct {
 
 const codexGlobalWriteTargetDisplay = "codex global config"
 
+var (
+	// These input errors contain no caller-supplied duration or private data.
+	ErrCodexSharedStdioActionBudgetRequired = errors.New("H6_ACTION_BUDGET_REQUIRED: supply --action-timeout with a positive Go duration or a finite action context")
+	ErrCodexSharedStdioActionBudgetInvalid  = errors.New("H6_ACTION_BUDGET_INVALID: action timeout must be a positive Go duration")
+	ErrProjectAdoptSourcePreimageUnexpected = errors.New("PROJECT_ADOPT_SOURCE_PREIMAGE_UNEXPECTED")
+	ErrProjectAdoptRepeatStateInconsistent  = errors.New("PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT")
+)
+
+// ResolveCodexSharedStdioActionContext is the sole action-duration input owner.
+// Ingress owns the returned cancel; subordinate operations inherit this context
+// without deriving another action allowance.
+func ResolveCodexSharedStdioActionContext(parent context.Context, actionTimeout *string) (context.Context, context.CancelFunc, error) {
+	if parent == nil {
+		return nil, nil, ErrCodexSharedStdioActionBudgetRequired
+	}
+	if err := parent.Err(); err != nil {
+		return nil, nil, err
+	}
+	if actionTimeout != nil {
+		duration, err := time.ParseDuration(*actionTimeout)
+		if err != nil || duration <= 0 {
+			return nil, nil, ErrCodexSharedStdioActionBudgetInvalid
+		}
+		ctx, cancel := context.WithTimeout(parent, duration)
+		return ctx, cancel, nil
+	}
+	deadline, ok := parent.Deadline()
+	if !ok {
+		return nil, nil, ErrCodexSharedStdioActionBudgetRequired
+	}
+	if !time.Now().Before(deadline) {
+		return nil, nil, context.DeadlineExceeded
+	}
+	return parent, func() {}, nil
+}
+
 // AdoptReceivingVerifier verifies the durable manifest/intent/client/provenance
 // receipt after an adopt transaction commits and before its lease settles.
-type AdoptReceivingVerifier func(*API, *AdoptPlan, *AdoptProvenanceRecord) error
+type AdoptReceivingVerifier func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error
 
-func (opts ExecuteAdoptOpts) verifyReceivers(a *API, plan *AdoptPlan, rec *AdoptProvenanceRecord) error {
+func (opts ExecuteAdoptOpts) verifyReceivers(ctx context.Context, a *API, plan *AdoptPlan, rec *AdoptProvenanceRecord) error {
 	if opts.ReceivingVerifier != nil {
-		return opts.ReceivingVerifier(a, plan, rec)
+		return opts.ReceivingVerifier(ctx, a, plan, rec)
 	}
-	return adoptReceivingVerifierFn(a, plan, rec)
+	return adoptReceivingVerifierFn(ctx, a, plan, rec)
+}
+
+func (opts ExecuteAdoptOpts) install(ctx context.Context, a *API, installOpts InstallOpts) error {
+	if opts.installFn != nil {
+		return opts.installFn(ctx, a, installOpts)
+	}
+	return a.installWithAdoptLeaseHeld(ctx, installOpts, nil)
 }
 
 // AdoptStageError is the closed transaction outcome returned by the apply
@@ -204,13 +260,17 @@ var adoptReceivingVerifierFn = verifyAdoptReceivers
 // facts as a substitute for this current-generation MCP settlement.
 var adoptReadinessVerifierFn = verifyAdoptReadiness
 
-func verifyAdoptReadiness(a *API, taskNames []string) error {
-	_, err := a.awaitReadinessForTasks(context.Background(), taskNames, nil, false)
+func verifyAdoptReadiness(ctx context.Context, a *API, taskNames []string) error {
+	_, err := a.awaitReadinessForTasks(ctx, taskNames, nil, false)
 	return err
 }
 
-func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanceRecord) error {
-	manifestPath := filepath.Join(defaultManifestDir(), plan.ManifestName, "manifest.yaml")
+func verifyAdoptReceivers(ctx context.Context, a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanceRecord) error {
+	manifestDir, err := adoptPlanManifestDir(plan)
+	if err != nil {
+		return newAdoptStageError("manifest-verify", "committed_unverified", fmt.Errorf("resolve manifest root: %w", err))
+	}
+	manifestPath := filepath.Join(manifestDir, plan.ManifestName, "manifest.yaml")
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return newAdoptStageError("manifest-verify", "committed_unverified", fmt.Errorf("read manifest: %w", err))
@@ -256,27 +316,37 @@ func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanc
 	if !intentFound {
 		return newAdoptStageError("intent-task-verify", "committed_unverified", fmt.Errorf("supervisor intent has no daemon for manifest %q", plan.ManifestName))
 	}
-	if err := adoptReadinessVerifierFn(a, taskNames); err != nil {
+	if err := adoptReadinessVerifierFn(ctx, a, taskNames); err != nil {
 		return newAdoptStageError("daemon-readiness", "committed_unverified", err)
 	}
 	expectedURL := fmt.Sprintf("http://127.0.0.1:%d%s", plan.Port, adoptDefaultURLPath)
-	for _, clientName := range plan.AdoptClients {
-		adapter, ok := clients.AllClients()[clientName]
-		if !ok {
-			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q is unavailable", clientName))
-		}
-		entry, err := adapter.GetEntry(plan.targetEntryName(clientName))
-		if err != nil || entry == nil || entry.URL != expectedURL || entry.Disabled || entry.ToolTimeoutSec != plan.toolTimeoutForClient(clientName) {
-			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q readback does not match the adopted HTTP binding", clientName))
-		}
+	if err := verifyAdoptClientReadbacksWithResolver(plan, expectedURL, newAdoptClientTargetResolver()); err != nil {
+		return err
 	}
 	rec, found, err := ReadAdoptProvenance(plan.ManifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if err != nil || !found || rec.OperationState != AdoptOperationStateAdopted {
 		return newAdoptStageError("provenance-receipt", "committed_unverified", fmt.Errorf("adopted provenance receipt is missing or uncommitted"))
 	}
 	if rec.SourceClient != plan.SourceClient || rec.SourceEntryName != plan.EntryName || !slices.Equal(rec.AdoptClients, plan.AdoptClients) ||
 		rec.ExpectedManifestHash == "" || rec.ExpectedManifestHash != manifestHash {
 		return newAdoptStageError("provenance-receipt", "committed_unverified", fmt.Errorf("adopted provenance receipt does not match the plan"))
+	}
+	return nil
+}
+
+func verifyAdoptClientReadbacksWithResolver(plan *AdoptPlan, expectedURL string, resolver adoptClientTargetResolver) error {
+	for _, clientName := range plan.AdoptClients {
+		resolved, err := resolver.resolvePlanClient(plan, clientName)
+		if err != nil {
+			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q target is unavailable", clientName))
+		}
+		entry, err := resolved.client.GetEntry(resolved.targetEntryName)
+		if err != nil || entry == nil || entry.URL != expectedURL || entry.Disabled || entry.ToolTimeoutSec != plan.toolTimeoutForClient(clientName) {
+			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q readback does not match the adopted HTTP binding", clientName))
+		}
 	}
 	return nil
 }
@@ -352,18 +422,106 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	if !isAdoptSupportedClient(sourceClient) {
 		return nil, fmt.Errorf("--client must be one of %s", strings.Join(adoptSupportedClients, " | "))
 	}
-	manifestName := strings.TrimSpace(opts.ManifestName)
-	if manifestName == "" {
-		manifestName = entryName
+	projectSourceMode := opts.CodexProjectSourceRoot != ""
+	if projectSourceMode {
+		if sourceClient != "codex-cli" || opts.ProviderPluginRef != "" || strings.TrimSpace(opts.ManifestName) != "" {
+			return nil, fmt.Errorf("CODEX_PROJECT_SOURCE_MODE_INVALID: project source requires client codex-cli without provider or user-supplied manifest name")
+		}
+		if opts.CodexProjectRoot != "" || opts.CodexWorkingDir != "" {
+			return nil, fmt.Errorf("CODEX_PROJECT_SOURCE_MODE_INVALID: project source cannot be combined with Codex layer-inspection fields")
+		}
 	}
-	if manifestName != entryName {
-		return nil, fmt.Errorf("adopt v1 requires --name to equal entry name %q (got %q)", entryName, manifestName)
+
+	var projectSource *projectAdoptSource
+	projectSourcePreimageToken := ""
+	manifestDir := ""
+	var err error
+	manifestName := strings.TrimSpace(opts.ManifestName)
+	if projectSourceMode {
+		identitySHA256, identityErr := clients.CodexProjectIdentitySHA256ForRoot(opts.CodexProjectSourceRoot)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		manifestName, err = deriveCodexProjectAdoptManifestName(entryName, identitySHA256)
+		if err != nil {
+			return nil, err
+		}
+		if err := CheckManifestName(manifestName); err != nil {
+			return nil, err
+		}
+		if embeddedManifestNamesContains(manifestName) {
+			return nil, fmt.Errorf("PROJECT_ADOPT_MANAGED_NAME_CONFLICT: derived manifest %q collides with a shipped identity", manifestName)
+		}
+		manifestDir, err = CanonicalManifestDir()
+		if err != nil {
+			return nil, fmt.Errorf("adopt: resolve manifest root: %w", err)
+		}
+		exists, existsErr := manifestExistsIn(manifestDir, manifestName)
+		if existsErr != nil {
+			return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, existsErr)
+		}
+		rec, found, readErr := ReadAdoptProvenance(manifestName)
+		if rec != nil && rec.ProjectService != nil {
+			return nil, errGraphifyServiceOperationRequired
+		}
+		if readErr != nil {
+			return nil, ErrProjectAdoptRepeatStateInconsistent
+		}
+		if found && adoptRecordHasSharedStdioTarget(*rec) {
+			if _, _, err := ResolveCodexSharedStdioActionContext(opts.Context, nil); err != nil {
+				return nil, err
+			}
+		}
+		if exists || found {
+			if !found || !projectAdoptRecordMatchesIdentity(rec, opts.CodexProjectSourceRoot, identitySHA256, entryName, manifestName) {
+				return nil, fmt.Errorf("PROJECT_ADOPT_MANAGED_NAME_CONFLICT: derived manifest %q belongs to different or unknown ownership", manifestName)
+			}
+			if !exists {
+				return nil, ErrProjectAdoptRepeatStateInconsistent
+			}
+			return a.buildProjectAdoptRepeatPlan(opts, rec, manifestDir)
+		}
+		projectSource, err = extractCodexProjectAdoptSource(opts.CodexProjectSourceRoot, entryName)
+		if err != nil {
+			if errors.Is(err, clients.ErrCodexProjectSourceRootInvalid) {
+				return nil, err
+			}
+			reason, _ := adoptExtractionErrorClass(err)
+			if reason == "" {
+				if errors.Is(err, ErrClientEntryNotPresent) {
+					reason = "source entry is absent"
+				} else {
+					reason = "config could not be read or parsed"
+				}
+			}
+			return nil, fmt.Errorf("CODEX_PROJECT_SOURCE_UNAVAILABLE: %s: %w", reason, err)
+		}
+		projectSourcePreimageToken, err = codexProjectSourcePreimageToken(identitySHA256, entryName, projectSource.configSHA256)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if manifestName == "" {
+			manifestName = entryName
+		}
+		if manifestName != entryName {
+			return nil, fmt.Errorf("adopt v1 requires --name to equal entry name %q (got %q)", entryName, manifestName)
+		}
 	}
 	if err := CheckManifestName(manifestName); err != nil {
 		return nil, err
 	}
 	if embeddedManifestNamesContains(manifestName) {
+		if projectSourceMode {
+			return nil, fmt.Errorf("PROJECT_ADOPT_MANAGED_NAME_CONFLICT: derived manifest %q collides with a shipped identity", manifestName)
+		}
 		return nil, fmt.Errorf("manifest %q collides with a shipped (built-in) server; adopt refuses to shadow shipped manifests", manifestName)
+	}
+	if manifestDir == "" {
+		manifestDir, err = adoptCommittedManifestDir()
+		if err != nil {
+			return nil, fmt.Errorf("adopt: resolve manifest root: %w", err)
+		}
 	}
 	compatibilityProfile := strings.TrimSpace(opts.MCPProtocolCompatibilityProfile)
 	if opts.MCPProtocolCompatibilityProfileExplicit && compatibilityProfile == "" {
@@ -372,16 +530,19 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	if _, err := mcpcompat.ResolveProtocolCompatibilityProfile(compatibilityProfile); err != nil {
 		return nil, fmt.Errorf("adopt MCP protocol compatibility profile: %w", err)
 	}
-	if exists, err := manifestExistsIn(defaultManifestDir(), manifestName); err != nil {
+	if exists, err := manifestExistsIn(manifestDir, manifestName); err != nil {
 		return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, err)
 	} else if exists {
+		if projectSourceMode {
+			return nil, fmt.Errorf("PROJECT_ADOPT_MANAGED_NAME_CONFLICT: derived manifest %q already exists without validated project provenance", manifestName)
+		}
 		if rec, found, readErr := ReadAdoptProvenance(manifestName); readErr == nil && found && rec.OperationState == AdoptOperationStateAdopted {
 			if opts.ProviderPluginRef != "" {
 				if rec.ProviderSource == nil || opts.ProviderPluginRef != rec.ProviderSource.PluginRef {
 					return nil, fmt.Errorf("existing adopted provider plugin does not match the durable receipt")
 				}
 			}
-			manifestBytes, manifestErr := os.ReadFile(filepath.Join(defaultManifestDir(), manifestName, "manifest.yaml"))
+			manifestBytes, manifestErr := os.ReadFile(filepath.Join(manifestDir, manifestName, "manifest.yaml"))
 			if manifestErr != nil {
 				return nil, fmt.Errorf("adopt: read existing disk manifest %q: %w", manifestName, manifestErr)
 			}
@@ -437,22 +598,31 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	scanOpts := adoptScanOpts(opts.ScanOpts)
-	entry, err := a.extractStdioEntryFromClient(sourceClient, entryName, scanOpts)
-	if err != nil {
-		if sourceClient == "codex-cli" && opts.CodexProjectRoot != "" && opts.CodexWorkingDir != "" {
-			if adapter, ok := clients.AsCodexTransportClient(clients.AllClients()[sourceClient]); ok {
-				target, targetErr := adapter.ResolveTransportTarget(clients.CodexTransportTargetRequest{
-					LogicalEntryName: entryName,
-					DesiredTransport: clients.CodexTransportHTTP,
-					ProjectRoot:      opts.CodexProjectRoot,
-					WorkingDir:       opts.CodexWorkingDir,
-				})
-				if targetErr == nil && target.ProjectLayerPresent {
-					return nil, fmt.Errorf("CODEX_PROJECT_SOURCE_UNSUPPORTED: source entry %q is not available from the global Codex config", entryName)
+	var entry extractedStdioEntry
+	if projectSourceMode {
+		entry = projectSource.entry
+		// adoptClientsWithSameNameEntry force-adds the already validated source.
+		// Emptying only this resolved path prevents project mode from consulting
+		// the user-global Codex config while preserving every other client scan.
+		scanOpts.CodexConfigPath = ""
+	} else {
+		entry, err = a.extractStdioEntryFromClient(sourceClient, entryName, scanOpts)
+		if err != nil {
+			if sourceClient == "codex-cli" && opts.CodexProjectRoot != "" && opts.CodexWorkingDir != "" {
+				if adapter, ok := clients.AsCodexTransportClient(clients.AllClients()[sourceClient]); ok {
+					target, targetErr := adapter.ResolveTransportTarget(clients.CodexTransportTargetRequest{
+						LogicalEntryName: entryName,
+						DesiredTransport: clients.CodexTransportHTTP,
+						ProjectRoot:      opts.CodexProjectRoot,
+						WorkingDir:       opts.CodexWorkingDir,
+					})
+					if targetErr == nil && target.ProjectLayerPresent {
+						return nil, fmt.Errorf("CODEX_PROJECT_SOURCE_UNSUPPORTED: source entry %q is not available from the global Codex config", entryName)
+					}
 				}
 			}
+			return nil, err
 		}
-		return nil, err
 	}
 	if entry.Disabled {
 		return nil, fmt.Errorf("server %q in source client %q is disabled; enable it first before adopting", entryName, sourceClient)
@@ -485,11 +655,17 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
 	}
 	targetEntryNames := make(map[string]string, len(adoptClients))
+	clientTargets := make(map[string]adoptClientTargetRef, len(adoptClients))
 	for _, client := range adoptClients {
 		targetEntryNames[client] = entryName
+		ref := adoptClientTargetRef{clientName: client, targetEntryName: entryName}
+		if projectSourceMode && client == "codex-cli" {
+			ref.projectSource = projectSource
+		}
+		clientTargets[client] = ref
 	}
 	var codexTarget *clients.CodexTransportTarget
-	if sourceClient == "codex-cli" {
+	if sourceClient == "codex-cli" && !projectSourceMode {
 		if (opts.CodexProjectRoot == "") != (opts.CodexWorkingDir == "") {
 			return nil, fmt.Errorf("%w: Codex project root and working directory must be supplied together", clients.ErrCodexLayerRootUnresolved)
 		}
@@ -528,8 +704,18 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		presentAtBuild:                  append([]string(nil), clientScan.Matching...),
 		secretValues:                    secretValues,
 		codexTarget:                     codexTarget,
+		projectSource:                   projectSource,
+		clientTargets:                   clientTargets,
+		projectSourcePreimageToken:      projectSourcePreimageToken,
 		toolTimeoutByClient:             adoptToolTimeoutByClient(bindings),
 	}, nil
+}
+
+func deriveCodexProjectAdoptManifestName(logicalEntryName, projectIdentitySHA256 string) (string, error) {
+	if _, ok := decodeLowerProjectAdoptSHA256(projectIdentitySHA256); !ok {
+		return "", fmt.Errorf("%w: invalid project identity for manifest derivation", clients.ErrCodexProjectSourceChanged)
+	}
+	return logicalEntryName + "-project-" + projectIdentitySHA256[:8], nil
 }
 
 // promoteAdoptProvenanceFn is the post-Install provenance promote step, injected
@@ -639,6 +825,25 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if plan == nil {
 		return fmt.Errorf("adopt plan is nil")
 	}
+	if plan.projectService != nil {
+		return a.executeProjectServicePlan(plan, w, opts)
+	}
+	if plan.ProjectService != nil {
+		return errors.New("PROJECT_SERVICE_PLAN_UNISSUED_OR_FOREIGN")
+	}
+	// Legacy execution retains its original lifetime. Only the explicit shared
+	// target consumes the finite action context, before GC, lease or effects.
+	actionCtx := context.Background()
+	for _, target := range plan.clientTargets {
+		if target.configTarget != nil && target.configTarget.Kind == adoptClientConfigTargetKindCodexSharedStdio {
+			var err error
+			actionCtx, _, err = ResolveCodexSharedStdioActionContext(opts.Context, nil)
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
 	if w == nil {
 		w = io.Discard
 	}
@@ -699,6 +904,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			stage = "existing-state-inconsistent"
 			commitState = "committed_unverified"
 			rec, found, err := ReadAdoptProvenance(plan.ManifestName)
+			if rec != nil && rec.ProjectService != nil {
+				return errGraphifyServiceOperationRequired
+			}
 			if err != nil {
 				return fmt.Errorf("read existing adopt provenance: %w", err)
 			}
@@ -708,8 +916,8 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			if err := validateAdoptRepeatState(plan, rec); err != nil {
 				return err
 			}
-			if err := opts.verifyReceivers(a, plan, rec); err != nil {
-				return fmt.Errorf("existing adopted receiver state does not match its durable receipt")
+			if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
+				return fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err)
 			}
 			return nil
 		}
@@ -794,7 +1002,11 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			return err
 		}
 		stage = "manifest-write"
-		if err := a.manifestCreateWithAdoptLeaseHeld(plan.ManifestName, plan.ManifestYAML); err != nil {
+		manifestDir, manifestDirErr := adoptPlanManifestDir(plan)
+		if manifestDirErr != nil {
+			return fmt.Errorf("adopt: resolve manifest root: %w", manifestDirErr)
+		}
+		if err := a.manifestCreateInWithAdoptLeaseHeld(manifestDir, plan.ManifestName, plan.ManifestYAML); err != nil {
 			abortNote := ""
 			if plan.providerSource == nil {
 				abortNote = abortProvenanceNote(abortAdoptProvenance(rec))
@@ -816,12 +1028,27 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			Writer:          &installNarration,
 			SymlinkConsents: opts.SymlinkConsents,
 		}
-		if plan.codexTarget != nil && plan.codexTarget.TargetEntryName != plan.EntryName {
+		if plan.hasCodexTransportRelocation() {
 			installOpts.ClientsInclude = withoutAdoptClient(plan.AdoptClients, "codex-cli")
 			installOpts.SkipClientConfigWrites = len(installOpts.ClientsInclude) == 0
 		}
+		if plan.providerSource != nil {
+			stage = "provider-install-state"
+			updated, err := advanceProviderManagedInstallState(plan.ManifestName, ProviderManagedInstallPreInstall, ProviderManagedInstallMayHaveApplied)
+			if err != nil {
+				return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: %w", err)
+			}
+			rec = updated
+			providerRec = updated
+		}
 		stage = "install"
-		if err := a.installWithAdoptLeaseHeld(context.Background(), installOpts, nil); err != nil {
+		if err := opts.install(actionCtx, a, installOpts); err != nil {
+			var committedUnverified *InstallCommittedUnverifiedError
+			if errors.As(err, &committedUnverified) {
+				providerManagedInstalled = plan.providerSource != nil
+				commitState = "committed_unverified"
+				return fmt.Errorf("adopt install committed client and intent changes, but managed registration settlement is unverified; manifest, provenance, routed vault keys, and provider state were PRESERVED for recovery: %w", err)
+			}
 			// FORWARD-COMMITTED branch: install proved that one client mutation is
 			// applied, deliberately retained earlier independent work, and skipped
 			// later optional clients after config-lock release became unconfirmed.
@@ -886,7 +1113,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			if plan.providerSource == nil {
 				abortNote = abortProvenanceNote(abortAdoptProvenance(rec))
 			}
-			if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
+			if cleanupErr := a.manifestDeleteInUnderLease(manifestDir, plan.ManifestName); cleanupErr != nil {
 				if len(plan.SecretRoutedKeys) > 0 {
 					vaultNote = "; routed vault keys were left intact because the manifest still exists: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 				}
@@ -907,7 +1134,14 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			return fmt.Errorf("adopt Codex target relocation failed: %w", err)
 		}
 		if plan.hasCodexTransportRelocation() {
-			settlement, settlementErr := NewClientConfigSettlementOwnerV1().Accept(ClientConfigOperationAdopt, codexResult)
+			owner := NewClientConfigSettlementOwnerV1()
+			var settlement ClientConfigSettlementV1
+			var settlementErr error
+			if plan.projectSource != nil {
+				settlement, settlementErr = owner.AcceptProject(ClientConfigOperationAdopt, codexResult, plan.projectSource.identity.ProjectIdentitySHA256())
+			} else {
+				settlement, settlementErr = owner.Accept(ClientConfigOperationAdopt, codexResult)
+			}
 			if opts.result != nil && settlement != (ClientConfigSettlementV1{}) {
 				opts.result.ClientConfigSettlements = append(opts.result.ClientConfigSettlements, settlement)
 			}
@@ -931,7 +1165,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			emitAdoptProvenanceCommitFailed(rec.ManifestName)
 			return err
 		}
-		if err := opts.verifyReceivers(a, plan, rec); err != nil {
+		if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
 			return err
 		}
 		return nil
@@ -1014,19 +1248,32 @@ func withoutAdoptClient(names []string, excluded string) []string {
 }
 
 func applyCodexAdoptTarget(plan *AdoptPlan) (clients.CodexHTTPRelocationResult, error) {
-	if plan == nil || plan.codexTarget == nil || plan.codexTarget.TargetEntryName == plan.EntryName {
+	return applyCodexAdoptTargetWithResolver(plan, newAdoptClientTargetResolver())
+}
+
+func applyCodexAdoptTargetWithResolver(plan *AdoptPlan, resolver adoptClientTargetResolver) (clients.CodexHTTPRelocationResult, error) {
+	if !plan.hasCodexTransportRelocation() {
 		return clients.CodexHTTPRelocationResult{}, nil
 	}
-	adapter, ok := clients.AsCodexTransportClient(clients.AllClients()["codex-cli"])
+	resolved, err := resolver.resolvePlanClient(plan, "codex-cli")
+	if err != nil {
+		return clients.CodexHTTPRelocationResult{}, err
+	}
+	adapter, ok := clients.AsCodexTransportClient(resolved.client)
 	if !ok {
 		return clients.CodexHTTPRelocationResult{}, fmt.Errorf("CODEX_LAYER_ROOT_UNRESOLVED: Codex transport adapter is unavailable")
 	}
+	expectedConfigSHA256 := ""
+	if resolved.projectSource != nil {
+		expectedConfigSHA256 = resolved.projectSource.configSHA256
+	}
 	result, err := adapter.RelocateHTTPEntry(clients.CodexHTTPRelocation{
-		SourceEntryName: plan.EntryName,
-		TargetEntryName: plan.codexTarget.TargetEntryName,
-		ExpectedSource:  clients.CodexTransportStdio,
+		SourceEntryName:      plan.EntryName,
+		TargetEntryName:      resolved.targetEntryName,
+		ExpectedSource:       clients.CodexTransportStdio,
+		ExpectedConfigSHA256: expectedConfigSHA256,
 		Entry: clients.MCPEntry{
-			Name:           plan.codexTarget.TargetEntryName,
+			Name:           resolved.targetEntryName,
 			URL:            fmt.Sprintf("http://127.0.0.1:%d%s", plan.Port, adoptDefaultURLPath),
 			ToolTimeoutSec: plan.toolTimeoutForClient("codex-cli"),
 		},
@@ -1063,6 +1310,11 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 		target := plan.targetEntryName(client)
 		fmt.Fprintf(w, "  client %s: logical source: %s; target alias: %s\n", client, plan.EntryName, target)
 		if client == "codex-cli" && plan.hasCodexTransportRelocation() {
+			if plan.projectSource != nil {
+				fmt.Fprintln(w, "    project write target: selected Codex project config")
+				fmt.Fprintln(w, "    action: replace project entry with HTTP relay")
+				continue
+			}
 			fmt.Fprintf(w, "    global write target: %s\n", codexGlobalWriteTargetDisplay)
 			fmt.Fprintln(w, "    collision reason: cross-layer opposite transport")
 			fmt.Fprintln(w, "    action: relocate global HTTP/add alias; project read-only")
@@ -1093,8 +1345,180 @@ func (plan *AdoptPlan) targetEntryName(client string) string {
 	return plan.EntryName
 }
 
+func (plan *AdoptPlan) ProjectSourcePreimageToken() string {
+	if plan == nil {
+		return ""
+	}
+	return plan.projectSourcePreimageToken
+}
+
+func adoptPlanManifestDir(plan *AdoptPlan) (string, error) {
+	if plan != nil && (plan.projectSource != nil || plan.projectRepeat != nil) {
+		return CanonicalManifestDir()
+	}
+	return adoptCommittedManifestDir()
+}
+
+// ValidateProjectSourcePreimageToken validates only the opaque preview token
+// already bound into this immutable plan. It performs no reads, locking, client
+// construction, or mutation.
+func (plan *AdoptPlan) ValidateProjectSourcePreimageToken(supplied string) error {
+	if plan == nil {
+		return clients.ErrCodexProjectSourceChanged
+	}
+	projectMarkers := 0
+	if plan.projectSource != nil {
+		projectMarkers++
+	}
+	if plan.projectRepeat != nil {
+		projectMarkers++
+	}
+	if plan.projectService != nil {
+		projectMarkers++
+	}
+	if projectMarkers == 1 {
+		if _, ok := decodeLowerProjectAdoptSHA256(plan.projectSourcePreimageToken); !ok {
+			return clients.ErrCodexProjectSourceChanged
+		}
+		if supplied == "" {
+			return clients.ErrCodexProjectSourcePreviewRequired
+		}
+		if _, ok := decodeLowerProjectAdoptSHA256(supplied); !ok || supplied != plan.projectSourcePreimageToken {
+			return clients.ErrCodexProjectSourceChanged
+		}
+		return nil
+	}
+	if projectMarkers > 1 {
+		return clients.ErrCodexProjectSourceChanged
+	}
+	if plan.projectSourcePreimageToken != "" {
+		return clients.ErrCodexProjectSourceChanged
+	}
+	if supplied != "" {
+		return ErrProjectAdoptSourcePreimageUnexpected
+	}
+	return nil
+}
+
 func (plan *AdoptPlan) hasCodexTransportRelocation() bool {
-	return plan != nil && plan.SourceClient == "codex-cli" && plan.targetEntryName("codex-cli") != plan.EntryName
+	return plan != nil && plan.SourceClient == "codex-cli" &&
+		(plan.projectSource != nil || plan.targetEntryName("codex-cli") != plan.EntryName)
+}
+
+func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, projectIdentitySHA256, entryName, manifestName string) bool {
+	if rec == nil || rec.ManifestName != manifestName || rec.SourceClient != "codex-cli" || rec.SourceEntryName != entryName || rec.ProviderSource != nil || rec.ProjectService != nil {
+		return false
+	}
+	matches := 0
+	for _, client := range rec.Clients {
+		if client.ConfigTarget == nil {
+			continue
+		}
+		if client.Client != "codex-cli" || adoptClientTargetEntryName(*rec, client) != entryName ||
+			client.ConfigTarget.Kind != adoptClientConfigTargetKindCodexProject || client.ConfigTarget.ProjectRoot != projectRoot ||
+			client.ConfigTarget.ProjectIdentitySHA256 != projectIdentitySHA256 {
+			return false
+		}
+		matches++
+	}
+	return matches == 1
+}
+
+func (a *API) buildProjectAdoptRepeatPlan(opts AdoptOpts, rec *AdoptProvenanceRecord, manifestDir string) (*AdoptPlan, error) {
+	if rec == nil || rec.OperationState != AdoptOperationStateAdopted || rec.ProviderSource != nil || rec.ProjectService != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(manifestDir, rec.ManifestName, "manifest.yaml"))
+	if err != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	bindings, err := expectedAdoptBindingsFromManifestBytes(rec, manifestBytes)
+	if err != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	targetNames := make(map[string]string, len(rec.AdoptClients))
+	targetRefs := make(map[string]adoptClientTargetRef, len(rec.AdoptClients))
+	clientRecords := make(map[string]AdoptClientProvenance, len(rec.Clients))
+	for _, client := range rec.Clients {
+		if _, duplicate := clientRecords[client.Client]; duplicate {
+			return nil, ErrProjectAdoptRepeatStateInconsistent
+		}
+		clientRecords[client.Client] = client
+	}
+	for _, clientName := range rec.AdoptClients {
+		client, ok := clientRecords[clientName]
+		if !ok {
+			return nil, ErrProjectAdoptRepeatStateInconsistent
+		}
+		targetEntryName := adoptClientTargetEntryName(*rec, client)
+		targetNames[clientName] = targetEntryName
+		targetRefs[clientName] = adoptClientTargetRef{clientName: clientName, targetEntryName: targetEntryName, configTarget: client.ConfigTarget}
+	}
+	snapshot, err := clients.ReadCodexProjectConfigSnapshot(opts.CodexProjectSourceRoot)
+	if err != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	projectEntry, err := snapshot.Entry(rec.SourceEntryName)
+	if err != nil || projectEntry == nil || projectEntry.Disabled {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	var projectBinding config.ClientBinding
+	foundBinding := false
+	for _, binding := range bindings {
+		if binding.Client == "codex-cli" {
+			projectBinding = binding
+			foundBinding = true
+			break
+		}
+	}
+	expected := &config.ServerManifest{Name: rec.ManifestName, Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}}}
+	matched, _ := liveEntryMatchesManifestBinding(projectEntry, rec.SourceEntryName, projectBinding, expected)
+	if !foundBinding || !matched {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	projectClient, ok := clientRecords["codex-cli"]
+	if !ok || projectClient.ConfigTarget == nil || snapshot.Identity().ProjectIdentitySHA256() != projectClient.ConfigTarget.ProjectIdentitySHA256 {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	token, err := codexProjectSourcePreimageToken(snapshot.Identity().ProjectIdentitySHA256(), rec.SourceEntryName, snapshot.ConfigSHA256())
+	if err != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	compatibilityProfile := strings.TrimSpace(opts.MCPProtocolCompatibilityProfile)
+	if opts.MCPProtocolCompatibilityProfileExplicit && compatibilityProfile == "" {
+		return nil, fmt.Errorf("adopt MCP protocol compatibility profile cannot be explicitly empty")
+	}
+	if _, err := mcpcompat.ResolveProtocolCompatibilityProfile(compatibilityProfile); err != nil {
+		return nil, fmt.Errorf("adopt MCP protocol compatibility profile: %w", err)
+	}
+	requestedClients, err := normalizeAdoptClientNames(opts.Clients, rec.SourceClient)
+	if err != nil {
+		return nil, err
+	}
+	plan := &AdoptPlan{
+		EntryName:                             rec.SourceEntryName,
+		SourceClient:                          rec.SourceClient,
+		ManifestName:                          rec.ManifestName,
+		Port:                                  rec.Port,
+		AdoptClients:                          append([]string(nil), rec.AdoptClients...),
+		MCPProtocolCompatibilityProfile:       rec.MCPProtocolCompatibilityProfile,
+		ManifestYAML:                          string(manifestBytes),
+		TargetEntryNames:                      targetNames,
+		projectRepeat:                         &projectAdoptRepeat{identity: snapshot.Identity(), logicalEntryName: rec.SourceEntryName, configSHA256: snapshot.ConfigSHA256()},
+		clientTargets:                         targetRefs,
+		projectSourcePreimageToken:            token,
+		alreadyAdopted:                        true,
+		requestedPort:                         opts.Port,
+		requestedClients:                      requestedClients,
+		requestedClientsExplicit:              len(opts.Clients) > 0,
+		requestedCompatibilityProfile:         compatibilityProfile,
+		requestedCompatibilityProfileExplicit: opts.MCPProtocolCompatibilityProfileExplicit,
+		toolTimeoutByClient:                   adoptToolTimeoutByClient(bindings),
+	}
+	if err := validateAdoptRepeatState(plan, rec); err != nil {
+		return nil, ErrProjectAdoptRepeatStateInconsistent
+	}
+	return plan, nil
 }
 
 func adoptScanOpts(opts ScanOpts) ScanOpts {

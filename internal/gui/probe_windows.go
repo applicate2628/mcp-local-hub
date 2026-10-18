@@ -13,6 +13,7 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"mcp-local-hub/internal/process"
 )
 
 // classifyOpenProcessError maps an OpenProcess failure to the appropriate
@@ -77,10 +79,7 @@ func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
 	)
 	h, err := windows.OpenProcess(processQueryLimitedInformation|processQueryInformation|processVMRead|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			return ProcessIdentity{Alive: true, Denied: true}, nil
-		}
-		return ProcessIdentity{Alive: false}, nil
+		return classifyOpenProcessError(err)
 	}
 	closeFailure := func(cause error) (ProcessIdentity, error) {
 		return ProcessIdentity{}, errors.Join(cause, windows.CloseHandle(h))
@@ -107,6 +106,16 @@ func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
 		StartTime: time.Unix(0, creation.Nanoseconds()),
 		Handle:    uintptr(h),
 	}, nil
+}
+
+// waitRetainedProcess preserves the GUI result signature while the process
+// owner performs the one native wait. ProcessIdentity retains handle ownership.
+func waitRetainedProcess(ctx context.Context, handle uintptr) (uint32, error) {
+	result, err := process.WaitRetainedProcessExit(ctx, handle)
+	if err == nil && (!result.Exited || !result.ExitCodeAvailable) {
+		err = errors.New("retained process exit code unavailable")
+	}
+	return result.ExitCode, err
 }
 
 func processIDWindows(pid int) (ProcessIdentity, error) {

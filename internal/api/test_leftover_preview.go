@@ -214,7 +214,7 @@ func buildTestLeftoverPathScope(operatorRoot string) testLeftoverPathScope {
 	if productionState, err := daemonStateDirReadOnly(); err == nil {
 		scope.productionState, scope.protectedScopeVerdicts["production-state"] = canonicalizeTestLeftoverProtectedScope(productionState)
 	}
-	if installPath, err := canonicalMcphubPath(); err == nil {
+	if installPath, err := LocalInstallMcphubPath(); err == nil {
 		scope.installPath, scope.protectedScopeVerdicts["install-path"] = canonicalizeTestLeftoverProtectedScope(installPath)
 	}
 	if repoRoot, err := findTestLeftoverRepoRoot(); err == nil {

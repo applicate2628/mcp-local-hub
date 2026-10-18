@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -26,9 +27,57 @@ func runAutostartOwnerModeFromCLI(owner autostart.OwnerMode, strict bool) error 
 	}
 	return RunAutostartOwnerMode(owner, strict, StrictModeDeps{
 		StateDir:         stateDir,
+		GUISettingsPath:  api.SettingsPath(),
+		EnableAutorun:    true,
 		IntentPath:       filepath.Join(stateDir, "supervisor-intent.json"),
 		BreadcrumbPath:   filepath.Join(stateDir, "strict-mode-mutation-incomplete.json"),
 		AutostartBackend: backend,
+	})
+}
+
+func withAutostartGUIControl(deps StrictModeDeps, enable bool, fn func(*api.GUIOwnerControl) error) error {
+	if fn == nil {
+		return errors.New("autostart GUI control operation is required")
+	}
+	if deps.GUISettingsPath == "" {
+		return errors.New("autostart GUI settings path is required")
+	}
+	a := &api.API{}
+	if enable {
+		result, err := a.SetGUIAutorunEnabledIn(deps.GUISettingsPath, true, func(control api.GUIOwnerControl) error {
+			return fn(&control)
+		})
+		if err != nil && result.Applied {
+			return fmt.Errorf("autorun preference applied; projection or settings release failed: %w", err)
+		}
+		return err
+	}
+	return a.WithGUIOwnerControlIn(deps.GUISettingsPath, func(control api.GUIOwnerControl) error {
+		return fn(&control)
+	})
+}
+
+func disableAutostartForPlatform(backend autostart.Backend) error {
+	result, err := (&api.API{}).SetGUIAutorunEnabled(false, func(api.GUIOwnerControl) error {
+		return backend.Disable()
+	})
+	if err != nil && result.Applied {
+		return fmt.Errorf("autorun preference applied; task removal or settings release failed: %w", err)
+	}
+	return err
+}
+
+func writeAutostartPlatformDetails(w io.Writer) error {
+	return (&api.API{}).WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
+		policy := "legacy"
+		if control.AutorunEnabled != nil {
+			policy = "disabled"
+			if *control.AutorunEnabled {
+				policy = "enabled"
+			}
+		}
+		_, err := fmt.Fprintf(w, "autorun-policy=%s\nrun-desired=%s\n", policy, control.RunDesired)
+		return err
 	})
 }
 

@@ -16,6 +16,25 @@ type IPCRequest struct {
 	Args    map[string]any `json:"args,omitempty"`
 }
 
+type LazyProxyReadinessEventV1 struct {
+	ProtocolVersion  int    `json:"protocol_version"`
+	TaskName         string `json:"task_name"`
+	WrapperPID       int    `json:"wrapper_pid"`
+	WrapperStartedAt string `json:"wrapper_started_at"`
+	BackendEpoch     uint64 `json:"backend_epoch"`
+	Transition       string `json:"transition"`
+	ObservedAt       string `json:"observed_at"`
+}
+
+type LazyProxyReadinessReceiptV1 struct {
+	Disposition      string `json:"disposition"`
+	WrapperPID       int    `json:"wrapper_pid"`
+	WrapperStartedAt string `json:"wrapper_started_at"`
+	PIDGeneration    int    `json:"pid_generation"`
+	BackendEpoch     uint64 `json:"backend_epoch"`
+	Transition       string `json:"transition"`
+}
+
 // IPCCommandIsReadOnly is the single owner of "read-only supervisor IPC command".
 // Fail-safe allowlist: true ONLY for enumerated pure-query commands (answered in the
 // pre-reconcileReady-gate dispatch switch); every other command — including unknown/

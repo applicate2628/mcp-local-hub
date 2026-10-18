@@ -10,34 +10,39 @@ import (
 
 // observeSupervisorReadiness records bounded, current-generation evidence
 // after a spawn. The tracker remains the only writer; API later reduces the
-// observation. This goroutine has a fixed deadline and does not mutate tasks,
+// observation. Bind and initial-protocol work stay deadline-bounded; a
+// retryable post-budget failure remains in this same generation-scoped
+// goroutine at the existing liveness cadence. It does not mutate tasks,
 // intents, ports, DACLs, or client configuration.
-func observeSupervisorReadiness(tracker *DaemonRuntimeTracker, events *api.SupervisorEventLog, d api.SupervisorDaemon, generation int, pid int, startedAt time.Time) {
-	observeSupervisorReadinessWithDeps(tracker, events, d, generation, pid, startedAt, supervisorReadinessObserverDeps{
+func observeSupervisorReadiness(ctx context.Context, tracker *DaemonRuntimeTracker, events *api.SupervisorEventLog, d api.SupervisorDaemon, generation int, pid int, startedAt time.Time) {
+	observeSupervisorReadinessWithDeps(ctx, tracker, events, d, generation, pid, startedAt, supervisorReadinessObserverDeps{
 		now:  func() time.Time { return time.Now().UTC() },
-		wait: time.Sleep,
+		wait: waitSupervisorReadiness,
 		inspect: func(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) (bool, bool) {
 			live, _, bound, _ := supervisorDaemonEntryLiveWithProbe(d, entry, now, supervisorLivenessProbeFns, 0)
 			return live, bound
 		},
-		probe:      api.ProbeMCPReadiness,
+		probe:      api.ProbeMCPReadinessContext,
 		routeProbe: api.AssertMCPFrontRoutesLive,
 	})
 }
 
 type supervisorReadinessObserverDeps struct {
 	now     func() time.Time
-	wait    func(time.Duration)
+	wait    func(context.Context, time.Duration) bool
 	inspect func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (live, bound bool)
-	probe   func(int) api.MCPReadinessResult
+	probe   func(context.Context, int) api.MCPReadinessResult
 	// routeProbe is the API-owned, combined readiness predicate for the
 	// supervisor's one reserved route-front descriptor. It owns the Serena and
 	// LSP route checks; ordinary daemon descriptors retain probe's /mcp check.
 	routeProbe func(context.Context, int) error
 }
 
-func observeSupervisorReadinessWithDeps(tracker *DaemonRuntimeTracker, events *api.SupervisorEventLog, d api.SupervisorDaemon, generation int, pid int, startedAt time.Time, deps supervisorReadinessObserverDeps) {
-	if tracker == nil || generation <= 0 {
+func observeSupervisorReadinessWithDeps(ctx context.Context, tracker *DaemonRuntimeTracker, events *api.SupervisorEventLog, d api.SupervisorDaemon, generation int, pid int, startedAt time.Time, deps supervisorReadinessObserverDeps) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tracker == nil || generation <= 0 || deps.now == nil || deps.wait == nil || deps.inspect == nil || deps.probe == nil {
 		return
 	}
 	policy := api.ReadinessPolicyMCPUpstream
@@ -50,22 +55,42 @@ func observeSupervisorReadinessWithDeps(tracker *DaemonRuntimeTracker, events *a
 	if deadlineSeconds <= 0 {
 		deadlineSeconds = 5
 	}
-	deadline := startedAt.Add(time.Duration(deadlineSeconds) * time.Second)
-	for {
-		entry, ok := tracker.Get(d.TaskName)
-		if !ok || entry.PIDGeneration != generation || entry.CurrentPID != pid {
-			return
-		}
-		observation := api.DaemonReadinessObservationV1{
+	listenerDeadline := startedAt.Add(time.Duration(deadlineSeconds) * time.Second)
+	initialProtocolDeadline := listenerDeadline.Add(api.MCPReadinessProbeBudget)
+	newObservation := func() api.DaemonReadinessObservationV1 {
+		return api.DaemonReadinessObservationV1{
 			TaskName: d.TaskName, Server: d.Server, Daemon: d.Daemon, Port: d.Port, PID: pid,
 			ProcessState: "Running", CurrentPIDGeneration: uint64(generation), ObservedPIDGeneration: uint64(generation),
 			IntentPresent: true, IntentRunnable: true, WrapperStarted: true, Policy: policy,
 		}
+	}
+	current := func() (DaemonRuntimeEntry, bool) {
+		if ctx.Err() != nil {
+			return DaemonRuntimeEntry{}, false
+		}
+		entry, ok := tracker.Get(d.TaskName)
+		if !ok || entry.PIDGeneration != generation || entry.CurrentPID != pid || entry.State != daemonRuntimeStateRunning {
+			return DaemonRuntimeEntry{}, false
+		}
+		return entry, true
+	}
+	for {
+		entry, ok := current()
+		if !ok {
+			return
+		}
+		observation := newObservation()
 		if policy == api.ReadinessPolicySyntheticProxy {
+			if _, ok := current(); !ok {
+				return
+			}
 			emitReadinessSettlement(events, tracker, observation)
 			return
 		}
 		live, bound := deps.inspect(d, entry, deps.now())
+		if _, ok := current(); !ok {
+			return
+		}
 		observation.ListenerReady = live && bound
 		if observation.ListenerReady {
 			if policy == api.ReadinessPolicyProcessOnly {
@@ -73,37 +98,108 @@ func observeSupervisorReadinessWithDeps(tracker *DaemonRuntimeTracker, events *a
 				return
 			}
 			if d.TaskName == api.BuiltinRouteTaskName {
-				if err := deps.routeProbe(context.Background(), d.Port); err == nil {
+				if deps.routeProbe == nil {
+					return
+				}
+				err := deps.routeProbe(ctx, d.Port)
+				if _, ok := current(); !ok {
+					return
+				}
+				if err == nil {
 					observation.MCPInitializeReady, observation.MCPToolsListReady = true, true
 					emitReadinessSettlement(events, tracker, observation)
 					return
-				} else {
-					observation.Failures = []api.ReadinessFailureV1{routeFrontReadinessFailure(d, err)}
-					emitRouteFrontReadinessDiagnostic(events, d, err)
-					emitReadinessSettlement(events, tracker, observation)
-					return
 				}
-			}
-			result := deps.probe(d.Port)
-			if result.State == api.MCPReadinessReady {
-				observation.MCPInitializeReady, observation.MCPToolsListReady = true, true
-				emitReadinessSettlement(events, tracker, observation)
+				observation.Failures = []api.ReadinessFailureV1{routeFrontReadinessFailure(d, err)}
+				if emitReadinessSettlement(events, tracker, observation) {
+					emitRouteFrontReadinessDiagnostic(events, d, err)
+				}
 				return
 			}
-			stage := api.ReadinessStageMCPInitialize
-			if result.Stage == api.MCPReadinessStageToolsList {
-				stage = api.ReadinessStageMCPToolsList
-			}
-			observation.Failures = []api.ReadinessFailureV1{{Stage: stage, FailureID: result.FailureID, TaskName: d.TaskName, Port: d.Port}}
-			emitReadinessSettlement(events, tracker, observation)
-			return
+			break
 		}
-		if !deps.now().Before(deadline) {
+		if !deps.now().Before(listenerDeadline) {
 			observation.DeadlineExceeded = true
 			emitReadinessSettlement(events, tracker, observation)
 			return
 		}
-		deps.wait(100 * time.Millisecond)
+		if _, ok := current(); !ok {
+			return
+		}
+		if !deps.wait(ctx, 100*time.Millisecond) {
+			return
+		}
+		if _, ok := current(); !ok {
+			return
+		}
+	}
+
+	deadlineExceeded := false
+	for {
+		if _, ok := current(); !ok {
+			return
+		}
+		attemptCtx := ctx
+		cancel := func() {}
+		if deadlineExceeded {
+			attemptCtx, cancel = context.WithTimeout(ctx, api.MCPReadinessProbeBudget)
+		} else {
+			attemptCtx, cancel = context.WithDeadline(ctx, initialProtocolDeadline)
+		}
+		result := deps.probe(attemptCtx, d.Port)
+		cancel()
+		if _, ok := current(); !ok {
+			return
+		}
+		observation := newObservation()
+		observation.ListenerReady = true
+		if result.State == api.MCPReadinessReady {
+			observation.MCPInitializeReady, observation.MCPToolsListReady = true, true
+			emitReadinessSettlement(events, tracker, observation)
+			return
+		}
+		stage := api.ReadinessStageMCPInitialize
+		if result.Stage == api.MCPReadinessStageToolsList {
+			stage = api.ReadinessStageMCPToolsList
+		}
+		observation.Failures = []api.ReadinessFailureV1{{
+			Stage: stage, FailureID: result.FailureID, Retryable: result.Retryable,
+			TaskName: d.TaskName, Port: d.Port,
+		}}
+		if !result.Retryable {
+			emitReadinessSettlement(events, tracker, observation)
+			return
+		}
+		if !deadlineExceeded && deps.now().Before(initialProtocolDeadline) {
+			emitReadinessSettlement(events, tracker, observation)
+			if _, ok := current(); !ok {
+				return
+			}
+			if !deps.wait(ctx, 100*time.Millisecond) {
+				return
+			}
+			continue
+		}
+		deadlineExceeded = true
+		observation.DeadlineExceeded = true
+		emitReadinessSettlement(events, tracker, observation)
+		if _, ok := current(); !ok {
+			return
+		}
+		if !deps.wait(ctx, supervisorLivenessInterval) {
+			return
+		}
+	}
+}
+
+func waitSupervisorReadiness(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -148,10 +244,13 @@ func emitRouteFrontReadinessDiagnostic(events *api.SupervisorEventLog, d api.Sup
 	}
 }
 
-func emitReadinessSettlement(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, observation api.DaemonReadinessObservationV1) {
-	_, event := tracker.MarkReadinessObservationWithSettlement(observation)
+func emitReadinessSettlement(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, observation api.DaemonReadinessObservationV1) bool {
+	accepted, event := tracker.MarkReadinessObservationWithSettlement(observation)
+	if !accepted {
+		return false
+	}
 	if event == nil || events == nil {
-		return
+		return true
 	}
 	if err := events.Emit(*event); err != nil {
 		_ = events.Emit(api.SupervisorEvent{
@@ -159,4 +258,5 @@ func emitReadinessSettlement(events *api.SupervisorEventLog, tracker *DaemonRunt
 			Body: map[string]any{"event": event.Event},
 		})
 	}
+	return true
 }

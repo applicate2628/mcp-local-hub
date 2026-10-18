@@ -17,6 +17,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestRetainedProcessWait_LinuxUnavailableIsNotSuccessfulExit(t *testing.T) {
+	identity, err := retainedProcessIDImpl(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := identity.Close(); err != nil {
+			t.Errorf("close original pidfd: %v", err)
+		}
+	}()
+	if _, err := identity.Wait(context.Background()); !errors.Is(err, ErrProcessExitStatusUnavailable) {
+		t.Fatalf("Wait(self): %v, want unavailable native terminal status", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Residual 1(a) review fix: classifyKillError must carry ambiguous kernel
 // errors as Indeterminate, never coerce them to Alive:false — only ESRCH

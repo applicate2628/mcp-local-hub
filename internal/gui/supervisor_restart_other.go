@@ -24,11 +24,6 @@ func applyDetachFlags(cmd *exec.Cmd) {
 	}
 }
 
-// configureDetachedSupervisor configures a spawn of `mcphub supervise`.
-func configureDetachedSupervisor(cmd *exec.Cmd) {
-	applyDetachFlags(cmd)
-}
-
 // configureDetachedGUI configures a spawn of a replacement GUI (RestartV3
 // self-restart) and deliberately does NOT suppress the console attach —
 // the child must keep the operator's terminal under --foreground. See the

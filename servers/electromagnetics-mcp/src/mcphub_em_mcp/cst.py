@@ -6,7 +6,6 @@ import math
 import os
 import re
 import secrets
-import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -15,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from mcp.types import CallToolResult, TextContent
+
+from .cst_bundle import _copy_cst_bundle
 
 from .contracts import (
     CSTTetOrder,
@@ -174,15 +175,6 @@ def _settings_history(settings: dict[str, Any]) -> str:
         lines.append(f'    .AddSampleInterval {text}, {text}, 1, "Single", {adaptation}')
     lines.extend(["    .ForceRecalculateOldSamples True", "End With"])
     return "\n".join(lines)
-
-
-def _copy_cst_bundle(project: Path, destination: Path) -> Path:
-    project_copy = destination / project.name
-    shutil.copy2(project, project_copy)
-    data = project.with_suffix("")
-    if data.is_dir():
-        shutil.copytree(data, destination / data.name)
-    return project_copy
 
 
 def _open_owned_project(interface: Any, project_path: Path) -> tuple[Any, Any]:

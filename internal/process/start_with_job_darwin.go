@@ -13,6 +13,19 @@ import (
 // equivalent, but children are started as process-group leaders so later
 // lifecycle code can target the group. The kqueue NOTE_EXIT watcher remains a
 // v0.6 follow-up; this function only closes the missing process-group portion.
+func startProvisionalWithJob(job *Job, cmd *exec.Cmd) (containedChild, error) {
+	owner, err := newPlatformContainedChild(cmd)
+	if err != nil {
+		return nil, err
+	}
+	child := owner.(*posixContainedChild)
+	if _, err := StartWithJob(job, cmd); err != nil {
+		return owner, err
+	}
+	child.pid = cmd.Process.Pid
+	return owner, nil
+}
+
 func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	return startWithJobFiles(job, cmd, nil, nil, nil)
 }

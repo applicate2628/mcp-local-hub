@@ -35,6 +35,7 @@ import (
 type fakeAutostartBackend struct {
 	enableCalls   []autostart.Options
 	disableCalls  int
+	disableErr    error
 	failEnable    bool         // when true, Enable returns shimErr
 	shimErr       error        // err returned on shimFail path
 	currentStrict bool         // last successful StrictMode the shim was set to
@@ -72,6 +73,9 @@ func (f *fakeAutostartBackend) Enable(opts autostart.Options) error {
 
 func (f *fakeAutostartBackend) Disable() error {
 	f.disableCalls++
+	if f.disableErr != nil {
+		return f.disableErr
+	}
 	f.installed = false
 	return nil
 }
@@ -184,6 +188,7 @@ func (f *strictModeFixture) MakeRevertWriteFail() {
 func (f *strictModeFixture) Deps() StrictModeDeps {
 	d := StrictModeDeps{
 		StateDir:         f.stateDir,
+		GUISettingsPath:  filepath.Join(f.stateDir, "gui-preferences.yaml"),
 		IntentPath:       f.intentPath,
 		BreadcrumbPath:   f.breadcrumbPath,
 		AutostartBackend: f.backend,
@@ -208,6 +213,114 @@ func (f *strictModeFixture) Deps() StrictModeDeps {
 		}
 	}
 	return d
+}
+
+func TestStrictModeWindowsExplicitAutorunOffSurvivesMutationAndRecovery(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("pure GUI boot projection is Windows-only")
+	}
+	for _, recovery := range []bool{false, true} {
+		name := "mutation"
+		if recovery {
+			name = "recovery"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setupSupervisorFixture(t)
+			// Simulate material rollback restoring the formerly enabled shim.
+			f.backend.installed = true
+			deps := f.Deps()
+			before := []byte("gui.autorun_enabled: \"false\"\nother.preference: retained\n")
+			if err := os.WriteFile(deps.GUISettingsPath, before, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if recovery {
+				if err = writeStrictModeBreadcrumb(deps.BreadcrumbPath, &strictModeBreadcrumb{Intended: true}); err != nil {
+					t.Fatal(err)
+				}
+				err = RunStrictModeRecover(deps)
+			} else {
+				err = RunStrictMode([]string{"enable"}, deps)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(f.backend.enableCalls) != 0 || f.backend.disableCalls != 1 {
+				t.Fatalf("OFF projection: enable=%d disable=%d", len(f.backend.enableCalls), f.backend.disableCalls)
+			}
+			if state, err := f.backend.Status(autostart.Options{}); err != nil || state != autostart.StateAbsent {
+				t.Fatalf("restored shim survived OFF: state=%s err=%v", state, err)
+			}
+			if recovery {
+				f.backend.installed = true
+				removalErr := errors.New("injected restored Task removal failure")
+				f.backend.disableErr = removalErr
+				if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &strictModeBreadcrumb{Intended: true}); err != nil {
+					t.Fatal(err)
+				}
+				if err := RunStrictModeRecover(deps); !errors.Is(err, removalErr) {
+					t.Fatalf("OFF recovery removal cause lost: %v", err)
+				}
+				if f.backend.disableCalls != 2 || len(f.backend.enableCalls) != 0 || !f.backend.installed {
+					t.Fatalf("failed OFF removal misreported: disable=%d enable=%d installed=%v", f.backend.disableCalls, len(f.backend.enableCalls), f.backend.installed)
+				}
+				if _, err := os.Stat(deps.BreadcrumbPath); err != nil {
+					t.Fatalf("failed OFF recovery lost breadcrumb: %v", err)
+				}
+			}
+			after, err := os.ReadFile(deps.GUISettingsPath)
+			if err != nil || string(before) != string(after) {
+				t.Fatalf("OFF/preferences changed: after=%q err=%v", after, err)
+			}
+			intent, err := api.ReadSupervisorIntent(deps.IntentPath)
+			if err != nil || !intent.StrictMode {
+				t.Fatalf("strict preference did not advance independently: intent=%+v err=%v", intent, err)
+			}
+		})
+	}
+}
+
+func TestAutostartWindowsExplicitEnablePreservesQuitAndAppliedProjectionFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("pure GUI boot projection is Windows-only")
+	}
+	for _, failProjection := range []bool{false, true} {
+		name := "projected"
+		if failProjection {
+			name = "projection-failed"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setupSupervisorFixture(t)
+			deps := f.Deps()
+			deps.EnableAutorun = true
+			generation := strings.Repeat("a", 64)
+			before := "gui.run_desired: stopped\ngui.autorun_enabled: \"false\"\ngui.stop_cause: cli-quit\ngui.stop_generation: " + generation + "\nother.preference: retained\n"
+			if err := os.WriteFile(deps.GUISettingsPath, []byte(before), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			projectionErr := errors.New("injected Task projection failure")
+			f.backend.failEnable, f.backend.shimErr = failProjection, projectionErr
+			err := RunAutostartOwnerMode(api.OwnerModeSupervise, false, deps)
+			if failProjection {
+				if !errors.Is(err, projectionErr) || !strings.Contains(err.Error(), "autorun preference applied") {
+					t.Fatalf("applied policy/projection failure lost: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if err := (&api.API{}).WithGUIOwnerControlIn(deps.GUISettingsPath, func(control api.GUIOwnerControl) error {
+				if control.AutorunEnabled == nil || !*control.AutorunEnabled || control.RunDesired != api.GUIRunStopped || control.StopGeneration != generation || control.StopCause != "cli-quit" {
+					t.Fatalf("enable overwrote Quit or lost applied choice: %+v", control)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !failProjection && (len(f.backend.enableCalls) != 1 || f.backend.enableCalls[0].OwnerMode != autostart.OwnerModeSupervise) {
+				t.Fatalf("wrong owner projection: %+v", f.backend.enableCalls)
+			}
+		})
+	}
 }
 
 type strictIntentAcquisitionTrace struct {

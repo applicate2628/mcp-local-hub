@@ -26,14 +26,16 @@ const (
 	windowsPEDLLCharacteristic = 0x2000
 )
 
-// WindowsArtifactRole names one member of the installed Windows product pair.
+// WindowsArtifactRole names one exact Windows product-artifact identity.
 // The role is part of persisted identity; subsystem inference is validation,
-// never a replacement for an explicit role.
+// never a replacement for an explicit role. CLI and windowless remain legacy
+// pair roles, while product names the single-executable design.
 type WindowsArtifactRole string
 
 const (
 	WindowsArtifactRoleCLI        WindowsArtifactRole = "cli"
 	WindowsArtifactRoleWindowless WindowsArtifactRole = "windowless"
+	WindowsArtifactRoleProduct    WindowsArtifactRole = "product"
 )
 
 // WindowsArtifact binds product metadata and exact bytes to one explicit role.
@@ -44,7 +46,8 @@ type WindowsArtifact struct {
 	Commit    string              `json:"commit,omitempty"`
 	BuildDate string              `json:"build_date,omitempty"`
 	SHA256    string              `json:"sha256"`
-	machine   uint16
+	Machine   uint16              `json:"-"`
+	Subsystem uint16              `json:"-"`
 }
 
 // WindowsProductPair is the admitted role-keyed Windows product identity.
@@ -107,13 +110,13 @@ func ValidateWindowsNativeImage(path string) error {
 }
 
 // AdmitWindowsRole validates one exact Windows artifact role and returns its
-// SHA-256 after the PE role has been proven without executing the image.
+// parsed identity and SHA-256 without executing the image.
 func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	expected := uint16(0)
 	switch artifact.Role {
 	case WindowsArtifactRoleCLI:
 		expected = WindowsCUISubsystem
-	case WindowsArtifactRoleWindowless:
+	case WindowsArtifactRoleWindowless, WindowsArtifactRoleProduct:
 		expected = WindowsGUISubsystem
 	default:
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: invalid artifact role %q", WindowsProductPairErrorID, artifact.Path, artifact.Role)
@@ -160,7 +163,8 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	artifact.Commit = identity.Commit
 	artifact.BuildDate = identity.BuildDate
 	artifact.SHA256 = actual
-	artifact.machine = machine
+	artifact.Machine = machine
+	artifact.Subsystem = subsystem
 	return artifact, nil
 }
 
@@ -182,8 +186,8 @@ func AdmitWindowsProductPair(cli, windowless WindowsArtifact) (WindowsProductPai
 	if admittedCLI.Version != admittedWindowless.Version || admittedCLI.Commit != admittedWindowless.Commit || admittedCLI.BuildDate != admittedWindowless.BuildDate {
 		return WindowsProductPair{}, fmt.Errorf("%s: artifact-derived identity differs between roles", WindowsProductPairErrorID)
 	}
-	if admittedCLI.machine != admittedWindowless.machine {
-		return WindowsProductPair{}, fmt.Errorf("%s: COFF machine differs between roles: cli %#x, windowless %#x", WindowsProductPairErrorID, admittedCLI.machine, admittedWindowless.machine)
+	if admittedCLI.Machine != admittedWindowless.Machine {
+		return WindowsProductPair{}, fmt.Errorf("%s: COFF machine differs between roles: cli %#x, windowless %#x", WindowsProductPairErrorID, admittedCLI.Machine, admittedWindowless.Machine)
 	}
 	return WindowsProductPair{CLI: admittedCLI, Windowless: admittedWindowless}, nil
 }
@@ -285,6 +289,7 @@ func formatError(path string, err error) error {
 type windowsPEHeader struct {
 	machine   uint16
 	subsystem uint16
+	characteristics uint16
 }
 
 // ReadWindowsPESubsystem performs exactly two bounded random-access reads. It
@@ -336,5 +341,6 @@ func readWindowsPEHeader(r io.ReaderAt, size int64) (windowsPEHeader, error) {
 	return windowsPEHeader{
 		machine:   binary.LittleEndian.Uint16(header[4:6]),
 		subsystem: binary.LittleEndian.Uint16(header[24+68 : 24+70]),
+		characteristics: binary.LittleEndian.Uint16(header[22:24]),
 	}, nil
 }

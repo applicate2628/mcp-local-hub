@@ -223,6 +223,92 @@ type fakeManifestGetter struct {
 	err  error
 }
 
+type fakeManifestViewer struct {
+	yaml  string
+	err   error
+	name  string
+	calls int
+}
+
+func (f *fakeManifestViewer) ManifestGet(name string) (string, error) {
+	f.name = name
+	f.calls++
+	return f.yaml, f.err
+}
+
+func TestManifestViewHandler(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		query  string
+		host   string
+		origin string
+		fetch  string
+		yaml   string
+		err    error
+		status int
+		code   string
+		calls  int
+		seen   string
+	}{
+		{name: "shipped", query: "?name=mcp-cbuild", yaml: "name: mcp-cbuild\n", status: 200, calls: 1, seen: "mcp-cbuild"},
+		{name: "custom", query: "?name=%20custom%20", yaml: "name: custom\n# UTF-8: λ\n", status: 200, calls: 1, seen: "custom"},
+		{name: "empty yaml", query: "?name=empty", status: 200, calls: 1, seen: "empty"},
+		{name: "missing name", status: 400, code: "BAD_REQUEST"},
+		{name: "blank name", query: "?name=%20%20", status: 400, code: "BAD_REQUEST"},
+		{name: "method", method: http.MethodPost, query: "?name=demo", status: 405},
+		{name: "origin", query: "?name=demo", origin: "http://example.invalid", status: 403, code: "CROSS_ORIGIN"},
+		{name: "fetch site", query: "?name=demo", fetch: "cross-site", status: 403, code: "CROSS_ORIGIN"},
+		{name: "host", query: "?name=demo", host: "example.invalid:9081", status: 403, code: "HOST_NOT_ALLOWED"},
+		{name: "owner error", query: "?name=demo", err: errors.New("synthetic private path: permission denied"), status: 500, code: "MANIFEST_VIEW_FAILED", calls: 1, seen: "demo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			viewer := &fakeManifestViewer{yaml: tc.yaml, err: tc.err}
+			s := &Server{cfg: Config{Port: 9081}, mux: http.NewServeMux(), manifestViewer: viewer}
+			registerManifestRoutes(s)
+			method := tc.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, "http://127.0.0.1:9081/api/manifest/view"+tc.query, nil)
+			if tc.host != "" {
+				req.Host = tc.host
+			}
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set("Sec-Fetch-Site", tc.fetch)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != tc.status || viewer.calls != tc.calls || viewer.name != tc.seen {
+				t.Fatalf("status/calls/name = %d/%d/%q, want %d/%d/%q; body=%s", rec.Code, viewer.calls, viewer.name, tc.status, tc.calls, tc.seen, rec.Body.String())
+			}
+			if tc.status == http.StatusMethodNotAllowed {
+				if rec.Header().Get("Allow") != "GET" {
+					t.Errorf("Allow = %q, want GET", rec.Header().Get("Allow"))
+				}
+				return
+			}
+			if rec.Header().Get("Content-Type") != "application/json" {
+				t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if tc.status == http.StatusOK {
+				yaml, isString := body["yaml"].(string)
+				if !isString || yaml != tc.yaml || len(body) != 1 {
+					t.Errorf("body = %#v, want only yaml string %q", body, tc.yaml)
+				}
+			} else if body["code"] != tc.code {
+				t.Errorf("code = %#v, want %q", body["code"], tc.code)
+			}
+			if tc.err != nil && (body["error"] != "internal error reading manifest" || strings.Contains(rec.Body.String(), tc.err.Error())) {
+				t.Errorf("unsafe owner failure body = %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 func (f *fakeManifestGetter) ManifestGetWithHash(name string) (string, string, error) {
 	return f.yaml, f.hash, f.err
 }
@@ -358,7 +444,7 @@ func TestManifestEditHandler_NotFound_Returns404(t *testing.T) {
 	}{
 		{
 			name: "os-not-exist",
-			err:  &os.PathError{Op: "open", Path: `/home/alice/.mcphub/servers/ghost/manifest.yaml`, Err: os.ErrNotExist},
+			err:  &os.PathError{Op: "open", Path: `/home/example/.mcphub/servers/ghost/manifest.yaml`, Err: os.ErrNotExist},
 		},
 		{
 			name: "api-not-found",
@@ -379,7 +465,7 @@ func TestManifestEditHandler_NotFound_Returns404(t *testing.T) {
 			if !strings.Contains(body, "MANIFEST_NOT_FOUND") {
 				t.Errorf("body=%q missing MANIFEST_NOT_FOUND code", body)
 			}
-			if strings.Contains(body, "/home/alice") || strings.Contains(body, "use create instead") {
+			if strings.Contains(body, "/home/example") || strings.Contains(body, "use create instead") {
 				t.Errorf("body leaks backend not-found detail: %q", body)
 			}
 		})
@@ -391,7 +477,7 @@ func TestManifestEditHandler_NotFound_Returns404(t *testing.T) {
 // filesystem paths. Verify the three handlers all sanitize before responding.
 
 func TestManifestGetHandler_500DoesNotLeakErrorDetails(t *testing.T) {
-	leaky := errors.New("open /home/alice/.secret/manifests/demo/manifest.yaml: permission denied")
+	leaky := errors.New("open /home/example/.secret/manifests/demo/manifest.yaml: permission denied")
 	getter := &fakeManifestGetter{err: leaky}
 	s := newManifestTestServerFull(&fakeManifestCreator{}, &fakeManifestValidator{},
 		getter, &fakeManifestEditor{})
@@ -403,7 +489,7 @@ func TestManifestGetHandler_500DoesNotLeakErrorDetails(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+	if strings.Contains(body, "/home/example") || strings.Contains(body, "permission denied") {
 		t.Errorf("response body leaks filesystem path or raw error: %q", body)
 	}
 	if !strings.Contains(body, "internal error") {
@@ -644,7 +730,7 @@ func TestManifestListHandler_EmptyIsNonNullArray_200(t *testing.T) {
 }
 
 func TestManifestListHandler_BackendError_500Sanitized(t *testing.T) {
-	lister := &fakeManifestLister{err: errors.New("readdir /home/alice/.local/share/mcphub/servers: permission denied")}
+	lister := &fakeManifestLister{err: errors.New("readdir /home/example/.local/share/mcphub/servers: permission denied")}
 	s := newManifestListDeleteTestServer(lister, &fakeManifestDeleter{})
 	req := httptest.NewRequest(http.MethodGet, "/api/manifests", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -654,7 +740,7 @@ func TestManifestListHandler_BackendError_500Sanitized(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+	if strings.Contains(body, "/home/example") || strings.Contains(body, "permission denied") {
 		t.Errorf("body leaks filesystem path or raw error: %q", body)
 	}
 	if !strings.Contains(body, "MANIFEST_LIST_FAILED") {
@@ -736,7 +822,7 @@ func TestCatalogHandler_RejectsCrossOrigin(t *testing.T) {
 }
 
 func TestCatalogHandler_BackendError_500Sanitized(t *testing.T) {
-	catalog := &fakeCatalogLister{err: errors.New("readdir /home/alice/.local/share/mcphub/servers: permission denied")}
+	catalog := &fakeCatalogLister{err: errors.New("readdir /home/example/.local/share/mcphub/servers: permission denied")}
 	s := newCatalogTestServer(catalog)
 	req := httptest.NewRequest(http.MethodGet, "/api/catalog", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -746,7 +832,7 @@ func TestCatalogHandler_BackendError_500Sanitized(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "/home/alice") || strings.Contains(body, "permission denied") {
+	if strings.Contains(body, "/home/example") || strings.Contains(body, "permission denied") {
 		t.Errorf("body leaks filesystem path or raw error: %q", body)
 	}
 	if !strings.Contains(body, "CATALOG_LIST_FAILED") {
@@ -892,7 +978,7 @@ func TestManifestDeleteSubtree_DoesNotShadowExactPaths(t *testing.T) {
 }
 
 func TestManifestCreateHandler_RetryableLeaseConflict409(t *testing.T) {
-	const canary = "C:\\Users\\operator\\private-lease-path"
+	const canary = "C:\\synthetic\\private-lease-path"
 	create := &fakeManifestCreator{err: fmt.Errorf("%s: %w", canary, &api.LeaseFailure{
 		FailureID: "E_ADOPT_LEASE_BUSY",
 		Retryable: true,

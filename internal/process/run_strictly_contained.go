@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 )
 
 // StrictRunFailureKind classifies the single contained-worker lifecycle.
@@ -18,6 +19,10 @@ const (
 	StrictRunExecutionFailed   StrictRunFailureKind = "execution_failed"
 	StrictRunInvalidInvocation StrictRunFailureKind = "invalid_invocation"
 )
+
+// Only the default Windows context-timeout path spends one Job polling quantum
+// proving post-kill member settlement. It does not extend child execution.
+const strictRunWindowsTimeoutJobProofMs uint32 = 50
 
 // StrictRunError retains the exact lower-level cause for errors.Is/errors.As.
 type StrictRunError struct {
@@ -47,8 +52,16 @@ type StrictRunCapture struct {
 // StrictRunResult is returned even when the child exits unsuccessfully so the
 // composition owner can emit only safe stream metadata.
 type StrictRunResult struct {
-	Stdout StrictRunCapture
-	Stderr StrictRunCapture
+	Stdout      StrictRunCapture
+	Stderr      StrictRunCapture
+	SettledExit *StrictRunSettledExit `json:"-"`
+}
+
+// StrictRunSettledExit is set only after the child, Job, streams and pipes
+// have all been positively settled. It is not part of any JSON protocol.
+type StrictRunSettledExit struct {
+	ExitCode int
+	TimedOut bool
 }
 
 // StrictRunInvocation makes the strict runner the sole standard-stream owner.
@@ -87,6 +100,19 @@ func (i StrictRunInvocation) validate() error {
 // finite input and independent bounded output drains, and does not return until
 // the child and those drains have been joined.
 func RunStrictlyContained(ctx context.Context, invocation StrictRunInvocation) (StrictRunResult, error) {
+	return runStrictlyContained(ctx, invocation, nil)
+}
+
+// RunStrictlyContainedWithJobCloseFaultForTest injects one close result only
+// after the real Job is closed.
+func RunStrictlyContainedWithJobCloseFaultForTest(ctx context.Context, invocation StrictRunInvocation, fault error) (StrictRunResult, error) {
+	if fault == nil {
+		return StrictRunResult{}, strictRunError(StrictRunInvalidInvocation, errors.New("nil test close fault"))
+	}
+	return runStrictlyContained(ctx, invocation, fault)
+}
+
+func runStrictlyContained(ctx context.Context, invocation StrictRunInvocation, closeFault error) (StrictRunResult, error) {
 	if ctx == nil {
 		return StrictRunResult{}, strictRunError(StrictRunInvalidInvocation, errors.New("nil context"))
 	}
@@ -100,13 +126,17 @@ func RunStrictlyContained(ctx context.Context, invocation StrictRunInvocation) (
 		}
 		return StrictRunResult{}, strictRunError(StrictRunContainmentFailed, fmt.Errorf("establish containment: %w", err))
 	}
-	return runStrictlyContainedWithJob(ctx, invocation, job)
+	return runStrictlyContainedWithJobCloseFault(ctx, invocation, job, closeFault)
 }
 
 // runStrictlyContainedWithJob is a per-call test seam for a deterministically
 // invalid Job. It owns the supplied job's close lifetime exactly as production
 // owns a newly-created one.
 func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvocation, job *Job) (result StrictRunResult, err error) {
+	return runStrictlyContainedWithJobCloseFault(ctx, invocation, job, nil)
+}
+
+func runStrictlyContainedWithJobCloseFault(ctx context.Context, invocation StrictRunInvocation, job *Job, closeFault error) (result StrictRunResult, err error) {
 	if job == nil {
 		return result, strictRunError(StrictRunContainmentFailed, errors.New("nil job"))
 	}
@@ -117,6 +147,9 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 		if !jobClosed {
 			jobClosed = true
 			jobCloseErr = job.Close()
+			if closeFault != nil {
+				jobCloseErr = errors.Join(jobCloseErr, closeFault)
+			}
 		}
 		if jobCloseReported {
 			return nil
@@ -222,18 +255,33 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 
 	waited := make(chan error, 1)
 	go func() { waited <- waitStrictContainedCommand(invocation.Command) }()
-	var waitErr error
+	var waitErr, childWaitErr, unexpectedTerminationErr error
 	var timeout bool
 	select {
-	case waitErr = <-waited:
+	case childWaitErr = <-waited:
+		waitErr = childWaitErr
 	case <-ctx.Done():
 		timeout = true
 		if invocation.timeoutKill != nil {
 			waitErr = invocation.timeoutKill(job, invocation.Command)
+			unexpectedTerminationErr = waitErr
 		} else {
-			waitErr = errors.Join(job.TerminateAll(1), func() error { killProcessGroup(invocation.Command); return nil }())
+			proofMs := uint32(1)
+			if runtime.GOOS == "windows" {
+				proofMs = strictRunWindowsTimeoutJobProofMs
+			}
+			termErr := job.TerminateAll(proofMs)
+			unexpectedTerminationErr = termErr
+			killProcessGroup(invocation.Command)
+			waitErr = termErr
 			if invocation.Command.Process != nil {
-				waitErr = errors.Join(waitErr, invocation.Command.Process.Kill())
+				killErr := invocation.Command.Process.Kill()
+				waitErr = errors.Join(waitErr, killErr)
+				// A successful TerminateAll already proved the Job empty;
+				// this direct kill is redundant and may report an exited PID.
+				if termErr != nil && killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+					unexpectedTerminationErr = errors.Join(unexpectedTerminationErr, killErr)
+				}
 			}
 		}
 		// Closing a kill-on-close Job is the final containment primitive. It
@@ -241,13 +289,22 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 		// both fail, and waiting first would otherwise make the caller's
 		// deadline unbounded while the still-owned Job could still reap the
 		// worker tree.
-		waitErr = errors.Join(waitErr, closeOwnedJob())
-		waitErr = errors.Join(waitErr, <-waited)
+		closeErr := closeOwnedJob()
+		unexpectedTerminationErr = errors.Join(unexpectedTerminationErr, closeErr)
+		waitErr = errors.Join(waitErr, closeErr)
+		childWaitErr = <-waited
+		waitErr = errors.Join(waitErr, childWaitErr)
 	}
 	// The output readers own the active drains until EOF. Closing their read
 	// endpoints before joining them can convert a successful fast-exit worker
 	// into os.ErrClosed and discard already-buffered protocol output.
 	cleanupErr := errors.Join(closeOwnedJob(), <-inputDone, <-stdoutDone, <-stderrDone, closeParents())
+	var exitErr *exec.ExitError
+	if cleanupErr == nil && unexpectedTerminationErr == nil && (!timeout || (runtime.GOOS == "windows" && invocation.timeoutKill == nil)) &&
+		(childWaitErr == nil || errors.As(childWaitErr, &exitErr)) &&
+		invocation.Command.ProcessState != nil && invocation.Command.ProcessState.Exited() {
+		result.SettledExit = &StrictRunSettledExit{ExitCode: invocation.Command.ProcessState.ExitCode(), TimedOut: timeout}
+	}
 	if timeout {
 		return result, strictRunError(StrictRunTimeout, errors.Join(ctx.Err(), waitErr, cleanupErr))
 	}

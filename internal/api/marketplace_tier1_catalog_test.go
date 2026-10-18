@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -112,6 +113,11 @@ var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 //     in the summary, but a clean-cache launch is verified.
 var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
 
+// localToolCatalogIDs are separately installed local commands. Their rows remain
+// inert until the command and its required companion tool pass the availability
+// probe; they do not imply release packaging of the command.
+var localToolCatalogIDs = []string{"mcp-cbuild"}
+
 // NOTE: the three research/academic-search servers (scholar-search, consensus, scite)
 // are ALL docs_only[] POINTER rows, NOT entries[] rows — so there is deliberately NO
 // research tier slice here, and the entries[] count sum below is unchanged from the
@@ -163,10 +169,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
 	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
 	// music-local only. docs_only count is asserted separately below.
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs) + len(localToolCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b; docs-only rows are in docs_only[], not entries[])",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b + %d local-tool; docs-only rows are in docs_only[], not entries[])",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs), len(localToolCatalogIDs))
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
@@ -208,6 +214,19 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		}
 		if e.InstallProbe == nil || (len(e.InstallProbe.Binaries) == 0 && len(e.InstallProbe.Files) == 0 && len(e.InstallProbe.FileGlobs) == 0) {
 			t.Fatalf("Tier-1 row %q has no install_probe (binaries, files, or file_globs)", id)
+		}
+	}
+
+	for _, id := range localToolCatalogIDs {
+		e, ok := byID[id]
+		if !ok {
+			t.Fatalf("v2 catalog missing local-tool row %q", id)
+		}
+		if e.Command != "mcphub" || !reflect.DeepEqual(e.Args, []string{"cbuild"}) || len(e.Env) != 0 {
+			t.Fatalf("local-tool row %q command shape = command:%q args:%v env:%v", id, e.Command, e.Args, e.Env)
+		}
+		if e.Availability != config.AvailabilityDisabledUntilProbe || e.InstallProbe == nil || len(e.InstallProbe.Binaries) != 2 || e.InstallProbe.Binaries[0] != "mcphub" || e.InstallProbe.Binaries[1] != "cmake" {
+			t.Fatalf("local-tool row %q probe = availability:%q probe:%#v", id, e.Availability, e.InstallProbe)
 		}
 	}
 

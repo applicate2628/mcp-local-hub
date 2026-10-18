@@ -28,8 +28,15 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"io"
+	"reflect"
+
 	"errors"
 	"fmt"
+	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 	"os"
 	"path/filepath"
 	"time"
@@ -367,6 +374,240 @@ func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (SerenaInte
 	return validateSerenaIntentRepairResult(result, err)
 }
 
+// ReconcileSerenaIntentForSupervisor prepares only an explicitly applied, exact
+// missing target. The caller receives the original invocation and owns its
+// CloseObserved after target settlement, including partial failure returns.
+func (a *API) ReconcileSerenaIntentForSupervisor(ctx context.Context, stateDir string, supervisor *SupervisorLock, target ReconcileTarget, apply bool) (result SerenaIntentRepairResult, invocation *PreparedSerenaConsumerInvocation, err error) {
+	selection := &serenaSupervisorRepair{ctx: ctx, supervisor: supervisor, target: target}
+	defer func() {
+		if err != nil {
+			result.Outcome = SerenaIntentRepairOutcomeError
+		}
+		if selection.invocation != nil {
+			invocation.readers = append(invocation.readers, selection.readers...)
+		}
+	}()
+	result, err = repairSerenaIntentFromRegistry(stateDir, false, selection)
+	if err != nil || !apply || !selection.missing {
+		return result, nil, err
+	}
+	if a == nil {
+		return result, nil, errors.New("SERENA_REPAIR_API_MISSING")
+	}
+	// These original manifest/plan/preparation owners execute after both capture
+	// locks have released. No installer, client writer or scheduler is invoked.
+	raw, path, readErr := selection.readManifest()
+	if readErr != nil {
+		return result, nil, readErr
+	}
+	selection.manifestRaw, selection.manifestPath = raw, path
+	catalog, parseErr := config.ParseManifest(bytes.NewReader(raw))
+	if parseErr != nil {
+		return result, nil, parseErr
+	}
+	dynamic, dynamicErr := BuildInMemorySerenaDynamicPoolManifest(catalog)
+	if dynamicErr != nil {
+		return result, nil, dynamicErr
+	}
+	if err = validateDynamicPoolManifest(dynamic); err != nil {
+		return result, nil, err
+	}
+	if err = ctx.Err(); err != nil {
+		return result, nil, err
+	}
+	if err = Preflight(dynamic, ""); err != nil {
+		return result, nil, err
+	}
+	plan, planErr := BuildPlanWithOpts(dynamic, a.installBuildPlanOpts(InstallOpts{}))
+	if planErr != nil {
+		return result, nil, planErr
+	}
+	opts := installPlanOpts{Writer: io.Discard, SkipSchedulerPrune: dynamic.DaemonTemplate != nil}
+	phase, phaseErr := selectInstallExecutionPhase(dynamic, plan, opts, true, true)
+	if phaseErr != nil {
+		return result, nil, phaseErr
+	}
+	plan.selectedExecutionPhase = phase
+	if err = phase.admitPrepared(dynamic, plan, opts, false); err != nil {
+		return result, nil, err
+	}
+	image, imageErr := RuntimeMcphubExecutable()
+	if imageErr != nil {
+		return result, nil, imageErr
+	}
+	binding, record, _, prepareErr := a.prepareSerenaInstall(ctx, dynamic, ManifestHashContent(raw), []string{canonicalIntentTaskKey(target.TaskName)}, nil)
+	if prepareErr != nil {
+		return result, nil, prepareErr
+	}
+	plan.serenaPreparedBinding, plan.serenaPreparedRecord = &binding, &record
+	descriptors, descriptorErr := materializePreparedSerenaDescriptors(dynamic, BuildSupervisorDaemonsForSerena(dynamic, []WorkspaceEntry{selection.row}, ManifestHashContent(raw), image), plan)
+	if descriptorErr != nil {
+		return result, nil, descriptorErr
+	}
+	owner, ownerErr := a.PreparedSerenaConsumerOwner()
+	if ownerErr != nil {
+		return result, nil, ownerErr
+	}
+	operation, operationErr := NewSerenaConsumerOperationID(ctx)
+	if operationErr != nil {
+		return result, nil, operationErr
+	}
+	invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operation, Binding: binding, ExpectedDescriptors: descriptors})
+	if err != nil {
+		return result, invocation, err
+	}
+	selection.invocation = invocation
+	selection.descriptors = descriptors
+	result, err = repairSerenaIntentFromRegistry(stateDir, true, selection)
+	return result, invocation, err
+}
+
+// One capture travels through both passes; it is not a permit or persistent
+// store. Only the original invocation authorizes the prepared publication.
+type serenaSupervisorRepair struct {
+	ctx                    context.Context
+	supervisor             *SupervisorLock
+	target                 ReconcileTarget
+	row                    WorkspaceEntry
+	beforeRaw, manifestRaw []byte
+	beforeDefined, missing bool
+	manifestPath           string
+	invocation             *PreparedSerenaConsumerInvocation
+	descriptors            []SupervisorDaemon
+	readers                []*StateFileReadObservation
+}
+
+func (s *serenaSupervisorRepair) validateOwner(stateDir string) error {
+	if s == nil || s.ctx == nil {
+		return errors.New("SERENA_REPAIR_CONTEXT_MISSING")
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if _, finite := s.ctx.Deadline(); !finite {
+		return errors.New("SERENA_REPAIR_DEADLINE_REQUIRED")
+	}
+	if err := s.validateHeldSupervisor(stateDir); err != nil {
+		return err
+	}
+	lk := s.supervisor
+	started, known := process.ProcessStartTime(os.Getpid())
+	declared, parseErr := time.Parse(time.RFC3339Nano, lk.owner.StartedAt)
+	if !known || parseErr != nil || !started.Equal(declared) {
+		return errors.New("SERENA_REPAIR_SUPERVISOR_GENERATION_UNVERIFIED")
+	}
+	root, observation, err := ResolveDaemonStateDirObserved(s.ctx)
+	if err != nil {
+		return err
+	}
+	if err = observation.Validate(s.ctx, root); err != nil {
+		return err
+	}
+	if root != stateDir {
+		return errors.New("SERENA_REPAIR_STATE_ROOT_DRIFT")
+	}
+	return nil
+}
+
+// Publication rechecks only the mutable original lock state; native self/root
+// observations belong to the unlocked capture boundaries above.
+func (s *serenaSupervisorRepair) validateHeldSupervisor(stateDir string) error {
+	lk := s.supervisor
+	if lk == nil || lk.fl == nil || lk.quiet || lk.path != filepath.Join(stateDir, "supervisor.lock") || lk.owner.PID != os.Getpid() {
+		return errors.New("SERENA_REPAIR_ORIGINAL_SUPERVISOR_REQUIRED")
+	}
+	return s.ctx.Err()
+}
+
+func (s *serenaSupervisorRepair) validateRow(row WorkspaceEntry) error {
+	t := s.target
+	registered, err := time.Parse(time.RFC3339Nano, t.RegisteredAt)
+	if err != nil || registered.IsZero() || t.WorkspaceKey == "" || t.WorkspacePath == "" || t.WorkspaceKey != WorkspaceKey(t.WorkspacePath) || canonicalIntentTaskKey(t.TaskName) != SerenaTaskNameForWorkspace(t.WorkspacePath) || t.ExpectedPort <= 0 || t.ExpectedPort > 65535 ||
+		row.WorkspaceKey != t.WorkspaceKey || row.WorkspacePath != t.WorkspacePath || canonicalIntentTaskKey(row.TaskName) != canonicalIntentTaskKey(t.TaskName) || !row.RegisteredAt.Equal(registered) || row.Port != t.ExpectedPort || row.Language != SerenaLanguageSentinel || row.PendingSerenaRemoval || workspacePathStale(row.WorkspacePath) {
+		return errors.Join(err, errors.New("SERENA_REPAIR_TARGET_GENERATION_DRIFT"))
+	}
+	return nil
+}
+
+func (s *serenaSupervisorRepair) readManifest() ([]byte, string, error) {
+	path := ""
+	raw, err := loadManifestYAMLEmbedFirstWithReader(SerenaServerName, func(selected string) ([]byte, error) {
+		path = selected
+		info, statErr := os.Lstat(selected)
+		if statErr != nil {
+			return nil, statErr
+		}
+		// Bound this capture by its actual selected file size, preserving the
+		// manifest owner's lack of an arbitrary fixed manifest-size ceiling.
+		cap := info.Size()
+		if cap < 1 {
+			cap = 1
+		}
+		data, reader, readErr := ReadStateFileInodeAnchoredObserved(s.ctx, selected, cap)
+		s.readers = append(s.readers, reader)
+		if reader == nil {
+			return data, errors.Join(readErr, errors.New("SERENA_REPAIR_MANIFEST_READER_MISSING"))
+		}
+		if readErr != nil {
+			return data, readErr
+		}
+		return data, reader.Validate(s.ctx, selected, cap, data, preparedSerenaHash(data))
+	})
+	return raw, path, err
+}
+
+func (s *serenaSupervisorRepair) publish(lease *StateFileObservedLease, prior *SupervisorIntentFile, commit bool) (result SerenaIntentRepairResult, err error) {
+	if !commit || s.invocation == nil || len(s.descriptors) != 1 {
+		return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_PREPARED_SELECTION_REQUIRED"))
+	}
+	raw, path, err := s.readManifest()
+	if err != nil {
+		return failedSerenaIntentRepairResult(err)
+	}
+	if path != s.manifestPath || !bytes.Equal(raw, s.manifestRaw) {
+		return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_MANIFEST_SOURCE_DRIFT"))
+	}
+	if prior == nil {
+		prior = &SupervisorIntentFile{Version: 1}
+	}
+	desired := cloneSupervisorIntentFile(prior)
+	d := s.descriptors[0]
+	if canonicalIntentTaskKey(d.TaskName) != canonicalIntentTaskKey(s.target.TaskName) || d.Workspace != s.target.WorkspacePath || d.Port != s.target.ExpectedPort {
+		return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_PREPARED_DESCRIPTOR_DRIFT"))
+	}
+	desired.Daemons = append(desired.Daemons, d)
+	if err = normalizePreparedSupervisorIntentMerge(prior, desired); err != nil {
+		return failedSerenaIntentRepairResult(err)
+	}
+	result = completedSerenaIntentRepairResult(0, nil, nil)
+	err = s.invocation.WithIntentLockHeld(s.ctx, lease, func() error {
+		if err := s.validateHeldSupervisor(filepath.Dir(s.invocation.io.IntentPath)); err != nil {
+			return err
+		}
+		if err := s.invocation.preflightParsedIntentObserved(s.ctx, lease, s.beforeDefined, s.beforeSHA(), desired); err != nil {
+			return err
+		}
+		publication, _, publishErr := s.invocation.publishParsedIntentObserved(s.ctx, lease, s.beforeDefined, s.beforeSHA(), desired)
+		if publication != nil {
+			if publication.writer != nil && publication.writer.readbackQualified {
+				result.Repaired = 1
+			}
+		}
+		return publishErr
+	})
+	if err != nil {
+		result.Outcome = SerenaIntentRepairOutcomeError
+	}
+	return result, err
+}
+
+func (s *serenaSupervisorRepair) beforeSHA() string {
+	if !s.beforeDefined {
+		return ""
+	}
+	return preparedSerenaHash(s.beforeRaw)
+}
+
 // repairSerenaIntentFromRegistry is the shared implementation behind
 // RepairSerenaIntentFromRegistry (commit=true, the pre-existing behavior —
 // used by the supervisor's own startup self-heal) and
@@ -374,7 +615,15 @@ func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (SerenaInte
 // reconcile). commit=false skips ONLY the final write + audit-event steps;
 // every read, lock, and classification decision is identical, so the two
 // modes can never diverge on WHICH rows are orphaned/deferred/skipped.
-func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result SerenaIntentRepairResult, err error) {
+func repairSerenaIntentFromRegistry(stateDir string, commit bool, selected ...*serenaSupervisorRepair) (result SerenaIntentRepairResult, err error) {
+	var selection *serenaSupervisorRepair
+	if len(selected) != 0 {
+		selection = selected[0]
+		if err := selection.validateOwner(stateDir); err != nil {
+			return failedSerenaIntentRepairResult(err)
+		}
+	}
+
 	// 1. Resolve the registry + intent paths. stateDir is the SUPERVISOR's already-
 	//    resolved state root, threaded in by the caller — NOT re-resolved via
 	//    DaemonStateDir() here. The cli stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE
@@ -464,6 +713,19 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: load registry: %w", err))
 	}
 	rows := reg.SerenaEntries()
+	if selection != nil {
+		row, exists := reg.GetSerena(selection.target.WorkspaceKey)
+		if !exists {
+			return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_TARGET_GENERATION_DRIFT"))
+		}
+		if err := selection.validateRow(row); err != nil {
+			return failedSerenaIntentRepairResult(err)
+		}
+		if selection.invocation != nil && !reflect.DeepEqual(row, selection.row) {
+			return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_TARGET_ROW_DRIFT"))
+		}
+		rows = []WorkspaceEntry{row}
+	}
 	if len(rows) == 0 {
 		return completedSerenaIntentRepairResult(0, nil, nil), nil
 	}
@@ -475,7 +737,28 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 	//    clobber-safety point: `missing` is computed from THIS read, never a
 	//    stale snapshot.
 	intentLockPath := supervisorIntentLockPath(intentPath)
-	intentRelease, intentLocked, err := tryLockSupervisorIntent(intentPath)
+	var intentRelease func() error
+	var intentLocked bool
+	var intentLease *StateFileObservedLease
+	if selection == nil {
+		intentRelease, intentLocked, err = tryLockSupervisorIntent(intentPath)
+	} else {
+		intentLease, err = AcquireStateFileObservedLease(selection.ctx, intentPath)
+		intentLocked = err == nil && intentLease != nil
+		if intentLease != nil {
+			intentRelease = func() error {
+				proof, closeErr := intentLease.CloseObserved()
+				closeErr = errors.Join(closeErr, proof.Validate(intentLease))
+				if selection.invocation != nil && selection.invocation.borrowedIntent == intentLease {
+					closeErr = errors.Join(closeErr, selection.invocation.ReceiveIntentClose(proof))
+				}
+				return closeErr
+			}
+			if err != nil {
+				err = errors.Join(err, intentRelease())
+			}
+		}
+	}
 	if err != nil {
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentLockPath, err))
 	}
@@ -500,7 +783,35 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 		}
 	}()
 
-	intent, rerr := ReadSupervisorIntent(intentPath)
+	var intent *SupervisorIntentFile
+	var rerr error
+	if selection == nil {
+		intent, rerr = ReadSupervisorIntent(intentPath)
+	} else {
+		var raw []byte
+		var reader *StateFileReadObservation
+		cap := stateFileReadCapBytes(intentPath)
+		raw, reader, rerr = ReadStateFileInodeAnchoredObserved(selection.ctx, intentPath, cap)
+		selection.readers = append(selection.readers, reader)
+		if reader == nil {
+			return failedSerenaIntentRepairResult(errors.Join(rerr, errors.New("SERENA_REPAIR_INTENT_READER_MISSING")))
+		}
+		defined := rerr == nil
+		if rerr != nil {
+			if absentErr := reader.ValidateAbsence(selection.ctx, intentPath, StateFileReadLeafNotFound); absentErr != nil {
+				return failedSerenaIntentRepairResult(errors.Join(rerr, absentErr))
+			}
+			rerr = os.ErrNotExist
+		} else if rerr = reader.Validate(selection.ctx, intentPath, cap, raw, preparedSerenaHash(raw)); rerr == nil {
+			intent, rerr = decodeOriginalSupervisorIntentFile(intentPath, raw)
+		}
+		if selection.invocation == nil {
+			selection.beforeRaw, selection.beforeDefined = append([]byte(nil), raw...), defined
+			selection.row = rows[0]
+		} else if defined != selection.beforeDefined || !bytes.Equal(raw, selection.beforeRaw) {
+			return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_INTENT_PREIMAGE_DRIFT"))
+		}
+	}
 	if rerr != nil {
 		if errors.Is(rerr, os.ErrNotExist) {
 			// A missing intent file is a valid empty intent (every serena row is
@@ -606,7 +917,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 	//     failing the whole repair over a registry write would keep the
 	//     workspace unusable for exactly the operator this branch exists to
 	//     rescue. The next pass re-classifies and retries the clear.
-	if len(reclaimedRemovalMarks) > 0 {
+	if selection == nil && len(reclaimedRemovalMarks) > 0 {
 		reclaimedKeys := missingWorkspaceKeys(reclaimedRemovalMarks)
 		body := map[string]any{
 			"reclaimed_count":     len(reclaimedKeys),
@@ -706,6 +1017,23 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 				"operator_action":    "run `mcphub migrate serena legacy-to-dynamic-pool` (or re-install) to re-materialize the descriptor with a runtime_spec",
 			},
 		})
+	}
+	if selection != nil {
+		if len(missing) == 0 {
+			if len(deferredLegacy) != 0 {
+				return finalizedSerenaIntentRepairResult(0, deferredLegacy, repairIncomplete, recoveredRemovalMarks), nil
+			}
+			d := intent.SpecBearingSerenaDaemonForWorkspaceKey(selection.target.WorkspaceKey)
+			if d == nil || canonicalIntentTaskKey(d.TaskName) != canonicalIntentTaskKey(selection.target.TaskName) || d.Workspace != selection.target.WorkspacePath || d.Port != selection.target.ExpectedPort || d.Server != SerenaServerName {
+				return failedSerenaIntentRepairResult(errors.New("SERENA_REPAIR_PRESENT_DESCRIPTOR_DRIFT"))
+			}
+			return finalizedSerenaIntentRepairResult(0, nil, repairIncomplete, recoveredRemovalMarks), nil
+		}
+		selection.missing = true
+		if selection.invocation == nil {
+			return finalizedSerenaIntentRepairResult(0, missingWorkspaceKeys(missing), repairIncomplete, recoveredRemovalMarks), nil
+		}
+		return selection.publish(intentLease, intent, commit)
 	}
 	if len(missing) == 0 {
 		// No orphan to append. Still report any legacy nil-spec deferrals so the

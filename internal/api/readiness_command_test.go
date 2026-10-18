@@ -128,6 +128,128 @@ func TestStatusReadinessSnapshot_UsesOneIPCObservation(t *testing.T) {
 	}
 }
 
+func TestStatus_DefaultPathOverlaysWorkspaceMetadataWithoutPromotingReadiness(t *testing.T) {
+	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
+
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	previousRegistryPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+
+	lastMaterializedAt := time.Date(2026, 9, 12, 15, 20, 32, 0, time.UTC)
+	lastToolsCallAt := time.Date(2026, 9, 12, 15, 59, 19, 0, time.UTC)
+	registry := NewRegistry(registryPath)
+	registry.Put(WorkspaceEntry{
+		WorkspaceKey:       "ccf3dc9e",
+		WorkspacePath:      `/workspace/project`,
+		Language:           "go",
+		Backend:            "gopls-mcp",
+		Port:               9421,
+		TaskName:           "mcp-local-hub-lsp-ccf3dc9e-go",
+		Lifecycle:          LifecycleActive,
+		LastMaterializedAt: lastMaterializedAt,
+		LastToolsCallAt:    lastToolsCallAt,
+	})
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	const pid = 75648
+	taskName := `\mcp-local-hub-lsp-ccf3dc9e-go`
+	dials := 0
+	ready := false
+	previousDial := statusInternalDialFn
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		dials++
+		observation := &DaemonReadinessObservationV1{
+			TaskName: taskName, Server: "mcp-language-server", Daemon: "lsp-ccf3dc9e-go",
+			Port: 9421, PID: pid, ProcessState: "Running",
+			CurrentPIDGeneration: 29, ObservedPIDGeneration: 29,
+			IntentPresent: true, IntentRunnable: true, WrapperStarted: true,
+			Policy: ReadinessPolicySyntheticProxy,
+		}
+		if ready {
+			observation.ListenerReady = true
+			observation.MCPInitializeReady = true
+			observation.MCPToolsListReady = true
+			observation.Policy = ReadinessPolicyMCPUpstream
+		}
+		return []DaemonStatus{{
+			TaskName:             taskName,
+			Server:               "mcp-language-server",
+			Daemon:               "lsp-ccf3dc9e-go",
+			State:                "Running",
+			Port:                 9421,
+			PID:                  pid,
+			IsWorkspaceScoped:    true,
+			ReadinessObservation: observation,
+		}}, nil
+	}
+	t.Cleanup(func() { statusInternalDialFn = previousDial })
+
+	rows, err := NewAPI().Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("IPC status dials = %d, want exactly 1", dials)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one workspace row", rows)
+	}
+	row := rows[0]
+	if row.Workspace != `/workspace/project` || row.Language != "go" || row.Backend != "gopls-mcp" || row.Lifecycle != LifecycleActive {
+		t.Fatalf("workspace metadata = %+v, want loaded registry fields", row)
+	}
+	if !row.LastMaterializedAt.Equal(lastMaterializedAt) || !row.LastToolsCallAt.Equal(lastToolsCallAt) {
+		t.Fatalf("registry timestamps = (%v, %v), want (%v, %v)", row.LastMaterializedAt, row.LastToolsCallAt, lastMaterializedAt, lastToolsCallAt)
+	}
+	if row.State != "Running" || row.Port != 9421 || row.PID != pid {
+		t.Fatalf("process fields changed: State=%q Port=%d PID=%d", row.State, row.Port, row.PID)
+	}
+	if !row.IsWorkspaceScoped || row.Server != "mcp-language-server" || row.Daemon != "lsp-ccf3dc9e-go" {
+		t.Fatalf("structural fields changed: %+v", row)
+	}
+	if row.ServiceState != ServiceStateStarting || row.ReadinessStage != ReadinessStageUpstreamListener || row.ReadinessSettled {
+		t.Fatalf("registry metadata promoted readiness: ServiceState=%q Stage=%q Settled=%v", row.ServiceState, row.ReadinessStage, row.ReadinessSettled)
+	}
+
+	ready = true
+	rows, err = NewAPI().Status()
+	if err != nil {
+		t.Fatalf("Status ready: %v", err)
+	}
+	if dials != 2 {
+		t.Fatalf("IPC status dials = %d after two calls, want one per call", dials)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ready rows = %#v, want one workspace row", rows)
+	}
+	row = rows[0]
+	if row.Workspace != "/workspace/project" || !row.LastMaterializedAt.Equal(lastMaterializedAt) || !row.LastToolsCallAt.Equal(lastToolsCallAt) {
+		t.Fatalf("ready row lost registry metadata: %+v", row)
+	}
+	if row.State != "Running" || row.Port != 9421 || row.PID != pid || row.ServiceState != ServiceStateRunning || row.ReadinessStage != ReadinessStageComplete || !row.ReadinessSettled {
+		t.Fatalf("ready observation changed: %+v", row)
+	}
+
+	registry.Workspaces[0].Port = 9422
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = NewAPI().Status()
+	var mismatch *WorkspaceStatusMetadataMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Status mismatch error = %T (%v), want *WorkspaceStatusMetadataMismatchError", err, err)
+	}
+	if rows != nil || mismatch.StatusPort != 9421 || mismatch.RegistryPort != 9422 {
+		t.Fatalf("Status mismatch rows=%+v error=%+v, want nil rows and both ports", rows, mismatch)
+	}
+	if dials != 3 {
+		t.Fatalf("IPC status dials = %d after three calls, want one per call", dials)
+	}
+}
+
 func committedSettlementForCommandTest() ClientConfigSettlementV1 {
 	return ClientConfigSettlementV1{
 		SchemaVersion: "client-config-settlement-v1", Operation: "install", Phase: "settled",

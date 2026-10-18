@@ -15,6 +15,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/servers"
 
 	"github.com/spf13/cobra"
@@ -264,6 +265,12 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			if lc == nil {
 				return fmt.Errorf("unsupported backend %q for language %q", spec.Backend, languageFlag)
 			}
+			wrapperPID := os.Getpid()
+			wrapperStartedAt, ok := process.ProcessStartTime(wrapperPID)
+			if !ok {
+				return fmt.Errorf("resolve workspace proxy kernel start time for readiness")
+			}
+			readinessFatalCh := make(chan error, 1)
 
 			proxy := daemon.NewLazyProxy(daemon.LazyProxyConfig{
 				WorkspaceKey:          activeWSKey,
@@ -276,6 +283,12 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				MaterializedHardCap:   hardCapFlag,
 				IdleBackendTTL:        idleTTLFlag,
 				IdleBackendCheckEvery: 0,
+				Readiness: daemon.LazyProxyReadinessConfig{
+					TaskName: entry.TaskName, WrapperPID: wrapperPID,
+					WrapperStartedAt: wrapperStartedAt,
+					Commit:           api.DialSupervisorIPCCommitLazyProxyReadiness,
+					Fatal:            readinessFatalCh,
+				},
 			})
 
 			// SIGINT / SIGTERM triggers graceful shutdown. Bound to a fresh
@@ -341,6 +354,15 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				defer cancel()
 				_ = proxy.Stop(shutdownCtx)
 				return nil
+			case readinessErr := <-readinessFatalCh:
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				stopErr := proxy.Stop(shutdownCtx)
+				cancel()
+				failure := fmt.Errorf("lazy proxy readiness settlement: %w", readinessErr)
+				if stopErr != nil {
+					return errors.Join(failure, fmt.Errorf("proxy stop: %w", stopErr))
+				}
+				return failure
 			}
 		},
 	}

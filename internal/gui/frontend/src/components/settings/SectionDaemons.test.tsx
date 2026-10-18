@@ -20,7 +20,7 @@ const env: SettingsEnvelope = {
     { key: "daemons.prune_dead_worktrees", section: "daemons", type: "bool",
       default: "true", value: "true", deferred: false, help: "dead-worktree help" },
     { key: "daemons.prune_idle_hours", section: "daemons", type: "int",
-      default: "0", value: "0", min: 0, max: 8760, deferred: false, help: "idle help" },
+      default: "168", value: "168", min: 0, max: 8760, deferred: false, help: "idle help" },
   ],
 };
 const snap = (refresh = vi.fn(async () => {})): SettingsSnapshot =>

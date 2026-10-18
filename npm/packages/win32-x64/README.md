@@ -5,10 +5,9 @@ Platform binary sub-package for [`mcp-local-hub`](https://www.npmjs.com/package/
 - Target: `win32/x64` (Go `windows/amd64`)
 - Support tier: **GA (generally available)**
 - Native payload (injected by the release job; NOT committed to git):
-  - `bin/mcphub.exe` (cli, PE subsystem 3)
-  - `bin/mcphub-windowless.exe` (windowless, PE subsystem 2)
-  - `bin/mcphub-pe-admit.exe` (admission-helper, PE subsystem 3)
-- The npm `mcphub` command resolves only to `bin/mcphub.exe`; the windowless adapter is reserved for supported GUI/Explorer entry points.
+  - `bin/mcphub.exe` (product, PE subsystem 2)
+  - `bin/windows-product-identity.json` (windows-product-identity-v1, non-executable admitted identity)
+- This Windows platform package deliberately declares no npm `bin`; the meta package alone owns the public `mcphub` Node shim so it can wait, relay standard streams, and return the native child's status.
 
 You do not install this package directly. The `mcp-local-hub` meta package declares it in `optionalDependencies`; npm installs only the sub-package matching your host's `os`/`cpu`.
 

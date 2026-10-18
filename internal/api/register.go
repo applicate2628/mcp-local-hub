@@ -2594,11 +2594,12 @@ func labeledRegistrationForwardContinuationError(label string, err error) error 
 	return fmt.Errorf("complete mandatory registration continuation %s: %w", label, err)
 }
 
-// Unregister removes scheduler tasks, client-config entries, and registry
-// rows for the named languages in workspacePath. If languages is empty/nil,
-// every language for the workspace is removed. Cleanup is atomic in the
-// sense that the registry is saved once at the end; scheduler and client
-// operations are best-effort and captured in Warnings.
+// Unregister removes scheduler tasks and registry rows for the named languages
+// in workspacePath. If languages is empty/nil, every language for the workspace
+// is removed. Client-entry names alone do not establish ownership: unproven
+// entries are preserved with warnings. Shared routers remain; absence is settled.
+// The registry is saved once at the end; scheduler cleanup and client observation
+// are best-effort and captured in Warnings.
 //
 // Unknown workspaces (no entries matching workspace_key) return an error;
 // unknown individual languages inside an otherwise-known workspace surface
@@ -2773,23 +2774,37 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 					fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
 				}
 			}
-			// 2. Remove client entries.
+			// A legacy client-name reference carries no durable owned-entry proof.
+			// Observe only: even an unchanged-looking Hub URL may be user-owned.
 			for clientName, entryName := range entry.ClientEntries {
 				client, ok := allClients[clientName]
-				if !ok || !client.Exists() {
+				if !ok {
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterClientPreserved, entryName, clientName, nil,
+					))
 					continue
 				}
-				if shouldPreserveSharedLSPRouterEntry(client, entryName, lang) {
+				if !client.Exists() {
+					continue
+				}
+				live, readErr := client.GetEntry(entryName)
+				if readErr != nil {
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterClientReadFailed, entryName, clientName, readErr,
+					))
+					continue
+				}
+				if live == nil {
+					fmt.Fprintf(w, "✓ client entry %s in %s already absent\n", entryName, clientName)
+					continue
+				}
+				if shouldPreserveSharedLSPRouterEntry(entryName, lang, live) {
 					fmt.Fprintf(w, "✓ preserved shared LSP router entry %s in %s\n", entryName, clientName)
 					continue
 				}
-				if err := client.RemoveEntry(entryName); err != nil {
-					report.addDiagnostic(NewRegistrationDiagnostic(
-						RegistrationCodeUnregisterClientRemoveFailed, entryName, clientName, err,
-					))
-				} else {
-					fmt.Fprintf(w, "\u2713 removed %s entry from %s\n", entryName, clientName)
-				}
+				report.addDiagnostic(NewRegistrationDiagnostic(
+					RegistrationCodeUnregisterClientPreserved, entryName, clientName, nil,
+				))
 			}
 			// 3. Drop registry row.
 			reg.Remove(targetWSKey, lang)
@@ -2811,12 +2826,8 @@ func appendUniqueUnregisterLanguage(values []string, value string) []string {
 	return append(values, value)
 }
 
-func shouldPreserveSharedLSPRouterEntry(client registerClient, entryName, language string) bool {
+func shouldPreserveSharedLSPRouterEntry(entryName, language string, live *clients.MCPEntry) bool {
 	if entryName != LSPRouterEntryName(language) {
-		return false
-	}
-	live, err := client.GetEntry(entryName)
-	if err != nil {
 		return false
 	}
 	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)

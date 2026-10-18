@@ -1,6 +1,7 @@
 // internal/gui/frontend/src/components/DeleteSecretModal.tsx
 import { useEffect, useRef, useState } from "preact/hooks";
 import { deleteSecret, type APIError, type ManifestError, type UsageRef } from "../lib/secrets-api";
+import { ConfirmModal } from "./ConfirmModal";
 
 type Stage =
   | { kind: "closed" }
@@ -20,28 +21,38 @@ export function DeleteSecretModal(props: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "closed" });
   const [typed, setTyped] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
+  const [initialConfirmOpen, setInitialConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (props.name === null) {
+      setInitialConfirmOpen(false);
       setStage({ kind: "closed" });
       setTyped("");
       if (dialogRef.current?.open) dialogRef.current.close();
       return;
     }
-    // First call: no confirm flag. Backend decides whether to escalate.
-    setStage({ kind: "deleting" });
-    if (dialogRef.current && !dialogRef.current.open) {
-      dialogRef.current.showModal();
-    }
-    void firstAttempt(props.name);
+    setInitialConfirmOpen(true);
 
-    // Cleanup: ensure dialog closes if unmounted while open
+    // Cleanup: ensure the classification/result dialog closes if unmounted.
     return () => {
       if (dialogRef.current?.open) {
         dialogRef.current.close();
       }
     };
   }, [props.name]);
+
+  async function startInitialDelete() {
+    if (props.name === null) return;
+    const name = props.name;
+    setInitialConfirmOpen(false);
+    // Preserve the existing first call: no confirm flag. Backend still decides
+    // whether to delete immediately or escalate to the typed ref/scan guard.
+    setStage({ kind: "deleting" });
+    if (dialogRef.current && !dialogRef.current.open) {
+      dialogRef.current.showModal();
+    }
+    await firstAttempt(name);
+  }
 
   async function firstAttempt(name: string) {
     try {
@@ -101,12 +112,13 @@ export function DeleteSecretModal(props: Props) {
   const isWorking = stage.kind === "deleting";
 
   return (
-    <dialog
-      ref={dialogRef}
-      onCancel={(e) => { if (isWorking || isConfirming) e.preventDefault(); }}
-      onClose={() => props.onClose()}
-      data-testid="delete-secret-modal"
-    >
+    <>
+      <dialog
+        ref={dialogRef}
+        onCancel={(e) => { if (isWorking || isConfirming) e.preventDefault(); }}
+        onClose={() => props.onClose()}
+        data-testid="delete-secret-modal"
+      >
       {stage.kind === "deleting" && (
         <div>
           <h2>Delete {props.name}?</h2>
@@ -177,6 +189,22 @@ export function DeleteSecretModal(props: Props) {
           </menu>
         </div>
       )}
-    </dialog>
+      </dialog>
+      {props.name !== null && initialConfirmOpen && (
+        <ConfirmModal
+          open={initialConfirmOpen}
+          title={`Delete ${props.name}?`}
+          body={<p>This permanently deletes the vault key if it is not referenced.</p>}
+          confirmLabel="Delete secret"
+          danger
+          onConfirm={startInitialDelete}
+          onCancel={() => {
+            setInitialConfirmOpen(false);
+            props.onClose();
+          }}
+          testId="delete-secret-initial-confirm"
+        />
+      )}
+    </>
   );
 }

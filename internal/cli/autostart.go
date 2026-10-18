@@ -24,7 +24,7 @@ import (
 // autostartBackendFactoryFn is the test seam — production paths leave
 // it pointing at autostart.New, but autostart_test.go injects a
 // recording fake. Restored via t.Cleanup between tests.
-var autostartBackendFactoryFn = autostart.New
+var autostartBackendFactoryFn = newAutostartBackendForCLI
 
 // newAutostartCmd returns the parent `mcphub autostart` cobra command
 // with three subcommands attached. Registered in root.go next to
@@ -45,7 +45,12 @@ persisted Windows owner mode is supervise.
 ` + "`status`" + ` prints one of: absent, enabled-running, enabled-stopped, drifted,
 stale-residue. Drifted means the on-disk shim's args or binary path
 disagree with what ` + "`mcphub autostart enable [--strict-mode]`" + ` would
-write today; re-run ` + "`mcphub autostart enable`" + ` to reconcile.`,
+write today; re-run ` + "`mcphub autostart enable`" + ` to reconcile.
+
+On Windows, enable/disable changes the logon preference without starting or
+stopping the current GUI. Quit remains effective until ` + "`mcphub gui --resume`" + `;
+enabling logon autorun does not resume a GUI stopped by the user.
+Linux and macOS retain their supervisor lifecycle start/stop behavior.`,
 	}
 	cmd.AddCommand(newAutostartEnableCmd())
 	cmd.AddCommand(newAutostartDisableCmd())
@@ -71,7 +76,8 @@ supervise when ` + "`--owner-mode supervise`" + ` is selected.
 
 Idempotent — re-running with the same flags is safe and re-writes the
 intent plus canonical shim as one recoverable transaction. Without explicit
-flags, the persisted owner and strict policy are preserved.`,
+flags, the persisted owner and strict policy are preserved.
+On Windows this records autorun ON without launching now or undoing Quit.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return enableAutostartForPlatform(
 				autostart.OwnerMode(ownerMode),
@@ -98,16 +104,18 @@ func newAutostartDisableCmd() *cobra.Command {
 		Long: `Removes the autostart shim for the current OS. Idempotent — runs to
 completion even when no shim is currently installed.
 
-The supervisor process is stopped as a side effect of removing the
-shim's lifecycle primitive (Task Scheduler /End, systemctl --user
-disable --now, launchctl bootout). If the supervisor is already
-stopped, disable still succeeds.`,
+On Windows this records autorun OFF and removes only the logon Task;
+the currently running GUI is not terminated. Later automatic installation
+or strict-mode reconciliation preserves this explicit OFF preference.
+On Linux/macOS, removing the supervisor lifecycle primitive retains its
+existing stop effect (systemctl --user disable --now / launchctl bootout).
+If the supervisor is already stopped, disable still succeeds.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			b, err := autostartBackendFactoryFn()
 			if err != nil {
 				return fmt.Errorf("autostart backend: %w", err)
 			}
-			return b.Disable()
+			return disableAutostartForPlatform(b)
 		},
 	}
 }
@@ -153,6 +161,9 @@ Pass --strict-mode to check drift against the strict-mode shim shape.`,
 			fmt.Fprintln(cmd.OutOrStdout(), state.String())
 			if details && policyDetails {
 				fmt.Fprintf(cmd.OutOrStdout(), "owner-mode=%s\nstrict-mode=%t\n", opts.OwnerMode, opts.StrictMode)
+				if err := writeAutostartPlatformDetails(cmd.OutOrStdout()); err != nil {
+					return fmt.Errorf("autostart GUI policy status: %w", err)
+				}
 			}
 			return nil
 		},

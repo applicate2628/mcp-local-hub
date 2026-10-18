@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -332,7 +334,7 @@ func TestCleanupLogWatchersHandler_DryRun_OK(t *testing.T) {
 	gotOpts := api.LogWatcherCleanupOpts{}
 	want := []api.LogWatcher{
 		{PID: 1234, ParentPID: 555, ParentAlive: false, Name: "tail.exe", AgeSec: 3600,
-			Cmdline: `tail.exe -F /d/dev/.scratch/x.log`},
+			Cmdline: `tail.exe -F /synthetic/log-watchers/x.log`},
 	}
 	s := newCleanupTestServer(t, fakeCleanupAPI{
 		CleanupLogWatchersFn: func(opts api.LogWatcherCleanupOpts) ([]api.LogWatcher, error) {
@@ -462,12 +464,9 @@ func TestCleanupLogWatchersHandler_GET_405(t *testing.T) {
 
 // --- /api/cleanup/aggressive handler ---------------------------------------
 //
-// The aggressive sweep is the operator-confirmed override that kills the
-// live-rooted MCP-stdio fan-out the default safe sweep refuses to touch.
-// These tests inject fakeCleanupAPI.AggressiveCleanupFn so nothing real
-// dies — the fake never runs a process snapshot or taskkill. They clone
-// the orphan-handler family (dry-run/apply opts assertion, scope
-// validation, method/origin/OS gates).
+// Fake-positive cases below exercise handler protocol/rendering only; supplied
+// nominees are not retirement authority. The production adapter refuses Windows
+// preview/apply, covered separately by the real-adapter containment assertion.
 
 // TestCleanupAggressiveHandler_DryRun_OK posts apply=false (preview) with
 // a valid --client scope and asserts the seam was called with DryRun=true
@@ -924,5 +923,62 @@ func TestCleanupAggressiveHandler_Unsupported_501(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "not_supported_on_this_os") {
 		t.Errorf("body should contain not_supported_on_this_os; got %s", rr.Body.String())
+	}
+}
+
+// Observe invocation while retaining the actual production adapter and API.
+// This supplies no synthetic candidates or retirement authority.
+type observedAggressiveCleanupAPI struct {
+	realCleanupAPI
+	calls []api.CleanupOpts
+}
+
+func (o *observedAggressiveCleanupAPI) AggressiveCleanup(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+	o.calls = append(o.calls, opts)
+	return o.realCleanupAPI.AggressiveCleanup(opts)
+}
+
+func TestCleanupAggressiveHandler_RealAdapterRetirementAuthorityUnavailable(t *testing.T) {
+	const cause = "aggressive cleanup unavailable: creator retirement authority is not established; preview and apply disabled"
+	var diagnostic bytes.Buffer
+	oldLogWriter := log.Writer()
+	log.SetOutput(&diagnostic)
+	t.Cleanup(func() { log.SetOutput(oldLogWriter) })
+	for _, body := range []string{
+		`{"client":"codex"}`,
+		`{"apply":true,"root_pid":1234,"token":"synthetic-old-token","include_classes":["chrome"],"min_age_sec":1}`,
+	} {
+		adapter := &observedAggressiveCleanupAPI{}
+		s := &Server{cfg: Config{Port: 9125}, mux: http.NewServeMux(), cleanup: adapter}
+		registerCleanupRoutes(s)
+		req := httptest.NewRequest(http.MethodPost, "/api/cleanup/aggressive", strings.NewReader(body))
+		req.Host = "127.0.0.1:9125"
+		req.Header.Set("Origin", "http://127.0.0.1:9125")
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		diagnostic.Reset()
+		s.ServeHTTP(rr, req)
+		if runtime.GOOS != "windows" {
+			if rr.Code != http.StatusNotImplemented || len(adapter.calls) != 0 {
+				t.Fatalf("non-Windows gate changed: status=%d calls=%d", rr.Code, len(adapter.calls))
+			}
+			continue
+		}
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("status=%d want 500; body=%s", rr.Code, rr.Body.String())
+		}
+		var got map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 || got["error"] != "internal error" || got["code"] != "CLEANUP_AGGRESSIVE_FAILED" {
+			t.Fatalf("redacted refusal must contain only error/code, no candidates/token/outcomes: %v", got)
+		}
+		if len(adapter.calls) != 1 || !adapter.calls[0].DryRun || adapter.calls[0].Expect != nil {
+			t.Fatalf("must stop at first preview/recompute without second apply: %+v", adapter.calls)
+		}
+		if !strings.Contains(diagnostic.String(), "cleanup-aggressive: "+cause) {
+			t.Fatalf("operator diagnostic omitted fixed cause: %q", diagnostic.String())
+		}
 	}
 }

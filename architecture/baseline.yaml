@@ -10371,18 +10371,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 54d0b1cf58482695e104dffc7f066d9cc9f3cf6969ba532c29d369329707b590
-      kind: mutable_global
-      location:
-        path: cmd/mcphub-pe-admit/main.go
-        symbol: admitWindowsRoleFn
-        line: 11
-      evidence: var admitWindowsRoleFn
-      message: production package-level var admitWindowsRoleFn requires an explicit policy allowance or instance-owned dependency
-      owner: composition-entrypoints
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: Executable entry points must delegate construction to the single composition root.
     - fingerprint: 54d3e3cb0a15d609a55946ab78230393116bbd8e6599632dbc5d423a3567e187
       kind: history_comment
       location:

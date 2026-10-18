@@ -200,7 +200,9 @@ func TestInstall_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", tmpState)
 	t.Setenv("XDG_STATE_HOME", tmpState)
 
-	dir := t.TempDir()
+	root := t.TempDir()
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(root, "bin", "mcphub.exe")))
+	dir := mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -208,10 +210,6 @@ func TestInstall_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte("{{{ not yaml [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prev := installShadowWarnDir
-	installShadowWarnDir = func() string { return dir }
-	t.Cleanup(func() { installShadowWarnDir = prev })
-
 	var buf bytes.Buffer
 	err := NewAPI().Install(InstallOpts{Server: "memory", DryRun: true, Writer: &buf})
 	if !strings.Contains(buf.String(), `disk manifest for shipped server "memory" is ignored`) {
@@ -237,7 +235,9 @@ func TestInstallUsingEmbedFirst_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T
 	t.Setenv("XDG_DATA_HOME", tmpState)
 	t.Setenv("XDG_STATE_HOME", tmpState)
 
-	dir := t.TempDir()
+	root := t.TempDir()
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(root, "bin", "mcphub.exe")))
+	dir := mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -246,10 +246,6 @@ func TestInstallUsingEmbedFirst_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T
 	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte("{{{ not yaml [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prev := installShadowWarnDir
-	installShadowWarnDir = func() string { return dir }
-	t.Cleanup(func() { installShadowWarnDir = prev })
-
 	var buf bytes.Buffer
 	err := NewAPI().installUsingEmbedFirst(InstallOpts{Server: "memory", DryRun: true, Writer: &buf})
 	if !strings.Contains(buf.String(), `disk manifest for shipped server "memory" is ignored`) {
@@ -270,10 +266,12 @@ func TestInstallUsingEmbedFirst_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T
 // F3c (Fable pre-bot review) — emit-site test for scan's readManifestNames on
 // the EMBED-FIRST path (dir == ""): the warn reaches the log sink for a
 // differing colliding file under the embed-first shadow dir, and the name still
-// lands in the scanned set (warn, never drop). Seeded via the scanShadowWarnDir
-// seam (defaultManifestDir is exe-derived, not seedable).
+// lands in the scanned set (warn, never drop). The existing canonical product
+// path seam binds the disk root.
 func TestReadManifestNames_EmbedFirstPathLogsEmbeddedDiskShadowWarn(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(root, "bin", "mcphub.exe")))
+	dir := mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(filepath.Join(dir, "wolfram"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -286,10 +284,6 @@ func TestReadManifestNames_EmbedFirstPathLogsEmbeddedDiskShadowWarn(t *testing.T
 	if err := os.WriteFile(filepath.Join(dir, "wolfram", "manifest.yaml"), append(embed, []byte("\n# operator edit\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prevDir := scanShadowWarnDir
-	scanShadowWarnDir = func() string { return dir }
-	t.Cleanup(func() { scanShadowWarnDir = prevDir })
-
 	var logBuf bytes.Buffer
 	prevLog := log.Writer()
 	log.SetOutput(&logBuf)

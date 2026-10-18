@@ -1202,10 +1202,17 @@ func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID
 
 	// (c) Neither suppressor fired: relaunch via the SAME seam the
 	// genuine-owner-death branch below uses.
-	if relaunchErr := livenessRelaunchFn(); relaunchErr != nil {
-		fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); GUI-owner relaunch FAILED (will retry next tick): %v\n", supervisorPID, relaunchErr)
+	if relaunchErr := api.NewAPI().AdmitGUIAutomaticStart(livenessRelaunchFn); relaunchErr != nil {
+		status := "FAILED (will retry next tick)"
+		message := "supervisor running with no live GUI owner; the GUI-owner relaunch failed; will retry next tick"
+		var admission *api.GUIAutomaticStartError
+		if errors.As(relaunchErr, &admission) && admission.Admitted {
+			status = "ADMITTED; settings release unconfirmed"
+			message = "GUI-owner scheduler admission succeeded; settings release unconfirmed; child startup/readiness unverified"
+		}
+		fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); GUI-owner relaunch %s: %v\n", supervisorPID, status, relaunchErr)
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn, "liveness-gui-headless-relaunch-failed",
-			"supervisor running with no live GUI owner; the GUI-owner relaunch failed; will retry next tick",
+			message,
 			map[string]any{
 				"relaunch_target": autostart.WindowsTaskName,
 				"supervisor_pid":  supervisorPID,
@@ -1900,15 +1907,22 @@ func runEnsureAliveContext(ctx context.Context, stateDir string, out io.Writer) 
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "phase-i-lease-unconfirmed", ensureAliveGUILeaseUnconfirmedDetail)
 		return nil
 	}
-	if relaunchErr := livenessRelaunchFn(); relaunchErr != nil {
+	if relaunchErr := api.NewAPI().AdmitGUIAutomaticStart(livenessRelaunchFn); relaunchErr != nil {
 		// Best-effort: record + exit 0. The next ~1-min tick retries. Mirror
 		// to the durable log so a chronically-failing relaunch (e.g. the
 		// autostart task was never installed) is operator-visible despite
 		// Task Scheduler discarding stdout.
-		fmt.Fprintf(out, "ensure-alive: supervisor not running; relaunch FAILED (will retry next tick): %v\n", relaunchErr)
+		status := "FAILED (will retry next tick)"
+		message := "supervisor down (no live GUI owner) and the owner relaunch failed; will retry next tick"
+		var admission *api.GUIAutomaticStartError
+		if errors.As(relaunchErr, &admission) && admission.Admitted {
+			status = "ADMITTED; settings release unconfirmed"
+			message = "owner scheduler admission succeeded; settings release unconfirmed; child startup/readiness unverified"
+		}
+		fmt.Fprintf(out, "ensure-alive: supervisor not running; relaunch %s: %v\n", status, relaunchErr)
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 			"liveness-relaunch-failed",
-			"supervisor down (no live GUI owner) and the owner relaunch failed; will retry next tick",
+			message,
 			map[string]any{
 				"relaunch_target": autostart.WindowsTaskName,
 				"error":           relaunchErr.Error(),

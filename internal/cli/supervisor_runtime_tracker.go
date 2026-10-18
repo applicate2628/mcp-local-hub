@@ -20,6 +20,9 @@ const (
 	daemonRuntimeStateQuarantine = "quarantine"
 )
 
+var errLazyReadinessIncarnationMismatch = errors.New("lazy readiness wrapper incarnation mismatch")
+var errLazyReadinessInvalid = errors.New("invalid lazy readiness event")
+
 type DaemonRuntimeEntry struct {
 	State         string
 	CurrentPID    int
@@ -104,6 +107,7 @@ type DaemonRuntimeTracker struct {
 	// runtime respawn decisions, exactly like `failures`.
 	reallocations        map[string][]time.Time
 	readinessSettlements map[string]daemonReadinessSettlementTuple
+	lazyReadiness        map[string]lazyProxyReadinessState
 	// stopSettlementEpoch and stopSettlements are the durable stop fence. They
 	// are protected by mu, while persistMu serializes the staged read/modify/
 	// write protocol without ever holding mu across state-file I/O.
@@ -124,12 +128,18 @@ type daemonReadinessSettlementTuple struct {
 	FailureID    string
 }
 
+type lazyProxyReadinessState struct {
+	Epoch      uint64
+	Transition string
+}
+
 func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 	return &DaemonRuntimeTracker{
 		entries:              map[string]DaemonRuntimeEntry{},
 		failures:             map[string][]time.Time{},
 		reallocations:        map[string][]time.Time{},
 		readinessSettlements: map[string]daemonReadinessSettlementTuple{},
+		lazyReadiness:        map[string]lazyProxyReadinessState{},
 		stopSettlements:      map[string]api.StopSettlementReceiptV1{},
 	}
 }
@@ -437,6 +447,7 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 	entry.PIDGeneration++
 	entry.LastError = ""
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 	return entry.PIDGeneration
@@ -459,6 +470,11 @@ func (t *DaemonRuntimeTracker) MarkReadinessObservationWithSettlement(observatio
 	taskName := canonicalSupervisorTaskName(observation.TaskName)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.markReadinessObservationLocked(taskName, observation)
+}
+
+// markReadinessObservationLocked requires t.mu.
+func (t *DaemonRuntimeTracker) markReadinessObservationLocked(taskName string, observation api.DaemonReadinessObservationV1) (bool, *api.SupervisorEvent) {
 	entry, ok := t.entries[taskName]
 	if !ok || observation.ObservedPIDGeneration == 0 ||
 		int(observation.ObservedPIDGeneration) != entry.PIDGeneration ||
@@ -509,6 +525,82 @@ func (t *DaemonRuntimeTracker) MarkReadinessObservationWithSettlement(observatio
 	}
 }
 
+func (t *DaemonRuntimeTracker) CommitLazyProxyReadinessEvent(event api.LazyProxyReadinessEventV1) (api.LazyProxyReadinessReceiptV1, *api.SupervisorEvent, error) {
+	if t == nil || event.ProtocolVersion != 1 || !api.IsLazyProxyTaskName(event.TaskName) || event.WrapperPID <= 0 || event.BackendEpoch == 0 || lazyReadinessTransitionRank(event.Transition) == 0 {
+		return api.LazyProxyReadinessReceiptV1{}, nil, errLazyReadinessInvalid
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, event.WrapperStartedAt)
+	if err != nil || startedAt.IsZero() {
+		return api.LazyProxyReadinessReceiptV1{}, nil, errLazyReadinessInvalid
+	}
+	observedAt, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
+	if err != nil || observedAt.IsZero() {
+		return api.LazyProxyReadinessReceiptV1{}, nil, errLazyReadinessInvalid
+	}
+	taskName := canonicalSupervisorTaskName(event.TaskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, ok := t.entries[taskName]
+	if !ok || entry.State != daemonRuntimeStateRunning || entry.CurrentPID != event.WrapperPID || !entry.StartedAt.Equal(startedAt.UTC()) {
+		return api.LazyProxyReadinessReceiptV1{}, nil, errLazyReadinessIncarnationMismatch
+	}
+	current := t.lazyReadiness[taskName]
+	receipt := func(disposition string, state lazyProxyReadinessState) api.LazyProxyReadinessReceiptV1 {
+		return api.LazyProxyReadinessReceiptV1{Disposition: disposition, WrapperPID: entry.CurrentPID, WrapperStartedAt: entry.StartedAt.UTC().Format(time.RFC3339Nano), PIDGeneration: entry.PIDGeneration, BackendEpoch: state.Epoch, Transition: state.Transition}
+	}
+	if current.Epoch > event.BackendEpoch {
+		return receipt("superseded", current), nil, nil
+	}
+	if current.Epoch == event.BackendEpoch {
+		if current.Transition == event.Transition {
+			return receipt("duplicate", current), nil, nil
+		}
+		if current.Transition != "starting" || event.Transition != "ready" {
+			return receipt("superseded", current), nil, nil
+		}
+	}
+	if (current.Epoch == 0 && event.Transition != "starting") ||
+		(current.Epoch < event.BackendEpoch && event.Transition == "ready") {
+		return api.LazyProxyReadinessReceiptV1{}, nil, fmt.Errorf("lazy readiness transition rejected")
+	}
+	observation := api.DaemonReadinessObservationV1{TaskName: taskName, PID: entry.CurrentPID, ProcessState: "Running", CurrentPIDGeneration: uint64(entry.PIDGeneration), ObservedPIDGeneration: uint64(entry.PIDGeneration), IntentPresent: true, IntentRunnable: true, WrapperStarted: true}
+	switch event.Transition {
+	case "starting", "idle":
+		observation.Policy = api.ReadinessPolicySyntheticProxy
+	case "ready":
+		observation.Policy = api.ReadinessPolicyMCPUpstream
+		observation.ListenerReady, observation.MCPInitializeReady, observation.MCPToolsListReady = true, true, true
+	case "failed":
+		observation.Policy = api.ReadinessPolicyMCPUpstream
+		observation.Failures = []api.ReadinessFailureV1{{Stage: api.ReadinessStageUpstreamListener, FailureID: "lazy_proxy_failed"}}
+	default:
+		return api.LazyProxyReadinessReceiptV1{}, nil, errLazyReadinessInvalid
+	}
+	accepted, settled := t.markReadinessObservationLocked(taskName, observation)
+	if !accepted {
+		return api.LazyProxyReadinessReceiptV1{}, nil, fmt.Errorf("lazy readiness tracker rejection")
+	}
+	if t.lazyReadiness == nil {
+		t.lazyReadiness = map[string]lazyProxyReadinessState{}
+	}
+	state := lazyProxyReadinessState{Epoch: event.BackendEpoch, Transition: event.Transition}
+	t.lazyReadiness[taskName] = state
+	return receipt("accepted", state), settled, nil
+}
+
+func lazyReadinessTransitionRank(transition string) int {
+	switch transition {
+	case "starting":
+		return 1
+	case "ready":
+		return 2
+	case "idle", "failed":
+		return 3
+	default:
+		return 0
+	}
+}
+
 func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	if t == nil {
 		return
@@ -525,6 +617,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -571,6 +664,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err e
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
@@ -589,6 +683,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -624,6 +719,7 @@ func (t *DaemonRuntimeTracker) MarkExitedIfCurrent(taskName string, pidGeneratio
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -656,6 +752,7 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	t.entries[taskName] = entry
@@ -687,6 +784,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.ReadinessObservation = nil
+	delete(t.lazyReadiness, taskName)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -712,6 +810,9 @@ func (t *DaemonRuntimeTracker) Remove(taskName string) {
 	}
 	if t.readinessSettlements != nil {
 		delete(t.readinessSettlements, taskName)
+	}
+	if t.lazyReadiness != nil {
+		delete(t.lazyReadiness, taskName)
 	}
 }
 

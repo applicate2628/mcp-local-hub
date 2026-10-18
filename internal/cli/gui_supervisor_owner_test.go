@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -55,20 +56,11 @@ func newSyntheticOwner(spawned bool) *supervisorOwner {
 // race-window-assertion discipline (no reliance on the natural 5-min
 // window). spawnFn is the test-injected respawn seam.
 func newTestManager(ctx context.Context, first *supervisorOwner, sink *safeBuffer,
-	spawnFn func(context.Context, string, bool, time.Duration) (*supervisorOwner, error)) *supervisorManager {
-	return &supervisorManager{
-		current:        first,
-		ctx:            ctx,
-		bin:            "mcphub-test",
-		strictMode:     false,
-		waitFor:        time.Millisecond, // the fake spawnFn returns instantly; never gated on 15s
-		spawnFn:        spawnFn,
-		stderrSink:     sink,
-		backoffBase:    time.Millisecond, // microsecond-scale cadence
-		backoffCap:     2 * time.Millisecond,
-		windowCapCount: guiSupervisorRespawnWindowCapCount,
-		windowDur:      guiSupervisorRespawnWindow,
-	}
+	spawnFn func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error)) *supervisorManager {
+	m := newSupervisorManager(ctx, "mcphub-test", false, time.Millisecond, first)
+	m.spawnFn, m.stderrSink = spawnFn, sink
+	m.backoffBase, m.backoffCap = time.Millisecond, 2*time.Millisecond
+	return m
 }
 
 // TestBoundedBuffer verifies the supervisor-stderr capture sink keeps
@@ -282,7 +274,7 @@ func TestGuiSupervisorManager_RespawnOnUnexpectedExit(t *testing.T) {
 
 	spawned := make(chan struct{}, 1)
 	var calls atomic.Int32
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		spawned <- struct{}{}
 		return ownerB, nil
@@ -335,7 +327,7 @@ func TestGuiSupervisorManager_RespawnAdoptedOwnerDoesNotHang(t *testing.T) {
 	// would NOT reproduce the nil-channel hang — build it inline.
 	adopted := &supervisorOwner{spawned: false}
 	var calls atomic.Int32
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		return adopted, nil
 	}
@@ -376,7 +368,7 @@ func TestGuiSupervisorManager_CtxCancelUnblocksReceive(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ownerA := newSyntheticOwner(true)
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		return newSyntheticOwner(true), nil
 	}
 	var sink safeBuffer
@@ -409,7 +401,7 @@ func TestGuiSupervisorManager_SpawnErrorTripsCapNotPark(t *testing.T) {
 	defer cancel()
 
 	var calls atomic.Int32
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		return nil, errors.New("spawn failed (port collision)")
 	}
@@ -451,7 +443,7 @@ func TestGuiSupervisorManager_CapStopsLoop(t *testing.T) {
 	// the cap. spawnFn returns a fresh synthetic owner whose exitedCh we
 	// pre-fire so the next loop iteration observes another unexpected
 	// exit without external help.
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		o := newSyntheticOwner(true)
 		o.exitedCh <- exitInfo{exitErr: errors.New("re-died")}
@@ -505,7 +497,7 @@ func TestGuiSupervisorManager_ShutdownSuppressesRespawn(t *testing.T) {
 		defer cancel()
 
 		var calls atomic.Int32
-		spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 			calls.Add(1)
 			return newSyntheticOwner(true), nil
 		}
@@ -534,7 +526,7 @@ func TestGuiSupervisorManager_ShutdownSuppressesRespawn(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		var calls atomic.Int32
-		spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 			calls.Add(1)
 			return newSyntheticOwner(true), nil
 		}
@@ -559,7 +551,7 @@ func TestGuiSupervisorManager_ShutdownSuppressesRespawn(t *testing.T) {
 		defer cancel()
 
 		var calls atomic.Int32
-		spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 			calls.Add(1)
 			return newSyntheticOwner(true), nil
 		}
@@ -587,7 +579,7 @@ func TestGuiSupervisorManager_ShutdownSuppressesRespawn(t *testing.T) {
 		entered := make(chan struct{}, 1)
 		orphan := newSyntheticOwner(false) // adopted → its Stop is a clean fast no-op
 		var once sync.Once
-		spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+		spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 			once.Do(func() { entered <- struct{}{} })
 			<-release // block mid-spawn until the test latches shutdown
 			return orphan, nil
@@ -605,25 +597,33 @@ func TestGuiSupervisorManager_ShutdownSuppressesRespawn(t *testing.T) {
 			t.Fatal("spawnFn was not entered")
 		}
 
-		// Latch shutdown WHILE spawnFn is blocked, then release it.
-		_ = m.Stop(context.Background(), 5000)
-		close(release)
-
-		// The loop must take the install-abort branch: Stop the orphan,
-		// NOT install it, and return.
+		// Stop now receives the blocked loop, so release only AFTER observing
+		// its actual shutdown latch. This remains the adopted-orphan branch.
+		stopped := make(chan struct{})
+		go func() { _ = m.Stop(context.Background(), 5000); close(stopped) }()
 		deadline := time.Now().Add(2 * time.Second)
 		for {
-			cur := m.currentOwner()
-			if cur == orphan {
-				t.Fatal("orphan was INSTALLED despite shutdown; install-abort branch missed")
-			}
-			// currentOwner should remain the victim (ownerA, snapshotted
-			// by manager.Stop). Once we've observed it stay non-orphan
-			// for a bounded window, the branch is proven.
-			if time.Now().After(deadline) {
+			m.mu.Lock()
+			latched := m.shuttingDown
+			m.mu.Unlock()
+			if latched {
 				break
 			}
-			time.Sleep(5 * time.Millisecond)
+			if time.Now().After(deadline) {
+				close(release)
+				<-stopped
+				t.Fatal("manager did not latch shutdown")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+		select {
+		case <-stopped:
+		case <-time.After(2 * time.Second):
+			t.Fatal("manager did not receive adopted orphan loop completion")
+		}
+		if m.currentOwner() == orphan {
+			t.Fatal("orphan was installed despite shutdown")
 		}
 	})
 }
@@ -638,7 +638,7 @@ func TestGuiSupervisorManager_WindowResetNoFalseCap(t *testing.T) {
 
 	var calls atomic.Int32
 	spawned := make(chan struct{}, 8)
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		spawned <- struct{}{}
 		return newSyntheticOwner(true), nil
@@ -694,7 +694,7 @@ func TestGuiSupervisorManager_AdoptedNeverArmed(t *testing.T) {
 	defer cancel()
 
 	var calls atomic.Int32
-	spawnFn := func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnFn := func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		return newSyntheticOwner(true), nil
 	}
@@ -755,7 +755,7 @@ func TestArmSupervisorManager_SpawnedOwnerArmsRespawnLoopViaPackageSeam(t *testi
 	respawned := newSyntheticOwner(true)
 	spawnedCh := make(chan struct{}, 1)
 	var calls atomic.Int32
-	spawnSupervisorFn = func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnSupervisorFn = func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		select {
 		case spawnedCh <- struct{}{}:
@@ -827,48 +827,47 @@ func TestArmSupervisorManager_SpawnedOwnerArmsRespawnLoopViaPackageSeam(t *testi
 	_ = manager.Stop(context.Background(), 5000)
 }
 
-// TestArmSupervisorManager_AdoptedOwnerReturnsNilNoLoop (W2): an adopted
-// (Spawned()==false) seed owner must make armSupervisorManager return nil
-// — no manager, no respawn loop. Even if the package seam WOULD spawn,
-// firing the adopted owner's exit produces zero calls because no loop is
-// consuming its exitedCh. This is the adopt-contract half of the §5 gate.
-func TestArmSupervisorManager_AdoptedOwnerReturnsNilNoLoop(t *testing.T) {
+// Adopted actors remain no-stop/no-respawn; explicit restart still has the
+// same GUI lifetime coordinator after initialization has settled.
+func TestArmSupervisorManager_AdoptedOwnerHasCoordinatorNoLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	origSpawnFn := spawnSupervisorFn
 	t.Cleanup(func() { spawnSupervisorFn = origSpawnFn })
 	var calls atomic.Int32
-	spawnSupervisorFn = func(context.Context, string, bool, time.Duration) (*supervisorOwner, error) {
+	spawnSupervisorFn = func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
 		calls.Add(1)
 		return newSyntheticOwner(true), nil
 	}
 
 	adopted := newSyntheticOwner(false)
 	manager := armSupervisorManager(ctx, adopted, "mcphub-test", false)
-	if manager != nil {
-		t.Fatalf("armSupervisorManager returned a non-nil manager for an adopted owner; want nil (no manager, no loop)")
+	if manager == nil || manager.currentOwner() != adopted || !manager.initialized || manager.loopDone != nil {
+		t.Fatal("adopted initialization lost coordinator or armed automatic respawn")
 	}
 
 	// Fire the adopted owner's exit — with no loop launched, nothing
 	// respawns through the seam.
 	adopted.exitedCh <- exitInfo{exitErr: errors.New("adopted died")}
-	time.Sleep(50 * time.Millisecond)
+	if err := manager.Stop(context.Background(), 5000); err != nil {
+		t.Fatalf("adopted Stop: %v", err)
+	}
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("spawnSupervisorFn called %d times for adopted owner; want 0 (no loop armed)", got)
 	}
 }
 
-// TestArmSupervisorManager_NilOwnerReturnsNil (W3): a nil seed owner (the
-// ensureSupervisorRunning spawn errored) must make armSupervisorManager
-// return nil without panicking on the Spawned() nil-receiver call.
-func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
+func TestArmSupervisorManager_NilOwnerHasCoordinatorNoLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	manager := armSupervisorManager(ctx, nil, "mcphub-test", false)
-	if manager != nil {
-		t.Fatalf("armSupervisorManager(nil owner) = %p; want nil", manager)
+	if manager == nil || manager.currentOwner() != nil || !manager.initialized || manager.loopDone != nil {
+		t.Fatal("absent initialization lost coordinator or armed automatic respawn")
+	}
+	if err := manager.Stop(context.Background(), 5000); err != nil {
+		t.Fatalf("absent Stop: %v", err)
 	}
 }
 
@@ -1010,5 +1009,295 @@ func TestSupervisorStateDirResolveError_PlatformRemediationAndCause(t *testing.T
 	// Cause stays wrapped for diagnosis (errors.Is reaches it).
 	if !errors.Is(err, cause) {
 		t.Errorf("cause not preserved through wrap; got: %s", msg)
+	}
+}
+
+func TestSupervisorOwnerAlreadyExitedRetainsOutcomeWithoutControl(t *testing.T) {
+	for _, originalErr := range []error{nil, errors.New("fixture original native exit failure")} {
+		exited := make(chan struct{})
+		close(exited)
+		owner := &supervisorOwner{
+			spawned: true,
+			// Synthetic immutable identity only: this branch must use neither a
+			// process operation nor any control proof/IPC acquisition.
+			proc:       &os.Process{Pid: 4242},
+			exitDone:   exited,
+			exitResult: exitInfo{exitErr: originalErr},
+		}
+		if err := owner.Stop(context.Background(), 5000); err != originalErr {
+			t.Fatal("known original exit was discarded or retargeted through IPC")
+		}
+		if err := owner.Stop(context.Background(), 5000); err != originalErr {
+			t.Fatal("repeat Stop changed the acquired original outcome")
+		}
+	}
+}
+
+// This invokes the same completion producer as the sole real monitor. The
+// error operand is synthetic; native Wait receiving remains a separate gate.
+func TestSupervisorOwnerFinalSnapshotReceivesWaitBeforeMonitorNotification(t *testing.T) {
+	want := errors.New("original Wait failure")
+	owner := &supervisorOwner{exitDone: make(chan struct{})}
+	var snapshots []supervisorCreationSnapshot
+	owner.attempt = &supervisorCreationAttempt{receive: func(snapshot supervisorCreationSnapshot) error {
+		snapshots = append(snapshots, snapshot)
+		return nil
+	}}
+	owner.receiveExitOutcome(want)
+	select {
+	case <-owner.exitDone:
+	default:
+		t.Fatal("original completion was not published")
+	}
+	if len(snapshots) != 0 {
+		t.Fatal("original completion invoked its observer")
+	}
+	// Deterministically enter final creator publication before the monitor's
+	// later notification. No observer blocks and no second Wait is introduced.
+	owner.attempt.publish(func(snapshot *supervisorCreationSnapshot) { snapshot.Finished = true })
+	if len(snapshots) != 1 || !snapshots[0].Finished || !snapshots[0].WaitReceived || !errors.Is(snapshots[0].WaitError, want) || !errors.Is(owner.exitResult.exitErr, want) {
+		t.Fatalf("completion lost actual received Wait: %#v", snapshots)
+	}
+}
+
+// The spawn barrier stands for an admitted creator whose return/settlement has
+// not reached the manager yet. No child, IPC connection or native operation is
+// created. The wrapper receives the ORIGINAL loop return, not a second loop.
+func TestQuit041ManagerStopReceivesInflightLoopAndCause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered, release, loopDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	orphanCause := errors.New("fixture unpublished owner stop failure")
+	orphan := newSyntheticOwner(true)
+	orphan.exitDone = make(chan struct{})
+	close(orphan.exitDone)
+	orphan.stoppedOnce.Do(func() { orphan.stoppedErr = orphanCause })
+	seed := newSyntheticOwner(true)
+	seed.exitDone = make(chan struct{})
+	close(seed.exitDone)
+	var sink safeBuffer
+	m := newTestManager(ctx, seed, &sink, func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
+		close(entered)
+		<-release
+		return orphan, nil
+	})
+	go func() { defer close(loopDone); m.runRespawnLoop(ctx) }()
+	defer func() {
+		unblock()
+		cancel()
+		select {
+		case <-loopDone:
+		case <-time.After(2 * time.Second):
+			t.Error("original respawn loop was not settled")
+		}
+	}()
+	seed.exitedCh <- exitInfo{exitErr: errors.New("fixture runtime exit")}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("respawn never entered the controlled unpublished window")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- m.Stop(context.Background(), 5000) }()
+	waitQuit041ManagerShutdown(t, m)
+	// This is a controlled, indefinitely blocked spawn, not a naturally short
+	// race window. The timer bounds the observation only; it grants no custody.
+	var early bool
+	var result error
+	select {
+	case result = <-stopped:
+		early = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	unblock()
+	select {
+	case <-loopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("original loop did not finish after releasing its spawn")
+	}
+	if !early {
+		select {
+		case result = <-stopped:
+		case <-time.After(2 * time.Second):
+			t.Fatal("manager Stop did not receive settled loop")
+		}
+	}
+	if m.currentOwner() == orphan {
+		t.Error("shutdown installed the unpublished owner")
+	}
+	if early {
+		t.Error("manager Stop returned while its admitted spawn and original loop were pending")
+	}
+	if !errors.Is(result, orphanCause) {
+		t.Error("shutdown-wins unpublished Stop cause did not reach manager result")
+	}
+}
+
+// An injected cached pending Stop result is not native failed-Kill proof. It
+// exercises the existing manager's receiving obligation without touching a PID.
+func TestQuit041ManagerStopReceivesOriginalExitAfterPendingStop(t *testing.T) {
+	pendingCause := errors.New("fixture original Stop returned pending")
+	original := newSyntheticOwner(true)
+	original.exitDone = make(chan struct{})
+	original.stoppedOnce.Do(func() { original.stoppedErr = pendingCause })
+	var sink safeBuffer
+	m := newTestManager(context.Background(), original, &sink, nil)
+	stopped := make(chan error, 1)
+	go func() { stopped <- m.Stop(context.Background(), 5000) }()
+	waitQuit041ManagerShutdown(t, m)
+	var early bool
+	var result error
+	select {
+	case result = <-stopped:
+		early = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(original.exitDone)
+	if !early {
+		select {
+		case result = <-stopped:
+		case <-time.After(2 * time.Second):
+			t.Fatal("manager did not receive original exit completion")
+		}
+	}
+	if early {
+		t.Error("manager Stop returned while original exitDone was pending")
+	}
+	if !errors.Is(result, pendingCause) {
+		t.Error("original pending Stop cause was lost")
+	}
+}
+
+func waitQuit041ManagerShutdown(t *testing.T, m *supervisorManager) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.mu.Lock()
+		latched := m.shuttingDown
+		m.mu.Unlock()
+		if latched {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Error("manager did not latch shutdown")
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// Original sender completion is controlled independently from process exit.
+// Both are injected retained outcomes, not native failed-Kill/IPC evidence.
+func TestQuit041ManagerStopReceivesOriginalSenderAfterExit(t *testing.T) {
+	pendingCause := errors.New("fixture original Stop pending")
+	senderCause := errors.New("fixture original sender closure failure")
+	killCause := errors.New("fixture original Kill failure")
+	original := newSyntheticOwner(true)
+	original.exitDone = make(chan struct{})
+	close(original.exitDone)
+	original.ipcDone = make(chan struct{})
+	original.killErr = killCause
+	original.stoppedOnce.Do(func() { original.stoppedErr = pendingCause })
+	var sink safeBuffer
+	m := newTestManager(context.Background(), original, &sink, nil)
+	stopped := make(chan error, 1)
+	go func() { stopped <- m.Stop(context.Background(), 5000) }()
+	waitQuit041ManagerShutdown(t, m)
+	var early bool
+	var result error
+	select {
+	case result = <-stopped:
+		early = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	original.ipcErr = senderCause
+	close(original.ipcDone)
+	if !early {
+		select {
+		case result = <-stopped:
+		case <-time.After(2 * time.Second):
+			t.Fatal("original sender was not received")
+		}
+	}
+	if early {
+		t.Error("manager returned after process exit while original sender was pending")
+	}
+	for _, cause := range []error{pendingCause, senderCause, killCause} {
+		if !errors.Is(result, cause) {
+			t.Errorf("acquired original cause not retained: %v", cause)
+		}
+	}
+	if !strings.Contains(sink.String(), "supervisor settlement unconfirmed") {
+		t.Error("pending sender did not emit the fixed safe custody diagnostic")
+	}
+}
+
+func TestQuit041ManagerQuiescePreservesAcceptedCurrent(t *testing.T) {
+	current := newSyntheticOwner(true)
+	current.exitDone = make(chan struct{})
+	var sink safeBuffer
+	m := newTestManager(context.Background(), current, &sink, nil)
+	m.loopDone = make(chan struct{})
+	go m.runRespawnLoop(m.ctx)
+	if err := m.Quiesce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	called := true
+	current.stoppedOnce.Do(func() { called = false })
+	if called {
+		t.Error("self-restart quiescence stopped the accepted current owner")
+	}
+	select {
+	case <-current.exitDone:
+		t.Error("quiescence fabricated accepted current exit")
+	default:
+	}
+	select {
+	case <-m.loopDone:
+	default:
+		t.Error("quiescence returned before its original arm completed")
+	}
+}
+
+// Both errors recover through the original retry/backoff. Only a genuine typed
+// startup cleanup failure remains a required final receiving failure.
+func TestQuit041ManagerRecoveredStartupCleanupCauseRetained(t *testing.T) {
+	for _, cleanup := range []bool{false, true} {
+		t.Run(map[bool]string{false: "transient", true: "cleanup"}[cleanup], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cause := errors.New("fixture startup failure")
+			attempts := 0
+			seed := newSyntheticOwner(true)
+			var sink safeBuffer
+			m := newTestManager(ctx, seed, &sink, func(context.Context, string, bool, time.Duration, supervisorAttemptReceiver) (*supervisorOwner, error) {
+				attempts++
+				if attempts == 1 {
+					if cleanup {
+						return nil, errors.Join(errSupervisorLaunchSettlement, cause)
+					}
+					return nil, cause
+				}
+				return newSyntheticOwner(false), nil
+			})
+			m.loopDone = make(chan struct{})
+			go m.runRespawnLoop(m.ctx)
+			seed.exitedCh <- exitInfo{exitErr: errors.New("fixture runtime exit")}
+			select {
+			case <-m.loopDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("original recovery loop did not finish")
+			}
+			result := m.Quiesce(context.Background())
+			if attempts != 2 {
+				t.Fatalf("original retry changed: %d attempts", attempts)
+			}
+			if errors.Is(result, cause) != cleanup {
+				t.Fatalf("cleanup=%t final result=%v", cleanup, result)
+			}
+		})
 	}
 }

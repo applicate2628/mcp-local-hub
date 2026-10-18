@@ -37,7 +37,7 @@ var reviewedRawFlockOwners = map[string]int{
 	"internal/api/lock_release_ledger.go:func:tryLockLeafLedgeredWithUnlock":                         1,
 	"internal/api/lsp_trusted_roots.go:func:BlessTrustedRootDetailed":                                1,
 	"internal/api/lsp_trusted_roots.go:func:RemoveTrustedRootDetailed":                               1,
-	"internal/api/managed_entries.go:func:withManagedEntriesLock":                                    1,
+	"internal/api/managed_entries.go:func:withManagedEntriesLockAt":                                  1,
 	"internal/api/mcp_front_routing_target.go:func:withMCPFrontRoutingFileLease":                     1,
 	"internal/api/state_file_helper.go:func:WriteStateFileBytesAtomic":                               1,
 	"internal/api/supervisor_events.go:func:OpenSupervisorEventLog":                                  1,
@@ -45,7 +45,7 @@ var reviewedRawFlockOwners = map[string]int{
 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuiet":                                1,
 	"internal/api/supervisor_lock.go:func:SupervisorRunningUnderStateDir/func-lit#1":                 1,
 	"internal/api/supervisor_state.go:func:MutateSupervisorStateIfChangedContext":                    1,
-	"internal/api/supervisor_state.go:func:WithEmptyStopSettlementFence":                              1,
+	"internal/api/supervisor_state.go:func:WithEmptyStopSettlementFence":                             1,
 }
 
 var reviewedAppliedReleaseClassifierOwners = map[string]int{

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   fetchOrThrow,
+  removeClientEntry,
+  ClientEntryRemovalError,
   postInitClientConfig,
   InitClientConfigError,
   listLspRouterClientStatuses,
@@ -61,8 +63,7 @@ import type {
 // overrides (persisted in localStorage, see lib/matrix-columns.ts) are
 // folded in via effectiveVisibleClients() — the "Manage columns" popover
 // lets them pin an undetected column visible or hide a noisy one. This is
-// a pure VIEW filter: hidden columns simply don't render; apply/migrate/
-// demigrate logic is unchanged. The computed list is threaded through
+// a pure VIEW filter: hidden columns simply don't render. The computed list is threaded through
 // ServerRowView/CellView as a prop.
 
 // EMPTY_CLIENT_CONFIG_PRESENCE is a stable reference used when a scan
@@ -83,34 +84,18 @@ const EMPTY_CLIENT_CONFIG_PRESENCE: Record<string, ClientConfigState> = {};
 // bailout above.
 const EMPTY_CLIENT_SCAN_ERRORS: Record<string, string> = {};
 
-// Per-cell dirty tracking with direction preserved. Outer key: server name.
-// Inner map: client → Direction.
-//
-// Direction is captured at toggle time because the cell's initialChecked
-// (scan state, authoritative) is the only honest source of truth for
-// "which endpoint should Apply call for this cell" — by the time
-// applyChanges runs, routing may have reloaded. Storing Direction in the
-// dirty map keeps endpoint selection stable across reloads.
-//
-// Prune invariant (see B1 memo §4 D4): on toggle-back (user re-flips a
-// dirty cell to its initial state), delete the client entry AND delete
-// the server entry if the inner map becomes empty. With the invariant
-// enforced at every update, `dirty.size === 0` remains a correct
-// "nothing pending" predicate without a deep-empty scan.
-type Direction = "migrate" | "demigrate";
-type DirtyMap = Map<string, Map<string, Direction>>;
-
-// Per-entry outcome from one applyChanges run. Drives the success-prune /
-// retain-failed-or-gated semantic in B1 memo §4 D6:
-//   - "succeeded"  : POST fired, got 2xx → prune from dirty
-//   - "failed"     : POST fired, got non-2xx → retain (user retries)
-//   - "gated"      : POST never fired because phase-1 demigrate on the
-//                    same client failed; the §4 D4 per-client gate
-//                    removed this client from the phase-2 migrate batch.
-//                    Retain (user retries; entry will fire once the
-//                    blocking demigrate succeeds).
+// One intent per observed server/client. Removal retains the opaque member
+// token through refresh/retry; routing checked state is distinct from presence.
+type CellIntent = { operation: "migrate" | "undo" } |
+  { operation: "remove-client-entry"; sourceToken: string | null; refusal?: string };
+type DirtyMap = Map<string, Map<string, CellIntent>>;
+type RemovalCell = { server: string; client: string; sourceToken: string | null };
 type Outcome = "succeeded" | "failed" | "gated";
 type OutcomeMap = Map<string, Map<string, Outcome>>;
+
+function hubChecked(routing: Routing): boolean {
+  return routing === "via-hub" || routing === "via-hub-inherited";
+}
 
 // HoverScope (G1) names the bulk-toggle group the pointer is currently over so
 // the matrix can preview which cells a click would flip. `kind: "col"` → key
@@ -125,15 +110,16 @@ type HoverScope = { kind: "col"; key: string } | { kind: "row"; key: string };
 // drift: a cell the header toggle would flip must be exactly a cell the
 // operator could flip by clicking its checkbox.
 //
-// Interactive routing states are "via-hub", "direct", and "available"
-// (see perClientRouting doc in lib/routing.ts). Everything else
+// Hub entries admit OFF removal; inherited entries require removal capability.
+// Direct and available entries admit ON only with a manifest. Everything else
 // ("not-installed", "unsupported", "config-error", "config-error-symlink",
 // and an undefined/absent client key → treated as "not-installed") is a
 // disabled, non-toggleable cell. The `applying` guard is folded in so an
 // in-flight Apply freezes both the per-cell checkbox AND the column toggle.
-function cellInteractive(routing: Routing, applying: boolean): boolean {
+function cellInteractive(routing: Routing, applying: boolean, removableInherited = false, manifested = true): boolean {
   if (applying) return false;
-  return routing === "via-hub" || routing === "direct" || routing === "available";
+  if (routing === "via-hub" || (routing === "via-hub-inherited" && removableInherited)) return true;
+  return manifested && (routing === "direct" || routing === "available");
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -266,13 +252,14 @@ export function ServersScreen() {
   // or navigates away.
   const [initMsg, setInitMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   const [dirty, setDirty] = useState<DirtyMap>(new Map());
-  // PR #22 retry-queue UX fix: persist last-Apply outcomes so toggleCell
-  // can detect cells with a pending failed/gated retry and preserve
-  // their dirty entry instead of pruning on toggle-back. Without this,
-  // unticking a via-hub cell + Apply-fails + re-ticking would silently
-  // drop the failed retry from the queue (Apply gauge would gray out
-  // even though backend state never changed). The user lost their
-  // ability to re-Apply without leaving and reloading the page.
+  const [removalOpen, setRemovalOpen] = useState(false);
+  const removalSelection: RemovalCell[] = [];
+  for (const [server, cells] of dirty) {
+    for (const [client, intent] of cells) {
+      if (intent.operation === "remove-client-entry") removalSelection.push({ server, client, sourceToken: intent.sourceToken });
+    }
+  }
+  const applyBusyRef = useRef(false);
   const [outcomes, setOutcomes] = useState<OutcomeMap>(new Map());
   const [applyMsg, setApplyMsg] = useState<string>("");
   const [applying, setApplying] = useState<boolean>(false);
@@ -282,17 +269,8 @@ export function ServersScreen() {
   // failure list. Empty array = no failures to render.
   const [failedRows, setFailedRows] = useState<string[]>([]);
   const [reloadToken, setReloadToken] = useState<number>(0);
-  // applyGen forces a per-cell remount after every applyChanges run so
-  // each CellView re-initializes its local `checked` state from
-  // initialChecked (authoritative scan). Bug-bash A4 (#17) closure:
-  // pre-fix, a failed demigrate left CellView showing the user's last
-  // toggle (☐) while the disk still held the entry (☑) — visual lied
-  // about state. CellView's useEffect [initialChecked] only fires when
-  // initialChecked CHANGES; on a failed Apply the scan is unchanged,
-  // so the effect doesn't re-sync and user's local toggle persists.
-  // Remounting via key fixes that: the new instance starts with
-  // useState(initialChecked) honestly. Retry context survives via the
-  // separate red-border outcome map.
+  // Remount settled cells from the scan plus retained intent. Presence badges
+  // remain scan-owned, so an unchecked failed removal never claims absence.
   const [applyGen, setApplyGen] = useState<number>(0);
 
   // v0.5.x Task 4.3 — Workspace registry + LSP matrix state.
@@ -414,7 +392,7 @@ export function ServersScreen() {
   // a poll tick can't even fire mid-edit; and because each CellView's
   // visible checkbox folds `dirty` over the baseline (effectiveChecked), a
   // baseline-only refresh can never visually drop a pending toggle.
-  const loadScan = useCallback(async () => {
+  const loadScan = useCallback(async (markScanAccepted: () => void) => {
     const requestId = latestScanRequestRef.current + 1;
     latestScanRequestRef.current = requestId;
     const isLatest = () => latestScanRequestRef.current === requestId;
@@ -500,6 +478,7 @@ export function ServersScreen() {
       // must NOT be cleared here — they remain visible until
       // the user starts a new Apply cycle.
       setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
+      markScanAccepted();
     } catch (err) {
       if (isLatest()) setError((err as Error).message);
     }
@@ -512,8 +491,8 @@ export function ServersScreen() {
   // never fires while local optimistic state is waiting on an operator POST.
   const hasUnsavedEdits = dirty.size > 0;
   const hasLspRouterToggleInFlight = Object.keys(lspRouterBusy).length > 0;
-  const autoScanPaused = hasUnsavedEdits || hasLspRouterToggleInFlight;
-  const { rescan, agoSeconds } = useAutoScan(loadScan, autoScanPaused);
+  const autoScanPaused = hasUnsavedEdits || hasLspRouterToggleInFlight || applying;
+  const { rescan, markScanAccepted, agoSeconds } = useAutoScan(loadScan, autoScanPaused);
 
   // reloadToken-driven refetch for Apply / Initialize / LSP register / SSE.
   // useAutoScan already issues the initial mount fetch, so this effect
@@ -523,8 +502,8 @@ export function ServersScreen() {
   // even though the auto-poll is paused while dirty.
   useEffect(() => {
     if (reloadToken === 0) return;
-    void loadScan();
-  }, [reloadToken, loadScan]);
+    void loadScan(markScanAccepted);
+  }, [reloadToken, loadScan, markScanAccepted]);
 
   async function initializeClient(client: string) {
     if (initBusy[client]) return;
@@ -643,246 +622,180 @@ export function ServersScreen() {
     }
   }
 
-  function toggleCell(server: string, client: string, nextChecked: boolean, initialChecked: boolean) {
-    setDirty((prev) => {
-      const next = new Map(prev);
-      if (nextChecked !== initialChecked) {
-        // Dirty: capture direction from initialChecked (authoritative scan
-        // state). A cell that started `via-hub` (initialChecked=true) and
-        // is now unchecked flips to "demigrate"; a direct cell (false) that
-        // just got checked flips to "migrate".
-        const direction: Direction = initialChecked ? "demigrate" : "migrate";
-        let clients = next.get(server);
-        if (!clients) {
-          clients = new Map();
-          next.set(server, clients);
-        }
-        clients.set(client, direction);
-      } else {
-        // Toggle-back: prune invariant (DirtyMap doc).
-        //
-        // Earlier draft (Codex PR #22 r3 P1 fix) tried to preserve
-        // the dirty entry when there was a retained-failure outcome,
-        // hoping to keep the retry queue alive across an accidental
-        // re-tick. That was WRONG: the visual checkbox is already at
-        // `initialChecked`, but the preserved dirty entry still
-        // carries the OLD direction (e.g., "demigrate"). A subsequent
-        // Apply then fires /api/demigrate against a cell that the
-        // user has visually returned to via-hub — UI and intent
-        // diverge.
-        //
-        // Retry affordance is preserved through the outcome map's
-        // visual indicator (`.matrix-cell-retry-pending` red outline
-        // — see CellView). When the user re-toggles the cell, the
-        // dirty entry is recreated with a direction that matches the
-        // current visual state, and Apply re-runs the failed action
-        // honestly. The outline keeps the failure context visible
-        // across the toggle-back so the user knows there was a prior
-        // problem on this cell even if Apply is currently inactive.
-        const clients = next.get(server);
-        if (clients) {
-          clients.delete(client);
-          if (clients.size === 0) next.delete(server);
-        }
+  // All selection surfaces change only this intent map, clearing only their
+  // superseded outcomes. Client configuration is written only by Apply.
+  function updateIntents(changes: { server: string; client: string; intent: CellIntent | null }[]) {
+    if (applyBusyRef.current || applying) return;
+    setDirty((previous) => {
+      const next = new Map(previous);
+      for (const { server, client, intent } of changes) {
+        const row = new Map(next.get(server));
+        if (intent) row.set(client, intent);
+        else row.delete(client);
+        if (row.size > 0) next.set(server, row);
+        else next.delete(server);
       }
       return next;
     });
+    setOutcomes((previous) => {
+      const next = new Map(previous);
+      for (const { server, client } of changes) {
+        const row = new Map(next.get(server));
+        row.delete(client);
+        if (row.size > 0) next.set(server, row);
+        else next.delete(server);
+      }
+      return next;
+    });
+    setFailedRows((previous) => previous.filter((message) => !changes.some(({ server, client }) =>
+      message.startsWith(`${server}/${client}:`) ||
+      (message.startsWith(`${server}/`) && message.includes(`/${client}:`)))));
+    setApplyMsg("");
   }
 
-  async function applyChanges() {
-    if (dirty.size === 0) return;
+  function removalIntent(server: string, client: string): CellIntent {
+    const presence = removalPresence(scanForLsp, server, client);
+    return { operation: "remove-client-entry", sourceToken: removalToken(presence),
+      refusal: removalRefusal(presence?.removal?.reason) };
+  }
+
+  function toggleCell(server: string, client: string, nextChecked: boolean, initialChecked: boolean) {
+    updateIntents([{ server, client, intent: nextChecked === initialChecked ? null :
+      nextChecked ? { operation: "migrate" } : removalIntent(server, client) }]);
+  }
+
+  function selectRemoval(next: RemovalCell[]) {
+    const changes: { server: string; client: string; intent: CellIntent | null }[] = [];
+    for (const current of removalSelection) {
+      if (!next.some((cell) => cell.server === current.server && cell.client === current.client)) changes.push({ ...current, intent: null });
+    }
+    for (const cell of next) {
+      if (!removalSelection.some((current) => current.server === cell.server && current.client === cell.client)) {
+        changes.push({ ...cell, intent: { operation: "remove-client-entry", sourceToken: cell.sourceToken } });
+      }
+    }
+    updateIntents(changes);
+  }
+
+  function queueUndo(server: string, client: string) {
+    updateIntents([{ server, client, intent: { operation: "undo" } }]);
+  }
+
+  // One executor/outcome/mount/in-flight owner for checkbox, bulk, explicit
+  // removal and retry. The explicit removal button executes removal intents only.
+  async function applyChanges(onlyRemoval = false) {
+    if (applyBusyRef.current || applying) return;
+    const selected: { server: string; client: string; intent: CellIntent }[] = [];
+    for (const [server, row] of dirty) {
+      for (const [client, intent] of row) {
+        if (!onlyRemoval || intent.operation === "remove-client-entry") selected.push({ server, client, intent });
+      }
+    }
+    if (selected.length === 0) return;
+    const cells = [
+      ...selected.filter((cell) => cell.intent.operation === "remove-client-entry"),
+      ...selected.filter((cell) => cell.intent.operation === "undo"),
+      ...selected.filter((cell) => cell.intent.operation === "migrate"),
+    ];
+    applyBusyRef.current = true;
     setApplying(true);
-    setApplyMsg(`Applying…`);
-    // Clear any stale failures from a prior Apply — new attempt resets
-    // the list so retried-cells don't display under both old and new
-    // error rows.
-    setFailedRows([]);
-
-    // Per-cell POST granularity (memo §4 D2). Each (server, client, direction)
-    // cell fires its OWN /api/migrate or /api/demigrate POST with a single-
-    // element clients array. Batching multiple clients into one POST would
-    // be collapsed by the handlers into a single 500 on any row failure,
-    // corrupting per-cell outcome tracking — a batch containing one failed
-    // row and one succeeded row would mark BOTH failed, leaving the actually-
-    // successful row dirty and replaying it on retry (which reads the now-
-    // polluted backup and hits the R5 sentinel bug). Per-cell POSTs keep
-    // outcome 1:1 with cell state. [Codex plan-R4 P1 on this plan.]
-    type Cell = { server: string; client: string };
-    const demigrateCells: Cell[] = [];
-    const migrateCells: Cell[] = [];
-    for (const [server, clientMap] of dirty.entries()) {
-      for (const [client, direction] of clientMap.entries()) {
-        if (direction === "demigrate") demigrateCells.push({ server, client });
-        else migrateCells.push({ server, client });
-      }
-    }
-
-    // Per-entry outcomes — seed every entry as "gated" (will upgrade to
-    // "succeeded" or "failed" once its POST fires; gated only remains for
-    // cells skipped by the phase-2 per-client gate).
-    const outcomes: OutcomeMap = new Map();
-    for (const [server, clientMap] of dirty.entries()) {
-      const row: Map<string, Outcome> = new Map();
-      for (const [client] of clientMap.entries()) row.set(client, "gated");
-      outcomes.set(server, row);
-    }
-
+    setApplyMsg(onlyRemoval ? "Removing selected entries…" : "Applying…");
+    const results: OutcomeMap = new Map();
     const failed: string[] = [];
-    // Clients whose phase-1 demigrate failed. Phase 2 skips every migrate
-    // cell targeting such a client (per-client gate, §4 D4). Gated cells
-    // stay "gated" in outcomes and retain in dirty for retry.
-    const failedDemigrateClients = new Set<string>();
-
-    // PHASE 1 — demigrate (one POST per cell).
-    //
-    // Response shapes (bug-bash B1 closure #7):
-    //   200 → success (Restored[] populated, Failed[] empty)
-    //   207 → partial failure (Failed[] has exactly 1 row for this cell)
-    //   500 → setup error (`{error, code: DEMIGRATE_FAILED}`)
-    //   204 (legacy) → treat as success for forward compat (test fakes)
-    for (const cell of demigrateCells) {
-      try {
-        const resp = await fetch("/api/demigrate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
-        });
-        if (resp.status === 200 || resp.status === 204) {
-          outcomes.get(cell.server)!.set(cell.client, "succeeded");
-        } else if (resp.status === 207) {
-          // Partial-failure body shape: { restored: [...], failed: [{server, client, err}] }.
-          // Per-cell POST means failed[] has at most 1 entry; surface its
-          // clean err message without the legacy aggregation prefix.
-          const body = (await resp.json().catch(() => ({}))) as {
-            failed?: { server: string; client: string; err: string }[];
-          };
-          const row = body.failed?.[0];
-          const errMsg = row?.err ?? `HTTP ${resp.status}`;
-          failed.push(`${cell.server}/demigrate/${cell.client}: ${errMsg}`);
-          outcomes.get(cell.server)!.set(cell.client, "failed");
-          failedDemigrateClients.add(cell.client);
-        } else {
-          // 4xx/5xx error body: { error, code }
-          const body = (await resp.json().catch(() => ({}))) as { error?: string };
-          failed.push(`${cell.server}/demigrate/${cell.client}: ${body.error ?? resp.status}`);
-          outcomes.get(cell.server)!.set(cell.client, "failed");
-          failedDemigrateClients.add(cell.client);
-        }
-      } catch (e) {
-        failed.push(`${cell.server}/demigrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
-        outcomes.get(cell.server)!.set(cell.client, "failed");
-        failedDemigrateClients.add(cell.client);
-      }
+    const blockedClients = new Set<string>();
+    let unsettled = false;
+    let succeeded = 0;
+    function record(server: string, client: string, outcome: Outcome) {
+      const row = results.get(server) ?? new Map<string, Outcome>();
+      row.set(client, outcome);
+      results.set(server, row);
     }
-
-    // PHASE 2 — migrate (one POST per cell, with per-client gate).
-    for (const cell of migrateCells) {
-      if (failedDemigrateClients.has(cell.client)) {
-        // Gated: a phase-1 demigrate on this client failed. Do NOT fire
-        // the migrate — it would write a polluted post-migrate backup
-        // that the user's retry of the failed demigrate would then
-        // misread. Outcome stays "gated"; entry retains in dirty.
-        continue;
-      }
-      try {
-        const resp = await fetch("/api/migrate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ servers: [cell.server], clients: [cell.client] }),
-        });
-        // Same shape as /api/demigrate above (B1 #7 symmetry).
-        if (resp.status === 200 || resp.status === 204) {
-          outcomes.get(cell.server)!.set(cell.client, "succeeded");
-        } else if (resp.status === 207) {
-          const body = (await resp.json().catch(() => ({}))) as {
-            failed?: { server: string; client: string; err: string }[];
-          };
-          const row = body.failed?.[0];
-          const errMsg = row?.err ?? `HTTP ${resp.status}`;
-          failed.push(`${cell.server}/migrate/${cell.client}: ${errMsg}`);
-          outcomes.get(cell.server)!.set(cell.client, "failed");
-        } else {
-          const body = (await resp.json().catch(() => ({}))) as { error?: string };
-          failed.push(`${cell.server}/migrate/${cell.client}: ${body.error ?? resp.status}`);
-          outcomes.get(cell.server)!.set(cell.client, "failed");
+    try {
+      for (const { server, client, intent } of cells) {
+        if (!mountedRef.current) return;
+        if (unsettled || (intent.operation !== "remove-client-entry" && blockedClients.has(client))) {
+          record(server, client, "gated");
+          failed.push(`${server}/${client}: ${unsettled && intent.operation === "remove-client-entry"
+            ? "Not attempted because another removal could not be settled. Refresh and verify the failed entry before retrying."
+            : `Not attempted because an earlier change ${unsettled ? "could not be settled" : "failed on this client"}. Refresh and verify before retrying.`}`);
+          continue;
         }
-      } catch (e) {
-        failed.push(`${cell.server}/migrate/${cell.client}: ${(e as Error).message ?? "unknown"}`);
-        outcomes.get(cell.server)!.set(cell.client, "failed");
-      }
-    }
-
-    // Prune "succeeded" outcomes from dirty; retain "failed" and "gated".
-    // §4 D6 rationale: successful entries would silently replay on retry
-    // and re-read the now-polluted latest backup (R5/R6/R7). Gated entries
-    // represent unfulfilled user intent that must retry (R10).
-    setDirty((prev) => {
-      const next = new Map(prev);
-      for (const [server, outcomeRow] of outcomes.entries()) {
-        const clientMap = next.get(server);
-        if (!clientMap) continue;
-        for (const [client, outcome] of outcomeRow.entries()) {
-          if (outcome === "succeeded") clientMap.delete(client);
+        try {
+          if (intent.operation === "remove-client-entry") {
+            const currentToken = removalToken(removalPresence(scanForLsp, server, client));
+            if (!intent.sourceToken) {
+              throw new ClientEntryRemovalError(intent.refusal ?? "Removal selection is incomplete. Refresh and select the current entry again.", "REMOVAL_SELECTION_INVALID", 0, "refused");
+            }
+            if (currentToken !== intent.sourceToken) {
+              throw new ClientEntryRemovalError("Source changed or removal is unsupported. Refresh, clear this selection, and select the current entry again.", "REMOVAL_SELECTION_STALE", 0, "refused");
+            }
+            await removeClientEntry(server, client, intent.sourceToken);
+          } else {
+            // The explicitly named undo action alone enters legacy demigrate.
+            const endpoint = intent.operation === "undo" ? "/api/demigrate" : "/api/migrate";
+            const resp = await fetch(endpoint, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ servers: [server], clients: [client] }),
+            });
+            if (resp.status !== 200 && resp.status !== 204) {
+              const body = await resp.json().catch(() => ({})) as { error?: string; failed?: { err?: string }[] };
+              throw new Error(body.failed?.[0]?.err ?? body.error ?? `HTTP ${resp.status}`);
+            }
+          }
+          record(server, client, "succeeded");
+          succeeded++;
+        } catch (err) {
+          record(server, client, "failed");
+          failed.push(`${server}/${client}: ${(err as Error).message ?? "unknown"}`);
+          if (intent.operation !== "migrate") blockedClients.add(client);
+          if (intent.operation === "remove-client-entry" &&
+            (!(err instanceof ClientEntryRemovalError) || (err.outcome !== "refused" && err.outcome !== "failed"))) unsettled = true;
         }
-        if (clientMap.size === 0) next.delete(server);
       }
-      return next;
-    });
-    // PR #22 retry-queue fix: hoist outcomes to state so toggleCell
-    // can detect retained-failure cells. Without this, outcomes
-    // (local var) is GC'd at end of applyChanges and the toggle-back
-    // path can't tell "user dismissing" from "user dismissing a
-    // pending retry".
-    setOutcomes(outcomes);
-
-    // Always reload, regardless of failure count. §4 D6 rationale: the
-    // Checkbox useEffect syncs local `checked` from `initialChecked`
-    // derived from server.routing; without a reload, successful demigrate
-    // cells stay with stale "via-hub" initialChecked and the next toggle
-    // fires the wrong direction. Reloading unconditionally keeps every
-    // cell's baseline honest.
-    setReloadToken((x) => x + 1);
-    // Bug-bash A4 (#17): bump applyGen so EVERY CellView remounts and
-    // re-initializes from initialChecked. Pre-fix, failed cells kept
-    // user's local toggle as the visible state while disk unchanged.
-    // Now: after Apply, every cell visually matches authoritative scan
-    // (initialChecked); retry context survives via outcomes/red border,
-    // not via the checkbox visual.
-    setApplyGen((g) => g + 1);
-
-    const total = demigrateCells.length + migrateCells.length;
-    if (failed.length === 0) {
-      setApplyMsg("Applied. Refreshing…");
-      setFailedRows([]);
-      // Flowbite success toast — a transient, screen-agnostic confirmation
-      // that complements the inline "Applied. Refreshing…" toolbar text.
-      pushToast(
-        "success",
-        `Applied ${total} change${total === 1 ? "" : "s"} to client configs.`,
-      );
-    } else {
-      // Bug-bash B1 closure (#7): each failed entry becomes its own
-      // <li> row in the toolbar list (see render below). applyMsg
-      // just shows the count + reminder; the wall-of-text in a
-      // single string is gone.
-      setApplyMsg(`Failed: ${failed.length} row(s); re-toggle and retry below.`);
-      setFailedRows(failed);
-      // Flowbite danger toast — sticky (no auto-dismiss) so the operator
-      // acknowledges the partial-failure explicitly. The per-row detail
-      // still lives in the inline failedRows list below.
-      pushToast(
-        "danger",
-        `Apply failed for ${failed.length} of ${total} change${total === 1 ? "" : "s"}; see the list below to retry.`,
-      );
+      if (!mountedRef.current) return;
+      setDirty((previous) => {
+        const next = new Map(previous);
+        for (const { server, client, intent } of cells) {
+          if (results.get(server)?.get(client) !== "succeeded" || next.get(server)?.get(client) !== intent) continue;
+          const row = new Map(next.get(server));
+          row.delete(client);
+          if (row.size > 0) next.set(server, row);
+          else next.delete(server);
+        }
+        return next;
+      });
+      setOutcomes((previous) => {
+        const next = new Map(previous);
+        for (const [server, row] of results) next.set(server, new Map([...(next.get(server) ?? []), ...row]));
+        return next;
+      });
+      setFailedRows((previous) => [
+        ...previous.filter((message) => !cells.some(({ server, client }) =>
+          message.startsWith(`${server}/${client}:`) ||
+          (message.startsWith(`${server}/`) && message.includes(`/${client}:`)))),
+        ...failed,
+      ]);
+      setApplyMsg(failed.length > 0
+        ? `Failed: ${failed.length} row(s); re-toggle and retry below.`
+        : onlyRemoval ? `Removed ${succeeded} selected entr${succeeded === 1 ? "y" : "ies"}. Refreshing…`
+        : "Applied. Refreshing…");
+      setReloadToken((token) => token + 1);
+      setApplyGen((generation) => generation + 1);
+      pushToast(failed.length > 0 ? "danger" : "success", failed.length > 0
+        ? `Apply failed or was gated for ${failed.length} of ${cells.length} changes; see the list below.`
+        : `Applied ${succeeded} changes to client configs.`);
+    } finally {
+      applyBusyRef.current = false;
+      if (mountedRef.current) setApplying(false);
     }
-    setApplying(false);
   }
 
   if (error) {
     return (
       <div>
         <h1>Servers</h1>
-        <p class="error">Failed to load: {error}</p>
+        <p class="error" role="alert">Failed to load: {error}</p>
+        <button type="button" class="btn" onClick={rescan}>Retry</button>
       </div>
     );
   }
@@ -917,39 +830,23 @@ export function ServersScreen() {
     }
   }
 
-  // Bug-bash A3 (#11/#12): split rows into mcphub-managed (manifested)
-  // and legacy non-mcphub (no manifest). The main matrix only renders
-  // manifested servers — checkboxes for non-manifested rows would mean
-  // nothing (Apply migrate/demigrate both require a manifest). Legacy
-  // entries surface in a read-only "Other MCP entries" expander so the
-  // operator can see what's in client configs without confusing them
-  // for mcphub-managed.
-  // Bot r1 P2 closure: keep any row with a pending dirty edit visible
-  // in the main matrix, even if a scan race flipped manifest_exists to
-  // false (e.g., manifest deletion between fetch + render). Pre-fix,
-  // filtering by `s.manifested` alone could hide a row that still has
-  // queued migrate/demigrate work — Apply would fire on an invisible
-  // row and the operator couldn't inspect or undo from the UI.
-  // Exclude the workspace-scoped LSP server from the top single-daemon
-  // matrix: its per-(workspace, language) form is enabled through the
-  // "LSP daemons" table below, and its bare matrix checkbox (Port "—")
-  // could register nothing — a non-functional trap. See LSP_MANIFEST_SERVER
-  // doc in lsp-rows.ts. (serena stays: it has a single router endpoint.)
-  const manifestedServers = servers.filter(
-    (s) => (s.manifested || dirty.has(s.name)) && s.name !== LSP_MANIFEST_SERVER,
-  );
-  const otherServers = servers.filter((s) => !s.manifested && !dirty.has(s.name));
+  // A Hub entry can be removed without a manifest. Direct legacy entries stay
+  // in the explicit removal panel; ON retains its existing manifest requirement.
+  const inMainMatrix = (s: ServerRow) => s.name !== LSP_MANIFEST_SERVER &&
+    (s.manifested || dirty.has(s.name) || Object.values(s.routing).some(hubChecked));
+  const manifestedServers = servers.filter(inMainMatrix);
+  const otherServers = servers.filter((s) => !inMainMatrix(s) && !s.manifested && !dirty.has(s.name));
 
   // effectiveChecked computes a cell's CURRENT visual state: a pending
   // dirty edit overrides the authoritative scan baseline (a queued
-  // "migrate" means the operator already checked it; "demigrate" means
+  // "migrate" means the operator already checked it; removal means
   // they unchecked it). Used by both the per-cell visual sync and the
   // column-toggle's all-checked computation so the header toggle reflects
   // unsaved edits, not just the last scan.
   const effectiveChecked = (server: ServerRow, client: string): boolean => {
     const pending = dirty.get(server.name)?.get(client);
-    if (pending) return pending === "migrate";
-    return (server.routing[client] ?? "not-installed") === "via-hub";
+    if (pending) return pending.operation === "migrate";
+    return hubChecked(server.routing[client] ?? "not-installed");
   };
 
   // Whole-column toggle (Feature 2): flip every applicable (toggleable,
@@ -957,18 +854,18 @@ export function ServersScreen() {
   // column's effective state across only the interactive cells — if ALL
   // are currently checked, set them all UNchecked; otherwise set them all
   // checked. Each flip routes through the SAME per-cell onToggle path
-  // (toggleCell) so migrate/demigrate semantics + the Apply queue stay
+  // (toggleCell) so operation capture and the Apply queue stay
   // identical to manual per-cell toggles — no separate apply path.
   const columnInteractiveServers = (client: string): ServerRow[] =>
     manifestedServers.filter((s) =>
-      cellInteractive(s.routing[client] ?? "not-installed", applying),
+      cellInteractive(s.routing[client] ?? "not-installed", applying, removalToken(removalPresence(scanForLsp, s.name, client)) !== null, s.manifested),
     );
   // flipCellGroup is the SINGLE owner of the bulk enable-all/disable-all
   // logic shared by the whole-column header toggle AND the whole-row
   // server toggle: given a set of (server, client) cells, if ALL are
   // currently checked set them all UNchecked, else set them all checked.
   // Each flip routes through the SAME per-cell toggleCell path so
-  // migrate/demigrate semantics + the Apply queue stay identical to a
+  // operation capture and the Apply queue stay identical to a
   // manual per-cell toggle — there is no separate bulk apply path, and no
   // duplicated flip logic between the column and row toggles.
   const flipCellGroup = (cells: { server: ServerRow; client: string }[]) => {
@@ -977,9 +874,9 @@ export function ServersScreen() {
     const next = !allChecked;
     for (const { server, client } of cells) {
       // initialChecked is the authoritative scan baseline the dirty map
-      // keys direction off of — pass it (NOT the effective state) so
+      // compares selection against — pass it (NOT the effective state) so
       // toggleCell prunes/creates the dirty entry against the right axis.
-      const initialChecked = (server.routing[client] ?? "not-installed") === "via-hub";
+      const initialChecked = hubChecked(server.routing[client] ?? "not-installed");
       // Only fire when the cell's effective state actually changes, so an
       // already-correct cell isn't churned through the dirty map.
       if (effectiveChecked(server, client) !== next) {
@@ -1011,7 +908,7 @@ export function ServersScreen() {
   // silently mutated by a row toggle.
   const rowInteractiveClients = (server: ServerRow): string[] =>
     clientColumns.filter((client) =>
-      cellInteractive(server.routing[client] ?? "not-installed", applying),
+      cellInteractive(server.routing[client] ?? "not-installed", applying, removalToken(removalPresence(scanForLsp, server.name, client)) !== null, server.manifested),
     );
   const toggleRowCells = (server: ServerRow) => {
     flipCellGroup(rowInteractiveClients(server).map((client) => ({ server, client })));
@@ -1120,12 +1017,16 @@ export function ServersScreen() {
           pauseReason={
             hasUnsavedEdits
               ? "auto-refresh paused — unsaved changes"
-              : "auto-refresh paused — LSP router update in progress"
+              : removalSelection.length > 0
+                ? "auto-refresh paused — removal selection"
+                : applying ? "auto-refresh paused — client update in progress" : "auto-refresh paused — LSP router update in progress"
           }
           disabledReason={
             hasUnsavedEdits
               ? "Apply or discard your unsaved matrix changes before rescanning"
-              : "Wait for the LSP router update to finish before rescanning"
+              : removalSelection.length > 0
+                ? "Use Refresh removal sources to check the selected entries"
+                : "Wait for the client update to finish before rescanning"
           }
         />
       </div>
@@ -1140,17 +1041,44 @@ export function ServersScreen() {
         }}
       />
       <div id="servers-toolbar">
-        <button class="btn btn-primary" onClick={applyChanges} disabled={applyDisabled}>
+<button type="button" class="btn btn-primary" onClick={() => applyChanges()} disabled={applyDisabled}>
           {retryPendingCount > 0
             ? `Apply changes (incl. retry ${retryPendingCount})`
             : "Apply changes"}
         </button>
-        <span style="margin-left:12px" class={applyMsg.startsWith("Failed") ? "error" : ""}>
+        <button
+          type="button"
+          class="btn"
+          aria-expanded={removalOpen}
+          aria-controls="servers-removal-selection"
+          disabled={applying}
+          onClick={() => setRemovalOpen((open) => !open)}
+        >
+          Select entries to remove{removalSelection.length > 0 ? ` (${removalSelection.length} selected)` : ""}
+        </button>
+        <span role="status" style="margin-left:12px" class={applyMsg.startsWith("Failed") ? "error" : ""}>
           {applyMsg}
         </span>
       </div>
+      <p>Uncheck a Hub entry and Apply changes to remove it from that client. Direct entries remain present while unchecked. Check and Apply to route an entry through the Hub. Restore direct connection is a separate undo action.</p>
+      {removalOpen && (
+        <section id="servers-removal-selection" aria-label="Remove entries from client configs">
+          <h2>Remove from client</h2>
+          <p>Select the existing entries to delete from their client configs. This does not restore an older entry. Selecting removal replaces a pending Hub routing change for that entry. Unsupported sources stay visible with their reason.</p>
+          <RemovalSelectionTable
+            scan={scanForLsp}
+            clients={clientColumns}
+            selection={removalSelection}
+            disabled={applying}
+            onSelection={selectRemoval}
+          />
+          <button type="button" class="btn btn-primary" disabled={applying || removalSelection.length === 0} onClick={() => applyChanges(true)}>Remove from client ({removalSelection.length})</button>
+          <button type="button" class="btn" disabled={applying} onClick={() => setReloadToken((token) => token + 1)}>Refresh removal sources</button>
+          <button type="button" class="btn" disabled={applying || removalSelection.length === 0} onClick={() => selectRemoval([])}>Clear removal selection</button>
+        </section>
+      )}
       {failedRows.length > 0 && (
-        <ul class="apply-failed-rows" data-testid="apply-failed-rows">
+        <ul class="apply-failed-rows" data-testid="apply-failed-rows" role="alert">
           {failedRows.map((row) => (
             <li key={row} class="error">
               {row}
@@ -1278,6 +1206,8 @@ export function ServersScreen() {
               pending={dirty.get(server.name)}
               applyGen={applyGen}
               onToggle={toggleCell}
+              onUndo={queueUndo}
+              removalSources={scanForLsp?.entries?.find((entry) => entry.name === server.name)?.client_presence}
               onRowToggle={toggleRowCells}
               onRowToggleHover={(hovering) =>
                 setHoverScope(hovering ? { kind: "row", key: server.name } : null)
@@ -1333,11 +1263,112 @@ export function ServersScreen() {
   );
 }
 
+function removalPresence(scan: ScanResult | null, server: string, client: string): ClientPresence | undefined {
+  return scan?.entries?.find((entry) => entry.name === server)?.client_presence?.[client];
+}
+
+function removalToken(presence: ClientPresence | undefined): string | null {
+  const capability = presence?.removal;
+  return capability?.version === 1 && capability.supported === true &&
+    typeof capability.source_token === "string" && capability.source_token.length > 0
+    ? capability.source_token
+    : null;
+}
+
+function removalRefusal(reason: string | undefined): string {
+  switch (reason) {
+    case "REMOVAL_SHARED_SOURCE_SCOPE": return "This source is shared with another client. Removing it would affect an unselected client.";
+    case "REMOVAL_SOURCE_CONFLICT": return "The source has changed or could not be verified. Refresh before selecting it again.";
+    case "REMOVAL_EFFECTIVE_RETAINED": return "Another config layer would keep this entry active after removal.";
+    default: return "Removal is not supported for this source.";
+  }
+}
+
+function RemovalSelectionTable(props: {
+  scan: ScanResult | null;
+  clients: readonly string[];
+  selection: RemovalCell[];
+  disabled: boolean;
+  onSelection: (selection: RemovalCell[]) => void;
+}) {
+  const { scan, clients, selection, disabled, onSelection } = props;
+  const names = [...new Set([
+    ...(scan?.entries ?? []).filter((entry) => Object.values(entry.client_presence ?? {}).some((presence) => presence.transport !== "absent")).map((entry) => entry.name),
+    ...selection.map((cell) => cell.server),
+  ])].sort();
+  const selected = (server: string, client: string) => selection.find((cell) => cell.server === server && cell.client === client);
+  const toggle = (server: string, client: string) => {
+    if (disabled) return;
+    const current = selected(server, client);
+    if (current) {
+      onSelection(selection.filter((cell) => cell !== current));
+      return;
+    }
+    const token = removalToken(removalPresence(scan, server, client));
+    if (token) onSelection([...selection, { server, client, sourceToken: token }]);
+  };
+  const selectClient = (client: string) => {
+    if (disabled) return;
+    const additions = names.flatMap((server) => {
+      const token = removalToken(removalPresence(scan, server, client));
+      return token && !selected(server, client) ? [{ server, client, sourceToken: token }] : [];
+    });
+    onSelection([...selection, ...additions]);
+  };
+  return (
+    <div style="overflow-x:auto">
+      {names.length === 0 ? <p>No client entries available to remove.</p> : (
+        <table class="servers-matrix">
+          <caption>Choose entries to remove from each client</caption>
+          <thead>
+            <tr>
+              <th scope="col">Server</th>
+              {clients.map((client) => (
+                <th key={client} scope="col">
+                  {client}
+                  <button type="button" class="btn btn-sm" disabled={disabled || !names.some((server) => removalToken(removalPresence(scan, server, client)) !== null)} onClick={() => selectClient(client)}>Select all for removal from {client}</button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {names.map((server) => (
+              <tr key={server}>
+                <th scope="row">{server}</th>
+                {clients.map((client) => {
+                  const presence = removalPresence(scan, server, client);
+                  const token = removalToken(presence);
+                  const current = selected(server, client);
+                  const stale = current !== undefined && token !== current.sourceToken;
+                  const reason = stale ? "Source changed. Refresh, clear this selection, and select the current entry again." :
+                    token ? "Delete this entry from the client config." :
+                    presence && presence.transport !== "absent" ? removalRefusal(presence.removal?.reason) : "No entry in this client.";
+                  return (
+                    <td key={client}>
+                      <label>
+                        <input type="checkbox" aria-label={`Remove ${server} from ${client}`} checked={Boolean(current)} disabled={disabled || (!token && !current)} onChange={() => toggle(server, client)} />
+                        {current ? "Selected for removal" : token ? "Select to remove" : "Unavailable"}
+                      </label>
+                      <p class={stale ? "error" : ""}>{reason}</p>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {selection.length > 0 && <p>Selected: {selection.map((cell) => `${cell.server}/${cell.client}`).join(", ")}</p>}
+    </div>
+  );
+}
+
 // OtherMCPEntriesSection renders MCP server entries discovered in
 // client configs that have no corresponding manifest under
 // servers/<name>/manifest.yaml — e.g. operator's own legacy stdio
 // entries like `time-server` in `.cursor/mcp.json`. These rows are
-// read-only: migrate/demigrate are no-ops without a manifest.
+// shown separately because ON migration requires a manifest. Existing direct
+// entries can still be selected in the shared explicit removal panel.
 //
 // Bug-bash A3 (#11/#12) closure: pre-fix, these rows mixed into the
 // main matrix and rendered live checkboxes that did nothing on Apply,
@@ -1357,7 +1388,7 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
           // "in: <clients>" lists every client that ACTUALLY HAS an entry for
           // this server — hub-routed (via-hub), inherited hub-routed
           // (via-hub-inherited), or a direct non-hub entry. via-hub-inherited
-          // is an entry the operator can see (just not demigrate), so it
+          // is an entry the operator can see, so it
           // belongs in this presence list; dropping it would hide a real
           // binding the same way the Discovery default-case drop did.
           const clientsWithEntry = Object.entries(s.routing)
@@ -1387,11 +1418,13 @@ function ServerRowView(props: {
   scanErrors: Record<string, string>;
   status?: { state: string; port: number | null };
   outcomes?: Map<string, Outcome>;
-  // Per-server dirty direction map (client → "migrate" | "demigrate").
+  // Per-server pending operation map, including captured removal tokens.
   // Threaded so each CellView's visual `checked` can reflect a pending
   // dirty edit — necessary for the whole-column toggle to visually flip
   // cells it queues, not just the cell the operator clicked directly.
-  pending?: Map<string, Direction>;
+  pending?: Map<string, CellIntent>;
+  removalSources?: Record<string, ClientPresence>;
+  onUndo: (server: string, client: string) => void;
   applyGen: number;
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   // Whole-row enable-all/disable-all for this server, the row analog of the
@@ -1413,7 +1446,7 @@ function ServerRowView(props: {
   onSymlinkResolved: () => void;
   applying: boolean;
 }) {
-  const { server, clients, scanErrors, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, onSymlinkResolved, applying } = props;
+  const { server, clients, scanErrors, status, outcomes, pending, removalSources, onUndo, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, onSymlinkResolved, applying } = props;
   // Row-toggle affordance state: a cell is "checked" if a pending dirty
   // edit says so, else the scan baseline (via-hub). rowInteractive uses the
   // same cellInteractive gate as the per-cell checkbox + the column toggle,
@@ -1421,11 +1454,11 @@ function ServerRowView(props: {
   // hand. The toggle is only offered when the row has ≥1 toggleable cell.
   const rowEffectiveChecked = (client: string): boolean => {
     const p = pending?.get(client);
-    if (p) return p === "migrate";
-    return (server.routing[client] ?? "not-installed") === "via-hub";
+    if (p) return p.operation === "migrate";
+    return hubChecked(server.routing[client] ?? "not-installed");
   };
   const rowInteractive = clients.filter((c) =>
-    cellInteractive(server.routing[c] ?? "not-installed", applying),
+    cellInteractive(server.routing[c] ?? "not-installed", applying, removalToken(removalSources?.[c]) !== null, server.manifested),
   );
   const rowToggleable = rowInteractive.length > 0;
   const rowAllChecked = rowToggleable && rowInteractive.every(rowEffectiveChecked);
@@ -1491,7 +1524,9 @@ function ServerRowView(props: {
           client={client}
           scanError={scanErrors[client]}
           lastOutcome={outcomes?.get(client)}
-          pendingDirection={pending?.get(client)}
+          pendingIntent={pending?.get(client)}
+          removalSource={removalSources?.[client]}
+          onUndo={onUndo}
           // G1 hover-scope preview: this cell is inside the hovered group when
           // a column-header toggle for this client is hovered, OR the row
           // toggle for THIS server is hovered. CellView still gates the actual
@@ -1644,14 +1679,16 @@ function CellView(props: {
   scanError?: string;
   onSymlinkResolved?: () => void;
   lastOutcome?: Outcome;
-  // Pending dirty direction for THIS cell (from the parent's dirty map).
+  // Pending operation for THIS cell (from the parent's intent map).
   // When present it overrides the scan baseline for the visual checkbox:
-  // "migrate" → checked, "demigrate" → unchecked. This lets the
+  // "migrate" → checked, removal/undo → unchecked. This lets the
   // whole-column header toggle (which only mutates the parent dirty map)
   // visually flip cells it queues, not merely the one the operator
   // clicked directly. A direct per-cell click also flows through dirty,
   // so the same path keeps the visual honest in every case.
-  pendingDirection?: Direction;
+  pendingIntent?: CellIntent;
+  removalSource?: ClientPresence;
+  onUndo: (server: string, client: string) => void;
   // G1 hover-scope: true when a hovered column/row bulk toggle covers this
   // cell. The visual highlight is gated additionally on the cell being
   // interactive (see `disabled` below) so a hovered column/row only lights up
@@ -1661,20 +1698,12 @@ function CellView(props: {
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, client, scanError, onSymlinkResolved, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
+  const { server, client, scanError, onSymlinkResolved, lastOutcome, pendingIntent, removalSource, onUndo, inHoverScope, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
-  // "via-hub-inherited" IS hub-routed (rendered CHECKED) but read-only/disabled
-  // — the hub cannot demigrate an inherited (import / below-write-target) entry
-  // it never wrote, so the cell shows checked-but-disabled (see `disabled` +
-  // cellInteractive below), not a toggleable demigrate switch.
-  const initialChecked = routing === "via-hub" || routing === "via-hub-inherited";
-  // effectiveChecked folds a pending dirty edit over the scan baseline so a
-  // column toggle (or any out-of-band dirty mutation) is reflected visually.
-  const effectiveChecked = pendingDirection
-    ? pendingDirection === "migrate"
-    : initialChecked;
+  const initialChecked = hubChecked(routing);
+  const effectiveChecked = pendingIntent ? pendingIntent.operation === "migrate" : initialChecked;
   const [checked, setChecked] = useState(effectiveChecked);
   // Keep local `checked` in sync with effectiveChecked. It changes when the
   // authoritative scan moves the cell (direct→via-hub after a reload), OR
@@ -1684,40 +1713,11 @@ function CellView(props: {
   useEffect(() => {
     setChecked(effectiveChecked);
   }, [effectiveChecked]);
-  // Disable when cell is meaningless:
-  //  - "unsupported"   : this client cannot route this server via the hub
-  //  - "not-installed" : this client's config file does not exist on disk
-  // "via-hub", "direct", and "available" are all INTERACTIVE.
-  // "via-hub" → uncheck + Apply posts /api/demigrate (B1 memo §4 D5).
-  // "direct" / "available" → check + Apply posts /api/migrate.
-  //
-  // Bug-bash A2 (#13) closure: "available" is the cell state for "this
-  // client's config file exists but currently has no entry for this
-  // server". Pre-fix, that state was missing — clients with empty
-  // mcpServers were indistinguishable from "client absent" and the UI
-  // disabled the whole column, locking the operator out of re-adding
-  // servers via Apply. The new state-machine includes "available" as
-  // an enabled-but-unchecked cell.
-  const disabled =
-    applying ||
-    routing === "unsupported" ||
-    routing === "not-installed" ||
-    routing === "config-error" ||
-    routing === "config-error-symlink" ||
-    // "via-hub-inherited" is hub-routed but read-only: the hub never wrote the
-    // inherited (import / below-write-target) source and cannot demigrate it,
-    // so the cell renders checked-but-disabled (kiro disabled-cell precedent).
-    routing === "via-hub-inherited";
+  const disabled = !cellInteractive(routing, applying, removalToken(removalSource) !== null, server.manifested);
   let title: string | undefined;
-  if (routing === "via-hub") {
-    title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
-  } else if (routing === "via-hub-inherited") {
-    // The hub-loopback entry exists but its SOURCE is a layer the hub never
-    // wrote — chiefly the ~/.claude.json mcpServers import, or a config.json
-    // layer below ${client}'s write target. The hub cannot demigrate what it
-    // did not write, so this cell is read-only; the operator edits the source
-    // config to remove it (kiro disabled-cell precedent).
-    title = `Routed through the hub, but ${client} inherits this entry from a config layer mcphub never wrote (e.g. ~/.claude.json, or a lower config.json layer). mcphub cannot roll it back — edit that source config directly to remove it.`;
+  if (hubChecked(routing)) {
+    title = `Currently present and routed through the Hub. Uncheck and Apply to remove this entry from ${client}.`;
+    if (!removalToken(removalSource)) title += ` ${removalRefusal(removalSource?.removal?.reason)}`;
   } else if (routing === "direct") {
     title = `${client} has a direct (non-hub) entry for this server. Check and Apply to route it through the hub.`;
   } else if (routing === "available") {
@@ -1786,7 +1786,7 @@ function CellView(props: {
   // v0.5.x Task 4.3 — dual-badge chip when this cell ALSO has a
   // legacy_conflict entry for the same client (coexistence anomaly:
   // hub URL + direct-stdio both target this client). The checkbox
-  // visual stays so the existing migrate/demigrate UX is preserved;
+  // visual stays on the routing axis;
   // the chip is a non-interactive marker that surfaces the anomaly.
   const hasLegacyConflict = Boolean(server.legacyConflict?.[client]);
   return (
@@ -1813,7 +1813,7 @@ function CellView(props: {
         <ToggleSwitch
           checked={checked}
           disabled={disabled}
-          pending={pendingDirection !== undefined}
+          pending={pendingIntent !== undefined}
           title={cellTitle}
           onChange={(ev) => {
             const next = (ev.currentTarget as HTMLInputElement).checked;
@@ -1822,6 +1822,22 @@ function CellView(props: {
           }}
         />
       </label>
+      {routing === "direct" && <span class="text-muted">Direct entry present</span>}
+      {initialChecked && <span class="text-muted">Hub entry present</span>}
+      {pendingIntent && <span class="text-muted">{pendingIntent.operation === "undo" ? "Undo Hub migration pending" : pendingIntent.operation === "migrate" ? "Hub routing pending" : "Removal pending"}</span>}
+      {initialChecked && !removalToken(removalSource) && (
+        <span class="error" role="note">{removalRefusal(removalSource?.removal?.reason)}</span>
+      )}
+      {pendingIntent && (
+        <button type="button" class="btn btn-sm" disabled={applying}
+          aria-label={`Cancel pending change for ${server.name} in ${client}`}
+          onClick={() => onToggle(server.name, client, initialChecked, initialChecked)}>Cancel pending change</button>
+      )}
+      {routing === "via-hub" && (
+        <button type="button" class="btn btn-sm" disabled={applying}
+          aria-label={`Restore direct connection for ${server.name} in ${client}`}
+          onClick={() => onUndo(server.name, client)}>Undo Hub migration</button>
+      )}
       {hasLegacyConflict && (
         <span
           class="matrix-cell-legacy-chip"
@@ -1896,7 +1912,7 @@ function RegisterWorkspacePanel(props: {
             type="text"
             class="field-ctl"
             data-testid="lsp-register-workspace-path"
-            placeholder="Workspace folder, e.g. D:\\dev\\my-project"
+            placeholder="Workspace folder path"
             value={pathValue}
             disabled={busy}
             onInput={(ev) => onPathInput((ev.currentTarget as HTMLInputElement).value)}
