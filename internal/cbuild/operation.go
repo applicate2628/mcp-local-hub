@@ -1,10 +1,6 @@
 package cbuild
 
-import (
-	"context"
-	"runtime"
-	"strings"
-)
+import "context"
 
 // Project-wide rather than preset-wide: distinct presets may share binaryDir.
 // Entries count both holders and waiters and disappear after the last user.
@@ -18,9 +14,7 @@ func (b *builder) lockProjectOperation(ctx context.Context, dir string) (func(),
 	if err != nil {
 		return nil, err
 	}
-	if runtime.GOOS == "windows" {
-		key = strings.ToLower(key)
-	}
+	key = projectPathKey(key)
 	b.operationsMu.Lock()
 	if b.operations == nil {
 		b.operations = make(map[string]*projectOperation)

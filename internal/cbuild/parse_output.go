@@ -300,6 +300,15 @@ func canonicalExistingDir(path string) (string, error) {
 	return filepath.Clean(real), nil
 }
 
+// projectPathKey is used only after filesystem canonicalization. It folds
+// Windows volume spelling (including UNC server/share) without changing I/O paths.
+func projectPathKey(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
+
 func sameCanonicalPath(a, b string) bool {
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(a, b)
@@ -353,7 +362,7 @@ func (b *builder) settleConfiguredCache(sourceDir, preset, output string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	key := configuredCacheKey{sourceDir: source, preset: preset}
+	key := configuredCacheKey{sourceDir: projectPathKey(source), preset: preset}
 	b.configuredMu.Lock()
 	delete(b.configured, key)
 	b.configuredMu.Unlock()
@@ -379,7 +388,7 @@ func (b *builder) configuredCacheDir(ctx context.Context, sourceDir, preset stri
 	if err != nil {
 		return "", err
 	}
-	key := configuredCacheKey{sourceDir: source, preset: preset}
+	key := configuredCacheKey{sourceDir: projectPathKey(source), preset: preset}
 	b.configuredMu.Lock()
 	cacheDir := b.configured[key]
 	b.configuredMu.Unlock()
