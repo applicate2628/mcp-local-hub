@@ -864,6 +864,10 @@ func knownState(v State) bool {
 }
 
 func (s *Server) sweepExpiredRuns() {
+	// Startup cleanup is valid only after acquiring exclusive store ownership.
+	if s.lease == nil {
+		return
+	}
 	runsRoot := filepath.Join(s.root, "runs")
 	entries, err := os.ReadDir(runsRoot)
 	if err != nil {
@@ -876,7 +880,16 @@ func (s *Server) sweepExpiredRuns() {
 		}
 		workspace := filepath.Join(runsRoot, entry.Name())
 		r, found, err := loadRunRecord(workspace)
-		if err != nil || !found || !terminal(r.State) {
+		if err != nil {
+			continue
+		}
+		if !found {
+			if expiredRecordlessWorkspace(workspace, entry.Name(), cutoff) {
+				_ = os.RemoveAll(workspace)
+			}
+			continue
+		}
+		if !terminal(r.State) {
 			continue
 		}
 		if marker, err := os.Lstat(filepath.Join(workspace, activeMarkerLeaf)); err == nil && marker.ModTime().After(cutoff) {
@@ -888,6 +901,35 @@ func (s *Server) sweepExpiredRuns() {
 		}
 		_ = os.RemoveAll(workspace)
 	}
+}
+
+// MkdirTemp(base, "run-") owns only this numeric namespace. Inspect metadata,
+// not contents, and preserve anything recent, irregular or unreadable. A recent
+// copied file/control temporary/active marker must protect an otherwise old root.
+func expiredRecordlessWorkspace(workspace, name string, cutoff time.Time) bool {
+	suffix := strings.TrimPrefix(name, "run-")
+	if suffix == name || suffix == "" {
+		return false
+	}
+	for _, ch := range suffix {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	err := filepath.WalkDir(workspace, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if (!info.IsDir() && !info.Mode().IsRegular()) || !info.ModTime().Before(cutoff) {
+			return errors.New("recordless workspace is not safely expired")
+		}
+		return nil
+	})
+	return err == nil
 }
 
 func (s *Server) releaseLeaseWhenWorkersSettled() error {

@@ -92,7 +92,7 @@ type receiptPermissionDecision struct {
 	Decision string `json:"decision"`
 }
 
-func parseProviderReceipt(record []byte, requestedEffort string, capabilityChoice CapabilityChoice) (providerReceipt, error) {
+func parseProviderReceipt(record []byte, requestedEffort, requestedRole string, capabilityChoice CapabilityChoice) (providerReceipt, error) {
 	if bytes.ContainsRune(record, '\r') || len(record) == 0 || record[len(record)-1] != '\n' || bytes.Count(record, []byte{'\n'}) != 1 {
 		return providerReceipt{}, errReceiptInvalid
 	}
@@ -117,7 +117,7 @@ func parseProviderReceipt(record []byte, requestedEffort string, capabilityChoic
 		envelope.Authorizing == nil || *envelope.Authorizing || envelope.ClosesRunIDs == nil || len(envelope.ClosesRunIDs) != 0 ||
 		envelope.IndependentVerificationRequired == nil || !*envelope.IndependentVerificationRequired ||
 		envelope.TerminalClass != "external-nonauthorizing" || envelope.ActualExecutionPath != "direct-external-cli" ||
-		envelope.AssignedRole == "" || envelope.ExecutionRole == "" {
+		envelope.AssignedRole != requestedRole || !validExecutionRole(requestedRole, envelope.ExecutionRole) {
 		return providerReceipt{}, errReceiptInvalid
 	}
 	var flags []string
@@ -245,4 +245,29 @@ func validReceiptName(value string) bool {
 
 func receiptInvalid(cause error) error {
 	return fmt.Errorf("%w: %v", errReceiptInvalid, cause)
+}
+
+// Role-to-lane binding follows Orchestrarium's external-role-taxonomy.v1.json
+// at 8964852bb0c0a55d2fe2a19fe8475b3b55ca5bd3. This adapter also accepts
+// explicit external-reviewer/worker assignments used by the legacy direct
+// wrapper contract, but never promotes them to another execution lane.
+func validExecutionRole(assigned, execution string) bool {
+	switch assigned {
+	case "consultant":
+		return execution == "consultant"
+	case "external-reviewer", "qa-engineer", "architecture-reviewer",
+		"security-reviewer", "performance-reviewer", "accessibility-reviewer",
+		"ux-reviewer", "ui-test-engineer":
+		return execution == "external-reviewer"
+	case "external-worker", "explorer", "product-analyst", "analyst", "architect",
+		"ux-designer", "planner", "algorithm-scientist", "computational-scientist",
+		"security-engineer", "performance-engineer", "reliability-engineer",
+		"backend-engineer", "frontend-engineer", "qt-ui-engineer", "model-view-engineer",
+		"data-engineer", "platform-engineer", "toolchain-engineer",
+		"scientific-software-engineer", "geometry-engineer", "graphics-engineer",
+		"visualization-engineer":
+		return execution == "external-worker"
+	default:
+		return false
+	}
 }

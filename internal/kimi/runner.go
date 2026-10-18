@@ -159,7 +159,7 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 	}
 	record, readErr := readReceiptFile(receiptPath)
 	if readErr == nil {
-		receipt, parseErr := parseProviderReceipt(record, request.Effort, request.CapabilityChoice)
+		receipt, parseErr := parseProviderReceipt(record, request.Effort, request.Role, request.CapabilityChoice)
 		if parseErr != nil {
 			return RunOutput{}, newFailure("E_KIMI_RECEIPT_INVALID", parseErr)
 		}

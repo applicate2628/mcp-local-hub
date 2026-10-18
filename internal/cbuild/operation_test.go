@@ -45,9 +45,10 @@ func TestConfigureAndCleanWaitForProjectOperation(t *testing.T) {
 	}
 	fake := filepath.Join(t.TempDir(), exeName("cmake"))
 	copyExe(t, self, fake)
+	copyExe(t, self, filepath.Join(filepath.Dir(fake), exeName("ctest")))
 	t.Setenv("CMAKE_BIN", fake)
 	t.Setenv("MCP_CBUILD_FAKE_ARGV", "1")
-	for _, operation := range []string{"configure", "clean", "purge", "workflow"} {
+	for _, operation := range []string{"configure", "build", "test", "clean", "purge", "workflow"} {
 		t.Run(operation, func(t *testing.T) {
 			source := t.TempDir()
 			dev := writeCleanCache(t, source, "dev")
@@ -66,6 +67,10 @@ func TestConfigureAndCleanWaitForProjectOperation(t *testing.T) {
 				tool = b.cmakeConfigure()
 			case "workflow":
 				tool = b.cmakeWorkflow()
+			case "build":
+				tool = b.cmakeBuild()
+			case "test":
+				tool = b.cmakeTest()
 			}
 			raw, err := json.Marshal(map[string]any{
 				"working_dir": source, "preset": "dev", "purge_build_dir": operation == "purge",
@@ -95,6 +100,7 @@ func TestConfigureInvalidatesBindingsBeforeUnsettledResult(t *testing.T) {
 	}
 	fake := filepath.Join(t.TempDir(), exeName("cmake"))
 	copyExe(t, self, fake)
+	copyExe(t, self, filepath.Join(filepath.Dir(fake), exeName("ctest")))
 	t.Setenv("CMAKE_BIN", fake)
 	t.Setenv("MCP_CBUILD_FAKE_ARGV", "1")
 	source := t.TempDir()

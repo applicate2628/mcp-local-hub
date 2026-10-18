@@ -36,7 +36,7 @@ func TestProviderReceiptRequiresMatchingPrimaryOutcome(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, err := parseProviderReceipt([]byte(providerResultPrefix+string(raw)+"\n"), "high", CapabilityChoice{Kind: "none"})
+				got, err := parseProviderReceipt([]byte(providerResultPrefix+string(raw)+"\n"), "high", "external-reviewer", CapabilityChoice{Kind: "none"})
 				if field != "matching" {
 					if err == nil {
 						t.Fatal("contradictory primary outcome accepted")

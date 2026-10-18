@@ -126,6 +126,13 @@ func TestRunWithDependenciesReturnsReceiptAndExactArgv(t *testing.T) {
 	if string(gotNoneCapabilities) != string(noneCapabilityJSON) {
 		t.Fatalf("none capabilities = %s", gotNoneCapabilities)
 	}
+
+	// A receipt from the old role must not satisfy a different caller request.
+	req.Role = "qa-engineer"
+	got, err = runWithDependencies(context.Background(), req, deps)
+	if failureID(err) != "E_KIMI_RECEIPT_INVALID" || got.Receipt.Payload != "" {
+		t.Fatalf("mismatched role accepted by runner: output=%+v err=%v", got, err)
+	}
 }
 
 func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {

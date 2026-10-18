@@ -453,6 +453,21 @@ func (b *builder) cmakeBuild() mcp.Tool {
 				argv = append(argv, "--verbose")
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultBuildTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
@@ -519,6 +534,21 @@ func (b *builder) cmakeTest() mcp.Tool {
 				argv = append(argv, "--output-junit", junitPath)
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultTestTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, ctestBin, argv)
 			if err != nil {
 				return nil, err
