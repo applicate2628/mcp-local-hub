@@ -17,6 +17,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("MCP_CBUILD_FAKE_CTEST") != "" {
+		fmt.Println("1/2 Test #1: first .................. Passed 0.01 sec")
+		if os.Getenv("MCP_CBUILD_FAKE_CTEST") == "large" {
+			fmt.Println(strings.Repeat("x", maxCapturedOutput+1))
+		}
+		fmt.Println("2/2 Test #2: last ................... Passed 0.01 sec")
+		fmt.Println("100% tests passed, 0 tests failed out of 2")
+		os.Exit(0)
+	}
 	if os.Getenv("MCP_CBUILD_PROTOCOL_FAKE_CMAKE") == "1" {
 		for _, arg := range os.Args[1:] {
 			switch arg {
@@ -241,7 +250,12 @@ func TestPresetArgvWiring(t *testing.T) {
 			t.Errorf("%s argv = %q, want exactly --preset=-weird", tc.tool, tail)
 		}
 	}
-	tail := rawTailOf(t, toolNamed(t, "cmake_clean"), map[string]any{"preset": "-weird", "working_dir": dir})
+	// Clean requires a preset-specific settlement, not discovery of any cache.
+	b := &builder{configured: make(map[configuredCacheKey]string)}
+	if _, err := b.settleConfiguredCache(dir, "-weird", "-- Build files have been written to: "+buildDir); err != nil {
+		t.Fatal(err)
+	}
+	tail := rawTailOf(t, b.cmakeClean(), map[string]any{"preset": "-weird", "working_dir": dir})
 	canonicalBuildDir, err := canonicalExistingDir(buildDir)
 	if err != nil {
 		t.Fatalf("canonical build directory: %v", err)

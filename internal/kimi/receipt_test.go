@@ -58,7 +58,7 @@ func TestParseProviderReceiptPreservesOwnerPayloadAndEffort(t *testing.T) {
 	for _, effort := range []string{"high", "max"} {
 		t.Run(effort, func(t *testing.T) {
 			record := ownerReceiptRecord(t, effort, "synthetic result")
-			got, err := parseProviderReceipt([]byte(record), effort, CapabilityChoice{Kind: "none"})
+			got, err := parseProviderReceipt([]byte(record), effort, "external-reviewer", CapabilityChoice{Kind: "none"})
 			if err != nil {
 				t.Fatalf("parseProviderReceipt: %v", err)
 			}
@@ -91,7 +91,7 @@ func TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance(t *testing.T
 	}
 	for name, record := range tests {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseProviderReceipt([]byte(record), "high", CapabilityChoice{Kind: "none"}); err == nil {
+			if _, err := parseProviderReceipt([]byte(record), "high", "external-reviewer", CapabilityChoice{Kind: "none"}); err == nil {
 				t.Fatal("invalid receipt accepted")
 			}
 		})
@@ -100,12 +100,12 @@ func TestParseProviderReceiptRejectsMalformedOrMismatchedProvenance(t *testing.T
 
 func TestProviderReceiptIsErrorUsesStructuralOutcomeNotResultText(t *testing.T) {
 	record := ownerReceiptRecord(t, "high", "text that contains the word failure but is legitimate")
-	got, err := parseProviderReceipt([]byte(record), "high", CapabilityChoice{Kind: "none"})
+	got, err := parseProviderReceipt([]byte(record), "high", "external-reviewer", CapabilityChoice{Kind: "none"})
 	if err != nil || got.IsError() {
 		t.Fatalf("legitimate result text changed success: got=%+v err=%v", got, err)
 	}
 	record = strings.Replace(record, `"cleanupStatus":"complete"`, `"cleanupStatus":"incomplete"`, 1)
-	got, err = parseProviderReceipt([]byte(record), "high", CapabilityChoice{Kind: "none"})
+	got, err = parseProviderReceipt([]byte(record), "high", "external-reviewer", CapabilityChoice{Kind: "none"})
 	if err != nil || !got.IsError() {
 		t.Fatalf("incomplete cleanup did not set tool error: got=%+v err=%v", got, err)
 	}
