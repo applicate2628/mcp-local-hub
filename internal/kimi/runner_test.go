@@ -162,25 +162,35 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 
 	t.Run("timeout", func(t *testing.T) {
 		deps := base
-		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+		deps.runContained = func(ctx context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			// A valid successful receipt must not mask process termination.
+			path := argumentValue(cmd.Args, "--terminal-receipt")
+			if err := os.WriteFile(path, []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			<-ctx.Done()
 			return ctx.Err()
 		}
-		_, err := runWithDependencies(context.Background(), req, deps)
-		if failureID(err) != "E_KIMI_TIMEOUT" {
+		out, err := runWithDependencies(context.Background(), req, deps)
+		if failureID(err) != "E_KIMI_TIMEOUT" || out.Receipt.Payload != "" {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
 		deps := base
-		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+		deps.runContained = func(ctx context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			// A valid successful receipt must not mask process termination.
+			path := argumentValue(cmd.Args, "--terminal-receipt")
+			if err := os.WriteFile(path, []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			<-ctx.Done()
 			return ctx.Err()
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := runWithDependencies(ctx, req, deps)
-		if failureID(err) != "E_KIMI_CANCELLED" {
+		out, err := runWithDependencies(ctx, req, deps)
+		if failureID(err) != "E_KIMI_CANCELLED" || out.Receipt.Payload != "" {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -326,5 +336,28 @@ func TestKimiFakeWrapperProcess(t *testing.T) {
 	}
 	if err := os.WriteFile(receipt, []byte(ownerReceiptRecord(t, effort, "synthetic result")), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadReceiptFileSizeBound(t *testing.T) {
+	for _, size := range []int{0, 64, maxReceiptBytes, maxReceiptBytes + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "receipt")
+			want := bytes.Repeat([]byte("x"), size)
+			if err := os.WriteFile(path, want, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := readReceiptFile(path)
+			if size > maxReceiptBytes {
+				if !errors.Is(err, errReceiptInvalid) || got != nil {
+					t.Fatalf("oversize receipt: len=%d err=%v", len(got), err)
+				}
+			} else if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("bounded receipt: len=%d err=%v", len(got), err)
+			}
+		})
+	}
+	if _, err := readReceiptFile(t.TempDir()); !errors.Is(err, errReceiptInvalid) {
+		t.Fatalf("directory receipt: %v", err)
 	}
 }
