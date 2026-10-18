@@ -30,6 +30,10 @@ type manifestGetter interface {
 	ManifestGetWithHash(name string) (yaml string, hash string, err error)
 }
 
+type manifestViewer interface {
+	ManifestGet(name string) (string, error)
+}
+
 type manifestPresence interface {
 	ManifestExists(name string) (bool, error)
 }
@@ -125,6 +129,10 @@ type manifestValidateResponse struct {
 type manifestGetResponse struct {
 	YAML string `json:"yaml"`
 	Hash string `json:"hash"`
+}
+
+type manifestViewResponse struct {
+	YAML string `json:"yaml"`
 }
 
 type manifestEditRequest struct {
@@ -320,6 +328,26 @@ func registerManifestRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifestGetResponse{YAML: yaml, Hash: hash})
+	}))
+	s.mux.HandleFunc("/api/manifest/view", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" {
+			writeAPIError(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		yaml, err := s.manifestViewer.ManifestGet(name)
+		if err != nil {
+			log.Printf("/api/manifest/view name=%q: %v", name, err)
+			writeAPIError(w, errors.New("internal error reading manifest"), http.StatusInternalServerError, "MANIFEST_VIEW_FAILED")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifestViewResponse{YAML: yaml})
 	}))
 	s.mux.HandleFunc("/api/manifest/edit", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

@@ -3,12 +3,12 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/pr
 import { ServerRowDrawer } from "./ServerRowDrawer";
 import type { DaemonStatus } from "../types";
 
-// getManifest is mocked so the drawer's manifest-preview pane resolves
-// deterministically without a real /api/manifest/get round-trip.
+// getManifestView is mocked so the drawer's manifest-preview pane resolves
+// deterministically without a real /api/manifest/view round-trip.
 vi.mock("../api", () => ({
-  getManifest: vi.fn(),
+  getManifestView: vi.fn(),
 }));
-import { getManifest } from "../api";
+import { getManifestView } from "../api";
 
 // flowbite's Drawer touches window.matchMedia / focus-trap behavior that
 // happy-dom only partially provides. Mock it to a no-op constructor so the
@@ -41,9 +41,8 @@ const RUNNING_ROW: DaemonStatus = {
 
 describe("ServerRowDrawer (Flowbite Drawer)", () => {
   beforeEach(() => {
-    (getManifest as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (getManifestView as ReturnType<typeof vi.fn>).mockResolvedValue({
       yaml: "name: memory\nport: 9123\n",
-      hash: "abc",
     });
   });
   afterEach(() => {
@@ -87,14 +86,51 @@ describe("ServerRowDrawer (Flowbite Drawer)", () => {
     render(<ServerRowDrawer serverName="memory" daemons={[RUNNING_ROW]} onClose={() => {}} />);
     const pre = await screen.findByTestId("server-row-drawer-manifest-yaml");
     expect(pre.textContent).toContain("name: memory");
-    expect(getManifest).toHaveBeenCalledWith("memory");
+    expect(getManifestView).toHaveBeenCalledWith("memory");
   });
 
   it("surfaces a manifest load error in the preview pane", async () => {
-    (getManifest as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("not found"));
+    (getManifestView as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("not found"));
     render(<ServerRowDrawer serverName="ghost" daemons={[]} onClose={() => {}} />);
     const err = await screen.findByTestId("server-row-drawer-manifest-err");
     expect(err.textContent).toContain("not found");
+  });
+
+  it.each(["success", "error"] as const)("ignores a late preview %s after switching rows", async (outcome) => {
+    let resolveOld!: (value: { yaml: string }) => void;
+    let rejectOld!: (reason: Error) => void;
+    const oldRead = new Promise<{ yaml: string }>((resolve, reject) => {
+      resolveOld = resolve;
+      rejectOld = reject;
+    });
+    vi.mocked(getManifestView).mockReturnValueOnce(oldRead);
+    const { rerender } = render(<ServerRowDrawer serverName="old" daemons={[]} onClose={() => {}} />);
+    expect(screen.getByText("Loading manifest…")).not.toBeNull();
+    rerender(<ServerRowDrawer serverName="memory" daemons={[]} onClose={() => {}} />);
+    await screen.findByTestId("server-row-drawer-manifest-yaml");
+    if (outcome === "success") resolveOld({ yaml: "name: old\n" });
+    else rejectOld(new Error("old read failed"));
+    await oldRead.catch(() => {});
+    await Promise.resolve();
+    await waitFor(() => {
+      expect(screen.getByTestId("server-row-drawer-manifest-yaml").textContent).toContain("name: memory");
+      expect(screen.queryByTestId("server-row-drawer-manifest-err")).toBeNull();
+    });
+  });
+
+  it("hides the drawer when unmounted during a pending preview", async () => {
+    let resolveRead!: (value: { yaml: string }) => void;
+    const pending = new Promise<{ yaml: string }>((resolve) => { resolveRead = resolve; });
+    vi.mocked(getManifestView).mockReturnValueOnce(pending);
+    const onClose = vi.fn();
+    const { unmount } = render(<ServerRowDrawer serverName="pending" daemons={[]} onClose={onClose} />);
+    hideSpy.mockClear();
+    unmount();
+    expect(hideSpy).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    resolveRead({ yaml: "name: pending\n" });
+    await pending;
+    expect(screen.queryByTestId("server-row-drawer")).toBeNull();
   });
 
   it("Restart posts to /api/servers/<name>/restart and shows a success message", async () => {

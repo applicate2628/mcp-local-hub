@@ -332,7 +332,7 @@ func TestSingleHealthProbe_SessionCleanupFailureSettlesAllPostInitializeReturns(
 	}{
 		{
 			name: "transport", list: func() (*http.Response, error) { return nil, errors.New("primary transport sentinel") }, cleanup: cleanupResponse,
-			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureReadinessHostUnavailable, Detail: "MCP_READINESS_HOST_UNAVAILABLE at tools_list"},
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureReadinessHostUnavailable, Detail: "MCP_READINESS_HOST_UNAVAILABLE at tools_list", Retryable: true},
 			wantSecondary: true, forbiddenRaw: []string{"primary transport sentinel"},
 		},
 		{

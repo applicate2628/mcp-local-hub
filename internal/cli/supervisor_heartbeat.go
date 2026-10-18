@@ -67,6 +67,18 @@ func runSupervisorHeartbeat(
 	startedAt time.Time,
 	interval time.Duration,
 ) {
+	runSupervisorHeartbeatWithHook(done, events, tracker, sinkPath, startedAt, interval, nil)
+}
+
+func runSupervisorHeartbeatWithHook(
+	done <-chan struct{},
+	events *api.SupervisorEventLog,
+	tracker *DaemonRuntimeTracker,
+	sinkPath string,
+	startedAt time.Time,
+	interval time.Duration,
+	beforeEmit func(),
+) {
 	if events == nil || interval <= 0 {
 		return
 	}
@@ -122,6 +134,9 @@ func runSupervisorHeartbeat(
 		// momentary contention and merely delays a beat. A permanently
 		// wedged event-log flock would silence every other row too, so it is
 		// not a failure mode the heartbeat alone should trade accuracy for.
+		if beforeEmit != nil {
+			beforeEmit()
+		}
 		emitStart := time.Now()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityInfo,

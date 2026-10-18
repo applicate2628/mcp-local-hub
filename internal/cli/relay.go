@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
-	"mcp-local-hub/servers"
 
 	"github.com/spf13/cobra"
 )
@@ -82,18 +79,13 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 	if err := api.CheckManifestName(server); err != nil {
 		return "", err
 	}
-	// Read the manifest. Embed FS first (production: manifests travel
-	// with the binary), with disk fallback so dev/custom manifests
-	// stay usable when relay is invoked from a project cwd.
-	data, err := servers.Manifests.ReadFile(server + "/manifest.yaml")
+	// Use the shared embed-first reader and its canonical disk fallback so the
+	// invoking executable context cannot select a different manifest root.
+	data, err := api.NewAPI().ManifestGet(server)
 	if err != nil {
-		path := filepath.Join(relayManifestDir(), server, "manifest.yaml")
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("load manifest %s: %w", server, err)
-		}
+		return "", fmt.Errorf("load manifest %s: %w", server, err)
 	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
+	m, err := config.ParseManifest(bytes.NewReader([]byte(data)))
 	if err != nil {
 		return "", fmt.Errorf("parse manifest %s: %w", server, err)
 	}
@@ -110,24 +102,4 @@ func resolveRelayURL(server, daemonName, explicitURL string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no daemon %q in manifest %s", daemonName, server)
-}
-
-// relayManifestDir returns the directory where disk-only manifests
-// live. Searches the binary's exe-dir/servers first, then ../servers
-// for dev checkouts where the binary sits in cmd/mcphub/.
-func relayManifestDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
-	}
-	exeDir := filepath.Dir(exe)
-	sibling := filepath.Join(exeDir, "servers")
-	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
-		return sibling
-	}
-	parent := filepath.Join(exeDir, "..", "servers")
-	if st, err := os.Stat(parent); err == nil && st.IsDir() {
-		return parent
-	}
-	return sibling
 }

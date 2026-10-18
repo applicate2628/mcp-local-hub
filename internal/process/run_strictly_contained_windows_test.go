@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +17,232 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func TestRunStrictlyContained_WindowsPositiveSettledExit(t *testing.T) {
+	if mode := os.Getenv("MCPHUB_STRICT_SETTLED_HELPER"); mode != "" {
+		switch mode {
+		case "zero":
+			return
+		case "nonzero":
+			os.Exit(7)
+		case "timeout":
+			time.Sleep(time.Hour)
+		}
+		os.Exit(90)
+	}
+	for _, tc := range []struct {
+		name, mode string
+		exitCode   int
+		timedOut   bool
+	}{
+		{name: "clean_zero", mode: "zero", exitCode: 0},
+		{name: "clean_nonzero", mode: "nonzero", exitCode: 7},
+		{name: "settled_timeout", mode: "timeout", timedOut: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			if tc.timedOut {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 80*time.Millisecond)
+			}
+			defer cancel()
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsPositiveSettledExit$")
+			cmd.Env = append(os.Environ(), "MCPHUB_STRICT_SETTLED_HELPER="+tc.mode)
+			result, err := RunStrictlyContained(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024})
+			if tc.mode == "zero" && err != nil {
+				t.Fatalf("clean zero: %v", err)
+			}
+			var strict *StrictRunError
+			if tc.mode == "nonzero" && (!errors.As(err, &strict) || strict.Kind != StrictRunExecutionFailed) {
+				t.Fatalf("clean nonzero: %v", err)
+			}
+			if tc.timedOut && (!errors.As(err, &strict) || strict.Kind != StrictRunTimeout) {
+				t.Fatalf("timeout: %v", err)
+			}
+			field := reflect.ValueOf(result).FieldByName("SettledExit")
+			if tc.timedOut && field.IsValid() && field.IsNil() {
+				var proof *JobTerminationProofError
+				if !errors.As(err, &proof) || proof.Stage != "member_wait" || !errors.Is(err, ErrCleanupTimeout) {
+					t.Fatalf("negative timeout lacks typed proof-window expiry: %v", err)
+				}
+				if cmd.Process == nil || cmd.ProcessState == nil || !cmd.ProcessState.Exited() || IsPidAlive(cmd.Process.Pid) {
+					t.Fatalf("negative timeout left owned child: process=%v state=%v", cmd.Process, cmd.ProcessState)
+				}
+				return
+			}
+			if !field.IsValid() || field.IsNil() {
+				t.Fatalf("missing positive settled-exit fact: run=%v result=%+v", err, result)
+			}
+			fact := field.Elem()
+			if fact.FieldByName("TimedOut").Bool() != tc.timedOut || (!tc.timedOut && int(fact.FieldByName("ExitCode").Int()) != tc.exitCode) {
+				t.Fatalf("settled exit mismatch: %+v", result)
+			}
+		})
+	}
+}
+
+func TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow(t *testing.T) {
+	if os.Getenv("MCPHUB_STRICT_PROOF_WINDOW_HELPER") == "1" {
+		time.Sleep(time.Hour)
+		return
+	}
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+		want  bool
+	}{
+		{name: "fast_original_handle_signal", delay: 10 * time.Millisecond, want: true},
+		{name: "expired_before_observation", delay: 100 * time.Millisecond, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$")
+			cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROOF_WINDOW_HELPER=1")
+			firstWait := time.Time{}
+			realSignaled := false
+			job.terminationOps = &jobTerminationOps{wait: func(h windows.Handle) (uint32, error) {
+				if firstWait.IsZero() {
+					firstWait = time.Now()
+				}
+				if time.Since(firstWait) < tc.delay {
+					return uint32(windows.WAIT_TIMEOUT), nil
+				}
+				status, waitErr := windows.WaitForSingleObject(h, 0)
+				if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+					realSignaled = true
+				}
+				return status, waitErr
+			}}
+			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+			defer cancel()
+			result, runErr := runStrictlyContainedWithJob(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024}, job)
+			var strict *StrictRunError
+			if !errors.As(runErr, &strict) || strict.Kind != StrictRunTimeout || !errors.Is(runErr, context.DeadlineExceeded) {
+				t.Fatalf("timeout contract=%v", runErr)
+			}
+			if (result.SettledExit != nil) != tc.want {
+				t.Fatalf("positive fact=%+v want=%v run=%v", result.SettledExit, tc.want, runErr)
+			}
+			if tc.want && (!realSignaled || !result.SettledExit.TimedOut) {
+				t.Fatalf("fast proof lacked real signaled original handle: %+v", result)
+			}
+			if !tc.want {
+				var proof *JobTerminationProofError
+				if !errors.As(runErr, &proof) || proof.Stage != "member_wait" || !errors.Is(runErr, ErrCleanupTimeout) {
+					t.Fatalf("expired proof lost typed cause: %v", runErr)
+				}
+			}
+			if job.Handle() != 0 || cmd.Process == nil || cmd.ProcessState == nil || !cmd.ProcessState.Exited() || IsPidAlive(cmd.Process.Pid) {
+				t.Fatalf("owned child/Job not settled: job=%v process=%v state=%v", job.Handle(), cmd.Process, cmd.ProcessState)
+			}
+		})
+	}
+}
+
+func TestRunStrictlyContained_WindowsNilTimeoutKillCallbackCannotProveJob(t *testing.T) {
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$")
+	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROOF_WINDOW_HELPER=1")
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	calls := 0
+	matched := false
+	result, runErr := runStrictlyContainedWithJob(ctx, StrictRunInvocation{
+		Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024,
+		timeoutKill: func(got *Job, started *exec.Cmd) error { calls++; matched = got == job && started == cmd; return nil },
+	}, job)
+	var strict *StrictRunError
+	if calls != 1 || !matched || !errors.As(runErr, &strict) || strict.Kind != StrictRunTimeout || !errors.Is(runErr, context.DeadlineExceeded) {
+		t.Fatalf("callback/timeout contract calls=%d matched=%v run=%v", calls, matched, runErr)
+	}
+	if result.SettledExit != nil {
+		t.Fatalf("nil callback falsely certified Job termination: %+v", result.SettledExit)
+	}
+	if job.Handle() != 0 || cmd.Process == nil || cmd.ProcessState == nil || !cmd.ProcessState.Exited() || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("Job.Close failed to reap test child: handle=%v process=%v state=%v", job.Handle(), cmd.Process, cmd.ProcessState)
+	}
+}
+
+func TestRunStrictlyContained_WindowsDrainFaultHasNoSettlement(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsPositiveSettledExit$")
+	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_SETTLED_HELPER=zero")
+	pipeCall := 0
+	var stdoutParent *os.File
+	result, err := RunStrictlyContained(context.Background(), StrictRunInvocation{
+		Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024,
+		pipe: func() (*os.File, *os.File, error) {
+			pipeCall++
+			left, right, pipeErr := os.Pipe()
+			if pipeCall == 2 {
+				stdoutParent = left
+			}
+			return left, right, pipeErr
+		},
+		started: func(_ *Job, _ int) {
+			if stdoutParent != nil {
+				_ = stdoutParent.Close()
+			}
+		},
+	})
+	var strict *StrictRunError
+	if !errors.As(err, &strict) || strict.Kind != StrictRunExecutionFailed || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("drain fault=%v, want typed closed-read failure", err)
+	}
+	if field := reflect.ValueOf(result).FieldByName("SettledExit"); field.IsValid() && !field.IsNil() {
+		t.Fatalf("drain fault admitted settlement: %+v", result)
+	}
+	if cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("child not joined after drain fault: %+v", cmd.Process)
+	}
+}
+
+func TestRunStrictlyContained_WindowsTimeoutCloseFaultHasNoSettlement(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsPositiveSettledExit$")
+	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_SETTLED_HELPER=timeout")
+	fault := errors.New("inside runner timeout-close fault")
+	result, err := RunStrictlyContainedWithJobCloseFaultForTest(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024}, fault)
+	var strict *StrictRunError
+	if !errors.As(err, &strict) || strict.Kind != StrictRunTimeout || !errors.Is(err, fault) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout/close fault not joined: %v", err)
+	}
+	if result.SettledExit != nil || cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("uncertain timeout admitted settlement or left child: result=%+v process=%v", result, cmd.Process)
+	}
+}
+
+func TestRunStrictlyContained_WindowsJobCloseFaultAfterMainExit(t *testing.T) {
+	if os.Getenv("MCPHUB_STRICT_WINDOWS_CLOSE_FAULT_HELPER") == "1" {
+		_, _ = os.Stdout.Write([]byte("finished"))
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsJobCloseFaultAfterMainExit$")
+	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_WINDOWS_CLOSE_FAULT_HELPER=1")
+	fault := errors.New("test-only close sentinel")
+	result, err := RunStrictlyContainedWithJobCloseFaultForTest(context.Background(), StrictRunInvocation{
+		Command: cmd, InputLimit: 1, StdoutLimit: 32, StderrLimit: 32,
+	}, fault)
+	var strict *StrictRunError
+	if !errors.As(err, &strict) || strict.Kind != StrictRunExecutionFailed || !errors.Is(err, fault) {
+		t.Fatalf("runner close fault=%v, want typed execution failure with sentinel", err)
+	}
+	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() || cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("main child not joined after close fault: state=%v process=%v", cmd.ProcessState, cmd.Process)
+	}
+	if !bytes.HasPrefix(result.Stdout.Prefix, []byte("finished")) || result.Stdout.Bytes != len(result.Stdout.Prefix) || result.Stdout.Truncated || result.Stderr.Bytes != 0 {
+		t.Fatalf("drains not joined after close fault: stdout=%+v stderr=%+v", result.Stdout, result.Stderr)
+	}
+	if field := reflect.ValueOf(result).FieldByName("SettledExit"); field.IsValid() && !field.IsNil() {
+		t.Fatalf("Job close fault admitted settlement: %+v", result)
+	}
+}
 
 func TestRunStrictlyContained_WindowsRealThreeChannelsAndJob(t *testing.T) {
 	if os.Getenv("MCPHUB_STRICT_WINDOWS_CHANNEL_HELPER") == "1" {

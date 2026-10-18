@@ -31,3 +31,5 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+replace github.com/gofrs/flock v0.13.0 => ./third_party/gofrs-flock

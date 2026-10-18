@@ -1,9 +1,13 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +87,9 @@ func TestEnrichStatusWithRegistry_OrphanWorkspaceTaskPreservesRawState(t *testin
 			NextRun:  "",
 		},
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 	if rows[0].State != "Running" {
 		t.Errorf("orphan workspace-scoped task: State = %q, want %q (raw scheduler state must be preserved when registry has no entry)",
 			rows[0].State, "Running")
@@ -99,12 +105,13 @@ func TestEnrichStatusWithRegistry_OrphanWorkspaceTaskPreservesRawState(t *testin
 // LastMaterializedAt, LastToolsCallAt, LastError, Port).
 func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 	dir := t.TempDir()
+	workspacePath := filepath.Join(dir, "workspace-a")
 	regPath := dir + "/ws.yaml"
 	reg := NewRegistry(regPath)
 	now := time.Now().UTC().Truncate(time.Second)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:       "abcd1234",
-		WorkspacePath:      "/home/u/project",
+		WorkspacePath:      workspacePath,
 		Language:           "python",
 		Backend:            "mcp-language-server",
 		Port:               9217,
@@ -121,10 +128,12 @@ func TestEnrichStatusWithRegistry_WorkspaceScoped(t *testing.T) {
 	rows := []DaemonStatus{
 		{TaskName: `\mcp-local-hub-lsp-abcd1234-python`},
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 	r := rows[0]
-	if r.Workspace != "/home/u/project" {
-		t.Errorf("Workspace = %q, want /home/u/project", r.Workspace)
+	if r.Workspace != workspacePath {
+		t.Errorf("Workspace = %q, want %q", r.Workspace, workspacePath)
 	}
 	if r.Language != "python" {
 		t.Errorf("Language = %q, want python", r.Language)
@@ -157,6 +166,9 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	workspaceRoot := filepath.Dir(regPath)
+	lazyWorkspace := filepath.Join(workspaceRoot, "workspace-a")
+	serenaWorkspace := filepath.Join(workspaceRoot, "workspace-b")
 	origRegPath := defaultRegistryPathFn
 	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
 	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
@@ -177,7 +189,7 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	reg := NewRegistry(regPath)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
-		WorkspacePath: "/home/u/project",
+		WorkspacePath: lazyWorkspace,
 		Language:      "python",
 		Backend:       "mcp-language-server",
 		Port:          9217,
@@ -186,7 +198,7 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	})
 	if err := reg.PutSerena(WorkspaceEntry{
 		WorkspaceKey:  "serena1234",
-		WorkspacePath: "/home/u/serena",
+		WorkspacePath: serenaWorkspace,
 		Language:      SerenaLanguageSentinel,
 		Backend:       "serena",
 		Port:          9401,
@@ -232,12 +244,240 @@ func TestStatusWithOpts_MergesRegistryOnlyWorkspaceRows(t *testing.T) {
 	}
 }
 
+func TestStatusWithOptsRejectsWorkspaceRegistryPortMismatch(t *testing.T) {
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	stateDir := t.TempDir()
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+
+	const taskName = `\mcp-local-hub-lsp-abcd1234-go`
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName:  taskName,
+			Server:    "mcp-language-server",
+			Daemon:    "lsp-abcd1234-go",
+			Workspace: `/workspace/project`,
+			Port:      9421,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	previousRegistryPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+	registry := NewRegistry(registryPath)
+	// A sentinel row is excluded from the registry-only LSP seed, so the public
+	// rich-status path reaches the supervisor-intent row with its existing port.
+	// The exact task match still presents the same cross-snapshot contradiction
+	// to the metadata join that a default IPC row can carry.
+	registry.Workspaces = []WorkspaceEntry{{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: `/workspace/project`,
+		Language:      SerenaLanguageSentinel,
+		Backend:       "gopls-mcp",
+		Port:          9422,
+		TaskName:      strings.TrimPrefix(taskName, `\`),
+		Lifecycle:     LifecycleActive,
+	}}
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "detailed",
+			run: func() error {
+				_, err := NewAPI().StatusWithOptsDetailed(StatusOpts{})
+				return err
+			},
+		},
+		{
+			name: "legacy wrapper",
+			run: func() error {
+				_, err := NewAPI().StatusWithOpts(StatusOpts{})
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatal("status returned nil error for nonzero status/registry port mismatch")
+			}
+			if !strings.Contains(err.Error(), "WORKSPACE_STATUS_METADATA_MISMATCH") {
+				t.Fatalf("status error = %T (%v), want stable mismatch identifier", err, err)
+			}
+		})
+	}
+}
+
+func TestApplyWorkspaceRegistryMetadataValidatesAllRowsBeforeMutation(t *testing.T) {
+	firstMaterialized := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	rows := []DaemonStatus{
+		{
+			TaskName:       `\mcp-local-hub-lsp-abcd1234-go`,
+			Port:           0,
+			State:          "Running",
+			PID:            111,
+			ServiceState:   ServiceStateStarting,
+			ReadinessStage: ReadinessStageUpstreamListener,
+		},
+		{
+			TaskName: `\mcp-local-hub-lsp-deadbeef-python`,
+			Port:     9500,
+			State:    "Running",
+			PID:      222,
+		},
+	}
+	before := append([]DaemonStatus(nil), rows...)
+	entries := []WorkspaceEntry{
+		{
+			TaskName:           "mcp-local-hub-lsp-abcd1234-go",
+			WorkspacePath:      "/workspace/first",
+			Language:           "go",
+			Backend:            "gopls-mcp",
+			Port:               9421,
+			Lifecycle:          LifecycleActive,
+			LastMaterializedAt: firstMaterialized,
+		},
+		{
+			TaskName:      "mcp-local-hub-lsp-deadbeef-python",
+			WorkspacePath: "/workspace/second",
+			Language:      "python",
+			Backend:       "mcp-language-server",
+			Port:          9501,
+			Lifecycle:     LifecycleActive,
+		},
+	}
+
+	err := applyWorkspaceRegistryMetadata(rows, entries)
+	var mismatch *WorkspaceStatusMetadataMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("metadata error = %T (%v), want *WorkspaceStatusMetadataMismatchError", err, err)
+	}
+	if mismatch.TaskName != rows[1].TaskName || mismatch.StatusPort != 9500 || mismatch.RegistryPort != 9501 {
+		t.Fatalf("mismatch = %+v, want task and both conflicting ports", mismatch)
+	}
+	if !strings.HasPrefix(err.Error(), WorkspaceStatusMetadataMismatchID) {
+		t.Fatalf("error = %q, want stable prefix %q", err, WorkspaceStatusMetadataMismatchID)
+	}
+	if !reflect.DeepEqual(rows, before) {
+		t.Fatalf("late mismatch partially mutated rows:\n got  %#v\n want %#v", rows, before)
+	}
+}
+
+func TestApplyWorkspaceRegistryMetadataCompatibleIdentityPreservesRuntimeFields(t *testing.T) {
+	materialized := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	toolsCall := time.Date(2026, 9, 12, 12, 5, 0, 0, time.UTC)
+	observation := &DaemonReadinessObservationV1{Policy: ReadinessPolicySyntheticProxy}
+	rows := []DaemonStatus{
+		{
+			TaskName:             `\mcp-local-hub-lsp-abcd1234-go`,
+			Server:               "mcp-language-server",
+			Daemon:               "lsp-abcd1234-go",
+			IsWorkspaceScoped:    true,
+			State:                "Running",
+			PID:                  111,
+			ReadinessObservation: observation,
+			ServiceState:         ServiceStateStarting,
+			ReadinessStage:       ReadinessStageUpstreamListener,
+			ReadinessSettled:     false,
+		},
+		{
+			TaskName:          "mcp-local-hub-lsp-deadbeef-python",
+			Port:              9500,
+			State:             "Ready",
+			PID:               222,
+			ServiceState:      ServiceStateRunning,
+			ReadinessSettled:  true,
+			IsWorkspaceScoped: true,
+		},
+		{TaskName: "mcp-local-hub-lsp-feedface-rust", Port: 9600, State: "Stopped"},
+		{TaskName: "mcp-local-hub-lsp-c0ffee00-typescript", Port: 9700, State: "Stopped"},
+		{TaskName: `\mcp-local-hub-memory-default`, Port: 9304, State: "Running", PID: 333},
+	}
+	entries := []WorkspaceEntry{
+		{
+			TaskName:           "mcp-local-hub-lsp-abcd1234-go",
+			WorkspacePath:      "/workspace/go",
+			Language:           "go",
+			Backend:            "gopls-mcp",
+			Port:               9421,
+			Lifecycle:          LifecycleActive,
+			LastMaterializedAt: materialized,
+			LastToolsCallAt:    toolsCall,
+			LastError:          "historical",
+		},
+		{
+			TaskName:      `\mcp-local-hub-lsp-deadbeef-python`,
+			WorkspacePath: "/workspace/python",
+			Language:      "python",
+			Backend:       "mcp-language-server",
+			Port:          9500,
+			Lifecycle:     LifecycleActive,
+		},
+		{
+			TaskName:      "mcp-local-hub-lsp-feedface-rust",
+			WorkspacePath: "/workspace/rust",
+			Language:      "rust",
+			Backend:       "rust-analyzer",
+			Port:          0,
+			Lifecycle:     LifecycleConfigured,
+		},
+		{
+			TaskName:      `\mcp-local-hub-memory-default`,
+			WorkspacePath: "/must/not/apply",
+			Port:          9305,
+			Lifecycle:     LifecycleActive,
+		},
+	}
+
+	if err := applyWorkspaceRegistryMetadata(rows, entries); err != nil {
+		t.Fatal(err)
+	}
+	first := rows[0]
+	if first.Workspace != "/workspace/go" || first.Language != "go" || first.Backend != "gopls-mcp" || first.Lifecycle != LifecycleActive || first.LastError != "historical" {
+		t.Fatalf("first metadata = %+v, want all registry fields", first)
+	}
+	if first.Port != 9421 || !first.LastMaterializedAt.Equal(materialized) || !first.LastToolsCallAt.Equal(toolsCall) {
+		t.Fatalf("first port/timestamps = %d/%v/%v", first.Port, first.LastMaterializedAt, first.LastToolsCallAt)
+	}
+	if first.Server != "mcp-language-server" || first.Daemon != "lsp-abcd1234-go" || !first.IsWorkspaceScoped || first.State != "Running" || first.PID != 111 || first.ReadinessObservation != observation || first.ServiceState != ServiceStateStarting || first.ReadinessStage != ReadinessStageUpstreamListener || first.ReadinessSettled {
+		t.Fatalf("first runtime/structural fields changed: %+v", first)
+	}
+	second := rows[1]
+	if second.Port != 9500 || second.Workspace != "/workspace/python" || second.State != "Ready" || second.PID != 222 || second.ServiceState != ServiceStateRunning || !second.ReadinessSettled {
+		t.Fatalf("equal-port row = %+v, want metadata with runtime fields preserved", second)
+	}
+	if rows[2].Workspace != "/workspace/rust" || rows[2].Port != 9600 || rows[2].State != "Stopped" || rows[2].Lifecycle != LifecycleConfigured {
+		t.Fatalf("zero registry port row = %+v, want metadata without port overwrite", rows[2])
+	}
+	if rows[3].Workspace != "" || rows[3].Port != 9700 || rows[3].State != "Stopped" {
+		t.Fatalf("missing registry row changed: %+v", rows[3])
+	}
+	if rows[4].Workspace != "" || rows[4].Port != 9304 || rows[4].State != "Running" || rows[4].PID != 333 {
+		t.Fatalf("non-LSP row changed: %+v", rows[4])
+	}
+}
+
 func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t *testing.T) {
 	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
 	// Hermetic supervisor-intent read (see sibling test) — empty temp state dir.
 	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	workspaceRoot := filepath.Dir(regPath)
+	liveWorkspace := filepath.Join(workspaceRoot, "workspace-live")
+	deadWorkspace := filepath.Join(workspaceRoot, "workspace-dead")
 	origRegPath := defaultRegistryPathFn
 	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
 	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
@@ -261,7 +501,7 @@ func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t 
 	for _, e := range []WorkspaceEntry{
 		{
 			WorkspaceKey:  "abcd1234",
-			WorkspacePath: "/home/u/live",
+			WorkspacePath: liveWorkspace,
 			Language:      "python",
 			Backend:       "mcp-language-server",
 			Port:          livePort,
@@ -270,7 +510,7 @@ func TestStatusWithOpts_RegistryOnlyWorkspaceRowsUsePortLivenessWithoutHealth(t 
 		},
 		{
 			WorkspaceKey:  "deadbeef",
-			WorkspacePath: "/home/u/dead",
+			WorkspacePath: deadWorkspace,
 			Language:      "go",
 			Backend:       "gopls-mcp",
 			Port:          deadPort,
@@ -323,6 +563,9 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 	_ = dead.Close()
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	workspaceRoot := filepath.Dir(regPath)
+	liveWorkspace := filepath.Join(workspaceRoot, "workspace-live")
+	deadWorkspace := filepath.Join(workspaceRoot, "workspace-dead")
 	origRegPath := defaultRegistryPathFn
 	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
 	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
@@ -352,7 +595,7 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 	for _, e := range []WorkspaceEntry{
 		{
 			WorkspaceKey:  "abcd1234",
-			WorkspacePath: "/home/u/live",
+			WorkspacePath: liveWorkspace,
 			Language:      "python",
 			Backend:       "mcp-language-server",
 			Port:          livePort,
@@ -361,7 +604,7 @@ func TestStatusWithOpts_HealthProbesLiveRegistryOnlyWorkspaceRows(t *testing.T) 
 		},
 		{
 			WorkspaceKey:  "deadbeef",
-			WorkspacePath: "/home/u/dead",
+			WorkspacePath: deadWorkspace,
 			Language:      "go",
 			Backend:       "gopls-mcp",
 			Port:          deadPort,
@@ -409,6 +652,7 @@ func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T)
 	t.Cleanup(func() { statusSchedulerFactory = origScheduler })
 
 	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	workspacePath := filepath.Join(filepath.Dir(regPath), "workspace-a")
 	origRegPath := defaultRegistryPathFn
 	defaultRegistryPathFn = func() (string, error) { return regPath, nil }
 	t.Cleanup(func() { defaultRegistryPathFn = origRegPath })
@@ -429,7 +673,7 @@ func TestStatusWithOpts_MergesRegistryRowsWhenSchedulerUnavailable(t *testing.T)
 	reg := NewRegistry(regPath)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
-		WorkspacePath: "/home/u/project",
+		WorkspacePath: workspacePath,
 		Language:      "python",
 		Backend:       "mcp-language-server",
 		Port:          9217,
@@ -473,7 +717,9 @@ func TestEnrichStatusWithRegistry_FailedEntryCarriesLastError(t *testing.T) {
 	rows := []DaemonStatus{
 		{TaskName: "mcp-local-hub-lsp-deadbeef-go"},
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 	if rows[0].Lifecycle != LifecycleMissing {
 		t.Errorf("Lifecycle = %q, want %q", rows[0].Lifecycle, LifecycleMissing)
 	}
@@ -501,7 +747,9 @@ func TestEnrichStatusWithRegistry_GlobalRowUntouched(t *testing.T) {
 	rows := []DaemonStatus{
 		{TaskName: `\mcp-local-hub-serena-claude`},
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 	if rows[0].Lifecycle != "" {
 		t.Errorf("global row got lifecycle = %q; must stay empty", rows[0].Lifecycle)
 	}
@@ -526,7 +774,9 @@ func TestEnrichStatusWithRegistry_NoRegistryFileIsSilentNoop(t *testing.T) {
 	rows := []DaemonStatus{
 		{TaskName: "mcp-local-hub-lsp-abcd1234-python"},
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 	if rows[0].Lifecycle != "" {
 		t.Errorf("missing registry should not populate lifecycle; got %q", rows[0].Lifecycle)
 	}
@@ -541,6 +791,27 @@ func TestEnrichStatusWithRegistry_NoRegistryFileIsSilentNoop(t *testing.T) {
 	// log dropdown whenever registry loading fails.
 	if !rows[0].IsWorkspaceScoped {
 		t.Errorf("IsWorkspaceScoped = false when registry is missing; must still be true (derived from TaskName structure, not registry)")
+	}
+}
+
+func TestEnrichStatusWithRegistry_InvalidRegistryIsSilentNoop(t *testing.T) {
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	if err := os.WriteFile(registryPath, []byte("version: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rows := []DaemonStatus{{
+		TaskName: `\mcp-local-hub-lsp-abcd1234-python`,
+		State:    "Running",
+	}}
+
+	if err := enrichStatusWithRegistry(rows, "", registryPath); err != nil {
+		t.Fatalf("invalid registry must preserve best-effort rich status: %v", err)
+	}
+	if rows[0].Workspace != "" || rows[0].Language != "" || rows[0].Lifecycle != "" || rows[0].Port != 0 {
+		t.Fatalf("invalid registry populated metadata: %+v", rows[0])
+	}
+	if !rows[0].IsWorkspaceScoped || rows[0].Server != "mcp-language-server" || rows[0].Daemon != "lsp-abcd1234-python" || rows[0].State != "Running" {
+		t.Fatalf("invalid registry lost structural/raw status fields: %+v", rows[0])
 	}
 }
 
@@ -564,7 +835,9 @@ func TestEnrichStatusWithRegistry_MaintenanceFlag(t *testing.T) {
 		{TaskName: `\mcp-local-hub-serena-weekly-refresh`},    // legacy per-server
 		{TaskName: `\mcp-local-hub-serena-claude`},            // normal daemon row
 	}
-	enrichStatusWithRegistry(rows, "", regPath)
+	if err := enrichStatusWithRegistry(rows, "", regPath); err != nil {
+		t.Fatal(err)
+	}
 
 	for i, want := range []bool{true, true, true, false} {
 		if rows[i].IsMaintenance != want {

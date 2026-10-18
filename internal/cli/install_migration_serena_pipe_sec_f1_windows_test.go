@@ -166,7 +166,10 @@ func TestSECF1_UpgradeDialReachesListenerBoundOnSupervisorIPCAddress(t *testing.
 	if err != nil {
 		t.Fatalf("DialPipe(%q) failed — the upgrade dial did NOT reach the supervisor listener: %v", deps.pipePath, err)
 	}
-	_ = conn.Close()
+	// Keep the client endpoint alive until the server observes this pipe
+	// instance. Closing it first can make go-winio discard the connection
+	// before Accept returns, even though DialPipe succeeded.
+	defer conn.Close()
 
 	select {
 	case aerr := <-accepted:

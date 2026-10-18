@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -40,6 +41,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/oneapi"
 	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/toolchain"
@@ -57,14 +59,6 @@ import (
 // setReaperFnForTest accessor below. Production callers MUST NOT
 // reassign this var.
 var reaperFn = ReapStaleTransients
-
-var supervisorExecutableFn = os.Executable
-
-func setSupervisorExecutableFnForTest(fn func() (string, error)) func() {
-	prev := supervisorExecutableFn
-	supervisorExecutableFn = fn
-	return func() { supervisorExecutableFn = prev }
-}
 
 // errSpawnPreChild marks a SpawnFunc error that occurred BEFORE any
 // child process existed (cmd.Start / StartWithJob returned non-nil).
@@ -434,8 +428,14 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 // handleIPCConn would obscure the contract; the bundle keeps the
 // dependency surface visible.
 type ipcDispatchDeps struct {
-	stateDir string
-	events   *api.SupervisorEventLog
+	// The original singleton remains held until IPC handlers join on shutdown.
+	supervisorLock *api.SupervisorLock
+	stateDir       string
+	events         *api.SupervisorEventLog
+	// Per-invocation test barrier at the accept-result boundary. Production
+	// leaves this nil; it has no effect on the IPC wire or event policy.
+	afterAccept       func(net.Conn, error)
+	beforeHandlerDone func(net.Conn)
 	// stallDump arms the goroutine-stack capture when a connection's
 	// accept-to-hello interval crosses the stall threshold. nil disables
 	// the automatic arm entirely (every method is nil-receiver safe), which
@@ -492,7 +492,76 @@ type ipcDispatchDeps struct {
 	// allowDirectRespawnForTest exists only for isolated handler fixtures that do
 	// not construct a controller. Production leaves it false: every respawn is
 	// controller-routed or returns a retryable not-ready response.
-	allowDirectRespawnForTest bool
+	allowDirectRespawnForTest       bool
+	mcpFrontRouteActivationRecovery *mcpFrontRouteActivationRecoveryDriver
+}
+
+const mcpFrontRouteActivationRecoveryTimeout = 30 * time.Second
+
+// mcpFrontRouteActivationRecoveryDriver owns one joined worker. Triggers are
+// non-blocking and coalesce while one recovery pass is already queued; the
+// worker runs every pass under its own finite child deadline and stops on the
+// supervisor context before runSupervise returns.
+type mcpFrontRouteActivationRecoveryDriver struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	triggerCh chan struct{}
+	done      chan struct{}
+	run       func(context.Context)
+	stopOnce  sync.Once
+}
+
+func startMCPFrontRouteActivationRecoveryDriver(parent context.Context, events *api.SupervisorEventLog, run func(context.Context)) *mcpFrontRouteActivationRecoveryDriver {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	driver := &mcpFrontRouteActivationRecoveryDriver{
+		ctx: ctx, cancel: cancel, triggerCh: make(chan struct{}, 1), done: make(chan struct{}), run: run,
+	}
+	go func() {
+		defer guardSupervisorGoroutine(events, "mcp-front-route-activation-recovery", "")
+		defer close(driver.done)
+		for {
+			select {
+			case <-driver.ctx.Done():
+				return
+			case <-driver.triggerCh:
+				if driver.run == nil {
+					continue
+				}
+				recoveryCtx, recoveryCancel := context.WithTimeout(driver.ctx, mcpFrontRouteActivationRecoveryTimeout)
+				driver.run(recoveryCtx)
+				recoveryCancel()
+			}
+		}
+	}()
+	return driver
+}
+
+func (d *mcpFrontRouteActivationRecoveryDriver) Trigger() {
+	if d == nil {
+		return
+	}
+	select {
+	case <-d.ctx.Done():
+		return
+	default:
+	}
+	select {
+	case d.triggerCh <- struct{}{}:
+	default:
+	}
+}
+
+func (d *mcpFrontRouteActivationRecoveryDriver) Stop() {
+	if d == nil {
+		return
+	}
+	d.stopOnce.Do(func() {
+		d.cancel()
+		<-d.done
+	})
 }
 
 // emitSerenaIntentRepairOutcome records the result of a
@@ -579,12 +648,80 @@ type runningProcessIdentity struct {
 // Phase-6 scope: lock → audit log → event loop → IPC listener → wait
 // for signal → cancel loop → return. Reconciliation, IPC dispatch,
 // and quiesce-drain are wired in later tasks.
-// The return is NAMED so the stderr-sink exit hook (releaseOnExit, deferred
-// below) can observe a non-nil error return and record it into the sink
+// The inner body's return is NAMED so the stderr-sink exit hook (releaseOnExit,
+// deferred below) can observe a non-nil error return and record it into the sink
 // before restoring stderr — cobra prints the returned error only AFTER this
 // function returns, by which point the restore has already sent it to the
 // detached void.
-func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) (err error) {
+type ipcRunOptions struct {
+	afterAccept         func(net.Conn, error)
+	beforeHandlerDone   func(net.Conn)
+	afterStopSeal       func()
+	beforeHeartbeatEmit func()
+}
+
+// ipcSession owns only the IPC producers created by one runSupervise call.
+// Admission and shutdown share mu, so a handler is counted before launch or
+// its connection is rejected after shutdown begins.
+type ipcSession struct {
+	listener      *SupervisorIPCListener
+	afterStopSeal func()
+	mu            sync.Mutex
+	stopping      bool
+	conns         map[net.Conn]struct{}
+	handlers      sync.WaitGroup
+	acceptDone    chan struct{}
+}
+
+func newIPCSession(listener *SupervisorIPCListener, afterStopSeal func()) *ipcSession {
+	return &ipcSession{listener: listener, afterStopSeal: afterStopSeal, conns: make(map[net.Conn]struct{})}
+}
+
+func (s *ipcSession) register(conn net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.conns[conn] = struct{}{}
+	s.handlers.Add(1)
+	return true
+}
+
+func (s *ipcSession) finish(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.conns, conn)
+	s.mu.Unlock()
+	s.handlers.Done()
+}
+
+func (s *ipcSession) stop() {
+	s.mu.Lock()
+	s.stopping = true
+	conns := make([]net.Conn, 0, len(s.conns))
+	for conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	s.mu.Unlock()
+	if s.afterStopSeal != nil {
+		s.afterStopSeal()
+	}
+
+	_ = s.listener.Close()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+	if s.acceptDone != nil {
+		<-s.acceptDone // includes the existing ipc-accept-exit emission
+	}
+	s.handlers.Wait() // no more Add calls after the accept loop has settled
+}
+
+func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) error {
+	return runSuperviseWithIPCOptions(ctx, noIPC, strictMode, strictJobProtectionFlag, ipcRunOptions{})
+}
+
+func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool, options ipcRunOptions) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -598,11 +735,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	if err != nil {
 		return fmt.Errorf("resolve supervisor state dir: %w", err)
 	}
-	exe, executableLookupErr := supervisorExecutableFn()
 
 	// Acquire singleton lock — fails fast if another supervisor holds
 	// it. The lock+sidecar is the FIRST resource taken so concurrent
-	// supervisors never race to sweep old binary asides, open the audit log,
+	// supervisors never race to open the audit log,
 	// or bind the IPC listener (the latter two produce noisy "already in use"
 	// errors that mask the real "another supervisor is running" condition).
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
@@ -680,49 +816,6 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// operator raise: whatever the launching task's priority, the supervisor
 	// sets its own class here.
 	ensureSupervisorPriorityFloor(events)
-
-	if executableLookupErr != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "lifecycle",
-			Event:    "old-binary-sweep-failed",
-			Body: map[string]any{
-				"err": executableLookupErr.Error(),
-			},
-		})
-	} else if exe == "" {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "lifecycle",
-			Event:    "old-binary-sweep-failed",
-			Body: map[string]any{
-				"err": "empty supervisor executable path",
-			},
-		})
-	} else {
-		sweepDir := filepath.Dir(exe)
-		if err := sweepOldBinariesFn(sweepDir, func(path string, err error) {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
-				Source:   "lifecycle",
-				Event:    "old-binary-sweep-remove-failed",
-				Body: map[string]any{
-					"path": path,
-					"err":  err.Error(),
-				},
-			})
-		}); err != nil {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
-				Source:   "lifecycle",
-				Event:    "old-binary-sweep-failed",
-				Body: map[string]any{
-					"dir": sweepDir,
-					"err": err.Error(),
-				},
-			})
-		}
-	}
 
 	// Task 13.1 cold-start stale-child reap. POSIX-only in practice:
 	// the Windows variant is a no-op stub because the Job Object's
@@ -991,6 +1084,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// nil` — so this MUST replace `intent` with the (possibly
 	// newly-allocated) returned value, not just call the seeder for its
 	// side effect and keep using the old (possibly nil) local variable.
+	if intent != nil {
+		imageResult, imageErr := api.ConvergeGeneratedSupervisorImage(filepath.Join(stateDir, "supervisor-intent.json"))
+		if imageErr != nil {
+			return fmt.Errorf("converge generated runtime image at startup: %w", imageErr)
+		}
+		intent = imageResult.Intent
+	}
 	intent = ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
 
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
@@ -1039,6 +1139,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// Closure-capture pattern (same as triggerGracefulExit below):
 	// the closure reads the variable's CURRENT value each call.
 	var ctrl *supervisorController
+	recoveryOps := newMCPFrontRouteActivationRecoveryOps(api.NewAPI(), stateDir, events)
+	mcpFrontRecoveryDriver := startMCPFrontRouteActivationRecoveryDriver(loopCtx, events, func(recoveryCtx context.Context) {
+		_ = recoverMCPFrontRouteActivation(recoveryCtx, stateDir, recoveryOps)
+	})
+	defer mcpFrontRecoveryDriver.Stop()
 
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
@@ -1054,7 +1159,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		if lerr != nil {
 			return fmt.Errorf("ipc listener: %w", lerr)
 		}
-		defer func() { _ = listener.Close() }()
+		ipc := newIPCSession(listener, options.afterStopSeal)
+		defer ipc.stop()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
@@ -1090,8 +1196,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		}()
 
 		deps := ipcDispatchDeps{
+			supervisorLock:     lk,
 			stateDir:           stateDir,
 			events:             events,
+			afterAccept:        options.afterAccept,
+			beforeHandlerDone:  options.beforeHandlerDone,
 			stallDump:          stallDump,
 			runtimeTracker:     runtimeTracker,
 			statusCoalescer:    newStatusPortOwnersCoalescer(runtimeTracker),
@@ -1105,20 +1214,22 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 				default:
 				}
 			},
-			overlay:            overlay,
-			intent:             intent,
-			respawnLate:        respawnLate,
-			controllerProvider: func() *supervisorController { return ctrl },
+			overlay:                         overlay,
+			intent:                          intent,
+			respawnLate:                     respawnLate,
+			controllerProvider:              func() *supervisorController { return ctrl },
+			mcpFrontRouteActivationRecovery: mcpFrontRecoveryDriver,
 		}
 
-		// Spawn the accept goroutine. It runs until listener.Close()
-		// causes Accept to return an error (the deferred Close above
-		// is the exit signal during the graceful-exit flow). Each
+		// Spawn the accept goroutine. The session closes the listener
+		// and joins this goroutine during every post-bind return. Each
 		// accepted connection gets its own handler goroutine so a slow
 		// client never blocks the next Accept.
+		ipc.acceptDone = make(chan struct{})
 		go func() {
+			defer close(ipc.acceptDone)
 			defer guardSupervisorGoroutine(events, "ipc-accept-loop", "")
-			acceptIPCConnections(listener, deps)
+			acceptIPCConnectionsWithSession(listener, deps, ipc)
 		}()
 	}
 
@@ -1166,7 +1277,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx.Done(), oneAPIInj, strictJobProtection)
+		daemonCreators := &daemonCreatorRecords{}
+		spawnFn = makeProductionSpawnFnWithCreatorRecords(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx, oneAPIInj, strictJobProtection, nil, daemonCreators)
 	}
 	terminateFn := reconcileTerminateFn
 	var terminateOutcomeFn terminationOutcomeFunc
@@ -1523,6 +1635,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"intent_files_loaded": intentFilesLoaded.Load(),
 		},
 	})
+	// Recover a surviving pre-activation phase once the same reconcile/event
+	// driver used by live requests is ready. The driver deduplicates this startup
+	// signal with any concurrent post-response reconcile signal.
+	mcpFrontRecoveryDriver.Trigger()
 
 	// Phase 9: production maintenance timer scheduler wiring.
 	// Constructed locally in runSupervise so v0.5.0 keeps the
@@ -1560,10 +1676,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// bounded detection latency; see supervisorHeartbeatInterval for the
 	// interval argument. Decision-inert: no restart, backoff, quarantine, or
 	// spawn path reads it.
+	heartbeatDone := make(chan struct{})
+	defer func() {
+		loopCancel()
+		<-heartbeatDone
+	}()
 	go func() {
+		defer close(heartbeatDone)
 		defer guardSupervisorGoroutine(events, "supervisor-heartbeat", "")
-		runSupervisorHeartbeat(loopCtx.Done(), events, runtimeTracker, stderrSink.path,
-			time.Now().UTC(), supervisorHeartbeatInterval)
+		runSupervisorHeartbeatWithHook(loopCtx.Done(), events, runtimeTracker, stderrSink.path,
+			time.Now().UTC(), supervisorHeartbeatInterval, options.beforeHeartbeatEmit)
 	}()
 
 	shutdownMaintenance := func(reason string) {
@@ -1813,8 +1935,8 @@ func defaultPipePath(stateDir string) string {
 }
 
 // acceptIPCConnections is the listener accept loop. Runs in its own
-// goroutine spawned from runSupervise; exits when listener.Close()
-// (deferred in runSupervise) causes Accept to return net.ErrClosed.
+// goroutine spawned from runSupervise; exits when the IPC session closes
+// the listener and Accept returns net.ErrClosed.
 //
 // Per spec §"Wire format": each accepted connection is a long-lived
 // newline-delimited-JSON channel. Multiple connections from the same
@@ -1880,6 +2002,10 @@ func acceptIPCConnections(
 	listener ipcAcceptor,
 	deps ipcDispatchDeps,
 ) {
+	acceptIPCConnectionsWithSession(listener, deps, nil)
+}
+
+func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps, session *ipcSession) {
 	consecErrs := 0
 	for {
 		// Both stamps are taken on THIS goroutine so the measured
@@ -1888,6 +2014,9 @@ func acceptIPCConnections(
 		enteredAccept := time.Now()
 		conn, err := listener.Accept()
 		acceptedAt := time.Now()
+		if deps.afterAccept != nil {
+			deps.afterAccept(conn, err)
+		}
 		if err != nil {
 			// listener.Close() returns net.ErrClosed via Accept on
 			// graceful exit. That is the ONE error that signals
@@ -1942,8 +2071,18 @@ func acceptIPCConnections(
 			continue
 		}
 		consecErrs = 0
+		if session != nil && !session.register(conn) {
+			_ = conn.Close()
+			continue
+		}
 		go func() {
+			if session != nil {
+				defer session.finish(conn)
+			}
 			defer guardSupervisorGoroutine(deps.events, "ipc-connection-handler", "")
+			if deps.beforeHandlerDone != nil {
+				defer deps.beforeHandlerDone(conn)
+			}
 			serveIPCConn(conn, listener, deps, ipcAcceptTiming{
 				acceptedAt:  acceptedAt,
 				acceptDwell: acceptedAt.Sub(enteredAccept),
@@ -2180,9 +2319,18 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		// EvIntentUpdate per drift entry so the SM drives Run/Stop/Delete
 		// transitions WITHOUT a supervisor cold-restart. See
 		// supervise_reconcile_ipc.go for the handler body.
-		return handleReconcile(conn, req, deps)
+		err := handleReconcile(conn, req, deps)
+		if err == nil {
+			args, parseErr := parseReconcileArgs(req.Args)
+			if parseErr == nil && args.Apply {
+				deps.mcpFrontRouteActivationRecovery.Trigger()
+			}
+		}
+		return err
 	case "commit_serena_activity":
 		return handleCommitSerenaActivity(conn, req, deps)
+	case "commit_lazy_proxy_readiness":
+		return handleCommitLazyProxyReadiness(conn, req, deps)
 	case "restart", "reload":
 		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
 		// adds the canonical `respawn` verb above; restart/reload still
@@ -2379,7 +2527,7 @@ func handleExit(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
 	})
 
 	// Write the response BEFORE triggering exit. If we triggered first,
-	// the supervisor's deferred listener.Close() could race the response
+	// the supervisor's deferred IPC session stop could race the response
 	// write and the client would observe a connection drop instead of
 	// the acknowledgement frame.
 	if err := writeIPCFrame(conn, api.IPCResponse{
@@ -2677,14 +2825,17 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	}
 	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
-	cmdPath := canonicalMcphubPath()
-	if cmdPath == "" {
+	cmdPath, imageErr := api.RuntimeMcphubExecutable()
+	if imageErr != nil || cmdPath == "" {
+		if imageErr == nil {
+			imageErr = fmt.Errorf("runtime product image is empty")
+		}
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "builtin-route-ensure-failed",
 			Body: map[string]any{
-				"err":  "resolve mcphub binary path (os.Executable) failed",
+				"err":  imageErr.Error(),
 				"path": supervisorIntentPath,
 			},
 		})
@@ -3064,79 +3215,7 @@ func emitDaemonTerminateFailed(events *api.SupervisorEventLog, d api.SupervisorD
 // docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md
 // §"Spawn-time env merge" + plan Task 2.7 / I1.
 func mergeDaemonEnv(parent []string, manifest, overlay map[string]string) []string {
-	if len(manifest) == 0 && len(overlay) == 0 {
-		return nil
-	}
-
-	winCaseFold := runtime.GOOS == "windows"
-
-	// normKey returns the lookup key used for collision detection.
-	// On Windows it folds to uppercase so PATH/Path/path collide.
-	// On POSIX it returns the key verbatim.
-	normKey := func(k string) string {
-		if winCaseFold {
-			return strings.ToUpper(k)
-		}
-		return k
-	}
-
-	// entries holds the winning "<key>=<value>" for each normalized
-	// key. Later writes (manifest after parent, overlay after
-	// manifest) overwrite earlier ones, so the highest-precedence
-	// source wins.
-	entries := make(map[string]string)
-
-	// Parent goes in first. Lines without '=' are skipped (defensive;
-	// os.Environ() never emits malformed entries but a test caller
-	// might supply hand-crafted input).
-	for _, kv := range parent {
-		eq := strings.IndexByte(kv, '=')
-		if eq < 0 {
-			continue
-		}
-		entries[normKey(kv[:eq])] = kv
-	}
-
-	// Manifest overrides parent for the same normalized key.
-	// Within a single layer, two source keys can collide under
-	// Windows case-fold (e.g. "PATH" and "Path" both in the manifest
-	// map). Sort the source keys before applying so the
-	// last-write-wins outcome is deterministic across map iteration
-	// orders. Sort is by original (non-normalized) key so on POSIX
-	// the two cases remain distinct buckets; on Windows the sort is
-	// still deterministic and the later case (e.g. "Path" > "PATH"
-	// in lexicographic order) wins.
-	mKeys := make([]string, 0, len(manifest))
-	for k := range manifest {
-		mKeys = append(mKeys, k)
-	}
-	sort.Strings(mKeys)
-	for _, k := range mKeys {
-		entries[normKey(k)] = k + "=" + manifest[k]
-	}
-
-	// Overlay overrides both for the same normalized key. Same
-	// within-layer sort discipline as above.
-	oKeys := make([]string, 0, len(overlay))
-	for k := range overlay {
-		oKeys = append(oKeys, k)
-	}
-	sort.Strings(oKeys)
-	for _, k := range oKeys {
-		entries[normKey(k)] = k + "=" + overlay[k]
-	}
-
-	keys := make([]string, 0, len(entries))
-	for k := range entries {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	out := make([]string, 0, len(entries))
-	for _, k := range keys {
-		out = append(out, entries[k])
-	}
-	return out
+	return daemon.MergeDaemonEnvironment(parent, manifest, overlay)
 }
 
 // defaultOneAPITargetServers is the DEFAULT set of daemon Server names
@@ -3550,7 +3629,7 @@ func resolveSpawnOverlayChannelPath(statePath string) (string, error) {
 // PR #241 (separator comment between the two doc blocks meant godoc
 // rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil, nil, false)
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, context.Background(), nil, false)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -3574,6 +3653,128 @@ type crashEvent struct {
 	StartedAt time.Time
 	ExitCode  int
 	WaitErr   error
+}
+
+// spawnWorkerObserver is an optional, per-factory fixture boundary. Production
+// callers pass nil; the returned SpawnFunc and its child policy are unchanged.
+type spawnWorkerObserver interface {
+	childStarted(*os.Process)
+	childWaited(*os.Process)
+	workerDone()
+	beforeChildExitEmit()
+}
+
+const daemonCreatorTerminalObservationBudget = 5 * time.Second
+
+// This generation owns a completion view over original creators. Rows survive
+// tracker retirement; the collection never becomes a process/Job writer.
+type daemonCreatorRecords struct {
+	mu         sync.Mutex
+	next       uint64
+	operations []*daemonCreatorOperation
+}
+
+type daemonCreatorOperation struct {
+	id                 uint64
+	task               string
+	generation         int
+	role               string
+	owner              *process.ProvisionalProcess
+	starting           bool
+	stdio              string
+	unsupported        bool
+	startupErr         error
+	startupDisposition process.CreatorTerminalSnapshot
+	startupReceipt     bool
+	root               process.CreatorRootExitSnapshot
+	rootErr            error
+	terminal           *process.CreatorTerminalResult
+	terminalErr        error
+	readinessDone      bool
+	readinessErr       error
+	waiterDone         bool
+	waiterErr          error
+	complete           bool
+}
+
+func (r *daemonCreatorRecords) begin(task string) (*daemonCreatorOperation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, old := range r.operations {
+		startupReleased := old.startupReceipt && old.startupDisposition.StartupReleaseKnown && old.startupDisposition.StartupResourcesReleased
+		if old.task == task && (old.starting || (old.owner != nil && !startupReleased && (old.terminal == nil || old.terminal.Closure() == nil))) {
+			return nil, fmt.Errorf("daemon creator resources remain incomplete for task %s", task)
+		}
+	}
+	r.next++
+	operation := &daemonCreatorOperation{id: r.next, task: task, role: "daemon", starting: true, stdio: "not-configured-by-this-creator"}
+	r.operations = append(r.operations, operation)
+	return operation, nil
+}
+
+func (r *daemonCreatorRecords) retain(operation *daemonCreatorOperation, owner *process.ProvisionalProcess) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if operation == nil || owner == nil || !operation.starting || operation.owner != nil {
+		return errors.New("daemon creator retention has invalid or duplicate owner")
+	}
+	operation.owner = owner
+	return nil
+}
+
+func (r *daemonCreatorRecords) endStart(operation *daemonCreatorOperation, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	operation.starting = false
+	operation.startupErr = err
+}
+
+func (r *daemonCreatorRecords) workerFinished(operation *daemonCreatorOperation, readiness bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if readiness {
+		operation.readinessDone, operation.readinessErr = true, err
+	} else {
+		operation.waiterDone, operation.waiterErr = true, err
+	}
+	operation.complete = !operation.unsupported && operation.terminal != nil && operation.terminal.Closure() != nil && operation.readinessDone && operation.waiterDone && operation.readinessErr == nil && operation.waiterErr == nil
+}
+
+// Re-panic after retaining the real worker cause so the existing supervisor
+// guard remains the diagnostic/containment owner for this goroutine.
+func (r *daemonCreatorRecords) finishWorker(operation *daemonCreatorOperation, readiness bool, workerErr *error) {
+	if value := recover(); value != nil {
+		var cause error
+		if err, ok := value.(error); ok {
+			cause = err
+		} else {
+			cause = fmt.Errorf("daemon creator worker panic: %v", value)
+		}
+		r.workerFinished(operation, readiness, cause)
+		panic(value)
+	}
+	r.workerFinished(operation, readiness, *workerErr)
+}
+
+// Resource-closed exit publication belongs to this same original operation.
+// Release the record lock before the existing callback may block; incomplete
+// ownership never enters the guard, tracker retirement or crash-channel send.
+func (r *daemonCreatorRecords) publishAfterCreatorClosure(operation *daemonCreatorOperation, publish func()) error {
+	r.mu.Lock()
+	var err error
+	if operation == nil || operation.owner == nil {
+		err = errors.New("original daemon creator is unavailable for exit publication")
+	} else if operation.terminalErr != nil {
+		err = operation.terminalErr
+	} else if operation.terminal == nil || operation.terminal.Closure() == nil {
+		err = errors.New("original daemon creator resource closure is incomplete")
+	}
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	publish()
+	return nil
 }
 
 // makeProductionSpawnFnWithStatePath constructs the production spawn
@@ -3601,8 +3802,29 @@ type crashEvent struct {
 // without orphan-protection). When true the closure refuses the spawn
 // BEFORE cmd.Start and returns errSpawnJobProtectionRefused so the
 // controller quarantines the daemon directly. ROADMAP §11.3.
-func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, crashShutdown <-chan struct{}, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
-	return func(d api.SupervisorDaemon) error {
+
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, supervisorCtx context.Context, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
+	return makeProductionSpawnFnWithWorkers(events, tracker, statePath, overlay, overlayPath, crashCh, supervisorCtx, oneAPIInj, strictJobProtection, nil)
+}
+
+func makeProductionSpawnFnWithWorkers(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, supervisorCtx context.Context, oneAPIInj *oneAPIInjector, strictJobProtection bool, workers spawnWorkerObserver) SpawnFunc {
+	return makeProductionSpawnFnWithCreatorRecords(events, tracker, statePath, overlay, overlayPath, crashCh, supervisorCtx, oneAPIInj, strictJobProtection, workers, nil)
+}
+
+func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, supervisorCtx context.Context, oneAPIInj *oneAPIInjector, strictJobProtection bool, workers spawnWorkerObserver, creators *daemonCreatorRecords) SpawnFunc {
+	if supervisorCtx == nil {
+		supervisorCtx = context.Background()
+	}
+	return func(d api.SupervisorDaemon) (spawnErr error) {
+		var operation *daemonCreatorOperation
+		if creators != nil {
+			var err error
+			operation, err = creators.begin(d.TaskName)
+			if err != nil {
+				return err
+			}
+			defer func() { creators.endStart(operation, spawnErr) }()
+		}
 		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
 		// no longer lives here. r1 expressed it as `return nil` inside this
 		// closure, but the controller's executeSideEffect treats a nil spawn
@@ -3986,16 +4208,52 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		}()
 
 		var (
-			pid      int
-			startErr error
+			pid                int
+			startErr           error
+			creator            *process.ProvisionalProcess
+			startupDisposition process.CreatorTerminalSnapshot
+			startupReceipt     bool
 		)
-		if daemonJob != nil {
+		if daemonJob != nil && creators != nil && runtime.GOOS == "windows" {
+			creator, startErr = process.StartProvisionalWithJob(daemonJob, cmd, func(owner *process.ProvisionalProcess) error {
+				// The callback receives transferred custody: clear the caller's
+				// close alias before registering the very same original owner.
+				handedOff, daemonJob = true, nil
+				return creators.retain(operation, owner)
+			})
+			if creator != nil {
+				handedOff, daemonJob = true, nil
+			}
+			if cmd.Process != nil {
+				pid = cmd.Process.Pid
+			}
+			if creator != nil && startErr != nil {
+				// Read only the original owner's outer projection. A nested
+				// callback/native cause cannot supply substitute release status.
+				if receipt, ok := startErr.(interface {
+					Snapshot() process.CreatorTerminalSnapshot
+				}); ok {
+					startupDisposition, startupReceipt = receipt.Snapshot(), true
+					if startupDisposition.Root.OriginalPID > 0 {
+						pid = startupDisposition.Root.OriginalPID
+					}
+				}
+				creators.mu.Lock()
+				operation.startupDisposition, operation.startupReceipt, operation.unsupported = startupDisposition, startupReceipt, true
+				creators.mu.Unlock()
+			}
+		} else if daemonJob != nil {
 			pid, startErr = process.StartWithJob(daemonJob, cmd)
 		} else {
 			startErr = cmd.Start()
 			if startErr == nil && cmd.Process != nil {
 				pid = cmd.Process.Pid
 			}
+		}
+		if creators != nil && creator == nil {
+			creators.mu.Lock()
+			operation.unsupported = true
+			creators.mu.Unlock()
 		}
 		if startErr != nil {
 			isOrphan := errors.Is(startErr, process.ErrSpawnPostCreate)
@@ -4036,7 +4294,13 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 				// wait-failure semantic.
 				var killErr error
 				killMethod := "TerminateJobObject"
-				if daemonJob != nil {
+				if creator != nil {
+					// The original constructor already performed startup cleanup
+					// once. Its actual disposition preserves the old retry rule.
+					if !startupReceipt || !startupDisposition.StartupReleaseKnown || !startupDisposition.StartupResourcesReleased {
+						killErr = errors.Join(startupDisposition.StartupReleaseError, errors.New("retained startup resources are not confirmed released"))
+					}
+				} else if daemonJob != nil {
 					killErr = daemonJob.TerminateAll(5000)
 				} else {
 					killErr = process.BestEffortKillByPID(pid)
@@ -4072,6 +4336,9 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					} else {
 						orphanBody["note"] = "Orphan kill failed - tree may still be alive but Job member enumeration returned empty (either MemberPIDs syscall failed, or the kernel reaped members after TerminateAll timeout fired but before this query). Returning RAW startErr (no errSpawnPreChild wrap) so controller does NOT synth EvChildExit + backoff retry. Daemon stays in StSpawning (preferable to duplicate-daemon risk). orphan_pid in supervisor-state.json is the original root pid (best available); the actual descendant holding the port may differ. Operator: check `mcphub status --json` and supplement with `taskkill /F /T /IM <wrapper-image>` if root pid is dead."
 					}
+					if creator != nil {
+						orphanBody["note"] = "Original creator startup cleanup remains incomplete. The original owner and cleanup cause remain retained; the original PID is diagnostic only. No caller-side member enumeration, second cleanup or automatic replacement occurred."
+					}
 					severity = "error"
 				} else {
 					orphanBody["note"] = "Orphan tree (root + descendants) terminated cleanly via " + killMethod + ". Wrapping with errSpawnPreChild so the controller synth EvChildExit + backoff timer drives retry. Fresh respawn binds the port cleanly."
@@ -4089,11 +4356,15 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					return startErr
 				}
 			}
+			if creator != nil && (!startupReceipt || !startupDisposition.StartupReleaseKnown || !startupDisposition.StartupResourcesReleased) {
+				return startErr
+			}
 			// Common pre-child case (and orphan-with-kill-success):
 			// wrap with errSpawnPreChild so the supervisor controller
 			// synthesizes EvChildExit and routes through
 			// StBackoffWaiting + backoff timer. The parent's deferred
-			// Close runs because handedOff stays false.
+			// Close runs for the ordinary path; retained startup already recorded
+			// its actual release in the original owner before this safe retry.
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		// F6.1 (lost-child fix): stamp the recorded start time from the CHILD'S
@@ -4134,9 +4405,24 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// instead of clearing the CURRENT child's tracking / driving an SM
 		// transition (P1a generation-stamped exit attribution).
 		spawnGen := tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		if creators != nil {
+			creators.mu.Lock()
+			operation.generation = spawnGen
+			creators.mu.Unlock()
+		}
+		if workers != nil {
+			workers.childStarted(cmd.Process) // count both workers before either launch
+		}
 		go func(descriptor api.SupervisorDaemon, generation, childPID int, childStartedAt time.Time) {
+			if workers != nil {
+				defer workers.workerDone()
+			}
 			defer guardSupervisorGoroutine(events, "daemon-readiness-observer", descriptor.TaskName)
-			observeSupervisorReadiness(tracker, events, descriptor, generation, childPID, childStartedAt)
+			if creators != nil {
+				var workerErr error
+				defer creators.finishWorker(operation, true, &workerErr)
+			}
+			observeSupervisorReadiness(supervisorCtx, tracker, events, descriptor, generation, childPID, childStartedAt)
 		}(d, spawnGen, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
@@ -4177,17 +4463,46 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		handedOff = true
 		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
-			// Guard FIRST so it is the outermost defer (LIFO): a panic in
+			if workers != nil {
+				defer workers.workerDone()
+			}
+			// Guard runs before the fixture completion defer (LIFO): a panic in
 			// the Job-handle release, the exit-code classification, or the
 			// crash-channel post below would otherwise kill the supervisor
 			// with no attribution. TaskName is carried so the row names the
 			// daemon whose wait goroutine died.
 			defer guardSupervisorGoroutine(events, "daemon-child-wait", taskName)
+			var workerErr error
+			if creators != nil {
+				defer creators.finishWorker(operation, false, &workerErr)
+			}
 			<-spawnLogged
-			waitErr := cmd.Wait()
-			if jobForWait != nil {
+			var waitErr error
+			if creator != nil {
+				root, rootErr := creator.WaitCreatorRoot()
+				waitErr = rootErr
+				var terminal *process.CreatorTerminalResult
+				var terminalErr error
+				if root.Known {
+					terminalCtx, cancel := context.WithTimeout(context.Background(), daemonCreatorTerminalObservationBudget)
+					terminal, terminalErr = creator.CompleteCreatorAfterExit(terminalCtx, true)
+					cancel()
+				} else {
+					terminalErr = errors.New("daemon original root exit is unavailable for terminal policy")
+				}
+				creators.mu.Lock()
+				operation.root, operation.rootErr, operation.terminal, operation.terminalErr = root, rootErr, terminal, terminalErr
+				creators.mu.Unlock()
+				workerErr = terminalErr
+			} else {
+				waitErr = cmd.Wait()
+			}
+			if creator == nil && jobForWait != nil {
 				_ = closeDaemonJobAfterWaitFn(jobForWait)
 				jobForWait = nil
+			}
+			if workers != nil {
+				workers.childWaited(cmd.Process)
 			}
 			// Diagnostic emit: without this, a wrapper that exits
 			// immediately (e.g. uvx fails to fetch package, port
@@ -4212,113 +4527,143 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			if waitErr != nil {
 				body["wait_err"] = waitErr.Error()
 			}
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: severity,
-				Source:   "lifecycle",
-				Event:    "daemon-exited",
-				TaskName: taskName,
-				Body:     body,
-			})
-			// P1a generation-stamped exit attribution: clear the runtime
-			// entry + post the exit downstream ONLY when THIS child is still
-			// the tracker's current generation. A late cmd.Wait exit of a
-			// SUPERSEDED child (a slow-binding daemon the liveness sweep
-			// already terminate-first-then-respawned, so a newer MarkSpawned
-			// bumped the generation) must NOT clear the CURRENT child's
-			// CurrentPID (that is the lost-child factory: the terminate path
-			// only ever targets tracker.CurrentPID, so a mis-cleared current
-			// child becomes a forgotten port squatter) and must NOT reach the
-			// SM (a stale exit during StExiting would consume the queued
-			// respawn prematurely). Dropping it at the SOURCE — not only at the
-			// controller guard — keeps the crashCh free of stale exits.
-			current := tracker.MarkExitedIfCurrent(taskName, spawnGen)
-			if !current {
-				_ = events.Emit(api.SupervisorEvent{
-					Severity: "info",
+			emitExit := func() error {
+				return events.Emit(api.SupervisorEvent{
+					Severity: severity,
 					Source:   "lifecycle",
-					Event:    "daemon-stale-exit-ignored",
+					Event:    "daemon-exited",
 					TaskName: taskName,
-					Body: map[string]any{
-						"pid":            spawnedPID,
-						"pid_generation": spawnGen,
-						"exit_code":      exitCode,
-						"note":           "late cmd.Wait exit of a superseded child; current tracking untouched and no crash event posted",
-					},
+					Body:     body,
 				})
-				return
 			}
-			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
-			// Child-exit notification: post EVERY (current-generation) exit
-			// (clean and non-clean) onto crashCh so the controller's single
-			// FIFO event loop observes the real exit and can drive the SM
-			// transition for the task. Cleanliness (exit_code==0 &&
-			// no waitErr) is carried implicitly in the crashEvent fields
-			// and re-derived by runCrashEventBridge into the LoopEvent's
-			// `clean_exit` body flag.
-			//
-			// Why clean exits must also post (Codex bot #268 P1,
-			// supervisor_controller.go:893): during a controller-driven
-			// restart an OWN daemon that handles SIGTERM and exits 0 has
-			// NO real EvChildExit posted if clean exits are suppressed
-			// here. The StExiting synthesize gate suppresses the
-			// synthetic exit for own-spawned tasks (owned==true), so the
-			// SM would wedge in StExiting with queued_action=respawn
-			// never consumed — daemon killed, never respawned. Posting
-			// the clean exit gives the controller the real EvChildExit it
-			// needs to complete the queued respawn.
-			//
-			// The deliberate-shutdown contract (clean exit on a daemon
-			// that was NOT being restarted must NOT trigger respawn) is
-			// preserved at the CONTROLLER, not here: handleLoopEvent
-			// drops a clean_exit EvChildExit when the task is still in
-			// StRunning (no controller-driven exit in flight), so a plain
-			// `mcphub stop` / external clean kill at steady state never
-			// reaches the StRunning->StBackoffWaiting respawn path.
-			//
-			// The dispatcher channel may be nil for legacy / test callers
-			// — guard with nil-check.
-			//
-			// BLOCKING send (audit P3, 2026-06-20): a real child-exit must
-			// NEVER be dropped. The earlier non-blocking
-			// select{...default: audit+drop} silently lost the respawn
-			// signal whenever 64+ exits were pending on the buffered
-			// crashCh, so the controller's restart-policy SM never saw that
-			// daemon's crash — the daemon stayed dead with only a warn-log
-			// trace. A blocking send is safe here because this is a
-			// PER-CHILD wait goroutine (one per running daemon): blocking it
-			// stalls only this daemon's wait, never the supervisor's event
-			// loop. The sole crashCh drainer, runCrashEventBridge, runs on
-			// its own goroutine and forwards to the event loop (cap 1024)
-			// independently; the loop never waits on a wait goroutine
-			// (c.spawn launches the next wait goroutine and returns;
-			// c.terminate issues a kill syscall and returns), so there is no
-			// dependency cycle and back-pressure always drains. The only
-			// abandon path is supervisor shutdown: once crashShutdown is
-			// closed the bridge has stopped draining crashCh, so a blocking
-			// send would leak this goroutine — select on crashShutdown to
-			// abandon cleanly instead. crashShutdown is nil for the
-			// compat/test wrapper, which makes that case a pure blocking
-			// send (the historical behavior when no shutdown signal exists).
-			if crashCh != nil {
-				select {
-				case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, StartedAt: startedAt, ExitCode: exitCode, WaitErr: waitErr}:
-				case <-crashShutdown:
-					// Supervisor is shutting down; the bridge has stopped
-					// draining crashCh. Abandon the send so this wait
-					// goroutine does not leak. Audit-log so the abandoned
-					// exit is still observable (it is not lost to a
-					// restart-policy decision because the supervisor itself
-					// is exiting — there is nothing to respawn into).
-					_ = events.Emit(api.SupervisorEvent{
+			publishExit := func() {
+				if workers != nil {
+					workers.beforeChildExitEmit()
+				}
+				exitEmitErr := emitExit()
+				if creators != nil {
+					workerErr = errors.Join(workerErr, exitEmitErr)
+				}
+				// P1a generation-stamped exit attribution: clear the runtime
+				// entry + post the exit downstream ONLY when THIS child is still
+				// the tracker's current generation. A late cmd.Wait exit of a
+				// SUPERSEDED child (a slow-binding daemon the liveness sweep
+				// already terminate-first-then-respawned, so a newer MarkSpawned
+				// bumped the generation) must NOT clear the CURRENT child's
+				// CurrentPID (that is the lost-child factory: the terminate path
+				// only ever targets tracker.CurrentPID, so a mis-cleared current
+				// child becomes a forgotten port squatter) and must NOT reach the
+				// SM (a stale exit during StExiting would consume the queued
+				// respawn prematurely). Dropping it at the SOURCE — not only at the
+				// controller guard — keeps the crashCh free of stale exits.
+				current := tracker.MarkExitedIfCurrent(taskName, spawnGen)
+				if !current {
+					staleEmitErr := events.Emit(api.SupervisorEvent{
 						Severity: "info",
 						Source:   "lifecycle",
-						Event:    "child-exit-abandoned-on-shutdown",
+						Event:    "daemon-stale-exit-ignored",
 						TaskName: taskName,
 						Body: map[string]any{
-							"exit_code": exitCode,
+							"pid":            spawnedPID,
+							"pid_generation": spawnGen,
+							"exit_code":      exitCode,
+							"note":           "late cmd.Wait exit of a superseded child; current tracking untouched and no crash event posted",
 						},
 					})
+					if creators != nil {
+						workerErr = errors.Join(workerErr, staleEmitErr)
+					}
+					return
 				}
+				exitPersistErr := persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
+				if creators != nil {
+					workerErr = errors.Join(workerErr, exitPersistErr)
+				}
+				// Child-exit notification: post EVERY (current-generation) exit
+				// (clean and non-clean) onto crashCh so the controller's single
+				// FIFO event loop observes the real exit and can drive the SM
+				// transition for the task. Cleanliness (exit_code==0 &&
+				// no waitErr) is carried implicitly in the crashEvent fields
+				// and re-derived by runCrashEventBridge into the LoopEvent's
+				// `clean_exit` body flag.
+				//
+				// Why clean exits must also post (Codex bot #268 P1,
+				// supervisor_controller.go:893): during a controller-driven
+				// restart an OWN daemon that handles SIGTERM and exits 0 has
+				// NO real EvChildExit posted if clean exits are suppressed
+				// here. The StExiting synthesize gate suppresses the
+				// synthetic exit for own-spawned tasks (owned==true), so the
+				// SM would wedge in StExiting with queued_action=respawn
+				// never consumed — daemon killed, never respawned. Posting
+				// the clean exit gives the controller the real EvChildExit it
+				// needs to complete the queued respawn.
+				//
+				// The deliberate-shutdown contract (clean exit on a daemon
+				// that was NOT being restarted must NOT trigger respawn) is
+				// preserved at the CONTROLLER, not here: handleLoopEvent
+				// drops a clean_exit EvChildExit when the task is still in
+				// StRunning (no controller-driven exit in flight), so a plain
+				// `mcphub stop` / external clean kill at steady state never
+				// reaches the StRunning->StBackoffWaiting respawn path.
+				//
+				// The dispatcher channel may be nil for legacy / test callers
+				// — guard with nil-check.
+				//
+				// BLOCKING send (audit P3, 2026-06-20): a real child-exit must
+				// NEVER be dropped. The earlier non-blocking
+				// select{...default: audit+drop} silently lost the respawn
+				// signal whenever 64+ exits were pending on the buffered
+				// crashCh, so the controller's restart-policy SM never saw that
+				// daemon's crash — the daemon stayed dead with only a warn-log
+				// trace. A blocking send is safe here because this is a
+				// PER-CHILD wait goroutine (one per running daemon): blocking it
+				// stalls only this daemon's wait, never the supervisor's event
+				// loop. The sole crashCh drainer, runCrashEventBridge, runs on
+				// its own goroutine and forwards to the event loop (cap 1024)
+				// independently; the loop never waits on a wait goroutine
+				// (c.spawn launches the next wait goroutine and returns;
+				// c.terminate issues a kill syscall and returns), so there is no
+				// dependency cycle and back-pressure always drains. The only
+				// abandon path is supervisor shutdown: once supervisorCtx is
+				// closed the bridge has stopped draining crashCh, so a blocking
+				// send would leak this goroutine — select on supervisorCtx.Done to
+				// abandon cleanly instead. The compatibility wrapper supplies a
+				// background context, preserving the historical pure blocking send.
+				if crashCh != nil {
+					select {
+					case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, StartedAt: startedAt, ExitCode: exitCode, WaitErr: waitErr}:
+					case <-supervisorCtx.Done():
+						// Supervisor is shutting down; the bridge has stopped
+						// draining crashCh. Abandon the send so this wait
+						// goroutine does not leak. Audit-log so the abandoned
+						// exit is still observable (it is not lost to a
+						// restart-policy decision because the supervisor itself
+						// is exiting — there is nothing to respawn into).
+						abandonedEmitErr := events.Emit(api.SupervisorEvent{
+							Severity: "info",
+							Source:   "lifecycle",
+							Event:    "child-exit-abandoned-on-shutdown",
+							TaskName: taskName,
+							Body: map[string]any{
+								"exit_code": exitCode,
+							},
+						})
+						if creators != nil {
+							workerErr = errors.Join(workerErr, abandonedEmitErr)
+						}
+					}
+				}
+			}
+			if creator != nil {
+				if publicationErr := creators.publishAfterCreatorClosure(operation, publishExit); publicationErr != nil {
+					// The real root outcome remains diagnostic data. Its cleanup
+					// failure is visible without claiming resource-closed retirement.
+					severity = "error"
+					body["note"] = "Original creator resource closure is incomplete; tracker retirement and exit-channel publication withheld: " + publicationErr.Error()
+					workerErr = errors.Join(workerErr, publicationErr, emitExit())
+				}
+			} else {
+				publishExit()
 			}
 		}()
 		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {

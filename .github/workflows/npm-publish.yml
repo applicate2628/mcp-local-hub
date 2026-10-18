@@ -1,9 +1,10 @@
-# npm publish — §13 Phase 3-5: cross-build the 6 platform payloads, inject them
-# into the @applicate2628/mcp-local-hub-<plat>-<arch> sub-packages, and publish
-# all 7 packages (6 scoped platform + the `mcp-local-hub` meta) to the public
+# npm publish — build the release's admitted platform payload, inject it
+# into its @applicate2628/mcp-local-hub-<plat>-<arch> sub-package, and publish
+# the platform package before the `mcp-local-hub` meta to the public
 # npm registry with Sigstore provenance. The meta's optionalDependencies pull
-# the matching platform package at `npm install -g mcp-local-hub` time
-# (esbuild/turbo pattern; no postinstall). The installed command is `mcphub`.
+# the matching platform package at `npm install -g mcp-local-hub` time.
+# The installed command is `mcphub`; postinstall only canonicalizes eligible
+# global installs and does not download a payload.
 #
 # Triggers:
 #   - push a tag `vX.Y.Z` (or `vX.Y.Z-beta.N`) → real publish (prereleases go to
@@ -12,10 +13,11 @@
 #     pipeline (build + pack) WITHOUT publishing. Run this once before the first
 #     real tag.
 #
-# Secrets: NPM_TOKEN — an npm "Automation" classic token or a granular
-# "All packages — read and write" token (both bypass the 2FA OTP prompt that a
-# plain "Publish" token triggers in CI). id-token:write enables `npm publish
-# --provenance` (requires a public repo).
+# Authentication: npm Trusted Publishing exchanges this GitHub-hosted job's
+# OIDC identity for short-lived package-bound publish authority. Each of the
+# published packages must separately trust applicate2628/mcp-local-hub and this
+# workflow filename with no environment. Missing or mismatched trust must fail
+# the publish; there is no long-lived publishing-token fallback.
 #
 # SECURITY: untrusted / template values (inputs.version, github.event_name,
 # steps.ver.outputs.version, inputs.dry_run) are routed through `env:` blocks
@@ -40,7 +42,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # npm --provenance (Sigstore attestation)
+  id-token: write   # npm Trusted Publishing OIDC + Sigstore provenance
 
 jobs:
   publish:
@@ -54,8 +56,19 @@ jobs:
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 20
+          node-version: '24.21.0'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify Trusted Publishing toolchain
+        shell: bash
+        run: |
+          if [ "$(node --version)" != "v24.21.0" ]; then
+            echo "::error::expected Node v24.21.0"; exit 1
+          fi
+          if [ "$(npm --version)" != "11.19.0" ]; then
+            echo "::error::expected npm 11.19.0"; exit 1
+          fi
 
       - name: Resolve version
         id: ver
@@ -69,64 +82,108 @@ jobs:
           else
             V="$VERSION_INPUT"
           fi
-          if ! printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::version '$V' is not semver"; exit 1
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version is not semver"; exit 1
           fi
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$V" >> "$GITHUB_OUTPUT"
           echo "Publishing version: $V"
 
       - name: Set package versions + regenerate platform packages
+        id: package_set
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          V="$VERSION"
-          node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          node -e "const v=process.env.VERSION;const f='npm/package.json';const p=require('./'+f);p.version=v;for(const k in p.optionalDependencies)p.optionalDependencies[k]=v;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
           node npm/generate-platform-packages.js
-          node npm/sync-version.js --inject   # push $V into build.sh + versioninfo.json so the binary matches
+          node npm/sync-version.js --inject   # push release version into build.sh + versioninfo.json so the binary matches
+          TARGETS="$(node -e "process.stdout.write(Object.keys(require('./npm/lib/platform-binary').PACKAGE_BY_PLATFORM).join(' '))")"
+          if [ "$TARGETS" != "win32-x64" ]; then
+            echo "::error::this release workflow admits only win32-x64; manifest targets: $TARGETS"; exit 1
+          fi
+          echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
 
-      - name: Cross-build the 6 platform payloads
+      - name: Build the admitted Windows x64 payload
         id: native
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
+          TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           V="$VERSION"
           COMMIT="$(git rev-parse HEAD)"
-          SHORT_COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LD="-s -w -X main.version=$V -X main.commit=$SHORT_COMMIT -X main.buildDate=$DATE"
           printf 'commit=%s\nbuild_date=%s\n' "$COMMIT" "$DATE" >> "$GITHUB_OUTPUT"
-          build() { # $1=GOOS $2=GOARCH $3=dir $4=binname
-            if [ "$1" = "windows" ]; then
-              echo "build $1/$2 through build.ps1 owner -> npm/packages/$3/bin"
-              pwsh -NoProfile -File ./build.ps1 \
-                -WindowsTargetArch "$2" \
-                -OutputDirectory "npm/packages/$3/bin" \
-                -ReleaseVersion "$V" \
-                -ReleaseCommit "$COMMIT" \
-                -ReleaseBuildDate "$DATE" || return $?
-              return
-            fi
-
-            echo "build $1/$2 -> npm/packages/$3/bin/$4"
-            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+          CHECKOUT="$(pwd -P)"
+          # This fresh parent belongs to the runner's existing job-temporary
+          # lifecycle. Go alone creates and verifies the export and snapshot.
+          SOURCE_OWNER="$(mktemp -d "$RUNNER_TEMP/mcphub-publisher-source.XXXXXX")"
+          SOURCE_EXPORT="$SOURCE_OWNER/source"
+          SOURCE_SNAPSHOT="$SOURCE_OWNER/source-snapshot.json"
+          SOURCE_PREPARATION="$SOURCE_OWNER/preparation.json"
+          # sync-version owns these generated build inputs. Frontend assets
+          # are committed source inputs, selected by the same Go capture.
+          go run ./tools/windows-product-validate \
+            --prepare-source "$SOURCE_EXPORT" \
+            --source-checkout "$CHECKOUT" \
+            --source-snapshot-output "$SOURCE_SNAPSHOT" \
+            --expected-commit "$COMMIT" \
+            --generated-source build.sh \
+            --generated-source build.ps1 \
+            --generated-source cmd/mcphub/versioninfo.json > "$SOURCE_PREPARATION"
+          SOURCE_EPOCH="$(SOURCE_PREPARATION="$SOURCE_PREPARATION" EXPECTED_COMMIT="$COMMIT" node <<'NODE'
+          const fs = require('node:fs');
+          const raw = fs.readFileSync(process.env.SOURCE_PREPARATION, 'utf8');
+          const row = JSON.parse(raw);
+          const keys = (value, expected) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+            JSON.stringify(Object.keys(value)) === JSON.stringify(expected);
+          // Go emits this constant compact shape. Exact roundtrip also refuses
+          // duplicate keys and trailing data without a second JSON parser.
+          if (raw !== JSON.stringify(row) + '\n' ||
+              !keys(row, ['schema', 'git_commit', 'git_tree', 'dirty_selected_source', 'source_input']) ||
+              row.schema !== 'windows-publisher-source-preparation-v1' ||
+              typeof row.git_commit !== 'string' || !/^[0-9a-f]{40}$/.test(row.git_commit) ||
+              row.git_commit !== process.env.EXPECTED_COMMIT ||
+              typeof row.git_tree !== 'string' || !/^[0-9a-f]{40}$/.test(row.git_tree) ||
+              typeof row.dirty_selected_source !== 'boolean' ||
+              !keys(row.source_input, ['schema', 'source_snapshot_sha256', 'source_epoch', 'file_count']) ||
+              row.source_input.schema !== 'windows-publisher-source-input-v1' ||
+              typeof row.source_input.source_snapshot_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.source_input.source_snapshot_sha256) ||
+              typeof row.source_input.source_epoch !== 'string' || !/^[0-9a-f]{64}$/.test(row.source_input.source_epoch) ||
+              !Number.isSafeInteger(row.source_input.file_count) || row.source_input.file_count <= 0) {
+            throw new Error('PUBLISHER_SOURCE_TABLE_INVALID: invalid preparation result');
           }
-          build windows amd64 win32-x64    mcphub.exe
-          build windows arm64 win32-arm64  mcphub.exe
-          build darwin  amd64 darwin-x64   mcphub
-          build darwin  arm64 darwin-arm64 mcphub
-          build linux   amd64 linux-x64    mcphub
-          build linux   arm64 linux-arm64  mcphub
-          chmod +x npm/packages/darwin-*/bin/mcphub npm/packages/linux-*/bin/mcphub || true
-          ls -l npm/packages/*/bin/
+          process.stdout.write(row.source_input.source_epoch);
+          NODE
+          )"
+          printf 'source_epoch=%s\n' "$SOURCE_EPOCH" >> "$GITHUB_OUTPUT"
+          for d in $TARGETS; do
+            case "$d" in
+              win32-x64)
+                (
+                  cd "$SOURCE_EXPORT"
+                  pwsh -NoProfile -File ./build.ps1 \
+                    -WindowsTargetArch amd64 \
+                    -OutputDirectory "$CHECKOUT/npm/packages/$d/bin" \
+                    -ReleaseVersion "$V" \
+                    -ReleaseCommit "$COMMIT" \
+                    -ReleaseBuildDate "$DATE" \
+                    -SourceSnapshotPath "$SOURCE_SNAPSHOT"
+                )
+                ;;
+              *) echo "::error::no admitted build route for $d"; exit 1 ;;
+            esac
+            ls -l "npm/packages/$d/bin/"
+          done
 
-      - name: Assert Windows artifact roles, PE subsystems, and product metadata
+      - name: Assert the Windows product identity manifest
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           COMMIT: ${{ steps.native.outputs.commit }}
           BUILD_DATE: ${{ steps.native.outputs.build_date }}
+          SOURCE_EPOCH: ${{ steps.native.outputs.source_epoch }}
+          TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           windows_product_rows() {
             node <<'NODE'
@@ -138,67 +195,81 @@ jobs:
           }
           WINDOWS_PRODUCT_ROWS="$RUNNER_TEMP/mcphub-windows-product-artifacts.tsv"
           windows_product_rows > "$WINDOWS_PRODUCT_ROWS"
-          if [ "$(wc -l < "$WINDOWS_PRODUCT_ROWS")" -ne 2 ]; then
-            echo "::error::Windows artifact contract did not emit exactly two metadata-bearing product rows"; exit 1
+          if [ "$(wc -l < "$WINDOWS_PRODUCT_ROWS")" -ne 1 ]; then
+            echo "::error::Windows artifact contract did not emit exactly one metadata-bearing product row"; exit 1
           fi
-          for target in win32-x64 win32-arm64; do
+          for target in $TARGETS; do
             while IFS=$'\t' read -r role filename; do
               candidate="npm/packages/$target/bin/$filename"
-              go run ./cmd/mcphub-pe-admit "$role" "$candidate" "$VERSION" "$COMMIT" "$BUILD_DATE"
+              observed="$RUNNER_TEMP/$target-windows-product-identity.json"
+              go run ./tools/windows-product-validate \
+                --candidate "$candidate" \
+                --expected-version "$VERSION" \
+                --expected-commit "$COMMIT" \
+                --expected-build-date "$BUILD_DATE" \
+                --expected-source-epoch "$SOURCE_EPOCH" > "$observed"
+              cmp "$observed" "npm/packages/$target/bin/windows-product-identity.json"
               echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
             done < "$WINDOWS_PRODUCT_ROWS"
           done
-
-      - name: Assert built binary version matches package.json
-        shell: bash
-        run: |
-          # The runner is linux/amd64, so only the linux-x64 binary executes here;
-          # all 6 share the same -X main.version ldflag, so one assertion covers all.
-          node npm/sync-version.js --assert-binary npm/packages/linux-x64/bin/mcphub
 
       - name: Verify staged npm package payloads
         shell: bash
         env:
           PACK_EVIDENCE: ${{ runner.temp }}/mcphub-pack-evidence
+          TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           mkdir -p "$PACK_EVIDENCE"
-          for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
+          for d in $TARGETS; do
             (cd "npm/packages/$d" && npm pack --dry-run --json) > "$PACK_EVIDENCE/$d.json"
           done
+          (cd npm && npm pack --dry-run --json) > "$PACK_EVIDENCE/meta.json"
           node <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');
           const root = process.env.PACK_EVIDENCE;
           const contract = require('./windows-product-artifacts.json');
-          const windowsNative = contract.artifacts
-            .filter((artifact) => artifact.npmPayload === true)
-            .map((artifact) => `bin/${artifact.filename}`)
-            .sort();
-          const targets = ['win32-x64','win32-arm64','darwin-x64','darwin-arm64','linux-x64','linux-arm64'];
+          const windowsNative = [
+            ...contract.artifacts
+              .filter((artifact) => artifact.npmPayload === true)
+              .map((artifact) => `bin/${artifact.filename}`),
+            `bin/${contract.identityManifest.filename}`,
+          ].sort();
+          const targets = Object.keys(require('./npm/lib/platform-binary').PACKAGE_BY_PLATFORM);
+          if (targets.join(' ') !== process.env.TARGETS) throw new Error('workflow target projection drift');
           for (const target of targets) {
             const rows = JSON.parse(fs.readFileSync(path.join(root, `${target}.json`), 'utf8'));
             if (!Array.isArray(rows) || rows.length !== 1) throw new Error(`${target}: expected one pack result`);
             const files = rows[0].files.map((f) => f.path);
             const count = (name) => files.filter((p) => p === name).length;
-            if (target.startsWith('win32-')) {
-              const native = files.filter((p) => p.startsWith('bin/')).sort();
-              if (JSON.stringify(native) !== JSON.stringify(windowsNative) || windowsNative.some((p) => count(p) !== 1)) {
-                throw new Error(`${target}: Windows native payload drift: ${files.join(', ')}`);
-              }
-            } else if (count('bin/mcphub') !== 1 || files.some((p) => p.endsWith('.exe') || p.includes('mcphub-pe-admit'))) {
-              throw new Error(`${target}: non-Windows payload drift: ${files.join(', ')}`);
+            const native = files.filter((p) => p.startsWith('bin/')).sort();
+            if (JSON.stringify(native) !== JSON.stringify(windowsNative) || windowsNative.some((p) => count(p) !== 1)) {
+              throw new Error(`${target}: Windows native payload drift: ${files.join(', ')}`);
             }
             process.stdout.write(`${target}: ${files.join(', ')}\n`);
           }
+          const metaRows = JSON.parse(fs.readFileSync(path.join(root, 'meta.json'), 'utf8'));
+          if (!Array.isArray(metaRows) || metaRows.length !== 1) throw new Error('meta: expected one pack result');
+          const metaFiles = metaRows[0].files.map((f) => f.path).sort();
+          const expectedMeta = ['README.md', 'bin/cli.js', 'lib/platform-binary.js', 'package.json', 'scripts/postinstall.js'];
+          if (JSON.stringify(metaFiles) !== JSON.stringify(expectedMeta)) {
+            throw new Error(`meta payload drift: ${metaFiles.join(', ')}`);
+          }
+          const meta = require('./npm/package.json');
+          const deps = meta.optionalDependencies;
+          if (JSON.stringify(deps) !== JSON.stringify({'@applicate2628/mcp-local-hub-win32-x64': meta.version})) {
+            throw new Error(`meta optional dependencies drift: ${JSON.stringify(deps)}`);
+          }
+          process.stdout.write(`meta: ${metaFiles.join(', ')}\n`);
           NODE
 
       - name: Publish platform packages, then the meta
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
           VERSION: ${{ steps.ver.outputs.version }}
+          TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           V="$VERSION"
           DRY=""
@@ -209,7 +280,7 @@ jobs:
           TAG=""
           case "$V" in *-*) TAG="--tag beta";; esac   # prerelease -> beta dist-tag, never latest
           # Platform packages FIRST so the meta's optionalDependencies resolve.
-          for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
+          for d in $TARGETS; do
             echo "::group::publish @applicate2628/mcp-local-hub-$d"
             ( cd "npm/packages/$d" && npm publish --provenance --access public $TAG $DRY )
             echo "::endgroup::"

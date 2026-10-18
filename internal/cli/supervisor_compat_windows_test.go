@@ -152,7 +152,10 @@ func TestEnsureSupervisorControlCompatibility_GenerationChangeUnderFenceNeverRea
 	supervisorControlExpectedPortsFn = func(string) ([]int, error) { return nil, nil }
 	supervisorControlVerifyPortsFn = func([]int, time.Duration) error { return nil }
 	supervisorControlForceKillOwnerFn = func(*v5UpgradeDeps, api.SupervisorLockOwner) error { kills++; return nil }
-	supervisorControlStartFn = func(*v5UpgradeDeps, string) error { starts++; return nil }
+	supervisorControlStartFn = func(*v5UpgradeDeps, string) (SupervisorLaunch, error) {
+		starts++
+		return &fixtureSupervisorLaunch{}, nil
+	}
 	supervisorControlGenerationCheckFn = func(context.Context, api.SupervisorLockOwner) error {
 		t.Fatal("changed under-fence owner reached generation check")
 		return nil
@@ -234,7 +237,10 @@ func TestReplaceLegacySupervisorForControl_StuckLegacyLockUsesOneExactForceFallb
 		}
 		return nil
 	}
-	supervisorControlStartFn = func(*v5UpgradeDeps, string) error { starts++; return nil }
+	supervisorControlStartFn = func(*v5UpgradeDeps, string) (SupervisorLaunch, error) {
+		starts++
+		return &fixtureSupervisorLaunch{}, nil
+	}
 	supervisorControlWaitReadyFn = func(context.Context, *v5UpgradeDeps, time.Duration, string, UpgradeCandidateV1) error {
 		readies++
 		return nil
@@ -301,7 +307,10 @@ func TestReplaceLegacySupervisorForControl_LockFailureCurrentSuccessorReadyAccep
 	supervisorControlWaitLockReleasedFn = func(context.Context, *v5UpgradeDeps, time.Duration) error {
 		return errors.New("legacy lock still held")
 	}
-	supervisorControlStartFn = func(*v5UpgradeDeps, string) error { starts++; return nil }
+	supervisorControlStartFn = func(*v5UpgradeDeps, string) (SupervisorLaunch, error) {
+		starts++
+		return &fixtureSupervisorLaunch{}, nil
+	}
 	supervisorControlWaitReadyFn = func(context.Context, *v5UpgradeDeps, time.Duration, string, UpgradeCandidateV1) error {
 		readies++
 		return nil
@@ -376,7 +385,10 @@ func TestReplaceLegacySupervisorForControl_FenceSerializesAndCompletesAfterCalle
 		settled++
 		return nil
 	}
-	supervisorControlStartFn = func(_ *v5UpgradeDeps, _ string) error { settled++; return nil }
+	supervisorControlStartFn = func(_ *v5UpgradeDeps, _ string) (SupervisorLaunch, error) {
+		settled++
+		return &fixtureSupervisorLaunch{}, nil
+	}
 	supervisorControlWaitReadyFn = func(ctx context.Context, _ *v5UpgradeDeps, _ time.Duration, _ string, _ UpgradeCandidateV1) error {
 		if ctx.Err() != nil {
 			t.Fatalf("successor readiness inherited cancelled caller context: %v", ctx.Err())

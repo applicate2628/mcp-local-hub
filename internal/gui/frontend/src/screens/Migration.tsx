@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
+  deleteDismiss,
   fetchOrThrow,
   getDeAdoptEligible,
   getDeAdoptRecoverable,
-  postAdopt,
-  postAdoptPlan,
   postDeAdopt,
   postDeAdoptPlan,
   postDismiss,
-  type APIError,
-  type AdoptPlan,
   type DeAdoptEligible,
   type DeAdoptPlan,
   type DeAdoptReport,
 } from "../api";
 import { InfoTip } from "../components/InfoTip";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
 import { LoadingState } from "../components/LoadingState";
 import { useAutoScan } from "../hooks/useAutoScan";
@@ -22,6 +20,11 @@ import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import { pushToast } from "../lib/toast-store";
 import type { ClientCapability, ScanEntry, ScanResult } from "../types";
+import {
+  AdoptionFlowModal,
+  adoptionActionKey as adoptActionKey,
+  useAdoptionFlow,
+} from "../components/AdoptionFlow";
 
 // DismissedResponse mirrors the /api/dismissed handler shape from
 // internal/gui/dismiss.go. Declared inline here rather than in
@@ -78,13 +81,10 @@ export function DiscoveryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [dismissCandidate, setDismissCandidate] = useState<ScanEntry | null>(null);
   const [scanReloadToken, setScanReloadToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
-  const [adoptPlan, setAdoptPlan] = useState<AdoptPlan | null>(null);
-  const [adoptConsent, setAdoptConsent] = useState(false);
-  const [adoptConfirmBusy, setAdoptConfirmBusy] = useState(false);
-  const [adoptModalError, setAdoptModalError] = useState<string | null>(null);
   const [deAdoptEligibility, setDeAdoptEligibility] = useState<Record<string, DeAdoptEligible>>({});
   const [deAdoptEligibilityErrors, setDeAdoptEligibilityErrors] = useState<Record<string, string>>({});
   const [recoverableDeAdoptNames, setRecoverableDeAdoptNames] = useState<string[]>([]);
@@ -101,6 +101,10 @@ export function DiscoveryScreen() {
   // publish state so a slow older response cannot replace fresher results.
   const latestScanRequestRef = useRef(0);
   const didInitSelection = useRef(false);
+  const adoption = useAdoptionFlow({
+    onSuccess: () => setScanReloadToken((n) => n + 1),
+    onPlanError: (nextError) => setActionError(nextError.message),
+  });
 
   // loadScan is the single fetch path for this screen. It is driven by
   // three sources, all calling the SAME closure so the rendered baseline
@@ -112,7 +116,7 @@ export function DiscoveryScreen() {
   // Discovery has NO edit/dirty state, so auto-refresh is never paused and
   // a refetch can never clobber pending work — it just re-derives groups
   // and prunes the `selected` set against the fresh can-migrate names.
-  const loadScan = useCallback(async () => {
+  const loadScan = useCallback(async (markScanAccepted: () => void) => {
     const requestId = latestScanRequestRef.current + 1;
     latestScanRequestRef.current = requestId;
     const isLatest = () => latestScanRequestRef.current === requestId;
@@ -185,6 +189,7 @@ export function DiscoveryScreen() {
         ...validRecoverableNames,
       ])]
         .filter((name) => MANIFEST_NAME_REGEX.test(name));
+      markScanAccepted();
       for (const name of scannedNames) {
         void getDeAdoptEligibleWithTimeout(name).then(
           (eligibility) => {
@@ -217,15 +222,15 @@ export function DiscoveryScreen() {
   // Auto-refresh: 10s poll while mounted, paused while the tab is hidden,
   // immediate refresh on becoming visible again. Discovery is never
   // edit-paused (no dirty state) so `paused` is a constant false.
-  const { rescan, agoSeconds } = useAutoScan(loadScan, false);
+  const { rescan, markScanAccepted, agoSeconds } = useAutoScan(loadScan, false);
 
   // scanReloadToken-driven refetch for local actions + SSE. useAutoScan
   // already issues the initial mount fetch, so this effect skips token 0
   // to avoid a redundant duplicate fetch on first paint.
   useEffect(() => {
     if (scanReloadToken === 0) return;
-    void loadScan();
-  }, [scanReloadToken, loadScan]);
+    void loadScan(markScanAccepted);
+  }, [scanReloadToken, loadScan, markScanAccepted]);
 
   // SSE refresh: any out-of-band change (another GUI tab migrated, CLI
   // ran on this machine, user hand-edited .claude.json) should refresh
@@ -357,64 +362,24 @@ export function DiscoveryScreen() {
     }
   }
 
+  async function runRestore(entry: ScanEntry) {
+    setActionError(null);
+    try {
+      await deleteDismiss(entry.name);
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      setActionError(`Restore ${entry.name}: ${(err as Error).message}`);
+    }
+  }
+
   async function runAdoptPlan(entry: ScanEntry, sourceClient?: string) {
     const client = sourceClient || firstClientFor(entry);
     if (!client) {
       setActionError(`Adopt ${entry.name}: no stdio client found`);
       return;
     }
-    const busyKey = adoptActionKey(entry.name);
-    setActionBusy(busyKey);
     setActionError(null);
-    setAdoptModalError(null);
-    try {
-      const plan = await postAdoptPlan({ entry: entry.name, client });
-      setAdoptPlan(plan);
-      setAdoptConsent(false);
-    } catch (err) {
-      setActionError(`Adopt ${entry.name}: ${(err as Error).message}`);
-    } finally {
-      setActionBusy(null);
-    }
-  }
-
-  async function confirmAdopt() {
-    if (!adoptPlan) return;
-    setAdoptConfirmBusy(true);
-    setAdoptModalError(null);
-    const req = {
-      entry: adoptPlan.EntryName,
-      client: adoptPlan.SourceClient,
-      clients: adoptPlan.AdoptClients,
-      name: adoptPlan.ManifestName,
-      port: adoptPlan.Port,
-    };
-    try {
-      await postAdopt({
-        ...req,
-        symlink_consent: adoptConsent ? adoptPlan.symlink_targets : [],
-      });
-      pushToast("success", `Adopted ${adoptPlan.ManifestName} into hub.`);
-      setAdoptPlan(null);
-      setAdoptConsent(false);
-      setScanReloadToken((n) => n + 1);
-    } catch (err) {
-      const apiErr = err as APIError;
-      if (apiErr.code === "SYMLINK_CONSENT_REQUIRED") {
-        setAdoptModalError("Symlink consent is required before adopting this entry.");
-        try {
-          const refreshed = await postAdoptPlan(req);
-          setAdoptPlan(refreshed);
-          setAdoptConsent(false);
-        } catch (refreshErr) {
-          setAdoptModalError((refreshErr as Error).message);
-        }
-        return;
-      }
-      setAdoptModalError((err as Error).message);
-    } finally {
-      setAdoptConfirmBusy(false);
-    }
+    await adoption.start({ entry: entry.name, client });
   }
 
   async function runDeAdoptPlan(server: string) {
@@ -479,6 +444,16 @@ export function DiscoveryScreen() {
   const migrationEntries = groups.canMigrate.filter(
     (entry) => deAdoptEligibility[entry.name]?.adopt_owned === false,
   );
+  const migrationProjectionPending = groups.canMigrate.some(
+    (entry) =>
+      MANIFEST_NAME_REGEX.test(entry.name) &&
+      deAdoptEligibility[entry.name] == null &&
+      deAdoptEligibilityErrors[entry.name] == null,
+  );
+  const migrationProjectionError =
+    groups.canMigrate
+      .map((entry) => deAdoptEligibilityErrors[entry.name])
+      .find((nextError) => nextError != null) ?? null;
   const displayedNames = new Set(
     [
       ...groups.viaHub,
@@ -517,7 +492,8 @@ export function DiscoveryScreen() {
     return (
       <section class="screen migration discovery">
         <h1>Discovery</h1>
-        <p class="error">{error}</p>
+        <p class="error" role="alert">{error}</p>
+        <button type="button" class="btn" onClick={rescan}>Retry</button>
       </section>
     );
   }
@@ -539,10 +515,30 @@ export function DiscoveryScreen() {
     groups.perSession.length +
     groups.dismissed.length +
     recoveryEntries.length;
+  // The authoritative scan settles before the auxiliary de-adopt eligibility
+  // reads. can-migrate rows stay fail-closed until that classification lands;
+  // when they are the only scan rows, retain Loading instead of committing the
+  // global "no servers" state between the scan and its row projection.
+  if (totalRows === 0 && migrationProjectionPending) {
+    return (
+      <section class="screen migration discovery">
+        <h1>Discovery</h1>
+        <LoadingState label="Loading discovery results" />
+      </section>
+    );
+  }
+  if (totalRows === 0 && migrationProjectionError != null) {
+    return (
+      <section class="screen migration discovery">
+        <h1>Discovery</h1>
+        <p class="error" role="alert">{migrationProjectionError}</p>
+      </section>
+    );
+  }
   const deAdoptRowProps: DeAdoptRowProps = {
     deAdoptEligibility,
     deAdoptEligibilityErrors,
-    actionBusy,
+    actionBusy: actionBusy ?? adoption.busyKey,
     onDeAdopt: runDeAdoptPlan,
   };
 
@@ -587,29 +583,33 @@ export function DiscoveryScreen() {
             clientCapabilities={scan.client_capabilities ?? {}}
             {...deAdoptRowProps}
             onAdopt={runAdoptPlan}
-            onDismiss={runDismiss}
+            onDismiss={setDismissCandidate}
           />
           <PerSessionGroup entries={groups.perSession} {...deAdoptRowProps} />
           <DismissedGroup
             entries={groups.dismissed}
             {...deAdoptRowProps}
+            onRestore={runRestore}
           />
         </div>
       )}
-      <AdoptConfirmModal
-        plan={adoptPlan}
-        consent={adoptConsent}
-        busy={adoptConfirmBusy}
-        error={adoptModalError}
-        onConsent={setAdoptConsent}
-        onCancel={() => {
-          if (adoptConfirmBusy) return;
-          setAdoptPlan(null);
-          setAdoptConsent(false);
-          setAdoptModalError(null);
-        }}
-        onConfirm={confirmAdopt}
-      />
+      <AdoptionFlowModal flow={adoption} />
+      {dismissCandidate && (
+        <ConfirmModal
+          open
+          title={`Dismiss ${dismissCandidate.name}?`}
+          body={<p>The entry will move to the Dismissed group.</p>}
+          confirmLabel="Dismiss"
+          danger
+          onConfirm={async () => {
+            const candidate = dismissCandidate;
+            setDismissCandidate(null);
+            await runDismiss(candidate);
+          }}
+          onCancel={() => setDismissCandidate(null)}
+          testId="dismiss-confirm-modal"
+        />
+      )}
       <DeAdoptConfirmModal
         plan={deAdoptPlan}
         report={deAdoptReport}
@@ -989,9 +989,12 @@ function PerSessionGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
 // DismissedGroup is a COLLAPSED, expandable section so dismissed entries
 // are visible-on-demand rather than dropped. STOP hiding dismissed
 // entirely (prior behavior): the operator can expand to see what was
-// parked. Re-instating a dismissed entry is a future affordance; for now
-// expansion is read-only visibility.
-function DismissedGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
+// parked. Restore re-enters the existing authoritative reload path; this
+// component never removes a row optimistically.
+function DismissedGroup(props: DeAdoptRowProps & {
+  entries: ScanEntry[];
+  onRestore: (entry: ScanEntry) => void;
+}) {
   if (props.entries.length === 0) {
     // Render nothing when there are no dismissed entries — an empty
     // <details> would be noise.
@@ -1002,7 +1005,7 @@ function DismissedGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
       <summary>
         <strong>Dismissed ({props.entries.length})</strong>
         {" — "}
-        entries you hid from the live list; expand to review
+        entries you hid from the live list; expand to review or restore
       </summary>
       <ul class="group-rows">
         {props.entries.map((e) => (
@@ -1011,6 +1014,14 @@ function DismissedGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
             <span class="badge badge-dismissed">
               {e.status === "external" ? "External remote" : "Unknown stdio"}
             </span>
+            <button
+              type="button"
+              class="restore btn btn-secondary"
+              data-action="restore-dismissed"
+              onClick={() => props.onRestore(e)}
+            >
+              Restore
+            </button>
             <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
         ))}
@@ -1043,10 +1054,6 @@ function firstAdoptClientFor(
     }
   }
   return "";
-}
-
-function adoptActionKey(name: string): string {
-  return `adopt:${name}`;
 }
 
 function deAdoptActionKey(name: string): string {
@@ -1199,122 +1206,6 @@ function ReportNames(props: { title: string; names: string[] }) {
         </ul>
       )}
     </section>
-  );
-}
-
-function AdoptConfirmModal(props: {
-  plan: AdoptPlan | null;
-  consent: boolean;
-  busy: boolean;
-  error: string | null;
-  onConsent: (next: boolean) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const { plan } = props;
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (plan && !dialog.open) {
-      dialog.showModal();
-    } else if (!plan && dialog.open) {
-      dialog.close();
-    }
-  }, [plan]);
-  if (!plan) return null;
-
-  const symlinkTargets = plan.symlink_targets ?? [];
-  const needsSymlinkConsent = symlinkTargets.length > 0;
-  return (
-    <dialog
-      ref={dialogRef}
-      data-testid="adopt-confirm-modal"
-      onCancel={(ev) => {
-        ev.preventDefault();
-        props.onCancel();
-      }}
-    >
-      <h2>Adopt into hub</h2>
-      <div class="adopt-plan-summary">
-        <p>Manifest: {plan.ManifestName}</p>
-        <p>Port: {plan.Port}</p>
-        <section>
-          <h3>Clients to repoint</h3>
-          <ul>
-            {plan.AdoptClients.map((client) => (
-              <li key={client}>{client}</li>
-            ))}
-          </ul>
-        </section>
-        {(plan.AlsoPresent.length > 0 ||
-          plan.SignatureMismatches.length > 0 ||
-          plan.DisabledSameName.length > 0) && (
-          <section>
-            <h3>Excluded same-name clients</h3>
-            <ul>
-              {plan.AlsoPresent.map((client) => (
-                <li key={`also-${client}`}>{client}: also present, not selected</li>
-              ))}
-              {plan.SignatureMismatches.map((mismatch) => (
-                <li key={`mismatch-${mismatch.Client}`}>
-                  {mismatch.Client}: {mismatch.Reason}
-                </li>
-              ))}
-              {plan.DisabledSameName.map((disabled) => (
-                <li key={`disabled-${disabled.Client}`}>{disabled.Client}: disabled</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {plan.SecretRoutedKeys.length > 0 && (
-          <section>
-            <h3>Secret-routed keys</h3>
-            <ul>
-              {plan.SecretRoutedKeys.map((key) => (
-                <li key={key}>{key}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {needsSymlinkConsent && (
-          <section>
-            <h3>Symlink write consent</h3>
-            <ul>
-              {symlinkTargets.map((target) => (
-                <li key={`${target.client}:${target.resolved_path}`}>
-                  {target.client} config is a symlink -&gt; {target.resolved_path}; adopting
-                  writes through the resolved target.
-                </li>
-              ))}
-            </ul>
-            <label class="adopt-symlink-consent">
-              <input
-                type="checkbox"
-                checked={props.consent}
-                onChange={(ev) => props.onConsent((ev.currentTarget as HTMLInputElement).checked)}
-              />
-              <span>I understand and consent to writing through the resolved target.</span>
-            </label>
-          </section>
-        )}
-      </div>
-      {props.error && <p class="error">{props.error}</p>}
-      <menu>
-        <button type="button" onClick={props.onCancel} disabled={props.busy}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="primary"
-          data-action="confirm-adopt"
-          disabled={props.busy || (needsSymlinkConsent && !props.consent)}
-          onClick={props.onConfirm}
-        >
-          {props.busy ? "Adopting..." : "Adopt into hub"}
-        </button>
-      </menu>
-    </dialog>
   );
 }
 

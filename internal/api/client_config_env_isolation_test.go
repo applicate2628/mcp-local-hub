@@ -33,7 +33,11 @@ import (
 // LOCALAPPDATA, below sandboxHome.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
-	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(sandboxHome))
+	restore, err := clients.ApplyClientConfigSandboxEnvironment(sandboxHome)
+	if err != nil {
+		t.Fatalf("prepare client config sandbox: %v", err)
+	}
+	t.Cleanup(restore)
 }
 
 // sandboxClientConfigHome is the form for a fixture that already owns its temp

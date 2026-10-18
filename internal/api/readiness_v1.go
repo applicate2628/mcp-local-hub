@@ -295,6 +295,10 @@ func reduceDaemonReadinessV1(observation DaemonReadinessObservationV1) (DaemonRe
 		failure := failures[0]
 		daemon.Failure = &failure
 		daemon.Stage = failure.Stage
+		if failure.Retryable && !observation.DeadlineExceeded {
+			daemon.ServiceState = ServiceStateStarting
+			return daemon, failures
+		}
 		if failure.Stage == ReadinessStageIntentAccess || failure.Stage == ReadinessStageSupervisorBootstrap || failure.Stage == ReadinessStageSupervisorIPC || failure.Stage == ReadinessStageTaskIntent || failure.Stage == ReadinessStageWrapperStart {
 			daemon.ServiceState = ServiceStateFailed
 		} else {

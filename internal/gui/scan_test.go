@@ -4,8 +4,10 @@ package gui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,10 +17,11 @@ import (
 // TestWriteAPIErrorRedacted_HidesRawPathKeepsCode pins the G16 P2 contract
 // for the central redaction helper: the response body must NOT echo the
 // raw err.Error() (which can embed the operator's absolute home path —
-// C:\Users\<name>\... — revealing the AD username on corp hosts), but MUST
+// modeled below with a temporary config path), while the response must
 // still carry the stable, code-keyed signal the frontend switches on.
 func TestWriteAPIErrorRedacted_HidesRawPathKeepsCode(t *testing.T) {
-	leaky := errors.New("open C:\\Users\\alice\\AppData\\Local\\mcp-local-hub\\supervisor-intent.json: permission denied")
+	privatePath := filepath.Join(t.TempDir(), "client", "config.json")
+	leaky := fmt.Errorf("open %s: permission denied", privatePath)
 	rec := httptest.NewRecorder()
 	writeAPIErrorRedacted(rec, leaky, http.StatusInternalServerError, "STATE_READ_FAILED", "/api/test")
 
@@ -26,7 +29,7 @@ func TestWriteAPIErrorRedacted_HidesRawPathKeepsCode(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 	body := rec.Body.String()
-	if strings.Contains(body, "C:\\Users\\alice") || strings.Contains(body, "permission denied") {
+	if strings.Contains(body, privatePath) || strings.Contains(body, "permission denied") {
 		t.Errorf("response body leaks filesystem path or raw error: %q", body)
 	}
 	var out struct{ Error, Code string }
@@ -47,6 +50,34 @@ type fakeScanner struct {
 }
 
 func (f fakeScanner) Scan() (*api.ScanResult, error) { return f.result, f.err }
+
+func TestScan_RedactsScannerFailure(t *testing.T) {
+	s := NewServer(Config{})
+	s.scanner = fakeScanner{err: errors.New("open %USERPROFILE%\\AppData\\Local\\mcp-local-hub\\config.json: permission denied")}
+	req := httptest.NewRequest(http.MethodGet, "/api/scan", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("content type = %q, want application/json", got)
+	}
+	var out struct{ Error, Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if out.Code != "SCAN_FAILED" {
+		t.Errorf("code = %q, want SCAN_FAILED", out.Code)
+	}
+	if out.Error != "internal error" {
+		t.Errorf("error = %q, want opaque internal error", out.Error)
+	}
+	if strings.Contains(rec.Body.String(), "%USERPROFILE%") || strings.Contains(rec.Body.String(), "permission denied") {
+		t.Errorf("response body leaks scanner path or OS diagnostic: %q", rec.Body.String())
+	}
+}
 
 func TestScan_ReturnsJSONWrappingAPIResult(t *testing.T) {
 	r := &api.ScanResult{}

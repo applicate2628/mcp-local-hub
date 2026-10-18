@@ -172,6 +172,9 @@ func buildForgetPlanUnderLease(manifestName string) (*ForgetAdoptProvenancePlan,
 	plan := &ForgetAdoptProvenancePlan{ManifestName: manifestName}
 
 	rec, found, err := ReadAdoptProvenance(manifestName)
+	if rec != nil && rec.ProjectService != nil {
+		return nil, nil, errGraphifyServiceOperationRequired
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("adopt-provenance forget %q: read store: %w", manifestName, err)
 	}

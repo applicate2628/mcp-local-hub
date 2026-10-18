@@ -9,6 +9,24 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+func TestGUIExitReasonObservedRetainsFirstSinkFailure(t *testing.T) {
+	ResetExitReasonDedupForTest()
+	t.Cleanup(ResetExitReasonDedupForTest)
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("controlled fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore := api.SetDaemonStateRootForTest(path)
+	t.Cleanup(restore)
+	first := EmitExitReasonEventObserved(GUIExitReasonTrayQuit, nil)
+	if first == nil {
+		t.Fatal("sink failure was hidden")
+	}
+	if second := EmitExitReasonEventObserved(GUIExitReasonTrayQuitAndStopAll, nil); second != first {
+		t.Fatalf("first outcome replaced: %v / %v", first, second)
+	}
+}
+
 // TestEmitExitReasonEvent_WritesBoundedRow proves EmitExitReasonEvent writes
 // the expected gui-exit-reason row (event name + machine-filterable reason
 // field) to supervisor-events.log, redirected to a temp state dir via the

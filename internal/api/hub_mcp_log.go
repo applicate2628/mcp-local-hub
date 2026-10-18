@@ -34,6 +34,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,6 +97,35 @@ var hubMcpLogAppendMu sync.Mutex
 // FIRST so envelope assignment is authoritative. This guarantees an
 // observability envelope a misbehaving emit site cannot rewrite.
 func LogHubMcpEvent(level, event string, fields map[string]any) error {
+	line, err := marshalHubMcpLogEvent(level, event, fields)
+	if err != nil {
+		return err
+	}
+	return appendHubMcpLogLine(line)
+}
+
+// LogHubMcpEventRequired receives all actual delivery and resource-closure
+// failures from the same append owner. It keeps the logger's original blocking
+// lock semantics; no caller cancellation can skip required delivery cleanup.
+// Ordinary LogHubMcpEvent callers retain their best-effort projection.
+func LogHubMcpEventRequired(level, event string, fields map[string]any) error {
+	return logHubMcpEventRequiredWithEffects(level, event, fields, hubMcpLogProductionEffects())
+}
+
+func logHubMcpEventRequiredWithEffects(level, event string, fields map[string]any, effects hubMcpLogEffects) error {
+	line, err := effects.marshal(level, event, fields)
+	if err != nil {
+		return err
+	}
+	var delivery hubMcpLogDelivery
+	primary := appendHubMcpLogLineCore(line, nil, effects, context.Background(), &delivery)
+	delivery.add(primary)
+	if delivery.err == nil {
+		return nil
+	}
+	return &delivery
+}
+func marshalHubMcpLogEvent(level, event string, fields map[string]any) ([]byte, error) {
 	if level == "" {
 		level = "info"
 	}
@@ -110,10 +140,10 @@ func LogHubMcpEvent(level, event string, fields map[string]any) error {
 	rec["event"] = event
 	raw, err := json.Marshal(rec)
 	if err != nil {
-		return fmt.Errorf("marshal hub-mcp event: %w", err)
+		return nil, fmt.Errorf("marshal hub-mcp event: %w", err)
 	}
 	redacted := RedactToken(string(raw))
-	return appendHubMcpLogLine([]byte(redacted))
+	return []byte(redacted), nil
 }
 
 // wrapHubMcpFileError wraps a syscall error with token-redacted path
@@ -235,28 +265,7 @@ func RecentHubMcpEvents(n int) ([]map[string]any, error) {
 // is at-or-above the ceiling, rotate to .1 (overwriting any existing
 // .1) before appending.
 func appendHubMcpLogLine(line []byte) error {
-	hubMcpLogAppendMu.Lock()
-	defer hubMcpLogAppendMu.Unlock()
-
-	dir, err := DaemonStateDir()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, hubMcpLogFileLeaf)
-	lockPath := filepath.Join(dir, hubMcpLogLockFileLeaf)
-
-	lk := flock.New(lockPath)
-	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("hub-mcp log flock: %w", err)
-	}
-	defer func() { _ = lk.Unlock() }()
-
-	if size, ok := hubMcpLogFileSize(path); ok && size >= HubMcpLogRotateSizeBytes {
-		if rotErr := rotateHubMcpLogFile(path); rotErr != nil {
-			return rotErr
-		}
-	}
-	return appendHubMcpLogLineUnlocked(path, line)
+	return appendHubMcpLogLineCore(line, nil, hubMcpLogProductionEffects(), nil, nil)
 }
 
 // hubMcpLogFileSize returns the size of path. Missing-file → (0,false)
@@ -274,14 +283,7 @@ func hubMcpLogFileSize(path string) (int64, bool) {
 // any existing .1 backup. Returns the rename error verbatim on
 // failure. Caller must already hold the hub-mcp.log flock.
 func rotateHubMcpLogFile(path string) error {
-	target := path + hubMcpLogRotatedSuffix
-	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove existing rotated %s: %w", target, err)
-	}
-	if err := os.Rename(path, target); err != nil {
-		return fmt.Errorf("rotate %s -> %s: %w", path, target, err)
-	}
-	return nil
+	return rotateHubMcpLogFileCore(path, nil, hubMcpLogProductionEffects(), nil)
 }
 
 // appendHubMcpLogLineUnlocked writes line + "\n" to path. Caller MUST
@@ -289,23 +291,31 @@ func rotateHubMcpLogFile(path string) error {
 // O_APPEND|O_CREATE|0600 + a defensive Chmod (POSIX umask drift
 // defense; Windows no-op).
 func appendHubMcpLogLineUnlocked(path string, line []byte) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
-	if err != nil {
-		return fmt.Errorf("open hub-mcp log %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
+	return appendHubMcpLogLineUnlockedCore(path, line, nil, hubMcpLogProductionEffects(), nil, nil)
+}
 
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod hub-mcp log %s: %w", path, err)
+func hubMcpLogProductionEffects() hubMcpLogEffects {
+	return hubMcpLogEffects{
+		now: time.Now, marshal: marshalHubMcpLogEvent, policyValidate: func(ctx context.Context, p *StateReadPolicyObservation) error {
+			if p == nil {
+				return errors.New("original completed audit policy required")
+			}
+			return p.Validate(ctx, p.view.EnvIdentitySHA256)
+		},
+		parent: acquireHubMcpAuditParent, legacyDir: DaemonStateDir, mutexTryLock: hubMcpLogAppendMu.TryLock, mutexLock: hubMcpLogAppendMu.Lock, mutexUnlock: hubMcpLogAppendMu.Unlock,
+		lock: func(path string) hubMcpLogLock { return flock.New(path) }, stat: func(path string) (int64, error) {
+			st, err := os.Stat(path)
+			if err != nil {
+				return 0, err
+			}
+			return st.Size(), nil
+		}, remove: os.Remove, rename: os.Rename,
+		open: func(path string) (hubMcpLogAppendFile, error) {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
+			if f == nil {
+				return nil, err
+			}
+			return f, err
+		}, chmod: func(path string) error { return os.Chmod(path, 0o600) },
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("write hub-mcp log %s: %w", path, err)
-	}
-	// Sync to match intent_audit.go:630 append durability — avoids losing
-	// the last appended line on power-cut/crash mid-rotation. Best-effort:
-	// the log path is observability-only, so sync errors are swallowed
-	// here (intent_audit.go, by contrast, returns its sync error because
-	// its audit trail is load-bearing).
-	_ = f.Sync()
-	return nil
 }

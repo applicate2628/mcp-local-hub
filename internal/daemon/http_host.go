@@ -37,7 +37,8 @@ import (
 // official clients emit one-shot single-line data: frames for
 // request/response traffic.
 type HTTPHost struct {
-	cfg HTTPHostConfig
+	cfg      HTTPHostConfig
+	prepared *httpHostPreparedState
 
 	cmd          *exec.Cmd
 	httpClient   *http.Client  // request-response POSTs (60 s timeout)
@@ -119,9 +120,16 @@ func maxHealthTimeoutUnder(outer time.Duration) time.Duration {
 
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
-	Command string            // subprocess executable (e.g. "uvx")
-	Args    []string          // subprocess args
-	Env     map[string]string // appended to os.Environ()
+	PreparedAdmission HTTPHostPreparedAdmission
+	// Original cleanup end is supplied before a prepared start. It is used
+	// for partial startup; successful service Stop owns its one clipped 5s leg.
+	PreparedStartupCleanupDeadline time.Time
+	// Only the unpublished qualification composition supplies this closed
+	// environment. Ordinary daemon env/overlay precedence remains unchanged.
+	PreparedClosedEnvironment []string
+	Command                   string            // subprocess executable (e.g. "uvx")
+	Args                      []string          // subprocess args
+	Env                       map[string]string // appended to os.Environ()
 	// UnsetEnv lists env keys to REMOVE from inherited os.Environ() (skipped
 	// optional secrets → truly absent, not present-but-empty; Codex #377).
 	UnsetEnv     []string
@@ -227,6 +235,10 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 // become reachable. Returns an error if the upstream does not respond
 // within HealthTimeout.
 func (h *HTTPHost) Start(ctx context.Context) error {
+	if h.cfg.PreparedAdmission != nil {
+		_, err := h.StartObserved(ctx)
+		return err
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.started {
@@ -392,6 +404,10 @@ func (h *HTTPHost) ExitState() *os.ProcessState {
 // Stop kills the subprocess and waits briefly for the watcher to
 // observe exit. Mirrors StdioHost.Stop semantics.
 func (h *HTTPHost) Stop() error {
+	if h.cfg.PreparedAdmission != nil {
+		_, err := h.StopObserved(context.Background())
+		return err
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.stopLocked()

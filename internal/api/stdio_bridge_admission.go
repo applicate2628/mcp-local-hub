@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/config"
@@ -31,16 +33,42 @@ type FrozenStdioBridgeAdmissionRequest struct {
 	StartDeadline time.Duration
 }
 
-// frozenStdioBridgeAdmissionFn is a narrow test seam around the only
-// process-owning admission operation. Production always runs the contained
+// frozenStdioBridgeAdmissionFn is a narrow test override around the only
+// process-owning admission operation. Production leaves it nil and runs the contained
 // initialize -> tools/list probe below. Nil certifies successful admission and
 // complete provisional cleanup; an error carries no cleanup proof unless the
 // process owner explicitly returns stdioBridgeAdmissionReapedError.
-var frozenStdioBridgeAdmissionFn = admitFrozenStdioBridgeRequests
+var frozenStdioBridgeAdmissionFn func(context.Context, []FrozenStdioBridgeAdmissionRequest) error
 
 // startStdioBridgeProvisionalFn permits owner-level startup failures in tests
 // while retaining the admission probe and its cleanup-proof classification.
 var startStdioBridgeProvisionalFn = process.StartProvisional
+
+var settleStdioBridgeProvisionalFn = (*process.ProvisionalProcess).TerminateAndWait
+
+type stdioBridgeAdmissionOwner struct {
+	task       string
+	request    FrozenStdioBridgeAdmissionRequest
+	child      *process.ProvisionalProcess
+	active     bool
+	settling   bool
+	cause      error
+	cleanupErr error
+}
+
+type stdioBridgeAdmissionCustody struct {
+	mu      sync.Mutex
+	closed  bool
+	entries map[string]*stdioBridgeAdmissionOwner
+	changed chan struct{}
+}
+
+func (c *stdioBridgeAdmissionCustody) notifyLocked() {
+	if c.changed != nil {
+		close(c.changed)
+	}
+	c.changed = make(chan struct{})
+}
 
 // stdioBridgeAdmissionReapedError preserves the admission failure while
 // certifying that the owner created no process or TerminateAndWait completed.
@@ -50,9 +78,188 @@ type stdioBridgeAdmissionReapedError struct{ cause error }
 func (e *stdioBridgeAdmissionReapedError) Error() string { return e.cause.Error() }
 func (e *stdioBridgeAdmissionReapedError) Unwrap() error { return e.cause }
 
+// Unsettled errors retain the API lifetime owner through the creator-process
+// boundary. Settle/Close on that same handle actively own cleanup; formatting
+// an error never substitutes for the lifetime owner.
+type stdioBridgeAdmissionUnsettledError struct {
+	cause error
+	owner *API
+}
+
+func (e *stdioBridgeAdmissionUnsettledError) Error() string {
+	return "stdio bridge admission: unsettled original-child custody: " + e.cause.Error()
+}
+func (e *stdioBridgeAdmissionUnsettledError) Unwrap() error { return e.cause }
+
+func (a *API) unsettledStdioBridgeAdmission(cause error) error {
+	return &stdioBridgeAdmissionUnsettledError{cause: cause, owner: a}
+}
+
+// SettleStdioBridgeAdmissions retries only original-child cleanup, never an
+// install or a new spawn. A refusal retains the identical child/reservation.
+func (a *API) SettleStdioBridgeAdmissions(ctx context.Context) error {
+	return a.settleStdioBridgeAdmissions(ctx, nil)
+}
+
+// CloseStdioBridgeAdmissions is terminal: it closes admission atomically before
+// settling, including starters that already reserved but have not returned.
+func (a *API) CloseStdioBridgeAdmissions(ctx context.Context) error {
+	if a == nil {
+		return errors.New("stdio bridge admission: nil API lifetime owner")
+	}
+	c := &a.stdioBridgeAdmissions
+	c.mu.Lock()
+	c.closed = true
+	c.notifyLocked()
+	c.mu.Unlock()
+	return a.settleStdioBridgeAdmissions(ctx, nil)
+}
+
+func (a *API) settleStdioBridgeAdmissions(ctx context.Context, tasks map[string]bool) error {
+	if a == nil {
+		return errors.New("stdio bridge admission: nil API lifetime owner")
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, provisionalStdioBridgeCleanupDeadline)
+	defer cancel()
+	deadline, _ := cleanupCtx.Deadline()
+	attempted := make(map[*stdioBridgeAdmissionOwner]bool)
+	var refusals []error
+	c := &a.stdioBridgeAdmissions
+	for {
+		c.mu.Lock()
+		var keys []string
+		for key := range c.entries {
+			if tasks == nil || tasks[key] {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		var candidate *stdioBridgeAdmissionOwner
+		pending := false
+		var pendingOwners []*stdioBridgeAdmissionOwner
+		for _, key := range keys {
+			entry := c.entries[key]
+			if entry.active || entry.settling {
+				pending = true
+				pendingOwners = append(pendingOwners, entry)
+				continue
+			}
+			if !attempted[entry] {
+				candidate = entry
+				entry.settling = true
+				break
+			}
+		}
+		changed := c.changed
+		c.mu.Unlock()
+		if candidate == nil {
+			if !pending {
+				return errors.Join(refusals...)
+			}
+			select {
+			case <-changed:
+				continue
+			case <-cleanupCtx.Done():
+				causes := append([]error(nil), refusals...)
+				c.mu.Lock()
+				for _, entry := range pendingOwners {
+					causes = append(causes, entry.cause, entry.cleanupErr)
+				}
+				c.mu.Unlock()
+				return a.unsettledStdioBridgeAdmission(errors.Join(append(causes, cleanupCtx.Err())...))
+			}
+		}
+		attempted[candidate] = true
+		remaining := time.Until(deadline).Truncate(time.Millisecond)
+		var cleanupErr error
+		if remaining <= 0 || cleanupCtx.Err() != nil {
+			cleanupErr = cleanupCtx.Err()
+			if cleanupErr == nil {
+				cleanupErr = context.DeadlineExceeded
+			}
+		} else if candidate.child != nil {
+			cleanupErr = settleStdioBridgeProvisionalFn(candidate.child, remaining)
+		}
+		c.mu.Lock()
+		candidate.settling = false
+		candidate.cleanupErr = cleanupErr
+		if cleanupErr == nil {
+			delete(c.entries, candidate.task)
+		} else {
+			refusals = append(refusals, a.unsettledStdioBridgeAdmission(errors.Join(candidate.cause, fmt.Errorf("reap original task %s: %w", candidate.task, cleanupErr))))
+		}
+		c.notifyLocked()
+		c.mu.Unlock()
+	}
+}
+
+func (a *API) reserveStdioBridgeAdmissions(ctx context.Context, requests []FrozenStdioBridgeAdmissionRequest) ([]*stdioBridgeAdmissionOwner, error) {
+	tasks := make(map[string]bool, len(requests))
+	for _, request := range requests {
+		if err := validateFrozenStdioBridgeAdmissionRequest(request); err != nil {
+			return nil, err
+		}
+		task := supervisorTaskNameForManifestDaemon(request.ManifestName, request.DaemonName)
+		if tasks[task] {
+			return nil, fmt.Errorf("stdio bridge admission: duplicate logical task %s", task)
+		}
+		tasks[task] = true
+	}
+	// Cleanup is independent of a canceled probe context and precedes provider
+	// starts. One aggregate budget covers every prior selected task.
+	if err := a.settleStdioBridgeAdmissions(context.Background(), tasks); err != nil {
+		return nil, err
+	}
+	c := &a.stdioBridgeAdmissions
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errors.New("stdio bridge admission: API admissions are closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for task := range tasks {
+		if entry := c.entries[task]; entry != nil {
+			return nil, a.unsettledStdioBridgeAdmission(errors.Join(entry.cause, entry.cleanupErr, fmt.Errorf("logical task %s is already reserved", task)))
+		}
+	}
+	if c.entries == nil {
+		c.entries = make(map[string]*stdioBridgeAdmissionOwner)
+	}
+	owners := make([]*stdioBridgeAdmissionOwner, 0, len(requests))
+	for _, request := range requests {
+		request.Args = append([]string(nil), request.Args...)
+		entry := &stdioBridgeAdmissionOwner{task: supervisorTaskNameForManifestDaemon(request.ManifestName, request.DaemonName), request: request, active: true}
+		c.entries[entry.task] = entry
+		owners = append(owners, entry)
+	}
+	c.notifyLocked()
+	return owners, nil
+}
+
+func (a *API) releaseStdioBridgeReservations(owners []*stdioBridgeAdmissionOwner) {
+	c := &a.stdioBridgeAdmissions
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, entry := range owners {
+		if c.entries[entry.task] == entry && entry.child == nil {
+			delete(c.entries, entry.task)
+		}
+	}
+	c.notifyLocked()
+}
+
+func (a *API) stdioBridgeAdmissionClosed() bool {
+	c := &a.stdioBridgeAdmissions
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // admitFrozenStdioBridgeBeforeMutation is the fail-before-advertise gate for
 // selected global stdio-bridge daemons. Dry-runs never call it.
-func admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts) error {
+func (a *API) admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts) error {
 	if opts.DryRun || m == nil || m.Kind != config.KindGlobal || m.Transport != config.TransportStdioBridge {
 		return nil
 	}
@@ -63,10 +270,29 @@ func admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *config.ServerM
 	if len(requests) == 0 {
 		return nil
 	}
+	if opts.requireExistingStdioBridge {
+		for _, request := range requests {
+			existing, err := existingFrozenStdioBridgeGeneration(request)
+			if err != nil {
+				return err
+			}
+			if !existing {
+				return ErrSupervisorCapabilityIncomplete
+			}
+		}
+	}
+	owners, err := a.reserveStdioBridgeAdmissions(ctx, requests)
+	if err != nil {
+		return err
+	}
+	defer a.releaseStdioBridgeReservations(owners)
 	// Pending provider recovery checks durable history, so the start barrier
 	// must precede handing control to the process-owning probe. Ordinary servers
 	// keep their existing admission path without provider phase mutations.
 	rec, found, err := ReadAdoptProvenance(m.Name)
+	if rec != nil && rec.ProjectService != nil {
+		return errGraphifyServiceOperationRequired
+	}
 	if err != nil {
 		return err
 	}
@@ -80,7 +306,16 @@ func admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *config.ServerM
 			startedHere = startedHere || started
 		}
 	}
-	err = frozenStdioBridgeAdmissionFn(ctx, requests)
+	if frozenStdioBridgeAdmissionFn != nil {
+		err = frozenStdioBridgeAdmissionFn(ctx, requests)
+	} else {
+		for i, request := range requests {
+			err = a.admitFrozenStdioBridgeRequest(ctx, request, owners[i])
+			if err != nil {
+				break
+			}
+		}
+	}
 	// Require proof for the complete returned outcome, not a sentinel found
 	// inside a join that can also contain unconfirmed cleanup. A successful
 	// probe's nil result certifies reaping by the admission owner's contract.
@@ -125,16 +360,10 @@ func frozenStdioBridgeAdmissionRequests(m *config.ServerManifest, plan *Plan, da
 	return requests, nil
 }
 
-func admitFrozenStdioBridgeRequests(ctx context.Context, requests []FrozenStdioBridgeAdmissionRequest) error {
-	for _, request := range requests {
-		if err := admitFrozenStdioBridgeRequest(ctx, request); err != nil {
-			return err
-		}
+func (a *API) admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridgeAdmissionRequest, owner *stdioBridgeAdmissionOwner) (err error) {
+	if a.stdioBridgeAdmissionClosed() {
+		return errors.New("stdio bridge admission: API admissions are closed")
 	}
-	return nil
-}
-
-func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridgeAdmissionRequest) (err error) {
 	if err := validateFrozenStdioBridgeAdmissionRequest(request); err != nil {
 		return err
 	}
@@ -152,20 +381,37 @@ func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridg
 	defer cancel()
 	cmd := exec.Command(request.Command, request.Args...)
 	cmd.Dir = request.WorkingDir
-	child, err := startStdioBridgeProvisionalFn(cmd)
-	if err != nil {
-		startErr := fmt.Errorf("stdio bridge admission: start provisional %s/%s: %w", request.ManifestName, request.DaemonName, err)
+	child, startErr := startStdioBridgeProvisionalFn(cmd)
+	if startErr != nil && child == nil {
+		cause := fmt.Errorf("stdio bridge admission: start provisional %s/%s: %w", request.ManifestName, request.DaemonName, startErr)
 		// Classify the whole owner outcome before wrapping it. A matching cause
 		// nested in a join cannot rule out an unknown process or cleanup failure.
-		if noProcess, ok := err.(*process.ProvisionalNoProcessError); ok && noProcess != nil {
-			return &stdioBridgeAdmissionReapedError{cause: startErr}
+		if noProcess, ok := startErr.(*process.ProvisionalNoProcessError); ok && noProcess != nil {
+			return &stdioBridgeAdmissionReapedError{cause: cause}
 		}
-		return startErr
+		return cause
 	}
+	if child == nil {
+		return errors.New("stdio bridge admission: provisional starter returned no owner or error")
+	}
+	c := &a.stdioBridgeAdmissions
+	c.mu.Lock()
+	owner.child = child
+	closed := c.closed
+	c.notifyLocked()
+	c.mu.Unlock()
 	defer func() {
-		cleanupErr := child.TerminateAndWait(provisionalStdioBridgeCleanupDeadline)
+		c.mu.Lock()
+		if c.closed && err == nil {
+			err = errors.New("stdio bridge admission: API closed before admission completed")
+		}
+		owner.cause = err
+		owner.active = false
+		c.notifyLocked()
+		c.mu.Unlock()
+		cleanupErr := a.settleStdioBridgeAdmissions(context.Background(), map[string]bool{owner.task: true})
 		if cleanupErr != nil {
-			err = errors.Join(err, fmt.Errorf("stdio bridge admission: reap provisional %s/%s: %w", request.ManifestName, request.DaemonName, cleanupErr))
+			err = errors.Join(err, cleanupErr)
 			return
 		}
 		if portInUse(request.Port) {
@@ -176,6 +422,12 @@ func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridg
 			err = &stdioBridgeAdmissionReapedError{cause: err}
 		}
 	}()
+	if closed {
+		return errors.Join(startErr, errors.New("stdio bridge admission: API closed during provisional acquisition"))
+	}
+	if startErr != nil {
+		return fmt.Errorf("stdio bridge admission: start provisional %s/%s: %w", request.ManifestName, request.DaemonName, startErr)
+	}
 	if err := waitFrozenStdioBridgePort(probeCtx, request.Port); err != nil {
 		return fmt.Errorf("stdio bridge admission: provisional %s/%s did not bind port %d: %w", request.ManifestName, request.DaemonName, request.Port, err)
 	}
@@ -261,7 +513,7 @@ func probeFrozenStdioBridgePort(ctx context.Context, request FrozenStdioBridgeAd
 		return &MCPReadinessError{Result: probe.Readiness}
 	}
 	return &MCPReadinessError{Result: MCPReadinessResult{
-		SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageInitialize,
+		SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageHost,
 		FailureID: readinesswire.FailureReadinessHostUnavailable,
 	}}
 }

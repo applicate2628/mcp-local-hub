@@ -122,7 +122,7 @@ func defaultPruneIdleThreshold() time.Duration {
 	}
 	v, ok := vals[api.PruneIdleHoursSettingKey]
 	if !ok {
-		return 0 // not set → the registry Default ("0") = off
+		return 0 // absent from resolved settings; fail closed
 	}
 	h, err := strconv.Atoi(v)
 	if err != nil || h <= 0 {
@@ -300,11 +300,16 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		}
 		pruned++
 		body := map[string]any{"workspace": path, "reason": reason}
+		level := "info"
 		if report != nil {
 			body["lsp_removed"] = len(report.LSPRemoved)
 			body["serena_removed"] = report.SerenaRemoved
+			if len(report.Warnings) > 0 {
+				body["warnings"] = report.Warnings
+				level = "warn"
+			}
 		}
-		_ = api.LogHubMcpEvent("info", "workspace-pruned", body)
+		_ = api.LogHubMcpEvent(level, "workspace-pruned", body)
 	}
 
 	// Drop ENOENT counters for workspaces that vanished from the registry this

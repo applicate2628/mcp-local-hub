@@ -842,6 +842,26 @@ func legacySerenaAuthorityJoinInput(t *testing.T) SerenaWorkspaceProjectionInput
 	return in
 }
 
+func legacyStoppedSerenaAuthorityJoinInput(t *testing.T) SerenaWorkspaceProjectionInputV1 {
+	t.Helper()
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"mcp-local-hub-serena-project-key","server":"serena","daemon":"project-key","workspace":"/workspace/project","port":9150,"state":"Stopped"}]}`)
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decode stopped legacy supervisor status: %v", err)
+	}
+	if len(rows) != 1 || rows[0].State != "Stopped" || rows[0].PID != 0 || rows[0].ReadinessObservation != nil {
+		t.Fatalf("stopped legacy status rows = %+v, want stopped PID-zero row with absent readiness observation", rows)
+	}
+	readiness, err := NewAPI().AssessReadinessFromStatusRowsWithOptions(context.Background(), rows, nil, ReadinessStatusRowsOptionsV1{})
+	if err != nil {
+		t.Fatalf("reduce stopped legacy supervisor status readiness: %v", err)
+	}
+	in := serenaAuthorityJoinHealthyInput()
+	in.StatusRows = rows
+	in.Readiness = readiness
+	return in
+}
+
 func TestSerenaAuthorityJoin_LegacyAbsentObservationSnapshotRetainsUnready(t *testing.T) {
 	in := legacySerenaAuthorityJoinInput(t)
 	out, err := ProjectSerenaWorkspaceSnapshot(in)
@@ -871,6 +891,106 @@ func TestSerenaAuthorityJoin_LegacyAbsentObservationRequireSettledFailsGeneratio
 	}
 	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
 		t.Fatalf("strict legacy mismatch returned partial output: %+v", out)
+	}
+}
+
+func TestSerenaAuthorityJoin_LegacyAbsentObservationStoppedModes(t *testing.T) {
+	for _, mode := range []SerenaWorkspaceProjectionMode{SerenaWorkspaceProjectionModeSnapshot, SerenaWorkspaceProjectionModeRequireSettled} {
+		t.Run(string(mode), func(t *testing.T) {
+			in := legacyStoppedSerenaAuthorityJoinInput(t)
+			in.Mode = mode
+			out, err := ProjectSerenaWorkspaceSnapshot(in)
+			if mode == SerenaWorkspaceProjectionModeRequireSettled {
+				var unready *SerenaWorkspaceProxyUnreadyError
+				if !errors.As(err, &unready) || unready.ServiceState != ServiceStateStopped || unready.Stage != ReadinessStageWrapperStart || !unready.Settled {
+					t.Fatalf("require-settled error = %T (%v), want stopped proxy-unready", err, err)
+				}
+				if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+					t.Fatalf("require-settled stopped output = %+v, want no partial output", out)
+				}
+				return
+			}
+			if err != nil || len(out.Workspaces) != 1 || len(out.StatusRows) != 1 {
+				t.Fatalf("snapshot stopped output = %+v err=%v", out, err)
+			}
+			workspace, status := out.Workspaces[0], out.StatusRows[0]
+			if workspace.ServiceState != ServiceStateStopped || workspace.ReadinessStage != ReadinessStageWrapperStart || !workspace.ReadinessSettled || workspace.ClientEndpoint != "" ||
+				status.ServiceState != ServiceStateStopped || status.ReadinessStage != ReadinessStageWrapperStart || !status.ReadinessSettled || status.ReadinessObservation != nil {
+				t.Fatalf("snapshot stopped workspace/status = %+v / %+v", workspace, status)
+			}
+		})
+	}
+}
+
+func TestSerenaAuthorityJoin_LegacyStoppedNilObservationRejectsContradictions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*SerenaWorkspaceProjectionInputV1)
+	}{
+		{"raw state", func(in *SerenaWorkspaceProjectionInputV1) { in.StatusRows[0].State = "Unknown" }},
+		{"raw positive PID", func(in *SerenaWorkspaceProjectionInputV1) { in.StatusRows[0].PID = 17 }},
+		{"raw negative PID", func(in *SerenaWorkspaceProjectionInputV1) { in.StatusRows[0].PID = -1 }},
+		{"reduced process state", func(in *SerenaWorkspaceProjectionInputV1) { in.Readiness.Daemons[0].ProcessState = "Running" }},
+		{"reduced PID", func(in *SerenaWorkspaceProjectionInputV1) { in.Readiness.Daemons[0].PID = 17 }},
+		{"reduced generation", func(in *SerenaWorkspaceProjectionInputV1) { in.Readiness.Daemons[0].PIDGeneration = 1 }},
+		{"reduced service state", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.Readiness.Daemons[0].ServiceState = ServiceStateStarting
+		}},
+		{"reduced stage", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.Readiness.Daemons[0].Stage = ReadinessStageUpstreamListener
+		}},
+		{"reduced unsettled", func(in *SerenaWorkspaceProjectionInputV1) { in.Readiness.Daemons[0].Settled = false }},
+		{"reduced failure", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.Readiness.Daemons[0].Failure = &ReadinessFailureV1{Stage: ReadinessStageWrapperStart, FailureID: "forced"}
+		}},
+	} {
+		for _, mode := range []SerenaWorkspaceProjectionMode{SerenaWorkspaceProjectionModeSnapshot, SerenaWorkspaceProjectionModeRequireSettled} {
+			t.Run(tc.name+"/"+string(mode), func(t *testing.T) {
+				in := legacyStoppedSerenaAuthorityJoinInput(t)
+				in.Mode = mode
+				tc.mutate(&in)
+				out, err := ProjectSerenaWorkspaceSnapshot(in)
+				var mismatch *SerenaWorkspaceStateMismatchError
+				if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchGeneration || len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+					t.Fatalf("contradiction result = %+v err=%T(%v), want generation mismatch without output", out, err, err)
+				}
+			})
+		}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		state string
+		pid   int
+	}{
+		{name: "unknown", state: "Unknown"},
+		{name: "positive PID", state: "Stopped", pid: 17},
+		{name: "negative PID", state: "Stopped", pid: -1},
+	} {
+		for _, mode := range []SerenaWorkspaceProjectionMode{SerenaWorkspaceProjectionModeSnapshot, SerenaWorkspaceProjectionModeRequireSettled} {
+			t.Run("reduced_"+tc.name+"/"+string(mode), func(t *testing.T) {
+				in := legacyStoppedSerenaAuthorityJoinInput(t)
+				in.StatusRows[0].State = tc.state
+				in.StatusRows[0].PID = tc.pid
+				readiness, err := NewAPI().AssessReadinessFromStatusRowsWithOptions(context.Background(), in.StatusRows, nil, ReadinessStatusRowsOptionsV1{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				in.Readiness = readiness
+				in.Mode = mode
+				out, err := ProjectSerenaWorkspaceSnapshot(in)
+				if mode == SerenaWorkspaceProjectionModeSnapshot {
+					if err != nil || len(out.Workspaces) != 1 || out.Workspaces[0].ServiceState != ServiceStateStarting || out.Workspaces[0].ReadinessStage != ReadinessStageWrapperStart || out.Workspaces[0].ReadinessSettled {
+						t.Fatalf("actual reducer snapshot = %+v err=%v, want starting legacy projection", out, err)
+					}
+					return
+				}
+				var mismatch *SerenaWorkspaceStateMismatchError
+				if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchGeneration || len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+					t.Fatalf("actual reducer strict result = %+v err=%T(%v), want generation mismatch without output", out, err, err)
+				}
+			})
+		}
 	}
 }
 
@@ -1122,6 +1242,57 @@ func TestStatusInternal_LegacySerenaWireReturnsUnreadyRow(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].ServiceState != ServiceStateStarting || rows[0].ReadinessStage != ReadinessStageWrapperStart || rows[0].ReadinessSettled || rows[0].ReadinessObservation != nil {
 		t.Fatalf("legacy status rows = %+v, want one Starting/wrapper_start/unsettled row", rows)
+	}
+}
+
+func TestStatusInternal_LegacySerenaStoppedWireReturnsStoppedRow(t *testing.T) {
+	in := legacyStoppedSerenaAuthorityJoinInput(t)
+	stateDir := t.TempDir()
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	previousRegistryPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+	registry := NewRegistry(registryPath)
+	registry.Workspaces = append([]WorkspaceEntry(nil), in.RegistryRows...)
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &in.SupervisorIntent); err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	previousDial := statusInternalDialFn
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		dials++
+		return cloneDaemonStatusRows(in.StatusRows), nil
+	}
+	t.Cleanup(func() { statusInternalDialFn = previousDial })
+	previousEndpoint := serenaWorkspaceProjectionEndpointFn
+	serenaWorkspaceProjectionEndpointFn = func(*API, context.Context) (SerenaClientEndpoint, error) { return in.Endpoint, nil }
+	t.Cleanup(func() { serenaWorkspaceProjectionEndpointFn = previousEndpoint })
+
+	rows, err := NewAPI().statusInternal(context.Background())
+	if err != nil {
+		t.Fatalf("statusInternal stopped legacy wire: %v", err)
+	}
+	if dials != 1 || len(rows) != 1 {
+		t.Fatalf("status IPC dials=%d rows=%+v, want one held row", dials, rows)
+	}
+	wire, err := json.Marshal(rows[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(wire, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["state"] != "Stopped" || fields["service_state"] != string(ServiceStateStopped) || fields["readiness_stage"] != string(ReadinessStageWrapperStart) || fields["readiness_settled"] != true {
+		t.Fatalf("public stopped legacy wire = %s", wire)
 	}
 }
 

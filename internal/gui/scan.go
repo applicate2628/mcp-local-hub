@@ -18,7 +18,7 @@ func registerScanRoutes(s *Server) {
 		}
 		result, err := s.scanner.Scan()
 		if err != nil {
-			writeAPIError(w, err, http.StatusInternalServerError, "SCAN_FAILED")
+			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "SCAN_FAILED", "/api/scan")
 			return
 		}
 		result = sanitizeScanResult(result)

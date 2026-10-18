@@ -7,6 +7,7 @@ package api
 // ReconcileResponse, return.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -90,10 +91,21 @@ func DialSupervisorIPCReconcileTarget(ctx context.Context, apply bool, target Re
 // DialSupervisorIPCStopBatch runs the versioned terminal-stop transaction and
 // refuses any supervisor that cannot echo the exact command and settlements.
 func DialSupervisorIPCStopBatch(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+	return dialSupervisorIPCStopBatchExpected(ctx, command, nil)
+}
+
+func DialSupervisorIPCStopBatchExpected(ctx context.Context, command StopBatchCommandV1, expected SupervisorLockOwner) (StopBatchResultV1, error) {
+	if expected.PID <= 0 || expected.StartedAt == "" {
+		return StopBatchResultV1{}, ErrSupervisorControlGenerationChanged
+	}
+	return dialSupervisorIPCStopBatchExpected(ctx, command, &expected)
+}
+
+func dialSupervisorIPCStopBatchExpected(ctx context.Context, command StopBatchCommandV1, expected *SupervisorLockOwner) (StopBatchResultV1, error) {
 	if command.ProtocolVersion != 1 || command.BatchID == "" || len(command.Targets) == 0 || command.IntentGeneration == 0 || command.SupervisorIntent == nil || command.UnifiedStops == nil {
 		return StopBatchResultV1{}, errors.New("supervisor stop_batch: invalid v1 command")
 	}
-	response, err := dialSupervisorIPCReconcile(ctx, true, nil, &command)
+	response, err := dialSupervisorIPCReconcile(ctx, true, nil, &command, expected)
 	if err != nil {
 		return StopBatchResultV1{}, err
 	}
@@ -103,7 +115,7 @@ func DialSupervisorIPCStopBatch(ctx context.Context, command StopBatchCommandV1)
 	return *response.StopBatch, nil
 }
 
-func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1) (ReconcileResponse, error) {
+func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1, expected ...*SupervisorLockOwner) (ReconcileResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -120,7 +132,7 @@ func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *Reconci
 	if err != nil {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: resolve state dir: %w", err)
 	}
-	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, target, stopBatch)
+	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, target, stopBatch, expected...)
 }
 
 // dialSupervisorIPCReconcileFromStateDir is the state-dir-injected
@@ -134,7 +146,7 @@ func dialSupervisorIPCReconcileFromStateDirWithTarget(ctx context.Context, state
 	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, target, nil)
 }
 
-func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stateDir string, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1) (ReconcileResponse, error) {
+func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stateDir string, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1, expected ...*SupervisorLockOwner) (out ReconcileResponse, resultErr error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	owner, err := ReadSupervisorLockOwner(lockPath)
 	if err != nil {
@@ -144,6 +156,16 @@ func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stat
 		}
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: read %s.owner.json: %w", lockPath, err)
 	}
+	var bound *SupervisorLockOwner
+	if len(expected) > 1 {
+		return ReconcileResponse{}, ErrSupervisorControlGenerationChanged
+	}
+	if len(expected) == 1 {
+		bound = expected[0]
+	}
+	if bound != nil && owner != *bound {
+		return ReconcileResponse{}, ErrSupervisorControlGenerationChanged
+	}
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
 	if err != nil {
@@ -152,7 +174,11 @@ func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stat
 		}
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial %s: %w", address, err)
 	}
-	defer conn.Close()
+	defer func() {
+		closeErr := conn.Close()
+		resultErr = errors.Join(resultErr, closeErr)
+
+	}()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
@@ -175,6 +201,18 @@ func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stat
 		Cmd:     "reconcile",
 		Args:    args,
 	}
+	if bound != nil {
+		// The HELLO was checked against this expected generation on this very
+		// connection. Recheck its durable owner immediately before send; never
+		// authenticate on one connection then signal through a replacement.
+		current, err := ReadSupervisorLockOwner(lockPath)
+		if err != nil {
+			return ReconcileResponse{}, err
+		}
+		if current != *bound {
+			return ReconcileResponse{}, ErrSupervisorControlGenerationChanged
+		}
+	}
 	if err := writeSupervisorIPCRequest(conn, req); err != nil {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: send request: %w", err)
 	}
@@ -191,18 +229,19 @@ func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stat
 	if resp.ID != req.ID {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: response id mismatch: got %d want %d", resp.ID, req.ID)
 	}
+	var responseErr error
 	if resp.Error != nil {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: %s: %s", resp.Error.Code, resp.Error.Message)
+		responseErr = fmt.Errorf("supervisor IPC reconcile: %s: %s", resp.Error.Code, resp.Error.Message)
+	} else if !resp.OK {
+		responseErr = fmt.Errorf("supervisor IPC reconcile: non-OK response without error")
 	}
-	if !resp.OK {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: non-OK response without error")
+	// Correlation and HELLO have already been received. Decode any available
+	// typed result independently of remote failure; later errors never erase it.
+	if len(resp.Result) == 0 || bytes.Equal(bytes.TrimSpace(resp.Result), []byte("null")) {
+		return out, errors.Join(responseErr, fmt.Errorf("supervisor IPC reconcile: empty result body"))
 	}
-	if len(resp.Result) == 0 {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: empty result body")
+	if decodeErr := json.Unmarshal(resp.Result, &out); decodeErr != nil {
+		return out, errors.Join(responseErr, fmt.Errorf("supervisor IPC reconcile: decode result: %w", decodeErr))
 	}
-	var out ReconcileResponse
-	if err := json.Unmarshal(resp.Result, &out); err != nil {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: decode result: %w", err)
-	}
-	return out, nil
+	return out, responseErr
 }

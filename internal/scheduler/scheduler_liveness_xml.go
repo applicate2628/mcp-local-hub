@@ -20,20 +20,13 @@ func livenessXMLEscape(s string) string {
 	return out.String()
 }
 
-// WindowsOwnedEntrypointPath maps a canonical product executable to the exact
-// same-directory windowless adapter. It is idempotent so readback/status code
-// can apply the resolver to either admitted member without inventing a third
-// path or consulting PATH.
-func WindowsOwnedEntrypointPath(canonicalExe string) string {
+// WindowsLegacyEntrypointPath resolves only the retired adapter member needed
+// to inventory and migrate an admitted legacy pair. It is never a launch
+// target for newly written tasks.
+func WindowsLegacyEntrypointPath(canonicalExe string) string {
 	const adapter = "mcphub-windowless.exe"
 	if i := strings.LastIndexAny(canonicalExe, `\/`); i >= 0 {
-		if strings.EqualFold(canonicalExe[i+1:], adapter) {
-			return canonicalExe
-		}
 		return canonicalExe[:i+1] + adapter
-	}
-	if strings.EqualFold(canonicalExe, adapter) {
-		return canonicalExe
 	}
 	return adapter
 }
@@ -71,7 +64,7 @@ func WindowsOwnedEntrypointPath(canonicalExe string) string {
 // The scheduled-task install side fails through scheduler.New() returning
 // "not implemented" on Linux/macOS.
 func BuildLivenessXML(canonicalExe, workingDir, principalSID, logonAccount string) string {
-	ownedEntrypoint := WindowsOwnedEntrypointPath(canonicalExe)
+	ownedEntrypoint := canonicalExe
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-16"?>`)
 	buf.WriteString("\n")

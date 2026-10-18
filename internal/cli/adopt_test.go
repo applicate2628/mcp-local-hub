@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -333,7 +334,7 @@ args = ["version"]
 		t.Fatalf("seed codex config: %v", err)
 	}
 
-	cmd := newAdoptCmdWithDeps(api.NewAPI, cliCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+	cmd := newAdoptCmdWithDeps(api.NewAPI, cliCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -351,6 +352,39 @@ args = ["version"]
 		}
 	}
 	assertAdoptTestInstallFixture(t, fixture)
+}
+
+func TestAdoptCLIActionBudgetReachesOriginalPlanner(t *testing.T) {
+	stop := errors.New("fixture planner stop before native work")
+	var captured context.Context
+	cmd := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
+		captured = opts.Context
+		return nil, stop
+	})
+	cmd.SetArgs([]string{"entry", "--client", "codex-cli", "--action-timeout", "1m"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); !errors.Is(err, stop) {
+		t.Fatal("planner cause was replaced")
+	}
+	if captured == nil {
+		t.Fatal("real command did not pass the action context")
+	}
+	if _, ok := captured.Deadline(); !ok || !errors.Is(captured.Err(), context.Canceled) {
+		t.Fatal("action deadline or command-owned cancellation was lost")
+	}
+
+	captured = nil
+	cmd = newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
+		captured = opts.Context
+		return nil, stop
+	})
+	cmd.SetArgs([]string{"entry", "--client", "codex-cli", "--action-timeout="})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); !errors.Is(err, api.ErrCodexSharedStdioActionBudgetInvalid) || captured != nil {
+		t.Fatal("explicit blank flag was omitted or reached the planner")
+	}
 }
 
 func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
@@ -377,7 +411,7 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
 	if err := os.WriteFile(codexPath, []byte("[mcp_servers."+entry+"]\ncommand = \"go\"\nargs = [\"version\"]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9344", "--yes"})

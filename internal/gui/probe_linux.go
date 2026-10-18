@@ -4,6 +4,7 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,13 @@ import (
 
 	"mcp-local-hub/internal/process"
 )
+
+// A pidfd pins the original process and can observe its exit, but waitid cannot
+// acquire an exit status for an unrelated GUI owned by another process. Do not
+// turn readable/dead pidfd state into an invented successful status.
+func waitRetainedProcess(_ context.Context, _ uintptr) (uint32, error) {
+	return 0, ErrProcessExitStatusUnavailable
+}
 
 // clkTck returns CLK_TCK (kernel clock-ticks-per-second), used to convert
 // /proc/<pid>/stat jiffy fields to wall-clock durations. The derivation

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -438,7 +439,12 @@ func TestMain(m *testing.M) {
 	restoreStdioAdmission := api.SetFrozenStdioBridgeAdmissionForTest(func(context.Context, []api.FrozenStdioBridgeAdmissionRequest) error { return nil })
 	// Redirect every client-adapter path input before installing the audit. The
 	// descriptor is shared with API and GUI package test setup.
-	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	restoreClientEnv, err := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	if err != nil {
+		restoreStdioAdmission()
+		restore()
+		panic(errors.Join(err, apitest.RemoveTestMainRoot(tmp)))
+	}
 
 	// Default subprocess state-env safety net (see doc comment above).
 	// MCPHUB_STATE_DIR_OVERRIDE is the authoritative redirect: it routes the

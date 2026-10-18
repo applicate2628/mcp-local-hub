@@ -18,6 +18,9 @@ import (
 // leaves an empty phase; retry re-proves the same facts instead of trusting
 // historical absence.
 func advanceProviderPreInstallManagedRemoved(manifestName string, expected *AdoptProvenanceRecord) (*AdoptProvenanceRecord, error) {
+	if expected != nil && expected.ProjectService != nil {
+		return nil, errGraphifyServiceOperationRequired
+	}
 	if expected == nil || expected.ProviderSource == nil || expected.ProviderSource.DeAdoptPhase != "" {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -37,6 +40,7 @@ func advanceProviderPreInstallManagedRemoved(manifestName string, expected *Adop
 				continue
 			}
 			if !deAdoptProvenanceIdentityMatches(expected, record) ||
+				record.ProjectService != nil ||
 				record.OperationState != AdoptOperationStateDeAdopting ||
 				record.ProviderSource == nil ||
 				*record.ProviderSource != *expected.ProviderSource ||

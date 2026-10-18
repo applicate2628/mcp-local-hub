@@ -137,3 +137,27 @@ func TestFailureV1WrongContentTypeIsClassifiedWithoutReadingStreamingBody(t *tes
 		t.Fatalf("decode = %#v", got)
 	}
 }
+
+func TestIsRetryableFailureIDUsesRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{FailureReadinessChildExited, true},
+		{FailureReadinessHostUnavailable, true},
+		{FailureReadinessTimeout, true},
+		{FailureBackingProtocolUnsupported, false},
+		{FailureChildProtocolMismatch, false},
+		{FailureCapabilityDrift, false},
+		{FailureToolCatalogDrift, false},
+		{FailureIDCorrelationFailed, false},
+		{FailureChildResponseInvalid, false},
+		{FailureWireInvalid, false},
+		{"", false},
+		{"UNKNOWN", false},
+	} {
+		if got := IsRetryableFailureID(tc.id); got != tc.want {
+			t.Fatalf("IsRetryableFailureID(%q)=%v want=%v", tc.id, got, tc.want)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -135,7 +136,7 @@ func TestAdoptReceiverRejectsParseableManifestHashDrift(t *testing.T) {
 	if err := os.WriteFile(manifestPath, append(raw, []byte("\n# parseable drift\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err = verifyAdoptReceivers(NewAPI(), plan, rec)
+	err = verifyAdoptReceivers(context.Background(), NewAPI(), plan, rec)
 	assertAdoptStage(t, err, "manifest-verify")
 }
 
@@ -222,7 +223,7 @@ func TestAdoptReceiverRejectsIntentIdentityDrift(t *testing.T) {
 			if err := WriteSupervisorIntent(intentPath, intent); err != nil {
 				t.Fatal(err)
 			}
-			err = verifyAdoptReceivers(NewAPI(), plan, rec)
+			err = verifyAdoptReceivers(context.Background(), NewAPI(), plan, rec)
 			if tc.wantErr {
 				assertAdoptStage(t, err, "intent-task-verify")
 			} else if err != nil {
@@ -323,7 +324,7 @@ func prepareAppliedAdoptA2(t *testing.T, entry string) (*AdoptPlan, *AdoptProven
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan initial: %v", err)
 	}
-	if err := NewAPI().ExecuteAdoptWithOpts(plan, &bytes.Buffer{}, ExecuteAdoptOpts{ReceivingVerifier: func(*API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil }}); err != nil {
+	if err := NewAPI().ExecuteAdoptWithOpts(plan, &bytes.Buffer{}, ExecuteAdoptOpts{ReceivingVerifier: func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error { return nil }}); err != nil {
 		t.Fatalf("ExecuteAdopt initial: %v", err)
 	}
 	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
@@ -348,7 +349,7 @@ func prepareAppliedAdoptA2(t *testing.T, entry string) (*AdoptPlan, *AdoptProven
 	if err != nil || !ok {
 		t.Fatalf("ReadAdoptProvenance: found=%v err=%v", ok, err)
 	}
-	if err := verifyAdoptReceivers(NewAPI(), plan, rec); err != nil {
+	if err := verifyAdoptReceivers(context.Background(), NewAPI(), plan, rec); err != nil {
 		t.Fatalf("corrected fixture does not satisfy production receiver: %v", err)
 	}
 	return plan, rec, codexPath, manifestRoot, stateRoot

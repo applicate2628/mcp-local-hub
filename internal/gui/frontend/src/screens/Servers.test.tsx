@@ -15,9 +15,19 @@ import {
   act,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
+import { resolveClientSymlink, SymlinkWriteError } from "../api";
 import { ALL_CLIENTS, CORE_CLIENTS } from "../lib/routing";
 import { installMemoryLocalStorage } from "../lib/test-local-storage";
 import type { ScanResult, DaemonStatus } from "../types";
+
+const fixtureRoots = {
+  winHome1: "C:/Users/test",
+  dev1: "D:/dev/test",
+  dev2: "D:/dev/example",
+  dev3: "D:/dev/user",
+  winHome2: "C:\\Users\\example",
+  home1: "/home/test",
+} as const;
 
 // happy-dom 20.9.0's globalThis.localStorage is a bare object with no
 // Storage methods; the column-visibility feature persists through it, so
@@ -28,12 +38,24 @@ const ls = installMemoryLocalStorage();
 // /api/events for the tray rescan-clients event; the stub matches
 // other screen tests' minimal shape.
 class StubEventSource {
+  static current: StubEventSource | null = null;
   url: string;
+  private listeners = new Map<string, Set<(ev: MessageEvent) => void>>();
   constructor(url: string) {
     this.url = url;
+    StubEventSource.current = this;
   }
-  addEventListener(_t: string, _l: (ev: MessageEvent) => void): void {}
-  removeEventListener(_t: string, _l: (ev: MessageEvent) => void): void {}
+  addEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    const listeners = this.listeners.get(name) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(name, listeners);
+  }
+  removeEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+  emit(name: string): void {
+    for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name));
+  }
   close(): void {}
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource =
@@ -101,6 +123,330 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("ServersScreen — explicit client-entry removal", () => {
+  const client = "kimi-code-cli";
+  const token = "a".repeat(64);
+  function removalScan(names = ["memory"]): ScanResult {
+    const scan = scanWith({ [client]: "ok" });
+    scan.entries = names.map((name) => ({
+      name, manifest_exists: false, can_migrate: false,
+      client_presence: { [client]: { transport: "http", endpoint: "http://127.0.0.1:9999/mcp", removal: { version: 1, supported: true, source_token: token } } },
+    }));
+    return scan;
+  }
+  function settled(server: string) {
+    return { operation: "remove-client-entry", server, client, outcome: "removed", effective_absent: true,
+      code: "REMOVAL_SETTLED", receipt: { version: 1, before_token: token, after_token: "b".repeat(64), source_count: 1 } };
+  }
+  beforeEach(() => { cleanup(); vi.restoreAllMocks(); ls.reset(); });
+  afterEach(() => cleanup());
+
+  it("removes selected non-manifest entries through the new action without demigrate", async () => {
+    let scan = removalScan();
+    const calls: unknown[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        calls.push(JSON.parse(init!.body as string));
+        scan = { ...scan, entries: [] };
+        return jsonResponse(200, settled("memory"));
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await screen.findByText("Removed 1 selected entry. Refreshing…");
+    expect(calls).toEqual([{ apply: true, server: "memory", client, source_token: token }]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/demigrate")).toBe(false);
+    await screen.findByText("No client entries available to remove.");
+  });
+
+  it("preserves the failed cell and retries only that selected cell after partial success", async () => {
+    let scan = removalScan(["memory", "serena"]);
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const { server } = JSON.parse(init!.body as string);
+        posted.push(server);
+        if (server === "memory") {
+          scan = removalScan(["serena"]);
+          return jsonResponse(200, settled(server));
+        }
+        return jsonResponse(207, { ...settled(server), outcome: "rollback-conflict", effective_absent: false, code: "REMOVAL_ROLLBACK_CONFLICT", receipt: undefined });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (2)" }));
+    await screen.findByText(/serena\/kimi-code-cli: rollback-conflict/);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove from client (1)" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await waitFor(() => expect(posted).toEqual(["memory", "serena", "serena"]));
+  });
+
+  it("shows unsupported inherited/missing metadata sources without admitting a delete", async () => {
+    const scan = removalScan(["memory", "serena"]);
+    scan.entries![0].client_presence![client].removal = { version: 1, supported: false, source_token: "", reason: "REMOVAL_SHARED_SOURCE_SCOPE" };
+    delete scan.entries![1].client_presence![client].removal;
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    expect(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("checkbox", { name: `Remove serena from ${client}` }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("This source is shared with another client. Removing it would affect an unselected client.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove from client (0)" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("requires refreshed selection after source-token drift", async () => {
+    let scan = removalScan();
+    const posted: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => { posted.push(JSON.parse(init!.body as string)); return jsonResponse(200, settled("memory")); },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    scan = removalScan();
+    scan.entries![0].client_presence![client].removal!.source_token = "c".repeat(64);
+    act(() => StubEventSource.current?.emit("clients-rescan"));
+    await screen.findByText("Source changed. Refresh, clear this selection, and select the current entry again.");
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await screen.findByText(/memory\/kimi-code-cli: Source changed/);
+    expect(posted).toEqual([]);
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("checkbox", { name: `Remove memory from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (1)" }));
+    await waitFor(() => expect(posted).toEqual([{ apply: true, server: "memory", client, source_token: "c".repeat(64) }]));
+  });
+
+  it("gates same-client ON after a known removal refusal while unrelated ON succeeds and retries only pending intents", async () => {
+    const otherClient = "claude-code";
+    const refusedToken = "c".repeat(64);
+    let scan = removalScan(["memory", "serena", "enable-same", "enable-other"]);
+    scan.client_config_presence![otherClient] = "ok";
+    for (const entry of scan.entries!) {
+      entry.manifest_exists = true;
+      entry.can_migrate = true;
+      entry.daemon_ports = [9999];
+      if (entry.name === "serena") entry.client_presence![client].removal!.source_token = refusedToken;
+      if (entry.name === "enable-same" || entry.name === "enable-other") {
+        entry.client_presence = { [entry.name === "enable-same" ? client : otherClient]: {
+          transport: "http", endpoint: "https://direct.example/mcp",
+        } };
+      }
+    }
+    scan.entries![0].client_presence![otherClient] = { transport: "stdio", raw: { command: "preserved-memory", args: ["--preserve"] } };
+    const unselectedBefore = JSON.stringify(scan.entries![0].client_presence![otherClient]);
+    const removed: unknown[] = [];
+    const migrated: unknown[] = [];
+    let allowRetry = false;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const body = JSON.parse(init!.body as string);
+        removed.push(body);
+        if (body.server === "serena" && !allowRetry) {
+          return jsonResponse(207, { ...settled(body.server), outcome: "refused", effective_absent: false,
+            code: "REMOVAL_SOURCE_CONFLICT", receipt: undefined });
+        }
+        scan = { ...scan, entries: scan.entries!.map((entry) => {
+          if (entry.name !== body.server) return entry;
+          const presence = { ...entry.client_presence };
+          delete presence[client];
+          return { ...entry, client_presence: presence };
+        }) };
+        const result = settled(body.server);
+        return jsonResponse(200, { ...result, receipt: { ...result.receipt,
+          before_token: body.server === "serena" ? refusedToken : token } });
+      },
+      "/api/migrate": (init) => {
+        const body = JSON.parse(init!.body as string);
+        migrated.push(body);
+        scan = { ...scan, entries: scan.entries!.map((entry) => entry.name === body.servers[0]
+          ? { ...entry, client_presence: { ...entry.client_presence, [body.clients[0]]: {
+            transport: "http", endpoint: "http://127.0.0.1:9999/mcp",
+          } } } : entry) };
+        return jsonResponse(200, { migrated: [{ server: body.servers[0], client: body.clients[0] }], failed: [] });
+      },
+    }));
+    render(<ServersScreen />);
+    await screen.findByTestId(`matrix-col-toggle-${client}`);
+    for (const server of ["memory", "serena", "enable-same"]) {
+      const toggle = screen.getByText(server).closest("tr")!.querySelector<HTMLInputElement>(`input[type="checkbox"][title*="${client}"]`)!;
+      expect(toggle.disabled).toBe(false);
+      fireEvent.click(toggle);
+    }
+    const unrelatedToggle = screen.getByText("enable-other").closest("tr")!.querySelector<HTMLInputElement>(`input[type="checkbox"][title*="${otherClient}"]`)!;
+    fireEvent.click(unrelatedToggle);
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await screen.findByText("Failed: 2 row(s); re-toggle and retry below.");
+    expect(removed).toEqual([
+      { apply: true, server: "memory", client, source_token: token },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+    ]);
+    expect(migrated).toEqual([{ servers: ["enable-other"], clients: [otherClient] }]);
+    expect(screen.getByTestId("apply-failed-rows").textContent).toContain(`serena/${client}: refused`);
+    expect(screen.getByTestId("apply-failed-rows").textContent).toContain(`enable-same/${client}: Not attempted`);
+    allowRetry = true;
+    const retry = await screen.findByRole("button", { name: "Apply changes (incl. retry 2)" });
+    await waitFor(() => expect(retry.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(retry);
+    await waitFor(() => expect(migrated).toEqual([
+      { servers: ["enable-other"], clients: [otherClient] },
+      { servers: ["enable-same"], clients: [client] },
+    ]));
+    expect(removed).toEqual([
+      { apply: true, server: "memory", client, source_token: token },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+      { apply: true, server: "serena", client, source_token: refusedToken },
+    ]);
+    expect(JSON.stringify(scan.entries![0].client_presence![otherClient])).toBe(unselectedBefore);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/demigrate")).toBe(false);
+  });
+
+  it("keeps Direct ON migration and explicitly named Undo dispatch separate from removal", async () => {
+    let scan = removalScan();
+    scan.entries![0].manifest_exists = true;
+    scan.entries![0].can_migrate = true;
+    scan.entries![0].daemon_ports = [9999];
+    scan.entries![0].client_presence![client].endpoint = "https://direct.example/mcp";
+    const migrated: unknown[] = [];
+    const undone: unknown[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/migrate": (init) => {
+        migrated.push(JSON.parse(init!.body as string));
+        scan = { ...scan, entries: scan.entries!.map((entry) => ({ ...entry,
+          client_presence: { ...entry.client_presence, [client]: { ...entry.client_presence![client], endpoint: "http://127.0.0.1:9999/mcp" } },
+        })) };
+        return jsonResponse(200, { migrated: [{ server: "memory", client }], failed: [] });
+      },
+      "/api/demigrate": (init) => {
+        undone.push(JSON.parse(init!.body as string));
+        return jsonResponse(207, { restored: [], failed: [{ server: "memory", client, err: "no pre-hub backup or managed marker" }] });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByTestId(`matrix-col-toggle-${client}`));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    const undo = await screen.findByRole("button", { name: `Restore direct connection for memory in ${client}` });
+    await waitFor(() => expect(undo.hasAttribute("disabled")).toBe(false));
+    expect(migrated).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(undone).toEqual([]);
+    fireEvent.click(undo);
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await screen.findByText(/memory\/kimi-code-cli: no pre-hub backup or managed marker/);
+    expect(undone).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(migrated).toEqual([{ servers: ["memory"], clients: [client] }]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/client-entry/remove")).toBe(false);
+  });
+
+  it("removes 21 selected Kimi entries through column OFF then Apply with exact member tokens", async () => {
+    const names = Array.from({ length: 21 }, (_, index) => `server-${String(index + 1).padStart(2, "0")}`);
+    const tokens = new Map(names.map((name, index) => [name, (index + 1).toString(16).padStart(64, "0")]));
+    const unselectedClient = "claude";
+    let scan = removalScan(names);
+    for (const entry of scan.entries!) {
+      entry.manifest_exists = true;
+      entry.can_migrate = true;
+      entry.daemon_ports = [9999];
+      entry.client_presence![client].removal!.source_token = tokens.get(entry.name)!;
+      entry.client_presence![unselectedClient] = { transport: "stdio", raw: { command: `direct-${entry.name}`, args: ["--preserve"] } };
+    }
+    const unselectedBefore = scan.entries!.map((entry) => JSON.stringify(entry.client_presence![unselectedClient]));
+    const posted: unknown[] = [];
+    const events: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => { events.push("scan"); return jsonResponse(200, scan); },
+      "/api/status": () => jsonResponse(200, []),
+      "/api/demigrate": (init) => {
+        const body = JSON.parse(init!.body as string);
+        return jsonResponse(207, { restored: [], failed: [{ server: body.servers[0], client, err: "no pre-hub backup or managed marker" }] });
+      },
+      "/api/client-entry/remove": (init) => {
+        const body = JSON.parse(init!.body as string);
+        expect(body).toEqual({ apply: true, server: body.server, client, source_token: tokens.get(body.server) });
+        posted.push(body);
+        events.push(body.server);
+        scan = { ...scan, entries: scan.entries!.map((entry) => {
+          if (entry.name !== body.server) return entry;
+          const presence = { ...entry.client_presence };
+          delete presence[client];
+          return { ...entry, client_presence: presence };
+        }) };
+        const result = settled(body.server);
+        return jsonResponse(200, { ...result, receipt: { ...result.receipt, before_token: tokens.get(body.server) } });
+      },
+    }));
+    // Hold only background polling intervals; waitFor keeps its real timeouts.
+    // This distinguishes a new per-member scan pipeline from a legitimate poll.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      render(<ServersScreen />);
+      fireEvent.click(await screen.findByTestId(`matrix-col-toggle-${client}`));
+      fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) =>
+        ["/api/client-entry/remove", "/api/demigrate", "/api/migrate"].includes(String(url)))).toBe(true));
+      expect(fetchMock.mock.calls.filter(([url]) => ["/api/demigrate", "/api/migrate"].includes(String(url)))).toEqual([]);
+      await waitFor(() => expect(posted).toEqual(names.map((server) => ({ apply: true, server, client, source_token: tokens.get(server) }))));
+      await waitFor(() => expect(events.filter((event) => event === "scan").length).toBeGreaterThan(1));
+      expect(events.slice(events.indexOf(names[0]), events.indexOf(names[names.length - 1]) + 1)).toEqual(names);
+      expect(scan.entries!.every((entry) => entry.client_presence![client] === undefined)).toBe(true);
+      expect(scan.entries!.map((entry) => JSON.stringify(entry.client_presence![unselectedClient]))).toEqual(unselectedBefore);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops sending additional removal requests after the screen unmounts", async () => {
+    const first = deferred<Response>();
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, removalScan(["memory", "serena"])), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => { posted.push(JSON.parse(init!.body as string).server); return first.promise; },
+    }));
+    const view = render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (2)" }));
+    await waitFor(() => expect(posted).toEqual(["memory"]));
+    view.unmount();
+    await act(async () => { first.resolve(jsonResponse(200, settled("memory"))); await first.promise; });
+    expect(posted).toEqual(["memory"]);
+  });
+
+  it("stops after an uncertain removal and retains unattempted cells without replaying success", async () => {
+    let scan = removalScan(["memory", "serena", "time"]);
+    const posted: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchRouter({
+      "/api/scan": () => jsonResponse(200, scan), "/api/status": () => jsonResponse(200, []),
+      "/api/client-entry/remove": (init) => {
+        const { server } = JSON.parse(init!.body as string);
+        posted.push(server);
+        if (server === "memory") {
+          scan = removalScan(["serena", "time"]);
+          return jsonResponse(200, settled(server));
+        }
+        return jsonResponse(207, { ...settled(server), outcome: "applied-unverified", code: "REMOVAL_SETTLEMENT_UNVERIFIED", receipt: undefined });
+      },
+    }));
+    render(<ServersScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Select entries to remove" }));
+    fireEvent.click(screen.getByRole("button", { name: `Select all for removal from ${client}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from client (3)" }));
+    await screen.findByText(/time\/kimi-code-cli: Not attempted because another removal could not be settled/);
+    expect(posted).toEqual(["memory", "serena"]);
+    expect(screen.getByRole("button", { name: "Remove from client (2)" })).toBeTruthy();
+  });
+});
 
 describe("ServersScreen — Initialize button (v0.4.5)", () => {
   beforeEach(() => {
@@ -231,7 +577,7 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
           if (init?.body) initBodies.push(init.body as string);
           return jsonResponse(200, {
             client: "vscode",
-            path: "C:/Users/foo/AppData/Roaming/Code/User/mcp.json",
+            path: `${fixtureRoots.winHome1}/AppData/Roaming/Code/User/mcp.json`,
             created: true,
           });
         },
@@ -477,7 +823,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [],
@@ -527,13 +873,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -599,13 +945,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -665,13 +1011,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -720,7 +1066,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             clients: [
               {
                 client: "codex-cli",
-                config_path: "D:/dev/codex/config.toml",
+                config_path: `${fixtureRoots.dev2}/config.toml`,
                 disabled: true,
                 missing_entries: ["mcp-language-server-python"],
               },
@@ -731,13 +1077,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -789,7 +1135,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [],
@@ -798,12 +1144,12 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/project",
+            workspace: `${fixtureRoots.dev1}`,
             workspace_key: "default",
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "go",
                 backend: "gopls-mcp",
                 port: 9201,
@@ -828,7 +1174,7 @@ describe("ServersScreen — LSP matrix rows", () => {
       expect(registerBodies).toHaveLength(1);
     });
     expect(registerBodies[0]).toEqual({
-      workspace_path: "D:/dev/project",
+      workspace_path: `${fixtureRoots.dev1}`,
       language: "go",
     });
     const message = await screen.findByTestId("lsp-register-msg");
@@ -842,7 +1188,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("existing workspace surfaces cleanup warnings", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(200, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" cleanup preserved\nlegacy entry "],
@@ -869,7 +1215,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("unconfirmed registration response is an error", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(200, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" unrelated result\nwas ignored "],
@@ -894,7 +1240,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("requested-language registration error stays error without refresh", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(207, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" cleanup\tpreserved "],
@@ -952,11 +1298,11 @@ describe("ServersScreen — LSP matrix rows", () => {
           return workspacesCallCount === 1
             ? jsonResponse(200, { workspaces: [], entries: [] })
             : jsonResponse(200, {
-                workspaces: [{ workspace_key: "my-project", workspace_path: "D:/dev/my-project" }],
+                workspaces: [{ workspace_key: "my-project", workspace_path: `${fixtureRoots.dev3}` }],
                 entries: [
                   {
                     workspace_key: "my-project",
-                    workspace_path: "D:/dev/my-project",
+                    workspace_path: `${fixtureRoots.dev3}`,
                     language: "python",
                     backend: "mcp-language-server",
                     port: 9202,
@@ -968,12 +1314,12 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/my-project",
+            workspace: `${fixtureRoots.dev3}`,
             workspace_key: "my-project",
             entries: [
               {
                 workspace_key: "my-project",
-                workspace_path: "D:/dev/my-project",
+                workspace_path: `${fixtureRoots.dev3}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9202,
@@ -1006,7 +1352,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     // Submit is disabled until a path is entered.
     expect(submit.disabled).toBe(true);
 
-    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.input(pathInput, { target: { value: `${fixtureRoots.dev3}` } });
     fireEvent.change(langSelect, { target: { value: "python" } });
     expect(submit.disabled).toBe(false);
     const callsBeforeRegister = workspacesCallCount;
@@ -1017,11 +1363,11 @@ describe("ServersScreen — LSP matrix rows", () => {
       expect(registerBodies).toHaveLength(1);
     });
     expect(registerBodies[0]).toEqual({
-      workspace_path: "D:/dev/my-project",
+      workspace_path: `${fixtureRoots.dev3}`,
       language: "python",
     });
     const message = await screen.findByTestId("lsp-register-msg");
-    expect(message.textContent).toBe("Registered python for D:/dev/my-project. Refreshing…");
+    expect(message.textContent).toBe(`Registered python for ${fixtureRoots.dev3}. Refreshing…`);
     // After a successful register the workspace list reloads exactly once.
     await waitFor(() => {
       expect(workspacesCallCount).toBe(callsBeforeRegister + 1);
@@ -1048,7 +1394,7 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/my-project",
+            workspace: `${fixtureRoots.dev3}`,
             workspace_key: "my-project",
             entries: [],
             warnings: [" cleanup preserved\nlegacy entry "],
@@ -1068,7 +1414,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     const submit = screen.getByTestId(
       "lsp-register-workspace-submit",
     ) as HTMLButtonElement;
-    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.input(pathInput, { target: { value: `${fixtureRoots.dev3}` } });
     fireEvent.change(langSelect, { target: { value: "python" } });
     const callsBeforeRegister = workspacesCallCount;
     fireEvent.click(submit);
@@ -1078,7 +1424,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(message.textContent).toContain("Partial success registering python");
     expect(message.textContent).toContain("cleanup preserved legacy entry");
     expect(message.textContent).not.toContain(
-      "Registered python for D:/dev/my-project. Refreshing…",
+      `Registered python for ${fixtureRoots.dev3}. Refreshing…`,
     );
     expect(message.classList.contains("lsp-register-warning")).toBe(true);
     expect(message.getAttribute("role")).toBe("status");
@@ -1169,13 +1515,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -1250,11 +1596,11 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/workspaces": () =>
           jsonResponse(200, {
-            workspaces: [{ workspace_key: "b133f336", workspace_path: "D:/dev/project" }],
+            workspaces: [{ workspace_key: "b133f336", workspace_path: `${fixtureRoots.dev1}` }],
             entries: [
               {
                 workspace_key: "b133f336",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -1329,13 +1675,13 @@ describe("ServersScreen — LSP matrix rows", () => {
       workspaces: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
         },
       ],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,
@@ -1366,7 +1712,7 @@ describe("ServersScreen — LSP matrix rows", () => {
                   ...currentEntry.client_presence,
                   zed: {
                     transport: "relay",
-                    endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+                    endpoint: `${fixtureRoots.winHome2}\\.local\\bin\\mcphub.exe`,
                     relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
                   },
                 },
@@ -1519,7 +1865,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             },
             zed: {
               transport: "relay",
-              endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+              endpoint: `${fixtureRoots.winHome2}\\.local\\bin\\mcphub.exe`,
               relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
             },
           },
@@ -1965,6 +2311,7 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
 
   beforeEach(() => {
     cleanup();
+    StubEventSource.current = null;
     vi.restoreAllMocks();
     vi.useFakeTimers();
     // Reset visibility to "visible" each test (a prior test may have left
@@ -2033,6 +2380,31 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
   });
 
+  it("shows a scan failure and retries it once into recovered Servers rows", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1
+            ? jsonResponse(500, { error: "internal error", code: "SCAN_FAILED" })
+            : jsonResponse(200, viaHubScan("recovered-memory"));
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.getByText("Failed to load: /api/scan: internal error")).toBeTruthy());
+    expect(scanCalls).toBe(1);
+    expect(screen.getByRole("alert").textContent).toBe("Failed to load: /api/scan: internal error");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() => expect(screen.getByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.queryByText("Failed to load: /api/scan: internal error")).toBeNull();
+  });
+
 
   it("ignores an older overlapping refresh that resolves after a newer one", async () => {
     const olderScan = deferred<Response>();
@@ -2060,6 +2432,12 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
       await Promise.resolve();
     });
     await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+
+    await act(async () => {
+      vi.advanceTimersByTime(4_000);
+    });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
 
     await act(async () => {
       olderScan.resolve(jsonResponse(200, viaHubScan("stale-memory")));
@@ -2069,6 +2447,56 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     });
     await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
     expect(screen.queryByText("fresh-memory")).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    const age = screen.getByTestId("scan-updated-ago").textContent ?? "";
+    expect(Number(age.match(/updated (\d+)s ago/)?.[1])).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resets age when an SSE-triggered direct reload publishes a new scan", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, viaHubScan(++scanCalls === 1 ? "first-memory" : "fresh-memory")),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+  });
+
+  it("keeps the failed SSE reload error-only and resets age on accepted recovery", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 2
+            ? jsonResponse(500, { error: "scan unavailable" })
+            : jsonResponse(200, viaHubScan(scanCalls === 1 ? "first-memory" : "recovered-memory"));
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText(/Failed to load:.*scan unavailable/)).toBeTruthy());
+    expect(screen.queryByTestId("scan-updated-ago")).toBeNull();
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(3);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
   });
 
   it("pauses auto-refresh and disables Rescan while a dirty cell is pending — and does NOT clobber the edit", async () => {
@@ -2149,13 +2577,13 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -2411,7 +2839,7 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
         "/api/resolve-symlink-and-write": () =>
           jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2450,14 +2878,14 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
           if (body.confirm) {
             return jsonResponse(200, {
               client: "codex-cli",
-              original_path: "/home/u/.codex/config.toml",
+              original_path: `${fixtureRoots.home1}/.codex/config.toml`,
               written_path: "/e/env/Agents/.codex/config.toml",
               written: true,
             });
           }
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2503,7 +2931,7 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
           bodies.push(init?.body as string);
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2528,25 +2956,39 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
     expect(bodies.map((b) => JSON.parse(b)).some((b) => b.confirm === true)).toBe(false);
   });
 
-  it("surfaces a WRITE_REFUSED error (e.g. strict mode) without rescanning away the cell", async () => {
+  it("keeps a refused write pending, hides old-server paths, and retries with the same pin", async () => {
+    let scanCount = 0;
+    let writeRefused = true;
+    const writeBodies: Array<Record<string, unknown>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/scan": () => {
+          scanCount += 1;
+          return jsonResponse(200, scanCount === 1 ? scanSymlink() : scanWith({ "codex-cli": "ok" }));
+        },
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/resolve-symlink-and-write": (init) => {
           const body = JSON.parse((init?.body as string) ?? "{}");
           if (body.confirm) {
-            return jsonResponse(500, {
-              error:
-                "write codex-cli via consent: secure write: strict mode is active (via MCPHUB_REQUIRE_SINGLE_USER_HOME=1)",
-              code: "WRITE_REFUSED",
-            });
+            writeBodies.push(body);
+            return writeRefused
+              ? jsonResponse(500, {
+                  error:
+                    "write <user-home>/config.toml and <target-root>/config.toml: strict mode is active (raw diagnostic)",
+                  code: "WRITE_REFUSED",
+                })
+              : jsonResponse(200, {
+                  client: "codex-cli",
+                  original_path: "<user-home>/config.toml",
+                  written_path: "<target-root>/config.toml",
+                  written: true,
+                });
           }
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
-            resolved_target: "/e/env/Agents/.codex/config.toml",
-            pinned_real_path: "/e/env/Agents/.codex",
+            original_path: "<user-home>/config.toml",
+            resolved_target: "<target-root>/config.toml",
+            pinned_real_path: "<target-root>",
             content_hash: "deadbeef",
             is_symlink: true,
           });
@@ -2567,7 +3009,91 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
     });
     const errEl = screen.getByTestId("resolve-symlink-error-codex-cli");
     expect(errEl.textContent).toContain("WRITE_REFUSED");
-    expect(errEl.textContent).toContain("MCPHUB_REQUIRE_SINGLE_USER_HOME");
+    expect(errEl.textContent).toContain("Check the local Hub log for the exact cause");
+    expect(errEl.textContent).toContain("target directory permissions");
+    expect(errEl.textContent).toContain("retry this action");
+    expect(errEl.textContent).not.toContain("<user-home>");
+    expect(errEl.textContent).not.toContain("<target-root>");
+    expect(errEl.textContent).not.toContain("raw diagnostic");
+    expect(errEl.getAttribute("role")).toBe("alert");
+    expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeTruthy();
+    expect(scanCount).toBe(1);
+    expect(writeBodies).toEqual([{
+      client: "codex-cli",
+      confirm: true,
+      pinned_real_path: "<target-root>",
+      content_hash: "deadbeef",
+    }]);
+
+    writeRefused = false;
+    fireEvent.click(screen.getByTestId("resolve-symlink-confirm-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeNull();
+      expect(scanCount).toBe(2);
+    });
+    expect(writeBodies).toHaveLength(2);
+    expect(writeBodies[1]).toEqual(writeBodies[0]);
+  });
+
+  it("shows recovery guidance for a redacted resolve refusal and leaves Resolve available", async () => {
+    let scanCount = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCount += 1;
+          return jsonResponse(200, scanSymlink());
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": (init) => {
+          bodies.push(JSON.parse((init?.body as string) ?? "{}"));
+          return jsonResponse(500, { error: "internal error", code: "WRITE_REFUSED" });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-error-codex-cli")).toBeTruthy();
+    });
+    const errEl = screen.getByTestId("resolve-symlink-error-codex-cli");
+    expect(errEl.textContent).toContain("WRITE_REFUSED");
+    expect(errEl.textContent).toContain("Check the local Hub log for the exact cause");
+    expect(errEl.textContent).toContain("target directory permissions");
+    expect(errEl.getAttribute("role")).toBe("alert");
+    expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeNull();
+    expect((screen.getByTestId("resolve-symlink-codex-cli") as HTMLButtonElement).disabled).toBe(false);
+    expect(scanCount).toBe(1);
+    expect(bodies).toEqual([{ client: "codex-cli", confirm: false }]);
+  });
+
+  it.each([
+    { status: 500, code: "WRITE_REFUSED", error: "private write cause", redacted: true },
+    { status: 409, code: "SYMLINK_REPOINTED", error: "target changed; rescan and retry" },
+    { status: 409, code: "WRITE_REFUSED", error: "conflict details remain visible" },
+    { status: 500, code: "OTHER_FAILURE", error: "other failure remains visible" },
+  ])("preserves the $status $code SymlinkWriteError contract", async ({ status, code, error, redacted }) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(status, { error, code }));
+    let caught: unknown;
+    try {
+      await resolveClientSymlink("codex-cli");
+    } catch (cause) {
+      caught = cause;
+    }
+    expect(caught).toBeInstanceOf(SymlinkWriteError);
+    const typed = caught as SymlinkWriteError;
+    expect(typed.status).toBe(status);
+    expect(typed.code).toBe(code);
+    if (redacted) {
+      expect(typed.message).not.toContain(error);
+      expect(typed.message).toContain("Check the local Hub log for the exact cause");
+    } else {
+      expect(typed.message).toContain(error);
+      expect(typed.message).not.toContain("Check the local Hub log for the exact cause");
+    }
   });
 });
 
@@ -2686,11 +3212,11 @@ describe("ServersScreen — optional LSP router status fetch (P2 isolation)", ()
 
   function workspacesResponse() {
     return {
-      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      workspaces: [{ workspace_key: "default", workspace_path: `${fixtureRoots.dev1}` }],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,
@@ -2782,7 +3308,7 @@ describe("ServersScreen — optional LSP router status fetch (P2 isolation)", ()
             clients: [
               {
                 client: "codex-cli",
-                config_path: "D:/dev/codex/config.toml",
+                config_path: `${fixtureRoots.dev2}/config.toml`,
                 disabled: true,
               },
             ],
@@ -2826,11 +3352,11 @@ describe("ServersScreen — LSP opt-out reachability across entry shapes", () =>
 
   function workspacesResponse() {
     return {
-      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      workspaces: [{ workspace_key: "default", workspace_path: `${fixtureRoots.dev1}` }],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,

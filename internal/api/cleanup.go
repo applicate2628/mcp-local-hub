@@ -267,7 +267,7 @@ func firstTokenBasename(cmdline string) string {
 
 // redactCmdlineForDisplay returns the executable's basename only, with no
 // path and no arguments. Cleanup-6 security fix: full command lines often
-// embed workspace paths (D:\dev\client-confidential-project\...), username
+// embed workspace paths (<workspace>\client-confidential-project\...), username
 // segments (C:\Users\<name>\...), filesystem paths to private files, and
 // process arguments that may contain API keys or tokens (--api-key=sk-...).
 // The orphan-table UI in the GUI and any operator screenshots / browser
@@ -1584,7 +1584,8 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 		// under a hub daemon is always spared.
 		matchSource := ""
 		spared := false
-		for cur, depth := r.ppid, 0; depth < 16; depth++ {
+		cur, depth := r.ppid, 0
+		for ; depth < 16; depth++ {
 			parent, ok := byPID[cur]
 			if !ok {
 				// The parent row is absent. If the missing parent is not PROVABLY dead
@@ -1627,6 +1628,10 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 			}
 			cur = parent.ppid
 		}
+		// Exhausting the cap leaves protective ancestry unresolved, even after a scope match.
+		if depth == 16 {
+			spared = true
+		}
 		if spared || matchSource == "" {
 			continue // hub-managed / uncertain, or not under the requested scope
 		}
@@ -1650,17 +1655,15 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 	return out, snapErr
 }
 
-// AggressiveCleanup (Phase H.1) reports — and, when DryRun=false, kills
-// — the live-rooted MCP-stdio processes under the scope named by
-// opts.Client OR opts.RootPID. It is the operator-confirmed override for
-// the per-subagent stdio fan-out class that the default safe sweep
-// (CleanupOrphans) correctly refuses to touch.
-//
-// The caller is responsible for the dry-run/confirmation-token protocol
-// (the CLI layer binds a token to the previewed candidate snapshot);
-// this method is the pure scope-resolve + (optional) kill primitive.
-// Returns errAggressiveScopeRequired / errAggressiveUnknownClient on a
-// malformed scope so the CLI can surface a precise message.
+var errAggressiveRetirementAuthorityUnavailable = errors.New(
+	"aggressive cleanup unavailable: creator retirement authority is not established; preview and apply disabled",
+)
+
+// AggressiveCleanup validates the explicit client or root scope. On Windows,
+// preview and apply are unavailable until creator retirement authority is
+// established; scope, identity and confirmation tokens cannot supply it.
+// Refusal precedes process discovery and all target operations.
+// Malformed scopes retain their precise scope/client errors.
 func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 	// Exactly one scope. No implicit "all live-rooted" mode (spec H.1).
 	hasClient := strings.TrimSpace(opts.Client) != ""
@@ -1668,67 +1671,19 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 	if hasClient == hasRoot {
 		return nil, errAggressiveScopeRequired
 	}
-	clientBasename := ""
 	if hasClient {
-		clientBasename = stripExtension(strings.ToLower(strings.TrimSpace(opts.Client)))
+		clientBasename := stripExtension(strings.ToLower(strings.TrimSpace(opts.Client)))
 		if !slices.Contains(knownClientLauncherBasenames, clientBasename) {
 			return nil, errAggressiveUnknownClient
 		}
 	}
 	if runtime.GOOS != "windows" {
-		// Process introspection below is Windows-specific. Return an
+		// Process introspection is Windows-specific. Return an
 		// empty result on other platforms so the flag contract stays
 		// usable (CLI prints "No aggressive candidates found.").
 		return nil, nil
 	}
-	if opts.MinAgeSec == 0 {
-		opts.MinAgeSec = 60
-	}
-
-	out, err := runProcessSnapshot()
-	if err != nil {
-		return nil, err
-	}
-	candidates, snapErr := parseAggressiveCandidates(
-		strings.NewReader(string(out)), clientBasename, opts.RootPID, opts.IncludeClasses)
-
-	// Age filter — same floor as the default sweep so a just-spawned
-	// in-flight child is not reaped mid-handshake.
-	filtered := candidates[:0]
-	for _, c := range candidates {
-		if c.AgeSec < opts.MinAgeSec {
-			continue
-		}
-		filtered = append(filtered, c)
-	}
-
-	// Validated-set binding (bot #373 R5, identity-keyed since bug 2026-07-08):
-	// when Expect is non-nil the caller has token-validated a specific candidate
-	// set, so the kill must touch ONLY those {PID, StartedAt} identities. A process
-	// that spawned — or a PID recycled onto a different process — between the
-	// validation snapshot and this one is excluded (its StartedAt differs); a
-	// validated identity that has since died simply drops out. nil → no binding
-	// (dry-run preview / token recompute).
-	if opts.Expect != nil {
-		filtered = filterToExpectedIdentities(filtered, opts.Expect)
-	}
-
-	// Fail closed on a truncated census before any APPLY kill: a dropped live
-	// `mcphub.exe daemon` ancestor row can mis-scope a hub-managed child as an
-	// aggressive candidate, so an unreliable snapshot must never drive a kill
-	// (all-return-paths of the parseProcessRows snapshot-error contract; codex
-	// PR #520). The dry-run preview stays best-effort — it lists the candidates
-	// but touches nothing — so the operator can see and retry.
-	if !opts.DryRun && snapErr != nil {
-		return filtered, fmt.Errorf("aggressive cleanup: process snapshot was truncated this run; kills disabled (fail closed): %w", snapErr)
-	}
-
-	// Same identity-re-verifying reap as the default sweep — never a raw
-	// taskkill against a census-captured PID, so a PID recycled between the
-	// census scan and the kill can never friendly-fire an unrelated process
-	// (PID-recycle guard, shared with CleanupOrphans via reapOrphans).
-	reapOrphans(filtered, opts.DryRun)
-	return filtered, nil
+	return nil, errAggressiveRetirementAuthorityUnavailable
 }
 
 // ProcIdentity names one operator-confirmed candidate by PID AND its census start

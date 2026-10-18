@@ -92,6 +92,87 @@ func TestWriteHubMcpStateAtomicRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReadHubMcpStateFileLeavesMissingRootAbsent(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "absent-state")
+	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	_, beforeErr := os.Stat(stateRoot)
+	t.Logf("STATE_ROOT_BEFORE exists=%t", beforeErr == nil)
+	if !os.IsNotExist(beforeErr) {
+		t.Fatalf("precondition: state root stat error = %v, want not-exist", beforeErr)
+	}
+	if _, err := readHubMcpStateFile("hub-mcp.endpoint.json"); !isHubMcpStateMissingErr(err) {
+		t.Fatalf("missing state read error = %v, want missing", err)
+	}
+	_, afterErr := os.Stat(stateRoot)
+	t.Logf("STATE_ROOT_AFTER exists=%t", afterErr == nil)
+	if !os.IsNotExist(afterErr) {
+		t.Fatalf("readHubMcpStateFile created state root %q: %v", stateRoot, afterErr)
+	}
+}
+
+func TestReadHubMcpStateFileRejectsInvalidNameBeforeRootResolution(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "absent-state")
+	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	if _, err := readHubMcpStateFile("../escape.json"); !errors.Is(err, errStateNameInvalid) {
+		t.Fatalf("invalid state name error = %v, want errStateNameInvalid", err)
+	}
+	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
+		t.Fatalf("invalid-name read resolved or created state root %q: %v", stateRoot, err)
+	}
+}
+
+func TestHubMcpStateFirstRunWriterAndLockBootstrapMatrix(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{name: "state writer", run: func(t *testing.T) {
+			if err := writeHubMcpStateFile("hub-mcp.endpoint.json", []byte(`{"ready":true}`)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "state lock", run: func(t *testing.T) {
+			lock, err := acquireHubMcpLock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lock.Unlock(); err != nil {
+				t.Fatalf("unlock first-run state lock: %v", err)
+			}
+		}},
+		{name: "adopted entries writer", run: func(t *testing.T) {
+			if err := writeAdoptedEntries(&AdoptedEntries{}); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := readAdoptedEntries(); err != nil || got.Version != adoptedEntriesSchemaV1 {
+				t.Fatalf("adopted entries readback = %#v, %v", got, err)
+			}
+		}},
+		{name: "managed entries writer", run: func(t *testing.T) {
+			if err := writeManagedEntries(&ManagedEntries{}); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := readManagedEntries(); err != nil || got.Version != managedEntriesSchemaVersion {
+				t.Fatalf("managed entries readback = %#v, %v", got, err)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateRoot := filepath.Join(t.TempDir(), "first-run-state")
+			t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+			if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
+				t.Fatalf("precondition: state root exists or is unreadable: %v", err)
+			}
+			tc.run(t)
+			info, err := os.Stat(stateRoot)
+			if err != nil || !info.IsDir() {
+				t.Fatalf("first-run owner did not create state root: info=%v err=%v", info, err)
+			}
+		})
+	}
+}
+
 // TestReadHubMcpStateRejectsSymlink asserts the load-time gate refuses
 // to read a state-file whose target is a symlink. The inode-anchored
 // reader's reparse-defeat flags are the relevant defense.

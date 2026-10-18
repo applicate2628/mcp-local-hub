@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -37,6 +36,111 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
+
+func TestSupervisorPeerIPCSenderOmissionSafety(t *testing.T) {
+	legacyCalled := false
+	legacy := func(context.Context, string, api.SupervisorLockOwner, string, map[string]any, time.Duration) (api.IPCResponse, error) {
+		legacyCalled = true
+		return api.IPCResponse{}, nil
+	}
+	custom := &v5UpgradeDeps{sendIPC: legacy}
+	if sender, err := custom.peerIPCSender(); sender != nil || !errors.Is(err, errSupervisorPeerIPCSenderRequired) {
+		t.Fatalf("legacy-only strict resolution=%v/%v, want typed refusal", sender != nil, err)
+	}
+	if launch, err := custom.StartSupervisor("unused-before-native-allocation"); launch != nil || !errors.Is(err, errSupervisorPeerIPCSenderRequired) {
+		t.Fatalf("legacy-only launch=%v/%v, want refusal before state/spawn", launch != nil, err)
+	}
+	if legacyCalled {
+		t.Fatal("legacy callback was invoked as strict proof")
+	}
+	if sender, err := (&v5UpgradeDeps{}).peerIPCSender(); sender == nil || err != nil {
+		t.Fatal("omitted ports did not select strict production implementation")
+	}
+	strictCalled := false
+	custom.sendIPCPeer = func(context.Context, string, api.SupervisorLockOwner, api.SupervisorProcessIdentityV1, string, map[string]any, time.Duration) (api.IPCResponse, error) {
+		strictCalled = true
+		return api.IPCResponse{ID: 91, OK: true, Final: true}, nil
+	}
+	sender, err := custom.peerIPCSender()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := sender(context.Background(), "", api.SupervisorLockOwner{}, api.SupervisorProcessIdentityV1{}, "exit", nil, time.Second)
+	if err != nil || response.ID != 91 || !strictCalled || legacyCalled {
+		t.Fatal("explicit strict callback did not win; callback is selection evidence only, not native proof")
+	}
+}
+
+func TestSupervisorPeerIPCSenderPreDialEvidence(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	owner := api.SupervisorLockOwner{PID: 41, StartedAt: "private-owner-generation"}
+	peer := api.SupervisorProcessIdentityV1{PID: 41, CreationTime: owner.StartedAt, ImagePath: "private-peer-path"}
+	for _, scenario := range []struct {
+		name    string
+		ctx     context.Context
+		timeout time.Duration
+	}{
+		{"canceled", ctx, time.Second},
+		{"missing-context", nil, time.Second},
+		{"nonpositive-timeout", context.Background(), 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			response, err := sendIPCWithResponseForPeer(scenario.ctx, "unused-before-dial", owner, peer, "exit", nil, scenario.timeout)
+			dispatch, ok := err.(*supervisorIPCDispatchError)
+			if !ok || dispatch.requestWriteEntered || dispatch.owner != owner || dispatch.peer != peer || dispatch.command != "exit" || response.OK || response.Final {
+				t.Fatalf("production admission lost no-write binding: %+v / %v", response, err)
+			}
+			if scenario.name == "canceled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation cause lost: %v", err)
+			}
+			if strings.Contains(err.Error(), owner.StartedAt) || strings.Contains(err.Error(), peer.ImagePath) {
+				t.Fatal("dispatch error exposed private binding")
+			}
+		})
+	}
+}
+
+type supervisorRequestWriteFaultConn struct {
+	net.Conn
+	writes          int
+	n               int
+	err             error
+	dispatch        *supervisorIPCDispatchError
+	observedEntered bool
+}
+
+func (c *supervisorRequestWriteFaultConn) Write([]byte) (int, error) {
+	c.writes++
+	c.observedEntered = c.dispatch.requestWriteEntered
+	return c.n, c.err
+}
+
+func TestSupervisorRequestCodecWriteEntry(t *testing.T) {
+	writeFailure := errors.New("synthetic entered write failure")
+	for _, scenario := range []struct {
+		name string
+		args map[string]any
+		n    int
+	}{
+		{"marshal-refusal", map[string]any{"unsupported": make(chan int)}, 0},
+		{"zero-write-error", nil, 0},
+		{"partial-write-error", nil, 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			dispatch := &supervisorIPCDispatchError{}
+			conn := &supervisorRequestWriteFaultConn{n: scenario.n, err: writeFailure, dispatch: dispatch}
+			err := writeFrameWithDispatch(conn, api.IPCRequest{Cmd: "exit", Args: scenario.args}, dispatch)
+			if scenario.name == "marshal-refusal" {
+				if err == nil || dispatch.requestWriteEntered || conn.writes != 0 {
+					t.Fatalf("marshal refusal entered Write: writes=%d error=%v", conn.writes, err)
+				}
+			} else if !errors.Is(err, writeFailure) || !dispatch.requestWriteEntered || !conn.observedEntered || conn.writes != 1 {
+				t.Fatalf("entered Write lost possible effect: writes=%d error=%v", conn.writes, err)
+			}
+		})
+	}
+}
 
 func TestUpgradeIPCResponseFrameUsesSupervisorBound(t *testing.T) {
 	t.Run("realistic status response above 30 KiB is accepted", func(t *testing.T) {
@@ -109,9 +213,9 @@ func (d *targetBoundRollbackDeps) ExitGraceful(context.Context, string, int) (ap
 	return api.IPCResponse{OK: true, Final: true}, nil
 }
 
-func (d *targetBoundRollbackDeps) StartSupervisor(binary string) error {
+func (d *targetBoundRollbackDeps) StartSupervisor(binary string) (SupervisorLaunch, error) {
 	d.started = append(d.started, binary)
-	return nil
+	return &fixtureSupervisorLaunch{}, nil
 }
 
 func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t *testing.T) {
@@ -283,7 +387,7 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	exe := writeAdmissionProductPairFixture(t, "UNREADABLE-INTENT")
+	exe := writeAdmissionProductFixture(t, "UNREADABLE-INTENT")
 	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
 	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
@@ -314,121 +418,6 @@ func TestRunV5UpgradeWindows_ExistingLivenessTickBlocksBeforeStaging(t *testing.
 	}
 	if _, statErr := os.Stat(target + ".new"); !os.IsNotExist(statErr) {
 		t.Fatalf("staged candidate exists before fence acquisition: stat=%v", statErr)
-	}
-}
-
-func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
-		t.Fatalf("seed supervisor intent: %v", err)
-	}
-
-	originalRun := runInstallUpgradeWindowsFn
-	originalFactory := newWindowsProductPairTxnFn
-	t.Cleanup(func() {
-		runInstallUpgradeWindowsFn = originalRun
-		newWindowsProductPairTxnFn = originalFactory
-	})
-	newWindowsProductPairTxnFn = func(windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
-		return &WindowsProductPairTxn{}, nil
-	}
-	var relaunches int
-	restoreRelaunch := setLivenessRelaunchFnForTest(func() error { relaunches++; return nil })
-	t.Cleanup(restoreRelaunch)
-	restoreStandalone := setStandaloneRelaunchFnForTest(func() error { relaunches++; return nil })
-	t.Cleanup(restoreStandalone)
-
-	phaseOutputs := make([]string, 0, 2)
-	runInstallUpgradeWindowsFn = func(context.Context, UpgradeOpts) error {
-		for _, phase := range []string{"pre-promotion", "rollback-kill-restore"} {
-			out := &strings.Builder{}
-			if err := runEnsureAlive(stateDir, out); err != nil {
-				t.Fatalf("ensure-alive during %s: %v", phase, err)
-			}
-			phaseOutputs = append(phaseOutputs, out.String())
-		}
-		return errors.New("synthetic post-rollback transaction failure")
-	}
-
-	cmd := &cobra.Command{}
-	cmd.SetOut(io.Discard)
-	exe := writeAdmissionProductPairFixture(t, "FENCE-HOLD")
-	target := filepath.Join(t.TempDir(), "mcphub.exe")
-	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
-	if err == nil || !strings.Contains(err.Error(), "synthetic post-rollback") {
-		t.Fatalf("upgrade error = %v", err)
-	}
-	for i, output := range phaseOutputs {
-		if !strings.Contains(output, "liveness-suppressed-upgrade-in-progress") {
-			t.Fatalf("phase %d output = %q, want upgrade suppression", i, output)
-		}
-	}
-	if relaunches != 0 {
-		t.Fatalf("liveness relaunches during transaction = %d, want 0", relaunches)
-	}
-	lease, acquired, acquireErr := api.TryAcquireUpgradeFence(context.Background(), stateDir)
-	if acquireErr != nil || !acquired {
-		t.Fatalf("fence after failed transaction = acquired=%v err=%v", acquired, acquireErr)
-	}
-	if err := lease.Release(); err != nil {
-		t.Fatalf("release reacquired fence: %v", err)
-	}
-}
-
-func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
-		t.Fatalf("seed supervisor intent: %v", err)
-	}
-
-	sourceDir := t.TempDir()
-	cliSource := filepath.Join(sourceDir, "mcphub.exe")
-	windowlessSource := filepath.Join(sourceDir, "mcphub-windowless.exe")
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, "PAIR-CLI"), cliSource)
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "PAIR-WINDOWLESS"), windowlessSource)
-	target := filepath.Join(t.TempDir(), "mcphub.exe")
-
-	originalFactory := newWindowsProductPairTxnFn
-	originalRun := runInstallUpgradeWindowsFn
-	t.Cleanup(func() {
-		newWindowsProductPairTxnFn = originalFactory
-		runInstallUpgradeWindowsFn = originalRun
-	})
-	var request windowsProductPairTxnRequest
-	stagedBytesPreserved := false
-	txn := &WindowsProductPairTxn{}
-	newWindowsProductPairTxnFn = func(got windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
-		request = got
-		cliSame, cliErr := sameFileContents(cliSource, got.StagedCLI)
-		windowlessSame, windowlessErr := sameFileContents(windowlessSource, got.StagedWindowless)
-		if cliErr != nil || windowlessErr != nil || !cliSame || !windowlessSame {
-			return nil, fmt.Errorf("staged pair bytes differ: cli_same=%v cli_err=%v windowless_same=%v windowless_err=%v", cliSame, cliErr, windowlessSame, windowlessErr)
-		}
-		stagedBytesPreserved = true
-		return txn, nil
-	}
-	var gotOpts UpgradeOpts
-	runInstallUpgradeWindowsFn = func(_ context.Context, opts UpgradeOpts) error {
-		gotOpts = opts
-		return nil
-	}
-
-	cmd := &cobra.Command{}
-	cmd.SetOut(io.Discard)
-	if err := runV5UpgradeWindowsWithPaths(cmd, cliSource, target); err != nil {
-		t.Fatalf("runV5UpgradeWindowsWithPaths: %v", err)
-	}
-	if gotOpts.WindowsProductPair != txn {
-		t.Fatal("legacy upgrade seam did not receive the sole pair owner")
-	}
-	if gotOpts.NewBinary != "" || gotOpts.AdmitStaged != nil || gotOpts.VerifyCanonical != nil || gotOpts.WriteReceipt != nil {
-		t.Fatalf("parallel single-binary mutation callbacks remain wired: %+v", gotOpts)
-	}
-	if request.CLIPath != target || request.WindowlessPath != filepath.Join(filepath.Dir(target), "mcphub-windowless.exe") {
-		t.Fatalf("installed paths = %q/%q", request.CLIPath, request.WindowlessPath)
-	}
-	if !stagedBytesPreserved {
-		t.Fatal("staged product pair bytes were not preserved before pair construction")
 	}
 }
 
@@ -486,14 +475,12 @@ func copyAdmissionPEFixture(t *testing.T, src, dst string) {
 	}
 }
 
-func writeAdmissionProductPairFixture(t *testing.T, tag string) string {
+func writeAdmissionProductFixture(t *testing.T, tag string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cli := filepath.Join(dir, "mcphub.exe")
-	windowless := filepath.Join(dir, "mcphub-windowless.exe")
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, tag+"-CLI"), cli)
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, tag+"-WINDOWLESS"), windowless)
-	return cli
+	product := filepath.Join(dir, "mcphub.exe")
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, tag), product)
+	return product
 }
 
 // ---------------------------------------------------------------------------

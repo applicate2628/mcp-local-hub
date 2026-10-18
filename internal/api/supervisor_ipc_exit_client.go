@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +11,8 @@ import (
 )
 
 // DialSupervisorIPCExit sends a graceful exit request to the running
-// supervisor via its IPC pipe. Used by the GUI process to shut down a
-// child supervisor it spawned (the "GUI owns supervisor lifecycle"
-// architecture introduced in 2026-05-18).
+// supervisor via its IPC pipe. Callers controlling an originally created
+// generation use DialSupervisorIPCExitForOwner instead.
 //
 // Returns nil on a successful `graceful_exit_initiated=true` reply. Any
 // failure (no supervisor lock owner sidecar, dial failure, handshake
@@ -51,6 +51,37 @@ func dialSupervisorIPCExitFromStateDir(ctx context.Context, stateDir string, tim
 		}
 		return fmt.Errorf("supervisor IPC exit: read %s.owner.json: %w", lockPath, err)
 	}
+	return DialSupervisorIPCExitForOwner(ctx, stateDir, owner, timeoutMs)
+}
+
+// DialSupervisorIPCExitForOwner never resolves a replacement owner. The original
+// generation is authenticated on the same connection that carries its exit.
+func DialSupervisorIPCExitForOwner(ctx context.Context, stateDir string, expected SupervisorLockOwner, timeoutMs int) (retErr error) {
+	return dialSupervisorIPCExitForOwner(ctx, stateDir, expected, nil, timeoutMs)
+}
+
+// DialSupervisorIPCExitForPeer validates EACH fresh exit connection against the
+// independently captured original creator before sending any destructive frame.
+func DialSupervisorIPCExitForPeer(ctx context.Context, stateDir string, owner SupervisorLockOwner, expected SupervisorProcessIdentityV1, timeoutMs int) error {
+	return dialSupervisorIPCExitForOwner(ctx, stateDir, owner, &expected, timeoutMs)
+}
+
+func dialSupervisorIPCExitForOwner(ctx context.Context, stateDir string, expected SupervisorLockOwner, peer *SupervisorProcessIdentityV1, timeoutMs int) (retErr error) {
+	if ctx == nil {
+		return fmt.Errorf("supervisor IPC exit: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	started, err := time.Parse(time.RFC3339Nano, expected.StartedAt)
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir || expected.PID <= 0 || err != nil || started.IsZero() || timeoutMs <= 0 {
+		return fmt.Errorf("supervisor IPC exit: explicit namespace, generation and positive grace required")
+	}
+	if peer != nil {
+		if err := validateSupervisorControlPeerExpectation(expected, *peer); err != nil {
+			return err
+		}
+	}
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
 	if err != nil {
@@ -59,13 +90,23 @@ func dialSupervisorIPCExitFromStateDir(ctx context.Context, stateDir string, tim
 		}
 		return fmt.Errorf("supervisor IPC exit: dial %s: %w", address, err)
 	}
-	defer conn.Close()
+	defer func() { retErr = errors.Join(retErr, conn.Close()) }()
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+		if err := conn.SetDeadline(deadline); err != nil {
+			return fmt.Errorf("supervisor IPC exit: set deadline: %w", err)
+		}
 	}
 
-	if err := validateSupervisorIPCHello(conn, owner); err != nil {
+	if peer != nil {
+		if err := ValidateSupervisorControlPeerConnectionV1(conn, expected, *peer); err != nil {
+			return err
+		}
+	}
+	if err := validateSupervisorIPCHello(conn, expected); err != nil {
 		return fmt.Errorf("supervisor IPC exit: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	req := IPCRequest{
 		Version: 1,

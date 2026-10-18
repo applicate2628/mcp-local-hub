@@ -532,6 +532,12 @@ func (e *stdioHostEndpoint) BackendAlive() bool {
 	}
 }
 
+// BackendExited exposes the backing process's close-only OS-exit signal to the
+// lazy proxy's optional lifetime facet. It does not transfer channel ownership.
+func (e *stdioHostEndpoint) BackendExited() <-chan struct{} {
+	return e.host.procExited
+}
+
 // wrapInitErr preserves the concrete init error but annotates it so the lazy
 // proxy can distinguish startup failures from missing-binary failures. Any
 // error here becomes LifecycleFailed (not Missing) since the binary WAS found

@@ -96,6 +96,9 @@ work-items/roadmap-scan-*.md
 /null
 graphify-out/
 
+# Graft local graph cache
+/graft/
+
 # Multi-platform release binaries staged into the npm sub-packages by the
 # publish workflow / local build. NEVER commit binaries into history — only the
 # per-arch `bin/.gitkeep` placeholders are tracked. This pattern also stops a

@@ -328,12 +328,21 @@ func TestRealInstallAdaptersCarryBoundGUIPort(t *testing.T) {
 	})
 
 	const boundPort = 19425
+	s := newEphemeralServer(t, Config{})
+	t.Cleanup(func() {
+		if err := s.api.CloseStdioBridgeAdmissions(context.Background()); err != nil {
+			t.Errorf("GUI API custody close: %v", err)
+		}
+	})
 	var single api.InstallOpts
-	realInstallerInstall = func(opts api.InstallOpts) error {
+	realInstallerInstall = func(a *api.API, opts api.InstallOpts) error {
+		if a != s.api {
+			t.Fatal("single install discarded the Server API lifetime owner")
+		}
 		single = opts
 		return nil
 	}
-	if err := (realInstaller{}).Install("serena", boundPort); err != nil {
+	if err := s.installer.Install("serena", boundPort); err != nil {
 		t.Fatalf("single install: %v", err)
 	}
 	if single.Server != "serena" || single.GUIPort != boundPort {
@@ -341,11 +350,14 @@ func TestRealInstallAdaptersCarryBoundGUIPort(t *testing.T) {
 	}
 
 	var all api.InstallAllOpts
-	realInstallBulkAll = func(opts api.InstallAllOpts) []api.InstallResult {
+	realInstallBulkAll = func(a *api.API, opts api.InstallAllOpts) []api.InstallResult {
+		if a != s.api {
+			t.Fatal("bulk install discarded the Server API lifetime owner")
+		}
 		all = opts
 		return nil
 	}
-	if got := (realInstallBulkAPI{}).InstallAll(nil, boundPort); got != nil {
+	if got := s.installBulk.InstallAll(nil, boundPort); got != nil {
 		t.Fatalf("empty-filter results = %+v, want nil", got)
 	}
 	if all.GUIPort != boundPort {
@@ -353,11 +365,14 @@ func TestRealInstallAdaptersCarryBoundGUIPort(t *testing.T) {
 	}
 
 	var subset []api.InstallOpts
-	realInstallBulkOne = func(opts api.InstallOpts) error {
+	realInstallBulkOne = func(a *api.API, opts api.InstallOpts) error {
+		if a != s.api {
+			t.Fatal("filtered bulk install discarded the Server API lifetime owner")
+		}
 		subset = append(subset, opts)
 		return nil
 	}
-	if got := (realInstallBulkAPI{}).InstallAll([]string{"serena", "memory"}, boundPort); len(got) != 2 {
+	if got := s.installBulk.InstallAll([]string{"serena", "memory"}, boundPort); len(got) != 2 {
 		t.Fatalf("subset results = %+v, want two rows", got)
 	}
 	if len(subset) != 2 {

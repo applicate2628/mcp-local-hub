@@ -36,6 +36,8 @@
 package daemon_env_overlay
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -74,8 +76,8 @@ var errTransientOverlayRead = errors.New("daemon_env_overlay: transient overlay 
 // internal "retry candidate" framing.
 type transientReadError struct{ inner error }
 
-func (e *transientReadError) Error() string { return e.inner.Error() }
-func (e *transientReadError) Unwrap() error { return e.inner }
+func (e *transientReadError) Error() string        { return e.inner.Error() }
+func (e *transientReadError) Unwrap() error        { return e.inner }
 func (e *transientReadError) Is(target error) bool { return target == errTransientOverlayRead }
 
 // underlyingReadError returns the open/stat error a transientReadError
@@ -108,7 +110,7 @@ var openOverlayFile = hardenedOpen
 // Overlay is the top-level YAML document persisted at
 // daemon-env-overrides.yaml under the state dir.
 type Overlay struct {
-	Version int                   `yaml:"version"`
+	Version int                  `yaml:"version"`
 	Daemons map[string]DaemonRow `yaml:"daemons"`
 }
 
@@ -203,55 +205,197 @@ func Load(path string) (*Overlay, error) {
 // transient wrapper preserves the underlying error via %w, so the
 // fs.ErrNotExist chain survives for Load's post-retry errors.Is check.
 func loadOnce(path string) (*Overlay, error) {
-	f, err := openOverlayFile(path)
-	if err != nil {
-		// Open failure: either "missing file" (fs.ErrNotExist) or — on
-		// Windows — the sharing-violation/not-found class that can
-		// transiently appear during a writer's atomic rename. Both are
-		// tagged transient so Load retries once. A genuinely-absent file
-		// still reports fs.ErrNotExist on the retry, which Load maps to
-		// emptyOverlay(); a momentary replace-window miss resolves to the
-		// COMPLETE new file on the retry.
-		return nil, &transientReadError{inner: fmt.Errorf("%s: open: %w", path, err)}
-	}
-	defer f.Close()
+	observed := loadOnceObserved(path)
+	return observed.overlay, observed.primary
+}
 
-	info, err := f.Stat()
-	if err != nil {
-		// Stat on an open handle failing is likewise consistent with a
-		// concurrent rename swapping the underlying entry. Tag transient
-		// for retry.
-		return nil, &transientReadError{inner: fmt.Errorf("%s: stat: %w", path, err)}
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: not a regular file (mode=%s)", path, info.Mode())
-	}
+// ReadObservation retains each actual acquisition and original Close outcome.
+// Legacy Load keeps its original retry/error policy; only the strict observed
+// caller requires settled Close and refuses a lost-provenance fallback.
+type ReadObservation struct {
+	attempts []overlayReadAttempt
+	overlay  *Overlay
+	absent   bool
+}
 
-	// Read-side parent-DACL gate (Sec-F1): the read-side mirror of the
-	// write-side secureWriteStateFileWithOperatorOpt gate. Runs AFTER
-	// the regular-file check and BEFORE the size read, exactly per the
-	// plan's wiring (servers-matrix revamp plan §"Load ... ->
-	// checkStateDirParentReadSafe(parentDir) -> size cap"). The gate
-	// already encodes strict / explicit-relax / default-refuse
-	// semantics (MCPHUB_REQUIRE_SINGLE_USER_HOME /
-	// MCPHUB_ALLOW_UNHARDENED_STATE_READ); propagate its error verbatim
-	// so the operator posture is identical on the read and write paths.
-	// Without this, a broadened %LOCALAPPDATA% parent that grants a
-	// co-resident principal FILE_DELETE_CHILD would let that principal
-	// swap daemon-env-overrides.yaml for an attacker-owned regular file
-	// that opens fine here, injecting attacker-controlled env (PATH
-	// binary-planting) into every supervised daemon.
-	if gateErr := checkStateDirParentReadSafe(filepath.Dir(path)); gateErr != nil {
-		return nil, gateErr
-	}
+func (ReadObservation) String() string     { return "overlay read observation (private)" }
+func (o ReadObservation) GoString() string { return o.String() }
 
-	// Read at most MaxOverlaySize+1 so we can detect overrun even when
-	// the OS reports a smaller size than the actual byte count
-	// (concurrent appends, sparse files, etc.).
-	raw, err := io.ReadAll(io.LimitReader(f, int64(MaxOverlaySize)+1))
-	if err != nil {
-		return nil, fmt.Errorf("%s: read: %w", path, err)
+type overlayReadAttempt struct {
+	overlay        *Overlay
+	raw            []byte
+	reader         fs.File
+	opened         bool
+	closeAttempted bool
+	closeDefined   bool
+	primary        error
+	closeError     error
+}
+
+type observedReadFailure struct {
+	observation *ReadObservation
+	cause       error
+}
+
+func (e *observedReadFailure) Error() string { return "GRAPHIFY_OVERLAY_READ_UNQUALIFIED" }
+func (e *observedReadFailure) Unwrap() error { return e.cause }
+
+func LoadObserved(path string) (*ReadObservation, error) {
+	first := loadOnceObserved(path)
+	attempts := []overlayReadAttempt{first}
+	if errors.Is(first.primary, errTransientOverlayRead) {
+		attempts = append(attempts, loadOnceObserved(path))
 	}
+	return finishOverlayReadObservation(attempts)
+}
+
+func finishOverlayReadObservation(attempts []overlayReadAttempt) (*ReadObservation, error) {
+	obs := &ReadObservation{attempts: append([]overlayReadAttempt(nil), attempts...)}
+	if len(attempts) == 0 {
+		return obs, &observedReadFailure{observation: obs, cause: errors.New("overlay original read attempts unavailable")}
+	}
+	first, selected := attempts[0], attempts[len(attempts)-1]
+	obs.overlay = selected.overlay
+	primary := underlyingReadError(selected.primary)
+	if errors.Is(first.primary, errTransientOverlayRead) && errors.Is(primary, fs.ErrNotExist) {
+		obs.absent = true
+		obs.overlay = emptyOverlay()
+		primary = nil
+	}
+	var closeErr error
+	for _, attempt := range obs.attempts {
+		if attempt.opened && (attempt.reader == nil || !attempt.closeAttempted || !attempt.closeDefined) {
+			closeErr = errors.Join(closeErr, errors.New("overlay close unavailable"))
+		}
+		closeErr = errors.Join(closeErr, attempt.closeError)
+	}
+	if cause := errors.Join(primary, closeErr); cause != nil {
+		return obs, &observedReadFailure{observation: obs, cause: cause}
+	}
+	return obs, nil
+}
+
+func (o *ReadObservation) Overlay() *Overlay {
+	if o == nil || o.overlay == nil {
+		return nil
+	}
+	clone := &Overlay{Version: o.overlay.Version, Daemons: make(map[string]DaemonRow, len(o.overlay.Daemons))}
+	for name, row := range o.overlay.Daemons {
+		if row.Env != nil {
+			env := make(map[string]string, len(row.Env))
+			for k, v := range row.Env {
+				env[k] = v
+			}
+			row.Env = env
+		}
+		clone.Daemons[name] = row
+	}
+	return clone
+}
+
+func (o *ReadObservation) Fingerprint() (string, error) {
+	if o == nil || len(o.attempts) == 0 || o.overlay == nil {
+		return "", errors.New("GRAPHIFY_OVERLAY_OBSERVATION_UNISSUED")
+	}
+	selected := o.attempts[len(o.attempts)-1]
+	if !o.absent && (selected.primary != nil || !selected.opened || !selected.closeDefined || selected.closeError != nil) {
+		return "", errors.New("GRAPHIFY_OVERLAY_OBSERVATION_UNQUALIFIED")
+	}
+	for _, attempt := range o.attempts {
+		if attempt.opened && (attempt.reader == nil || !attempt.closeAttempted || !attempt.closeDefined) {
+			return "", errors.New("GRAPHIFY_OVERLAY_CLOSE_UNAVAILABLE")
+		}
+		if attempt.closeError != nil {
+			return "", errors.New("GRAPHIFY_OVERLAY_CLOSE_FAILED")
+		}
+	}
+	material := append([]byte{0}, selected.raw...)
+	if o.absent {
+		material[0] = 1
+	}
+	digest := sha256.Sum256(material)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func loadOnceObserved(path string) (observation overlayReadAttempt) {
+	original, openErr := openOverlayFile(path)
+	var file fs.File
+	if original != nil {
+		file = original
+	}
+	return consumeOverlayReadAttempt(path, file, openErr)
+}
+
+func consumeOverlayReadAttempt(path string, file fs.File, openErr error) (observation overlayReadAttempt) {
+	observation.overlay, observation.primary = func() (*Overlay, error) {
+		if file != nil {
+			observation.reader = file
+			observation.opened = true
+			defer func() {
+				observation.closeAttempted = true
+				observation.closeError = file.Close()
+				observation.closeDefined = true
+			}()
+		}
+		if openErr != nil {
+			// Open failure: either "missing file" (fs.ErrNotExist) or — on
+			// Windows — the sharing-violation/not-found class that can
+			// transiently appear during a writer's atomic rename. Both are
+			// tagged transient so Load retries once. A genuinely-absent file
+			// still reports fs.ErrNotExist on the retry, which Load maps to
+			// emptyOverlay(); a momentary replace-window miss resolves to the
+			// COMPLETE new file on the retry.
+			return nil, &transientReadError{inner: fmt.Errorf("%s: open: %w", path, openErr)}
+		}
+		if file == nil {
+			return nil, errors.New("overlay original reader unavailable")
+		}
+
+		info, err := file.Stat()
+		if err != nil {
+			// Stat on an open handle failing is likewise consistent with a
+			// concurrent rename swapping the underlying entry. Tag transient
+			// for retry.
+			return nil, &transientReadError{inner: fmt.Errorf("%s: stat: %w", path, err)}
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s: not a regular file (mode=%s)", path, info.Mode())
+		}
+
+		// Read-side parent-DACL gate (Sec-F1): the read-side mirror of the
+		// write-side secureWriteStateFileWithOperatorOpt gate. Runs AFTER
+		// the regular-file check and BEFORE the size read, exactly per the
+		// plan's wiring (servers-matrix revamp plan §"Load ... ->
+		// checkStateDirParentReadSafe(parentDir) -> size cap"). The gate
+		// already encodes strict / explicit-relax / default-refuse
+		// semantics (MCPHUB_REQUIRE_SINGLE_USER_HOME /
+		// MCPHUB_ALLOW_UNHARDENED_STATE_READ); propagate its error verbatim
+		// so the operator posture is identical on the read and write paths.
+		// Without this, a broadened %LOCALAPPDATA% parent that grants a
+		// co-resident principal FILE_DELETE_CHILD would let that principal
+		// swap daemon-env-overrides.yaml for an attacker-owned regular file
+		// that opens fine here, injecting attacker-controlled env (PATH
+		// binary-planting) into every supervised daemon.
+		if gateErr := checkStateDirParentReadSafe(filepath.Dir(path)); gateErr != nil {
+			return nil, gateErr
+		}
+
+		// Read at most MaxOverlaySize+1 so we can detect overrun even when
+		// the OS reports a smaller size than the actual byte count
+		// (concurrent appends, sparse files, etc.).
+		raw, err := io.ReadAll(io.LimitReader(file, int64(MaxOverlaySize)+1))
+		observation.raw = append([]byte(nil), raw...)
+		if err != nil {
+			return nil, fmt.Errorf("%s: read: %w", path, err)
+		}
+		return Decode(raw, path)
+	}()
+	return observation
+}
+
+// Decode is the same pure payload owner for an already observed protected read.
+// It does not attest the read, path policy or resource closure.
+func Decode(raw []byte, path string) (*Overlay, error) {
 	if len(raw) > MaxOverlaySize {
 		return nil, fmt.Errorf("%s: file exceeds %d-byte cap", path, MaxOverlaySize)
 	}
@@ -313,4 +457,3 @@ func (r *sliceReader) Read(p []byte) (int, error) {
 	r.off += n
 	return n, nil
 }
-

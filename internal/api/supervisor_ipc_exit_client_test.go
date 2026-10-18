@@ -3,10 +3,36 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+// This deliberately degraded in-memory transport has no native pipe handle.
+// It is an unavailable-proof/unsupported-projection guard, not native evidence.
+func TestSupervisorControlPeerUnavailableAndUnsupported(t *testing.T) {
+	image, err := filepath.Abs("mcphub-peer-fixture.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := SupervisorLockOwner{PID: 4242, StartedAt: "2026-10-09T00:00:00Z"}
+	expected := SupervisorProcessIdentityV1{PID: owner.PID, CreationTime: owner.StartedAt, UserSID: "S-1-5-21-9", ImagePath: image}
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	err = ValidateSupervisorControlPeerConnectionV1(client, owner, expected)
+	want := ErrSupervisorControlPeerIdentity
+	if runtime.GOOS != "windows" {
+		want = ErrSupervisorControlPeerUnsupported
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("unavailable native connection proof=%v, want %v", err, want)
+	}
+}
 
 // TestDialSupervisorIPCExit_HappyPath drives the production exit IPC
 // client against a fake server that emits the canonical
@@ -129,4 +155,41 @@ func TestDialSupervisorIPCExit_NotInitiatedReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "graceful_exit_initiated=false") {
 		t.Fatalf("err = %v, want error mentioning graceful_exit_initiated=false", err)
 	}
+}
+
+func TestDialSupervisorIPCExitForOwnerNeverRetargetsSidecar(t *testing.T) {
+	original := SupervisorLockOwner{PID: 4242, StartedAt: "2026-05-18T10:00:00Z"}
+	replacement := SupervisorLockOwner{PID: 4343, StartedAt: "2026-05-18T10:00:01Z"}
+	t.Run("original_connection_with_replacement_sidecar", func(t *testing.T) {
+		stateDir := hardenedTempDir(t)
+		writeSupervisorOwnerForTest(t, stateDir, replacement)
+		var seen atomic.Bool
+		stop := startFakeSupervisorIPCStatusServer(t, stateDir, original, func(req IPCRequest) IPCResponse {
+			seen.Store(req.Cmd == "exit")
+			return IPCResponse{ID: req.ID, OK: true, Final: true, Result: map[string]any{"graceful_exit_initiated": true}}
+		})
+		defer stop()
+		if err := DialSupervisorIPCExitForOwner(context.Background(), stateDir, original, 5000); err != nil {
+			t.Fatal(err)
+		}
+		if !seen.Load() {
+			t.Fatal("original bound connection did not receive its graceful exit")
+		}
+		current, err := ReadSupervisorLockOwner(stateDir + string(os.PathSeparator) + "supervisor.lock")
+		if err != nil || current != replacement {
+			t.Fatal("bound exit rewrote current replacement metadata")
+		}
+	})
+	t.Run("replacement_connection_refuses_before_exit", func(t *testing.T) {
+		stateDir := hardenedTempDir(t)
+		writeSupervisorOwnerForTest(t, stateDir, replacement)
+		stop := startFakeSupervisorIPCStatusServer(t, stateDir, replacement, func(IPCRequest) IPCResponse {
+			t.Error("replacement received a destructive frame from the original binding")
+			return IPCResponse{}
+		})
+		defer stop()
+		if err := DialSupervisorIPCExitForOwner(context.Background(), stateDir, original, 5000); err == nil || !strings.Contains(err.Error(), "hello mismatch") {
+			t.Fatal("replacement hello did not refuse the original expected generation")
+		}
+	})
 }

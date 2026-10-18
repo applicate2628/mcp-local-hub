@@ -3,9 +3,13 @@ package api
 import "fmt"
 
 func providerRecoveryOwnershipAbsent(rec *AdoptProvenanceRecord) (bool, error) {
-	intent, err := loadSupervisorOwnedIntent()
+	return providerRecoveryOwnershipAbsentWithIntentLoader(rec, loadSupervisorOwnedIntent)
+}
+
+func providerRecoveryOwnershipAbsentWithIntentLoader(rec *AdoptProvenanceRecord, loadIntent func() (*SupervisorIntentFile, error)) (bool, error) {
+	intent, err := loadIntent()
 	if err != nil {
-		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: load supervisor intent: %w", err)
 	}
 	scope, err := providerAdoptOwnershipScope(rec)
 	if err != nil {
@@ -23,7 +27,10 @@ func providerRecoveryOwnershipAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 }
 
 func providerRecoveryManifestExact(rec *AdoptProvenanceRecord) (bool, error) {
-	root := adoptCommittedManifestDir()
+	root, rootErr := adoptCommittedManifestDir()
+	if rootErr != nil {
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: resolve manifest root: %w", rootErr)
+	}
 	exists, err := manifestExistsIn(root, rec.ManifestName)
 	if err != nil {
 		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -49,19 +56,30 @@ func providerRecoveryManifestExact(rec *AdoptProvenanceRecord) (bool, error) {
 // markerless legacy receipt remains UNKNOWN and is never promoted from current
 // absence.
 func claimProviderUnmanagedRecovery(rec *AdoptProvenanceRecord) (bool, error) {
+	return claimProviderUnmanagedRecoveryWithIntentLoader(rec, loadSupervisorOwnedIntent)
+}
+
+func claimProviderUnmanagedRecoveryWithIntentLoader(rec *AdoptProvenanceRecord, loadIntent func() (*SupervisorIntentFile, error)) (bool, error) {
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
-	absent, err := providerRecoveryOwnershipAbsent(rec)
-	if err != nil || !absent {
-		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	absent, err := providerRecoveryOwnershipAbsentWithIntentLoader(rec, loadIntent)
+	if err != nil {
+		return false, err
+	}
+	if !absent {
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: preinstall_owner_present")
 	}
 	if _, err := providerRecoveryManifestExact(rec); err != nil {
 		return false, err
 	}
 	phase, phaseErr := readProviderInstallPhase(rec.ManifestName)
 	if phaseErr != nil {
-		return false, phaseErr
+		if rec.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall ||
+			!providerInstallPhaseMissing(rec.ManifestName) {
+			return false, phaseErr
+		}
+		phase = providerInstallPhaseNotStarted
 	}
 	if phase != providerInstallPhaseManagedSettled {
 		claimed, err := providerInstallNeverStarted(rec)
@@ -69,9 +87,12 @@ func claimProviderUnmanagedRecovery(rec *AdoptProvenanceRecord) (bool, error) {
 			return claimed, err
 		}
 	}
-	absent, err = providerRecoveryOwnershipAbsent(rec)
-	if err != nil || !absent {
-		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	absent, err = providerRecoveryOwnershipAbsentWithIntentLoader(rec, loadIntent)
+	if err != nil {
+		return false, err
+	}
+	if !absent {
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: preinstall_owner_present")
 	}
 	exists, err := providerRecoveryManifestExact(rec)
 	if err != nil {
@@ -83,7 +104,11 @@ func claimProviderUnmanagedRecovery(rec *AdoptProvenanceRecord) (bool, error) {
 	if deAdoptBeforeManifestDeleteHook != nil {
 		deAdoptBeforeManifestDeleteHook()
 	}
-	if err := NewAPI().ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
+	root, rootErr := adoptCommittedManifestDir()
+	if rootErr != nil {
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: resolve manifest root: %w", rootErr)
+	}
+	if err := NewAPI().manifestDeleteInWithHashUnderLease(root, rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider recovery manifest delete: %w", err)
 	}
 	if deAdoptAfterManifestDeleteHook != nil {

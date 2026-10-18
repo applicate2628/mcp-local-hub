@@ -1,7 +1,14 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +16,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 // Env vars the release-file helper child reads. The sentinel gates the helper
@@ -20,6 +28,7 @@ import (
 const (
 	staleExitHelperSentinelEnv = "MCPHUB_STALE_EXIT_RELEASE_HELPER"
 	staleExitHelperReleaseEnv  = "MCPHUB_STALE_EXIT_RELEASE_PATH"
+	staleExitCustodyFixtureEnv = "MCPHUB_STALE_EXIT_CUSTODY_FIXTURE"
 )
 
 // TestStaleExitReleaseHelper is the release-file helper subprocess. Under a
@@ -36,6 +45,10 @@ func TestStaleExitReleaseHelper(t *testing.T) {
 	if releasePath == "" {
 		os.Exit(3)
 	}
+	if fixture := os.Getenv(staleExitCustodyFixtureEnv); fixture != "" {
+		runStaleExitCustodyFixture(t, fixture, releasePath)
+		return
+	}
 	// Poll for the release file. Bounded so a broken test cannot hang a child
 	// forever (the test process itself has a package timeout anyway).
 	deadline := time.Now().Add(60 * time.Second)
@@ -46,6 +59,212 @@ func TestStaleExitReleaseHelper(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	os.Exit(4)
+}
+
+// A closed fixture on the existing sentinel/selector-qualified helper entry.
+// The child remains in the hosting StdioHost's inherited original Job. The
+// helper retains its actual creation object and one Wait, never PID authority.
+type staleExitCustodyFixture struct {
+	Version           int
+	Role, Root, Nonce string
+	Descendant        bool
+}
+
+type staleExitCustodyRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  struct {
+		Nonce string `json:"nonce"`
+	} `json:"params"`
+	CreatorPID    int                                  `json:"creatorPid,omitempty"`
+	CreatorNative process.PublisherNativeIncarnationV1 `json:"creatorNative"`
+}
+
+// The fixture producer and its caller share this exact private wire. Native
+// values are closed current-self observations, never process-control authority.
+type stdioCLICustodyReply struct {
+	Nonce       string                                `json:"nonce"`
+	RootPID     int                                   `json:"rootPid"`
+	ChildPID    int                                   `json:"childPid"`
+	Held        bool                                  `json:"held"`
+	RootNative  process.PublisherNativeIncarnationV1  `json:"rootNative"`
+	ChildNative *process.PublisherNativeIncarnationV1 `json:"childNative,omitempty"`
+}
+
+func staleExitCustodyPublish(path string, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".tmp", raw, 0600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+func staleExitCustodyReceive(ctx context.Context, path string, value any) error {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			return json.Unmarshal(raw, value)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func runStaleExitCustodyFixture(t *testing.T, raw, releasePath string) {
+	t.Helper()
+	var fixture staleExitCustodyFixture
+	decoder := json.NewDecoder(bytes.NewBufferString(raw))
+	decoder.DisallowUnknownFields()
+	if len(raw) > 4096 || !json.Valid([]byte(raw)) || decoder.Decode(&fixture) != nil || fixture.Version != 1 ||
+		!filepath.IsAbs(fixture.Root) || fixture.Root != filepath.Dir(releasePath) ||
+		fixture.Nonce != filepath.Base(fixture.Root) || (fixture.Role != "root" && fixture.Role != "descendant") ||
+		fixture.Role == "descendant" && (fixture.Descendant || filepath.Base(releasePath) != "descendant.release") ||
+		fixture.Role == "root" && filepath.Base(releasePath) != "root.release" {
+		t.Fatal("invalid closed custody fixture")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	selfObservation, captureErr := process.ObserveCurrentPublisherNative(ctx)
+	if selfObservation == nil {
+		t.Fatalf("fixture current-self observation unavailable: %v", captureErr)
+	}
+	primaryErr, closeErr := selfObservation.CaptureErrors()
+	if err := errors.Join(captureErr, primaryErr, closeErr, selfObservation.Validate(ctx)); err != nil {
+		t.Fatalf("fixture current-self observation incomplete: %v", err)
+	}
+	self := selfObservation.NativeSnapshot()
+	reply := func(request staleExitCustodyRequest, pid int, held bool) {
+		if request.JSONRPC != "2.0" || len(request.ID) == 0 || request.Method != "fixture/liveness" || request.Params.Nonce == "" {
+			t.Fatal("invalid custody liveness request")
+		}
+		if err := selfObservation.Validate(ctx); err != nil {
+			t.Fatalf("fixture current-self observation changed: %v", err)
+		}
+		response := struct {
+			JSONRPC string               `json:"jsonrpc"`
+			ID      json.RawMessage      `json:"id"`
+			Result  stdioCLICustodyReply `json:"result"`
+		}{JSONRPC: "2.0", ID: request.ID}
+		response.Result.Nonce, response.Result.RootPID, response.Result.ChildPID, response.Result.Held = request.Params.Nonce, request.CreatorPID, pid, held
+		response.Result.RootNative = self
+		if held {
+			if request.CreatorPID <= 0 || request.CreatorNative.PID != uint32(request.CreatorPID) || request.CreatorNative.NativeBirthFILETIME == 0 {
+				t.Fatal("descendant request lacks its root native identity")
+			}
+			response.Result.RootNative = request.CreatorNative
+			response.Result.ChildNative = &self
+		}
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprintln(os.Stdout, string(encoded)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.Role == "descendant" {
+		if _, err := fmt.Fprintln(os.Stderr, "custody descendant holds inherited stderr"); err != nil {
+			t.Fatal(err)
+		}
+		if err := staleExitCustodyPublish(filepath.Join(fixture.Root, "descendant.ready"), fixture); err != nil {
+			t.Fatal(err)
+		}
+		var request staleExitCustodyRequest
+		if err := staleExitCustodyReceive(ctx, filepath.Join(fixture.Root, "descendant.request"), &request); err != nil {
+			t.Fatal(err)
+		}
+		reply(request, os.Getpid(), true)
+		var release string
+		if err := staleExitCustodyReceive(ctx, releasePath, &release); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if fixture.Descendant {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		childFixture := fixture
+		childFixture.Role, childFixture.Descendant = "descendant", false
+		childRaw, err := json.Marshal(childFixture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := exec.Command(exe, "-test.run=^TestStaleExitReleaseHelper$", "-test.count=1", "-test.timeout=15s")
+		process.NoConsole(child)
+		child.Dir = fixture.Root
+		child.Env = append(withoutCLITestHelperEnvironment(os.Environ()),
+			staleExitHelperSentinelEnv+"=1", staleExitHelperReleaseEnv+"="+filepath.Join(fixture.Root, "descendant.release"), staleExitCustodyFixtureEnv+"="+string(childRaw))
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		waited := make(chan error, 1)
+		go func() { waited <- child.Wait() }()
+		defer func() {
+			select {
+			case err := <-waited:
+				var exit *exec.ExitError
+				if err != nil && !errors.As(err, &exit) {
+					t.Errorf("retired fixture child Wait: %v", err)
+				}
+				return
+			default:
+			}
+			killErr := child.Process.Kill()
+			if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+				t.Errorf("retained fixture child termination: %v", killErr)
+			}
+			select {
+			case err := <-waited:
+				var exit *exec.ExitError
+				if err != nil && !errors.As(err, &exit) {
+					t.Errorf("fixture child Wait: %v", err)
+				}
+			case <-ctx.Done():
+				t.Error("retained fixture child Wait not received")
+			}
+		}()
+		var ready staleExitCustodyFixture
+		if err := staleExitCustodyReceive(ctx, filepath.Join(fixture.Root, "descendant.ready"), &ready); err != nil {
+			t.Fatal(err)
+		}
+		if ready != childFixture {
+			t.Fatal("descendant barrier belongs to another fixture")
+		}
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		var request staleExitCustodyRequest
+		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
+			t.Fatal(err)
+		}
+		request.CreatorPID = os.Getpid()
+		request.CreatorNative = self
+		if fixture.Descendant {
+			if err := staleExitCustodyPublish(filepath.Join(fixture.Root, "descendant.request"), request); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			reply(request, 0, false)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // waitForEventMarker polls the supervisor events log until it contains the
@@ -95,9 +314,8 @@ func TestWaitGoroutine_StaleExitNoCrashPostNoClear(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, tracker, statePath, nil, "", crashCh, shutdown, nil, false,
+		events, tracker, statePath, nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	taskName := reconcileWiringTestTaskName
@@ -177,9 +395,8 @@ func TestWaitGoroutine_CurrentExitPostsWithGeneration(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, tracker, statePath, nil, "", crashCh, shutdown, nil, false,
+		events, tracker, statePath, nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	taskName := reconcileWiringTestTaskName
@@ -215,5 +432,4 @@ func TestWaitGoroutine_CurrentExitPostsWithGeneration(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("current-generation exit did not post a crashEvent within 30s")
 	}
-	_ = shutdown
 }

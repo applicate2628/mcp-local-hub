@@ -4,9 +4,26 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
 )
+
+func withAutostartGUIControl(_ StrictModeDeps, enable bool, fn func(*api.GUIOwnerControl) error) error {
+	if enable {
+		return api.ErrBootPolicyProjectionUnsupported
+	}
+	// POSIX autostart owns a headless supervisor and retains its existing
+	// start/stop effects; it does not consume a Windows GUI boot choice.
+	return fn(nil)
+}
+
+func disableAutostartForPlatform(backend autostart.Backend) error {
+	return backend.Disable()
+}
+
+func writeAutostartPlatformDetails(_ io.Writer) error { return nil }
 
 func enableAutostartForPlatform(_ autostart.OwnerMode, ownerExplicit, strict bool, _ bool) error {
 	if ownerExplicit {

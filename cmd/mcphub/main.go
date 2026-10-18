@@ -16,15 +16,50 @@ import (
 // These are populated at build time via `-ldflags "-X ..."` (see build
 // scripts). Defaults are useful for `go run` / unmarked dev builds.
 var (
-	version   = "dev"
-	commit    = "unknown"
-	buildDate = "unknown"
+	version         = "dev"
+	commit          = "unknown"
+	buildDate       = "unknown"
+	launchBareGUIFn = cli.LaunchBareGUI
 )
+
+type windowsEntrypointMode uint8
+
+const (
+	windowsEntrypointCLI windowsEntrypointMode = iota
+	windowsEntrypointGUI
+	windowsEntrypointBackground
+	windowsEntrypointStdioProtocol
+)
+
+// classifyWindowsEntrypointMode is the composition-root owner of whether an
+// ordinary Windows launch may inspect/repair console output handles. Unknown
+// and newly registered commands deliberately default to CLI.
+func classifyWindowsEntrypointMode(args []string) windowsEntrypointMode {
+	if len(args) <= 1 {
+		if autoLaunchGUIOptedOut() {
+			return windowsEntrypointCLI
+		}
+		return windowsEntrypointGUI
+	}
+	switch args[1] {
+	case "gui":
+		return windowsEntrypointGUI
+	case "supervise", "daemon", "route", "tray", "workspace-weekly-refresh",
+		"audit-lock-terminal-worker", "daemon-recovery-audit-handoff-worker",
+		"gui-owner-unknown-confirmation-worker":
+		return windowsEntrypointBackground
+	case "relay", "cbuild":
+		return windowsEntrypointStdioProtocol
+	default:
+		return windowsEntrypointCLI
+	}
+}
 
 func main() {
 	args := os.Args
 	consolePolicy, args := cli.ResolveWindowsConsolePolicy(args)
-	debugConsoleAcquired, err := applyWindowsConsolePolicy(consolePolicy)
+	entrypointMode := classifyWindowsEntrypointMode(args)
+	debugConsoleAcquired, err := applyWindowsConsolePolicy(entrypointMode, consolePolicy)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -32,10 +67,13 @@ func main() {
 	cli.SetBuildInfo(version, commit, buildDate)
 	cli.SetDebugConsoleAcquired(debugConsoleAcquired)
 
-	// A bare invocation (no subcommand) is the first-run entry point: route
-	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
-	if !autoLaunchGUIOptedOut() && shouldAutoLaunchGUIForArgs(args) {
-		args = cli.RouteInvocationArgs(args)
+	args, handled, err := prepareInvocation(args, consolePolicy)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	if handled {
+		return
 	}
 	os.Args = args
 
@@ -65,6 +103,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+func prepareInvocation(args []string, consolePolicy cli.WindowsConsolePolicy) ([]string, bool, error) {
+	if autoLaunchGUIOptedOut() || !shouldAutoLaunchGUIForArgs(args) {
+		return args, false, nil
+	}
+	// A startup prefix may normalize to a bare argv, but an explicitly
+	// requested console is process-local state and must stay with the inline
+	// Cobra GUI lifetime. Never transfer that launch to the detached same-image
+	// child or attempt to recreate the console request in child argv.
+	if consolePolicy != cli.WindowsConsoleDisabled {
+		return cli.RouteInvocationArgs(args), false, nil
+	}
+	handled, err := launchBareGUIFn()
+	if err != nil {
+		return args, false, err
+	}
+	if handled {
+		return args, true, nil
+	}
+	return cli.RouteInvocationArgs(args), false, nil
 }
 
 // shouldAutoLaunchGUI reports whether this invocation carried no subcommand

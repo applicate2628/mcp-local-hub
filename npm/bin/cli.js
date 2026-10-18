@@ -5,7 +5,7 @@
 // `@applicate2628/mcp-local-hub-<platform>-<arch>` package per supported
 // target in its `optionalDependencies`. npm installs ONLY the sub-package
 // whose `os`/`cpu` fields match the host (esbuild / turbo / @swc pattern), so
-// a Windows host downloads only `@applicate2628/mcp-local-hub-win32-x64`,
+// a Windows x64 host downloads only `@applicate2628/mcp-local-hub-win32-x64`,
 // never the macOS or Linux binaries.
 //
 // This shim is the `bin` entry point. It:
@@ -20,33 +20,20 @@
 // itself installed, and it still resolves under `npm install --ignore-scripts`
 // (that flag skips lifecycle scripts, not optional dependencies).
 //
-// The package DOES ship one lifecycle script, scripts/postinstall.js, but it
-// performs NO network I/O: it only COPIES the already-installed local platform
-// binary into the canonical ~/.local/bin (via `mcphub canonicalize`) so a bare
-// `mcphub` runs the version npm just delivered. A copy-only step is a
-// different, far narrower risk profile than a downloading postinstall, and it
-// is fully fail-safe — a copy failure never breaks `npm install`. Under
-// `--ignore-scripts` it simply does not run, and the operator reconciles
-// ~/.local with `mcphub setup`.
+// The package ships scripts/postinstall.js as a no-op. npm owns delivery
+// and replacement of the native platform payload; this shim resolves it
+// directly. The lifecycle script does not launch the product or promote
+// another copy into ~/.local/bin. Explicit setup/canonicalize remains a
+// separate optional local-install action.
 
 "use strict";
 
 const { spawnSync } = require("node:child_process");
 const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
 
-// PACKAGE_BY_PLATFORM (the `${process.platform}-${process.arch}` -> sub-package
-// map) and binaryBasename now live in ../lib/platform-binary.js, the single
-// owner shared with scripts/postinstall.js (imported above). Support tiers are
-// documented in npm/README.md and each sub-package description: win32-x64 is
-// GA; the rest are best-effort (the CLI runs everywhere we cross-compile;
-// supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview).
-//
-// ROSETTA CAVEAT: Node reports Apple-Silicon-native as `arm64` and
-// Intel/Rosetta as `x64`. On an arm64 Mac with no native arm64 install present
-// (or when Node itself runs under Rosetta and reports `process.arch === "x64"`),
-// the darwin-x64 binary runs fine under Rosetta 2 translation — an ACCEPTABLE
-// fallback, not an error. We do not force-prefer the arm64 build; we trust the
-// package npm actually installed for this host.
+// PACKAGE_BY_PLATFORM and binaryBasename live in ../lib/platform-binary.js.
+// The map is derived from the shipped meta manifest: a deferred host is
+// rejected before looking for any older installed package.
 
 const RELEASES_URL =
   "https://github.com/applicate2628/mcp-local-hub/releases";
@@ -58,10 +45,8 @@ function fail(message) {
 
 function fallbackHint() {
   return (
-    `\nFallback: download the matching binary from GitHub Releases\n` +
-    `  ${RELEASES_URL}\n` +
-    `and place it on your PATH, then keep it current with\n` +
-    `  mcphub install --upgrade\n`
+    `\nCheck available pinned package versions or release assets for this host:\n` +
+    `  ${RELEASES_URL}\n`
   );
 }
 

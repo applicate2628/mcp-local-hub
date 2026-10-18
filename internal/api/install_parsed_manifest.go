@@ -30,6 +30,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
@@ -55,9 +57,14 @@ var installSupervisorRunningProbeFn = SupervisorRunningUnderStateDir
 // seam always passes StartTasks=false into the materialization core. The
 // deferred-start contract is structural, not a runtime knob.
 type InstallParsedManifestOpts struct {
-	Writer            io.Writer
-	ClientsInclude    []string
-	IncludeAllClients bool
+	SerenaPreparationPolicy *SerenaPreparationPolicyV1
+	// A held intent/quiet-lock caller supplies an already prepared binding;
+	// this path cannot perform installation under that exclusion.
+	SerenaPreparedBinding    *PreparedSerenaRuntimeBinding
+	SerenaPreparedInvocation *PreparedSerenaConsumerInvocation
+	Writer                   io.Writer
+	ClientsInclude           []string
+	IncludeAllClients        bool
 	// Snapshot of registered serena workspaces; consumed by the
 	// per-workspace fan-out; populated by future callers (migrate redesign
 	// / E.2 auto-register).
@@ -272,7 +279,112 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("InstallParsedManifest: a non-nil Workspaces snapshot is required for a non-dry install of %q (pass an empty non-nil slice to install with zero registered workspaces; a nil snapshot would drop the server's existing supervisor-intent daemon rows)", m.Name)
 	}
 
-	stateDir, err := DaemonStateDir()
+	plan, planErr := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
+		ClientsInclude:    opts.ClientsInclude,
+		IncludeAllClients: opts.IncludeAllClients,
+	}))
+	if planErr != nil {
+		return "", planErr
+	}
+	selected, selectErr := selectInstallExecutionPhase(m, plan, installPlanOpts{
+		Writer: w, SkipSchedulerPrune: m.DaemonTemplate != nil,
+	}, true, true)
+	if selectErr != nil {
+		return "", selectErr
+	}
+	plan.selectedExecutionPhase = selected
+	var preparedPlan *Plan
+	invocation := opts.SerenaPreparedInvocation
+	ownInvocation := false
+	if IsSerenaServer(m.Name) && len(opts.Workspaces) > 0 {
+		live := filterExistingWorkspaceRows(m.Name, opts.Workspaces, w)
+		opts.Workspaces = live
+		if len(live) > 0 {
+			if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
+				return "", err
+			}
+			var binding PreparedSerenaRuntimeBinding
+			var record PreparedSerenaRuntimeRecord
+			operationID := ""
+			if invocation == nil {
+				if opts.SupervisorLockBypass.lk != nil || opts.SerenaPreparedBinding != nil {
+					return "", errors.New("SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED")
+				}
+				tasks := make([]string, 0, len(live))
+				for _, workspace := range live {
+					tasks = append(tasks, SerenaTaskNameForWorkspace(workspace.WorkspacePath))
+				}
+				var request PreparedSerenaRequest
+				binding, record, request, err = a.prepareSerenaInstall(ctx, m, opts.ManifestHash, tasks, opts.SerenaPreparationPolicy)
+				if err != nil {
+					return "", err
+				}
+				bounded, cancel := context.WithDeadline(ctx, request.AbsoluteCleanupDeadline)
+				defer cancel()
+				ctx = bounded
+				operationID = request.OperationID
+			} else {
+				if ctx == nil {
+					return "", errors.New("SERENA_PARSED_CONTEXT_MISSING")
+				}
+				bounded, cancel := context.WithDeadline(ctx, invocation.deadline)
+				defer cancel()
+				ctx = bounded
+				owner, ownerErr := a.preparedSerenaRuntimeOwner()
+				if ownerErr != nil {
+					return "", ownerErr
+				}
+				if err = invocation.Validate(ctx, owner, invocation.request); err != nil {
+					return "", err
+				}
+				binding, record = invocation.request.Binding, invocation.record
+				operationID = invocation.request.OperationID
+				if opts.SerenaPreparedBinding != nil && *opts.SerenaPreparedBinding != binding {
+					return "", errors.New("SERENA_PARSED_BINDING_DRIFT")
+				}
+			}
+			preparedPlan = &Plan{serenaPreparedBinding: &binding, serenaPreparedRecord: &record}
+			image, imageErr := canonicalMcphubPath()
+			if imageErr != nil {
+				return "", imageErr
+			}
+			expected, projectionErr := materializePreparedSerenaDescriptors(m, BuildSupervisorDaemonsForSerena(m, live, opts.ManifestHash, image), preparedPlan)
+			if projectionErr != nil {
+				return "", projectionErr
+			}
+			if invocation == nil {
+				owner, ownerErr := a.preparedSerenaRuntimeOwner()
+				if ownerErr != nil {
+					return "", ownerErr
+				}
+				invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operationID, Binding: binding, ExpectedDescriptors: expected})
+				if err != nil {
+					return "", err
+				}
+				ownInvocation = true
+			} else if !reflect.DeepEqual(expected, invocation.request.ExpectedDescriptors) {
+				return "", errors.New("SERENA_PARSED_DESCRIPTOR_SCOPE_DRIFT")
+			}
+		}
+	}
+	if ownInvocation {
+		defer func() {
+			proof, closeErr := invocation.CloseObserved()
+			err = errors.Join(err, closeErr, proof.Validate(invocation))
+		}()
+	}
+	plan.serenaPreparedInvocation = invocation
+	if invocation != nil {
+		if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
+			return "", err
+		}
+	}
+	stateDir := ""
+	if invocation != nil {
+		stateDir = invocation.io.Root
+	} else {
+		stateDir, err = DaemonStateDir()
+	}
 	if err != nil {
 		return "", fmt.Errorf("resolve state dir: %w", err)
 	}
@@ -306,8 +418,25 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// secure-write body (writeSupervisorIntentLockHeld) — re-entering
 	// WriteSupervisorIntent (which re-acquires the same flock) would deadlock,
 	// exactly the readIntentLocked/writeIntentLocked split daemon_intent.go uses.
-	release, lockErr := lockSupervisorIntent(intentPath)
+	var heldIntent *StateFileObservedLease
+	var release func() error
+	var lockErr error
+	if invocation != nil {
+		heldIntent, lockErr = AcquireStateFileObservedLease(ctx, intentPath)
+		if heldIntent != nil {
+			release = func() error {
+				proof, closeErr := heldIntent.CloseObserved()
+				return errors.Join(closeErr, proof.Validate(heldIntent), invocation.ReceiveIntentClose(proof))
+			}
+		}
+	} else {
+		release, lockErr = lockSupervisorIntent(intentPath)
+	}
 	if lockErr != nil {
+		if heldIntent != nil {
+			_, closeErr := heldIntent.CloseObserved()
+			lockErr = errors.Join(lockErr, closeErr)
+		}
 		return "", fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
 	committed := false
@@ -315,229 +444,240 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
 	}()
 
-	// Build the intent file we intend to write up front (under the held lock)
-	// so the pre-flight dry-write exercises the same payload and the same
-	// secure-write pipeline the real write will use. priorIntent + priorExisted
-	// drive the rollback restore.
-	// InstallParsedManifest is the workspace-scoped / serena path and always
-	// installs the full set (no per-daemon filter), so pass "" — and serena's
-	// manifest has weekly_refresh=false, so mergeServerWeeklyRefreshTimer's
-	// materialization condition never fires here (prior timers carry verbatim).
-	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, nil, opts.ManifestHash, intentPath, opts.Workspaces, "", w)
-	if err != nil {
-		return "", err
-	}
-	removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMergeScope(priorIntent, desiredIntent, m.Name, ownershipScope)
-	desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
-	desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
-
-	// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
-	// auto-registers a SPECIFIC triggering workspace passes opts.RequireWorkspaceKey.
-	// If buildMergedSupervisorIntent's stale-row filter dropped that workspace (its
-	// dir vanished between the caller's registry Save and this build), committing
-	// would write an intent MISSING the triggering daemon — and on the FIRST introduce
-	// also REPLACE the legacy serena rows with nothing, so the caller's recovery-restart
-	// would reconcile an emptied intent. Fail HERE, before the §7.1 gate and the intent
-	// write, so the prior intent stays intact on disk and the recovery-restart restores
-	// it. This is the pre-commit form the bot asked for (vs a post-commit restore). Empty
-	// key = no requirement.
-	if opts.RequireWorkspaceKey != "" && !desiredIntent.HasSerenaDaemonForWorkspaceKey(opts.RequireWorkspaceKey) {
-		return "", fmt.Errorf("InstallParsedManifest: required workspace key %q is not present in the merged supervisor intent for %q (its directory may have been removed mid-install); refusing to commit an intent that drops it", opts.RequireWorkspaceKey, m.Name)
-	}
-
-	// §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2 P2).
-	// desiredIntent may carry runtime_spec rows (materializeSerenaRuntimeSpec).
-	// An ALREADY-RUNNING supervisor MAY be an OLD binary whose
-	// ReadSupervisorIntent uses DisallowUnknownFields: its watcher would reject a
-	// file carrying the new runtime_spec field, keep its stale in-memory intent,
-	// and leave split-brain (this new CLI believes the descriptor was
-	// re-materialized; the old supervisor never sees it). The only safe state for
-	// a spec-bearing write is NO supervisor running — the NEXT supervisor start is
-	// THIS binary, which reads runtime_spec. So this Phase-1 gate refuses while a
-	// supervisor is running OR while liveness is undeterminable (FAIL CLOSED,
-	// consultant PR #246 r2 #1 — assuming "not running" on a probe error would
-	// silently disable the gate on hardened hosts). Non-spec installs (no
-	// runtime_spec rows) are NOT gated — an old supervisor reads legacy/global
-	// rows fine. The cutover phase (design §7.1 / Phase 4) UPGRADES this refuse to
-	// an automatic drive of the cold-restart flow; until then the operator must
-	// STOP the running supervisor (NOT merely `install --upgrade`, which leaves a
-	// supervisor running — the any-running gate would still refuse). The check
-	// runs under the held supervisor-intent flock, immediately before the
-	// preflight + commit; the supervisor lock is a distinct primitive, so an old
-	// binary cold-starting in the tiny probe→commit window is an extreme residual
-	// edge — but it self-heals: a fresh old binary decoding the new file fails
-	// LOUD at supervisor cold start (supervise.go intent-decode hard abort), not
-	// silently.
-	//
-	// Phase-5 live-add refinement (auto-register-on-miss): the gate fires ONLY
-	// when this write INTRODUCES runtime_spec — i.e. desiredIntent carries it but
-	// the prior on-disk intent does NOT. A write that ADDS a workspace to an
-	// intent that ALREADY carries runtime_spec is safe even while a supervisor
-	// runs, because that running supervisor is PROVABLY the new binary: the only
-	// path to a runtime_spec on-disk intent is the Phase-4 cutover, which reaps
-	// the old supervisor BEFORE the first runtime_spec write (this very gate
-	// blocks writing runtime_spec while an old supervisor runs). So
-	// priorIntent.HasRuntimeSpecRow() ⟹ the cutover already happened ⟹ any
-	// running supervisor understands runtime_spec ⟹ a live-add cannot split-brain.
-	// (Verified airtight against every runtime_spec writer: InstallParsedManifest
-	// is gated here; migrate reaps first; strict-mode only PRESERVES, never
-	// INTRODUCES, runtime_spec; the supervisor reconciler never writes it back.)
-	// The introduction case keeps the original FAIL-CLOSED behavior (refuse on
-	// running OR undeterminable liveness).
-	if desiredIntent.HasRuntimeSpecRow() && !priorIntent.HasRuntimeSpecRow() {
-		// Verified-identity bypass (Phase 1, plan "Revision 1"). The migrate /
-		// serena auto-register flows acquire THIS gate's supervisor.lock around
-		// their reap+rewrite, so the lock the probe would see held is their OWN
-		// handle, not a foreign (possibly-old) supervisor. Skip the probe ONLY
-		// when the caller proves it holds the matching lock: a non-nil token
-		// whose lock is STILL HELD (lk.fl != nil; Release() nils it,
-		// supervisor_lock.go) AND whose lk.path equals this gate's own
-		// supervisor.lock path. A nil, released, or path-mismatched token is NO
-		// bypass → the probe runs → fail-closed. Folding the path check INTO the
-		// gate means a misconfigured Phase-2 call site (wrong resolver) cannot
-		// silently re-open the split-brain.
-		gateLockPath := filepath.Join(stateDir, "supervisor.lock")
-		if bp := opts.SupervisorLockBypass.lk; bp != nil && bp.fl != nil && bp.path == gateLockPath {
-			// Verified bypass: the caller holds this gate's exact lock. Emit the
-			// info audit row (mirrors emitSpecBearingInstallRefusedEvent) and skip
-			// the probe so the spec-bearing write proceeds.
-			emitSpecBearingInstallAllowedUnderLockEvent(m.Name, gateLockPath)
+	executeParsed := func() (resultPath string, err error) {
+		if invocation != nil {
+			if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
+				return "", err
+			}
+		}
+		var undoErr error
+		defer func() { err = errors.Join(err, undoErr) }()
+		// Build the intent file we intend to write up front (under the held lock)
+		// so the pre-flight dry-write exercises the same payload and the same
+		// secure-write pipeline the real write will use. priorIntent + priorExisted
+		// drive the rollback restore.
+		// InstallParsedManifest is the workspace-scoped / serena path and always
+		// installs the full set (no per-daemon filter), so pass "" — and serena's
+		// manifest has weekly_refresh=false, so mergeServerWeeklyRefreshTimer's
+		// materialization condition never fires here (prior timers carry verbatim).
+		var desiredIntent, priorIntent *SupervisorIntentFile
+		var priorExisted bool
+		var priorRawSHA string
+		if invocation != nil {
+			priorIntent, priorExisted, priorRawSHA, err = invocation.readParsedIntentObserved(ctx, heldIntent)
+			if err != nil {
+				return "", err
+			}
+			desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntentFromPrior(m, preparedPlan, opts.ManifestHash, opts.Workspaces, "", w, priorIntent, priorExisted)
 		} else {
-			running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
-			switch {
-			case probeErr != nil:
-				emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
-				return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
-			case running:
-				emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
-				pidNote := ""
-				if pid > 0 {
-					pidNote = fmt.Sprintf(" (pid %d)", pid)
-				}
-				return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
-			}
+			desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntent(m, preparedPlan, opts.ManifestHash, intentPath, opts.Workspaces, "", w)
 		}
-	}
-
-	// 2. Pre-flight intent-write gate: dry-write to a temp path. No rollback
-	// push — this is a read-only-ish probe that leaves no committed side
-	// effect (the temp file is removed immediately). The probe targets a
-	// DISTINCT ".preflight" path with its OWN ".preflight.lock" leaf, so it
-	// never re-acquires the supervisor-intent.json.lock we hold here. (Dry-run
-	// short-circuited above before reaching this flock-guarded section.)
-	if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
-		return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
-	}
-
-	// 3. Build the plan. NOTE: refuseWorkspaceScopedInstall is intentionally
-	// NOT called — workspace-scoped is the intended input here.
-	//
-	// Routed through installBuildPlanOpts (the documented single owner of
-	// "which BuildPlanOpts does an install entry point use") rather than the
-	// hand-copied struct literal that used to sit here. Both literals on this
-	// seam omitted DefaultClientsOverride, which is the exact field whose
-	// omission from installUsingEmbedFirst caused bot PR #583 — so leaving them
-	// out kept install.go's claim that every plan-building entry point goes
-	// through the owner literally false.
-	//
-	// Scope note, verified rather than assumed: this omission is currently
-	// UNREACHABLE, and by schema rather than by luck. The seam accepts only
-	// kind=workspace-scoped manifests WITH a daemon_template (enforced just
-	// above by validateDynamicPoolManifest); config.Validate rejects
-	// daemon_template together with a daemons[] block; and a client_binding must
-	// name a daemon from daemons[] ("binding references unknown daemon"). A
-	// manifest that reaches here therefore cannot carry a resolvable client
-	// binding at all, so a dry run plans zero client updates and
-	// DefaultClientsOverride can change nothing today. That is a stronger
-	// guarantee than "the synthesized projection happens to carry no bindings",
-	// but it is a guarantee about the SCHEMA, not about this call site — which
-	// is precisely why the call site should not re-encode it. Routing through
-	// the owner costs nothing, removes the drift vector, and keeps the claim
-	// true if the schema ever admits bindings here.
-	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
-		ClientsInclude:    opts.ClientsInclude,
-		IncludeAllClients: opts.IncludeAllClients,
-	}))
-	if err != nil {
-		return "", err
-	}
-
-	// 4. Audit-first + execute, with the supervisor-intent write folded into
-	// executeInstallTo's rollback stack via the intermediate hook. On dry-run
-	// installPlan prints the plan and returns without invoking the hook. The
-	// write + rollback restore run LOCK-FREE because the supervisor-intent
-	// flock is already held by this function (see FIX 1 above).
-	var intermediate intentWriteStep = func() (func(), error) {
-		// The supervisor-intent write below is the irreversible commit point. Honor a
-		// caller cancellation HERE — the last instant before the write — so serena
-		// auto-register's session watcher (which cancels ctx on a mid-register session
-		// DELETE/idle-sweep) prevents a terminated session from landing a committed
-		// daemon row (bot PR #253 r6 P2). For a DaemonTemplate plan executeInstallTo has
-		// run no other mutation (zero scheduler tasks), so this IS the true pre-commit
-		// gate; the caller's failPreCommit then rolls the registry row back (and, if it
-		// reaped, recovery-restarts on the still-intact prior intent).
-		if cerr := ctx.Err(); cerr != nil {
-			return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+		if err != nil {
+			return "", err
 		}
-		if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
-			return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+		removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMergeScope(priorIntent, desiredIntent, m.Name, ownershipScope)
+		desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
+		desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
+
+		// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
+		// auto-registers a SPECIFIC triggering workspace passes opts.RequireWorkspaceKey.
+		// If buildMergedSupervisorIntent's stale-row filter dropped that workspace (its
+		// dir vanished between the caller's registry Save and this build), committing
+		// would write an intent MISSING the triggering daemon — and on the FIRST introduce
+		// also REPLACE the legacy serena rows with nothing, so the caller's recovery-restart
+		// would reconcile an emptied intent. Fail HERE, before the §7.1 gate and the intent
+		// write, so the prior intent stays intact on disk and the recovery-restart restores
+		// it. This is the pre-commit form the bot asked for (vs a post-commit restore). Empty
+		// key = no requirement.
+		if opts.RequireWorkspaceKey != "" && !desiredIntent.HasSerenaDaemonForWorkspaceKey(opts.RequireWorkspaceKey) {
+			return "", fmt.Errorf("InstallParsedManifest: required workspace key %q is not present in the merged supervisor intent for %q (its directory may have been removed mid-install); refusing to commit an intent that drops it", opts.RequireWorkspaceKey, m.Name)
 		}
-		// Compensating undo: restore the prior intent through the same
-		// supervisor-intent write boundary, or remove the file entirely if it did
-		// not exist before this install.
-		undo := func() {
-			if priorExisted {
-				if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
-					fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
-				} else {
-					fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
-				}
-				return
-			}
-			if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
-				fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
+
+		// §7.1 spec-bearing supervisor-intent write gate (bot PR #246 r2 P2).
+		// desiredIntent may carry runtime_spec rows (materializeSerenaRuntimeSpec).
+		// An ALREADY-RUNNING supervisor MAY be an OLD binary whose
+		// ReadSupervisorIntent uses DisallowUnknownFields: its watcher would reject a
+		// file carrying the new runtime_spec field, keep its stale in-memory intent,
+		// and leave split-brain (this new CLI believes the descriptor was
+		// re-materialized; the old supervisor never sees it). The only safe state for
+		// a spec-bearing write is NO supervisor running — the NEXT supervisor start is
+		// THIS binary, which reads runtime_spec. So this Phase-1 gate refuses while a
+		// supervisor is running OR while liveness is undeterminable (FAIL CLOSED,
+		// consultant PR #246 r2 #1 — assuming "not running" on a probe error would
+		// silently disable the gate on hardened hosts). Non-spec installs (no
+		// runtime_spec rows) are NOT gated — an old supervisor reads legacy/global
+		// rows fine. The cutover phase (design §7.1 / Phase 4) UPGRADES this refuse to
+		// an automatic drive of the cold-restart flow; until then the operator must
+		// STOP the running supervisor (NOT merely `install --upgrade`, which leaves a
+		// supervisor running — the any-running gate would still refuse). The check
+		// runs under the held supervisor-intent flock, immediately before the
+		// preflight + commit; the supervisor lock is a distinct primitive, so an old
+		// binary cold-starting in the tiny probe→commit window is an extreme residual
+		// edge — but it self-heals: a fresh old binary decoding the new file fails
+		// LOUD at supervisor cold start (supervise.go intent-decode hard abort), not
+		// silently.
+		//
+		// Phase-5 live-add refinement (auto-register-on-miss): the gate fires ONLY
+		// when this write INTRODUCES runtime_spec — i.e. desiredIntent carries it but
+		// the prior on-disk intent does NOT. A write that ADDS a workspace to an
+		// intent that ALREADY carries runtime_spec is safe even while a supervisor
+		// runs, because that running supervisor is PROVABLY the new binary: the only
+		// path to a runtime_spec on-disk intent is the Phase-4 cutover, which reaps
+		// the old supervisor BEFORE the first runtime_spec write (this very gate
+		// blocks writing runtime_spec while an old supervisor runs). So
+		// priorIntent.HasRuntimeSpecRow() ⟹ the cutover already happened ⟹ any
+		// running supervisor understands runtime_spec ⟹ a live-add cannot split-brain.
+		// (Verified airtight against every runtime_spec writer: InstallParsedManifest
+		// is gated here; migrate reaps first; strict-mode only PRESERVES, never
+		// INTRODUCES, runtime_spec; the supervisor reconciler never writes it back.)
+		// The introduction case keeps the original FAIL-CLOSED behavior (refuse on
+		// running OR undeterminable liveness).
+		if desiredIntent.HasRuntimeSpecRow() && !priorIntent.HasRuntimeSpecRow() {
+			// Verified-identity bypass (Phase 1, plan "Revision 1"). The migrate /
+			// serena auto-register flows acquire THIS gate's supervisor.lock around
+			// their reap+rewrite, so the lock the probe would see held is their OWN
+			// handle, not a foreign (possibly-old) supervisor. Skip the probe ONLY
+			// when the caller proves it holds the matching lock: a non-nil token
+			// whose lock is STILL HELD (lk.fl != nil; Release() nils it,
+			// supervisor_lock.go) AND whose lk.path equals this gate's own
+			// supervisor.lock path. A nil, released, or path-mismatched token is NO
+			// bypass → the probe runs → fail-closed. Folding the path check INTO the
+			// gate means a misconfigured Phase-2 call site (wrong resolver) cannot
+			// silently re-open the split-brain.
+			gateLockPath := filepath.Join(stateDir, "supervisor.lock")
+			if bp := opts.SupervisorLockBypass.lk; bp != nil && bp.fl != nil && bp.path == gateLockPath {
+				// Verified bypass: the caller holds this gate's exact lock. Emit the
+				// info audit row (mirrors emitSpecBearingInstallRefusedEvent) and skip
+				// the probe so the spec-bearing write proceeds.
+				emitSpecBearingInstallAllowedUnderLockEvent(m.Name, gateLockPath)
 			} else {
-				fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+				running, pid, probeErr := SupervisorRunningUnderStateDir(stateDir)
+				switch {
+				case probeErr != nil:
+					emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-liveness-undeterminable", 0)
+					return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q: could not determine whether a supervisor is running (%v) — failing closed to avoid split-brain with an older supervisor whose intent watcher uses DisallowUnknownFields. Stop any running supervisor and resolve the probe error, then re-run the install (design §7.1)", m.Name, probeErr)
+				case running:
+					emitSpecBearingInstallRefusedEvent(m.Name, "supervisor-running", pid)
+					pidNote := ""
+					if pid > 0 {
+						pidNote = fmt.Sprintf(" (pid %d)", pid)
+					}
+					return "", fmt.Errorf("InstallParsedManifest: refusing to write spec-bearing serena dynamic-pool descriptors (runtime_spec) for %q while a supervisor is running%s: an older supervisor binary's intent watcher uses DisallowUnknownFields and would reject the new field, leaving split-brain. STOP the running supervisor first (the next start will be this binary, which reads runtime_spec) — note `mcphub install --upgrade` alone leaves a supervisor running, so the Phase-4 cold-restart driver or a manual stop is required — then re-run the install (design §7.1)", m.Name, pidNote)
+				}
 			}
 		}
-		return undo, nil
-	}
 
-	// FIX 2 — skip scheduler prune for workspace-scoped (DaemonTemplate)
-	// installs. A workspace-scoped manifest yields ZERO SchedulerTasks, but
-	// executeInstallTo's full-install reconcile would then prune EVERY existing
-	// mcp-local-hub-<server>-* scheduler task against an empty planned set —
-	// destroying registered serena workspace tasks before the intent is even
-	// written. Workspace-scoped daemons live in supervisor-intent.json, not in
-	// scheduler tasks, so there is nothing for this seam to reconcile. Legacy
-	// callers (api.Install et al.) pass non-DaemonTemplate manifests and leave
-	// SkipSchedulerPrune false, so their reconcile behavior is unchanged.
-	if err := a.installPlan(ctx, m, plan, installPlanOpts{
-		Writer:       w,
-		DaemonFilter: "",
-		DryRun:       false, // dry-run short-circuited above; this path always mutates
-		// StartTasks is always false: this seam defers every daemon start to
-		// the supervisor reconciler (workspace-scoped-only contract). Pass B
-		// never runs here.
-		StartTasks:         false,
-		Intermediate:       intermediate,
-		SkipSchedulerPrune: m.DaemonTemplate != nil,
-		AuditTaskNames:     fanOutAuditTaskNames(m, desiredIntent),
-	}); err != nil {
-		return "", err
+		// The same workspace plan and execution selection were frozen before
+		// preparation through the shared installBuildPlanOpts owner.
+		// 4. Audit-first + execute, with the supervisor-intent write folded into
+		// executeInstallTo's rollback stack via the intermediate hook. On dry-run
+		// installPlan prints the plan and returns without invoking the hook. The
+		// write + rollback restore run LOCK-FREE because the supervisor-intent
+		// flock is already held by this function (see FIX 1 above).
+		var intermediate intentWriteStep = func() (func(), error) {
+			// The supervisor-intent write below is the irreversible commit point. Honor a
+			// caller cancellation HERE — the last instant before the write — so serena
+			// auto-register's session watcher (which cancels ctx on a mid-register session
+			// DELETE/idle-sweep) prevents a terminated session from landing a committed
+			// daemon row (bot PR #253 r6 P2). For a DaemonTemplate plan executeInstallTo has
+			// run no other mutation (zero scheduler tasks), so this IS the true pre-commit
+			// gate; the caller's failPreCommit then rolls the registry row back (and, if it
+			// reaped, recovery-restarts on the still-intact prior intent).
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+			}
+			if invocation != nil {
+				commit, commitSHA, writeErr := invocation.publishParsedIntentObserved(ctx, heldIntent, priorExisted, priorRawSHA, desiredIntent)
+				if writeErr != nil {
+					return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, writeErr)
+				}
+				return func() {
+					var restoreErr error
+					if priorExisted {
+						_, _, restoreErr = invocation.replaceParsedIntentObserved(ctx, heldIntent, commitSHA, priorIntent)
+					} else {
+						restoreErr = invocation.restoreParsedIntentAbsenceObserved(ctx, heldIntent, commit, commitSHA)
+					}
+					if restoreErr != nil {
+						undoErr = errors.Join(undoErr, fmt.Errorf("restore prior supervisor-intent: %w", restoreErr))
+						fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", restoreErr)
+					} else {
+						if priorExisted {
+							fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+						} else {
+							fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+						}
+					}
+				}, nil
+			}
+			if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
+				return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+			}
+			// Compensating undo: restore the prior intent through the same
+			// supervisor-intent write boundary, or remove the file entirely if it did
+			// not exist before this install.
+			undo := func() {
+				if priorExisted {
+					if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
+						fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
+					} else {
+						fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+					}
+					return
+				}
+				if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
+					fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
+				} else {
+					fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+				}
+			}
+			return undo, nil
+		}
+
+		// FIX 2 — skip scheduler prune for workspace-scoped (DaemonTemplate)
+		// installs. A workspace-scoped manifest yields ZERO SchedulerTasks, but
+		// executeInstallTo's full-install reconcile would then prune EVERY existing
+		// mcp-local-hub-<server>-* scheduler task against an empty planned set —
+		// destroying registered serena workspace tasks before the intent is even
+		// written. Workspace-scoped daemons live in supervisor-intent.json, not in
+		// scheduler tasks, so there is nothing for this seam to reconcile. Legacy
+		// callers (api.Install et al.) pass non-DaemonTemplate manifests and leave
+		// SkipSchedulerPrune false, so their reconcile behavior is unchanged.
+		executionOpts := selected.executionOptions(intermediate, fanOutAuditTaskNames(m, desiredIntent))
+		if invocation != nil {
+			if err := selected.admitPrepared(m, plan, executionOpts, true); err != nil {
+				return "", err
+			}
+		}
+		if invocation != nil {
+			if err := invocation.preflightParsedIntentObserved(ctx, heldIntent, priorExisted, priorRawSHA, desiredIntent); err != nil {
+				return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+			}
+		} else if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+			return "", fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+		}
+		if err := a.installPlan(ctx, m, plan, executionOpts); err != nil {
+			return "", err
+		}
+		committed = true
+		if len(removedSupervisorTargetsAfterInstall) > 0 {
+			nudgeResult := nudgeSupervisorReconcileAfterRemovedTargets(context.Background())
+			killRemovedSupervisorTargetsAfterGlobalInstall(
+				removedSupervisorTargetsAfterInstall,
+				removedSupervisorPIDByTask,
+				nudgeResult,
+				fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
+				w,
+			)
+		}
+		return intentPath, nil
 	}
-	committed = true
-	if len(removedSupervisorTargetsAfterInstall) > 0 {
-		nudgeResult := nudgeSupervisorReconcileAfterRemovedTargets(context.Background())
-		killRemovedSupervisorTargetsAfterGlobalInstall(
-			removedSupervisorTargetsAfterInstall,
-			removedSupervisorPIDByTask,
-			nudgeResult,
-			fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
-			w,
-		)
+	if invocation != nil {
+		var resultPath string
+		err = invocation.WithIntentLockHeld(ctx, heldIntent, func() error { resultPath, err = executeParsed(); return err })
+		return resultPath, err
 	}
-	return intentPath, nil
+	return executeParsed()
 }
 
 // installPlanCore is the shared install body for the three global-manifest
@@ -565,13 +705,48 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 	return a.installPlanCoreWithSymlinkConsents(ctx, m, plan, daemonFilter, dryRun, w, nil)
 }
 
+// selectGlobalInstallExecutionPhase owns the existing global branch/options
+// decision for both preparation admission and later execution.
+func selectGlobalInstallExecutionPhase(m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer, symlinkConsents []ResolvedSymlinkConsent) (*selectedInstallExecutionPhase, error) {
+	if m == nil || plan == nil {
+		return nil, errors.New("SERENA_INSTALL_PLAN_MISSING")
+	}
+	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
+	opts := installPlanOpts{Writer: w, DaemonFilter: daemonFilter, DryRun: dryRun, SymlinkConsents: symlinkConsents}
+	if !dryRun {
+		opts.SkipSchedulerTasks = true
+		opts.SkipSchedulerPrune = true
+	}
+	return selectInstallExecutionPhase(m, plan, opts, superviseGlobal, false)
+}
+
 func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer, symlinkConsents []ResolvedSymlinkConsent) error {
+	ownedBackend := plan.ownedBackendInstall
 	// Phase F: a global manifest's daemon lifecycle is owned by
 	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global
 	// installs must enter this merge even when the NEW manifest contributes zero
 	// rows (daemonless remote-http): the full install still owns removal of this
 	// server's prior descriptor rows and per-server weekly timer.
-	superviseGlobal := m.Kind != config.KindWorkspaceScoped && (len(plan.SupervisorIntent) > 0 || daemonFilter == "")
+	selected := plan.selectedExecutionPhase
+	if selected == nil {
+		if plan.serenaPreparedInvocation != nil {
+			return errors.New("SERENA_PREPARED_PRECOMMIT_PLAN_EFFECTS_REFUSED")
+		}
+		var selectErr error
+		selected, selectErr = selectGlobalInstallExecutionPhase(m, plan, daemonFilter, dryRun, w, symlinkConsents)
+		if selectErr != nil {
+			return selectErr
+		}
+	}
+	if plan.serenaPreparedInvocation != nil {
+		actual := selected.opts
+		actual.DaemonFilter, actual.DryRun = daemonFilter, dryRun
+		actual.SymlinkConsents = symlinkConsents
+		if err := selected.admitPrepared(m, plan, actual, false); err != nil {
+			return err
+		}
+	}
+	superviseGlobal := selected.supervisorCommit
 	if dryRun {
 		if superviseGlobal {
 			return a.printSupervisorGlobalInstallDryRun(m, plan, daemonFilter, w)
@@ -597,7 +772,14 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 	nudgeResult := supervisorReconcileNudgeResult{status: supervisorReconcileNudgeSucceeded}
 
 	if superviseGlobal {
-		stateDir, err := DaemonStateDir()
+		invocation := plan.serenaPreparedInvocation
+		var stateDir string
+		var err error
+		if invocation != nil {
+			stateDir = invocation.io.Root
+		} else {
+			stateDir, err = DaemonStateDir()
+		}
 		if err != nil {
 			return fmt.Errorf("resolve state dir: %w", err)
 		}
@@ -635,145 +817,253 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			// Because we hold the lock, the inner write uses the LOCK-FREE
 			// writeSupervisorIntentLockHeld body (re-entering WriteSupervisorIntent
 			// would deadlock).
-			release, lockErr := lockSupervisorIntent(intentPath)
+			var heldIntent *StateFileObservedLease
+			var release func() error
+			var lockErr error
+			if invocation != nil {
+				heldIntent, lockErr = AcquireStateFileObservedLease(ctx, intentPath)
+				if heldIntent != nil {
+					release = func() error {
+						proof, closeErr := heldIntent.CloseObserved()
+						return errors.Join(closeErr, proof.Validate(heldIntent), invocation.ReceiveIntentClose(proof))
+					}
+				}
+			} else {
+				release, lockErr = lockSupervisorIntent(intentPath)
+			}
 			if lockErr != nil {
+				if heldIntent != nil {
+					_, closeErr := heldIntent.CloseObserved()
+					lockErr = errors.Join(lockErr, closeErr)
+				}
 				return fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 			}
 			committed := false
 			defer func() {
 				releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
 			}()
-
-			// Build the merged intent under the held lock. For a global manifest
-			// serenaOrPlanDaemons takes the supervisorDaemonsFromPlan branch (no
-			// workspaces, no runtime_spec), so this carries NO spec-bearing rows —
-			// the §7.1 supervisor-running gate does not apply. daemonFilter is
-			// threaded so a global manifest's weekly_refresh materializes a
-			// server-weekly-refresh MaintenanceTimer on a FULL install (the Phase F
-			// successor to the deleted per-server scheduler task at install.go:1230).
-			desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, plan, "", intentPath, nil, daemonFilter, w)
-			if err != nil {
-				return err
-			}
-			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstallScope(priorIntent, desiredIntent, m.Name, daemonFilter, ownershipScope)
-			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
-			desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
-			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
-				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope))
-			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
-				(daemonFilter == "" && supervisorIntentHasServerDaemonRowsScope(priorIntent, m.Name, ownershipScope))
-			if len(plan.SupervisorIntent) > 0 {
-				ensureAutostartAfterInstall = true
-				autostartStrictMode = desiredIntent.StrictMode
-				autostartOwnerMode = desiredIntent.EffectiveOwnerMode()
-			}
-			// Defense-in-depth: a global manifest must never materialize a
-			// runtime_spec row. If one ever appeared it would need the §7.1
-			// supervisor-running gate (which lives in InstallParsedManifest), so
-			// refuse rather than write a spec-bearing intent through this gate-less
-			// path. Scope the check to THIS server's rows: the merged intent
-			// legitimately carries OTHER servers' spec-bearing rows (the serena
-			// dynamic-pool rows after `mcphub migrate serena
-			// legacy-to-dynamic-pool`), and a whole-file check made EVERY global
-			// install fail on such hosts (live-host fetch install, 2026-06-12).
-			for _, d := range desiredIntent.Daemons {
-				if d.RuntimeSpec != nil && supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
-					return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
-				}
-			}
-
-			if intentWriteNeeded {
-				// Pre-flight the secure-write so a doomed install fails fast with a
-				// pristine end-state (mirrors InstallParsedManifest step 2).
-				if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
-					return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
-				}
-			}
-
-			phase, phaseErr := readProviderInstallPhase(m.Name)
-			freshProviderInstall := phaseErr == nil && phase == providerInstallPhaseNotStarted &&
-				!supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope)
-			intentWriteAttempted := false
-			var intermediate intentWriteStep
-			if intentWriteNeeded {
-				intermediate = func() (func(), error) {
-					if cerr := ctx.Err(); cerr != nil {
-						return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+			executeLocked := func() (err error) {
+				if invocation != nil {
+					if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
+						return err
 					}
-					// A write error can follow publication. Never certify rollback
-					// merely because the writer did not return its undo closure.
-					intentWriteAttempted = true
-					if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
-						return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+				}
+				var undoErr error
+				defer func() { err = errors.Join(err, undoErr) }()
+
+				// Build the merged intent under the held lock. For a global manifest
+				// serenaOrPlanDaemons takes the supervisorDaemonsFromPlan branch (no
+				// workspaces, no runtime_spec), so this carries NO spec-bearing rows —
+				// the §7.1 supervisor-running gate does not apply. daemonFilter is
+				// threaded so a global manifest's weekly_refresh materializes a
+				// server-weekly-refresh MaintenanceTimer on a FULL install (the Phase F
+				// successor to the deleted per-server scheduler task at install.go:1230).
+				var desiredIntent, priorIntent *SupervisorIntentFile
+				var priorExisted bool
+				var priorRawSHA string
+				if invocation != nil {
+					priorIntent, priorExisted, priorRawSHA, err = invocation.readParsedIntentObserved(ctx, heldIntent)
+					if err == nil {
+						desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntentFromPrior(m, plan, "", nil, daemonFilter, w, priorIntent, priorExisted)
 					}
-					undo := func() {
-						if priorExisted {
-							if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
-								fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
-							} else {
-								fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
-							}
-							return
+				} else {
+					desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntent(m, plan, "", intentPath, nil, daemonFilter, w)
+				}
+				if err != nil {
+					return err
+				}
+				if ownedBackend != nil {
+					if invocation != nil {
+						if ownedBackend.preparedInvocation != invocation || ownedBackend.root != invocation.io.Root || ownedBackend.path != intentPath {
+							return errors.New("SERENA_PARSED_INTENT_OWNER_MISSING")
 						}
-						if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
-							fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
-						} else {
-							fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
-						}
+						ownedBackend.heldIntent = heldIntent
+						ownedBackend.preparedPriorSHA = priorRawSHA
 					}
-					return undo, nil
+					if err := ownedBackend.beginLocked(ctx, priorIntent, desiredIntent, priorExisted, m.Name, daemonFilter); err != nil {
+						return err
+					}
+					if ownedBackend.capsule.Ownership == "reused" {
+						return ownedBackend.receiveLocked(ctx)
+					}
+					if err := checkProjectBackendLateEffects(m, daemonFilter, desiredIntent); err != nil {
+						return errors.Join(err, ownedBackend.persist(ctx, "late-effects-admission", "pending"))
+					}
 				}
-			}
-
-			if err := a.installPlan(ctx, m, plan, installPlanOpts{
-				Writer:       w,
-				DaemonFilter: daemonFilter,
-				DryRun:       false,
-				// Defer every daemon spawn to the supervisor reconcile loop; create
-				// no per-daemon scheduler task; the daemon set is owned by
-				// supervisor-intent.json, so the legacy scheduler cleanup below is
-				// a best-effort handoff delete rather than executeInstallTo's
-				// rollback-scoped replacement/prune.
-				StartTasks:         false,
-				Intermediate:       intermediate,
-				SkipSchedulerTasks: true,
-				SkipSchedulerPrune: true,
-				SymlinkConsents:    symlinkConsents,
-			}); err != nil {
-				var incomplete *InstallClientRollbackIncompleteError
-				var forward *InstallForwardCommittedError
-				if freshProviderInstall && !intentWriteAttempted &&
-					!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
-					!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
-					!errors.Is(err, ErrClientConfigSettlementInvalid) &&
-					!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
-					// This call ran compensation without any scheduler changes,
-					// prior owned intent, or attempted managed publication. Codex
-					// settlement errors retain their client mutation instead of
-					// running compensation and must never supply this proof.
-					return &providerInstallUnpublishedRollbackError{cause: err}
+				removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstallScope(priorIntent, desiredIntent, m.Name, daemonFilter, ownershipScope)
+				desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
+				desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
+				intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
+					(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope))
+				nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
+					(daemonFilter == "" && supervisorIntentHasServerDaemonRowsScope(priorIntent, m.Name, ownershipScope))
+				if len(plan.SupervisorIntent) > 0 {
+					ensureAutostartAfterInstall = true
+					autostartStrictMode = desiredIntent.StrictMode
+					autostartOwnerMode = desiredIntent.EffectiveOwnerMode()
 				}
-				return err
-			}
-			committed = intentWriteNeeded
-			// Capture THIS install's committed descriptor rows for the best-effort
-			// daemon-installed audit emit (after the lock releases). Only when an
-			// intent write actually happened — a daemonless full install
-			// (intentWriteNeeded==false) committed no descriptor rows, so nothing
-			// was installed to announce. A daemon-filtered install preserves sibling
-			// rows in desiredIntent; do not report those unchanged descriptors as
-			// freshly installed.
-			if intentWriteNeeded {
+				// Defense-in-depth: a global manifest must never materialize a
+				// runtime_spec row. If one ever appeared it would need the §7.1
+				// supervisor-running gate (which lives in InstallParsedManifest), so
+				// refuse rather than write a spec-bearing intent through this gate-less
+				// path. Scope the check to THIS server's rows: the merged intent
+				// legitimately carries OTHER servers' spec-bearing rows (the serena
+				// dynamic-pool rows after `mcphub migrate serena
+				// legacy-to-dynamic-pool`), and a whole-file check made EVERY global
+				// install fail on such hosts (live-host fetch install, 2026-06-12).
 				for _, d := range desiredIntent.Daemons {
-					if daemonFilter != "" && d.Daemon != daemonFilter {
-						continue
-					}
-					if supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
-						installedSupervisorRows = append(installedSupervisorRows, d)
+					if d.RuntimeSpec != nil && supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
+						return fmt.Errorf("installPlanCore: global manifest %q unexpectedly produced a runtime_spec-bearing supervisor-intent row; global installs must not carry runtime_spec (that path is InstallParsedManifest's)", m.Name)
 					}
 				}
+
+				phase, phaseErr := readProviderInstallPhase(m.Name)
+				freshProviderInstall := phaseErr == nil && phase == providerInstallPhaseNotStarted &&
+					!supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope)
+				intentWriteAttempted := false
+				var intermediate intentWriteStep
+				var ownedCompensationErr error
+				if intentWriteNeeded {
+					intermediate = func() (func(), error) {
+						if cerr := ctx.Err(); cerr != nil {
+							return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
+						}
+						// A write error can follow publication. Never certify rollback
+						// merely because the writer did not return its undo closure.
+						intentWriteAttempted = true
+						if ownedBackend != nil {
+							ownedBackend.attempted = true
+							ownedBackend.capsule.Publication = "attempted"
+							if err := ownedBackend.persist(ctx, "intent-write-attempt", "pending"); err != nil {
+								return nil, err
+							}
+						}
+						if invocation != nil {
+							commit, commitSHA, writeErr := invocation.publishParsedIntentObserved(ctx, heldIntent, priorExisted, priorRawSHA, desiredIntent)
+							if ownedBackend != nil {
+								ownedBackend.preparedCommit, ownedBackend.preparedCommitSHA = commit, commitSHA
+							}
+							if writeErr != nil {
+								if ownedBackend != nil {
+									return nil, errors.Join(writeErr, ownedBackend.receiveLocked(ctx))
+								}
+								return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, writeErr)
+							}
+							return func() {
+								if ownedBackend != nil {
+									_, ownedCompensationErr = ownedBackend.compensateLocked(ctx)
+									return
+								}
+								var restoreErr error
+								if priorExisted {
+									_, _, restoreErr = invocation.replaceParsedIntentObserved(ctx, heldIntent, commitSHA, priorIntent)
+								} else {
+									restoreErr = invocation.restoreParsedIntentAbsenceObserved(ctx, heldIntent, commit, commitSHA)
+								}
+								if restoreErr != nil {
+									undoErr = errors.Join(undoErr, fmt.Errorf("restore prior supervisor-intent: %w", restoreErr))
+									fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", restoreErr)
+								} else if priorExisted {
+									fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+								} else {
+									fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+								}
+							}, nil
+						}
+						if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
+							if ownedBackend != nil {
+								return nil, errors.Join(werr, ownedBackend.receiveLocked(ctx))
+							}
+							return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
+						}
+						undo := func() {
+							if ownedBackend != nil {
+								_, ownedCompensationErr = ownedBackend.compensateLocked(ctx)
+								return
+							}
+							if priorExisted {
+								if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
+									fmt.Fprintf(w, "  rollback: restore prior supervisor-intent failed: %v\n", rerr)
+								} else {
+									fmt.Fprintf(w, "  rollback: restored prior supervisor-intent.json\n")
+								}
+								return
+							}
+							if rerr := os.Remove(intentPath); rerr != nil && !os.IsNotExist(rerr) {
+								fmt.Fprintf(w, "  rollback: remove supervisor-intent failed: %v\n", rerr)
+							} else {
+								fmt.Fprintf(w, "  rollback: removed supervisor-intent.json\n")
+							}
+						}
+						return undo, nil
+					}
+				}
+
+				executionOpts := selected.executionOptions(intermediate, nil)
+				if invocation != nil {
+					if err := selected.admitPrepared(m, plan, executionOpts, true); err != nil {
+						return err
+					}
+				}
+				if intentWriteNeeded {
+					// Pre-flight the secure-write so a doomed install fails fast with a
+					// pristine end-state (mirrors InstallParsedManifest step 2).
+					if invocation != nil {
+						if err := invocation.preflightParsedIntentObserved(ctx, heldIntent, priorExisted, priorRawSHA, desiredIntent); err != nil {
+							return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+						}
+					} else if err := preflightSupervisorIntentWrite(stateDir, desiredIntent); err != nil {
+						return fmt.Errorf("pre-flight supervisor-intent write: %w", err)
+					}
+				}
+				if err := a.installPlan(ctx, m, plan, executionOpts); err != nil {
+					if ownedBackend != nil {
+						return errors.Join(err, ownedCompensationErr, ownedBackend.persist(ctx, "materializer-failure", "pending"))
+					}
+					var incomplete *InstallClientRollbackIncompleteError
+					var forward *InstallForwardCommittedError
+					if invocation == nil && freshProviderInstall && !intentWriteAttempted &&
+						!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
+						!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
+						!errors.Is(err, ErrClientConfigSettlementInvalid) &&
+						!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
+						// This call ran compensation without any scheduler changes,
+						// prior owned intent, or attempted managed publication. Codex
+						// settlement errors retain their client mutation instead of
+						// running compensation and must never supply this proof.
+						return &providerInstallUnpublishedRollbackError{cause: err}
+					}
+					return err
+				}
+				if ownedBackend != nil {
+					if err := ownedBackend.receiveLocked(ctx); err != nil {
+						return err
+					}
+				}
+				committed = intentWriteNeeded
+				// Capture THIS install's committed descriptor rows for the best-effort
+				// daemon-installed audit emit (after the lock releases). Only when an
+				// intent write actually happened — a daemonless full install
+				// (intentWriteNeeded==false) committed no descriptor rows, so nothing
+				// was installed to announce. A daemon-filtered install preserves sibling
+				// rows in desiredIntent; do not report those unchanged descriptors as
+				// freshly installed.
+				if intentWriteNeeded {
+					for _, d := range desiredIntent.Daemons {
+						if daemonFilter != "" && d.Daemon != daemonFilter {
+							continue
+						}
+						if supervisorIntentRowOwnedByScope(d, m.Name, ownershipScope) {
+							installedSupervisorRows = append(installedSupervisorRows, d)
+						}
+					}
+				}
+				return nil
 			}
-			return nil
+			if invocation != nil {
+				return invocation.WithIntentLockHeld(ctx, heldIntent, executeLocked)
+			}
+			return executeLocked()
 		}
 		// Run the locked critical section; its deferred Unlock fires here, so the
 		// supervisor-intent flock is released BEFORE recordInstallIntentPostSuccess
@@ -781,28 +1071,27 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 		if err := runLocked(); err != nil {
 			return err
 		}
+		if ownedBackend != nil && ownedBackend.capsule.Ownership == "reused" {
+			return nil
+		}
 		// Best-effort: announce each committed daemon descriptor row to
 		// supervisor-events.log so an operator (and a future GUI lifecycle
 		// consumer) sees that a daemon was installed. Mirrors
 		// emitStaleWorkspaceSkippedEvent's channel discipline — a log failure
 		// never blocks or alters the install.
 		emitDaemonInstalledEvents(m.Name, installedSupervisorRows)
-		cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
-		if ensureAutostartAfterInstall {
+		if ownedBackend == nil {
+			cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
+		} else if err := checkProjectBackendLateEffects(m, daemonFilter, ownedBackend.desired); err != nil {
+			return errors.Join(err, ownedBackend.persist(ctx, "late-effects-drift", "pending"))
+		}
+		if ensureAutostartAfterInstall && ownedBackend == nil {
 			ensureGlobalInstallAutostartOwner(w, autostartStrictMode, autostartOwnerMode)
 		}
 	} else {
 		// Global manifest with no daemons (e.g. remote-http): client-config
 		// writes only — no scheduler tasks, no supervisor-intent rows.
-		if err := a.installPlan(ctx, m, plan, installPlanOpts{
-			Writer:             w,
-			DaemonFilter:       daemonFilter,
-			DryRun:             false,
-			StartTasks:         false,
-			SkipSchedulerTasks: true,
-			SkipSchedulerPrune: true,
-			SymlinkConsents:    symlinkConsents,
-		}); err != nil {
+		if err := a.installPlan(ctx, m, plan, selected.executionOptions(nil, nil)); err != nil {
 			return err
 		}
 	}
@@ -810,7 +1099,16 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 	// Post-success: record Desired=running re-enable intent for each planned
 	// task (clears any prior stop tombstone). Failures are logged + tolerated —
 	// the install already happened.
-	a.recordInstallIntentPostSuccess(m, daemonFilter, w)
+	if ownedBackend == nil {
+		a.recordInstallIntentPostSuccess(m, daemonFilter, w)
+	} else {
+		if err := a.recordInstallIntentPostSuccessReceived(m, daemonFilter, w); err != nil {
+			return errors.Join(err, ownedBackend.persist(ctx, "reenable-failure", "pending"))
+		}
+		if err := ownedBackend.receiveAfterMaterialization(ctx); err != nil {
+			return err
+		}
+	}
 
 	// v0.6 Phase F (bot PR #288 F2): a fresh global install only WRITES the
 	// supervisor-intent descriptor rows; nothing in this path spawns the
@@ -827,6 +1125,12 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 	// supervise-global branch that actually wrote descriptor rows.
 	if nudgeAfterInstall {
 		nudgeResult = nudgeSupervisorReconcileAfterGlobalInstall(context.Background(), w)
+	}
+	if ownedBackend != nil {
+		if nudgeResult.status != supervisorReconcileNudgeSucceeded {
+			return errors.Join(errors.New("managed backend activation dispatch unreceived"), ownedBackend.persist(ctx, "activation-dispatch", "pending"))
+		}
+		return nil
 	}
 	// A live supervisor may still hold the removed descriptor rows in its
 	// in-memory intent cache until the reconcile nudge above refreshes it. Kill
@@ -851,17 +1155,36 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 		return fmt.Errorf("resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-	desiredIntent, priorIntent, priorExisted, mergeErr := a.buildMergedSupervisorIntent(m, plan, "", intentPath, nil, daemonFilter, io.Discard)
+	var daemonRows []SupervisorDaemon
+	projectionInvoked := false
+	projectRows := func() ([]SupervisorDaemon, error) {
+		projectionInvoked = true
+		var projectionErr error
+		daemonRows, projectionErr = collectSupervisorDaemonsForInstall(m, plan, "", nil, daemonFilter, io.Discard)
+		return daemonRows, projectionErr
+	}
+	desiredIntent, priorIntent, priorExisted, mergeErr := a.buildMergedSupervisorIntentWithProjection(m, nil, daemonFilter, intentPath, projectRows)
 	var priorDiffUnavailable string
 	if mergeErr != nil {
-		fallbackRows, rowErr := supervisorDaemonsFromPlan(m, plan, daemonFilter)
+		var imageErr *RuntimeProductImageError
+		if errors.As(mergeErr, &imageErr) {
+			return mergeErr
+		}
+		if projectionInvoked {
+			return mergeErr
+		}
+		fallbackRows, rowErr := projectRows()
 		if rowErr != nil {
 			return rowErr
+		}
+		timers, timerErr := mergeServerWeeklyRefreshTimer(m, daemonFilter, nil)
+		if timerErr != nil {
+			return timerErr
 		}
 		desiredIntent = &SupervisorIntentFile{
 			Version:           1,
 			Daemons:           fallbackRows,
-			MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, nil),
+			MaintenanceTimers: timers,
 		}
 		priorDiffUnavailable = fmt.Sprintf("unable to read prior supervisor intent at %s: %v", intentPath, mergeErr)
 	} else if !priorExisted {
@@ -875,10 +1198,6 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	legacyTasks, legacyErr := legacySchedulerTasksForSupervisorInstallDryRun(m, daemonFilter)
 
 	fmt.Fprintf(w, "Install plan for server %q (dry-run):\n\n", plan.Server)
-	daemonRows, rowErr := supervisorDaemonsFromPlan(m, plan, daemonFilter)
-	if rowErr != nil {
-		return rowErr
-	}
 	fmt.Fprintf(w, "  Supervisor intent rows to write (%d):\n", len(daemonRows))
 	for _, d := range daemonRows {
 		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n        %s %v\n", strings.TrimPrefix(d.TaskName, `\`), d.Port, d.Command, d.Args)
@@ -985,26 +1304,49 @@ func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool, ownerMode O
 		return
 	}
 	opts := autostart.Options{StrictMode: strictMode, OwnerMode: ownerMode}
-	if canonical, err := canonicalMcphubPath(); err == nil {
-		opts.MCPHubPath = canonical
-	}
-	state, err := backend.Status(opts)
+	entrypoint, err := CanonicalAutostartEntrypoint()
 	if err != nil {
-		warnAutostartOwner(w, "read status", err)
+		warnAutostartOwner(w, "resolve canonical entrypoint", err)
 		return
 	}
-	switch state {
-	case autostart.StateAbsent, autostart.StateDrifted:
-		if err := backend.Enable(opts); err != nil {
-			warnAutostartOwner(w, "enable", err)
+	opts.MCPHubPath = entrypoint
+	err = withInstallAutostartGUIControl(func(allow bool) error {
+		if !allow {
+			return autostart.ProjectAutorunDisabled(&allow, backend, opts)
 		}
-	case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
-		return
-	default:
-		if w != nil {
-			fmt.Fprintf(w, "  warning: supervisor autostart owner is %s; run `mcphub autostart enable` to reconcile\n", state)
+		state, err := backend.Status(opts)
+		if err != nil {
+			return fmt.Errorf("read status: %w", err)
 		}
+		switch state {
+		case autostart.StateAbsent, autostart.StateDrifted:
+			if err := backend.Enable(opts); err != nil {
+				return fmt.Errorf("enable: %w", err)
+			}
+		case autostart.StateEnabledRunning, autostart.StateEnabledStopped:
+			return nil
+		default:
+			if w != nil {
+				fmt.Fprintf(w, "  warning: supervisor autostart owner is %s; run `mcphub autostart enable` to reconcile\n", state)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		warnAutostartOwner(w, "reconcile policy", err)
 	}
+}
+
+// Windows installation projects GUI boot policy under its existing settings
+// lock. POSIX owns a headless supervisor and keeps its original native
+// lifecycle; a stored Windows GUI choice does not gate that separate role.
+func withInstallAutostartGUIControl(fn func(allow bool) error) error {
+	if runtime.GOOS != "windows" {
+		return fn(true)
+	}
+	return (&API{}).WithGUIOwnerControl(func(control GUIOwnerControl) error {
+		return fn(control.AutorunEnabled == nil || *control.AutorunEnabled)
+	})
 }
 
 func warnAutostartOwner(w io.Writer, action string, err error) {
@@ -1569,8 +1911,30 @@ const supervisorStateFileLeaf = "supervisor-state.json"
 // server logic above for full installs. Filtered installs replace only the
 // selected daemon row and preserve this server's other daemon rows verbatim.
 func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, plan *Plan, dynamicManifestHash, intentPath string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
+	return a.buildMergedSupervisorIntentWithProjection(m, workspaces, daemonFilter, intentPath, func() ([]SupervisorDaemon, error) {
+		return serenaOrPlanDaemons(m, plan, dynamicManifestHash, workspaces, daemonFilter, w)
+	})
+}
+
+func (a *API) buildMergedSupervisorIntentWithProjection(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter, intentPath string, projectRows func() ([]SupervisorDaemon, error)) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
+		return nil, nil, false, err
+	}
+	return a.buildMergedSupervisorIntentFromPriorWithProjection(m, workspaces, daemonFilter, prior, existed, projectRows)
+}
+
+func (a *API) buildMergedSupervisorIntentFromPrior(m *config.ServerManifest, plan *Plan, dynamicManifestHash string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer, prior *SupervisorIntentFile, existed bool) (merged, original *SupervisorIntentFile, priorExisted bool, err error) {
+	return a.buildMergedSupervisorIntentFromPriorWithProjection(m, workspaces, daemonFilter, prior, existed, func() ([]SupervisorDaemon, error) {
+		return serenaOrPlanDaemons(m, plan, dynamicManifestHash, workspaces, daemonFilter, w)
+	})
+}
+
+func (a *API) buildMergedSupervisorIntentFromPriorWithProjection(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter string, prior *SupervisorIntentFile, existed bool, projectRows func() ([]SupervisorDaemon, error)) (merged, original *SupervisorIntentFile, priorExisted bool, err error) {
+	if prior == nil {
+		return nil, nil, false, errors.New("supervisor intent prior observation missing")
+	}
+	if err := validatePreparedSupervisorIntent(prior); err != nil {
 		return nil, nil, false, err
 	}
 	ownershipScope := supervisorIntentOwnershipScopeForManifest(m, workspaces, "")
@@ -1618,19 +1982,24 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, plan *Plan, 
 		}
 		kept = append(kept, d)
 	}
-	fresh, err := serenaOrPlanDaemons(m, plan, dynamicManifestHash, workspaces, daemonFilter, w)
+	fresh, err := projectRows()
 	if err != nil {
 		return nil, nil, false, err
 	}
 	kept = append(kept, fresh...)
+	timers, err := mergeServerWeeklyRefreshTimer(m, daemonFilter, prior.MaintenanceTimers)
+	if err != nil {
+		return nil, nil, false, err
+	}
 
 	merged = &SupervisorIntentFile{
-		Version:           1,
-		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		Daemons:           kept,
-		MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, prior.MaintenanceTimers),
-		StrictMode:        prior.StrictMode,
-		OwnerMode:         prior.OwnerMode,
+		Version:                 prior.Version,
+		SerenaPreparedConsumers: clonePreparedSerenaConsumers(prior.SerenaPreparedConsumers),
+		UpdatedAt:               time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:                 kept,
+		MaintenanceTimers:       timers,
+		StrictMode:              prior.StrictMode,
+		OwnerMode:               prior.OwnerMode,
 		// Stops is the E2 sub-block — the SOLE per-daemon stop source. The
 		// install merge does not own stops; dropping it here would wipe
 		// every operator stop across ALL servers on any install (bot PR
@@ -1639,6 +2008,9 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, plan *Plan, 
 		// installed daemons' entries afterwards.
 		Stops:                prior.Stops,
 		LegacyStopWatermarks: prior.LegacyStopWatermarks,
+	}
+	if err := normalizePreparedSupervisorIntentMerge(prior, merged); err != nil {
+		return nil, nil, false, err
 	}
 	return merged, prior, existed, nil
 }
@@ -2076,14 +2448,15 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	}
 
 	merged := &SupervisorIntentFile{
-		Version:              1,
-		UpdatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
-		Daemons:              keptDaemons,
-		MaintenanceTimers:    keptTimers,
-		StrictMode:           prior.StrictMode,
-		OwnerMode:            prior.OwnerMode,
-		Stops:                keptStops,
-		LegacyStopWatermarks: keptWatermarks,
+		Version:                 prior.Version,
+		SerenaPreparedConsumers: clonePreparedSerenaConsumers(prior.SerenaPreparedConsumers),
+		UpdatedAt:               time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:                 keptDaemons,
+		MaintenanceTimers:       keptTimers,
+		StrictMode:              prior.StrictMode,
+		OwnerMode:               prior.OwnerMode,
+		Stops:                   keptStops,
+		LegacyStopWatermarks:    keptWatermarks,
 	}
 	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
 		return false, nil, nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
@@ -2208,9 +2581,9 @@ func killRemovedSupervisorTargetsAfterUninstall(server string, targets []Supervi
 // task name `\mcp-local-hub-<server>-weekly-refresh`), and preserves any prior
 // timer's operator off-switch (Enabled=&false) so a re-install never silently
 // re-enables a deliberately-disabled timer.
-func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string, prior []MaintenanceTimer) []MaintenanceTimer {
+func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string, prior []MaintenanceTimer) ([]MaintenanceTimer, error) {
 	if m.Kind == config.KindWorkspaceScoped || daemonFilter != "" {
-		return prior
+		return prior, nil
 	}
 
 	wantName := canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-weekly-refresh")
@@ -2229,15 +2602,13 @@ func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string
 		out = append(out, tm)
 	}
 	if !m.WeeklyRefresh {
-		return out
+		return out, nil
 	}
 
-	// Resolve the mcphub binary the supervisor will exec, matching
-	// supervisorDaemonsFromPlan's fallback posture (bare name when
-	// `mcphub setup` has not run; the install preflight surfaces that upstream).
+	// Timer materialization uses the same admitted image as daemon launches.
 	command, perr := canonicalMcphubPath()
 	if perr != nil {
-		command = mcphubShortName
+		return nil, fmt.Errorf("resolve weekly-refresh runtime image: %w", perr)
 	}
 
 	out = append(out, MaintenanceTimer{
@@ -2248,7 +2619,7 @@ func mergeServerWeeklyRefreshTimer(m *config.ServerManifest, daemonFilter string
 		Args:    []string{"restart", "--server", m.Name},
 		Enabled: priorEnabled,
 	})
-	return out
+	return out, nil
 }
 
 func serverWeeklyRefreshTimerOwnedBy(tm MaintenanceTimer, server string) bool {
@@ -2294,6 +2665,14 @@ func fanOutAuditTaskNames(m *config.ServerManifest, desired *SupervisorIntentFil
 // otherwise), so a non-workspace-scoped manifest or an empty workspaces
 // snapshot deterministically takes the plan-derived branch here.
 func serenaOrPlanDaemons(m *config.ServerManifest, plan *Plan, dynamicManifestHash string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) ([]SupervisorDaemon, error) {
+	daemons, err := collectSupervisorDaemonsForInstall(m, plan, dynamicManifestHash, workspaces, daemonFilter, w)
+	if err != nil {
+		return nil, err
+	}
+	return materializePreparedSerenaDescriptors(m, daemons, plan)
+}
+
+func collectSupervisorDaemonsForInstall(m *config.ServerManifest, plan *Plan, dynamicManifestHash string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) ([]SupervisorDaemon, error) {
 	if m.DaemonTemplate != nil && len(workspaces) > 0 {
 		// FIX 3 — drop stale workspace rows (path no longer exists on disk)
 		// BEFORE the fan-out. BuildSupervisorDaemonsForSerena's contract
@@ -2304,15 +2683,11 @@ func serenaOrPlanDaemons(m *config.ServerManifest, plan *Plan, dynamicManifestHa
 		// makes the daemon spawn-loop. Filter here and emit an operator-
 		// visible warn per dropped row so the prune is never silent.
 		live := filterExistingWorkspaceRows(m.Name, workspaces, w)
-		// Resolve the mcphub binary the supervisor will exec for each
-		// descriptor. canonicalMcphubPath only fails when `mcphub setup`
-		// has not run, which the install preflight already surfaces
-		// upstream; fall back to the bare name (the descriptor stays
-		// well-formed and the supervisor resolves it on PATH), matching
-		// supervisorDaemonsFromPlan's fallback posture.
+		// Fan-out must retain the admitted runtime-image authority and its
+		// causal errors; a PATH script is not a native product fallback.
 		mcphubPath, perr := canonicalMcphubPath()
 		if perr != nil {
-			mcphubPath = mcphubShortName
+			return nil, fmt.Errorf("resolve workspace runtime image: %w", perr)
 		}
 		if len(live) > 0 && dynamicManifestHash == "" {
 			return nil, fmt.Errorf("install intent: exact manifest hash is required for %d workspace daemon row(s)", len(live))

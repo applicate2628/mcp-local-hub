@@ -448,23 +448,32 @@ func MutateSupervisorStateIfChangedContext(ctx context.Context, path string, mut
 		}
 		file = &SupervisorStateFile{Version: 1}
 	}
+	raw, changed, err := prepareSupervisorStateMutation(file, mutate)
+	if err != nil || !changed {
+		return err
+	}
+	return WriteStateFileBytesLockHeld(path, raw)
+}
+
+func prepareSupervisorStateMutation(file *SupervisorStateFile, mutate func(*SupervisorStateFile) (bool, error)) ([]byte, bool, error) {
 	normalizeSupervisorStateForMutation(file)
 	changed := true
 	if mutate != nil {
+		var err error
 		changed, err = mutate(file)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 	}
 	if !changed {
-		return nil
+		return nil, false, nil
 	}
 	normalizeSupervisorStateForMutation(file)
 	raw, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal supervisor state: %w", err)
+		return nil, false, fmt.Errorf("marshal supervisor state: %w", err)
 	}
-	return WriteStateFileBytesLockHeld(path, raw)
+	return raw, true, nil
 }
 
 const stateFileLockPollInterval = 25 * time.Millisecond

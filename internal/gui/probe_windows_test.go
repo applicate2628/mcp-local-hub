@@ -7,10 +7,12 @@
 package gui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -28,6 +30,30 @@ func TestRetainedProcessID_WindowsSelfPinsWaitableHandle(t *testing.T) {
 	}
 	if err := identity.Close(); err != nil {
 		t.Fatalf("second close retained self identity: %v", err)
+	}
+}
+
+func TestRetainedProcessWait_WindowsCancellationRetainsOriginalHandle(t *testing.T) {
+	identity, err := retainedProcessIDImpl(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := identity.Close(); err != nil {
+			t.Errorf("close original observation: %v", err)
+		}
+	}()
+	original := identity.Handle
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := identity.Wait(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait(self): %v, want caller deadline", err)
+	}
+	if identity.Handle != original {
+		t.Fatalf("Wait released/replaced original handle: %d -> %d", original, identity.Handle)
+	}
+	if result, err := windows.WaitForSingleObject(windows.Handle(original), 0); err != nil || result != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatalf("original self was affected: wait=%#x err=%v", result, err)
 	}
 }
 

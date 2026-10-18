@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api/apitest"
@@ -287,5 +289,55 @@ func TestValidateStopBatchEchoRejectsMissingOrReorderedReply(t *testing.T) {
 	}
 	if err := validateStopBatchEcho(command, reordered); err == nil {
 		t.Fatal("reordered stop_batch reply accepted")
+	}
+}
+
+// Uses the actual authenticated production receiver, not a direct result decode.
+// Counts are synthetic wire data; no native append or preparation is claimed.
+func TestIPCReconcilePartial(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    any
+		remote    bool
+		count     int
+		typeError bool
+	}{
+		{"valid", ReconcileResponse{SerenaOrphansRepaired: 1, SerenaRepairOutcome: SerenaIntentRepairOutcomeError, SerenaRepairError: "close failed"}, true, 1, false},
+		{"typed", json.RawMessage(`{"serena_orphans_repaired":1,"drift_count":"invalid","serena_repair_outcome":"error"}`), true, 1, true},
+		{"missing", nil, true, 0, false},
+		{"null", json.RawMessage(`null`), false, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			withDaemonStateRootOverride(t, stateDir)
+			owner := SupervisorLockOwner{PID: 4242, StartedAt: "2026-05-21T10:00:00Z"}
+			writeSupervisorOwnerForTest(t, stateDir, owner)
+			stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(req IPCRequest) IPCResponse {
+				frame := IPCResponse{ID: req.ID, OK: !tc.remote, Result: tc.result, Final: true}
+				if tc.remote {
+					frame.Error = &IPCErr{Code: "RECONCILE_LATE_FAILURE", Message: "original remote cause"}
+				}
+				return frame
+			})
+			defer stop()
+			got, err := DialSupervisorIPCReconcile(context.Background(), true)
+			if err == nil {
+				t.Fatal("error/unavailable result became success")
+			}
+			if got.SerenaOrphansRepaired != tc.count {
+				t.Fatalf("available count=%d want=%d err=%v", got.SerenaOrphansRepaired, tc.count, err)
+			}
+			if tc.remote && !strings.Contains(err.Error(), "RECONCILE_LATE_FAILURE: original remote cause") {
+				t.Fatalf("remote cause lost: %v", err)
+			}
+			var decodeErr *json.UnmarshalTypeError
+			if errors.As(err, &decodeErr) != tc.typeError {
+				t.Fatalf("decode cause lost/created: %v", err)
+			}
+			if tc.name == "valid" && got.SerenaRepairOutcome != SerenaIntentRepairOutcomeError {
+				t.Fatalf("error outcome lost: %+v", got)
+			}
+		})
 	}
 }

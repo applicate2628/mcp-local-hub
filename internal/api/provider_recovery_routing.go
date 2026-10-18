@@ -15,7 +15,10 @@ func providerPreManifestRecovery(rec *AdoptProvenanceRecord) bool {
 	}
 	phase, err := readProviderInstallPhase(rec.ManifestName)
 	if err != nil {
-		return false
+		// Retained hotfix receipts predate the phase sidecar but carry an exact
+		// durable preinstall state. Admit only that explicit state and only when
+		// the newer owner file is absent; corrupt or unreadable files stay refused.
+		return deAdoptPreinstallRecoveryEligible(rec) && providerInstallPhaseMissing(rec.ManifestName)
 	}
 	if phase == providerInstallPhaseManagedSettled {
 		// Normal stop also writes this marker before its separate phase CAS.

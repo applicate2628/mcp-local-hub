@@ -97,13 +97,18 @@ var managedEntriesMu sync.Mutex
 // AFTER the in-process mutex, and the lock-file path is resolved
 // while the in-process mutex is held.
 func withManagedEntriesLock(fn func() error) error {
-	managedEntriesMu.Lock()
-	defer managedEntriesMu.Unlock()
-
 	dir, err := DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("managed-entries lock: resolve state dir: %w", err)
 	}
+	return withManagedEntriesLockAt(dir, fn)
+}
+
+// withManagedEntriesLockAt is the same current lock owner used by projection
+// paths that already carry an admitted state directory.
+func withManagedEntriesLockAt(dir string, fn func() error) error {
+	managedEntriesMu.Lock()
+	defer managedEntriesMu.Unlock()
 	lockPath := filepath.Join(dir, managedEntriesLockFileLeaf)
 	lk := flock.New(lockPath)
 	if err := lk.Lock(); err != nil {
@@ -118,9 +123,53 @@ func withManagedEntriesLock(fn func() error) error {
 // has installed into a client's config. installed_at is the UTC
 // timestamp of the most recent migrate that produced this entry.
 type ManagedEntry struct {
-	Client      string    `json:"client"`
-	Server      string    `json:"server"`
-	InstalledAt time.Time `json:"installed_at"`
+	Client                  string                                   `json:"client"`
+	Server                  string                                   `json:"server"`
+	InstalledAt             time.Time                                `json:"installed_at"`
+	Owner                   string                                   `json:"owner,omitempty"`
+	Transport               clients.ManagedRegistrationTransport     `json:"transport,omitempty"`
+	EnabledState            clients.ManagedRegistrationEnabledState  `json:"enabled_state,omitempty"`
+	IdentityState           clients.ManagedRegistrationIdentityState `json:"identity_state,omitempty"`
+	Exists                  bool                                     `json:"exists,omitempty"`
+	ConfigSHA256            clients.ManagedRegistrationFingerprint   `json:"config_sha256,omitempty"`
+	EntrySHA256             clients.ManagedRegistrationFingerprint   `json:"entry_sha256,omitempty"`
+	DesiredProjectionSHA256 clients.ManagedRegistrationFingerprint   `json:"desired_projection_sha256,omitempty"`
+	ConfigPathSHA256        clients.ManagedRegistrationFingerprint   `json:"config_path_sha256,omitempty"`
+	EntryKeySHA256          clients.ManagedRegistrationFingerprint   `json:"entry_key_sha256,omitempty"`
+	TargetIdentitySHA256    clients.ManagedRegistrationFingerprint   `json:"target_identity_sha256,omitempty"`
+}
+
+type managedEntryWire struct {
+	Client                  string                                   `json:"client"`
+	Server                  string                                   `json:"server"`
+	InstalledAt             time.Time                                `json:"installed_at"`
+	Owner                   string                                   `json:"owner,omitempty"`
+	Transport               clients.ManagedRegistrationTransport     `json:"transport,omitempty"`
+	EnabledState            clients.ManagedRegistrationEnabledState  `json:"enabled_state,omitempty"`
+	IdentityState           clients.ManagedRegistrationIdentityState `json:"identity_state,omitempty"`
+	Exists                  bool                                     `json:"exists,omitempty"`
+	ConfigSHA256            *clients.ManagedRegistrationFingerprint  `json:"config_sha256,omitempty"`
+	EntrySHA256             *clients.ManagedRegistrationFingerprint  `json:"entry_sha256,omitempty"`
+	DesiredProjectionSHA256 *clients.ManagedRegistrationFingerprint  `json:"desired_projection_sha256,omitempty"`
+	ConfigPathSHA256        *clients.ManagedRegistrationFingerprint  `json:"config_path_sha256,omitempty"`
+	EntryKeySHA256          *clients.ManagedRegistrationFingerprint  `json:"entry_key_sha256,omitempty"`
+	TargetIdentitySHA256    *clients.ManagedRegistrationFingerprint  `json:"target_identity_sha256,omitempty"`
+}
+
+func (entry ManagedEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(managedEntryWire{
+		Client: entry.Client, Server: entry.Server, InstalledAt: entry.InstalledAt,
+		Owner: entry.Owner, Transport: entry.Transport, EnabledState: entry.EnabledState, IdentityState: entry.IdentityState, Exists: entry.Exists,
+		ConfigSHA256: managedRegistrationFingerprintPointer(entry.ConfigSHA256), EntrySHA256: managedRegistrationFingerprintPointer(entry.EntrySHA256),
+		DesiredProjectionSHA256: managedRegistrationFingerprintPointer(entry.DesiredProjectionSHA256), ConfigPathSHA256: managedRegistrationFingerprintPointer(entry.ConfigPathSHA256),
+		EntryKeySHA256: managedRegistrationFingerprintPointer(entry.EntryKeySHA256), TargetIdentitySHA256: managedRegistrationFingerprintPointer(entry.TargetIdentitySHA256),
+	})
+}
+
+func managedRegistrationEntryIsLegacy(entry ManagedEntry) bool {
+	return entry.Owner == "" && entry.Transport == "" && entry.EnabledState == "" && entry.IdentityState == "" && !entry.Exists &&
+		entry.ConfigSHA256.String() == "" && entry.EntrySHA256.String() == "" && entry.DesiredProjectionSHA256.String() == "" &&
+		entry.ConfigPathSHA256.String() == "" && entry.EntryKeySHA256.String() == "" && entry.TargetIdentitySHA256.String() == ""
 }
 
 // ManagedEntries is the file root.

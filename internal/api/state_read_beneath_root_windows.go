@@ -11,6 +11,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func stateReadOpenCauseIsNotExist(cause error) bool {
+	status, direct := cause.(windows.NTStatus)
+	return direct && windowsAnchoredReadErrIsNotExist(status)
+}
+
 // ReadStateFileBeneathRootNoFollow reads one bounded regular state file through
 // a retained no-follow handle chain. The bytes returned are the bytes hashed
 // from the final handle; no pathname is reopened after loading.
@@ -176,6 +181,12 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 }
 
 func ntOpenStateReadRelative(parent windows.Handle, name string, desiredAccess uint32, directory bool) (windows.Handle, error) {
+	return ntOpenStateReadRelativeMode(parent, name, desiredAccess, &directory, windows.FILE_OPEN, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil)
+}
+
+// The owned-tree mode keeps the same anchored NT open and adds explicit
+// create/share/type policy; legacy readers retain their original policy.
+func ntOpenStateReadRelativeMode(parent windows.Handle, name string, desiredAccess uint32, directory *bool, disposition, share uint32, sd *windows.SECURITY_DESCRIPTOR) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return windows.InvalidHandle, err
@@ -184,12 +195,17 @@ func ntOpenStateReadRelative(parent windows.Handle, name string, desiredAccess u
 		ObjectName: objectName, RootDirectory: parent,
 		Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE,
 	}
+	if sd != nil {
+		oa.SecurityDescriptor = sd
+	}
 	oa.Length = uint32(unsafe.Sizeof(*oa))
 	options := uint32(windows.FILE_SYNCHRONOUS_IO_NONALERT | windows.FILE_OPEN_REPARSE_POINT)
-	if directory {
-		options |= windows.FILE_DIRECTORY_FILE
-	} else {
-		options |= windows.FILE_NON_DIRECTORY_FILE
+	if directory != nil {
+		if *directory {
+			options |= windows.FILE_DIRECTORY_FILE
+		} else {
+			options |= windows.FILE_NON_DIRECTORY_FILE
+		}
 	}
 	var iosb windows.IO_STATUS_BLOCK
 	var allocSize int64
@@ -197,8 +213,8 @@ func ntOpenStateReadRelative(parent windows.Handle, name string, desiredAccess u
 	if err := windows.NtCreateFile(
 		&handle, desiredAccess|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
 		windows.FILE_ATTRIBUTE_NORMAL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		windows.FILE_OPEN, options, 0, 0,
+		share,
+		disposition, options, 0, 0,
 	); err != nil {
 		return windows.InvalidHandle, err
 	}
@@ -206,6 +222,10 @@ func ntOpenStateReadRelative(parent windows.Handle, name string, desiredAccess u
 }
 
 func ntOpenStateReadRoot(root string) (windows.Handle, error) {
+	return ntOpenStateReadRootMode(root, windows.FILE_TRAVERSE|windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+}
+
+func ntOpenStateReadRootMode(root string, access, share uint32) (windows.Handle, error) {
 	cleanRoot := filepath.Clean(root)
 	nativeRoot := `\??\` + cleanRoot
 	if strings.HasPrefix(cleanRoot, `\\`) {
@@ -224,9 +244,9 @@ func ntOpenStateReadRoot(root string) (windows.Handle, error) {
 	var allocSize int64
 	var handle windows.Handle
 	if err := windows.NtCreateFile(
-		&handle, windows.FILE_TRAVERSE|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
+		&handle, access|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
 		windows.FILE_ATTRIBUTE_NORMAL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		share,
 		windows.FILE_OPEN,
 		windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT,
 		0, 0,

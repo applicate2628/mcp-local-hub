@@ -8,6 +8,7 @@
 // The PRODUCTION write owners are exercised by the Go unit tests; this spec
 // proves the GUI WIRING end-to-end against the real Preact build + hash router:
 //   - toggle happy-path (optimistic flip → 200 → ✓)
+//   - workspace-LSP native checkbox restoration, confirmation, and Retry gate
 //   - error revert + §3.1 plain copy (raw code only in tooltip) + Retry
 //   - reconcile-to-response (response.enabled clamps, not the requested intent)
 //   - both-scopes claude card render (Project toggle / Local read-only / shadow once)
@@ -65,6 +66,65 @@ function scanEntry(name: string, presence: Record<string, unknown>, over: Record
 }
 
 test.describe("Projects P3b — per-row toggles (epic area 6)", () => {
+  test("workspace LSP checkbox restores its native state, confirms disable, and reconfirms Retry", async ({
+    page,
+    hub,
+  }) => {
+    await stubAggregate(page, {
+      projects: [proj({
+        entries: [{ workspace_key: "k", workspace_path: KEY, language: "go", backend: "mcp-language-server", port: 0, task_name: "t", lifecycle: "failed" }],
+      })],
+      groups: [],
+    });
+    const requests: Array<Record<string, unknown>> = [];
+    await page.route("**/api/projects/toggle", async (route) => {
+      requests.push(JSON.parse(route.request().postData() ?? "{}"));
+      if (requests.length === 1) {
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "disk full", code: "PROJECT_TOGGLE_FAILED" }) });
+      } else {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ scope: "workspace-lsp", server: "go", enabled: false }) });
+      }
+    });
+
+    await page.goto(`${hub.url}/#/projects?path=${encodeURIComponent(KEY)}`);
+    const toggle = page.getByTestId("projects-toggle-workspace-lsp-go");
+    const modal = page.getByTestId("projects-workspace-toggle-confirm");
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toHaveAttribute("aria-label", "go workspace tool");
+
+    await toggle.focus();
+    await page.keyboard.press("Space");
+    await expect(modal).toBeVisible();
+    await expect(toggle).toBeChecked();
+    expect(requests).toHaveLength(0);
+    await modal.getByRole("button", { name: "Cancel" }).click();
+    await expect(modal).toBeHidden();
+    await expect(toggle).toBeChecked();
+    expect(requests).toHaveLength(0);
+
+    await toggle.click();
+    await expect(modal).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modal).toBeHidden();
+    await expect(toggle).toBeChecked();
+    expect(requests).toHaveLength(0);
+
+    await toggle.click();
+    await modal.getByRole("button", { name: "Disable workspace tool" }).click();
+    await expect(page.getByTestId("projects-toggle-error-workspace-lsp-go")).toContainText("couldn't be saved");
+    await expect(toggle).toBeChecked();
+    expect(requests).toEqual([{ root: KEY, scope: "workspace-lsp", server: "go", enable: false, languages: ["go"] }]);
+
+    await page.getByTestId("projects-toggle-retry-workspace-lsp-go").click();
+    await expect(modal).toBeVisible();
+    expect(requests).toHaveLength(1);
+    await expect(page.getByTestId("projects-toggle-error-workspace-lsp-go")).toContainText("couldn't be saved");
+    await modal.getByRole("button", { name: "Disable workspace tool" }).click();
+    await expect(toggle).not.toBeChecked();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual({ root: KEY, scope: "workspace-lsp", server: "go", enable: false, languages: ["go"] });
+  });
+
   // -------------------------------------------------------------------------
   // 1. Happy path + reconcile-to-response: disable a cursor member → 200
   //    enabled:false → object-member member removed → row flips to the COLD

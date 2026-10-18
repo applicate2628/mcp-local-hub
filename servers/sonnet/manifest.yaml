@@ -1,0 +1,48 @@
+name: sonnet
+description: "Sonnet Suites BASIC native MCP server — copied-project runs, durable status/result receipts, and explicit force cancellation."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - sonnet
+
+# The catalog stays inert until the existing readiness gate resolves the native
+# mcphub bridge. Runtime product discovery remains registry-first (SONNET_DIR)
+# then PATH and reports product absence or ambiguity through Sonnet's own MCP
+# tools; catalog visibility is not a vendor-installed claim. Neither path probes
+# licenses, starts a solver, GUI, emstatus, or macro runner.
+availability: disabled-until-probe
+install_probe:
+  binaries:
+    - mcphub
+  platforms:
+    - windows/amd64
+
+daemons:
+  - name: default
+    port: 9141
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

@@ -181,7 +181,24 @@ var installParsedManifestFn = func(ctx context.Context, a *api.API, m *config.Se
 	return a.InstallParsedManifest(ctx, m, opts)
 }
 
-// reconcileSerenaClientsFn is the package-level seam over
+// reconcileSerenaClientsToRouterFn is the post-construction test seam over the
+// API owner. Production delegates directly; tests may inspect or complete the
+// constructed options without touching live client configuration.
+var reconcileSerenaClientsToRouterFn = api.ReconcileSerenaClientsToRouter
+
+// selectSerenaMigrationRoutingTarget preserves FRONT's admitted generation and
+// port exactly. Stable GUI deliberately leaves the target nil so the API's
+// existing StableGUICompatibility lease can discover and verify the live
+// pidport instead of freezing the historical settings port.
+func selectSerenaMigrationRoutingTarget(target api.ClientRoutingTarget) *api.ClientRoutingTarget {
+	if target.Mode == api.MCPFrontRoutingTargetGUI {
+		return nil
+	}
+	exact := target
+	return &exact
+}
+
+// reconcileSerenaClientsFn is the package-level composition seam over
 // api.ReconcileSerenaClientsToRouter. Default wires the gui-package pidport
 // primitives (which the api package cannot import without a cycle) so the
 // reconcile discovers the live GUI router port; tests override it to assert
@@ -195,8 +212,8 @@ var reconcileSerenaClientsFn = func(ctx context.Context, w io.Writer) (*api.Migr
 	if err != nil {
 		return nil, fmt.Errorf("resolve gui pidport path: %w", err)
 	}
-	return api.ReconcileSerenaClientsToRouter(ctx, api.SerenaReconcileOpts{
-		RoutingTarget: &target,
+	return reconcileSerenaClientsToRouterFn(ctx, api.SerenaReconcileOpts{
+		RoutingTarget: selectSerenaMigrationRoutingTarget(target),
 		PidportPath:   pidportPath,
 		ReadPidport:   gui.ReadPidport,
 		VerifyIdentity: func(verifyCtx context.Context, pid, port int) error {
@@ -432,6 +449,7 @@ upgrade flow) so the binary that next reads the new runtime_spec intent is the
 new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
 			return runMigrateSerenaDynamicPool(cmd.Context(), cmd.OutOrStdout())
 		},
 	}

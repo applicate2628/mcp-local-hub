@@ -51,6 +51,9 @@ type CommandMutationRowV1 struct {
 // InstallMutationReceiptV1 is made from the exact plan instance passed to the
 // low-level core before it is applied. A receiver must never create a plan.
 type InstallMutationReceiptV1 struct {
+	projectSettlement       *CommandSettlementV1
+	projectPolicyExecution  *clients.ProjectHTTPAttachmentPolicyExecution
+	BackendInstall          *ManagedBackendInstallReceiptV1 `json:"managed_backend_install,omitempty"`
 	DryRun                  bool
 	Committed               bool
 	ExpectedTasks           []string
@@ -193,7 +196,10 @@ func commandSettlementV1(operation CommandOperationV1, commitState string, rows 
 }
 
 func freezeInstallBindingExpectations(plan *Plan, server, relayExePath string) ([]bindingExpectationV1, error) {
-	allClients := clients.AllClients()
+	return freezeInstallBindingExpectationsFromClients(plan, server, relayExePath, clients.AllClients())
+}
+
+func freezeInstallBindingExpectationsFromClients(plan *Plan, server, relayExePath string, allClients map[string]clients.Client) ([]bindingExpectationV1, error) {
 	expectations := make([]bindingExpectationV1, 0, len(plan.ClientUpdates))
 	for _, update := range plan.ClientUpdates {
 		client := allClients[update.Client]
@@ -250,6 +256,12 @@ func (c CommandCoordinator) Install(ctx context.Context, opts InstallOpts) (Comm
 	}
 	if receipt.DryRun {
 		return commandSettlementV1(CommandOperationInstall, "dry_run", receipt.MutationRows, ReadinessSnapshotV1{}), nil
+	}
+	if opts.ProjectClientCreate != nil || opts.ProjectClientRollback != nil {
+		if receipt.projectSettlement == nil {
+			return commandSettlementV1(CommandOperationInstall, "committed_unverified", receipt.MutationRows, ReadinessSnapshotV1{}), ErrProjectClientBackendReceiptUnavailable
+		}
+		return *receipt.projectSettlement, nil
 	}
 	if !receipt.Committed || len(receipt.ExpectedTasks) == 0 {
 		settlement := commandSettlementV1(CommandOperationInstall, "committed_unverified", receipt.MutationRows, ReadinessSnapshotV1{})

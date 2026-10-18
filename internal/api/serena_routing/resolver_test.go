@@ -3,127 +3,15 @@ package serena_routing
 import (
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 )
-
-func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(testFile), "resolver.go"), nil, 0)
-	if err != nil {
-		t.Fatalf("ParseFile resolver.go: %v", err)
-	}
-	var refresh *ast.FuncDecl
-	for _, decl := range parsed.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "refresh" {
-			refresh = fn
-			break
-		}
-	}
-	if refresh == nil {
-		t.Fatal("resolver refresh function missing")
-	}
-
-	var capture, deferredRelease token.Pos
-	ast.Inspect(refresh.Body, func(node ast.Node) bool {
-		switch node := node.(type) {
-		case *ast.AssignStmt:
-			if node.Tok != token.DEFINE || len(node.Lhs) != 1 || len(node.Rhs) != 1 {
-				return true
-			}
-			name, ok := node.Lhs[0].(*ast.Ident)
-			if !ok {
-				return true
-			}
-			call, ok := node.Rhs[0].(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			method, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			receiver, ok := method.X.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			registry, ok := receiver.X.(*ast.Ident)
-			if ok && name.Name == "entries" && method.Sel.Name == "SerenaEntries" && receiver.Sel.Name == "reg" && registry.Name == "r" {
-				capture = node.Pos()
-			}
-		case *ast.DeferStmt:
-			ast.Inspect(node.Call, func(candidate ast.Node) bool {
-				call, ok := candidate.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				callee, ok := call.Fun.(*ast.Ident)
-				if ok && callee.Name == "unlock" {
-					deferredRelease = node.Pos()
-				}
-				return true
-			})
-		}
-		return true
-	})
-	if !capture.IsValid() || !deferredRelease.IsValid() {
-		t.Fatalf("refresh ordering anchors missing: capture=%d deferredRelease=%d", capture, deferredRelease)
-	}
-	if capture <= deferredRelease {
-		t.Fatal("refresh must register the registry-release defer before capturing Serena entries")
-	}
-}
-
-func TestRefreshSnapshotsRegistryBeforeUnlock(t *testing.T) {
-	dir := t.TempDir()
-	entries := make([]api.WorkspaceEntry, 512)
-	for i := range entries {
-		entries[i] = api.WorkspaceEntry{
-			WorkspaceKey:  fmt.Sprintf("workspace-%04d", i),
-			WorkspacePath: filepath.Join(dir, fmt.Sprintf("workspace-%04d", i)),
-			Port:          9100 + i,
-		}
-	}
-	regPath := makeRegistryWithSerena(t, dir, entries)
-	reg := api.NewRegistry(regPath)
-	resolver := NewWorkspaceResolver(reg, regPath)
-
-	var wg sync.WaitGroup
-	for worker := 0; worker < 4; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for iteration := 0; iteration < 8; iteration++ {
-				resolver.mu.Lock()
-				resolver.loaded = false
-				resolver.mu.Unlock()
-				resolver.refresh()
-			}
-		}()
-	}
-	wg.Wait()
-
-	resolver.mu.RLock()
-	got := len(resolver.cached)
-	resolver.mu.RUnlock()
-	if got != len(entries) {
-		t.Fatalf("cached entries = %d, want %d", got, len(entries))
-	}
-}
 
 func makeWorkspace(t *testing.T, root, name string) string {
 	t.Helper()
@@ -600,7 +488,7 @@ func TestResolveByPath_TransientStatErrorPreservesCache(t *testing.T) {
 		t.Fatal("ResolveByPath returned nil entry without error")
 	}
 	if entry.Port != 9301 {
-		t.Errorf("Port = %d, want 9301 from cached snapshot", entry.Port)
+		t.Errorf("Port = %d, want 9301 from last-good observer generation", entry.Port)
 	}
 }
 
@@ -640,7 +528,7 @@ func TestResolveByPath_FileDeletionClearsCache(t *testing.T) {
 	}
 }
 
-func TestResolveByPath_EmptyRegistryCachedAcrossCalls(t *testing.T) {
+func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *testing.T) {
 	root := t.TempDir()
 	wsPath := makeWorkspace(t, root, "EmptyCached")
 	nested := filepath.Join(wsPath, "src", "main.go")
@@ -681,14 +569,100 @@ func TestResolveByPath_EmptyRegistryCachedAcrossCalls(t *testing.T) {
 	}
 	setFileModTime(t, regPath, fixedMtime)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 32; i++ {
 		entry, err := resolver.ResolveByPath(nested)
-		if !errors.Is(err, ErrWorkspaceNotFound) {
-			t.Fatalf("iteration %d err = %v, entry = %+v; want cached empty snapshot", i, err, entry)
+		if err == nil && entry != nil && entry.Port == 9301 {
+			return
 		}
-		if entry != nil {
-			t.Fatalf("iteration %d entry = %+v, want nil", i, entry)
+	}
+	t.Fatal("updated Serena registration was not observed within 32 lookups with equal mtime")
+}
+
+func TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "SameIdentity")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{{
+		WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath,
+		Port: 9301, ClientEntries: map[string]string{"codex": "original"},
+		Languages: []string{"go"},
+	}})
+	fixed := setFileModTime(t, regPath, time.Unix(1_700_000_000, 0))
+	resolver := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath)
+	seed := resolver.ListWorkspaces()
+	if len(seed) != 1 || seed[0].Port != 9301 {
+		t.Fatalf("seed = %+v", seed)
+	}
+	seed[0].ClientEntries["codex"] = "mutated"
+	seed[0].Languages[0] = "rust"
+	stable := resolver.ListWorkspaces()
+	if stable[0].ClientEntries["codex"] != "original" || stable[0].Languages[0] != "go" {
+		t.Fatalf("returned nested fields mutated the cache: %+v", stable[0])
+	}
+	beforeInfo, err := os.Stat(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := strings.Replace(string(before), "port: 9301", "port: 9302", 1)
+	if after == string(before) || len(after) != len(before) {
+		t.Fatal("test fixture did not produce an equal-sized content change")
+	}
+	if err := os.WriteFile(regPath, []byte(after), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setFileModTime(t, regPath, fixed)
+	afterInfo, err := os.Stat(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(beforeInfo, afterInfo) || beforeInfo.Size() != afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
+		t.Fatal("test fixture metadata changed")
+	}
+	for i := 0; i < 32; i++ {
+		entries := resolver.ListWorkspaces()
+		if len(entries) == 1 && entries[0].Port == 9302 {
+			return
 		}
+	}
+	t.Fatal("same-identity Serena edit was not observed in 32 lookups")
+}
+
+func TestResolveByPath_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
+	root := t.TempDir()
+	wsPath := makeWorkspace(t, root, "Selected")
+	file := filepath.Join(wsPath, "main.go")
+	if err := os.WriteFile(file, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rows := []api.WorkspaceEntry{{
+		WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath,
+		Port: 9301, ClientEntries: map[string]string{"codex": "selected"},
+		Languages: []string{"go"},
+	}}
+	for i := 0; i < 256; i++ {
+		rows = append(rows, api.WorkspaceEntry{
+			WorkspaceKey:  fmt.Sprintf("other-%03d", i),
+			WorkspacePath: filepath.Join(root, fmt.Sprintf("other-%03d", i)),
+			Port:          9400 + i, ClientEntries: map[string]string{"codex": "unrelated"},
+			Languages: []string{"go"},
+		})
+	}
+	regPath := makeRegistryWithSerena(t, root, rows)
+	r := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath)
+	if got, err := r.ResolveByPath(file); err != nil || got.Port != 9301 {
+		t.Fatalf("seed = %+v, err = %v", got, err)
+	}
+	allocs := testing.AllocsPerRun(64, func() {
+		got, err := r.ResolveByPath(file)
+		if err != nil || got.Port != 9301 {
+			panic("selected Serena row changed")
+		}
+	})
+	if allocs >= 100 {
+		t.Fatalf("single-row lookup allocated %.0f times with 256 unrelated nested rows", allocs)
 	}
 }
 
@@ -753,8 +727,8 @@ func TestCanonicalizeWorkspacePath_EmptyReturnsEmpty(t *testing.T) {
 // the GUI's own registry writers for the SAME cross-process exclusive lock
 // (Registry.Lock(), which also CREATES <registry>.lock + the state
 // directory). This test holds that lock externally (simulating a concurrent
-// GUI mutation) and proves a read-only resolver's refresh still completes —
-// using its last-cached snapshot — instead of blocking for the lock.
+// GUI mutation) and proves a read-only observer lookup still completes —
+// using its last-good generation if necessary — without waiting for the lock.
 //
 // Mutation-proven: constructing the resolver via the ordinary
 // NewWorkspaceResolver (the pre-fix-equivalent, locked path) instead of
@@ -775,16 +749,16 @@ func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *te
 		t.Fatalf("Load: %v", err)
 	}
 	resolver := NewReadOnlyWorkspaceResolver(reg, regPath)
-	// Prime the cache (loaded=true) via one uncontended resolve before the
+	// Prime the observer generation via one uncontended resolve before the
 	// concurrent holder acquires the lock, matching how the route daemon's
-	// resolver is used in steady state (a first refresh already succeeded).
+	// resolver is used in steady state (a first observation already succeeded).
 	if _, err := resolver.ResolveByPath(filepath.Join(root, "anything")); err != nil && !errors.Is(err, ErrWorkspaceNotFound) {
 		t.Fatalf("prime resolve: %v", err)
 	}
 
-	// Bump the registry file's mtime so the NEXT refresh() sees a change and
-	// attempts a reload — otherwise the mtime-unchanged fast path would
-	// short-circuit before ever reaching the lock/no-lock branch.
+	// Bump mtime so the next observer lookup takes the immediate secure-read
+	// path; equal metadata would also be compared by lookup 32, but that
+	// cadence is not the lock/no-lock distinction this test isolates.
 	future := time.Now().Add(2 * time.Second)
 	if err := os.Chtimes(regPath, future, future); err != nil {
 		t.Fatalf("Chtimes: %v", err)
@@ -809,17 +783,17 @@ func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *te
 	case <-done:
 		// Correct: the read-only resolver never contended for the lock.
 	case <-time.After(3 * time.Second):
-		t.Fatal("read-only resolver blocked on a concurrently-held exclusive registry lock — it must reload unlocked, not contend with a GUI writer")
+		t.Fatal("read-only resolver blocked on a concurrently-held exclusive registry lock — its observer must read without that lock")
 	}
 }
 
 // TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock pins the
 // CONTRASTING, intentional production behavior: the ordinary (non-read-only)
-// resolver's refresh DOES take the registry's exclusive lock, so it
-// genuinely waits out a concurrent holder rather than serving a stale
-// snapshot. This is the mutation-test counterpart to the read-only test
-// above — a change that accidentally made the production resolver skip
-// locking too would be caught here.
+// constructor selects the GUI observer mode. RegistrySnapshotObserver.ObserveView
+// takes the registry's exclusive lock for a required content read, so this
+// lookup waits out a concurrent holder rather than serving a stale snapshot.
+// This is the mutation-test counterpart to the read-only mode above: a change
+// that made both observer modes skip locking would be caught here.
 func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
 	root := t.TempDir()
 	regPath := filepath.Join(root, "workspaces.yaml")

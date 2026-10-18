@@ -1,260 +1,219 @@
 package gui
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
-	"runtime"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
-// supervisorTestImagePath returns an mcphub binary path whose basename
-// satisfies the per-OS matchBasename (mcphub.exe on Windows, mcphub on
-// POSIX) so the image gate passes on every test runner.
-func supervisorTestImagePath() string {
-	if runtime.GOOS == "windows" {
-		return `C:\Program Files\mcphub\mcphub.exe`
-	}
-	return "/usr/local/bin/mcphub"
-}
-
-// foreignImagePath returns a non-mcphub binary path so the image gate
-// (matchBasename) refuses regardless of OS.
-func foreignImagePath() string {
-	if runtime.GOOS == "windows" {
-		return `C:\Windows\System32\notepad.exe`
-	}
-	return "/usr/bin/python3"
-}
-
-// These tests cover the kill-target identity gate added to
-// killSupervisorProcess (POST /api/supervisor/restart). The gate proves
-// the recorded supervisor.lock PID is still the live mcphub supervisor
-// before the force-kill fires, so a recycled / reused PID is never
-// killed. The probe is injected via the processIDOverride seam and the
-// kill is observed via the killSupervisorPIDFn seam, so NO real process
-// is ever signalled.
-
-// swapSupervisorKillProbe installs a processIDOverride for the test
-// scope and restores the prior value on cleanup.
-func swapSupervisorKillProbe(t *testing.T, fn func(pid int) (ProcessIdentity, error)) {
+func newSupervisorRestartTransportTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
-	orig := processIDOverride
-	t.Cleanup(func() { processIDOverride = orig })
-	processIDOverride = fn
+	root := apitest.HardenedTempDir(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	s := NewServer(Config{Port: 9081})
+	s.events.DisableGUIEventLog = true
+	t.Cleanup(s.events.Close)
+	return s, root
 }
 
-// captureSupervisorKill installs a kill spy for the test scope. The
-// returned pointer records the PID the kill was invoked with (0 if the
-// kill never fired — i.e. the gate refused).
-func captureSupervisorKill(t *testing.T) *int {
-	t.Helper()
-	killed := 0
-	orig := killSupervisorPIDFn
-	t.Cleanup(func() { killSupervisorPIDFn = orig })
-	killSupervisorPIDFn = func(pid int) error {
-		killed = pid
-		return nil
-	}
-	return &killed
-}
-
-func TestKillSupervisorProcess_RealSupervisor_Killed(t *testing.T) {
-	// The recorded PID is a live mcphub supervisor whose process started
-	// BEFORE the sidecar started_at → the gate must authorize the kill.
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{
-			Alive:     true,
-			ImagePath: supervisorTestImagePath(),
-			Cmdline:   []string{supervisorTestImagePath(), "supervise"},
-			StartTime: started.Add(-5 * time.Second),
-		}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	if err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano)); err != nil {
-		t.Fatalf("killSupervisorProcess on a real supervisor PID returned error: %v", err)
-	}
-	if *killed != 4321 {
-		t.Fatalf("expected PID 4321 to be killed, got killed=%d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_RecycledPID_Refused(t *testing.T) {
-	// A crashed supervisor's PID was REUSED by an unrelated process: the
-	// image basename + argv match by coincidence is impossible here —
-	// the recycled process began AFTER the sidecar was written. Gate 3
-	// (start-time precedes started_at) must refuse, and NOTHING is killed.
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{
-			Alive:     true,
-			ImagePath: supervisorTestImagePath(),
-			Cmdline:   []string{supervisorTestImagePath(), "supervise"},
-			// Started AFTER the sidecar → PID-recycled.
-			StartTime: started.Add(10 * time.Second),
-		}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano))
-	if err == nil {
-		t.Fatalf("expected refusal error for a recycled PID, got nil")
-	}
-	if !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("expected a 'refused' refusal error, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("recycled PID must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_ForeignSubcommand_Refused(t *testing.T) {
-	// PID reused by another mcphub subcommand (e.g. `mcphub status`) →
-	// Gate 2 (argv[1] == "supervise") refuses; nothing killed.
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{
-			Alive:     true,
-			ImagePath: supervisorTestImagePath(),
-			Cmdline:   []string{supervisorTestImagePath(), "status"},
-			StartTime: started.Add(-5 * time.Second),
-		}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano))
-	if err == nil || !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("expected refusal for a non-supervise subcommand, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("foreign-subcommand PID must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_ForeignImage_Refused(t *testing.T) {
-	// PID reused by a non-mcphub binary → Gate 1 (image basename)
-	// refuses; nothing killed.
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{
-			Alive:     true,
-			ImagePath: foreignImagePath(),
-			Cmdline:   []string{foreignImagePath(), "supervise"},
-			StartTime: started.Add(-5 * time.Second),
-		}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano))
-	if err == nil || !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("expected refusal for a foreign image, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("foreign-image PID must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_DeadPID_Refused(t *testing.T) {
-	// Recorded PID is already gone (Alive=false) → benign refusal,
-	// nothing killed.
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{Alive: false}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano))
-	if err == nil || !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("expected refusal for a dead PID, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("dead PID must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_ProbeError_Propagated_NotKilled(t *testing.T) {
-	// A transient identity-probe failure means we CANNOT prove the PID is
-	// the supervisor → propagate as an error and kill NOTHING (never
-	// guess).
-	started := time.Now().UTC()
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{}, errors.New("simulated transient identity probe stall")
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, started.Format(time.RFC3339Nano))
-	if err == nil {
-		t.Fatalf("expected a propagated probe error, got nil")
-	}
-	if !strings.Contains(err.Error(), "could not verify") {
-		t.Fatalf("expected a 'could not verify' probe error, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("an unprovable target must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_MissingStartedAt_Refused(t *testing.T) {
-	// A missing/unparseable started_at cannot anchor Gate 3 → fail closed
-	// (refuse) even when image + argv match, since a recycled PID can't
-	// be ruled out.
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		return ProcessIdentity{
-			Alive:     true,
-			ImagePath: supervisorTestImagePath(),
-			Cmdline:   []string{supervisorTestImagePath(), "supervise"},
-			StartTime: time.Now().UTC().Add(-5 * time.Second),
-		}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	err := killSupervisorProcess(4321, "")
-	if err == nil || !strings.Contains(err.Error(), "refused") {
-		t.Fatalf("expected refusal when started_at is missing, got: %v", err)
-	}
-	if *killed != 0 {
-		t.Fatalf("missing-started_at target must NOT be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-func TestKillSupervisorProcess_NonPositivePID_NoProbe(t *testing.T) {
-	// PID <= 0 is rejected up front and never reaches the probe or kill.
-	probed := false
-	swapSupervisorKillProbe(t, func(pid int) (ProcessIdentity, error) {
-		probed = true
-		return ProcessIdentity{Alive: true}, nil
-	})
-	killed := captureSupervisorKill(t)
-
-	if err := killSupervisorProcess(0, time.Now().UTC().Format(time.RFC3339Nano)); err == nil {
-		t.Fatalf("expected error for PID 0, got nil")
-	}
-	if probed {
-		t.Fatalf("PID 0 must short-circuit before the identity probe")
-	}
-	if *killed != 0 {
-		t.Fatalf("PID 0 must never be killed, but kill fired on PID %d", *killed)
-	}
-}
-
-// cmdlineIsSupervise unit coverage — argv[1] must be exactly "supervise".
-func TestCmdlineIsSupervise(t *testing.T) {
-	cases := []struct {
-		argv []string
-		want bool
+func TestSupervisorRestartHTTPGuardsAndUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, host, origin, fetchSite string
+		status                                int
 	}{
-		{[]string{"mcphub", "supervise"}, true},
-		{[]string{"mcphub", "supervise", "--strict-mode"}, true},
-		{[]string{"mcphub", "status"}, false},
-		{[]string{"mcphub", "supervise-foo"}, false}, // substring, not token
-		{[]string{"mcphub"}, false},                  // no argv[1]
-		{nil, false},
+		{name: "method", method: http.MethodGet, host: "127.0.0.1:9081", status: http.StatusMethodNotAllowed},
+		{name: "host", method: http.MethodPost, host: "foreign.example:9081", status: http.StatusForbidden},
+		{name: "origin", method: http.MethodPost, host: "127.0.0.1:9081", origin: "http://foreign.example:9081", status: http.StatusForbidden},
+		{name: "fetch-site", method: http.MethodPost, host: "127.0.0.1:9081", fetchSite: "cross-site", status: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newSupervisorRestartTransportTestServer(t)
+			s.SetSupervisorRestartHandler(func(context.Context) (SupervisorRestartResult, error) {
+				t.Fatal("rejected request reached lifecycle owner")
+				return SupervisorRestartResult{}, nil
+			})
+			req := httptest.NewRequest(tc.method, "http://"+tc.host+"/api/supervisor/restart", nil)
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("status=%d, want %d", rec.Code, tc.status)
+			}
+			if tc.method == http.MethodGet && rec.Header().Get("Allow") != http.MethodPost {
+				t.Fatal("method refusal lost Allow: POST")
+			}
+		})
 	}
-	for _, tc := range cases {
-		if got := cmdlineIsSupervise(tc.argv); got != tc.want {
-			t.Errorf("cmdlineIsSupervise(%q) = %v, want %v", tc.argv, got, tc.want)
+	t.Run("unavailable", func(t *testing.T) {
+		s, root := newSupervisorRestartTransportTestServer(t)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9081/api/supervisor/restart", nil))
+		var result SupervisorRestartResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
 		}
+		if rec.Code != http.StatusOK || result.Outcome != SupervisorRestartRefused || result.Code != "RESTART_UNAVAILABLE" || result.Spawned || result.Killed || result.Ready {
+			t.Fatalf("unavailable response=%s status=%d", rec.Body, rec.Code)
+		}
+		entries, err := os.ReadDir(root)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("uncomposed route touched state: entries=%v err=%v", entries, err)
+		}
+	})
+}
+
+func readySupervisorRestartResultForTest() SupervisorRestartResult {
+	return SupervisorRestartResult{
+		Outcome: SupervisorRestartRestarted, SpawnedPID: 202, Spawned: true,
+		Ready: true, OriginalSettled: true, Phase: "complete",
+		OriginalGeneration:       &api.SupervisorLockOwner{PID: 101, StartedAt: "2026-01-01T00:00:00Z"},
+		SelectedGeneration:       &api.SupervisorLockOwner{PID: 202, StartedAt: "2026-01-01T00:01:00Z"},
+		OriginalChildDisposition: "retained", NamespaceDisposition: "occupied",
 	}
+}
+
+func TestSupervisorRestartHTTPProjectsLifecycleOutcomes(t *testing.T) {
+	complete := readySupervisorRestartResultForTest()
+	standalone := complete
+	standalone.TransferCommitted, standalone.Transferred = true, true
+	standalone.OriginalChildDisposition = "transferred"
+	ownerCause := errors.New("private-native-path-and-argv")
+	for _, tc := range []struct {
+		name    string
+		result  SupervisorRestartResult
+		err     error
+		outcome SupervisorRestartOutcome
+	}{
+		{name: "retained-ready", result: complete, outcome: SupervisorRestartRestarted},
+		{name: "transferred-ready", result: standalone, outcome: SupervisorRestartRestarted},
+		{name: "creation-only", result: SupervisorRestartResult{Spawned: true, SpawnedPID: 202}, outcome: SupervisorRestartFailed},
+		{name: "pending-child", result: SupervisorRestartResult{Outcome: SupervisorRestartPending, Spawned: true, SpawnedPID: 202, Phase: "settlement", OriginalChildDisposition: "pending"}, err: ownerCause, outcome: SupervisorRestartPending},
+		{name: "refused", result: SupervisorRestartResult{Outcome: SupervisorRestartRefused, Code: "RESTART_IDENTITY_UNCONFIRMED", Phase: "admission", OriginalChildDisposition: "none"}, err: ownerCause, outcome: SupervisorRestartRefused},
+		{name: "settled-loser-foreign-winner", result: SupervisorRestartResult{Outcome: SupervisorRestartFailed, Spawned: true, SpawnedPID: 202, Phase: "namespace", OriginalChildDisposition: "settled", NamespaceDisposition: "occupied", Code: "RESTART_NAMESPACE_CONFLICT"}, err: ownerCause, outcome: SupervisorRestartFailed},
+		{name: "ready-with-owner-error", result: complete, err: ownerCause, outcome: SupervisorRestartFailed},
+		{name: "ready-with-step-error", result: func() SupervisorRestartResult {
+			r := complete
+			r.PerStepError = map[string]string{"kill": ownerCause.Error()}
+			return r
+		}(), outcome: SupervisorRestartFailed},
+		{name: "commit-without-transfer", result: func() SupervisorRestartResult { r := standalone; r.Transferred = false; return r }(), outcome: SupervisorRestartFailed},
+		{name: "unknown-private-classification", result: SupervisorRestartResult{Outcome: SupervisorRestartFailed, Phase: ownerCause.Error(), Code: ownerCause.Error(), PerStepError: map[string]string{ownerCause.Error(): ownerCause.Error()}, OriginalChildDisposition: ownerCause.Error(), NamespaceDisposition: ownerCause.Error()}, err: ownerCause, outcome: SupervisorRestartFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newSupervisorRestartTransportTestServer(t)
+			actions := make(chan Event, 1)
+			s.events.subs[actions] = struct{}{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			s.SetSupervisorRestartHandler(func(actual context.Context) (SupervisorRestartResult, error) {
+				calls++
+				if actual != ctx {
+					t.Fatal("transport replaced original request context")
+				}
+				return tc.result, tc.err
+			})
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9081/api/supervisor/restart", nil).WithContext(ctx))
+			var result SupervisorRestartResult
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || calls != 1 || result.Outcome != tc.outcome || result.Spawned != tc.result.Spawned || result.SpawnedPID != tc.result.SpawnedPID || result.Killed != tc.result.Killed ||
+				result.Ready != tc.result.Ready || result.OriginalSettled != tc.result.OriginalSettled || result.TransferCommitted != tc.result.TransferCommitted || result.Transferred != tc.result.Transferred {
+				t.Fatalf("status=%d calls=%d result=%s", rec.Code, calls, rec.Body)
+			}
+			if strings.Contains(rec.Body.String(), ownerCause.Error()) {
+				t.Fatalf("private owner detail leaked: %s", rec.Body)
+			}
+			wantActions := 0
+			if tc.outcome == SupervisorRestartRestarted {
+				wantActions = 1
+			} else if len(result.PerStepError) == 0 {
+				t.Fatal("non-clean result lost failure classification")
+			}
+			if len(actions) != wantActions {
+				t.Fatalf("successful audit actions=%d, want %d", len(actions), wantActions)
+			}
+			var wire map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"killed_pid", "killed", "spawned_pid", "spawned", "outcome", "ready", "original_settled", "transfer_committed", "transferred", "original_child_disposition", "namespace_disposition"} {
+				if _, ok := wire[key]; !ok {
+					t.Errorf("missing actual JSON field %s", key)
+				}
+			}
+			if result.SelectedGeneration != nil {
+				var generation map[string]json.RawMessage
+				if err := json.Unmarshal(wire["selected_generation"], &generation); err != nil || len(generation["pid"]) == 0 || len(generation["started_at"]) == 0 {
+					t.Fatalf("generation wire=%s err=%v", wire["selected_generation"], err)
+				}
+			}
+			if tc.name == "retained-ready" {
+				t.Logf("RESTART_TRANSPORT_WIRE_SAMPLE=%s", rec.Body.String())
+			}
+		})
+	}
+}
+
+type supervisorRestartFailingWriter struct {
+	header http.Header
+	err    error
+}
+
+func (w *supervisorRestartFailingWriter) Header() http.Header       { return w.header }
+func (w *supervisorRestartFailingWriter) WriteHeader(int)           {}
+func (w *supervisorRestartFailingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestSupervisorRestartHTTPReceivesDeliveryAndOutputFailures(t *testing.T) {
+	t.Run("required-log", func(t *testing.T) {
+		s, root := newSupervisorRestartTransportTestServer(t)
+		if err := os.Mkdir(filepath.Join(root, "hub-mcp.log"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		actions := make(chan Event, 1)
+		s.events.subs[actions] = struct{}{}
+		s.SetSupervisorRestartHandler(func(context.Context) (SupervisorRestartResult, error) {
+			return readySupervisorRestartResultForTest(), nil
+		})
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9081/api/supervisor/restart", nil))
+		var result SupervisorRestartResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Code != "RESTART_DIAGNOSTIC_UNCONFIRMED" || result.PerStepError["diagnostic"] == "" || result.Outcome != SupervisorRestartFailed || !result.Spawned || result.SpawnedPID != 202 || result.OriginalChildDisposition != "retained" || len(actions) != 0 {
+			t.Fatalf("lost delivery/effect outcome: %s", rec.Body)
+		}
+	})
+	t.Run("response-write", func(t *testing.T) {
+		s, _ := newSupervisorRestartTransportTestServer(t)
+		ownerErr := errors.New("original-callback-cause")
+		writeErr := errors.New("original-response-write-cause")
+		s.SetSupervisorRestartHandler(func(context.Context) (SupervisorRestartResult, error) {
+			return SupervisorRestartResult{Outcome: SupervisorRestartPending, Phase: "settlement", OriginalChildDisposition: "pending"}, ownerErr
+		})
+		var output bytes.Buffer
+		previous := log.Writer()
+		log.SetOutput(&output)
+		t.Cleanup(func() { log.SetOutput(previous) })
+		writer := &supervisorRestartFailingWriter{header: make(http.Header), err: writeErr}
+		s.ServeHTTP(writer, httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9081/api/supervisor/restart", nil))
+		if !strings.Contains(output.String(), ownerErr.Error()) || !strings.Contains(output.String(), writeErr.Error()) {
+			t.Fatalf("original acquired causes not received: %s", &output)
+		}
+	})
 }

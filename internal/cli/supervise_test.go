@@ -25,14 +25,17 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +53,7 @@ func TestObserveSupervisorReadiness_DeterministicCurrentGeneration(t *testing.T)
 	inspectCalls, waitCalls, probeCalls := 0, 0, 0
 
 	observeSupervisorReadinessWithDeps(
+		context.Background(),
 		tracker,
 		nil,
 		api.SupervisorDaemon{TaskName: task, Server: "memory", Daemon: "default", Port: 9304, StartupBindDeadlineSeconds: 5},
@@ -58,15 +62,16 @@ func TestObserveSupervisorReadiness_DeterministicCurrentGeneration(t *testing.T)
 		started,
 		supervisorReadinessObserverDeps{
 			now: func() time.Time { return now },
-			wait: func(delay time.Duration) {
+			wait: func(_ context.Context, delay time.Duration) bool {
 				waitCalls++
 				now = now.Add(delay)
+				return true
 			},
 			inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
 				inspectCalls++
 				return inspectCalls >= 2, inspectCalls >= 2
 			},
-			probe: func(port int) api.MCPReadinessResult {
+			probe: func(_ context.Context, port int) api.MCPReadinessResult {
 				probeCalls++
 				if port != 9304 {
 					t.Fatalf("probe port = %d, want 9304", port)
@@ -89,6 +94,71 @@ func TestObserveSupervisorReadiness_DeterministicCurrentGeneration(t *testing.T)
 	}
 }
 
+func TestObserveSupervisorReadiness_RetryableColdTransientConvergesSameGeneration(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	task := `\mcp-local-hub-fetch-default`
+	started := time.Date(2026, 9, 11, 15, 30, 0, 0, time.UTC)
+	generation := tracker.MarkSpawned(task, 4321, started)
+	now := started
+	probeCalls, waitCalls := 0, 0
+	eventPath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer events.Close()
+
+	observeSupervisorReadinessWithDeps(
+		context.Background(),
+		tracker, events,
+		api.SupervisorDaemon{TaskName: task, Server: "fetch", Daemon: "default", Port: 9133, StartupBindDeadlineSeconds: 5},
+		generation, 4321, started,
+		supervisorReadinessObserverDeps{
+			now: func() time.Time { return now },
+			wait: func(_ context.Context, delay time.Duration) bool {
+				waitCalls++
+				now = now.Add(delay)
+				return true
+			},
+			inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
+				return true, true
+			},
+			probe: func(context.Context, int) api.MCPReadinessResult {
+				probeCalls++
+				if probeCalls == 1 {
+					return api.MCPReadinessResult{
+						SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessUnready,
+						Stage: api.MCPReadinessStageInitialize, FailureID: "MCP_READINESS_HOST_UNAVAILABLE", Retryable: true,
+					}
+				}
+				return api.MCPReadinessResult{
+					SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady,
+					Stage: api.MCPReadinessStageToolsList, ToolCount: 3,
+				}
+			},
+		},
+	)
+
+	if probeCalls != 2 || waitCalls != 1 {
+		t.Fatalf("calls probe=%d wait=%d, want 2/1", probeCalls, waitCalls)
+	}
+	entry, ok := tracker.Get(task)
+	if !ok || entry.PIDGeneration != generation || entry.ReadinessObservation == nil {
+		t.Fatalf("entry=%#v, want same-generation readiness", entry)
+	}
+	got := api.ReduceReadinessV1(api.ReadinessRequest{
+		Mode: api.ReadinessModeAwaitSettled, Observations: []api.DaemonReadinessObservationV1{*entry.ReadinessObservation},
+	})
+	if len(got.Daemons) != 1 || got.Daemons[0].ServiceState != api.ServiceStateRunning ||
+		got.Daemons[0].Stage != api.ReadinessStageComplete || !got.Daemons[0].Settled {
+		t.Fatalf("readiness=%#v, want same-generation Running/complete", got.Daemons)
+	}
+	settlements := readinessSettlementEvents(t, eventPath)
+	if len(settlements) != 1 || settlements[0].Body["service_state"] != string(api.ServiceStateRunning) {
+		t.Fatalf("settlements=%#v, want one Running event and no Degraded event", settlements)
+	}
+}
+
 func TestObserveSupervisorReadiness_RouteFrontUsesRouteAwareProbe(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	started := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
@@ -99,13 +169,13 @@ func TestObserveSupervisorReadiness_RouteFrontUsesRouteAwareProbe(t *testing.T) 
 	generation := tracker.MarkSpawned(d.TaskName, 4321, started)
 	genericProbeCalls, routeProbeCalls := 0, 0
 
-	observeSupervisorReadinessWithDeps(tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
+	observeSupervisorReadinessWithDeps(context.Background(), tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
 		now:  func() time.Time { return started },
-		wait: func(time.Duration) { t.Fatal("ready route front must not wait") },
+		wait: func(context.Context, time.Duration) bool { t.Fatal("ready route front must not wait"); return false },
 		inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
 			return true, true
 		},
-		probe: func(int) api.MCPReadinessResult {
+		probe: func(context.Context, int) api.MCPReadinessResult {
 			genericProbeCalls++
 			return api.MCPReadinessResult{State: api.MCPReadinessUnready}
 		},
@@ -159,11 +229,11 @@ func TestObserveSupervisorReadiness_RouteFrontPreservesTypedRouteFailure(t *test
 				Cause: errors.New("route target unavailable"),
 			}
 
-			observeSupervisorReadinessWithDeps(tracker, events, d, generation, 4321, started, supervisorReadinessObserverDeps{
+			observeSupervisorReadinessWithDeps(context.Background(), tracker, events, d, generation, 4321, started, supervisorReadinessObserverDeps{
 				now:     func() time.Time { return started },
-				wait:    func(time.Duration) { t.Fatal("bound route front must not wait") },
+				wait:    func(context.Context, time.Duration) bool { t.Fatal("bound route front must not wait"); return false },
 				inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) { return true, true },
-				probe: func(int) api.MCPReadinessResult {
+				probe: func(context.Context, int) api.MCPReadinessResult {
 					t.Fatal("route front must not use generic /mcp probe")
 					return api.MCPReadinessResult{}
 				},
@@ -207,11 +277,14 @@ func TestObserveSupervisorReadiness_OrdinaryDaemonKeepsGenericProbe(t *testing.T
 	generation := tracker.MarkSpawned(d.TaskName, 4321, started)
 	genericProbeCalls, routeProbeCalls := 0, 0
 
-	observeSupervisorReadinessWithDeps(tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
-		now:     func() time.Time { return started },
-		wait:    func(time.Duration) { t.Fatal("ready ordinary daemon must not wait") },
+	observeSupervisorReadinessWithDeps(context.Background(), tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
+		now: func() time.Time { return started },
+		wait: func(context.Context, time.Duration) bool {
+			t.Fatal("ready ordinary daemon must not wait")
+			return false
+		},
 		inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) { return true, true },
-		probe: func(int) api.MCPReadinessResult {
+		probe: func(context.Context, int) api.MCPReadinessResult {
 			genericProbeCalls++
 			return api.MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady}
 		},
@@ -243,6 +316,7 @@ func TestObserveSupervisorReadiness_BlockedProbeCannotSettleExitedSameGeneration
 	go func() {
 		defer close(observerDone)
 		observeSupervisorReadinessWithDeps(
+			context.Background(),
 			tracker,
 			nil,
 			api.SupervisorDaemon{TaskName: task, Server: "memory", Daemon: "default", Port: 9304, StartupBindDeadlineSeconds: 5},
@@ -251,11 +325,11 @@ func TestObserveSupervisorReadiness_BlockedProbeCannotSettleExitedSameGeneration
 			started,
 			supervisorReadinessObserverDeps{
 				now:  func() time.Time { return started },
-				wait: func(time.Duration) {},
+				wait: func(context.Context, time.Duration) bool { return true },
 				inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
 					return true, true
 				},
-				probe: func(int) api.MCPReadinessResult {
+				probe: func(context.Context, int) api.MCPReadinessResult {
 					close(probeEntered)
 					<-probeRelease
 					return api.MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady}
@@ -449,6 +523,74 @@ func TestSuperviseCommand_AcquiresLockAndExitsOnSignal(t *testing.T) {
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	if _, err := os.Stat(eventsPath); err != nil {
 		t.Fatalf("supervisor-events.log never appeared: %v", err)
+	}
+}
+
+func TestRunSupervise_NoIPCExitJoinsHeartbeat(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	exitCh := make(chan struct{}, 1)
+	t.Cleanup(setSuperviseTestExitCh(exitCh))
+	beatHeld := make(chan struct{})
+	releaseBeat := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseBeat) }) }
+	done := make(chan error, 1)
+	returned := make(chan struct{})
+	logPath := filepath.Join(stateDir, "supervisor-events.log")
+	go func() {
+		done <- runSuperviseWithIPCOptions(context.Background(), true, false, false, ipcRunOptions{
+			beforeHeartbeatEmit: func() {
+				close(beatHeld)
+				<-releaseBeat
+			},
+		})
+		close(returned)
+	}()
+	t.Cleanup(func() {
+		select {
+		case exitCh <- struct{}{}:
+		default:
+		}
+		release()
+		select {
+		case <-returned:
+		case <-time.After(3 * time.Second):
+			t.Error("supervisor did not return during heartbeat test cleanup")
+		}
+		select {
+		case <-beatHeld:
+			waitForSupervisorEvent(t, logPath, `"event":"supervisor-heartbeat"`, 3*time.Second)
+		default:
+		}
+	})
+	select {
+	case <-beatHeld:
+	case <-time.After(3 * time.Second):
+		t.Fatal("immediate heartbeat did not reach the pre-emit barrier")
+	}
+	exitCh <- struct{}{}
+	waitForSupervisorEvent(t, logPath, `"signal":"test-exit"`, 3*time.Second)
+	select {
+	case err := <-done:
+		t.Fatalf("runSupervise returned before held heartbeat emitted: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runSupervise returned %v, want nil", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("runSupervise did not join heartbeat after release")
+	}
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(body), `"event":"supervisor-heartbeat"`) != 1 || !strings.Contains(string(body), `"severity":"info"`) {
+		t.Fatalf("joined heartbeat info row missing or duplicated at return: %s", body)
 	}
 }
 
@@ -1074,118 +1216,46 @@ func TestSuperviseCommand_ReaperFailureDoesNotBlockStartup(t *testing.T) {
 	}
 }
 
-// TestSuperviseCommand_SweepsOldBinariesOnStartup pins the P3 wiring: every
-// supervisor startup runs the rename-aside retention sweep, and the sweep is
-// non-fatal so normal startup still reaches the graceful test-exit path.
-func TestSuperviseCommand_SweepsOldBinariesOnStartup(t *testing.T) {
-	tmpHome := apitest.HardenedTempDir(t)
-	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
-
-	defer setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+// Ordinary startup has no binary-aside deletion authority. The legacy
+// post-handoff caller remains independently covered in install_upgrade_test.go.
+func TestSuperviseCommand_StartupPreservesBinaryAsides(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	defer setReaperFnForTest(func(context.Context, ReaperDeps) (ReaperResult, error) {
 		return ReaperResult{}, nil
 	})()
-
-	sweepCalled := make(chan string, 1)
-	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
-		sweepCalled <- dir
-		return nil
-	})
-	defer cleanupSweep()
-
-	exitCh := make(chan struct{}, 1)
-	cleanupExit := setSuperviseTestExitCh(exitCh)
-	defer cleanupExit()
-
-	cmd := newSuperviseCmd()
-	cmd.SetArgs([]string{"--no-ipc"})
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Execute() }()
-
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("resolve test executable: %v", err)
-	}
-	wantDir := filepath.Dir(exe)
-
-	select {
-	case gotDir := <-sweepCalled:
-		if gotDir != wantDir {
-			t.Fatalf("sweep dir = %s, want executable dir %s", gotDir, wantDir)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("runSupervise did not call SweepOldBinaries on startup")
-	}
-
-	exitCh <- struct{}{}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("supervise exited with err after startup sweep: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("supervise did not exit on test-exit signal within 3s")
-	}
-}
-
-func TestSuperviseCommand_SkipsOldBinarySweepWhenExecutableUnavailable(t *testing.T) {
-	tmpHome := apitest.HardenedTempDir(t)
-	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
-
-	defer setSupervisorExecutableFnForTest(func() (string, error) {
-		return "", errors.New("executable unavailable")
-	})()
-
-	cleanupReaper := setReaperFnForTest(func(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
-		return ReaperResult{}, nil
-	})
-	defer cleanupReaper()
-
 	var sweepCalls atomic.Int32
-	cleanupSweep := setSweepOldBinariesFnForTest(func(dir string, warn ...func(string, error)) error {
+	defer setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
 		sweepCalls.Add(1)
-		return nil
-	})
-	defer cleanupSweep()
-
+		return errors.New("startup must never invoke this competing deleter")
+	})()
+	// Seven controlled prior/baseline leaves exceed the existing legacy keep5;
+	// their aged encoded names exercise both old deletion criteria.
+	before := make(map[string][]byte)
+	for i := 0; i < 7; i++ {
+		path := filepath.Join(stateDir, fmt.Sprintf("mcphub.exe.old-200001%02dT000000Z", i+1))
+		payload := []byte(fmt.Sprintf("original-prior-or-baseline-%d", i))
+		if err := os.WriteFile(path, payload, 0600); err != nil {
+			t.Fatal(err)
+		}
+		before[path] = payload
+	}
 	exitCh := make(chan struct{}, 1)
-	cleanupExit := setSuperviseTestExitCh(exitCh)
-	defer cleanupExit()
-
+	exitCh <- struct{}{}
+	defer setSuperviseTestExitCh(exitCh)()
 	cmd := newSuperviseCmd()
 	cmd.SetArgs([]string{"--no-ipc"})
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Execute() }()
-
-	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		select {
-		case err := <-done:
-			t.Fatalf("supervise exited before startup after executable lookup failure: %v", err)
-		default:
-		}
-		if data, err := os.ReadFile(eventsPath); err == nil && strings.Contains(string(data), `"event":"supervisor-start"`) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("supervise did not reach startup after executable lookup failure")
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
 	}
-
-	exitCh <- struct{}{}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("supervise exited with err after executable lookup failure: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("supervise did not exit on test-exit signal within 3s")
+	if sweepCalls.Load() != 0 {
+		t.Fatal("ordinary startup entered binary-aside cleanup")
 	}
-	if got := sweepCalls.Load(); got != 0 {
-		t.Fatalf("SweepOldBinaries calls = %d, want 0 when executable lookup fails", got)
+	for path, expected := range before {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, expected) {
+			t.Fatal("ordinary startup changed a preserved prior/baseline")
+		}
 	}
 }
 

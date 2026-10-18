@@ -243,7 +243,11 @@ func (c *supervisorController) settleStopBatchTargets(ctx context.Context, targe
 				results[i].Error = "runtime generation replaced during stop settlement"
 				continue
 			}
-			if after.State != daemonRuntimeStateIdle || after.CurrentPID != 0 {
+			// Quarantine is a PID-less terminal suspension of automatic respawn,
+			// not evidence of a live process. Admit only that exact non-idle state
+			// to the existing listener-free fence; every other non-idle state stays
+			// fail-closed, and any nonzero PID still refuses.
+			if after.CurrentPID != 0 || (after.State != daemonRuntimeStateIdle && after.State != daemonRuntimeStateQuarantine) {
 				results[i] = api.StoppedSettlement{TaskName: target.TaskName, State: api.StoppedSettlementFailed, Reason: api.StoppedSettlementReasonProcessAlive, CurrentPID: after.CurrentPID, PIDGeneration: after.PIDGeneration, Error: "controller runtime has not reached idle"}
 				continue
 			}

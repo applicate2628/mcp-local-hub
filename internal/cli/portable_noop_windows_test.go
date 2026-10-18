@@ -7,5 +7,5 @@ package cli
 // tests as a platform-portable no-op that lets cmd.Start succeed
 // without forking a long-lived child.
 func portableNoopCommand() (string, []string) {
-	return "cmd.exe", []string{"/c", "exit", "0"}
+	return "cmd.exe", []string{"/d", "/c", "exit", "0"}
 }

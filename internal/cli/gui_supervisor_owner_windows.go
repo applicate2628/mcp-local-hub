@@ -3,6 +3,11 @@
 package cli
 
 import (
+	"errors"
+	"os"
+	"time"
+
+	"mcp-local-hub/internal/api"
 	"os/exec"
 	"syscall"
 
@@ -45,3 +50,17 @@ const (
 	windowsDetachedProcess       = 0x00000008
 	windowsCreateNewProcessGroup = 0x00000200
 )
+
+func captureGUISupervisorGeneration(proc *os.Process) (api.SupervisorLockOwner, error) {
+	if proc == nil {
+		return api.SupervisorLockOwner{}, errSupervisorControlBinding
+	}
+	identity, err := process.LookupPIDHandleIdentity(proc.Pid)
+	if err != nil {
+		return api.SupervisorLockOwner{}, err
+	}
+	if identity.PID != proc.Pid || identity.StartedAt.IsZero() {
+		return api.SupervisorLockOwner{}, errors.New("created supervisor native generation unavailable")
+	}
+	return api.SupervisorLockOwner{PID: identity.PID, StartedAt: identity.StartedAt.UTC().Format(time.RFC3339Nano)}, nil
+}

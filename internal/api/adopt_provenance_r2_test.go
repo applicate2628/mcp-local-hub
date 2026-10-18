@@ -18,7 +18,7 @@ import (
 func writeAdoptManifestForClassifierTest(t *testing.T, manifest string, port int, client string) {
 	t.Helper()
 	yaml := renderStdioBridgeManifestYAML(manifest, "go", []string{"version"}, nil, port, adoptClientBindings([]string{client}))
-	dir := filepath.Join(defaultManifestDir(), manifest)
+	dir := filepath.Join(mustCanonicalManifestDir(t), manifest)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

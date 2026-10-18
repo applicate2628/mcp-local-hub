@@ -2268,6 +2268,10 @@ func TestUnregister_FullRemovesAllLanguages(t *testing.T) {
 	if _, err := a.registerWithManifest(m, ws, []string{"python", "typescript"}, RegisterOpts{Writer: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
+	clientBefore, err := json.Marshal(h.fakeClients.entries)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rpt, err := a.unregisterWithManifest(m, ws, nil, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("Unregister: %v", err)
@@ -2282,9 +2286,20 @@ func TestUnregister_FullRemovesAllLanguages(t *testing.T) {
 	if len(reg.Workspaces) != 0 {
 		t.Errorf("expected 0 entries after full unregister, got %+v", reg.Workspaces)
 	}
-	// Client entries removed too.
-	if n := countEntries(h.fakeClients); n != 0 {
-		t.Errorf("client entries remain after unregister: %d", n)
+	clientAfter, err := json.Marshal(h.fakeClients.entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(clientAfter, clientBefore) {
+		t.Errorf("name-only client entries changed: before=%s after=%s", clientBefore, clientAfter)
+	}
+	if len(rpt.Warnings) == 0 || len(rpt.Diagnostics()) == 0 {
+		t.Fatalf("preserved client entries lack typed warnings: %+v", rpt)
+	}
+	for _, diagnostic := range rpt.Diagnostics() {
+		if diagnostic.Code() != RegistrationCodeUnregisterClientPreserved || diagnostic.Severity() != RegistrationSeverityWarning {
+			t.Errorf("unexpected unregister diagnostic=%+v, want ownership preservation warning", diagnostic)
+		}
 	}
 }
 
@@ -2360,8 +2375,18 @@ func TestUnregister_MixedCanonicalAndLegacyKeysRemovesBoth(t *testing.T) {
 	if want := []string{"go", "python"}; !slices.Equal(rpt.Removed, want) {
 		t.Fatalf("Removed = %v, want %v", rpt.Removed, want)
 	}
-	if len(rpt.Warnings) != 0 {
-		t.Fatalf("warnings = %v, want none for languages present under either key", rpt.Warnings)
+	if len(rpt.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want both preserved client entries", rpt.Warnings)
+	}
+	preserved := map[string]bool{}
+	for _, diagnostic := range rpt.Diagnostics() {
+		if diagnostic.Code() != RegistrationCodeUnregisterClientPreserved || diagnostic.Severity() != RegistrationSeverityWarning || diagnostic.Participant() != "codex-cli" {
+			t.Errorf("unexpected unregister diagnostic=%+v", diagnostic)
+		}
+		preserved[diagnostic.PlanIdentity()] = true
+	}
+	if !preserved["go-entry"] || !preserved["python-entry"] {
+		t.Errorf("typed warnings do not identify both preserved entries: %v", preserved)
 	}
 	if reconcileCalls != 2 {
 		t.Fatalf("reconcile calls = %d, want 2 supervised descriptor removals", reconcileCalls)
@@ -2387,11 +2412,11 @@ func TestUnregister_MixedCanonicalAndLegacyKeysRemovesBoth(t *testing.T) {
 	if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(legacyWSKey, "python")); row != nil {
 		t.Fatalf("legacy supervisor-intent row survived unregister: %+v", row)
 	}
-	if _, ok := h.fakeClients.entries["codex-cli"]["go-entry"]; ok {
-		t.Fatal("canonical client entry survived unregister")
+	if got := h.fakeClients.entries["codex-cli"]["go-entry"]; got != "http://localhost:0/mcp" {
+		t.Fatalf("canonical client entry changed: %q", got)
 	}
-	if _, ok := h.fakeClients.entries["codex-cli"]["python-entry"]; ok {
-		t.Fatal("legacy client entry survived unregister")
+	if got := h.fakeClients.entries["codex-cli"]["python-entry"]; got != "http://localhost:0/mcp" {
+		t.Fatalf("legacy client entry changed: %q", got)
 	}
 }
 
@@ -8281,5 +8306,156 @@ func TestBuildDirectCleanupPlans_DeterministicWarningOrder(t *testing.T) {
 	}
 	if !slices.Equal(forward.trace, []string{"go", "python"}) || forward.mutations != 0 {
 		t.Fatalf("canonical trace/mutations=%v/%d, want [go python]/0", forward.trace, forward.mutations)
+	}
+}
+
+// A legacy row records a client key, not the currently stored entry's ownership.
+// Exercise real temporary client bytes while retaining the existing fake native
+// owners; this must compile against the unsafe producer for the red baseline.
+func TestUnregister_PreservesUnprovenLegacyClientEntries(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		shape        string
+		throughPrune bool
+		wantWarning  bool
+	}{
+		{name: "foreign direct unregister", shape: "foreign", wantWarning: true},
+		{name: "foreign paired prune", shape: "foreign", throughPrune: true, wantWarning: true},
+		{name: "unchanged looking old Hub URL", shape: "old-hub", wantWarning: true},
+		{name: "current client read failure", shape: "malformed", wantWarning: true},
+		{name: "target already absent", shape: "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			workspace := t.TempDir()
+			canonical := mustCanonical(t, workspace)
+			key := WorkspaceKey(canonical)
+			entryName := LSPRouterEntryName("go") + "-legacy"
+			entry := WorkspaceEntry{
+				WorkspaceKey: key, WorkspacePath: canonical, Language: "go",
+				Backend: "gopls-mcp", Port: 9424,
+				TaskName:      LSPTaskNameForWorkspaceLanguage(key, "go"),
+				ClientEntries: map[string]string{"claude-code": entryName},
+				Lifecycle:     LifecycleConfigured,
+			}
+			registry := NewRegistry(h.regPath)
+			if err := registry.PutLSP(entry); err != nil {
+				t.Fatal(err)
+			}
+			if err := registry.Save(); err != nil {
+				t.Fatal(err)
+			}
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeSupervisorIntentForRegisterTest(t, intentPath, &SupervisorIntentFile{
+				Version: 1,
+				Daemons: []SupervisorDaemon{BuildSupervisorDaemonForLSP(entry, testCanonicalMcphubPathOverride)},
+			})
+			originalReconcile := registerSupervisorReconcileFn
+			registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+				return ReconcileResponse{DryRun: false}, nil
+			}
+			t.Cleanup(func() { registerSupervisorReconcileFn = originalReconcile })
+
+			client, err := clients.NewClaudeCode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(fmt.Sprintf(`{
+  "unrelated": {"keep": "exact spacing and bytes"},
+  "mcpServers": {
+    "%s": {"type":"http","url":"https://example.invalid/operator-owned-mcp","headers":{"X-Fixture":"foreign"}},
+    "other": {"command":"fixture-other","args":["keep"]}
+  }
+}
+`, entryName))
+			switch tc.shape {
+			case "old-hub":
+				raw = []byte(strings.ReplaceAll(string(raw), "https://example.invalid/operator-owned-mcp", "http://127.0.0.1:9408/mcp"))
+			case "malformed":
+				raw = []byte(`{"mcpServers": {"` + entryName + `": {"url": "https://example.invalid/foreign"}, BROKEN}`)
+			case "absent":
+				raw = []byte("{ \"mcpServers\": {\"other\": {\"url\":\"https://example.invalid/keep\"}} }\n")
+			}
+			if err := os.WriteFile(client.ConfigPath(), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var mutations []string
+			observedClient := &cleanupMutationLedgerClient{registerClient: realClientAdapter{client}, events: &mutations}
+			testClientFactory = func() map[string]registerClient {
+				return map[string]registerClient{"claude-code": observedClient}
+			}
+
+			a := mustNewAPI(t)
+			var warnings []string
+			if tc.throughPrune {
+				report, err := a.PruneWorkspace(workspace, "lsp")
+				if err != nil || report == nil {
+					t.Fatalf("PruneWorkspace report=%+v err=%v", report, err)
+				}
+				if !slices.Equal(report.LSPRemoved, []string{"go"}) || report.SerenaRemoved != 0 {
+					t.Errorf("prune registration counts=%+v, want only the real go row", report)
+				}
+				warnings = report.Warnings
+			} else {
+				report, err := a.Unregister(workspace, []string{"go"})
+				if err != nil || report == nil {
+					t.Fatalf("Unregister report=%+v err=%v", report, err)
+				}
+				if !slices.Equal(report.Removed, []string{"go"}) {
+					t.Errorf("Removed=%v, want actual language row go", report.Removed)
+				}
+				warnings = report.Warnings
+				if tc.wantWarning {
+					found := false
+					for _, diagnostic := range report.Diagnostics() {
+						if diagnostic.Severity() == RegistrationSeverityWarning && diagnostic.Participant() == "claude-code" && diagnostic.PlanIdentity() == entryName && diagnostic.Code() != RegistrationCodeUnknown {
+							found = true
+							if tc.shape == "malformed" && diagnostic.Cause() == nil {
+								t.Error("read-failure diagnostic lost its original cause")
+							}
+						}
+					}
+					if !found {
+						t.Errorf("missing typed warning identifying preserved client/key: %+v", report.Diagnostics())
+					}
+				}
+			}
+			if tc.wantWarning {
+				text := strings.Join(warnings, "\n")
+				if !strings.Contains(strings.ToLower(text), "preserv") || !strings.Contains(text, "claude-code") || !strings.Contains(text, entryName) {
+					t.Errorf("warnings=%v, want explicit client/key preservation", warnings)
+				}
+			} else if len(warnings) != 0 {
+				t.Errorf("already absent target warnings=%v, want clean absence", warnings)
+			}
+			actual, err := os.ReadFile(client.ConfigPath())
+			if err != nil || !bytes.Equal(actual, raw) {
+				t.Errorf("current client file changed: readErr=%v before=%q after=%q", err, raw, actual)
+			}
+			if len(mutations) != 0 {
+				t.Errorf("unproven client target invoked mutation: %v", mutations)
+			}
+			registry = NewRegistry(h.regPath)
+			if err := registry.Load(); err != nil {
+				t.Fatal(err)
+			}
+			if rows := registry.ListByWorkspaceLSP(key); len(rows) != 0 {
+				t.Errorf("claimed removed registration rows still present: %+v", rows)
+			}
+			intent, err := ReadSupervisorIntent(intentPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if descriptor := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(key, "go")); descriptor != nil {
+				t.Errorf("claimed retired descriptor still present: %+v", descriptor)
+			}
+		})
 	}
 }

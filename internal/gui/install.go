@@ -20,29 +20,30 @@ type installer interface {
 }
 
 // realInstaller is the production adapter for /api/install. Follows the
-// realManifestCreator / realManifestValidator idiom: empty value receiver,
-// lazy api.NewAPI() per call so tests can swap the interface without
-// needing to stub a constructor. api.API.Install takes InstallOpts; we
+// Server's long-lived API owns every original provisional child, including
+// cleanup refusal across requests. api.API.Install takes InstallOpts; we
 // populate the server and the bound GUI listener port because the API routing
 // owner needs both facts to select the stable client target.
-type realInstaller struct{}
+type realInstaller struct{ api *api.API }
 
-func (realInstaller) Install(name string, guiPort int) error {
-	return realInstallerInstall(api.InstallOpts{Server: name, GUIPort: guiPort})
+func (r realInstaller) Install(name string, guiPort int) error {
+	if r.api == nil {
+		return fmt.Errorf("install: missing GUI API lifetime owner")
+	}
+	return realInstallerInstall(r.api, api.InstallOpts{Server: name, GUIPort: guiPort})
 }
 
 // Package-local seams keep the production adapters testable without letting
-// route tests touch the live API state. Production still creates a fresh API
-// per adapter call, matching the established GUI adapter pattern.
-var realInstallerInstall = func(opts api.InstallOpts) error {
-	return api.NewAPI().Install(opts)
+// route tests touch the live API state. Production uses the retained Server API.
+var realInstallerInstall = func(a *api.API, opts api.InstallOpts) error {
+	return a.Install(opts)
 }
 
 // uninstaller is the narrow interface the DELETE /api/install/:server
 // handler needs. It returns the structured *api.UninstallReport so the
 // handler can surface per-client / per-task warnings as a 207 instead of
 // collapsing them into a single error string. realUninstaller below wires
-// the lazy api.NewAPI() per call, matching the realInstaller idiom — this
+// the lazy api.NewAPI() per call for this resource-free adapter — this
 // is the seam that keeps the DESTRUCTIVE api.Uninstall out of the test
 // path (manifest_test / install_test inject a fake that records the
 // server arg and never touches the live fleet).
@@ -60,8 +61,8 @@ func (realUninstaller) Uninstall(server string) (*api.UninstallReport, error) {
 // installBulkAPI is the narrow interface the POST /api/install-all handler
 // needs. api.InstallAllWithOpts returns []InstallResult and never an error
 // at the call level (per-server errors ride inside each row's Err), so the
-// interface mirrors that exactly. realInstallBulkAPI wires the lazy
-// api.NewAPI(); the optional clients filter is left at install-all defaults
+// interface mirrors that exactly. realInstallBulkAPI retains the Server API;
+// the optional clients filter is left at install-all defaults
 // (all clients) — the GUI bulk-install affordance installs everything.
 type installBulkAPI interface {
 	InstallAll(servers []string, guiPort int) []api.InstallResult
@@ -73,26 +74,29 @@ type installBulkAPI interface {
 // is non-empty it filters to that subset by installing each name in turn,
 // preserving the same []InstallResult row shape so the handler renders one
 // path regardless of filter.
-type realInstallBulkAPI struct{}
+type realInstallBulkAPI struct{ api *api.API }
 
-func (realInstallBulkAPI) InstallAll(servers []string, guiPort int) []api.InstallResult {
+func (r realInstallBulkAPI) InstallAll(servers []string, guiPort int) []api.InstallResult {
+	if r.api == nil {
+		return []api.InstallResult{{Err: fmt.Errorf("install-all: missing GUI API lifetime owner")}}
+	}
 	if len(servers) == 0 {
-		return realInstallBulkAll(api.InstallAllOpts{GUIPort: guiPort})
+		return realInstallBulkAll(r.api, api.InstallAllOpts{GUIPort: guiPort})
 	}
 	results := make([]api.InstallResult, 0, len(servers))
 	for _, name := range servers {
-		err := realInstallBulkOne(api.InstallOpts{Server: name, GUIPort: guiPort})
+		err := realInstallBulkOne(r.api, api.InstallOpts{Server: name, GUIPort: guiPort})
 		results = append(results, api.InstallResult{Server: name, Err: err})
 	}
 	return results
 }
 
-var realInstallBulkAll = func(opts api.InstallAllOpts) []api.InstallResult {
-	return api.NewAPI().InstallAllWithOpts(opts)
+var realInstallBulkAll = func(a *api.API, opts api.InstallAllOpts) []api.InstallResult {
+	return a.InstallAllWithOpts(opts)
 }
 
-var realInstallBulkOne = func(opts api.InstallOpts) error {
-	return api.NewAPI().Install(opts)
+var realInstallBulkOne = func(a *api.API, opts api.InstallOpts) error {
+	return a.Install(opts)
 }
 
 type installRequest struct {

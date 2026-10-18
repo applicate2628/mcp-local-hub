@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,12 +13,13 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/servers"
 )
 
 // validManifestName bounds acceptable server names to lower-case
 // letters, digits, dot, underscore, hyphen. Any other character would
-// either (a) change how defaultManifestDir's filepath.Join resolves —
+// either (a) change how the canonical manifest root's filepath.Join resolves —
 // ".." escapes the parent, absolute paths ignore the root, leading
 // slashes change the meaning — or (b) collide with OS-specific path
 // semantics (colon-drive on Windows, control chars). Restricting the
@@ -167,7 +169,7 @@ func checkManifestName(name string) error {
 
 // ManifestList returns the sorted list of server names that have a
 // manifest, unioning the embed FS (shipped with the binary, source of
-// truth in production) with the on-disk defaultManifestDir (used by
+// truth in production) with the on-disk canonical manifest directory (used by
 // dev flows where a new manifest hasn't been compiled in yet).
 //
 // Before this changed, ManifestList ONLY looked at disk — so a canonical
@@ -317,6 +319,22 @@ func (a *API) ManifestGet(name string) (string, error) {
 	return string(data), nil
 }
 
+func (a *API) ManifestGetObserved(ctx context.Context, name string) (*ManifestSourceObservation, error) {
+	if ctx == nil || ctx.Err() != nil {
+		observation := &ManifestSourceObservation{name: name}
+		cause := errors.New("GRAPHIFY_SELECTED_MANIFEST_CONTEXT_UNAVAILABLE")
+		if ctx != nil {
+			cause = errors.Join(cause, ctx.Err())
+		}
+		return observation, &manifestSourceObservationFailure{observation: observation, cause: cause}
+	}
+	observation := loadManifestSourceObserved(name, nil)
+	if err := observation.ValidateProjectServiceLaunchRead(ctx); err != nil {
+		return observation, err
+	}
+	return observation, nil
+}
+
 // ErrManifestNotEmbedded is returned by CatalogManifestGet when the
 // requested server name is NOT in the binary's embedded manifest set
 // (embeddedManifestNames). The D2 cold-re-enable Re-add flow maps it to
@@ -417,19 +435,23 @@ func (a *API) ManifestGetInWithHash(dir, name string) (string, string, error) {
 	return string(data), ManifestHashContent(data), nil
 }
 
-// ManifestGetWithHash is the default-dir convenience wrapper, used by
-// GUI handlers which always read from defaultManifestDir().
+// ManifestGetWithHash is the canonical-dir convenience wrapper used by GUI
+// handlers for editable disk manifests.
 func (a *API) ManifestGetWithHash(name string) (string, string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", "", err
 	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return "", "", fmt.Errorf("manifest get with hash: %w", err)
+	}
 	// Read from disk (not embed) because edit flow only makes sense
 	// for user-created / on-disk manifests — you cannot edit embedded
 	// shipped manifests in-place.
-	return a.ManifestGetInWithHash(defaultManifestDir(), name)
+	return a.ManifestGetInWithHash(dir, name)
 }
 
-// ManifestCreate writes a new manifest under the default servers dir.
+// ManifestCreate writes a new manifest under the canonical servers dir.
 // Rejects if the server name already has a manifest; use ManifestEdit
 // to change existing ones. The per-manifest adopt lease serializes creation
 // with adopt/de-adopt recovery through their final cleanup boundary.
@@ -452,21 +474,38 @@ func (a *API) ManifestCreate(name, yaml string) (err error) {
 	return a.manifestCreateWithAdoptLeaseHeld(name, yaml)
 }
 
-// manifestCreateWithAdoptLeaseHeld is the default-dir write used by callers
+// manifestCreateWithAdoptLeaseHeld is the canonical-dir write used by callers
 // that already own the per-manifest adopt lease.
 func (a *API) manifestCreateWithAdoptLeaseHeld(name, yaml string) error {
-	return a.ManifestCreateIn(defaultManifestDir(), name, yaml)
+	dir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return fmt.Errorf("manifest create: %w", err)
+	}
+	return a.manifestCreateInWithAdoptLeaseHeld(dir, name, yaml)
+}
+
+func (a *API) manifestCreateInWithAdoptLeaseHeld(dir, name, yaml string) error {
+	return runManifestMutationUnderVaultLock(name, func() error {
+		return a.ManifestCreateIn(dir, name, yaml)
+	})
 }
 
 // ManifestExists reports whether the default manifest dir already has the
 // target manifest file. It mirrors ManifestCreateIn's pre-create existence
 // gate without reading the file contents.
 func (a *API) ManifestExists(name string) (bool, error) {
-	return manifestExistsIn(defaultManifestDir(), name)
+	if err := checkManifestName(name); err != nil {
+		return false, err
+	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return false, fmt.Errorf("manifest exists: %w", err)
+	}
+	return manifestExistsIn(dir, name)
 }
 
 // manifestExistsIn is the dir-parametric existence check backing
-// ManifestExists (defaultManifestDir). It stats dir/name/manifest.yaml
+// ManifestExists. It stats dir/name/manifest.yaml
 // without reading the contents. (The embedded-vs-disk shadow warn reads the
 // disk file's bytes directly — it needs them for the identical-copy
 // suppression — so it no longer routes through this stat-only check.)
@@ -494,6 +533,10 @@ func manifestExistsIn(dir, name string) (bool, error) {
 // work-items/decisions/2026-07-03-embed-vs-disk-manifest-precedence.md.
 var ErrManifestNameEmbedded = errors.New("manifest name collides with a shipped (built-in) server")
 
+// ErrManifestNameExists identifies an existing disk manifest, independently of
+// the contextual path retained by ManifestCreateIn's wrapped error.
+var ErrManifestNameExists = errors.New("manifest name already exists")
+
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
 func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if err := checkManifestName(name); err != nil {
@@ -511,7 +554,7 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("manifest %q already exists at %s; use edit instead", name, target)
+		return fmt.Errorf("manifest %q already exists at %s; use edit instead: %w", name, target, ErrManifestNameExists)
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
@@ -532,7 +575,16 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 // ManifestEdit replaces an existing manifest after validation. Fails if
 // the manifest doesn't exist; use ManifestCreate for new entries.
 func (a *API) ManifestEdit(name, yaml string) error {
-	return a.ManifestEditIn(defaultManifestDir(), name, yaml)
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return fmt.Errorf("manifest edit: %w", err)
+	}
+	return a.withCanonicalManifestMutation(name, func() error {
+		return a.ManifestEditIn(dir, name, yaml)
+	})
 }
 
 // ManifestEditIn is the tempdir-capable form of ManifestEdit.
@@ -808,14 +860,36 @@ func ManifestSetFailWriteHook(h func() bool) { manifestEditFailWriteHook = h }
 
 // ManifestEditWithHash is the default-dir convenience wrapper.
 func (a *API) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
-	return a.ManifestEditInWithHash(defaultManifestDir(), name, yaml, expectedHash)
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return "", fmt.Errorf("manifest edit with hash: %w", err)
+	}
+	var newHash string
+	err = a.withCanonicalManifestMutation(name, func() error {
+		var mutateErr error
+		newHash, mutateErr = a.ManifestEditInWithHash(dir, name, yaml, expectedHash)
+		return mutateErr
+	})
+	return newHash, err
 }
 
 // ManifestDelete removes the named server's manifest directory. Does NOT
 // uninstall the server — caller should run Uninstall first for a clean
 // teardown.
 func (a *API) ManifestDelete(name string) error {
-	return a.ManifestDeleteIn(defaultManifestDir(), name)
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return fmt.Errorf("manifest delete: %w", err)
+	}
+	return a.withCanonicalManifestMutation(name, func() error {
+		return a.ManifestDeleteIn(dir, name)
+	})
 }
 
 // ManifestDeleteIn is the tempdir-capable form of ManifestDelete.
@@ -838,6 +912,87 @@ func (a *API) ManifestDeleteIn(dir, name string) error {
 		return fmt.Errorf("manifest %q does not exist", name)
 	}
 	return os.RemoveAll(target)
+}
+
+const manifestVaultMutationBusyFailureID = "E_MANIFEST_MUTATION_BUSY"
+
+func manifestVaultMutationBusy(name string) error {
+	return newLeaseFailure(manifestVaultMutationBusyFailureID, true, false,
+		fmt.Errorf("manifest %q: the vault reference transaction is held by a concurrent operation; retry after it completes", name))
+}
+
+// withVaultReferenceTransaction owns the nonblocking vault lock order used by
+// canonical manifest writers: vaultMutex, then vault flock, then I/O.
+func withVaultReferenceTransaction(fn func() error) (bool, error) {
+	if !vaultMutex.TryLock() {
+		return false, nil
+	}
+	defer vaultMutex.Unlock()
+	return secrets.TryWithVaultLock(secrets.DefaultVaultPath(), fn)
+}
+
+func runManifestMutationUnderVaultLock(name string, mutate func() error) error {
+	locked, err := withVaultReferenceTransaction(mutate)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return manifestVaultMutationBusy(name)
+	}
+	return nil
+}
+
+// withCanonicalManifestMutation extends the PR-owned same-name mutation lease
+// with the vault reference transaction. It preserves manifestMutationLeaseOwner
+// and acquireAdoptLeaseForApply as the sole lease/migration owners.
+func (a *API) withCanonicalManifestMutation(name string, mutate func() error) (err error) {
+	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, name)
+	if leaseErr != nil || !acquired {
+		if leaseErr == nil {
+			leaseErr = newLeaseFailure(adoptLeaseFailureBusy, true, false)
+		}
+		return fmt.Errorf("manifest mutation: acquire per-manifest lease for %q: %w", name, leaseErr)
+	}
+	defer func() {
+		if unlockErr := lease.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("manifest mutation: release per-manifest lease for %q: %w", name, unlockErr))
+		}
+	}()
+	return runManifestMutationUnderVaultLock(name, mutate)
+}
+
+// manifestDeleteUnderLease is the canonical delete seam for an adopt caller
+// that already owns the PR per-manifest lease.
+func (a *API) manifestDeleteUnderLease(name string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	dir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return fmt.Errorf("manifest delete: %w", err)
+	}
+	return a.manifestDeleteInUnderLease(dir, name)
+}
+
+func (a *API) manifestDeleteInUnderLease(dir, name string) error {
+	return runManifestMutationUnderVaultLock(name, func() error {
+		return a.ManifestDeleteIn(dir, name)
+	})
+}
+
+func (a *API) manifestDeleteInWithHashUnderLease(dir, name, expectedHash string) error {
+	return runManifestMutationUnderVaultLock(name, func() error {
+		return a.ManifestDeleteInWithHash(dir, name, expectedHash)
+	})
+}
+
+func (a *API) manifestEditInWithHashUnderLease(dir, name, yaml, expectedHash string) (newHash string, err error) {
+	err = runManifestMutationUnderVaultLock(name, func() error {
+		var mutateErr error
+		newHash, mutateErr = a.ManifestEditInWithHash(dir, name, yaml, expectedHash)
+		return mutateErr
+	})
+	return newHash, err
 }
 
 // ErrManifestHashRequired is returned by ManifestDeleteInWithHash when the

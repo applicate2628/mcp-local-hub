@@ -11,10 +11,9 @@ import (
 // cross-platform (no build tag), so this test runs on every platform.
 func TestBuildLivenessXML_Contract(t *testing.T) {
 	const (
-		exe        = `C:\Users\test\.local\bin\mcphub.exe`
-		windowless = `C:\Users\test\.local\bin\mcphub-windowless.exe`
-		wdir       = `C:\Users\test\.local\bin`
-		user       = "test-user"
+		exe  = `C:\Users\test\.local\bin\mcphub.exe`
+		wdir = `C:\Users\test\.local\bin`
+		user = "test-user"
 	)
 	xml := BuildLivenessXML(exe, wdir, "S-1-5-21-test", user)
 
@@ -34,8 +33,8 @@ func TestBuildLivenessXML_Contract(t *testing.T) {
 		// CalendarTrigger + Repetition recurrence pair.
 		"<CalendarTrigger>",
 		"<Repetition>",
-		// Owned liveness runs through the same-directory windowless adapter.
-		"<Command>" + windowless + "</Command>",
+		// Owned liveness runs through the canonical product executable.
+		"<Command>" + exe + "</Command>",
 		"<WorkingDirectory>" + wdir + "</WorkingDirectory>",
 		// Per-user principal carries the supplied user id.
 		"<UserId>" + user + "</UserId>",
@@ -112,13 +111,10 @@ func TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount(t *testing
 	}
 }
 
-func TestWindowsOwnedEntrypointPathUsesExactSiblingAndIsIdempotent(t *testing.T) {
+func TestWindowsLegacyEntrypointPathSelectsExactRetiredSibling(t *testing.T) {
 	const cli = `C:\Users\test\.local\bin\mcphub.exe`
-	const adapter = `C:\Users\test\.local\bin\mcphub-windowless.exe`
-	if got := WindowsOwnedEntrypointPath(cli); got != adapter {
-		t.Fatalf("got %q want %q", got, adapter)
-	}
-	if got := WindowsOwnedEntrypointPath(adapter); got != adapter {
-		t.Fatalf("adapter changed to %q", got)
+	const legacy = `C:\Users\test\.local\bin\mcphub-windowless.exe`
+	if got := WindowsLegacyEntrypointPath(cli); got != legacy {
+		t.Fatalf("legacy path=%q want %q", got, legacy)
 	}
 }

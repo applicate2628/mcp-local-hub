@@ -147,6 +147,8 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 
 // readHubMcpStateFile reads a hub-mcp state file via the inode-
 // anchored verify+read pipeline (hub_mcp_state_read_inode_{windows,posix}.go).
+// Resolving the read target never creates an absent state directory; creation
+// remains owned by the existing write and lock paths.
 // The verify and read steps share the same parent-directory handle
 // / fd so a co-resident principal cannot replace the file between
 // our check and our read — the read is bound to the verified inode
@@ -167,7 +169,7 @@ func readHubMcpStateFile(name string) ([]byte, error) {
 	if err := validateStateFileName(name); err != nil {
 		return nil, err
 	}
-	dir, err := DaemonStateDir()
+	dir, err := DaemonStateDirReadOnly()
 	if err != nil {
 		return nil, err
 	}

@@ -217,6 +217,12 @@ func TestFetchDescriptorRejectsMCP2(t *testing.T) {
 	if err := descriptor.validate(); err == nil || !strings.Contains(err.Error(), "MCP 1.x") {
 		t.Fatalf("Fetch descriptor accepted forbidden MCP 2.x closure: %v", err)
 	}
+	descriptor.Version = "1.0.0"
+	descriptor.Artifacts.MCPVersion = "1.30.0"
+	descriptor.Runtime.Args = []string{"--with", "mcp==1.30.0", "mcp-server-fetch@1.0.0"}
+	if err := descriptor.validate(); err == nil || !strings.Contains(err.Error(), "repository or version is not an exact release") {
+		t.Fatalf("Fetch descriptor accepted a non-calendar outer version: %v", err)
+	}
 }
 
 // TestGenerateDerivesFetchProjections catches a generator that records an
@@ -341,19 +347,19 @@ base_args:
 // outer npm pin without publishing the immutable source and exact resolved-lock
 // evidence carried by the same canonical descriptor.
 func TestGenerateDerivesSequentialProjections(t *testing.T) {
-	root := t.TempDir()
-	writeCurrentSerenaFixture(t, root)
-	writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "release.yaml"), `schema_version: 1
+	writeDescriptor := func(t *testing.T, root, version string) {
+		t.Helper()
+		descriptor := fmt.Sprintf(`schema_version: 1
 server_id: sequential-thinking
 upstream_repository: https://github.com/modelcontextprotocol/servers
-version: "2026.7.4"
+version: %q
 source_commit: 6dd0a683e198783e30feabf7abaf42f925bd18b1
 readme_path: src/sequentialthinking/README.md
 runtime:
   command: npx
   args:
     - -y
-    - "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
+    - "@modelcontextprotocol/server-sequential-thinking@%s"
 artifacts:
   package_integrity: sha512-tmR/ieGaeweffLNBrDp1H1w4sn4M6TN5yWSbMS+YMfS+0GDyPjnNKzqCl2uqfdRiX3D44PJUhwiDGqtJp6tFhw==
 lock:
@@ -363,8 +369,28 @@ lock:
   resolved_sdk:
     version: "1.30.0"
     integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==
-`)
-	writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "manifest.yaml"), `name: sequential-thinking
+`, version, version)
+		writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "release.yaml"), descriptor)
+	}
+	packageArg := func(version string) string {
+		return "@modelcontextprotocol/server-sequential-thinking@" + version
+	}
+	cases := []struct {
+		name      string
+		version   string
+		wantError bool
+	}{
+		{name: "legacy-calendar", version: "2026.7.4"},
+		{name: "numeric-triple", version: "1.0.0"},
+		{name: "another-numeric-triple", version: "2.3.4"},
+		{name: "rejects-version-range", version: "^1.0.0", wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCurrentSerenaFixture(t, root)
+			writeDescriptor(t, root, tc.version)
+			writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "manifest.yaml"), `name: sequential-thinking
 kind: global
 transport: stdio-bridge
 command: npx
@@ -373,42 +399,53 @@ base_args:
   - "@modelcontextprotocol/server-sequential-thinking@2025.12.18"
 daemons: [{name: default, port: 9124}]
 `)
-	writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "README.md"), "stale Sequential Thinking release metadata\n")
-	writeSequentialCatalogs(t, root, []string{"-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"}, "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md")
+			writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "README.md"), "stale Sequential Thinking release metadata\n")
+			writeSequentialCatalogs(t, root, []string{"-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"}, "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md")
 
-	if err := Generate(root); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	manifest, err := os.ReadFile(filepath.Join(root, "servers", "sequential-thinking", "manifest.yaml"))
-	if err != nil {
-		t.Fatalf("read generated Sequential manifest: %v", err)
-	}
-	if !bytes.Contains(manifest, []byte("@modelcontextprotocol/server-sequential-thinking@2026.7.4")) || bytes.Contains(manifest, []byte("2025.12.18")) {
-		t.Fatalf("generated Sequential manifest retained a stale release: %s", manifest)
-	}
-	for _, relative := range []string{"marketplace/v1/catalog.json", "marketplace/v2/catalog.json"} {
-		assertGeneratedCatalogEntry(t, filepath.Join(root, filepath.FromSlash(relative)), "sequential-thinking",
-			[]string{"-y", "@modelcontextprotocol/server-sequential-thinking@2026.7.4"},
-			"https://raw.githubusercontent.com/modelcontextprotocol/servers/6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md")
-	}
-	readme, err := os.ReadFile(filepath.Join(root, "servers", "sequential-thinking", "README.md"))
-	if err != nil {
-		t.Fatalf("read generated Sequential README: %v", err)
-	}
-	for _, required := range []string{
-		"npx -y @modelcontextprotocol/server-sequential-thinking@2026.7.4",
-		"sha512-tmR/ieGaeweffLNBrDp1H1w4sn4M6TN5yWSbMS+YMfS+0GDyPjnNKzqCl2uqfdRiX3D44PJUhwiDGqtJp6tFhw==",
-		"a9ae0791d302ff944fa3d43c6909539425bfc7aa04a75322963a165a06280843",
-		"@modelcontextprotocol/sdk 1.30.0",
-		"sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==",
-		"6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md",
-	} {
-		if !bytes.Contains(readme, []byte(required)) {
-			t.Fatalf("generated Sequential README lacks %q: %s", required, readme)
-		}
-	}
-	if bytes.Contains(readme, []byte("/main/")) {
-		t.Fatalf("generated Sequential README retained a floating reference: %s", readme)
+			if tc.wantError {
+				if err := Generate(root); err == nil || !strings.Contains(err.Error(), "Sequential descriptor repository or version is not an exact release") {
+					t.Fatalf("Generate must reject a range as an exact Sequential version: %v", err)
+				}
+				return
+			}
+			if err := Generate(root); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			manifest, err := os.ReadFile(filepath.Join(root, "servers", "sequential-thinking", "manifest.yaml"))
+			if err != nil {
+				t.Fatalf("read generated Sequential manifest: %v", err)
+			}
+			if !bytes.Contains(manifest, []byte(packageArg(tc.version))) || bytes.Contains(manifest, []byte("2025.12.18")) {
+				t.Fatalf("generated Sequential manifest retained a stale release: %s", manifest)
+			}
+			for _, relative := range []string{"marketplace/v1/catalog.json", "marketplace/v2/catalog.json"} {
+				assertGeneratedCatalogEntry(t, filepath.Join(root, filepath.FromSlash(relative)), "sequential-thinking",
+					[]string{"-y", packageArg(tc.version)},
+					"https://raw.githubusercontent.com/modelcontextprotocol/servers/6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md")
+			}
+			readme, err := os.ReadFile(filepath.Join(root, "servers", "sequential-thinking", "README.md"))
+			if err != nil {
+				t.Fatalf("read generated Sequential README: %v", err)
+			}
+			for _, required := range []string{
+				"npx -y " + packageArg(tc.version),
+				"sha512-tmR/ieGaeweffLNBrDp1H1w4sn4M6TN5yWSbMS+YMfS+0GDyPjnNKzqCl2uqfdRiX3D44PJUhwiDGqtJp6tFhw==",
+				"a9ae0791d302ff944fa3d43c6909539425bfc7aa04a75322963a165a06280843",
+				"@modelcontextprotocol/sdk 1.30.0",
+				"sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==",
+				"6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md",
+			} {
+				if !bytes.Contains(readme, []byte(required)) {
+					t.Fatalf("generated Sequential README lacks %q: %s", required, readme)
+				}
+			}
+			if bytes.Contains(readme, []byte("/main/")) {
+				t.Fatalf("generated Sequential README retained a floating reference: %s", readme)
+			}
+			if err := Check(root); err != nil {
+				t.Fatalf("generated Sequential fixture must pass Check: %v", err)
+			}
+		})
 	}
 }
 

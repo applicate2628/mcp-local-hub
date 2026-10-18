@@ -29,6 +29,10 @@ var errMacOSProbeUnsupported = errors.New("--force --kill identity probe not sup
 // (probeOnce arch sentinel handling).
 var errWindowsArchUnsupported = errors.New("--force --kill identity probe is amd64-only on Windows; this build (other arch) cannot enumerate cmdline/start-time")
 
+// ErrProcessExitStatusUnavailable means the original retained process cannot
+// supply a native terminal exit status. It never represents successful exit.
+var ErrProcessExitStatusUnavailable = errors.New("original process native exit status unavailable")
+
 // ProcessIdentity is the cross-platform result of inspecting an OS
 // process. Used by single_instance.go's Probe + KillRecordedHolder and
 // hub_listener.go's initial-bind owner classifier. The former runs the full
@@ -80,6 +84,34 @@ type processIdentityCloseState struct {
 	mu     sync.Mutex
 	closed bool
 	err    error
+}
+
+// Wait receives the exit status of this already-retained native process. It
+// does not reopen a PID, signal the process, or release the observation. The
+// caller must Close on every route, including cancellation and unavailable
+// status. The caller must finish Wait before Close; the native handle stays
+// held for the whole observation. Wait borrows the identity; callers must not
+// copy it or mutate its exported snapshot fields during observation.
+func (id *ProcessIdentity) Wait(ctx context.Context) (uint32, error) {
+	if ctx == nil {
+		return 0, errors.New("process observation context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if id == nil || id.Handle == 0 || id.Denied || id.Indeterminate {
+		return 0, ErrProcessExitStatusUnavailable
+	}
+	if id.closeState == nil {
+		id.closeState = &processIdentityCloseState{}
+	}
+	state := id.closeState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed || id.Handle == 0 || id.closeHandle != nil {
+		return 0, ErrProcessExitStatusUnavailable
+	}
+	return waitRetainedProcess(ctx, id.Handle)
 }
 
 // Close releases any kernel handle held by Handle. Safe to call

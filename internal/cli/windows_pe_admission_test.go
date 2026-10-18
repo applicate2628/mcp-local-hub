@@ -155,29 +155,40 @@ func TestWindowsPEAdmissionCanonicalize(t *testing.T) {
 		malformed bool
 		id        string
 	}{
-		{"GUI in CLI role", binaryadmission.WindowsGUISubsystem, false, binaryadmission.WindowsPESubsystemErrorID},
-		{"malformed CLI", 0, true, binaryadmission.WindowsPEFormatErrorID},
+		{"CUI in Product role", binaryadmission.WindowsCUISubsystem, false, binaryadmission.WindowsPESubsystemErrorID},
+		{"malformed Product", 0, true, binaryadmission.WindowsPEFormatErrorID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sourceDir := t.TempDir()
 			targetDir := t.TempDir()
-			sourceCLI := filepath.Join(sourceDir, "mcphub.exe")
-			copyAdmissionPEFixture(t, writeAdmissionPEFixture(t, tc.subsystem, tc.malformed), sourceCLI)
-			copyAdmissionPEFixture(t, writeAdmissionPEFixture(t, binaryadmission.WindowsGUISubsystem, false), filepath.Join(sourceDir, "mcphub-windowless.exe"))
-			targetCLI := filepath.Join(targetDir, "mcphub.exe")
-			prior := []byte("PRIOR-EXACT-BYTES")
-			if err := os.WriteFile(targetCLI, prior, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			err := canonicalizeBinaryToTarget(&bytes.Buffer{}, sourceCLI, targetCLI)
+			sourceProduct := filepath.Join(sourceDir, "mcphub.exe")
+			copyAdmissionPEFixture(t, writeAdmissionPEFixture(t, tc.subsystem, tc.malformed), sourceProduct)
+			targetProduct := filepath.Join(targetDir, "mcphub.exe")
+			err := canonicalizeBinaryToTarget(&bytes.Buffer{}, sourceProduct, targetProduct)
 			if err == nil || !strings.Contains(err.Error(), tc.id) {
 				t.Fatalf("error=%v, want %s", err, tc.id)
 			}
-			got, readErr := os.ReadFile(targetCLI)
-			if readErr != nil || !bytes.Equal(got, prior) {
-				t.Fatalf("destination bytes=%q err=%v", got, readErr)
+			if _, statErr := os.Stat(targetProduct); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("destination created after rejected candidate: stat=%v", statErr)
 			}
 		})
+	}
+}
+
+func TestWindowsPEAdmissionCanonicalizeReplacementRequiresUpgrade(t *testing.T) {
+	sourceProduct := filepath.Join(t.TempDir(), "mcphub.exe")
+	targetProduct := filepath.Join(t.TempDir(), "mcphub.exe")
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "NEW-PRODUCT"), sourceProduct)
+	prior := mustReadFile(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "PRIOR-PRODUCT"))
+	if err := os.WriteFile(targetProduct, prior, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := canonicalizeBinaryToTarget(&bytes.Buffer{}, sourceProduct, targetProduct)
+	if !errors.Is(err, ErrWindowsProductPairReplacementRequiresUpgrade) {
+		t.Fatalf("error=%v, want differing-target replacement refusal", err)
+	}
+	if got := mustReadFile(t, targetProduct); !bytes.Equal(got, prior) {
+		t.Fatalf("destination mutated after replacement refusal: got %q, want %q", got, prior)
 	}
 }
 
@@ -304,7 +315,9 @@ func (*realBinaryUpgradeDeps) ExitGraceful(context.Context, string, int) (api.IP
 }
 
 func (*realBinaryUpgradeDeps) ForceKillSupervisor(string) error { return nil }
-func (*realBinaryUpgradeDeps) StartSupervisor(string) error     { return nil }
+func (*realBinaryUpgradeDeps) StartSupervisor(string) (SupervisorLaunch, error) {
+	return &fixtureSupervisorLaunch{}, nil
+}
 
 func TestInstallUpgradeRestoresConsolePriorAfterSuccessorReadinessFailure(t *testing.T) {
 	dir := t.TempDir()

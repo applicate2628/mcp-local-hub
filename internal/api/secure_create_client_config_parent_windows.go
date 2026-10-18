@@ -23,6 +23,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,38 +140,49 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 // (secureCreateClientConfigParentDirImpl) ignores it and keeps its
 // per-component verifyDACL posture (every prefix it walks is under $HOME).
 func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string, sd *windows.SECURITY_DESCRIPTOR, verifyDACL bool) (handle windows.Handle, created bool, err error) {
+	return mkdirOrVerifyRealDirWindowsObserved(parentHandle, name, full, sd, verifyDACL, nil, "")
+}
+
+func mkdirOrVerifyRealDirWindowsObserved(parentHandle windows.Handle, name, full string, sd *windows.SECURITY_DESCRIPTOR, verifyDACL bool, b *stateFileReadBuilder, slot string) (handle windows.Handle, created bool, err error) {
 	if !singleWindowsPathComponent(name) {
 		return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: invalid path component %q", name)
 	}
 
-	h, err := ntCreateRelative(
+	h, err := ntCreateRelativeObserved(
 		parentHandle,
 		name,
 		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.SYNCHRONIZE,
 		windows.FILE_CREATE,
 		windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT,
 		sd,
+		b, slot,
 	)
 	if err != nil {
 		if !isAlreadyExistsErr(err) {
 			return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
 		}
+		if b != nil && b.borrowedErr != nil {
+			return windows.InvalidHandle, false, errors.Join(err, b.borrowedErr)
+		}
 		// Existing component: open it relative to the held parent handle
 		// (FILE_OPEN_REPARSE_POINT) and refuse a reparse point / non-dir
 		// via the SHARED descent step (also used by the AF-1 F1
 		// resolved-symlink-target walk in client_write_resolve_windows.go).
-		h, err = openExistingRealDirAt(parentHandle, name)
+		h, err = openExistingRealDirAtObserved(parentHandle, name, b, slot)
 		if err != nil {
 			return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, err)
 		}
 		closeOnErr := true
 		defer func() {
 			if closeOnErr {
-				_ = windows.CloseHandle(h)
+				closeErr := closeParentDirectory(b, slot, h)
+				if b != nil {
+					err = errors.Join(err, closeErr)
+				}
 			}
 		}()
 		if verifyDACL {
-			if verr := verifyWindowsDACLFromHandle(h); verr != nil {
+			if verr := verifyWindowsDACLFromHandleMaskedObserved(h, windowsDACLSignificantBits, b, slot+"-dacl"); verr != nil {
 				return windows.InvalidHandle, false, wrapParentGateRefusal(full, verr)
 			}
 		}
@@ -185,7 +197,10 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 	closeOnErr := true
 	defer func() {
 		if closeOnErr {
-			_ = windows.CloseHandle(h)
+			closeErr := closeParentDirectory(b, slot, h)
+			if b != nil {
+				err = errors.Join(err, closeErr)
+			}
 		}
 	}()
 
@@ -193,7 +208,7 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, rerr)
 	}
 	if verifyDACL {
-		if verr := verifyWindowsDACLFromHandle(h); verr != nil {
+		if verr := verifyWindowsDACLFromHandleMaskedObserved(h, windowsDACLSignificantBits, b, slot+"-dacl"); verr != nil {
 			return windows.InvalidHandle, false, wrapParentGateRefusal(full, verr)
 		}
 	}
@@ -222,16 +237,20 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 // re-walks every intermediate at open time). On error the (possibly opened)
 // handle is closed before returning.
 func openExistingRealDirAt(parentHandle windows.Handle, name string) (windows.Handle, error) {
+	return openExistingRealDirAtObserved(parentHandle, name, nil, "")
+}
+
+func openExistingRealDirAtObserved(parentHandle windows.Handle, name string, b *stateFileReadBuilder, slot string) (windows.Handle, error) {
 	if !singleWindowsPathComponent(name) {
 		return windows.InvalidHandle, fmt.Errorf("invalid path component %q", name)
 	}
-	h, err := ntOpenDirRelative(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL)
+	h, err := ntCreateRelativeObserved(parentHandle, name, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.SYNCHRONIZE, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT, nil, b, slot)
 	if err != nil {
 		return windows.InvalidHandle, err
 	}
 	if rerr := refuseReparsePointHandle(h); rerr != nil {
-		_ = windows.CloseHandle(h)
-		return windows.InvalidHandle, rerr
+		closeErr := closeParentDirectory(b, slot, h)
+		return windows.InvalidHandle, joinParentObserved(b, rerr, closeErr)
 	}
 	return h, nil
 }

@@ -1,0 +1,38 @@
+name: kimi
+description: "Kimi Code K3 — run one bounded file-prompt task with wrapper-owned capabilities and per-run high/max effort."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - kimi
+
+env: {}
+
+daemons:
+  - name: default
+    port: 9142
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func mkPruneEntry(path, key, lang string) *api.WorkspaceEntry {
@@ -588,6 +589,26 @@ func seedSetting(t *testing.T, p, key, value string) {
 	}
 }
 
+func TestDefaultPruneIdleThreshold_UsesResolvedSettings(t *testing.T) {
+	t.Run("omitted setting uses registry default", func(t *testing.T) {
+		redirectSettingsPath(t)
+		if got := defaultPruneIdleThreshold(); got != 168*time.Hour {
+			t.Fatalf("defaultPruneIdleThreshold() = %v, want 168h", got)
+		}
+	})
+
+	t.Run("invalid persisted setting fails closed", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		seedSetting(t, p, api.PruneIdleHoursSettingKey, "168")
+		if err := os.WriteFile(p, []byte(api.PruneIdleHoursSettingKey+`: "many"`+"\n"), 0o600); err != nil {
+			t.Fatalf("overwrite with invalid idle threshold: %v", err)
+		}
+		if got := defaultPruneIdleThreshold(); got != 0 {
+			t.Fatalf("defaultPruneIdleThreshold() = %v on invalid persisted setting, want 0", got)
+		}
+	})
+}
+
 // TestDefaultPruneDeadWorktrees_FailClosed locks in the GUI sweeper's fail-SAFE
 // posture (Finding 2 parity): a settings-read error resolves the destructive
 // dead-worktree gate to FALSE; an absent key applies the registry Default
@@ -626,4 +647,61 @@ func TestDefaultPruneDeadWorktrees_FailClosed(t *testing.T) {
 			t.Fatalf("defaultPruneDeadWorktrees() = true with the gate persisted \"false\"; want false")
 		}
 	})
+}
+
+// A successful registration retirement can preserve an unproven client entry.
+// Its existing event must carry that partial-cleanup warning and real row counts.
+func TestSweepPruneWorkspaces_PreservedClientWarningVisible(t *testing.T) {
+	restoreState := api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	t.Cleanup(restoreState)
+	originalEnabled, originalRows, originalBegin, originalEnd, originalAction, originalIdle :=
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn =
+			originalEnabled, originalRows, originalBegin, originalEnd, originalAction, originalIdle
+	})
+	workspace := t.TempDir()
+	now := time.Date(2026, time.October, 16, 12, 0, 0, 0, time.UTC)
+	warning := "preserved client entry mcp-language-server-go-legacy in claude-code: ownership unknown"
+	pruneEnabledFn = func() bool { return true }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneIdleThresholdFn = func() time.Duration { return 168 * time.Hour }
+	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+		return []*api.WorkspaceEntry{{
+			WorkspacePath: workspace, WorkspaceKey: "retirement-warning", Language: "go",
+			LastToolsCallAt: now.Add(-8 * 24 * time.Hour),
+		}}
+	}
+	actionCalls := 0
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		actionCalls++
+		return &api.PruneReport{
+			Workspace: path, LSPRemoved: []string{"go"}, Warnings: []string{warning},
+		}, nil
+	}
+	s := newEphemeralServer(t, Config{})
+	if got := s.SweepPruneWorkspaces(context.Background(), now); got != 1 || actionCalls != 1 {
+		t.Fatalf("retired workspace count=%d action calls=%d, want one committed registration", got, actionCalls)
+	}
+	// The isolated root owns exactly this one event; use the existing public
+	// event reader so the actual serialized warnings/severity are received.
+	events, err := api.RecentHubMcpEvents(1)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("workspace event receiving=%v err=%v", events, err)
+	}
+	event := events[0]
+	if event["event"] != "workspace-pruned" || event["workspace"] != workspace {
+		t.Fatalf("retirement event=%v", event)
+	}
+	if event["level"] != "warn" {
+		t.Errorf("event level=%v, want warn for preserved client cleanup", event["level"])
+	}
+	warnings, ok := event["warnings"].([]any)
+	if !ok || len(warnings) != 1 || warnings[0] != warning {
+		t.Errorf("serialized warnings=%v, want unchanged preservation warning", event["warnings"])
+	}
+	if event["lsp_removed"] != float64(1) || event["serena_removed"] != float64(0) {
+		t.Errorf("event row counts=%v/%v, want one LSP and zero Serena rows", event["lsp_removed"], event["serena_removed"])
+	}
 }

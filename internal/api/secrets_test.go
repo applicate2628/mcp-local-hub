@@ -29,10 +29,155 @@ func secretsTestEnv(t *testing.T) (keyPath, vaultPath string) {
 	return keyPath, vaultPath
 }
 
+func guardSecretsInitFixture(t *testing.T) {
+	t.Helper()
+	root := filepath.Clean(os.TempDir())
+	if !filepath.IsAbs(root) {
+		t.Fatal("private temporary root must be absolute")
+	}
+	keyPath, vaultPath := secrets.DefaultKeyPath(), secrets.DefaultVaultPath()
+	for _, path := range []string{keyPath, vaultPath, vaultPath + ".lock"} {
+		rel, err := filepath.Rel(root, path)
+		if err != nil || !filepath.IsAbs(path) || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatal("secrets-init fixture selected a target outside private temporary storage")
+		}
+		for current := path; ; current = filepath.Dir(current) {
+			info, err := os.Lstat(current)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if err == nil && (info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular())) {
+				t.Fatal("secrets-init fixture target ancestry is not ordinary")
+			}
+			if current == root {
+				if err != nil || !info.IsDir() {
+					t.Fatal("private temporary root is unavailable")
+				}
+				break
+			}
+		}
+	}
+}
+
+func TestSecretsInit_CleanupAttemptOutcomes(t *testing.T) {
+	for _, name := range []string{"vault_failure", "key_failure", "both_failure", "both_absent"} {
+		t.Run(name, func(t *testing.T) {
+			keyPath, vaultPath := secretsTestEnv(t)
+			initErr := errors.New("synthetic initialization failure")
+			vaultErr, keyErr := errors.New("synthetic vault removal failure"), errors.New("synthetic key removal failure")
+			if initErr == nil || vaultErr == nil || keyErr == nil || vaultErr == keyErr {
+				t.Fatal("fixture requires independent non-nil failure sentinels")
+			}
+			priorInit := initVaultFn
+			t.Cleanup(func() { initVaultFn = priorInit })
+			initVaultFn = func(kp, vp string) error {
+				if kp != keyPath || vp != vaultPath {
+					t.Fatal("initialization targets differ from the private fixture")
+				}
+				if name != "both_absent" {
+					if err := os.WriteFile(kp, []byte("SYNTHETIC-KEY"), 0o600); err != nil {
+						return err
+					}
+				}
+				if name == "vault_failure" || name == "both_failure" {
+					if err := os.WriteFile(vp, []byte("SYNTHETIC-PARTIAL-VAULT"), 0o600); err != nil {
+						return err
+					}
+				}
+				return initErr
+			}
+			var calls []string
+			returned := make(map[string]error)
+			remove := func(path string) error {
+				calls = append(calls, path)
+				var err error
+				switch {
+				case path == vaultPath && (name == "vault_failure" || name == "both_failure"):
+					err = vaultErr
+				case path == keyPath && (name == "key_failure" || name == "both_failure"):
+					err = keyErr
+				default:
+					err = os.Remove(path)
+				}
+				returned[path] = err
+				return err
+			}
+			guardSecretsInitFixture(t)
+			_, err := NewAPI().secretsInitWithRemove(remove)
+			var failed *SecretsInitFailed
+			if !errors.As(err, &failed) {
+				t.Fatalf("real writer returned %T, want SecretsInitFailed", err)
+			}
+			if len(calls) != 2 || calls[0] != vaultPath || calls[1] != keyPath {
+				t.Fatalf("removal must attempt vault then key exactly once; calls=%v", calls)
+			}
+			if failed.Cause != initErr || failed.Unwrap() != initErr || !errors.Is(err, initErr) || failed.Error() != initErr.Error() {
+				t.Fatal("original initialization cause identity or text changed")
+			}
+			if failed.cleanupTargets == nil {
+				t.Fatal("real writer did not retain its two removal attempts")
+			}
+			for _, target := range []secretsInitTargetOutcome{failed.cleanupTargets.Vault, failed.cleanupTargets.Key} {
+				actualErr, attempted := returned[target.Path]
+				if !attempted || target.RemoveError != actualErr {
+					t.Fatal("attempt path or exact returned removal error was lost")
+				}
+			}
+			wantVault, wantKey := secretsInitAbsent, secretsInitRemoveFailed
+			wantStatus, wantOrphan := "failed", keyPath
+			switch name {
+			case "vault_failure":
+				wantVault, wantKey, wantOrphan = secretsInitRemoveFailed, secretsInitRemoved, vaultPath
+			case "both_failure":
+				wantVault, wantKey, wantOrphan = secretsInitRemoveFailed, secretsInitRemoveFailed, vaultPath
+			case "both_absent":
+				wantVault, wantKey, wantStatus, wantOrphan = secretsInitAbsent, secretsInitAbsent, "ok", ""
+			}
+			if failed.cleanupTargets.Vault.Path != vaultPath || failed.cleanupTargets.Key.Path != keyPath || failed.cleanupTargets.Vault.Outcome != wantVault || failed.cleanupTargets.Key.Outcome != wantKey {
+				t.Fatal("independent attempted-target outcomes differ from the scenario")
+			}
+			for _, target := range []secretsInitTargetOutcome{failed.cleanupTargets.Vault, failed.cleanupTargets.Key} {
+				if target.Outcome == secretsInitAbsent && (target.RemoveError == nil || !os.IsNotExist(target.RemoveError)) {
+					t.Fatal("absent must retain the actual non-nil NotExist removal error")
+				}
+			}
+			if failed.CleanupStatus != wantStatus || failed.OrphanPath != wantOrphan {
+				t.Fatal("legacy aggregate or first-failure projection changed")
+			}
+		})
+	}
+}
+
+func TestSecretsInit_CleanupAttemptMissingInputs(t *testing.T) {
+	_, vaultPath := secretsTestEnv(t)
+	priorInit := initVaultFn
+	t.Cleanup(func() { initVaultFn = priorInit })
+	initCalls := 0
+	initVaultFn = func(string, string) error { initCalls++; return errors.New("unexpected init") }
+	result, err := NewAPI().secretsInitWithRemove(nil)
+	if err == nil || result != (SecretsInitResult{}) || initCalls != 0 || fileExists(vaultPath+".lock") {
+		t.Fatal("nil removal dependency must refuse before initialization or lock side effects")
+	}
+	for _, targets := range []*secretsInitCleanupTargets{
+		nil,
+		{},
+		{Vault: secretsInitTargetOutcome{Path: "vault"}, Key: secretsInitTargetOutcome{Path: "key"}},
+		{Vault: secretsInitTargetOutcome{Outcome: secretsInitRemoved}, Key: secretsInitTargetOutcome{Outcome: secretsInitRemoved}},
+		{Vault: secretsInitTargetOutcome{Path: "vault", Outcome: secretsInitRemoved}},
+		{Vault: secretsInitTargetOutcome{Path: "vault", Outcome: "invalid"}, Key: secretsInitTargetOutcome{Path: "key", Outcome: secretsInitRemoved}},
+	} {
+		status, orphan, projectable := targets.legacyProjection()
+		if projectable || status != "" || orphan != "" {
+			t.Fatal("missing/unattempted inputs must not project successful cleanup")
+		}
+	}
+}
+
 func TestSecretsInit_IdempotentOnExistingVault(t *testing.T) {
 	_, _ = secretsTestEnv(t)
 	a := NewAPI()
 
+	guardSecretsInitFixture(t)
 	res1, err := a.SecretsInit()
 	if err != nil {
 		t.Fatalf("first SecretsInit: %v", err)
@@ -41,6 +186,7 @@ func TestSecretsInit_IdempotentOnExistingVault(t *testing.T) {
 		t.Errorf("first init vault_state = %q, want %q", res1.VaultState, "ok")
 	}
 
+	guardSecretsInitFixture(t)
 	res2, err := a.SecretsInit()
 	if err != nil {
 		t.Fatalf("second SecretsInit: %v", err)
@@ -61,6 +207,7 @@ func TestSecretsInit_FreshInitCreatesFiles(t *testing.T) {
 		t.Fatalf("test setup leak: files already exist")
 	}
 
+	guardSecretsInitFixture(t)
 	res, err := a.SecretsInit()
 	if err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -82,6 +229,7 @@ func TestSecretsInit_PartialFailureCleansBothArtifacts(t *testing.T) {
 
 	// Inject: simulate "key written, vault write failed" — write the key
 	// ourselves, write a partial vault, then return error.
+	priorInit := initVaultFn
 	initVaultFn = func(kp, vp string) error {
 		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
 			return err
@@ -94,8 +242,9 @@ func TestSecretsInit_PartialFailureCleansBothArtifacts(t *testing.T) {
 		}
 		return fmt.Errorf("simulated mid-init failure")
 	}
-	defer func() { initVaultFn = secrets.InitVault }()
+	defer func() { initVaultFn = priorInit }()
 
+	guardSecretsInitFixture(t)
 	_, err := a.SecretsInit()
 	var initFailed *SecretsInitFailed
 	if !errors.As(err, &initFailed) {
@@ -103,6 +252,9 @@ func TestSecretsInit_PartialFailureCleansBothArtifacts(t *testing.T) {
 	}
 	if initFailed.CleanupStatus != "ok" {
 		t.Errorf("cleanup_status = %q, want ok", initFailed.CleanupStatus)
+	}
+	if initFailed.cleanupTargets == nil || initFailed.cleanupTargets.Vault.Path != vaultPath || initFailed.cleanupTargets.Key.Path != keyPath || initFailed.cleanupTargets.Vault.Outcome != secretsInitRemoved || initFailed.cleanupTargets.Key.Outcome != secretsInitRemoved || initFailed.cleanupTargets.Vault.RemoveError != nil || initFailed.cleanupTargets.Key.RemoveError != nil {
+		t.Fatal("default removal must retain both successful removal attempts")
 	}
 	if fileExists(keyPath) {
 		t.Errorf("orphan key file %s still exists after cleanup", keyPath)
@@ -117,6 +269,7 @@ func TestSecretsInit_PartialFailureKeyOnly(t *testing.T) {
 	a := NewAPI()
 
 	// Simulate "key written, vault never created".
+	priorInit := initVaultFn
 	initVaultFn = func(kp, vp string) error {
 		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
 			return err
@@ -126,8 +279,9 @@ func TestSecretsInit_PartialFailureKeyOnly(t *testing.T) {
 		}
 		return fmt.Errorf("simulated key-only failure")
 	}
-	defer func() { initVaultFn = secrets.InitVault }()
+	defer func() { initVaultFn = priorInit }()
 
+	guardSecretsInitFixture(t)
 	_, err := a.SecretsInit()
 	var initFailed *SecretsInitFailed
 	if !errors.As(err, &initFailed) {
@@ -135,6 +289,9 @@ func TestSecretsInit_PartialFailureKeyOnly(t *testing.T) {
 	}
 	if initFailed.CleanupStatus != "ok" {
 		t.Errorf("cleanup_status = %q, want ok (vault never existed, key removed)", initFailed.CleanupStatus)
+	}
+	if initFailed.cleanupTargets == nil || initFailed.cleanupTargets.Vault.Path != vaultPath || initFailed.cleanupTargets.Key.Path != keyPath || initFailed.cleanupTargets.Vault.Outcome != secretsInitAbsent || initFailed.cleanupTargets.Vault.RemoveError == nil || !os.IsNotExist(initFailed.cleanupTargets.Vault.RemoveError) || initFailed.cleanupTargets.Key.Outcome != secretsInitRemoved || initFailed.cleanupTargets.Key.RemoveError != nil {
+		t.Fatal("default removal must distinguish absent vault from removed key")
 	}
 	if fileExists(keyPath) {
 		t.Errorf("orphan key file %s still exists after cleanup", keyPath)
@@ -189,6 +346,7 @@ func TestSecretsInit_PartialFailureCleanupAlsoFails(t *testing.T) {
 
 func TestSecretsInit_OrphanKey(t *testing.T) {
 	keyPath, _ := secretsTestEnv(t)
+	guardSecretsInitFixture(t)
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +355,7 @@ func TestSecretsInit_OrphanKey(t *testing.T) {
 	}
 
 	a := NewAPI()
+	guardSecretsInitFixture(t)
 	_, err := a.SecretsInit()
 	var blocked *SecretsInitBlocked
 	if !errors.As(err, &blocked) {
@@ -289,7 +448,7 @@ func TestClassifyVaultOpenError_AccessDeniedNotCorrupt(t *testing.T) {
 		{
 			// Sibling: an unmarshal error mentioning DACL in a path is still corrupt.
 			name: "unmarshal error with DACL-named dir stays corrupt",
-			err:  errors.New(`unmarshal vault: invalid character (vault at /home/u/DACL/secrets.age)`),
+			err:  errors.New(`unmarshal vault: invalid character (vault at /synthetic/vault-profile/DACL/secrets.age)`),
 			want: "corrupt",
 		},
 		{
@@ -1019,6 +1178,7 @@ func TestSecretsInit_RaceDoesNotDeleteConcurrentVault(t *testing.T) {
 	// Simulate concurrent init: another request just created both files.
 	// initVaultFn returns the "already exists" error (matches what
 	// secrets.InitVault returns at vault.go:28-33).
+	priorInit := initVaultFn
 	initVaultFn = func(kp, vp string) error {
 		// Pretend another request wrote both files just before we got here.
 		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
@@ -1032,8 +1192,9 @@ func TestSecretsInit_RaceDoesNotDeleteConcurrentVault(t *testing.T) {
 		}
 		return fmt.Errorf("identity file already exists: %s", kp)
 	}
-	defer func() { initVaultFn = secrets.InitVault }()
+	defer func() { initVaultFn = priorInit }()
 
+	guardSecretsInitFixture(t)
 	_, err := a.SecretsInit()
 	var blocked *SecretsInitBlocked
 	if !errors.As(err, &blocked) {
@@ -1063,6 +1224,7 @@ func TestSecretsInit_VaultAlreadyExistsRaceDoesNotDelete(t *testing.T) {
 
 	// Simulate the rarer race where only the vault file exists from a
 	// concurrent request (e.g. they're between key write and vault write).
+	priorInit := initVaultFn
 	initVaultFn = func(kp, vp string) error {
 		if err := os.MkdirAll(filepath.Dir(kp), 0o700); err != nil {
 			return err
@@ -1075,8 +1237,9 @@ func TestSecretsInit_VaultAlreadyExistsRaceDoesNotDelete(t *testing.T) {
 		}
 		return fmt.Errorf("vault file already exists: %s", vp)
 	}
-	defer func() { initVaultFn = secrets.InitVault }()
+	defer func() { initVaultFn = priorInit }()
 
+	guardSecretsInitFixture(t)
 	_, err := a.SecretsInit()
 	var blocked *SecretsInitBlocked
 	if !errors.As(err, &blocked) {
@@ -1135,6 +1298,7 @@ func TestSecretsInit_ConcurrentCallsSerializeCleanly(t *testing.T) {
 	var wg sync.WaitGroup
 	for range N {
 		wg.Go(func() {
+			guardSecretsInitFixture(t)
 			r, e := a.SecretsInit()
 			results <- result{r, e}
 		})

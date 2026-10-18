@@ -9,7 +9,7 @@ import (
 	"mcp-local-hub/internal/process"
 )
 
-// Windows detach flags shared by both configurators below.
+// Windows detach flags used by the replacement GUI command below.
 //
 // DETACHED_PROCESS                 — child does not inherit a console.
 //
@@ -38,11 +38,6 @@ func applyDetachFlags(cmd *exec.Cmd) {
 		CreationFlags: winDetachedProcess | winCreateNewProcessGroup | winCreateBreakawayFromJob,
 	}
 	process.NoConsole(cmd)
-}
-
-// configureDetachedSupervisor configures a spawn of `mcphub supervise`.
-func configureDetachedSupervisor(cmd *exec.Cmd) {
-	applyDetachFlags(cmd)
 }
 
 // configureDetachedGUI configures a console-free replacement GUI. Debug

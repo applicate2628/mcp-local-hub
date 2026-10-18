@@ -16,6 +16,15 @@
 
 package gui
 
+import (
+	"context"
+	"errors"
+)
+
+func waitRetainedProcess(_ context.Context, _ uintptr) (uint32, error) {
+	return 0, errors.Join(ErrProcessExitStatusUnavailable, errWindowsArchUnsupported)
+}
+
 // errWindowsArchUnsupported is defined in probe.go (cross-platform
 // surface) so the probeOnce classifier can errors.Is against it on
 // every platform without splitting the arch-handling logic across

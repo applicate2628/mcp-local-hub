@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -214,7 +215,7 @@ url = "http://127.0.0.1:9999/mcp"
 		t.Fatal(err)
 	}
 	result, err := NewAPI().ExecuteAdoptResultWithOpts(plan, io.Discard, ExecuteAdoptOpts{
-		ReceivingVerifier: func(*API, *AdoptPlan, *AdoptProvenanceRecord) error {
+		ReceivingVerifier: func(context.Context, *API, *AdoptPlan, *AdoptProvenanceRecord) error {
 			return errors.New("injected outer receiver failure")
 		},
 	})

@@ -136,6 +136,42 @@ func DismissUnknown(name string) error {
 	return nil
 }
 
+// UndismissUnknown removes a server name from the Migration screen's
+// persisted dismissal set. Idempotent: restoring a name that is not
+// dismissed is a no-op and does not create or rewrite the state file.
+func UndismissUnknown(name string) error {
+	if name == "" {
+		return errors.New("UndismissUnknown: name must not be empty")
+	}
+	dismissMu.Lock()
+	defer dismissMu.Unlock()
+
+	existing, err := ListDismissedUnknown()
+	if err != nil {
+		return err
+	}
+	if _, dismissed := existing[name]; !dismissed {
+		return nil
+	}
+	delete(existing, name)
+
+	sorted := make([]string, 0, len(existing))
+	for n := range existing {
+		sorted = append(sorted, n)
+	}
+	sort.Strings(sorted)
+
+	payload := dismissedPayload{Version: 1, Unknown: sorted}
+	path, err := dismissedFilePath()
+	if err != nil {
+		return err
+	}
+	if err := WriteStateFileAtomic(path, payload); err != nil {
+		return fmt.Errorf("write dismissed payload %s: %w", path, err)
+	}
+	return nil
+}
+
 // dismissedFilePath resolves the per-machine storage path using the
 // same state-directory convention as internal/api/workspace_registry.go:71
 // and internal/api/logs.go:93:

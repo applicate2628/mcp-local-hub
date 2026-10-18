@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -81,6 +82,16 @@ func TestSecureWriteClientConfigRefusesSymlinkTarget(t *testing.T) {
 	err := SecureWriteClientConfig(link, []byte(`{"v":1}`))
 	if err == nil {
 		t.Fatalf("SecureWriteClientConfig must refuse to overwrite a symlink target")
+	}
+	if runtime.GOOS == "windows" {
+		if !errors.Is(err, ErrSecureWriteReparsePointRefused) {
+			t.Fatal("actual Windows destination refusal lost its typed identity")
+		}
+		operation := &projectServicePlan{}
+		retained := operation.retainFailure(newAdoptStageError("provenance-capture", "pending", err))
+		if !errors.Is(retained, ErrSecureWriteReparsePointRefused) || !errors.Is(retained, err) || retained.Error() != "PROJECT_SERVICE_LAUNCH_OBSERVATION_UNQUALIFIED" {
+			t.Fatal("private custody lost or published the actual secure-write refusal")
+		}
 	}
 	// The real file should be untouched.
 	got, err := os.ReadFile(real)

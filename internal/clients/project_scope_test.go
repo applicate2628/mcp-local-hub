@@ -10,16 +10,19 @@ import (
 // TestProjectScopes_VerifiedFormats pins the per-client project-scope formats
 // against the design's VERIFIED table
 // (work-items/decisions/2026-06-24-per-project-gui-design.md): claude-code →
-// .mcp.json/mcpServers, cursor → .cursor/mcp.json/mcpServers, vscode →
-// .vscode/mcp.json/servers (NOT mcpServers).
+// .mcp.json/mcpServers (read only), cursor → .cursor/mcp.json/mcpServers,
+// vscode → .vscode/mcp.json/servers (NOT mcpServers), and codex-cli →
+// .codex/config.toml/mcp_servers (read only).
 func TestProjectScopes_VerifiedFormats(t *testing.T) {
 	want := map[string]struct {
-		rel     string
-		section string
+		rel                string
+		section            string
+		objectMemberToggle bool
 	}{
-		"claude-code": {filepath.Join(".mcp.json"), "mcpServers"},
-		"cursor":      {filepath.Join(".cursor", "mcp.json"), "mcpServers"},
-		"vscode":      {filepath.Join(".vscode", "mcp.json"), "servers"},
+		"claude-code": {filepath.Join(".mcp.json"), "mcpServers", false},
+		"cursor":      {filepath.Join(".cursor", "mcp.json"), "mcpServers", true},
+		"vscode":      {filepath.Join(".vscode", "mcp.json"), "servers", true},
+		"codex-cli":   {filepath.Join(".codex", "config.toml"), "mcp_servers", false},
 	}
 	got := map[string]ProjectScope{}
 	for _, ps := range ProjectScopes() {
@@ -41,6 +44,9 @@ func TestProjectScopes_VerifiedFormats(t *testing.T) {
 		}
 		if ps.SectionKey != w.section {
 			t.Errorf("%s SectionKey = %q, want %q", client, ps.SectionKey, w.section)
+		}
+		if ps.ObjectMemberToggle != w.objectMemberToggle {
+			t.Errorf("%s ObjectMemberToggle = %v, want %v", client, ps.ObjectMemberToggle, w.objectMemberToggle)
 		}
 	}
 }
@@ -67,6 +73,27 @@ func TestProjectScope_SectionKeyMatchesAdapter(t *testing.T) {
 	if bySection["cursor"] != "mcpServers" {
 		t.Errorf("cursor SectionKey = %q, want canonical \"mcpServers\"", bySection["cursor"])
 	}
+	if bySection["codex-cli"] != "mcp_servers" {
+		t.Errorf("codex-cli SectionKey = %q, want canonical \"mcp_servers\"", bySection["codex-cli"])
+	}
+}
+
+// Catches a supported read/discovery row silently acquiring JSON object-member
+// write authority, or cursor/vscode losing their established writer capability.
+func TestProjectScopeObjectMemberToggleCapability(t *testing.T) {
+	for _, client := range []string{"claude-code", "codex-cli"} {
+		if projectScopeForClient(client) == nil {
+			t.Fatalf("projectScopeForClient(%q) = nil, want supported read row", client)
+		}
+		if got := projectObjectMemberToggleScopeForClient(client); got != nil {
+			t.Fatalf("projectObjectMemberToggleScopeForClient(%q) = %#v, want nil", client, got)
+		}
+	}
+	for _, client := range []string{"cursor", "vscode"} {
+		if got := projectObjectMemberToggleScopeForClient(client); got == nil || !got.ObjectMemberToggle {
+			t.Fatalf("projectObjectMemberToggleScopeForClient(%q) = %#v, want writable row", client, got)
+		}
+	}
 }
 
 // TestProjectScopeClients_AreRegistryClients ensures every project-scope client
@@ -84,7 +111,7 @@ func TestProjectScopeClients_AreRegistryClients(t *testing.T) {
 }
 
 // TestProjectScanConfigPaths_Valid resolves an existing temp directory and
-// returns absolute, in-root paths for all three clients.
+// returns absolute, in-root paths for all four clients.
 func TestProjectScanConfigPaths_Valid(t *testing.T) {
 	root := t.TempDir()
 
@@ -105,6 +132,7 @@ func TestProjectScanConfigPaths_Valid(t *testing.T) {
 		"claude-code": filepath.Join(realRoot, ".mcp.json"),
 		"cursor":      filepath.Join(realRoot, ".cursor", "mcp.json"),
 		"vscode":      filepath.Join(realRoot, ".vscode", "mcp.json"),
+		"codex-cli":   filepath.Join(realRoot, ".codex", "config.toml"),
 	}
 	if len(paths) != len(want) {
 		t.Fatalf("got %d paths, want %d: %v", len(paths), len(want), paths)
@@ -337,6 +365,7 @@ func TestProjectScanConfigPaths_RealIntermediateDirIncluded(t *testing.T) {
 		"claude-code": filepath.Join(realRoot, ".mcp.json"),
 		"cursor":      filepath.Join(realRoot, ".cursor", "mcp.json"),
 		"vscode":      filepath.Join(realRoot, ".vscode", "mcp.json"),
+		"codex-cli":   filepath.Join(realRoot, ".codex", "config.toml"),
 	}
 	for client, w := range want {
 		got, ok := paths[client]
@@ -439,10 +468,10 @@ func TestProjectScanConfigPaths_FinalFileSymlinkContainedIncluded(t *testing.T) 
 }
 
 // TestProjectScanConfigPaths_ForwardSlashRoot is the finding-4 guard: the P1
-// frontend canonicalizes Windows roots with FORWARD slashes (C:/dev/proj), and
+// frontend returns Windows absolute roots using forward slashes, and
 // the endpoint must ACCEPT them (previously the clean round-trip rejected them
 // on Windows because Clean produces backslashes). POSIX is unaffected
-// (FromSlash is a no-op). A forward-slash TRAVERSAL (C:/dev/../etc) must STILL
+// while roots containing a traversal segment must still
 // be REJECTED. GOOS-gated like the existing symlink tests.
 func TestProjectScanConfigPaths_ForwardSlashRoot(t *testing.T) {
 	if runtime.GOOS != "windows" {
@@ -451,7 +480,7 @@ func TestProjectScanConfigPaths_ForwardSlashRoot(t *testing.T) {
 	// A real temp dir, then re-expressed with forward slashes the way the P1
 	// frontend canonicalizes it.
 	root := t.TempDir()
-	fwd := filepath.ToSlash(root) // e.g. C:/Users/.../Temp/xxxxx
+	fwd := filepath.ToSlash(root)
 	if fwd == root {
 		t.Fatalf("test bug: ToSlash(%q) did not change separators on Windows", root)
 	}
@@ -478,10 +507,10 @@ func TestProjectScanConfigPaths_ForwardSlashTraversalRejected(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("forward-slash Windows traversal case is Windows-specific")
 	}
-	// Build an absolute forward-slash root with a `..` segment. After FromSlash
-	// it becomes `C:\dev\..\etc`; Clean collapses to `C:\etc` ≠ normalized
-	// input, so it must be rejected (never stat'd).
-	dirty := "C:/dev/../etc"
+	// Build an absolute forward-slash root with a `..` segment from a
+	// temporary parent. Clean changes it, so the round-trip guard rejects it.
+	root := filepath.Join(t.TempDir(), "project")
+	dirty := filepath.ToSlash(root) + "/../project"
 	if _, _, err := ProjectScanConfigPaths(dirty); err == nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) accepted a forward-slash traversal root", dirty)
 	}

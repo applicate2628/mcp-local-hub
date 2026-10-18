@@ -84,6 +84,8 @@ var reservedDaemonOverlayControlVars = []string{
 }
 
 func newDaemonCmdReal() *cobra.Command {
+	var preparedTask preparedTaskFlag
+	var preparedDeadline preparedDeadlineFlag
 	var server, daemonName string
 	c := &cobra.Command{
 		Use:   "daemon",
@@ -114,6 +116,26 @@ need to call this manually.
 
 See also: install, logs, restart, status.`,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			if preparedTask.count != 0 || preparedDeadline.count != 0 {
+				start, cancel, contextErr := preparedFlagContext(cmd.Context(), &preparedTask, &preparedDeadline)
+				if contextErr != nil {
+					return contextErr
+				}
+				defer cancel()
+				a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+				launch, launchErr := a.ObservePreparedSerenaLaunch(start, preparedTask.value)
+				if launchErr != nil {
+					return launchErr
+				}
+				row, rowErr := launch.Descriptor(start)
+				if rowErr != nil {
+					return rowErr
+				}
+				if row.Workspace != "" || row.Server != server || row.Daemon != daemonName || api.EffectiveStartupBindDeadlineSeconds(row) != preparedDeadline.value {
+					return errors.New("prepared global launch selector disagrees with descriptor")
+				}
+				return runPreparedSerenaWrapper(cmd.Context(), start, a, launch, row, filepath.Join(logBaseDir(), server+"-"+daemonName+".log"))
+			}
 			if server == "" || daemonName == "" {
 				return fmt.Errorf("--server and --daemon are required")
 			}
@@ -155,7 +177,11 @@ See also: install, logs, restart, status.`,
 			if err != nil {
 				return fmt.Errorf("load manifest %s: %w", server, err)
 			}
-			m, err := config.ParseManifest(bytes.NewReader([]byte(raw)))
+			launchContext, err := daemon.CaptureStdioLaunchContext(cmd.Context())
+			if err != nil {
+				return err
+			}
+			m, err := launchContext.ParseManifest(bytes.NewReader([]byte(raw)))
 			if err != nil {
 				return err
 			}
@@ -183,13 +209,16 @@ See also: install, logs, restart, status.`,
 				return daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath, verr)
 			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver, m.EnvForwardLocal)
+			resolver, err = launchContext.BindResolver(resolver)
+			if err != nil {
+				return err
+			}
+			env, unsetEnv, err := daemonEnvWithOverlaySnapshot(server, daemonName, m.Env, resolver, launchContext, m.EnvForwardLocal)
 			if err != nil {
 				return err
 			}
 			// Build launch spec.
-			childArgs := append([]string{}, m.BaseArgs...)
-			childArgs = append(childArgs, spec.ExtraArgs...)
+			childArgs := daemon.StdioArguments(m.BaseArgs, spec.ExtraArgs)
 			// Resolve `command: mcphub` to the running binary's absolute path.
 			// Manifests that wrap a hub-internal subcommand (e.g. lldb-bridge)
 			// need the exact same exe that carries that subcommand; Go's exec
@@ -289,7 +318,7 @@ See also: install, logs, restart, status.`,
 					cmdPath = launchCapability.DirectImage.ImagePath
 					childArgs = append([]string{}, launchCapability.DirectImage.FrontendArgs...)
 				}
-				h, err := daemon.NewStdioHost(daemon.HostConfig{
+				h, err := launchContext.NewStdioHost(daemon.HostConfig{
 					Command:          cmdPath,
 					Args:             childArgs,
 					Env:              env,
@@ -319,68 +348,7 @@ See also: install, logs, restart, status.`,
 					// writes are bounded per-line via the handler's own select/context,
 					// not by the server socket.
 				}
-				errCh := make(chan error, 1)
-				go func() { errCh <- srv.ListenAndServe() }()
-				select {
-				case err := <-errCh:
-					// Codex CLI xhigh re-review on 479cbc3 (P2 #4) and
-					// kosyak 2026-05-06-claude-stop-error-durability-sham-fix.md:
-					// Use h.LogSupervisorEvent so Stop errors land in the
-					// rotated LogPath (durable across scheduled paths) AND
-					// stderr (interactive). Cobra exit message goes through
-					// os.Stderr alone, which scheduled paths can drop.
-					stopErr := h.Stop()
-					if stopErr != nil {
-						h.LogSupervisorEvent(fmt.Sprintf("stop after http server error: %v (server err: %v)", stopErr, err))
-					}
-					if errors.Is(err, http.ErrServerClosed) {
-						if stopErr != nil {
-							return fmt.Errorf("http server closed; %w", stopErr)
-						}
-						return nil
-					}
-					if stopErr != nil {
-						return fmt.Errorf("http server: %w; stop: %v", err, stopErr)
-					}
-					return fmt.Errorf("http server: %w", err)
-				case <-ctx.Done():
-					// Stop() first so handleSSE and handlePOST goroutines observe h.done
-					// and return; then Shutdown can complete without waiting on long-lived SSE.
-					stopErr := h.Stop()
-					if stopErr != nil {
-						h.LogSupervisorEvent(fmt.Sprintf("stop after ctx.Done graceful shutdown: %v", stopErr))
-					}
-					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					_ = srv.Shutdown(shutdownCtx)
-					if stopErr != nil {
-						return fmt.Errorf("graceful shutdown: %w", stopErr)
-					}
-					return nil
-				case <-h.ChildExited():
-					// Stdio child died unexpectedly (npx/uvx servers like memory,
-					// sequential-thinking, time are known to exit silently after
-					// serving N requests). Surface this to the scheduler by
-					// returning a non-nil error from RunE so mcphub exits
-					// non-zero; Windows Task Scheduler's RestartOnFailure policy
-					// (3 retries, 1 minute apart — configured in install.go and
-					// scheduler_windows.go) will re-launch the task, which
-					// respawns the child. Scheduler owns the retry budget; we
-					// do not add in-process respawn logic here.
-					stopErr := h.Stop()
-					exitMsg := fmt.Sprintf("child exited unexpectedly: %s", formatChildExit(h.ExitState()))
-					if stopErr != nil {
-						exitMsg += fmt.Sprintf("; stop: %v", stopErr)
-					}
-					h.LogSupervisorEvent(exitMsg)
-					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					_ = srv.Shutdown(shutdownCtx)
-					if stopErr != nil {
-						return fmt.Errorf("stdio child exited unexpectedly; stop: %w", stopErr)
-					}
-					return fmt.Errorf("stdio child exited unexpectedly")
-				}
+				return serveStdioHost(ctx, h, srv)
 			} else if m.Transport == config.TransportProcess {
 				// Companion (kind=companion): a hub-managed NON-MCP process (e.g.
 				// the excalidraw canvas Express server). No MCP host, no HTTP
@@ -402,6 +370,10 @@ See also: install, logs, restart, status.`,
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name")
+	c.Flags().Var(&preparedTask, "task-name", "exact prepared supervisor task selector")
+	c.Flags().Var(&preparedDeadline, "startup-bind-deadline-seconds", "original prepared startup bound")
+	_ = c.Flags().MarkHidden("task-name")
+	_ = c.Flags().MarkHidden("startup-bind-deadline-seconds")
 	c.Flags().StringVar(&daemonName, "daemon", "", "daemon name within the server manifest")
 	// Phase 3 workspace-scoped: lazy proxy subcommand the scheduler task
 	// launches per (workspace, language). Hidden — users don't run it.
@@ -480,6 +452,20 @@ func daemonVaultDACLRefusedPath(keyPath, vaultPath string, err error) string {
 // removes these from the inherited os.Environ() so the child sees them as
 // truly absent, not present-but-empty (Codex #377).
 func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver, envForwardLocal ...[]string) (map[string]string, []string, error) {
+	return daemonEnvWithOverlayReader(server, daemonName, manifestEnv, resolver, daemonOverlayEnv, os.LookupEnv, envForwardLocal...)
+}
+
+func daemonEnvWithOverlaySnapshot(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver, snapshot *daemon.StdioLaunchContext, envForwardLocal ...[]string) (map[string]string, []string, error) {
+	if snapshot == nil {
+		return nil, nil, daemon.ErrStdioLaunchContext
+	}
+	load := func(task string) (map[string]string, error) {
+		return daemonOverlayEnvWithLookup(task, snapshot.LookupEnvironment)
+	}
+	return daemonEnvWithOverlayReader(server, daemonName, manifestEnv, resolver, load, snapshot.LookupEnvironment, envForwardLocal...)
+}
+
+func daemonEnvWithOverlayReader(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver, load func(string) (map[string]string, error), lookup func(string) (string, bool), envForwardLocal ...[]string) (map[string]string, []string, error) {
 	if resolver == nil {
 		return nil, nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
 	}
@@ -499,7 +485,7 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	// logic; the serena proxy reaches the same owner with ITS workspace-keyed
 	// task name (daemon_serena.go), never reconstructing one from server/daemon.
 	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
-	return mergeResolvedDaemonEnvWithOverlay(taskName, env, omitted, envForwardLocal...)
+	return mergeResolvedDaemonEnvWithOverlayLookup(taskName, env, omitted, load, lookup, envForwardLocal...)
 }
 
 // mergeResolvedDaemonEnvWithOverlay is the task-name-keyed overlay-merge owner
@@ -522,6 +508,14 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 // wrapper, so an operator override (e.g. SERENA_LOG_LEVEL) was silently
 // dropped and an EnvRefs overlap key clobbered the overlay value.
 func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecrets map[string]string, envForwardLocal ...[]string) (map[string]string, []string, error) {
+	return mergeResolvedDaemonEnvWithOverlayReader(taskName, resolvedEnv, omittedSecrets, daemonOverlayEnv, envForwardLocal...)
+}
+
+func mergeResolvedDaemonEnvWithOverlayReader(taskName string, resolvedEnv, omittedSecrets map[string]string, load func(string) (map[string]string, error), envForwardLocal ...[]string) (map[string]string, []string, error) {
+	return mergeResolvedDaemonEnvWithOverlayLookup(taskName, resolvedEnv, omittedSecrets, load, os.LookupEnv, envForwardLocal...)
+}
+
+func mergeResolvedDaemonEnvWithOverlayLookup(taskName string, resolvedEnv, omittedSecrets map[string]string, load func(string) (map[string]string, error), lookup func(string) (string, bool), envForwardLocal ...[]string) (map[string]string, []string, error) {
 	resolved := make(map[string]string, len(resolvedEnv)+len(envForwardLocal))
 	for key, value := range resolvedEnv {
 		resolved[key] = value
@@ -532,14 +526,14 @@ func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecr
 			if _, static := resolved[key]; static {
 				continue
 			}
-			if value, present := os.LookupEnv(key); present {
+			if value, present := lookup(key); present {
 				resolved[key] = value
 			} else {
 				forwardedAbsent[key] = "env_forward_local"
 			}
 		}
 	}
-	overlayEnv, err := daemonOverlayEnv(taskName)
+	overlayEnv, err := load(taskName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -603,7 +597,11 @@ func mergeDaemonEnvMaps(manifest, overlay map[string]string) map[string]string {
 // An unset channel + direct `mcphub daemon` invocation resolves the overlay
 // against the operator's own state dir, exactly as before.
 func resolveDaemonOverlayPath() (string, error) {
-	if p := os.Getenv(daemonOverlayPathEnvVar); p != "" {
+	return resolveDaemonOverlayPathWithLookup(os.LookupEnv)
+}
+
+func resolveDaemonOverlayPathWithLookup(lookup func(string) (string, bool)) (string, error) {
+	if p, _ := lookup(daemonOverlayPathEnvVar); p != "" {
 		return p, nil
 	}
 	stateDir, err := stateDirFunc()
@@ -621,11 +619,28 @@ func resolveDaemonOverlayPath() (string, error) {
 // it from server/daemon so a serena proxy (whose task name is workspace-keyed,
 // not server-daemon-keyed) loads its own overlay row instead of a phantom one.
 func daemonOverlayEnv(taskName string) (map[string]string, error) {
-	overlayPath, err := resolveDaemonOverlayPath()
+	return daemonOverlayEnvWithLookup(taskName, os.LookupEnv)
+}
+
+func daemonOverlayEnvWithLookup(taskName string, lookup func(string) (string, bool)) (map[string]string, error) {
+	// Only materialize keys consumed by the existing overlay/control owner.
+	parent := func(keys []string) []string {
+		env := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if value, present := lookup(key); present {
+				env = append(env, key+"="+value)
+			}
+		}
+		return env
+	}
+	controls := []string{daemonOverlayAppliedEnvVar, daemonOverlayKeysEnvVar, daemonOverlayPathEnvVar, "PATH"}
+	parentEnv := parent(controls)
+	parentEnv = append(parentEnv, parent(daemonOverlayKeysFromEnv(parentEnv))...)
+	overlayPath, err := resolveDaemonOverlayPathWithLookup(lookup)
 	if err != nil {
 		return nil, fmt.Errorf("resolve state dir for env overlay: %w", err)
 	}
-	supervisorApplied := daemonOverlayAlreadyApplied(os.Environ())
+	supervisorApplied := daemonOverlayAlreadyApplied(parentEnv)
 	ov, err := daemon_env_overlay.Load(overlayPath)
 	if err != nil {
 		// Supervisor-spawned wrapper (marker present): the supervisor
@@ -657,8 +672,8 @@ func daemonOverlayEnv(taskName string) (map[string]string, error) {
 		// empty and we proceed with manifest-only env (nil overlay map),
 		// exactly as before.
 		if supervisorApplied {
-			injectedKeys := daemonOverlayKeysFromEnv(os.Environ())
-			reconstructed := overlayMapFromInjectedKeys(injectedKeys, os.Environ())
+			injectedKeys := daemonOverlayKeysFromEnv(parentEnv)
+			reconstructed := overlayMapFromInjectedKeys(injectedKeys, parentEnv)
 			_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-reload-degraded-supervised", map[string]any{
 				"task_name":          taskName,
 				"err":                err.Error(),
@@ -676,6 +691,11 @@ func daemonOverlayEnv(taskName string) (map[string]string, error) {
 		return nil, fmt.Errorf("load env overlay: %w", err)
 	}
 	overlayEnv := daemon_env_overlay.LookupOverlay(ov, taskName)
+	keys := make([]string, 0, len(overlayEnv))
+	for key := range overlayEnv {
+		keys = append(keys, key)
+	}
+	parentEnv = append(parentEnv, parent(keys)...)
 	if len(overlayEnv) == 0 {
 		return nil, nil
 	}
@@ -702,11 +722,11 @@ func daemonOverlayEnv(taskName string) (map[string]string, error) {
 	// so the overlay still wins and no raw ${parent_path} token leaks to the
 	// child.
 	if supervisorApplied {
-		return overlayValuesFromEnv(overlayEnv, os.Environ()), nil
+		return overlayValuesFromEnv(overlayEnv, parentEnv), nil
 	}
 	// Direct `mcphub daemon` invocation (no marker): expand ${parent_path}
 	// against our own environment exactly once.
-	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, os.Environ())
+	expanded, err := daemon_env_overlay.ExpandParentPath(overlayEnv, parentEnv)
 	if err != nil {
 		_ = api.LogHubMcpEvent("warn", "daemon-env-overlay-parent-path-resolve-failed", map[string]any{
 			"task_name": taskName,

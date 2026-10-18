@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,4 +45,31 @@ func WithVaultLock(vaultPath string, fn func() error) error {
 	}
 	defer func() { _ = fl.Unlock() }()
 	return fn()
+}
+
+// TryWithVaultLock is the nonblocking counterpart to WithVaultLock. It runs fn
+// while holding the same cross-process flock and reports contention as
+// (false, nil), allowing canonical manifest writers to refuse retryably while
+// de-adopt owns the vault reference transaction.
+func TryWithVaultLock(vaultPath string, fn func() error) (locked bool, err error) {
+	if dir := filepath.Dir(vaultPath); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return false, fmt.Errorf("vault lock: mkdir %s: %w", dir, err)
+		}
+	}
+	lockPath := vaultPath + ".lock"
+	fl := flock.New(lockPath)
+	acquired, err := fl.TryLock()
+	if err != nil {
+		return false, fmt.Errorf("vault lock %s: %w", lockPath, err)
+	}
+	if !acquired {
+		return false, nil
+	}
+	defer func() {
+		if unlockErr := fl.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("vault lock %s: unlock: %w", lockPath, unlockErr))
+		}
+	}()
+	return true, fn()
 }

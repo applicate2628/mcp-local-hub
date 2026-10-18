@@ -3,7 +3,10 @@ package clients
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -436,6 +439,13 @@ func tomlHasStandaloneFooter(configBytes []byte, lastExpressionEnd int) bool {
 }
 
 func extractTOMLEntryPhysicalToken(configBytes []byte, section, name string) (*entryPhysicalToken, bool, error) {
+	return extractTOMLEntryPhysicalTokenWithOwnedFooter(configBytes, section, name, false)
+}
+
+// Only the inverse owner may admit a footer created by its own byte transform;
+// it must still compare the complete returned span with its private applied
+// preimage before writing. All unproven readers retain strict ambiguity refusal.
+func extractTOMLEntryPhysicalTokenWithOwnedFooter(configBytes []byte, section, name string, ownedFooter bool) (*entryPhysicalToken, bool, error) {
 	var parsed map[string]any
 	if err := toml.Unmarshal(configBytes, &parsed); err != nil {
 		return nil, false, fmt.Errorf("parse toml physical config: %w", err)
@@ -494,7 +504,7 @@ func extractTOMLEntryPhysicalToken(configBytes []byte, section, name string) (*e
 				lastExpressionEnd = headers[i].expressionEnd
 			}
 		}
-		if tomlHasStandaloneFooter(configBytes, lastExpressionEnd) {
+		if !ownedFooter && tomlHasStandaloneFooter(configBytes, lastExpressionEnd) {
 			return nil, false, fmt.Errorf("toml physical entry %q has ambiguous trailing footer comments", name)
 		}
 	}
@@ -513,6 +523,333 @@ func extractTOMLEntryPhysicalToken(configBytes []byte, section, name string) (*e
 		token.nextPrefix = append([]byte(nil), configBytes[headers[boundary].leadingStart:headers[boundary].lineStart]...)
 	}
 	return token, true, nil
+}
+
+// replaceCodexTransportBytes changes only the adapter-owned transport fields
+// and, for relocation, the selected key in its contiguous named-table block.
+// Unknown fields are never interpreted or re-encoded.
+func replaceCodexTransportBytes(configBytes []byte, source, target string, entry MCPEntry) ([]byte, error) {
+	return replaceCodexTransportBytesForKind(configBytes, source, target, entry, CodexTransportHTTP)
+}
+func replaceCodexTransportBytesForKind(configBytes []byte, source, target string, entry MCPEntry, kind CodexTransport) ([]byte, error) {
+	token, present, err := extractTOMLEntryPhysicalToken(configBytes, "mcp_servers", source)
+	if err != nil || !present {
+		return nil, fmt.Errorf("%w: selected transport table is not byte-editable: %v", ErrCodexLayerParseFailed, err)
+	}
+	document, err := decodeCodexTOMLBytes(configBytes)
+	if err != nil {
+		return nil, err
+	}
+	servers := document["mcp_servers"].(map[string]any)
+	raw := servers[source].(map[string]any)
+	expectedEntry := codexHTTPReplacement(raw, entry)
+	transportFields := codexHTTPTransportFields(entry)
+	if kind == CodexTransportStdio {
+		expectedEntry = codexSharedStdioReplacement(raw, entry)
+		transportFields = codexSharedStdioTransportFields(entry)
+	}
+	if source == target && reflect.DeepEqual(raw, expectedEntry) {
+		return append([]byte(nil), configBytes...), nil
+	}
+	if source != target {
+		if _, occupied := servers[target]; occupied {
+			return nil, fmt.Errorf("%w: target table already exists", ErrCodexTargetNameConflict)
+		}
+		delete(servers, source)
+	}
+	servers[target] = expectedEntry
+
+	var transport bytes.Buffer
+	if err := toml.NewEncoder(&transport).SetTablesInline(true).Encode(transportFields); err != nil {
+		return nil, err
+	}
+	var keyEncoding bytes.Buffer
+	if err := toml.NewEncoder(&keyEncoding).Encode(map[string]any{target: true}); err != nil {
+		return nil, err
+	}
+	var keyParser unstable.Parser
+	keyParser.Reset(keyEncoding.Bytes())
+	if !keyParser.NextExpression() {
+		return nil, fmt.Errorf("%w: target key encoding failed", ErrCodexLayerParseFailed)
+	}
+	keyIterator := keyParser.Expression().Key()
+	if !keyIterator.Next() {
+		return nil, fmt.Errorf("%w: target key encoding failed", ErrCodexLayerParseFailed)
+	}
+	targetKey := append([]byte(nil), keyParser.Raw(keyIterator.Node().Raw)...)
+
+	type edit struct {
+		start, end int
+		value      []byte
+	}
+	var edits []edit
+	block := token.memberBytes
+	var parser unstable.Parser
+	parser.KeepComments = true
+	parser.Reset(block)
+	var table []string
+	for parser.NextExpression() {
+		expression := parser.Expression()
+		if expression.Kind == unstable.Table || expression.Kind == unstable.ArrayTable {
+			var keys []*unstable.Node
+			table = nil
+			iterator := expression.Key()
+			for iterator.Next() {
+				node := iterator.Node()
+				keys = append(keys, node)
+				table = append(table, string(node.Data))
+			}
+			if len(keys) < 2 || table[0] != "mcp_servers" || table[1] != source {
+				return nil, fmt.Errorf("%w: selected table block changed", ErrCodexLayerParseFailed)
+			}
+			lineStart := bytes.LastIndexByte(block[:keys[0].Raw.Offset], '\n') + 1
+			if len(table) > 2 && codexTransportField(table[2]) {
+				start := lineStart + bytes.IndexByte(block[lineStart:int(keys[0].Raw.Offset)], '[')
+				end := int(keys[len(keys)-1].Raw.Offset + keys[len(keys)-1].Raw.Length)
+				end += bytes.IndexByte(block[end:], ']') + 1
+				if expression.Kind == unstable.ArrayTable {
+					end++
+				}
+				edits = append(edits, edit{start: start, end: end})
+				continue
+			}
+			if source != target {
+				node := keys[1]
+				edits = append(edits, edit{start: int(node.Raw.Offset), end: int(node.Raw.Offset + node.Raw.Length), value: targetKey})
+			}
+			if len(table) == 2 {
+				lineEnd := bytes.IndexByte(block[lineStart:], '\n')
+				insertAt := len(block)
+				value := transport.Bytes()
+				if lineEnd >= 0 {
+					insertAt = lineStart + lineEnd + 1
+					if insertAt >= 2 && block[insertAt-2] == '\r' {
+						value = bytes.ReplaceAll(value, []byte("\n"), []byte("\r\n"))
+					}
+				} else {
+					value = append([]byte{'\n'}, value...)
+				}
+				edits = append(edits, edit{start: insertAt, end: insertAt, value: value})
+			}
+			continue
+		}
+		if expression.Kind != unstable.KeyValue {
+			continue
+		}
+		remove := len(table) > 2 && codexTransportField(table[2])
+		if len(table) == 2 {
+			keys := expression.Key()
+			remove = keys.Next() && codexTransportField(string(keys.Node().Data))
+		}
+		if remove {
+			start := int(expression.Raw.Offset)
+			end := start + int(expression.Raw.Length)
+			var comments []byte
+			var retainComments func(*unstable.Node)
+			retainComments = func(node *unstable.Node) {
+				for ; node != nil; node = node.Next() {
+					if node.Kind == unstable.Comment && int(node.Raw.Offset) >= start && int(node.Raw.Offset+node.Raw.Length) <= end {
+						comments = append(comments, parser.Raw(node.Raw)...)
+						comments = append(comments, '\n')
+					}
+					retainComments(node.Child())
+				}
+			}
+			retainComments(expression)
+			edits = append(edits, edit{start: start, end: end, value: comments})
+		}
+	}
+	if err := parser.Error(); err != nil {
+		return nil, fmt.Errorf("%w: parse selected transport block: %v", ErrCodexLayerParseFailed, err)
+	}
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].start == edits[j].start {
+			return edits[i].end < edits[j].end
+		}
+		return edits[i].start < edits[j].start
+	})
+	var changed []byte
+	offset := 0
+	for _, patch := range edits {
+		if patch.start < offset || patch.end < patch.start || patch.end > len(block) {
+			return nil, fmt.Errorf("%w: overlapping transport expression spans", ErrCodexLayerParseFailed)
+		}
+		changed = append(changed, block[offset:patch.start]...)
+		changed = append(changed, patch.value...)
+		offset = patch.end
+	}
+	changed = append(changed, block[offset:]...)
+	out := append([]byte(nil), configBytes[:token.memberStart]...)
+	out = append(out, changed...)
+	out = append(out, configBytes[token.memberEnd:]...)
+	readback, err := decodeCodexTOMLBytes(out)
+	if err != nil || !reflect.DeepEqual(readback, document) {
+		return nil, fmt.Errorf("%w: transport byte edit differs from expected settings", ErrCodexLayerParseFailed)
+	}
+	return out, nil
+}
+
+// Attachment insertion and inverse share this physical TOML owner. Only the
+// selected boolean value and newly encoded tables can change.
+func encodeCodexAttachmentTable(name string, fields map[string]any) ([]byte, error) {
+	var output bytes.Buffer
+	if err := toml.NewEncoder(&output).Encode(map[string]any{"mcp_servers": map[string]any{name: fields}}); err != nil {
+		return nil, err
+	}
+	encoded := output.Bytes()
+	token, present, err := extractTOMLEntryPhysicalToken(encoded, "mcp_servers", name)
+	if err != nil || !present {
+		return nil, ErrProjectClientInvalid
+	}
+	// The encoder may emit an empty parent table; only the owned child table is inserted.
+	return append([]byte(nil), token.memberBytes...), nil
+}
+
+func deriveCodexAttachmentOriginalToken(before []byte, logical, managed, operation string) ([]byte, error) {
+	doc, err := decodeCodexTOMLBytes(before)
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := doc["mcp_servers"].(map[string]any)
+	if _, present := servers[managed]; present {
+		return nil, ErrProjectClientEntryConflict
+	}
+	raw, present := servers[logical]
+	switch operation {
+	case "create-absent":
+		if present {
+			return nil, ErrProjectClientEntryConflict
+		}
+		return nil, nil
+	case "replace-enable-override":
+		fields, ok := raw.(map[string]any)
+		enabled, isBool := fields["enabled"].(bool)
+		if !present || !ok || len(fields) != 1 || !isBool || !enabled {
+			return nil, ErrProjectClientEntryConflict
+		}
+		token, found, err := extractTOMLEntryPhysicalToken(before, "mcp_servers", logical)
+		if err != nil || !found {
+			return nil, ErrProjectClientEntryConflict
+		}
+		return append([]byte(nil), token.memberBytes...), nil
+	default:
+		return nil, ErrProjectClientInvalid
+	}
+}
+
+func createCodexProjectAttachmentBytes(before []byte, logical, managed string, aliasFields map[string]any, operation string) ([]byte, []byte, []byte, []byte, error) {
+	original, err := deriveCodexAttachmentOriginalToken(before, logical, managed, operation)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	out := append([]byte(nil), before...)
+	if operation == "replace-enable-override" {
+		token, _, _ := extractTOMLEntryPhysicalToken(before, "mcp_servers", logical)
+		var parser unstable.Parser
+		parser.KeepComments = true
+		parser.Reset(original)
+		start, end, found := 0, 0, false
+		for parser.NextExpression() {
+			node := parser.Expression()
+			if node.Kind != unstable.KeyValue {
+				continue
+			}
+			key := node.Key()
+			if !key.Next() || string(key.Node().Data) != "enabled" || key.Next() {
+				return nil, nil, nil, nil, ErrProjectClientEntryConflict
+			}
+			value := node.Value()
+			if found || string(parser.Raw(value.Raw)) != "true" {
+				return nil, nil, nil, nil, ErrProjectClientEntryConflict
+			}
+			start, end, found = int(value.Raw.Offset), int(value.Raw.Offset+value.Raw.Length), true
+		}
+		if parser.Error() != nil || !found {
+			return nil, nil, nil, nil, ErrProjectClientEntryConflict
+		}
+		start += token.memberStart
+		end += token.memberStart
+		out = append(append(append([]byte(nil), before[:start]...), []byte("false")...), before[end:]...)
+	}
+	alias, err := encodeCodexAttachmentTable(managed, aliasFields)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	separator := []byte("\n\n")
+	if len(out) == 0 || out[len(out)-1] == '\n' {
+		separator = []byte("\n")
+	}
+	var appended []byte
+	if operation == "create-absent" {
+		mask, err := encodeCodexAttachmentTable(logical, map[string]any{"enabled": false})
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		appended = append(appended, separator...)
+		appended = append(appended, mask...)
+		appended = append(appended, '\n')
+		appended = append(appended, alias...)
+	} else {
+		appended = append(appended, separator...)
+		appended = append(appended, alias...)
+	}
+	out = append(out, appended...)
+	parsed, err := decodeCodexTOMLBytes(out)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	expected, err := decodeCodexTOMLBytes(before)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	servers, ok := expected["mcp_servers"].(map[string]any)
+	if !ok {
+		servers = map[string]any{}
+		expected["mcp_servers"] = servers
+	}
+	servers[logical] = map[string]any{"enabled": false}
+	servers[managed] = cloneCodexRawEntry(aliasFields)
+	if !reflect.DeepEqual(parsed, expected) {
+		return nil, nil, nil, nil, ErrProjectClientInvalid
+	}
+	mask, mp, err := extractTOMLEntryPhysicalToken(out, "mcp_servers", logical)
+	if err != nil || !mp {
+		return nil, nil, nil, nil, ErrProjectClientInvalid
+	}
+	aliasToken, ap, err := extractTOMLEntryPhysicalToken(out, "mcp_servers", managed)
+	if err != nil || !ap {
+		return nil, nil, nil, nil, ErrProjectClientInvalid
+	}
+	// appended is the exact insertion suffix; inverse will remove its generated
+	// separators only while the owned tables remain byte-identical.
+	return out, append([]byte(nil), mask.memberBytes...), append([]byte(nil), aliasToken.memberBytes...), append([]byte(nil), appended...), nil
+}
+
+func restoreCodexProjectAttachmentBytes(current []byte, logical, managed string, ownedMask, ownedAlias, appended, original []byte, operation string) ([]byte, error) {
+	mask, mp, err := extractTOMLEntryPhysicalToken(current, "mcp_servers", logical)
+	if err != nil || !mp || !bytes.Equal(mask.memberBytes, ownedMask) {
+		return nil, ErrProjectClientRollbackIncomplete
+	}
+	alias, ap, err := extractTOMLEntryPhysicalToken(current, "mcp_servers", managed)
+	if err != nil || !ap || !bytes.Equal(alias.memberBytes, ownedAlias) {
+		return nil, ErrProjectClientRollbackIncomplete
+	}
+	// Locate the uniquely owned inserted suffix, not a coincidental table fragment.
+	pos := bytes.Index(current, appended)
+	if pos < 0 || bytes.Index(current[pos+len(appended):], appended) >= 0 {
+		return nil, ErrProjectClientRollbackIncomplete
+	}
+	out := append(append([]byte(nil), current[:pos]...), current[pos+len(appended):]...)
+	if operation == "replace-enable-override" {
+		owned, present, err := extractTOMLEntryPhysicalToken(out, "mcp_servers", logical)
+		if err != nil || !present || !bytes.Equal(owned.memberBytes, ownedMask) {
+			return nil, ErrProjectClientRollbackIncomplete
+		}
+		out = append(append(append([]byte(nil), out[:owned.memberStart]...), original...), out[owned.memberEnd:]...)
+	} else if operation != "create-absent" {
+		return nil, ErrProjectClientRollbackIncomplete
+	}
+	return out, nil
 }
 
 func restoreTOMLEntryPhysical(configBytes []byte, token *entryPhysicalToken) ([]byte, error) {
@@ -700,4 +1037,161 @@ func (l *lockingClient) EntryPresentInBytes(configBytes []byte, name string) (bo
 		return c.EntryPresentInBytes(configBytes, name)
 	}
 	return false, fmt.Errorf("client %q does not support byte-level entry validation", l.Name())
+}
+
+func codexSharedStdioTransportFields(entry MCPEntry) map[string]any {
+	return map[string]any{"command": "mcphub", "args": []any{"relay", "--url", entry.RelayURL}}
+}
+func codexSharedStdioReplacement(source map[string]any, entry MCPEntry) map[string]any {
+	fields := cloneCodexRawEntry(source)
+	for key := range fields {
+		if codexTransportField(key) {
+			delete(fields, key)
+		}
+	}
+	for key, value := range codexSharedStdioTransportFields(entry) {
+		fields[key] = value
+	}
+	return fields
+}
+
+// Preparation uses the same original physical boundary/footer/editor as HTTP.
+// It performs no IO and returns independent exact tokens before publication.
+func PrepareCodexSharedStdioTransportTokens(originalGlobal []byte, logicalEntryName string, target MCPEntry) (beforeToken, appliedToken []byte, err error) {
+	if err = validateCodexSharedStdioTarget(logicalEntryName, target); err != nil {
+		return nil, nil, err
+	}
+	before, present, err := extractTOMLEntryPhysicalToken(originalGlobal, "mcp_servers", logicalEntryName)
+	if err != nil || !present {
+		return nil, nil, errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	rendered, err := replaceCodexTransportBytesForKind(originalGlobal, logicalEntryName, logicalEntryName, target, CodexTransportStdio)
+	if err != nil {
+		return nil, nil, err
+	}
+	applied, present, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(rendered, "mcp_servers", logicalEntryName, true)
+	if err != nil || !present {
+		return nil, nil, errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	return bytes.Clone(before.memberBytes), bytes.Clone(applied.memberBytes), nil
+}
+
+// Only frozen owned tokens may be selected. Everything outside the exact current
+// span comes from CURRENT, preserving later unrelated bytes on inverse/repeat.
+func replaceCodexSharedStdioFrozenToken(current []byte, name string, evidence CodexSharedStdioReplayEvidenceV1, desired CodexSharedStdioTokenState) ([]byte, bool, error) {
+	token, present, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(current, "mcp_servers", name, true)
+	if err != nil || !present {
+		return nil, false, errors.Join(ErrCodexTargetNameConflict, ErrCodexSharedStdioReplayTokenChanged, err)
+	}
+	wanted, other := evidence.BeforeToken, evidence.AppliedToken
+	if desired == CodexSharedStdioApplied {
+		wanted, other = evidence.AppliedToken, evidence.BeforeToken
+	} else if desired != CodexSharedStdioBefore {
+		return nil, false, ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	if bytes.Equal(token.memberBytes, wanted) {
+		return bytes.Clone(current), false, nil
+	}
+	if !bytes.Equal(token.memberBytes, other) {
+		return nil, false, errors.Join(ErrCodexTargetNameConflict, ErrCodexSharedStdioReplayTokenChanged)
+	}
+	out := make([]byte, 0, len(current)-len(token.memberBytes)+len(wanted))
+	out = append(out, current[:token.memberStart]...)
+	out = append(out, wanted...)
+	out = append(out, current[token.memberEnd:]...)
+	received, present, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(out, "mcp_servers", name, true)
+	if err != nil || !present || !bytes.Equal(received.memberBytes, wanted) {
+		return nil, false, errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	return out, true, nil
+}
+
+// Validate a frozen producer's token without re-rendering it through a later
+// renderer. Semantic transport plus the existing physical parser's retained
+// expression/comment spans establish the original nontransport relationship.
+func validateCodexSharedStdioFrozenTokens(original []byte, name string, target MCPEntry, before, applied []byte) error {
+	token, present, err := extractTOMLEntryPhysicalToken(original, "mcp_servers", name)
+	if err != nil || !present || !bytes.Equal(token.memberBytes, before) {
+		return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	candidate := append([]byte(nil), original[:token.memberStart]...)
+	candidate = append(candidate, applied...)
+	candidate = append(candidate, original[token.memberEnd:]...)
+	observed, present, err := extractTOMLEntryPhysicalTokenWithOwnedFooter(candidate, "mcp_servers", name, true)
+	if err != nil || !present || !bytes.Equal(observed.memberBytes, applied) {
+		return errors.Join(ErrCodexSharedStdioReplayEvidenceInvalid, err)
+	}
+	expected, err := decodeCodexTOMLBytes(original)
+	if err != nil {
+		return err
+	}
+	received, err := decodeCodexTOMLBytes(candidate)
+	if err != nil {
+		return err
+	}
+	servers, ok := expected["mcp_servers"].(map[string]any)
+	if !ok {
+		return ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	source, ok := servers[name].(map[string]any)
+	if !ok {
+		return ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	servers[name] = codexSharedStdioReplacement(source, target)
+	if !reflect.DeepEqual(expected, received) {
+		return ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	preserved := func(block []byte) ([]string, error) {
+		var parser unstable.Parser
+		parser.KeepComments = true
+		parser.Reset(block)
+		var table []string
+		var spans []string
+		for parser.NextExpression() {
+			expression := parser.Expression()
+			var comments func(*unstable.Node)
+			comments = func(node *unstable.Node) {
+				for ; node != nil; node = node.Next() {
+					if node.Kind == unstable.Comment {
+						spans = append(spans, "comment:"+string(parser.Raw(node.Raw)))
+					}
+					comments(node.Child())
+				}
+			}
+			comments(expression)
+			transport := false
+			if expression.Kind == unstable.Table || expression.Kind == unstable.ArrayTable {
+				table = nil
+				keys := expression.Key()
+				for keys.Next() {
+					table = append(table, string(keys.Node().Data))
+				}
+				transport = len(table) > 2 && codexTransportField(table[2])
+			} else if expression.Kind == unstable.KeyValue {
+				transport = len(table) > 2 && codexTransportField(table[2])
+				if len(table) == 2 {
+					keys := expression.Key()
+					transport = keys.Next() && codexTransportField(string(keys.Node().Data))
+				}
+			} else {
+				continue
+			}
+			if !transport {
+				spans = append(spans, "expression:"+string(parser.Raw(expression.Raw)))
+			}
+		}
+		return spans, parser.Error()
+	}
+	originalSpans, err := preserved(before)
+	if err != nil {
+		return err
+	}
+	appliedSpans, err := preserved(applied)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(originalSpans, appliedSpans) {
+		return ErrCodexSharedStdioReplayEvidenceInvalid
+	}
+	return nil
 }

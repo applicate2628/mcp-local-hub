@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"mcp-local-hub/internal/mcpcompat/readinesswire"
 )
@@ -15,12 +17,15 @@ const (
 	MCPReadinessStageNone           = "none"
 	MCPReadinessStageProfile        = "profile"
 	MCPReadinessStageIdentity       = "identity"
+	MCPReadinessStageHost           = readinesswire.StageHost
 	MCPReadinessStageInitialize     = "initialize"
 	MCPReadinessStageInitialized    = "initialized"
 	MCPReadinessStageToolsList      = "tools_list"
 	MCPReadinessStageSessionCleanup = "session_cleanup"
 
 	MCPReadinessFailureSessionCleanup = "MCP_HEALTH_SESSION_CLEANUP_FAILED"
+
+	MCPReadinessProbeBudget = 3 * time.Second
 )
 
 // MCPReadinessResult is the one additive API projection shared by install,
@@ -39,6 +44,7 @@ type MCPReadinessResult struct {
 	ProfileID          string `json:"profile_id"`
 	ToolCount          int    `json:"tool_count"`
 	Detail             string `json:"detail"`
+	Retryable          bool   `json:"-"`
 }
 
 // MCPReadinessError keeps the typed projection intact through call paths that
@@ -68,6 +74,8 @@ func readinessStageFromWire(stage string) string {
 		return MCPReadinessStageProfile
 	case readinesswire.StageIdentity:
 		return MCPReadinessStageIdentity
+	case readinesswire.StageHost:
+		return MCPReadinessStageHost
 	case readinesswire.StageInitialize:
 		return MCPReadinessStageInitialize
 	case readinesswire.StageInitialized:
@@ -105,7 +113,7 @@ func readinessFromFailure(f readinesswire.Failure) MCPReadinessResult {
 		Stage: readinessStageFromWire(f.Stage), FailureID: f.FailureID,
 		HTTPStatus: f.HTTPStatus, RequestedProtocol: f.RequestedProtocol,
 		NegotiatedProtocol: f.NegotiatedProtocol, SupportedFloor: f.SupportedFloor,
-		ProfileID: f.ProfileID,
+		ProfileID: f.ProfileID, Retryable: readinesswire.IsRetryableFailureID(f.FailureID),
 	}
 	result.Detail = closedReadinessDetail(result)
 	return result
@@ -150,15 +158,21 @@ func normalizeDaemonReadiness(rows []DaemonStatus) {
 // ProbeMCPReadiness returns the canonical typed projection while the retained
 // HealthProbe compatibility fields are derived by singleHealthProbe.
 func ProbeMCPReadiness(port int) MCPReadinessResult {
-	probe := singleHealthProbe(port)
+	return ProbeMCPReadinessContext(context.Background(), port)
+}
+
+// ProbeMCPReadinessContext runs the canonical probe under the caller's
+// lifecycle cancellation boundary.
+func ProbeMCPReadinessContext(ctx context.Context, port int) MCPReadinessResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probe := singleHealthProbeContext(ctx, port)
 	if probe == nil || probe.Readiness.SchemaVersion != "mcp-readiness-v1" {
-		result := MCPReadinessResult{
-			SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready,
-			Stage:     MCPReadinessStageNone,
+		return readinessFromFailure(readinesswire.Failure{
 			FailureID: readinesswire.FailureReadinessHostUnavailable,
-		}
-		result.Detail = closedReadinessDetail(result)
-		return result
+			Stage:     readinesswire.StageHost,
+		})
 	}
 	return probe.Readiness
 }

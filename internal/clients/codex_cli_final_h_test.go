@@ -91,9 +91,8 @@ http_headers = { "X-Unrelated" = "keep" }
 	expectedServers := expected["mcp_servers"].(map[string]any)
 	delete(expectedServers, "serena")
 	expectedServers["serena-mcphub"] = map[string]any{
-		"url":                 "http://127.0.0.1:9300/mcp",
-		"startup_timeout_sec": 10.0,
-		"http_headers":        map[string]any{"Authorization": "Bearer" + " test-token"},
+		"url":          "http://127.0.0.1:9300/mcp",
+		"http_headers": map[string]any{"Authorization": "Bearer" + " test-token"},
 	}
 
 	result, err := (&codexCLI{path: path}).RelocateHTTPEntry(CodexHTTPRelocation{

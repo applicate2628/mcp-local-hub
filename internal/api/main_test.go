@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
 )
@@ -92,7 +93,17 @@ func TestMain(m *testing.M) {
 	daemonStateRootOverride = tmp
 	// Install every adapter-path redirect before the audit and before m.Run.
 	// The descriptor is the single inventory shared with CLI and GUI tests.
-	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	restoreClientEnv, err := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	if err != nil {
+		daemonStateRootOverride = prevOverride
+		var restoreMimoErr error
+		if hadMimoCodeDisable {
+			restoreMimoErr = os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", priorMimoCodeDisable)
+		} else {
+			restoreMimoErr = os.Unsetenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
+		}
+		panic(errors.Join(err, restoreMimoErr, apitest.RemoveTestMainRoot(tmp)))
+	}
 	priorReadPidport := readPidportFn
 	readPidportFn = testReadLegacyPidport
 
@@ -268,6 +279,11 @@ func TestMain(m *testing.M) {
 	stopForceKillPIDFn = prevStopForceKillPID
 	snapshotProcessesFn = prevSnapshotProcesses
 	frozenStdioBridgeAdmissionFn = prevFrozenStdioBridgeAdmission
-	_ = os.RemoveAll(tmp)
+	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString("internal/api TestMain cleanup: " + cleanupErr.Error() + "\n")
+	}
 	os.Exit(code)
 }

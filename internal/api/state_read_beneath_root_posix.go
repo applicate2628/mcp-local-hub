@@ -8,6 +8,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func stateReadOpenCauseIsNotExist(error) bool {
+	return false
+}
+
 // ReadStateFileBeneathRootNoFollow reads one bounded regular state file through
 // a no-follow descriptor chain rooted at root. The returned bytes are exactly
 // the bytes whose digest was verified; no pathname is reopened after loading.

@@ -493,3 +493,50 @@ func TestDirectCleanupReceipt_MalformedCurrentBytesFailClosed(t *testing.T) {
 		t.Fatal("malformed foreign bytes were changed")
 	}
 }
+
+// Pure lexical coverage only. Native captures, locks and source receiving remain
+// the distinct accepted native/functional oracles; this fixture creates no file.
+func TestCodexSharedStdioReplayLexicalInverse(t *testing.T) {
+	original := []byte("# operator heading\n[mcp_servers.demo]\nenabled = false\ncommand = \"original-tool\" # command-note\nargs = [\"--original\"]\ncustom = \"untouched\"\n\n[mcp_servers.other]\ntag = \"before\"\n")
+	target := MCPEntry{Name: "demo", RelayExePath: "mcphub", RelayURL: "http://127.0.0.1:1/mcp"}
+	before, applied, err := PrepareCodexSharedStdioTransportTokens(original, "demo", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCodexSharedStdioFrozenTokens(original, "demo", target, before, applied); err != nil {
+		t.Fatalf("prepared token validation: %v", err)
+	}
+	// A frozen prior producer can place the transport after the retained enabled
+	// row. Validation must not redefine its exact bytes through today's renderer.
+	frozen := bytes.Replace(before, []byte("command = \"original-tool\""), []byte("command = \"mcphub\""), 1)
+	frozen = bytes.Replace(frozen, []byte("args = [\"--original\"]"), []byte("args = [\"relay\", \"--url\", \"http://127.0.0.1:1/mcp\"]"), 1)
+	if err := validateCodexSharedStdioFrozenTokens(original, "demo", target, before, frozen); err != nil {
+		t.Fatalf("frozen producer layout was redefined: %v", err)
+	}
+	evidence := CodexSharedStdioReplayEvidenceV1{BeforeToken: before, AppliedToken: frozen}
+	forward, changed, err := replaceCodexSharedStdioFrozenToken(original, "demo", evidence, CodexSharedStdioApplied)
+	if err != nil || !changed {
+		t.Fatalf("forward changed=%t err=%v", changed, err)
+	}
+	for _, retained := range [][]byte{[]byte("enabled = false"), []byte("# command-note"), []byte("custom = \"untouched\"")} {
+		if !bytes.Contains(forward, retained) {
+			t.Fatalf("forward dropped selected nontransport/comment bytes %q", retained)
+		}
+	}
+	current := bytes.Replace(forward, []byte("tag = \"before\""), []byte("tag = \"after\""), 1)
+	expected := bytes.Replace(original, []byte("tag = \"before\""), []byte("tag = \"after\""), 1)
+	restored, changed, err := replaceCodexSharedStdioFrozenToken(current, "demo", evidence, CodexSharedStdioBefore)
+	if err != nil || !changed || !bytes.Equal(restored, expected) {
+		t.Fatalf("inverse did not retain exact original token and current outside edit: changed=%t err=%v", changed, err)
+	}
+	repeated, changed, err := replaceCodexSharedStdioFrozenToken(restored, "demo", evidence, CodexSharedStdioBefore)
+	if err != nil || changed || !bytes.Equal(repeated, restored) {
+		t.Fatalf("inverse repeat changed=%t err=%v", changed, err)
+	}
+	foreign := bytes.Replace(current, []byte("custom = \"untouched\""), []byte("custom = \"foreign\""), 1)
+	preserved := bytes.Clone(foreign)
+	refused, changed, err := replaceCodexSharedStdioFrozenToken(foreign, "demo", evidence, CodexSharedStdioBefore)
+	if !errors.Is(err, ErrCodexSharedStdioReplayTokenChanged) || changed || refused != nil || !bytes.Equal(foreign, preserved) {
+		t.Fatalf("foreign selected token was not preserved/refused: changed=%t err=%v", changed, err)
+	}
+}

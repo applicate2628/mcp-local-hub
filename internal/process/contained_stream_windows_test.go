@@ -85,6 +85,176 @@ func TestContainedStreamWindowsHelper(t *testing.T) {
 	}
 }
 
+func TestContainedStreamWindowsNaturalExitJobSnapshot(t *testing.T) {
+	if os.Getenv("MCPHUB_CONTAINED_HELD_CHILD") == "1" {
+		fmt.Fprintln(os.Stdout, "ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestContainedStreamWindowsNaturalExitJobSnapshot$")
+	cmd.Env = append(os.Environ(), "MCPHUB_CONTAINED_HELD_CHILD=1")
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := &windowsContainedChild{cmd: cmd, job: job}
+	stdinRead, stdinWrite, err := os.Pipe()
+	if err != nil {
+		_ = child.close()
+		t.Fatal(err)
+	}
+	stdoutRead, stdoutWrite, err := os.Pipe()
+	if err != nil {
+		_ = stdinRead.Close()
+		_ = stdinWrite.Close()
+		_ = child.close()
+		t.Fatal(err)
+	}
+	stderrRead, stderrWrite, err := os.Pipe()
+	if err != nil {
+		_ = stdinRead.Close()
+		_ = stdinWrite.Close()
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
+		_ = child.close()
+		t.Fatal(err)
+	}
+	var retained []windows.Handle
+	var readyDone chan struct{}
+	defer func() {
+		_ = stdinWrite.Close()
+		_ = stdinRead.Close()
+		_ = stdoutWrite.Close()
+		_ = stderrWrite.Close()
+		_ = stdoutRead.Close()
+		_ = stderrRead.Close()
+		if err := job.Close(); err != nil {
+			t.Errorf("close test-owned Job: %v", err)
+		}
+		if child.process != 0 {
+			status, waitErr := windows.WaitForSingleObject(child.process, 2000)
+			if waitErr != nil || status != uint32(windows.WAIT_OBJECT_0) {
+				t.Errorf("test-owned child not joined: status=%d err=%v", status, waitErr)
+			}
+		}
+		for _, h := range retained {
+			if err := windows.CloseHandle(h); err != nil {
+				t.Errorf("close retained test-owned member handle: %v", err)
+			}
+		}
+		if err := child.close(); err != nil {
+			t.Errorf("close test-owned child handles: %v", err)
+		}
+		if readyDone != nil {
+			select {
+			case <-readyDone:
+			case <-time.After(time.Second):
+				t.Error("ready reader did not join")
+			}
+		}
+	}()
+	initial, initialErr := job.queryAccounting()
+	initialList, initialListErr := job.queryProcessIDList()
+	t.Logf("TARGET_WINDOWS_EMPTY_JOB total=%d active=%d terminated=%d assigned=%d listed=%d accounting_err=%v list_err=%v", initial.TotalProcesses, initial.ActiveProcesses, initial.TotalTerminatedProcesses, initialList.Assigned, len(initialList.PIDs), initialErr, initialListErr)
+	if initialErr != nil || initialListErr != nil {
+		t.Fatalf("initial Job snapshot unavailable: %v/%v", initialErr, initialListErr)
+	}
+	if err := child.start(cmd, stdinRead, stdoutWrite, stderrWrite); err != nil {
+		t.Fatal(err)
+	}
+	readyDone = make(chan struct{})
+	ready := make(chan error, 1)
+	go func() {
+		defer close(readyDone)
+		line, readErr := bufio.NewReader(stdoutRead).ReadString('\n')
+		if readErr == nil && line != "ready\n" {
+			readErr = fmt.Errorf("unexpected ready marker")
+		}
+		ready <- readErr
+	}()
+	_ = stdoutWrite.Close()
+	_ = stderrWrite.Close()
+	_ = stdinRead.Close()
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("held child ready marker: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("held child did not become ready")
+	}
+	inspect := func(h windows.Handle) (uint32, uint64, string, bool, uint32, error) {
+		pid, err := windows.GetProcessId(h)
+		if err != nil {
+			return 0, 0, "", false, 0, err
+		}
+		var created, exited, kernel, user windows.Filetime
+		if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+			return 0, 0, "", false, 0, err
+		}
+		creation := uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+		buffer := make([]uint16, 4096)
+		size := uint32(len(buffer))
+		if err := windows.QueryFullProcessImageName(h, 0, &buffer[0], &size); err != nil {
+			return 0, 0, "", false, 0, err
+		}
+		base := filepath.Base(windows.UTF16ToString(buffer[:size]))
+		member, err := jobMemberFromHandle(h, job)
+		if err != nil {
+			return 0, 0, "", false, 0, err
+		}
+		status, err := windows.WaitForSingleObject(h, 0)
+		return pid, creation, base, member, status, err
+	}
+	held, heldErr := job.queryAccounting()
+	list, listErr := job.queryProcessIDList()
+	originalPID, originalCreation, originalBase, originalMember, originalWait, originalErr := inspect(child.process)
+	t.Logf("TARGET_WINDOWS_HELD_JOB total=%d active=%d terminated=%d assigned=%d listed=%d original_pid=%d original_creation=%d original_image=%s original_member=%v original_wait=%d accounting_err=%v list_err=%v original_err=%v", held.TotalProcesses, held.ActiveProcesses, held.TotalTerminatedProcesses, list.Assigned, len(list.PIDs), originalPID, originalCreation, originalBase, originalMember, originalWait, heldErr, listErr, originalErr)
+	if heldErr != nil || listErr != nil || originalErr != nil || !originalMember || originalWait != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatalf("held snapshot unavailable or original not live: %v/%v/%v member=%v wait=%d", heldErr, listErr, originalErr, originalMember, originalWait)
+	}
+	for _, pid := range list.PIDs {
+		h, openErr := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if openErr != nil {
+			t.Fatalf("open listed Job member pid=%d: %v", pid, openErr)
+		}
+		retained = append(retained, h)
+		id, created, base, member, status, inspectErr := inspect(h)
+		t.Logf("TARGET_WINDOWS_HELD_MEMBER pid=%d creation=%d image=%s member=%v wait=%d err=%v", id, created, base, member, status, inspectErr)
+		if inspectErr != nil || !member || id != pid {
+			t.Fatalf("listed member identity unproved pid=%d: %v member=%v id=%d", pid, inspectErr, member, id)
+		}
+	}
+	if err := stdinWrite.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, waitErr := windows.WaitForSingleObject(child.process, 2000)
+	if waitErr != nil || status != uint32(windows.WAIT_OBJECT_0) {
+		t.Fatalf("released child did not join: status=%d err=%v", status, waitErr)
+	}
+	waited := child.wait()
+	if !waited.exited || waited.err != nil || waited.exitCode != 0 {
+		t.Fatalf("released child wait=%+v", waited)
+	}
+	after, afterErr := job.queryAccounting()
+	afterList, afterListErr := job.queryProcessIDList()
+	t.Logf("TARGET_WINDOWS_RELEASED_JOB total=%d active=%d terminated=%d assigned=%d listed=%d accounting_err=%v list_err=%v", after.TotalProcesses, after.ActiveProcesses, after.TotalTerminatedProcesses, afterList.Assigned, len(afterList.PIDs), afterErr, afterListErr)
+	if afterErr != nil || afterListErr != nil {
+		t.Fatalf("released Job snapshot unavailable: %v/%v", afterErr, afterListErr)
+	}
+	for _, h := range retained {
+		id, created, base, member, memberWait, inspectErr := inspect(h)
+		t.Logf("TARGET_WINDOWS_RELEASED_MEMBER pid=%d creation=%d image=%s member=%v wait=%d err=%v", id, created, base, member, memberWait, inspectErr)
+	}
+	terminationErr := child.terminate(5000)
+	var proof *JobTerminationProofError
+	if errors.As(terminationErr, &proof) {
+		t.Logf("TARGET_WINDOWS_TERMINATE stage=%s error=%v", proof.Stage, terminationErr)
+	} else {
+		t.Logf("TARGET_WINDOWS_TERMINATE error=%v", terminationErr)
+	}
+}
+
 func TestRunContainedStream_ChildSeesNormalizedEnvironment(t *testing.T) {
 	cmd := containedWindowsHelperCommand(t, "environment")
 	dir := t.TempDir()

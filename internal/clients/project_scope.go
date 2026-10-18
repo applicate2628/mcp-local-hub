@@ -10,7 +10,7 @@ import (
 
 // ProjectScope is one row of the per-project (Model B) config-scope registry:
 // for a supported client, WHERE under a project root its project-local MCP
-// config lives (RelFile) and WHICH top-level JSON key holds the server map
+// config lives (RelFile), WHICH top-level key holds the server map
 // (SectionKey).
 //
 // This is a DATA registry — deliberately NOT a new method on the Client
@@ -35,10 +35,15 @@ type ProjectScope struct {
 	// the load-bearing property for the path-traversal threat model (see
 	// ProjectScanConfigPaths).
 	RelFile string
-	// SectionKey is the top-level JSON key holding the server map in RelFile.
+	// SectionKey is the format-specific top-level key holding the server map in
+	// RelFile (JSON object key or TOML table name).
 	SectionKey string
 	// Supported reports whether this client has a project-local config scope.
 	Supported bool
+	// ObjectMemberToggle reports whether this row authorizes the JSON
+	// object-member toggle writer. A supported read row does not imply write
+	// authority (Codex TOML and Claude approval-array rows are false).
+	ObjectMemberToggle bool
 }
 
 // projectScopeRegistry is the single owner of the per-client project-scope
@@ -57,6 +62,8 @@ type ProjectScope struct {
 //   - vscode: <root>/.vscode/mcp.json, top-level `servers` (NOT mcpServers!)
 //     (vscodeServersKey = "servers", vscode.go:32; scanVSCode parses
 //     json:"servers", scan.go:1040). Pure path-reparam, but a DIFFERENT key.
+//   - codex-cli: <root>/.codex/config.toml, top-level `mcp_servers`. This is a
+//     read/discovery row only; deliberate writes route through project adopt.
 //
 // Clients without a project-local scope are simply absent from this registry
 // (equivalently Supported:false) and never contribute a project config path.
@@ -66,9 +73,10 @@ var projectScopeRegistry = []ProjectScope{
 	// reconciliation lives in the ~/.claude.json Local scope (a SEPARATE
 	// substrate) and is deferred to P2b per the design doc — a known scoped
 	// boundary, not a defect.
-	{Client: "claude-code", RelFile: ".mcp.json", SectionKey: "mcpServers", Supported: true},
-	{Client: "cursor", RelFile: filepath.Join(".cursor", "mcp.json"), SectionKey: "mcpServers", Supported: true},
-	{Client: "vscode", RelFile: filepath.Join(".vscode", "mcp.json"), SectionKey: "servers", Supported: true},
+	{Client: "claude-code", RelFile: ".mcp.json", SectionKey: "mcpServers", Supported: true, ObjectMemberToggle: false},
+	{Client: "cursor", RelFile: filepath.Join(".cursor", "mcp.json"), SectionKey: "mcpServers", Supported: true, ObjectMemberToggle: true},
+	{Client: "vscode", RelFile: filepath.Join(".vscode", "mcp.json"), SectionKey: "servers", Supported: true, ObjectMemberToggle: true},
+	{Client: "codex-cli", RelFile: filepath.Join(".codex", "config.toml"), SectionKey: "mcp_servers", Supported: true, ObjectMemberToggle: false},
 }
 
 // ProjectScopes returns the supported per-client project-scope rows in stable
@@ -89,7 +97,7 @@ func ProjectScopes() []ProjectScope {
 // api.ScanFrom(api.ScanOpts{ConfigPaths: ...}). It performs NO I/O on the
 // per-client files (it only validates the root); a missing per-client file is
 // the scanner's job to absorb (os.IsNotExist → no entries), so a project that
-// has only a .cursor/mcp.json still returns paths for all three clients and the
+// has only a .cursor/mcp.json still returns paths for all four clients and the
 // scanner reports the absent ones as having no servers.
 //
 // It returns the symlink-RESOLVED real root (realRoot) as the first value: the
@@ -154,15 +162,15 @@ func ProjectScanConfigPaths(root string) (string, map[string]string, error) {
 	}
 	// Separator normalization BEFORE the IsAbs + clean round-trip guard. The
 	// P1 Projects frontend canonicalizes roots with FORWARD slashes
-	// (`C:/dev/proj`), but on Windows filepath.Clean produces BACKSLASHES, so a
+	// (for example, an absolute drive-rooted project), but on Windows
 	// forward-slash Windows root would fail the round-trip equality guard below
 	// and the endpoint would reject the frontend's OWN roots
 	// (PROJECT_ROOT_INVALID), breaking the feature end-to-end. FromSlash
 	// converts `/`→`\` on Windows and is a NO-OP on POSIX (so a POSIX
-	// `/home/proj` is unaffected). The guard's security property is PRESERVED:
+	// an absolute root is unaffected). The guard's security property is PRESERVED:
 	// FromSlash only swaps the separator, it does NOT collapse `..` segments —
-	// `C:/dev/../etc` → FromSlash → `C:\dev\..\etc` → Clean → `C:\etc` ≠
-	// normalized input → still REJECTED by the round-trip guard.
+	// a root with a `..` segment changes after Clean and is still REJECTED
+	// by the round-trip guard.
 	root = filepath.FromSlash(root)
 	if !filepath.IsAbs(root) {
 		return "", nil, fmt.Errorf("project root must be an absolute path")

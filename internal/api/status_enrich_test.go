@@ -18,7 +18,9 @@ func TestEnrichStatusFillsPortFromManifest(t *testing.T) {
 		{TaskName: `\mcp-local-hub-godbolt-default`}, // no manifest in tmp — port stays 0
 	}
 
-	enrichStatus(rows, tmp)
+	if err := enrichStatus(rows, tmp); err != nil {
+		t.Fatal(err)
+	}
 
 	if rows[0].Port != 9123 {
 		t.Errorf("memory.Port: got %d, want 9123", rows[0].Port)
@@ -90,7 +92,9 @@ func TestEnrichStatusWithRegistry_OrphanGlobalDaemonPreservesRawState(t *testing
 			NextRun:  "",
 		},
 	}
-	enrichStatusWithRegistry(rows, dir, regPath)
+	if err := enrichStatusWithRegistry(rows, dir, regPath); err != nil {
+		t.Fatal(err)
+	}
 	if rows[0].State != "Running" {
 		t.Errorf("orphan global daemon (Port=0): State = %q, want %q (raw scheduler state must be preserved when manifest is unknown)",
 			rows[0].State, "Running")
@@ -143,7 +147,9 @@ func TestEnrichStatusWithRegistry_SelfPIDIsNotAlive(t *testing.T) {
 		// arises via registry/dynamic ports; seed it to exercise that branch.
 		{TaskName: `\mcp-local-hub-wolfram-default`, State: "Running", Port: 9125},
 	}
-	enrichStatus(rows, dir)
+	if err := enrichStatus(rows, dir); err != nil {
+		t.Fatal(err)
+	}
 
 	// PID, RAM, Uptime must NOT be populated from the self-PID.
 	if rows[0].PID != 0 {
@@ -202,7 +208,9 @@ func TestEnrichStatusWithRegistry_ForeignPIDIsAlive(t *testing.T) {
 	rows := []DaemonStatus{
 		{TaskName: `\mcp-local-hub-serena-claude`, State: "Running"},
 	}
-	enrichStatus(rows, dir)
+	if err := enrichStatus(rows, dir); err != nil {
+		t.Fatal(err)
+	}
 
 	if rows[0].PID != foreignPID {
 		t.Errorf("foreign-PID daemon: PID = %d, want %d", rows[0].PID, foreignPID)
@@ -250,7 +258,9 @@ func TestEnrichStatusWithRegistry_MaintenanceRowsBypassPortGuard(t *testing.T) {
 			NextRun:  "04.05.2026 3:00:00",
 		},
 	}
-	enrichStatusWithRegistry(rows, dir, regPath)
+	if err := enrichStatusWithRegistry(rows, dir, regPath); err != nil {
+		t.Fatal(err)
+	}
 
 	for i, row := range rows {
 		if !row.IsMaintenance {
@@ -284,7 +294,9 @@ func TestEnrichStatusWithRegistry_MaintenanceRowsNoTriggerBecomeStopped(t *testi
 			NextRun:  "", // no upcoming trigger
 		},
 	}
-	enrichStatusWithRegistry(rows, dir, regPath)
+	if err := enrichStatusWithRegistry(rows, dir, regPath); err != nil {
+		t.Fatal(err)
+	}
 
 	if rows[0].State != "Stopped" {
 		t.Errorf("maintenance row with no trigger: State = %q, want %q",
@@ -382,7 +394,9 @@ func TestEnrichStatus_StateLifecycleTransitions(t *testing.T) {
 					NextRun:  step.nextRun,
 				},
 			}
-			enrichStatus(rows, dir)
+			if err := enrichStatus(rows, dir); err != nil {
+				t.Fatal(err)
+			}
 
 			if rows[0].State != step.wantState {
 				t.Errorf("State = %q, want %q (raw=%q alivePort=%d nextRun=%q)",

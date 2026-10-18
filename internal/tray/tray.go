@@ -128,10 +128,11 @@ const (
 	lifecyclePhaseSpawn      lifecyclePhase = "spawn"
 	lifecyclePhaseChildExit  lifecyclePhase = "child-exit"
 
-	lifecycleEventUnavailable     = "tray-child-unavailable"
-	lifecycleEventRetrySummary    = "tray-child-retry-summary"
-	lifecycleEventProtocolWarning = "tray-child-protocol-warning"
-	lifecycleEventStable          = "tray-child-stable"
+	lifecycleEventUnavailable           = "tray-child-unavailable"
+	lifecycleEventRetrySummary          = "tray-child-retry-summary"
+	lifecycleEventProtocolWarning       = "tray-child-protocol-warning"
+	lifecycleEventStable                = "tray-child-stable"
+	lifecycleEventSettlementUnconfirmed = "tray-child-settlement-unconfirmed"
 
 	lifecycleStableAfter     = 30 * time.Second
 	lifecycleSummaryInterval = 30 * time.Second
@@ -167,10 +168,19 @@ func (realLifecycleClock) Wait(ctx context.Context, d time.Duration) bool {
 }
 
 type childAttempt struct {
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	wait   func() error
-	kill   func() error
+	stdin         io.WriteCloser
+	stdout        io.ReadCloser
+	wait          func() error
+	kill          func() error
+	inputClose    sync.Once
+	inputCloseErr error
+}
+
+// closeInput owns explicit EARLY EOF once. Cmd.Wait remains the final pipe
+// closer; every finalizer reads this same retained early-close outcome.
+func (attempt *childAttempt) closeInput() error {
+	attempt.inputClose.Do(func() { attempt.inputCloseErr = attempt.stdin.Close() })
+	return attempt.inputCloseErr
 }
 
 type lifecycleDeps struct {
@@ -263,8 +273,10 @@ func (c *stateCollector) snapshot(ctx context.Context) (stateSnapshot, bool) {
 }
 
 // Run owns the restartable tray subprocess lifecycle and routes events between
-// it and the in-process Config callbacks. It returns when ctx is canceled or
-// StateCh closes; child setup failures and exits are retried while the parent
+// it and the in-process Config callbacks. Cancellation or StateCh closure
+// initiates settlement; Run returns only after its original child/Wait and
+// workers settle. Failed termination retains custody with a safe diagnostic.
+// Child setup failures and settled exits are retried while the parent
 // lifecycle remains live. On non-Windows hosts it blocks on ctx.Done() without
 // starting a collector, timer, or child.
 //
@@ -301,16 +313,13 @@ func launchTrayChild() (*childAttempt, lifecyclePhase, error) {
 	}
 	stdout, err := c.StdoutPipe()
 	if err != nil {
-		_ = stdin.Close()
-		return nil, lifecyclePhaseStdoutPipe, err
+		return nil, lifecyclePhaseStdoutPipe, errors.Join(err, stdin.Close())
 	}
 	if stderrIsValid() {
 		c.Stderr = os.Stderr
 	}
 	if err := c.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, lifecyclePhaseSpawn, err
+		return nil, lifecyclePhaseSpawn, errors.Join(err, stdin.Close(), stdout.Close())
 	}
 	return &childAttempt{
 		stdin:  stdin,
@@ -341,12 +350,13 @@ func runLifecycle(ctx context.Context, cfg Config, deps lifecycleDeps) error {
 			return nil
 		}
 		attemptNumber++
+		onUnconfirmed := func(err error) { reporter.settlementUnconfirmed(attemptNumber, err) }
 		attempt, phase, err := deps.launch()
 		if runCtx.Err() != nil {
 			if attempt != nil {
-				settleUnservedAttempt(attempt, deps.clock)
+				return errors.Join(err, settleUnservedAttempt(attempt, deps.clock, onUnconfirmed))
 			}
-			return nil
+			return err
 		}
 		if err != nil {
 			delay := lifecycleRetryDelays[retryIndex]
@@ -360,22 +370,20 @@ func runLifecycle(ctx context.Context, cfg Config, deps lifecycleDeps) error {
 			continue
 		}
 		if runCtx.Err() != nil {
-			settleUnservedAttempt(attempt, deps.clock)
-			return nil
+			return settleUnservedAttempt(attempt, deps.clock, onUnconfirmed)
 		}
 		snapshot, ok := collector.snapshot(runCtx)
 		if !ok {
-			settleUnservedAttempt(attempt, deps.clock)
-			return nil
+			return settleUnservedAttempt(attempt, deps.clock, onUnconfirmed)
 		}
 		result := serveAttempt(runCtx, cfg, attempt, snapshot, collector.updates, deps.clock, func() {
 			retryIndex = 0
 			reporter.stable(attemptNumber)
 		}, func() {
 			reporter.protocolWarning(attemptNumber)
-		})
+		}, onUnconfirmed)
 		if result.terminal || runCtx.Err() != nil {
-			return nil
+			return result.err
 		}
 		delay := lifecycleRetryDelays[retryIndex]
 		if retryIndex < len(lifecycleRetryDelays)-1 {
@@ -393,7 +401,7 @@ type attemptResult struct {
 	err      error
 }
 
-func serveAttempt(ctx context.Context, cfg Config, attempt *childAttempt, snapshot stateSnapshot, updates <-chan stateSnapshot, clock lifecycleClock, onStable, onProtocolWarning func()) attemptResult {
+func serveAttempt(ctx context.Context, cfg Config, attempt *childAttempt, snapshot stateSnapshot, updates <-chan stateSnapshot, clock lifecycleClock, onStable, onProtocolWarning func(), onUnconfirmed func(error)) attemptResult {
 	startedAt := clock.Now()
 	stable := false
 	markStable := func() {
@@ -416,53 +424,68 @@ func serveAttempt(ctx context.Context, cfg Config, attempt *childAttempt, snapsh
 	protocolWarningCh := make(chan struct{})
 	waitDone := make(chan error, 1)
 	stableCh := make(chan struct{}, 1)
-	var workers sync.WaitGroup
-	workers.Add(3)
+	var streamWorkers, timerWorker sync.WaitGroup
+	streamWorkers.Add(2)
+	timerWorker.Add(1)
 	go func() {
-		defer workers.Done()
+		defer streamWorkers.Done()
 		writerDone <- writeAttemptStates(attemptCtx, attempt.stdin, snapshot, updates)
 	}()
 	go func() {
-		defer workers.Done()
+		defer streamWorkers.Done()
 		readerDone <- readAttemptEvents(attemptCtx, attempt.stdout, cfg, protocolWarningCh)
 	}()
 	go func() {
-		defer workers.Done()
+		defer timerWorker.Done()
 		if clock.Wait(attemptCtx, lifecycleStableAfter) {
 			stableCh <- struct{}{}
 		}
 	}()
-	go func() { waitDone <- attempt.wait() }()
+	go func() {
+		// StdoutPipe requires the original readers to finish BEFORE Cmd.Wait.
+		// Completion is independent of the value channels consumed below.
+		streamWorkers.Wait()
+		attempt.closeInput() // outcome retained by the same attempt, received below
+		waitDone <- attempt.wait()
+	}()
+	readerReceived, writerReceived := false, false
+	joinWorkers := func(result attemptResult) attemptResult {
+		streamWorkers.Wait()
+		timerWorker.Wait()
+		if !readerReceived {
+			result.err = errors.Join(result.err, <-readerDone)
+		}
+		if !writerReceived {
+			result.err = errors.Join(result.err, <-writerDone)
+		}
+		return result
+	}
 
 	waited := false
 	var waitErr error
 	for {
 		select {
 		case <-ctx.Done():
-			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, waitErr, clock)
-			workers.Wait()
-			return attemptResult{terminal: true, err: waitErr}
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, waitErr, clock, onUnconfirmed)
+			return joinWorkers(attemptResult{terminal: true, err: waitErr})
 		case err := <-waitDone:
 			waited, waitErr = true, err
 			markStableIfElapsed()
-			cancelAttempt()
-			_ = attempt.stdin.Close()
-			_ = attempt.stdout.Close()
-			workers.Wait()
-			return attemptResult{err: waitErr}
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, waitErr, clock, onUnconfirmed)
+			return joinWorkers(attemptResult{err: waitErr})
 		case err := <-readerDone:
+			readerReceived = true
 			markStableIfElapsed()
-			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock)
-			workers.Wait()
-			return attemptResult{err: waitErr}
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock, onUnconfirmed)
+			return joinWorkers(attemptResult{err: waitErr})
 		case err := <-writerDone:
+			writerReceived = true
 			if err == nil && attemptCtx.Err() != nil {
 				continue
 			}
 			markStableIfElapsed()
-			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock)
-			workers.Wait()
-			return attemptResult{err: waitErr}
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock, onUnconfirmed)
+			return joinWorkers(attemptResult{err: waitErr})
 		case <-stableCh:
 			markStable()
 			stableCh = nil
@@ -472,10 +495,9 @@ func serveAttempt(ctx context.Context, cfg Config, attempt *childAttempt, snapsh
 	}
 }
 
-func settleAttempt(attempt *childAttempt, cancel context.CancelFunc, waitDone <-chan error, waited bool, prior error, clock lifecycleClock) error {
+func settleAttempt(attempt *childAttempt, cancel context.CancelFunc, waitDone <-chan error, waited bool, prior error, clock lifecycleClock, onUnconfirmed func(error)) error {
 	cancel()
-	_ = attempt.stdin.Close()
-	waitErr := prior
+	resultErr := errors.Join(prior, attempt.closeInput())
 	if !waited {
 		shutdownCtx, stopShutdown := context.WithCancel(context.Background())
 		graceExpired := make(chan bool, 1)
@@ -484,29 +506,51 @@ func settleAttempt(attempt *childAttempt, cancel context.CancelFunc, waitDone <-
 		case err := <-waitDone:
 			stopShutdown()
 			<-graceExpired
-			waitErr = err
+			resultErr = errors.Join(resultErr, err)
 		case expired := <-graceExpired:
 			stopShutdown()
 			if expired {
-				_ = attempt.kill()
+				killErr := attempt.kill()
+				resultErr = errors.Join(resultErr, killErr)
+				if killErr != nil {
+					select {
+					case err := <-waitDone:
+						return errors.Join(resultErr, err)
+					default:
+						if onUnconfirmed != nil {
+							onUnconfirmed(resultErr)
+						}
+					}
+				}
 			}
-			waitErr = <-waitDone
+			resultErr = errors.Join(resultErr, <-waitDone)
 		}
 	}
-	_ = attempt.stdout.Close()
-	return waitErr
+	// Successful Start transferred final stdout-pipe closure to Cmd.Wait.
+	// Calling Close again here would manufacture a redundant-close failure.
+	return resultErr
 }
 
-func settleUnservedAttempt(attempt *childAttempt, clock lifecycleClock) {
+func settleUnservedAttempt(attempt *childAttempt, clock lifecycleClock, onUnconfirmed func(error)) error {
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- attempt.wait() }()
-	_ = settleAttempt(attempt, cancel, waitDone, false, nil, clock)
+	readDone := make(chan struct{})
+	var readErr error
+	go func() {
+		_, readErr = io.Copy(io.Discard, attempt.stdout)
+		close(readDone)
+	}()
+	go func() {
+		<-readDone
+		attempt.closeInput()
+		waitDone <- attempt.wait()
+	}()
+	settlementErr := settleAttempt(attempt, cancel, waitDone, false, nil, clock, onUnconfirmed)
+	return errors.Join(settlementErr, readErr)
 }
 
-func writeAttemptStates(ctx context.Context, stdin io.WriteCloser, initial stateSnapshot, updates <-chan stateSnapshot) error {
-	defer stdin.Close()
+func writeAttemptStates(ctx context.Context, stdin io.Writer, initial stateSnapshot, updates <-chan stateSnapshot) error {
 	enc := json.NewEncoder(stdin)
 	lastGeneration := initial.generation
 	if initial.hasState || initial.hasRelax {
@@ -568,6 +612,12 @@ type lifecycleReporter struct {
 	failures           int
 	lastProtocolWarn   time.Time
 	hasProtocolWarn    bool
+}
+
+func (r *lifecycleReporter) settlementUnconfirmed(attempt int, err error) {
+	if r.emit != nil {
+		r.emit(LifecycleReport{Type: lifecycleEventSettlementUnconfirmed, Phase: "settlement", Attempt: attempt, ErrorDetail: safeErrorDetail(err)})
+	}
 }
 
 func (r *lifecycleReporter) failure(phase lifecyclePhase, attempt int, retry time.Duration, err error) {

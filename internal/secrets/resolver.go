@@ -1,6 +1,8 @@
 package secrets
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"regexp"
@@ -57,8 +59,9 @@ func ValidateSettableKeyName(name string) error {
 //	$VAR         → os.Getenv (fails if unset)
 //	<literal>    → returned as-is
 type Resolver struct {
-	vault *Vault
-	local map[string]string
+	vault  *Vault
+	local  map[string]string
+	lookup func(string) (string, bool)
 }
 
 // NewResolver builds a Resolver. Either argument may be nil if the caller knows
@@ -67,43 +70,113 @@ func NewResolver(v *Vault, local map[string]string) *Resolver {
 	return &Resolver{vault: v, local: local}
 }
 
+// WithEnvironmentLookup binds the existing reference parser to a captured
+// environment without changing the vault or optional-reference rules.
+func (r *Resolver) WithEnvironmentLookup(lookup func(string) (string, bool)) (*Resolver, error) {
+	if r == nil || lookup == nil {
+		return nil, fmt.Errorf("resolver environment lookup is required")
+	}
+	var local map[string]string
+	if r.local != nil {
+		local = make(map[string]string, len(r.local))
+		for key, value := range r.local {
+			local[key] = value
+		}
+	}
+	return &Resolver{vault: r.vault, local: local, lookup: lookup}, nil
+}
+
+func (r *Resolver) lookupEnvironment(name string) (string, bool) {
+	if r.lookup != nil {
+		return r.lookup(name)
+	}
+	return os.LookupEnv(name)
+}
+
 // Resolve returns the resolved value for a manifest-style reference string.
 func (r *Resolver) Resolve(ref string) (string, error) {
+	value, _, err := r.ResolveWithProvenance(ref)
+	return value, err
+}
+
+// Provenance is captured by the SAME reference parser before resolution.
+// It retains the declaration, never a fingerprint of a decrypted value.
+type ResolvedReferenceProvenance struct {
+	kind, declaration, mapKey string
+	resolvedValue             string
+	resolved                  bool
+}
+
+func (p ResolvedReferenceProvenance) Kind() string   { return p.kind }
+func (p ResolvedReferenceProvenance) Resolved() bool { return p.resolved }
+func (p ResolvedReferenceProvenance) ValidateMapKey(key string) error {
+	if !p.resolved || p.mapKey == "" || p.mapKey != key {
+		return fmt.Errorf("original resolved declaration/key required")
+	}
+	return nil
+}
+func (p ResolvedReferenceProvenance) ValidateResolvedValue(value string) error {
+	if !p.resolved || p.resolvedValue != value {
+		return fmt.Errorf("original resolved value required")
+	}
+	return nil
+}
+func (p ResolvedReferenceProvenance) ReferenceIdentitySHA256() (string, error) {
+	if !p.resolved || (p.kind != "vault-ref" && p.kind != "file-ref" && p.kind != "environment-ref") {
+		return "", fmt.Errorf("qualified logical reference required")
+	}
+	digest := sha256.Sum256([]byte(p.declaration))
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func (r *Resolver) ResolveWithProvenance(ref string) (value string, provenance ResolvedReferenceProvenance, retErr error) {
+	provenance.declaration = ref
+	defer func() {
+		provenance.resolved = retErr == nil
+		if retErr == nil {
+			provenance.resolvedValue = value
+		}
+	}()
 	switch {
 	case strings.HasPrefix(ref, "secret:"):
+		provenance.kind = "vault-ref"
 		if r.vault == nil {
-			return "", fmt.Errorf("resolve %q: vault not available", ref)
+			return "", provenance, fmt.Errorf("resolve %q: vault not available", ref)
 		}
 		key := strings.TrimPrefix(ref, "secret:")
-		return r.vault.Get(key)
+		value, retErr = r.vault.Get(key)
+		return value, provenance, retErr
 	case strings.HasPrefix(ref, "file:"):
+		provenance.kind = "file-ref"
 		key := strings.TrimPrefix(ref, "file:")
 		if r.local == nil {
-			return "", fmt.Errorf("resolve %q: local config not available", ref)
+			return "", provenance, fmt.Errorf("resolve %q: local config not available", ref)
 		}
 		v, ok := r.local[key]
 		if !ok {
-			return "", fmt.Errorf("resolve %q: key %q not in local config", ref, key)
+			return "", provenance, fmt.Errorf("resolve %q: key %q not in local config", ref, key)
 		}
-		return v, nil
+		return v, provenance, nil
 	case strings.HasPrefix(ref, "${env:") && envPlaceholderRE.FindString(ref) == ref:
+		provenance.kind = "environment-ref"
 		name := strings.TrimSuffix(strings.TrimPrefix(ref, "${env:"), "}")
 		if name == "" {
-			return "", fmt.Errorf("resolve %q: environment variable name is empty", ref)
+			return "", provenance, fmt.Errorf("resolve %q: environment variable name is empty", ref)
 		}
-		v, ok := os.LookupEnv(name)
+		v, ok := r.lookupEnvironment(name)
 		if !ok {
-			return "", fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
+			return "", provenance, fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
 		}
-		return v, nil
+		return v, provenance, nil
 	case strings.Contains(ref, "${env:"):
+		provenance.kind = "composite-environment-ref"
 		var resolveErr error
 		resolved := envPlaceholderRE.ReplaceAllStringFunc(ref, func(token string) string {
 			if resolveErr != nil {
 				return token
 			}
 			name := strings.TrimSuffix(strings.TrimPrefix(token, "${env:"), "}")
-			v, ok := os.LookupEnv(name)
+			v, ok := r.lookupEnvironment(name)
 			if !ok {
 				resolveErr = fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
 				return token
@@ -111,7 +184,7 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return v
 		})
 		if resolveErr != nil {
-			return "", resolveErr
+			return "", provenance, resolveErr
 		}
 		// Fail loud on malformed tokens the placeholder regex could not
 		// match (e.g. "${env:foo-bar}", "${env: FOO}"): silently passing the
@@ -119,19 +192,42 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 		// into a fail-quiet launch (fable acceptance LOW-6; master's
 		// parse-time behavior for such values was a hard error).
 		if strings.Contains(resolved, "${env:") {
-			return "", fmt.Errorf("resolve %q: malformed ${env:...} placeholder (variable names match [A-Za-z_][A-Za-z0-9_]*)", ref)
+			return "", provenance, fmt.Errorf("resolve %q: malformed ${env:...} placeholder (variable names match [A-Za-z_][A-Za-z0-9_]*)", ref)
 		}
-		return resolved, nil
+		return resolved, provenance, nil
 	case strings.HasPrefix(ref, "$"):
+		provenance.kind = "environment-ref"
 		name := strings.TrimPrefix(ref, "$")
-		v, ok := os.LookupEnv(name)
+		v, ok := r.lookupEnvironment(name)
 		if !ok {
-			return "", fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
+			return "", provenance, fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
 		}
-		return v, nil
+		return v, provenance, nil
 	default:
-		return ref, nil
+		provenance.kind = "literal"
+		return ref, provenance, nil
 	}
+}
+
+func (r *Resolver) ResolveMapWithProvenance(declarations map[string]string) (map[string]string, map[string]ResolvedReferenceProvenance, error) {
+	values := map[string]string{}
+	sources := map[string]ResolvedReferenceProvenance{}
+	normalized := map[string]bool{}
+	for key, ref := range declarations {
+		canonical := strings.ToUpper(key)
+		if key == "" || normalized[canonical] {
+			return nil, nil, fmt.Errorf("ambiguous declaration key")
+		}
+		normalized[canonical] = true
+		value, source, err := r.ResolveWithProvenance(ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("env[%s]: %w", key, err)
+		}
+		source.mapKey = key
+		values[key] = value
+		sources[key] = source
+	}
+	return values, sources, nil
 }
 
 // ResolveMap resolves every value in a manifest env map and returns a new map.
@@ -220,4 +316,25 @@ func OpenVaultOptional(keyPath, vaultPath string) (*Vault, error) {
 		return nil, fmt.Errorf("vault exists but unreadable: %w", err)
 	}
 	return vault, nil
+}
+
+// Per-call observed readers keep absence and cleanup classification with their
+// original owner. The vault/parser and optional missing-vault rule remain here.
+func OpenVaultOptionalWithReader(keyPath, vaultPath string, read VaultFileReader) (*Vault, error) {
+	if read == nil {
+		return nil, fmt.Errorf("vault reader required")
+	}
+	data, err := read(vaultPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return OpenVaultWithReader(keyPath, vaultPath, func(path string) ([]byte, error) {
+		if path == vaultPath {
+			return append([]byte(nil), data...), nil
+		}
+		return read(path)
+	})
 }

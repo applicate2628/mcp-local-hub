@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,8 +42,6 @@ func TestProductionSpawnFnUsesDescriptorWorkingDirUnlessWorkspaceOverrides(t *te
 		t.Fatal(err)
 	}
 	defer events.Close()
-	spawnFn := makeProductionSpawnFn(events, NewDaemonRuntimeTracker())
-
 	for _, tc := range []struct {
 		name      string
 		workspace string
@@ -51,6 +51,20 @@ func TestProductionSpawnFnUsesDescriptorWorkingDirUnlessWorkspaceOverrides(t *te
 		{name: "workspace overrides descriptor working directory", workspace: workspaceDir, want: workspaceDir},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			held := make(chan struct{})
+			releaseEmit := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(releaseEmit) }) }
+			workers := &fixtureSpawnWorkers{beforeEmit: func() {
+				close(held)
+				<-releaseEmit
+			}}
+			t.Cleanup(func() {
+				release()
+				settleFixtureSpawnWorkers(t, workers, cancel)
+			})
+			spawnFn := makeProductionSpawnFnWithWorkers(events, NewDaemonRuntimeTracker(), "", nil, "", nil, ctx, nil, false, workers)
 			output := filepath.Join(root, tc.name+".cwd")
 			t.Setenv(spawnWorkingDirHelperOutputEnv, output)
 			descriptor := api.SupervisorDaemon{
@@ -74,6 +88,7 @@ func TestProductionSpawnFnUsesDescriptorWorkingDirUnlessWorkspaceOverrides(t *te
 			if string(got) != tc.want {
 				t.Fatalf("child working directory = %q, want %q", got, tc.want)
 			}
+			requireFixtureWaitsForExitEmit(t, workers, cancel, held, release, filepath.Join(root, "supervisor-events.log"), descriptor.TaskName)
 		})
 	}
 }

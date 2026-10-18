@@ -121,70 +121,103 @@ func setReconcileSchedulerNewFnForTest(fn func() (scheduler.Scheduler, error)) f
 //   - Emit one `mcphub-reconcile-invoked` audit event with body
 //     {dry_run, drift_count, applied_count}.
 //   - Return ReconcileResponse via IPCResponse.Result.
-func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
+func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) (err error) {
+	var prepared *api.PreparedSerenaConsumerInvocation
+	var repairAPI *api.API
+	var serenaRepairResult api.SerenaIntentRepairResult
+	var serenaRepairCause error
+	var preparedCloseCause error
+	var retainedResponse api.ReconcileResponse
+	// Every frame and non-frame return settles the SAME original invocation.
+	// The outer request context remains live through its final receiving.
+	closePrepared := func() error {
+		if prepared == nil {
+			return nil
+		}
+		original := prepared
+		prepared = nil
+		proof, closeErr := original.CloseObserved()
+		closeErr = errors.Join(closeErr, proof.Validate(original))
+		if closeErr != nil {
+			preparedCloseCause = closeErr
+			serenaRepairResult.Outcome = api.SerenaIntentRepairOutcomeError
+		}
+		return closeErr
+	}
+	writeFrame := func(frame api.IPCResponse, frameCauses ...error) error {
+		originalRepairCause := serenaRepairCause
+		closeErr := closePrepared()
+		retainedResponse.SerenaOrphansRepaired = serenaRepairResult.Repaired
+		retainedResponse.SerenaOrphansDeferred = serenaRepairResult.Deferred
+		retainedResponse.SerenaRepairOutcome = serenaRepairResult.Outcome
+		retainedResponse.SerenaRepairIncomplete = serenaRepairResult.Incomplete
+		retainedResponse.SerenaRepairRecovered = serenaRepairResult.Recovered
+		if originalCause := errors.Join(originalRepairCause, preparedCloseCause); originalCause != nil {
+			retainedResponse.SerenaRepairError = originalCause.Error()
+		}
+		if originalRepairCause == nil && preparedCloseCause == nil {
+			retainedResponse.SerenaRepairError = ""
+		}
+		causes := []error{originalRepairCause}
+		causes = append(causes, frameCauses...)
+		causes = append(causes, preparedCloseCause)
+		cause := errors.Join(causes...)
+		if closeErr != nil && frame.Error == nil {
+			return &reconcileResultError{cause: cause, response: retainedResponse, frame: &frame}
+		}
+		if repairAPI != nil && frame.Error != nil {
+			serenaRepairResult.Outcome = api.SerenaIntentRepairOutcomeError
+			retainedResponse.SerenaRepairOutcome = serenaRepairResult.Outcome
+			// Human wire text is formatted only here. Typed return causes come from
+			// original arguments above, never by parsing this message back into errors.
+			frame.Error.Message = errors.Join(originalRepairCause, errors.New(frame.Error.Message), preparedCloseCause).Error()
+			retainedResponse.SerenaRepairError = frame.Error.Message
+			frame.Result = retainedResponse
+		}
+		return writeReconcileResultFrame(conn, frame, retainedResponse, cause)
+	}
+	writeTimeout := func(cause error) error {
+		if cause == nil {
+			cause = context.DeadlineExceeded
+		}
+		return writeFrame(api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "RECONCILE_TIMEOUT", Message: cause.Error(), Retryable: true}, Final: true}, cause)
+	}
 	args, err := parseReconcileArgs(req.Args)
 	if err != nil {
-		return writeIPCFrame(conn, api.IPCResponse{
+		return writeFrame(api.IPCResponse{
 			ID:    req.ID,
 			Error: &api.IPCErr{Code: "INVALID_ARGS", Message: err.Error()},
 			Final: true,
-		})
+		}, err)
 	}
 	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileRequestTimeout(args))
-	defer cancel()
+	defer func() { err = errors.Join(err, closePrepared()); cancel() }()
 	if args.Apply && deps.runtimeTracker != nil {
 		if integrityErr := deps.runtimeTracker.StopSettlementIntegrityError(); integrityErr != nil {
-			return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "STOP_SETTLEMENT_RECOVERY_REQUIRED", Message: integrityErr.Error()}, Final: true})
+			return writeFrame(api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "STOP_SETTLEMENT_RECOVERY_REQUIRED", Message: integrityErr.Error()}, Final: true}, integrityErr)
 		}
 	}
 	if args.StopBatch != nil {
 		return handleReconcileStopBatch(conn, req, ctx, deps, *args.StopBatch)
 	}
 
-	// (0) Serena registry/intent self-heal (the P1 fix this closes: `mcphub
-	// workspace register` used to commit a workspaces.yaml row and print
-	// success WITHOUT ever touching supervisor-intent.json — no daemon row, no
-	// reconcile, no spawn). RepairSerenaIntentFromRegistry re-converges any
-	// serena registry row not yet reflected in intent (an explicit register, or
-	// a crash between an auto-register Save and its install commit) by
-	// APPENDING the missing daemon row — it never replace-alls. Running it
-	// here, BEFORE the intent read at step (1) below, means an apply-mode pass
-	// computes drift (and spawns) against the now-complete intent in the SAME
-	// round trip that `mcphub workspace register` triggers via
-	// DialSupervisorIPCReconcile (apply=true). Mirrors the supervisor's own
-	// startup self-heal (runSupervise, supervise.go).
-	//
-	// BOTH modes now compute the SAME classification (mcphub-register-intent
-	// REVISE round 2, BLOCKING 3 fix): before this, ONLY apply mode ever
-	// computed which orphaned serena rows would be materialized, so a dry-run
-	// reconcile could never show an operator what the very next `--apply`
-	// (possibly for a completely unrelated reason — a plain `mcphub reconcile
-	// --apply`, `mcphub stop`, `mcphub restart`, ...) was about to silently
-	// materialize. Apply mode COMMITS the append (RepairSerenaIntentFromRegistry,
-	// unchanged behavior, still audited via emitSerenaIntentRepairOutcome);
-	// dry-run mode only PREVIEWS it (PreviewSerenaIntentRepairFromRegistry —
-	// read-only, never writes, never audited, since the event log records
-	// actual repairs and a dry-run preview describes nothing that happened). A
-	// repair/preview error or a deferred introduce-crash never fails this
-	// reconcile request either way.
-	//
-	// A repair/preview FAILURE is reported to the caller in
-	// ReconcileResponse.SerenaRepairError. It must be: a failed repair leaves
-	// the orphan out of the intent, hence out of the drift report too, so
-	// without this field the response is byte-identical to a healthy "no drift"
-	// pass and `mcphub reconcile --apply` printed `no drift` + exited 0 over a
-	// workspace that stayed unusable. Reporting it is NOT the same as failing
-	// the request: the drift report is still valid, and `mcphub stop` /
-	// `mcphub restart` dispatch apply-mode reconciles whose own work must not
-	// be blocked by an unrelated serena row — so the frame still carries OK.
-	// The same holds in dry-run, where a swallowed preview error would report
-	// `serena orphans would repair: 0` for a preview that never got a verdict;
-	// surfacing it keeps that number honest without making a dry-run fail.
-	var serenaRepairResult api.SerenaIntentRepairResult
+	// (0) An explicit target-bearing Apply prepares only that exact missing
+	// workspace through one original API. Startup, untargeted requests and
+	// previews retain the legacy registry repair and first-introduction deferral.
+	// Repair failures remain visible in SerenaRepairError while the existing
+	// generic drift/settlement path keeps its independent operational contract.
 	var serenaRepairErr string
-	if args.Apply {
+	if args.Apply && args.SettleTarget != nil {
+		repairAPI = api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+		serenaRepairResult, prepared, serenaRepairCause = repairAPI.ReconcileSerenaIntentForSupervisor(ctx, deps.stateDir, deps.supervisorLock, *args.SettleTarget, true)
+		emitSerenaIntentRepairOutcome(deps.events, serenaRepairResult, serenaRepairCause)
+		if serenaRepairCause != nil {
+			serenaRepairErr = serenaRepairCause.Error()
+		}
+	} else if args.Apply {
 		var rErr error
 		serenaRepairResult, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
+		serenaRepairCause = rErr
 		emitSerenaIntentRepairOutcome(deps.events, serenaRepairResult, rErr)
 		if rErr != nil {
 			serenaRepairErr = rErr.Error()
@@ -192,6 +225,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	} else {
 		var pErr error
 		serenaRepairResult, pErr = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
+		serenaRepairCause = pErr
 		if pErr != nil {
 			serenaRepairErr = pErr.Error()
 		}
@@ -204,17 +238,17 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	intentPath := filepath.Join(deps.stateDir, "supervisor-intent.json")
 	intent, err := readSupervisorIntentForReconcile(ctx, intentPath)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return writeReconcileTimeoutFrame(conn, req, err)
+		return writeTimeout(err)
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return writeIPCFrame(conn, api.IPCResponse{
+		return writeFrame(api.IPCResponse{
 			ID: req.ID,
 			Error: &api.IPCErr{
 				Code:    "RECONCILE_INTENT_READ_FAILED",
 				Message: err.Error(),
 			},
 			Final: true,
-		})
+		}, err)
 	}
 	// Phase 4-E2: the supervisor-intent.json `stops` sub-block is the SOLE stop
 	// source. A genuinely MISSING file (os.ErrNotExist) is tolerated for the
@@ -232,6 +266,20 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		// empty intent file (no daemons declared). The orphan-detection
 		// loop below still runs.
 		intent = &api.SupervisorIntentFile{}
+	}
+	if args.Apply && !supervisorIntentMissing {
+		imageResult, imageErr := api.ConvergeGeneratedSupervisorImage(intentPath)
+		if imageErr != nil {
+			return writeFrame(api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "RECONCILE_RUNTIME_IMAGE_FAILED", Message: imageErr.Error()}, Final: true}, imageErr)
+		}
+		intent = imageResult.Intent
+		intent = ensureBuiltinRouteDaemonAtStartup(deps.stateDir, intent, deps.events)
+	} else if !args.Apply {
+		preview, imageErr := api.PreviewGeneratedSupervisorImage(intent)
+		if imageErr != nil {
+			return writeFrame(api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "RECONCILE_RUNTIME_IMAGE_FAILED", Message: imageErr.Error()}, Final: true}, imageErr)
+		}
+		intent = preview
 	}
 	updatedIntent := intent
 
@@ -254,7 +302,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		if err == nil {
 			err = ctx.Err()
 		}
-		return writeReconcileTimeoutFrame(conn, req, err)
+		return writeTimeout(err)
 	}
 	var rawDaemonIntent *api.DaemonIntentFile
 	if daemonIntentRes.State == api.IntentStateValid {
@@ -317,20 +365,20 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// (3) Scheduler snapshot.
 	schedTasks, schedErr := reconcileSchedulerListFn(ctx)
 	if errors.Is(schedErr, context.DeadlineExceeded) || errors.Is(schedErr, context.Canceled) {
-		return writeReconcileTimeoutFrame(conn, req, schedErr)
+		return writeTimeout(schedErr)
 	}
 	if schedErr != nil {
 		if api.ReconcileSchedulerUnavailableError(schedErr) {
 			schedTasks = nil
 		} else {
-			return writeIPCFrame(conn, api.IPCResponse{
+			return writeFrame(api.IPCResponse{
 				ID: req.ID,
 				Error: &api.IPCErr{
 					Code:    "RECONCILE_SCHEDULER_LIST_FAILED",
 					Message: schedErr.Error(),
 				},
 				Final: true,
-			})
+			}, schedErr)
 		}
 	}
 
@@ -470,7 +518,10 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			var applyErr error
 			appliedCount, applyErr = applyReconcileDriftForTargetWithObserver(ctx, deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent, nil)
 			if applyErr != nil {
-				return fmt.Errorf("apply targeted reconcile drift: %w", applyErr)
+				writeErr := writeFrame(api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "RECONCILE_APPLY_FAILED", Message: fmt.Errorf("apply targeted reconcile drift: %w", applyErr).Error()}, Final: true}, applyErr)
+				// Preserve the failed handler result: the dispatcher must not
+				// trigger its post-success recovery worker after this error frame.
+				return errors.Join(serenaRepairCause, applyErr, preparedCloseCause, writeErr)
 			}
 		}
 	}
@@ -501,6 +552,12 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		})
 	}
 
+	// Settlement and authoritative reads are complete. Receive the original
+	// invocation close before serializing any successful terminal response.
+	_ = closePrepared()
+	if cause := errors.Join(serenaRepairCause, preparedCloseCause); cause != nil {
+		serenaRepairErr = cause.Error()
+	}
 	// (9) Response.
 	resp := api.ReconcileResponse{
 		DryRun:                 !args.Apply,
@@ -515,15 +572,16 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		SerenaRepairError:      serenaRepairErr,
 		TargetSettlement:       targetSettlement,
 	}
+	retainedResponse = resp
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return writeIPCFrame(conn, api.IPCResponse{
+		return writeFrame(api.IPCResponse{
 			ID:    req.ID,
 			Error: &api.IPCErr{Code: "RECONCILE_MARSHAL_FAILED", Message: err.Error()},
 			Final: true,
-		})
+		}, err)
 	}
-	return writeIPCFrame(conn, api.IPCResponse{
+	return writeFrame(api.IPCResponse{
 		ID:     req.ID,
 		OK:     true,
 		Result: json.RawMessage(body),
@@ -531,6 +589,31 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	})
 }
 
+// Existing response DATA remains attached to its original failure boundary. It
+// is diagnostic partial outcome, never proof of delivery, settlement or retry.
+type reconcileResultError struct {
+	cause    error
+	response api.ReconcileResponse
+	frame    *api.IPCResponse
+}
+
+func (e *reconcileResultError) Error() string {
+	if e.response.SerenaRepairOutcome == "" && e.response.SerenaOrphansRepaired == 0 && len(e.response.SerenaOrphansDeferred) == 0 {
+		return e.cause.Error()
+	}
+	return fmt.Sprintf("%v (retained partial Serena result: repaired=%d, deferred=%d, outcome=%s)", e.cause, e.response.SerenaOrphansRepaired, len(e.response.SerenaOrphansDeferred), e.response.SerenaRepairOutcome)
+}
+func (e *reconcileResultError) Unwrap() error { return e.cause }
+
+// One actual production write boundary preserves already acquired causes when
+// transmission fails, including a close consumed before terminal construction.
+// Successfully transmitted historical error frames keep their return convention.
+func writeReconcileResultFrame(conn net.Conn, frame api.IPCResponse, result api.ReconcileResponse, cause error) error {
+	if writeErr := writeIPCFrame(conn, frame); writeErr != nil {
+		return &reconcileResultError{cause: errors.Join(cause, writeErr), response: result, frame: &frame}
+	}
+	return nil
+}
 func baseReconcileContext(deps ipcDispatchDeps) context.Context {
 	if deps.controllerProvider != nil {
 		if ctrl := deps.controllerProvider(); ctrl != nil && ctrl.ctx != nil {
@@ -576,21 +659,6 @@ func daemonIntentReadTimeoutForReconcile(ctx context.Context) time.Duration {
 		}
 	}
 	return timeout
-}
-
-func writeReconcileTimeoutFrame(conn net.Conn, req api.IPCRequest, err error) error {
-	if err == nil {
-		err = context.DeadlineExceeded
-	}
-	return writeIPCFrame(conn, api.IPCResponse{
-		ID: req.ID,
-		Error: &api.IPCErr{
-			Code:      "RECONCILE_TIMEOUT",
-			Message:   err.Error(),
-			Retryable: true,
-		},
-		Final: true,
-	})
 }
 
 // parseReconcileArgs converts req.Args (which arrives as map[string]any

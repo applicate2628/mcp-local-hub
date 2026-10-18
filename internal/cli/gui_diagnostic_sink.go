@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -20,6 +21,7 @@ const guiConsoleReleasedDiagnosticEvent = "gui-console-released-diagnostic"
 // Without the seam the assertion would have to read the hub-mcp log file,
 // which makes an ordering test depend on state-dir plumbing.
 var logGUIDiagnosticEvent = api.LogHubMcpEvent
+var logGUIDiagnosticEventRequired = api.LogHubMcpEventRequired
 
 // consoleReleaseSink is the ONE writer every GUI runtime diagnostic goes
 // through, and the reason there is a single one is the failure it exists
@@ -103,28 +105,46 @@ func (s *consoleReleaseSink) engageDurableSink() {
 
 // Write always reports success for the full buffer. Callers are
 // fmt.Fprintf diagnostics that discard the error anyway, and reporting a
-// short write or an error would be worse than useless: it cannot be acted
-// on, and on a released console the fallback failing is the EXPECTED state
-// rather than a fault. The durable write is where delivery is actually
-// guaranteed.
+// short write or an error changes that legacy contract. Required lifecycle
+// delivery uses WriteRequired and receives both actual destination outcomes.
 func (s *consoleReleaseSink) Write(p []byte) (int, error) {
+	_, _ = s.deliver(p, false)
+	return len(p), nil
+}
+
+func (s *consoleReleaseSink) WriteRequired(p []byte) (int, error) {
+	return s.deliver(p, true)
+}
+
+// One routing body preserves durable-first ordering and always attempts the
+// selected fallback, including after a durable failure. It never logs itself.
+func (s *consoleReleaseSink) deliver(p []byte, required bool) (int, error) {
 	s.mu.Lock()
 	durable, fallback := s.durable, s.fallback
 	s.mu.Unlock()
+	var result error
 
 	if durable {
 		// One fmt.Fprintf produces exactly one Write of the whole
 		// formatted message, so one event per operator-facing line.
 		if msg := strings.TrimRight(string(p), "\r\n"); strings.TrimSpace(msg) != "" {
-			_ = logGUIDiagnosticEvent("warn", guiConsoleReleasedDiagnosticEvent, map[string]any{
+			emit := logGUIDiagnosticEvent
+			if required {
+				emit = logGUIDiagnosticEventRequired
+			}
+			result = emit("warn", guiConsoleReleasedDiagnosticEvent, map[string]any{
 				"message": msg,
 			})
 		}
 	}
 	if fallback != nil {
-		_, _ = fallback.Write(p)
+		n, err := fallback.Write(p)
+		if required && err == nil && n != len(p) {
+			err = io.ErrShortWrite
+		}
+		result = errors.Join(result, err)
 	}
-	return len(p), nil
+	return len(p), result
 }
 
 // guiRuntimeStdout / guiRuntimeStderr are the process-wide GUI diagnostic

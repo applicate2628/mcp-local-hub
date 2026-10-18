@@ -463,8 +463,9 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 				markerCompensation = outcome
 			}
 		}
-		return errors.Join(releaseErr, workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
-			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation))
+		outputErr := printPartialReconcileRepair(cmd.OutOrStderr(), reconcileResp)
+		partialErr := workspaceRegisterPartialStateError(canonical, wsKey, entry, settled, reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation)
+		return errors.Join(releaseErr, &reconcileResultError{cause: errors.Join(reconcileErr, settlementErr, checkErr, partialErr, outputErr), response: reconcileResp})
 	}
 
 	// Re-read the settled registry row, then render only the API-owned batch

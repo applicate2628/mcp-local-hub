@@ -55,9 +55,9 @@ import (
 // Serena tools/call whose upstream forward fails (dead port — mirrors
 // route_i6_readonly_test.go's fixture) must never create hub-mcp.log even
 // when the state directory's OWN DACL is broadened to Authenticated Users,
-// which makes Registry.Load() (called from
-// serena_routing.WorkspaceResolver.refresh()) hit the parent-gate
-// default-relax fallback on every request.
+// which makes the initial Registry.Load and later shared-observer secure
+// reads hit the parent-gate default-relax fallback. The observer compares
+// bytes by lookup 32 for a stable readable file, not every request.
 func TestBuildRouteServer_BroadenedParentRegistryRead_NoHubMcpLogWrite(t *testing.T) {
 	tmp := t.TempDir()
 	broadenDirAuthenticatedUsers(t, tmp)
