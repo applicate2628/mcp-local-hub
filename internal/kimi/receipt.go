@@ -30,7 +30,7 @@ type providerReceipt struct {
 }
 
 func (r providerReceipt) IsError() bool {
-	return r.ExitCode != 0 || r.Status != "completed" || r.Cancelled || r.TimedOut ||
+	return r.ExitCode != 0 || r.Status != "completed" || r.Gate != "PASS" || r.Cancelled || r.TimedOut ||
 		r.CleanupStatus != "complete" || r.CleanupIssueCount != 0
 }
 

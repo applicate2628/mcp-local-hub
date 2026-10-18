@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,6 +36,10 @@ func TestIdempotencyRequestBindingSurvivesRestart(t *testing.T) {
 		equivalent := req
 		equivalent.ProjectRoot = root + string(filepath.Separator) + "."
 		equivalent.ProjectFile = "." + string(filepath.Separator) + "sample.son"
+		if runtime.GOOS == "windows" {
+			equivalent.ProjectRoot = strings.ToUpper(equivalent.ProjectRoot)
+			equivalent.ProjectFile = strings.ToUpper(equivalent.ProjectFile)
+		}
 		replay, err := s.Start(context.Background(), equivalent)
 		if err != nil || replay.RunID != first.RunID || replay.RequestDisposition != "replayed" {
 			t.Fatalf("restart=%v replay=%+v err=%v", restart, replay, err)
@@ -149,5 +155,28 @@ func TestTimedOutFlagPersistsWithTerminalState(t *testing.T) {
 	}
 	if body, err := os.ReadFile(filepath.Join(root, "sample.son")); err != nil || string(body) != admittedTestSON {
 		t.Fatalf("source changed: %q %v", body, err)
+	}
+}
+
+func TestRequestHashPathCaseFollowsPlatformIdentity(t *testing.T) {
+	req := StartRequest{ProjectRoot: filepath.Join(t.TempDir(), "MixedCase"), ProjectFile: "SubDir/Project.son", TimeoutSeconds: 10}
+	original, err := startRequestHash(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"root", "file"} {
+		changed := req
+		if field == "root" {
+			changed.ProjectRoot = strings.ToUpper(changed.ProjectRoot)
+		} else {
+			changed.ProjectFile = strings.ToUpper(changed.ProjectFile)
+		}
+		got, err := startRequestHash(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (got == original) != (runtime.GOOS == "windows") {
+			t.Fatalf("%s case identity on %s: equal=%v", field, runtime.GOOS, got == original)
+		}
 	}
 }

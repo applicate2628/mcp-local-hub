@@ -50,3 +50,20 @@ func TestProviderReceiptRequiresMatchingPrimaryOutcome(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderReceiptFailedGateIsErrorEvenWithSuccessfulExit(t *testing.T) {
+	for _, gate := range []string{"PASS", "FAIL", "BLOCKED", "unknown"} {
+		t.Run(gate, func(t *testing.T) {
+			record := ownerReceiptRecord(t, "high", "result")
+			// Change both top-level and primaryOutcome gates, keeping them consistent.
+			record = strings.ReplaceAll(record, `"gate":"PASS"`, `"gate":"`+gate+`"`)
+			got, err := parseProviderReceipt([]byte(record), "high", "external-reviewer", CapabilityChoice{Kind: "none"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.IsError() != (gate != "PASS") {
+				t.Fatalf("gate %q with exit=0/completed: IsError=%v", gate, got.IsError())
+			}
+		})
+	}
+}

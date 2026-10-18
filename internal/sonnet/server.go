@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -448,11 +449,18 @@ func startRequestHash(req StartRequest) (string, error) {
 	if !within(root, filepath.Join(root, file)) {
 		return "", errors.New("SONNET_PROJECT_INVALID")
 	}
+	// Windows project identity is case-insensitive, including the relative
+	// project filename. Keep POSIX casing significant and do not alter the
+	// actual paths used for copying or invoking the driver.
+	rootKey, fileKey := filepath.ToSlash(root), filepath.ToSlash(file)
+	if runtime.GOOS == "windows" {
+		rootKey, fileKey = strings.ToLower(rootKey), strings.ToLower(fileKey)
+	}
 	payload, err := json.Marshal(struct {
 		ProjectRoot    string
 		ProjectFile    string
 		TimeoutSeconds int
-	}{filepath.ToSlash(root), filepath.ToSlash(file), req.TimeoutSeconds})
+	}{rootKey, fileKey, req.TimeoutSeconds})
 	if err != nil {
 		return "", fmt.Errorf("SONNET_PROJECT_INVALID: %w", err)
 	}
