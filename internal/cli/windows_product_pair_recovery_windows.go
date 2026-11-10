@@ -58,41 +58,47 @@ type windowsProductPairRecoveryDeps struct {
 }
 
 type windowsProductRecoveryRequest struct {
-	Context                context.Context
-	StateDir               string
-	ProductPath            string
-	LegacyWindowlessPath   string
-	Legacy                 windowsProductPairRecoveryRequest
-	RecoverPriorSettlement func(context.Context, windowsProductRecoveryJournalV3) error
-	PreparePendingRuntime  func(context.Context, windowsProductRecoveryJournalV3, *pendingRuntimeReceiving) (func(context.Context, windowsProductRecoveryJournalV3) error, error)
-	PendingRuntime         *pendingRuntimeReceiving
-	ObserveSuccessorReady  func(context.Context, string, string) (bool, error)
-	StartSupervisor        func(string) (SupervisorLaunch, error)
-	WaitSupervisorReady    func(context.Context, string, string) error
-	ReconcileCommitted     func(windowsProductRecoveryJournalV3) error
-	Deps                   windowsProductRecoveryDeps
+	CanonicalEntryPath             string
+	IdentityPath                   string
+	Context                        context.Context
+	StateDir                       string
+	ProductPath                    string
+	LegacyWindowlessPath           string
+	Legacy                         windowsProductPairRecoveryRequest
+	RecoverPriorSettlement         func(context.Context, windowsProductRecoveryJournalV3) error
+	RecoverPriorSettlementOriginal func(context.Context, windowsProductRecoveryJournalV3, *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error
+	PreparePendingRuntime          func(context.Context, windowsProductRecoveryJournalV3, *pendingRuntimeReceiving) (func(context.Context, windowsProductRecoveryJournalV3) error, error)
+	PendingRuntime                 *pendingRuntimeReceiving
+	ObserveSuccessorReady          func(context.Context, string, string) (bool, error)
+	StartSupervisor                func(string) (SupervisorLaunch, error)
+	WaitSupervisorReady            func(context.Context, string, string) error
+	ReconcileCommitted             func(windowsProductRecoveryJournalV3) error
+	Deps                           windowsProductRecoveryDeps
 	// Optional command admission controls; legacy recovery retains its contract.
 	ExpectedJournalSHA256                   string
 	RequirePriorSettlementOnSettledRollback bool
 }
 
 type windowsProductRecoveryDeps struct {
-	ReadJournal      func(string) ([]byte, error)
-	WriteJournal     func(string, []byte) error
-	RemoveJournal    func(string) error
-	ReadReceipt      func(string) ([]byte, error)
-	WriteReceipt     func(string, []byte) error
-	RemoveReceipt    func(string) error
-	ListAsides       func(string) ([]string, error)
-	HashFile         func(string) (string, error)
-	AdmitProduct     func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
-	ReopenTasks      func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductTaskTxn, error)
-	DiscardTaskStore func(WindowsProductPairTaskRecovery) error
-	RestorePromotion func(WindowsProductPairPromotion) (string, error)
-	RestoreNoReplace func(string, string) error
-	RemoveExact      func(string) error
-	PublishCommitted func(WindowsProductCommitEvent) (string, error)
-	Now              func() time.Time
+	ReopenEntrySetTasks func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error)
+	RetainEntry         func(string) (string, error)
+	AdmitEntrySet       func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV1, binaryadmission.WindowsCanonicalEntrySetSnapshotV1) (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error)
+	ReadJournal         func(string) ([]byte, error)
+	WriteJournal        func(string, []byte) error
+	RemoveJournal       func(string) error
+	ReadReceipt         func(string) ([]byte, error)
+	WriteReceipt        func(string, []byte) error
+	RemoveReceipt       func(string) error
+	ListAsides          func(string) ([]string, error)
+	HashFile            func(string) (string, error)
+	AdmitProduct        func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
+	ReopenTasks         func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductTaskTxn, error)
+	DiscardTaskStore    func(WindowsProductPairTaskRecovery) error
+	RestorePromotion    func(WindowsProductPairPromotion) (string, error)
+	RestoreNoReplace    func(string, string) error
+	RemoveExact         func(string) error
+	PublishCommitted    func(WindowsProductCommitEvent) (string, error)
+	Now                 func() time.Time
 }
 
 // The recovery owner, shared by stored-pending admission and execution.
@@ -160,15 +166,21 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		}
 	}
 	journal, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err == nil {
+		err = resolveCanonicalRecoveryRequest(&req, journal)
+	}
 	if err != nil || !sameWindowsRecoveryPath(journal.Product.Target, req.ProductPath) ||
 		!sameWindowsRecoveryPath(journal.LegacyWindowless.Target, req.LegacyWindowlessPath) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V3.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV3+".json")) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json")) {
 		return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch", ErrWindowsProductRecoveryIdentity)
 	}
+	if journal.EntrySet != nil && journal.Phase == WindowsProductRecoverySettledRollback {
+		return rollbackCanonicalEntryRecovery(req, d, v3Path, journal, nil)
+	}
 	// Stored pre-decision GUI-owned recovery binds current desired state before
 	// task opening or material inverse. Immediate rollback never enters this hook.
-	if req.PreparePendingRuntime != nil && windowsProductPriorRecoveryPending(journal) && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+	if journal.EntrySet == nil && req.PreparePendingRuntime != nil && windowsProductPriorRecoveryPending(journal) && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
 		if req.PendingRuntime == nil {
 			req.PendingRuntime = new(pendingRuntimeReceiving)
 		}
@@ -235,7 +247,19 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	if d.ReopenTasks == nil || d.DiscardTaskStore == nil {
 		return nil, fmt.Errorf("%w: retained task recovery owner is unavailable", ErrWindowsProductRecoveryIdentity)
 	}
-	tasks, err := d.ReopenTasks(req.Context, journal.Tasks)
+	var tasks WindowsProductTaskTxn
+	if journal.EntrySet != nil {
+		targets, targetErr := canonicalEntrySetJournalTargets(journal)
+		if targetErr != nil {
+			return nil, targetErr
+		}
+		if d.ReopenEntrySetTasks == nil {
+			return nil, fmt.Errorf("%w: complete-set task recovery projection unavailable", ErrWindowsProductRecoveryPending)
+		}
+		tasks, err = d.ReopenEntrySetTasks(req.Context, journal.Tasks, targets)
+	} else {
+		tasks, err = d.ReopenTasks(req.Context, journal.Tasks)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: reopen retained task transaction: %w", ErrWindowsProductRecoveryIdentity, err)
 	}
@@ -247,6 +271,9 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 }
 
 func rollbackWindowsProductRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
+	if journal.EntrySet != nil {
+		return rollbackCanonicalEntryRecovery(req, d, journalPath, journal, tasks)
+	}
 	productArtifact := windowsProductPairRecoveryArtifact{
 		Target: journal.Product.Target, PriorPresent: journal.Product.PriorPresent,
 		PriorSHA256: journal.Product.PriorSHA256, NewSHA256: journal.Product.NewSHA256,
@@ -365,6 +392,14 @@ func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j 
 }
 
 func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
+	if journal.EntrySet != nil {
+		if err := cleanupColdCanonicalOriginals(req, d, journalPath, &journal); err != nil {
+			return nil, err
+		}
+		if err := readRecoveryCanonicalEntrySet(req.Context, journal, d); err != nil {
+			return nil, err
+		}
+	}
 	product, err := d.AdmitProduct(binaryadmission.WindowsArtifact{
 		Path: journal.Product.Target, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: journal.Product.NewSHA256,
 	})
@@ -556,7 +591,23 @@ func restoreWindowsProductLegacyRecoveryArtifact(a windowsProductPairRecoveryArt
 	return nil
 }
 
+func withWindowsProductNativeDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
+	if d.RetainLegacy == nil {
+		d.RetainLegacy = api.RetainBinaryTargetAside
+	}
+	if d.RestoreNoReplace == nil {
+		d.RestoreNoReplace = moveWindowsFileNoReplace
+	}
+	return d
+}
+
 func withWindowsProductRecoveryDefaults(d windowsProductRecoveryDeps) windowsProductRecoveryDeps {
+	if d.RetainEntry == nil {
+		d.RetainEntry = api.RetainBinaryTargetAside
+	}
+	if d.AdmitEntrySet == nil {
+		d.AdmitEntrySet = readCanonicalEntrySet
+	}
 	product := withWindowsProductDefaults(WindowsProductTxnDeps{
 		WriteReceipt: d.WriteReceipt, ReadReceipt: d.ReadReceipt, RemoveReceipt: d.RemoveReceipt,
 		WriteRecoveryJournal: d.WriteJournal, ReadRecoveryJournal: d.ReadJournal,
@@ -712,6 +763,34 @@ type windowsProductPairRecoveryArtifactState struct {
 }
 
 func inspectWindowsProductPairRecoveryArtifact(a windowsProductPairRecoveryArtifact, d windowsProductPairRecoveryDeps) (windowsProductPairRecoveryArtifactState, error) {
+	state, err := observeWindowsProductPairRecoveryArtifact(a, d)
+	if err != nil {
+		return state, err
+	}
+	if a.PriorPresent {
+		switch state.canonical {
+		case a.PriorSHA256:
+			if state.priorAside != "" {
+				return state, errors.New("canonical prior and crash-created prior aside coexist")
+			}
+		case a.NewSHA256:
+			if state.priorAside == "" || state.newAside != "" {
+				return state, errors.New("canonical successor has ambiguous crash-created asides")
+			}
+		case "":
+			if state.priorAside == "" {
+				return state, errors.New("absent canonical has no crash-created prior aside")
+			}
+		}
+	} else if state.priorAside != "" || state.newAside != "" {
+		return state, errors.New("prior-absent target has an unexplained crash-created aside")
+	}
+	return state, nil
+}
+
+// Observation rejects foreign bytes and ambiguous originals without imposing
+// rollback's requirement that every prior still exists after committed cleanup.
+func observeWindowsProductPairRecoveryArtifact(a windowsProductPairRecoveryArtifact, d windowsProductPairRecoveryDeps) (windowsProductPairRecoveryArtifactState, error) {
 	state := windowsProductPairRecoveryArtifactState{}
 	hash, err := d.HashFile(a.Target)
 	if errors.Is(err, os.ErrNotExist) {
@@ -754,24 +833,6 @@ func inspectWindowsProductPairRecoveryArtifact(a windowsProductPairRecoveryArtif
 		default:
 			return state, errors.New("unrecognized post-journal generated aside")
 		}
-	}
-	if a.PriorPresent {
-		switch state.canonical {
-		case a.PriorSHA256:
-			if state.priorAside != "" {
-				return state, errors.New("canonical prior and crash-created prior aside coexist")
-			}
-		case a.NewSHA256:
-			if state.priorAside == "" || state.newAside != "" {
-				return state, errors.New("canonical successor has ambiguous crash-created asides")
-			}
-		case "":
-			if state.priorAside == "" {
-				return state, errors.New("absent canonical has no crash-created prior aside")
-			}
-		}
-	} else if state.priorAside != "" || state.newAside != "" {
-		return state, errors.New("prior-absent target has an unexplained crash-created aside")
 	}
 	return state, nil
 }
@@ -961,21 +1022,6 @@ func withWindowsProductPairRecoveryDefaults(d windowsProductPairRecoveryDeps) wi
 		d.RemoveExact = os.Remove
 	}
 	return d
-}
-
-func hashRecoveryFile(path string) (string, error) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(body)), nil
-}
-
-func removeRecoveryLeaf(path string) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
 }
 
 func moveWindowsFileNoReplace(source, target string) error {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -236,7 +237,11 @@ func dirOnPath(dir, pathEnv string) bool {
 // Exported so `mcphub install` can invoke the same flow when it detects that
 // mcphub is not yet on PATH and stdin is a terminal.
 func Bootstrap(w io.Writer) error {
-	if err := bootstrapCopyOnly(w); err != nil {
+	return bootstrapWithWindowsCanonicalEntryInput(context.Background(), w, windowsCanonicalEntryCommandInput{})
+}
+
+func bootstrapWithWindowsCanonicalEntryInput(ctx context.Context, w io.Writer, input windowsCanonicalEntryCommandInput) error {
+	if err := bootstrapCopyOnlyWithWindowsCanonicalEntryInput(ctx, w, input); err != nil {
 		return err
 	}
 	target, err := setupTargetPath()
@@ -251,6 +256,10 @@ func Bootstrap(w io.Writer) error {
 // Bootstrap calls it before the separate PATH-registration step so setup keeps
 // file installation and environment registration as explicit owners.
 func bootstrapCopyOnly(w io.Writer) error {
+	return bootstrapCopyOnlyWithWindowsCanonicalEntryInput(context.Background(), w, windowsCanonicalEntryCommandInput{})
+}
+
+func bootstrapCopyOnlyWithWindowsCanonicalEntryInput(ctx context.Context, w io.Writer, input windowsCanonicalEntryCommandInput) error {
 	target, err := setupTargetPath()
 	if err != nil {
 		return fmt.Errorf("resolve target path: %w", err)
@@ -259,11 +268,15 @@ func bootstrapCopyOnly(w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
-	return bootstrapProductToTarget(w, curExe, target)
+	return bootstrapProductToTargetWithWindowsCanonicalEntryInput(ctx, w, curExe, target, input)
 }
 
 // newSetupCmdReal returns the `mcphub setup` command.
 func newSetupCmdReal() *cobra.Command {
+	return newSetupCmdRealWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+func newSetupCmdRealWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	var allowElevated bool
 	var rollbackLSPRouter bool
 	var trustedRoots []string
@@ -378,6 +391,9 @@ See also: install, uninstall, autostart, supervise.`,
 			if rollbackLSPRouter {
 				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)
 			}
+			if runtime.GOOS == "windows" && input.bindingErr != nil {
+				return input.bindingErr
+			}
 			// Validate --trusted-root paths BEFORE any mutation so a
 			// fat-fingered relative path fails the whole command up front
 			// rather than after bootstrap/watchdog side effects have landed.
@@ -391,7 +407,7 @@ See also: install, uninstall, autostart, supervise.`,
 			if err := validateSetupServerArg(installServer); err != nil {
 				return err
 			}
-			if err := runSetupBootstrap(cmd.OutOrStdout()); err != nil {
+			if err := runSetupBootstrapWithWindowsCanonicalEntryInput(cmd.Context(), cmd.OutOrStdout(), input); err != nil {
 				return err
 			}
 			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
@@ -540,10 +556,14 @@ func runSetupInstallServer(out io.Writer, server string) error {
 }
 
 func runSetupBootstrap(out io.Writer) error {
+	return runSetupBootstrapWithWindowsCanonicalEntryInput(context.Background(), out, windowsCanonicalEntryCommandInput{})
+}
+
+func runSetupBootstrapWithWindowsCanonicalEntryInput(ctx context.Context, out io.Writer, input windowsCanonicalEntryCommandInput) error {
 	if setupBootstrapFn != nil {
 		return setupBootstrapFn(out)
 	}
-	return Bootstrap(out)
+	return bootstrapWithWindowsCanonicalEntryInput(ctx, out, input)
 }
 
 func runSetupWatchdogForSetup(out io.Writer, allowElevated bool) error {

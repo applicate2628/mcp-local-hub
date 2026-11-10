@@ -39,7 +39,7 @@ function generateFixture(fixtureRoot) {
   return npmDir;
 }
 
-test("generator emits one Windows executable plus its non-executable identity manifest", () => {
+test("generator emits the waiting entry, nested GUI product, and V1 identity", () => {
   withScratch("npm-platform-generator-", (fixtureRoot) => {
     const npmDir = generateFixture(fixtureRoot);
     const manifest = JSON.parse(
@@ -49,6 +49,7 @@ test("generator emits one Windows executable plus its non-executable identity ma
     assert.deepStrictEqual(manifest.cpu, ["x64"]);
     assert.strictEqual(Object.hasOwn(manifest, "bin"), false);
     assert.deepStrictEqual(manifest.files, [
+      "bin/mcphub-product/mcphub.exe",
       "bin/mcphub.exe",
       "bin/windows-product-identity.json",
       "README.md",
@@ -96,7 +97,7 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
     for (const target of ["win32-x64"]) {
       const packageDir = path.join(npmDir, "packages", target);
       const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
-      const expectedNative = ["bin/mcphub.exe", "bin/windows-product-identity.json"];
+      const expectedNative = ["bin/mcphub-product/mcphub.exe", "bin/mcphub.exe", "bin/windows-product-identity.json"];
       for (const relative of expectedNative) {
         const nativePath = path.join(packageDir, ...relative.split("/"));
         fs.mkdirSync(path.dirname(nativePath), { recursive: true });
@@ -116,7 +117,7 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
       assert.deepStrictEqual(actualNative, expectedNative, target);
       assert.deepStrictEqual(
         result[0].files.map((entry) => entry.path).sort(),
-        ["README.md", "bin/mcphub.exe", "bin/windows-product-identity.json", "package.json"],
+        ["README.md", "bin/mcphub-product/mcphub.exe", "bin/mcphub.exe", "bin/windows-product-identity.json", "package.json"],
       );
     }
   });
@@ -127,7 +128,7 @@ test("Windows artifact contract freezes filenames, roles, sources, subsystems, a
     fs.readFileSync(path.join(ROOT, "windows-product-artifacts.json"), "utf8"),
   );
   assert.deepStrictEqual(contract, {
-    schemaVersion: 2,
+    schemaVersion: 3,
     identityManifest: {
       filename: "windows-product-identity.json",
       schema: "windows-product-identity-v1",
@@ -135,14 +136,47 @@ test("Windows artifact contract freezes filenames, roles, sources, subsystems, a
     artifacts: [
       {
         role: "product",
-        filename: "mcphub.exe",
+        filename: "mcphub-product/mcphub.exe",
         source: "./cmd/mcphub",
         subsystem: 2,
         productMetadata: true,
         npmPayload: true,
         npmBin: false,
       },
+      {
+        role: "launcher",
+        filename: "mcphub.exe",
+        source: "./cmd/mcphub-launcher",
+        subsystem: 3,
+        productMetadata: false,
+        npmPayload: true,
+        npmBin: false,
+      },
     ],
+  });
+});
+
+test("generator refuses a swapped or incomplete Windows entry set", () => {
+  withScratch("npm-platform-entry-contract-", (fixtureRoot) => {
+    const npmDir = generateFixture(fixtureRoot);
+    const contractPath = path.join(fixtureRoot, "windows-product-artifacts.json");
+    const original = JSON.parse(fs.readFileSync(contractPath, "utf8"));
+    for (const mutate of [
+      (contract) => { contract.artifacts.pop(); },
+      (contract) => { contract.artifacts[0].filename = "mcphub.exe"; },
+      (contract) => { contract.artifacts[1].subsystem = 2; },
+      (contract) => { contract.identityManifest.schema = "windows-product-identity-v2"; },
+      (contract) => { contract.runtimePayload = {}; },
+    ]) {
+      const contract = structuredClone(original);
+      mutate(contract);
+      fs.writeFileSync(contractPath, JSON.stringify(contract));
+      const result = spawnSync(process.execPath, [path.join(npmDir, "generate-platform-packages.js")], {
+        cwd: fixtureRoot, encoding: "utf8",
+      });
+      assert.notStrictEqual(result.status, 0);
+      assert.match(result.stderr, /schemaVersion 3/);
+    }
   });
 });
 

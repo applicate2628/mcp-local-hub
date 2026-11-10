@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "identityManifest": {
     "schema": "windows-product-identity-v1",
     "filename": "windows-product-identity.json"
@@ -7,10 +7,19 @@
   "artifacts": [
     {
       "role": "product",
-      "filename": "mcphub.exe",
+      "filename": "mcphub-product/mcphub.exe",
       "source": "./cmd/mcphub",
       "subsystem": 2,
       "productMetadata": true,
+      "npmPayload": true,
+      "npmBin": false
+    },
+    {
+      "role": "launcher",
+      "filename": "mcphub.exe",
+      "source": "./cmd/mcphub-launcher",
+      "subsystem": 3,
+      "productMetadata": false,
       "npmPayload": true,
       "npmBin": false
     }
