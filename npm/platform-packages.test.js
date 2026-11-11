@@ -108,7 +108,13 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
         encoding: "utf8",
       });
       assert.strictEqual(packed.status, 0, packed.stderr || packed.stdout);
-      const result = JSON.parse(packed.stdout);
+      const packedResult = JSON.parse(packed.stdout);
+      if (!Array.isArray(packedResult)) {
+        assert.deepStrictEqual(Object.keys(packedResult), [manifest.name]);
+      }
+      const result = Array.isArray(packedResult)
+        ? packedResult
+        : [packedResult[manifest.name]];
       assert.strictEqual(result.length, 1);
       const actualNative = result[0].files
         .map((entry) => entry.path)
