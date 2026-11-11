@@ -1073,8 +1073,9 @@ func validateGUIOwnedIndependentFleet(journal windowsProductRecoveryJournalV3, o
 type guiOwnedPriorSupervisorState string
 
 const (
-	guiOwnedPriorSupervisorSame   guiOwnedPriorSupervisorState = "same"
-	guiOwnedPriorSupervisorAbsent guiOwnedPriorSupervisorState = "absent"
+	guiOwnedPriorSupervisorSame                 guiOwnedPriorSupervisorState = "same"
+	guiOwnedPriorSupervisorAbsent               guiOwnedPriorSupervisorState = "absent"
+	guiOwnedPriorSupervisorRecoveredIndependent guiOwnedPriorSupervisorState = "recovered-independent"
 )
 
 type guiOwnedPriorReservationOps struct {
@@ -1317,38 +1318,42 @@ func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsP
 	}()
 	operation = upgradeGUIPriorSupervisorState
 	state, err := ops.SupervisorState(ctx, journal)
-	if err != nil || (state != guiOwnedPriorSupervisorSame && state != guiOwnedPriorSupervisorAbsent) {
+	if err != nil || (state != guiOwnedPriorSupervisorSame && state != guiOwnedPriorSupervisorAbsent && state != guiOwnedPriorSupervisorRecoveredIndependent) {
 		return errors.Join(fmt.Errorf("%w: original supervisor state is ambiguous", ErrWindowsProductRecoveryPending), err)
 	}
-	if state == guiOwnedPriorSupervisorSame {
-		operation = upgradeGUIPriorSettleSame
-		if err := ops.SettleSame(ctx, journal); err != nil {
-			return fmt.Errorf("%w: exact original supervisor reap unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
-		}
-	}
-	operation = upgradeGUIPriorAbsence
-	if err := ops.ProveAbsent(ctx, journal); err != nil {
-		return fmt.Errorf("%w: prior supervisor lock/ports remain: %w", ErrWindowsProductRecoveryPending, err)
-	}
-	operation = upgradeGUIPriorSupervisorStart
-	launch, startErr := ops.StartSupervisor()
-	if startErr != nil || launch == nil {
-		return errors.Join(fmt.Errorf("%w: independent prior supervisor start unconfirmed: %w", ErrWindowsProductRecoveryPending, errors.Join(startErr, missingSupervisorLaunch(launch))), abortStartedSupervisor(launch))
-	}
+	var launch SupervisorLaunch
+	var binding SupervisorControlBinding
 	handedOff := false
-	defer func() {
-		if !handedOff {
-			retErr = errors.Join(retErr, abortStartedSupervisor(launch))
+	if state != guiOwnedPriorSupervisorRecoveredIndependent {
+		if state == guiOwnedPriorSupervisorSame {
+			operation = upgradeGUIPriorSettleSame
+			if err := ops.SettleSame(ctx, journal); err != nil {
+				return fmt.Errorf("%w: exact original supervisor reap unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
+			}
 		}
-	}()
-	operation = upgradeGUIPriorControl
-	binding, err := launch.BindControl(ctx, ops.SupervisorExpected)
-	if err != nil {
-		return fmt.Errorf("%w: prior supervisor control unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
-	}
-	operation = upgradeGUIPriorReadiness
-	if err := ops.WaitSupervisorReady(ctx); err != nil {
-		return fmt.Errorf("%w: prior supervisor readiness unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
+		operation = upgradeGUIPriorAbsence
+		if err := ops.ProveAbsent(ctx, journal); err != nil {
+			return fmt.Errorf("%w: prior supervisor lock/ports remain: %w", ErrWindowsProductRecoveryPending, err)
+		}
+		operation = upgradeGUIPriorSupervisorStart
+		launch, err = ops.StartSupervisor()
+		if err != nil || launch == nil {
+			return errors.Join(fmt.Errorf("%w: independent prior supervisor start unconfirmed: %w", ErrWindowsProductRecoveryPending, errors.Join(err, missingSupervisorLaunch(launch))), abortStartedSupervisor(launch))
+		}
+		defer func() {
+			if !handedOff {
+				retErr = errors.Join(retErr, abortStartedSupervisor(launch))
+			}
+		}()
+		operation = upgradeGUIPriorControl
+		binding, err = launch.BindControl(ctx, ops.SupervisorExpected)
+		if err != nil {
+			return fmt.Errorf("%w: prior supervisor control unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
+		}
+		operation = upgradeGUIPriorReadiness
+		if err := ops.WaitSupervisorReady(ctx); err != nil {
+			return fmt.Errorf("%w: prior supervisor readiness unconfirmed: %w", ErrWindowsProductRecoveryPending, err)
+		}
 	}
 	operation = upgradeGUIPriorIndependentFleet
 	if err := ops.ProveIndependent(ctx, journal); err != nil {
@@ -1381,11 +1386,13 @@ func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsP
 		if readbackErr := ops.Readback(journal); readbackErr == nil {
 			operation = upgradeGUIPriorFinalHealth
 			if healthErr := ops.ObserveHealthy(limit, journal); healthErr == nil {
-				operation = upgradeGUIPriorHandoff
-				if err := launch.Handoff(limit, binding); err != nil {
-					return fmt.Errorf("%w: prior supervisor managed handoff: %w", ErrWindowsProductRecoveryPending, err)
+				if launch != nil {
+					operation = upgradeGUIPriorHandoff
+					if err := launch.Handoff(limit, binding); err != nil {
+						return fmt.Errorf("%w: prior supervisor managed handoff: %w", ErrWindowsProductRecoveryPending, err)
+					}
+					handedOff = true
 				}
-				handedOff = true
 				return nil
 			} else {
 				lastHealth, lastObservation = healthErr, healthErr
@@ -2839,7 +2846,40 @@ func windowsCanonicalEntryRecoveryRuntimeRequest(ctx context.Context, stateDir, 
 	return req, nil
 }
 
-func recoverWindowsCanonicalEntryPriorRuntime(ctx context.Context, stateDir string, journal windowsProductRecoveryJournalV3, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) (retErr error) {
+func recoverWindowsCanonicalEntryPriorRuntime(ctx context.Context, stateDir string, journal windowsProductRecoveryJournalV3, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error {
+	runtimePath := journal.Product.Target
+	if original != nil {
+		runtimePath = original.Artifact().Path
+	}
+	deps := buildV5UpgradeDeps(runtimePath, stateDir)
+	return recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(ctx, stateDir, journal, original, deps.StartSupervisor,
+		func(ctx context.Context, path, digest string) error {
+			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{SHA256: digest})
+		})
+}
+
+func recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(ctx context.Context, stateDir string, journal windowsProductRecoveryJournalV3, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1, start func(string) (SupervisorLaunch, error), ready func(context.Context, string, string) error) (retErr error) {
+	if ctx == nil {
+		return fmt.Errorf("%w: prior runtime recovery context unavailable", ErrWindowsProductRecoveryPending)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	switch journal.Mode {
+	case WindowsProductPairModeSetup, WindowsProductPairModeCanonicalize:
+		// These producers do not stop a prior runtime or persist its projection.
+		return nil
+	case WindowsProductPairModeUpgrade:
+	default:
+		return fmt.Errorf("%w: unsupported prior runtime recovery mode", ErrWindowsProductRecoveryIdentity)
+	}
+	if journal.EntrySet == nil {
+		return fmt.Errorf("%w: complete-set prior runtime recovery has no entry set", ErrWindowsProductRecoveryIdentity)
+	}
+	pre := journal.PreSettlement
+	if pre == nil {
+		return fmt.Errorf("%w: original runtime settlement is missing", ErrWindowsProductRecoveryPending)
+	}
 	path, digest, present, err := windowsProductRecoveryPriorRuntime(journal)
 	if err != nil {
 		return err
@@ -2847,90 +2887,193 @@ func recoverWindowsCanonicalEntryPriorRuntime(ctx context.Context, stateDir stri
 	if !present {
 		path = journal.EntrySet.CanonicalEntry.Target
 	}
-	frozen := expandWindowsProductFrozenPorts(journal.FrozenPorts)
-	absent, absenceErr := observeWindowsProductPairQuiescence(ctx, stateDir, path, frozen)
-	if absenceErr == nil && absent.Supervisor.State == windowsProductSupervisorKnownAbsent && absent.GUIOwner == windowsProductGUIOwnerConfirmedAbsent && absent.SupervisorLockReleased {
-		if err := validateWindowsProductQuiescenceObservation(absent, frozen); err != nil {
+	if pre.Supervisor.State != windowsProductSupervisorKnownAbsent && pre.Supervisor.State != windowsProductSupervisorGracefullySettled {
+		return fmt.Errorf("%w: unsupported prior supervisor state", ErrWindowsProductRecoveryIdentity)
+	}
+	if pre.Supervisor.State == windowsProductSupervisorGracefullySettled || pre.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+		if !present || original == nil {
+			return fmt.Errorf("%w: original recovery runtime view unavailable for a previously live runtime", ErrWindowsProductRecoveryPending)
+		}
+		if err := original.ValidateOriginal(ctx); err != nil {
 			return err
 		}
-		// The existing GUI probe does not own the tray role. Observe that role
-		// independently before accepting a no-stop inverse, including nil view.
-		rows, err := api.NewAPI().ListMatchingProcesses([]string{"mcphub.exe", "mcphub-windowless.exe"})
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			role := supervisorCommandLineSubcommand(row.Cmdline)
-			if role != "gui" && role != "tray" && role != "supervise" {
-				continue
-			}
-			identity, err := process.LookupPIDHandleIdentity(row.PID)
-			if err != nil {
-				return err
-			}
-			if samePath(identity.ExecutablePath, path) {
-				absenceErr = errors.New("original runtime process still exists")
-				break
-			}
-		}
-		if absenceErr == nil {
-			return ctx.Err()
+		artifact := original.Artifact()
+		if !samePath(artifact.Path, path) || artifact.SHA256 != digest {
+			return fmt.Errorf("%w: original runtime differs from journal-bound prior", ErrWindowsProductRecoveryIdentity)
 		}
 	}
-	if original == nil {
-		return errors.Join(fmt.Errorf("%w: native runtime absence is unproved and original recovery runtime view unavailable", ErrWindowsProductRecoveryPending), absenceErr)
-	}
-	if err := original.ValidateOriginal(ctx); err != nil {
-		return errors.Join(absenceErr, err)
-	}
-	if journal.PreSettlement == nil {
-		return fmt.Errorf("%w: original runtime settlement is missing", ErrWindowsProductRecoveryPending)
-	}
-	if journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+	if pre.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
 		return recoverGUIOwnedPriorSettlementWithOriginal(ctx, stateDir, path, journal, nil, nil, original)
 	}
-	recorded := journal.PreSettlement.Supervisor.Generation
-	if recorded == nil {
-		return errors.Join(fmt.Errorf("%w: recorded original supervisor is missing", ErrWindowsProductRecoveryPending), absenceErr)
+	if pre.GUIOwner != windowsProductGUIOwnerConfirmedAbsent {
+		return fmt.Errorf("%w: original GUI ownership is unknown", ErrWindowsProductRecoveryIdentity)
 	}
-	held, err := process.HoldPIDForTermination(recorded.PID)
+	frozen := expandWindowsProductFrozenPorts(journal.FrozenPorts)
+	current, err := observeWindowsProductPairQuiescence(ctx, stateDir, path, frozen)
 	if err != nil {
 		return err
 	}
-	defer func() { retErr = errors.Join(retErr, held.Close()) }()
-	if err := held.VerifyIdentity(process.PIDIdentityProof{PID: recorded.PID, ExecutablePath: path, StartedAt: recorded.StartedAt}); err != nil {
+	if err := validateWindowsProductQuiescenceObservation(current, frozen); err != nil {
 		return err
 	}
-	if err := verifyUpgradePriorRuntimeHeld(ctx, original, held); err != nil {
-		return err
+	if current.Supervisor.State == windowsProductSupervisorKnownAbsent {
+		if err := validateCanonicalEntryRuntimeAbsence(ctx, path, frozen, current); err != nil {
+			return err
+		}
+		if pre.Supervisor.State == windowsProductSupervisorKnownAbsent {
+			return ctx.Err()
+		}
+	} else if pre.Supervisor.State == windowsProductSupervisorKnownAbsent {
+		return fmt.Errorf("%w: prior known-absent state changed", ErrWindowsProductRecoveryIdentity)
 	}
-	if _, err := held.Terminate(); err != nil {
-		return err
+	if start == nil || ready == nil {
+		return fmt.Errorf("%w: prior supervisor launch operations unavailable", ErrWindowsProductRecoveryPending)
 	}
-	deps := buildV5UpgradeDeps(path, stateDir)
-	if err := deps.WaitSupervisorLockReleased(ctx, defaultSupervisorLockReleaseTimeout); err != nil {
+	recorded := pre.Supervisor.Generation
+	if recorded == nil {
+		return fmt.Errorf("%w: recorded original supervisor is missing", ErrWindowsProductRecoveryIdentity)
+	}
+	if current.Supervisor.State == windowsProductSupervisorGracefullySettled {
+		live := current.Supervisor.Generation
+		if live.PID != recorded.PID || live.StartedAt != recorded.StartedAt {
+			// A prior recovery may have restarted the original before its journal
+			// was retired. Accept only that original image, independent and ready;
+			// a different generation is never termination authority.
+			held, err := process.HoldPIDForJobObservation(live.PID)
+			if err != nil {
+				return err
+			}
+			defer func() { retErr = errors.Join(retErr, held.Close()) }()
+			proof := process.PIDIdentityProof{PID: live.PID, ExecutablePath: path, StartedAt: live.StartedAt, StartTolerance: time.Nanosecond}
+			if err := held.VerifyIdentity(proof); err != nil {
+				return err
+			}
+			if err := verifyUpgradePriorRuntimeHeld(ctx, original, held); err != nil {
+				return err
+			}
+			if inJob, err := held.InAnyJob(); err != nil || inJob {
+				return errors.Join(fmt.Errorf("%w: recovered supervisor independence unproved: member=%v", ErrWindowsProductRecoveryIdentity, inJob), err)
+			}
+			owner := api.SupervisorLockOwner{PID: live.PID, StartedAt: live.StartedAt}
+			if err := waitCanonicalRecoveredSupervisorReady(ctx, stateDir, path, owner, held); err != nil {
+				return err
+			}
+			owner, err = api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+			if err != nil || owner.PID != live.PID || owner.StartedAt != live.StartedAt {
+				return errors.Join(fmt.Errorf("%w: recovered supervisor changed during readiness", ErrWindowsProductRecoveryIdentity), err)
+			}
+			return verifyUpgradePriorRuntimeHeld(ctx, original, held)
+		}
+		held, err := process.HoldPIDForTermination(recorded.PID)
+		if err != nil {
+			return err
+		}
+		defer func() { retErr = errors.Join(retErr, held.Close()) }()
+		if err := held.VerifyIdentity(process.PIDIdentityProof{PID: recorded.PID, ExecutablePath: path, StartedAt: recorded.StartedAt}); err != nil {
+			return err
+		}
+		if err := verifyUpgradePriorRuntimeHeld(ctx, original, held); err != nil {
+			return err
+		}
+		if _, err := held.Terminate(); err != nil {
+			return err
+		}
+	}
+	// The recorded generation may already be gone. Proven current absence
+	// permits a restart, but cannot itself satisfy an originally live state.
+	if err := waitV5SupervisorLockReleased(ctx, defaultSupervisorLockReleaseTimeout, filepath.Join(stateDir, "supervisor.lock")); err != nil {
 		return err
 	}
 	settled, err := observeWindowsProductPairQuiescence(ctx, stateDir, path, frozen)
 	if err != nil {
 		return err
 	}
-	if settled.Supervisor.State != windowsProductSupervisorKnownAbsent {
-		return fmt.Errorf("%w: original supervisor absence unproved", ErrWindowsProductRecoveryPending)
-	}
-	if err := validateWindowsProductQuiescenceObservation(settled, frozen); err != nil {
+	if err := validateCanonicalEntryRuntimeAbsence(ctx, path, frozen, settled); err != nil {
 		return err
 	}
 	if err := original.ValidateOriginal(ctx); err != nil {
 		return err
 	}
-	launch, err := deps.StartSupervisor(path)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	launch, err := start(path)
 	if err != nil {
 		return errors.Join(err, abortStartedSupervisor(launch))
 	}
 	return receiveStartedSupervisor(ctx, launch, supervisorExpectation(stateDir, path, digest), func() error {
-		return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{SHA256: digest})
+		return ready(ctx, path, digest)
 	})
+}
+
+// Replayed recovery observes an existing generation; it has no creator launch
+// binding. Read readiness only from that generation's actual native pipe peer.
+func waitCanonicalRecoveredSupervisorReady(ctx context.Context, stateDir, path string, owner api.SupervisorLockOwner, held process.HeldPIDJobObservation) error {
+	if ctx == nil || held == nil {
+		return fmt.Errorf("%w: recovered supervisor observation unavailable", ErrWindowsProductRecoveryPending)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	peer, err := api.ObserveSupervisorProcessIdentityV1(owner.PID)
+	if err != nil {
+		return err
+	}
+	if err := api.ValidateSupervisorStatusServerIdentityV1(owner, peer, peer.UserSID, peer.SessionID, path); err != nil {
+		return fmt.Errorf("%w: recovered supervisor peer: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	proof := process.PIDIdentityProof{PID: owner.PID, ExecutablePath: path, StartedAt: owner.StartedAt, StartTolerance: time.Nanosecond}
+	if err := held.VerifyIdentity(proof); err != nil {
+		return err
+	}
+	limit, cancel := context.WithTimeout(ctx, defaultSupervisorLockReleaseTimeout)
+	defer cancel()
+	for {
+		readiness, err := api.ReadSupervisorControlReadinessForPeerFromStateDir(limit, stateDir, owner, peer)
+		if err != nil {
+			return err
+		}
+		if readiness.ReconcileReadyPresent && readiness.ReconcileReadyValid && readiness.ReconcileReady {
+			return held.VerifyIdentity(proof)
+		}
+		select {
+		case <-limit.Done():
+			return limit.Err()
+		case <-time.After(supervisorReadyPollInterval):
+		}
+	}
+}
+
+func validateCanonicalEntryRuntimeAbsence(ctx context.Context, path string, frozen []windowsProductIntentPortV1, observation windowsProductQuiescenceObservationV1) error {
+	if observation.Supervisor.State != windowsProductSupervisorKnownAbsent || observation.GUIOwner != windowsProductGUIOwnerConfirmedAbsent || !observation.SupervisorLockReleased {
+		return fmt.Errorf("%w: original runtime absence unproved", ErrWindowsProductRecoveryPending)
+	}
+	if err := validateWindowsProductQuiescenceObservation(observation, frozen); err != nil {
+		return err
+	}
+	// The lock/port and GUI observations do not own the tray role. Also refuse
+	// an unbound supervisor process before accepting absence or restarting.
+	rows, err := api.NewAPI().ListMatchingProcesses([]string{"mcphub.exe", "mcphub-windowless.exe"})
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		role := supervisorCommandLineSubcommand(row.Cmdline)
+		if role != "gui" && role != "tray" && role != "supervise" {
+			continue
+		}
+		identity, err := process.LookupPIDHandleIdentity(row.PID)
+		if err != nil {
+			return err
+		}
+		if samePath(identity.ExecutablePath, path) {
+			return fmt.Errorf("%w: original runtime process still exists", ErrWindowsProductRecoveryPending)
+		}
+	}
+	return ctx.Err()
 }
 
 func windowsProductRecoveryPriorRuntime(j windowsProductRecoveryJournalV3) (path, digest string, present bool, err error) {
@@ -3181,6 +3324,9 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 		}
 		return nil
 	}
+	// A resumed attempt observes this generation; it never acquires its creator
+	// capability or rewrites the original generation in the durable journal.
+	var recoveredSupervisor *api.SupervisorLockOwner
 	return recoverGUIOwnedPriorSettlementWithOps(ctx, journal, guiOwnedPriorRecoveryOps{
 		Readback: func(journal windowsProductRecoveryJournalV3) error {
 			if expectation != nil {
@@ -3226,6 +3372,9 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 				if err := verifyUpgradePriorRuntimeTopology(ctx, original, held); err != nil {
 					return err
 				}
+			}
+			if recoveredSupervisor != nil && held.SupervisorOwner != *recoveredSupervisor {
+				return errors.New("recovered independent supervisor changed before GUI health")
 			}
 			if expectation == nil {
 				return validateUpgradeGUIOwnedPriorHealth(journal, held)
@@ -3304,7 +3453,11 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 				return "", err
 			}
 			recorded := journal.PreSettlement.Supervisor.Generation
-			if recorded == nil || owner.PID != recorded.PID || owner.StartedAt != recorded.StartedAt {
+			if recorded == nil {
+				return "", errors.New("original supervisor generation is missing")
+			}
+			sameGeneration := owner.PID == recorded.PID && owner.StartedAt == recorded.StartedAt
+			if !sameGeneration && original == nil {
 				return "", errors.New("original supervisor generation changed")
 			}
 			held, err := process.HoldPIDForJobObservation(owner.PID)
@@ -3328,8 +3481,8 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 				}
 			}
 			inJob, err := held.InAnyJob()
-			if err != nil || !inJob {
-				return "", fmt.Errorf("original supervisor Job membership unconfirmed: member=%v error=%v", inJob, err)
+			if err != nil || inJob != sameGeneration {
+				return "", errors.Join(fmt.Errorf("prior supervisor Job membership unconfirmed: original=%v member=%v", sameGeneration, inJob), err)
 			}
 			sameUser, err := process.ProcessOwnerSIDMatchesCurrent(owner.PID)
 			if err != nil || !sameUser {
@@ -3338,6 +3491,20 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 			identity, err := process.LookupProcessIdentity(owner.PID)
 			if err != nil || !samePath(identity.ExecutablePath, productPath) || supervisorCommandLineSubcommand(identity.CommandLine) != "supervise" {
 				return "", fmt.Errorf("original supervisor image or role changed: %v", err)
+			}
+			if !sameGeneration {
+				if err := waitCanonicalRecoveredSupervisorReady(ctx, stateDir, productPath, owner, held); err != nil {
+					return "", err
+				}
+				current, err := api.ReadSupervisorLockOwner(lockPath)
+				if err != nil || current != owner {
+					return "", errors.Join(errors.New("recovered independent supervisor changed during readiness"), err)
+				}
+				if err := verifyUpgradePriorRuntimeHeld(ctx, original, held); err != nil {
+					return "", err
+				}
+				recoveredSupervisor = &owner
+				return guiOwnedPriorSupervisorRecoveredIndependent, nil
 			}
 			return guiOwnedPriorSupervisorSame, nil
 		},
@@ -3408,11 +3575,17 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 				if owner.PID <= 0 || (journal.PreSettlement.Supervisor.Generation != nil && owner.PID == journal.PreSettlement.Supervisor.Generation.PID && owner.StartedAt == journal.PreSettlement.Supervisor.Generation.StartedAt) {
 					return errors.New("independent prior supervisor generation was not created")
 				}
+				if recoveredSupervisor != nil && owner != *recoveredSupervisor {
+					return errors.New("recovered independent supervisor changed before fleet proof")
+				}
 				held, err := process.HoldPIDForJobObservation(owner.PID)
 				if err != nil {
 					return err
 				}
 				identityErr := held.VerifyIdentity(process.PIDIdentityProof{PID: owner.PID, ExecutablePath: productPath, StartedAt: owner.StartedAt, StartTolerance: time.Nanosecond})
+				if identityErr == nil && recoveredSupervisor != nil {
+					identityErr = verifyUpgradePriorRuntimeHeld(limit, original, held)
+				}
 				inJob, jobErr := held.InAnyJob()
 				closeErr := held.Close()
 				if identityErr != nil || jobErr != nil || inJob || closeErr != nil {
