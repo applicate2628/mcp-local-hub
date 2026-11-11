@@ -156,6 +156,100 @@ func TestOriginalCanonicalEntrySetBuildBindingAndRetainedGuards(t *testing.T) {
 	}
 }
 
+func TestOriginalCanonicalEntryIdentitySizeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"limit", windowsProductIdentityMaxBytes},
+		{"limit_plus_one", windowsProductIdentityMaxBytes + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			targets, binding := canonicalEntrySetFixture(t)
+			raw, err := os.ReadFile(targets.IdentityPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			padded := append(bytes.Repeat([]byte(" "), tc.size-len(raw)), raw...)
+			if err := os.WriteFile(targets.IdentityPath, padded, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			owner, err := AdmitWindowsCanonicalEntrySetV1(context.Background(), targets.CanonicalEntryPath, binding)
+			closeCanonicalEntryFixtureOwner(t, owner)
+			if tc.size > windowsProductIdentityMaxBytes {
+				if err == nil {
+					t.Fatal("oversized identity admitted")
+				}
+				if _, err := owner.Snapshot(); err == nil {
+					t.Fatal("oversized identity exposed an admitted snapshot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := owner.Snapshot()
+			if err != nil || !bytes.Equal(snapshot.IdentityBytes, padded) {
+				t.Fatalf("identity at byte limit was not preserved: bytes=%d error=%v", len(snapshot.IdentityBytes), err)
+			}
+		})
+	}
+}
+
+func TestCanonicalEntryPriorIdentitySizeBoundPreservesOriginalBytes(t *testing.T) {
+	targets, binding := canonicalEntrySetFixture(t)
+	source, err := AdmitWindowsCanonicalEntrySetV1(context.Background(), targets.CanonicalEntryPath, binding)
+	closeCanonicalEntryFixtureOwner(t, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "mcphub.exe")
+	identityPath := filepath.Join(filepath.Dir(destination), WindowsCanonicalIdentityRelativePathV1)
+	old := bytes.Repeat([]byte("p"), windowsProductIdentityMaxBytes+1)
+	for _, path := range []string{destination, identityPath} {
+		if err := os.WriteFile(path, old, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staged, err := source.Stage(context.Background(), destination)
+	if staged != nil {
+		t.Cleanup(func() {
+			if err := staged.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := staged.AcquireOriginalPriorSet(context.Background())
+	if prior != nil {
+		t.Cleanup(func() {
+			if err := prior.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	present, body, hash, err := prior.ReadOriginal("identity")
+	if err == nil || !present || body != nil || hash != "" {
+		t.Fatalf("oversized prior identity was received: present=%t bytes=%d hash=%q error=%v", present, len(body), hash, err)
+	}
+	present, body, hash, err = prior.ReadOriginal("launcher")
+	if err != nil || !present || !bytes.Equal(body, old) || hash != canonicalEntrySHA256(old) {
+		t.Fatalf("identity bound affected launcher preimage: present=%t bytes=%d error=%v", present, len(body), err)
+	}
+	if err := prior.Close(); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.ReadFile(identityPath)
+	if err != nil || !bytes.Equal(actual, old) {
+		t.Fatalf("refused identity preimage changed: bytes=%d error=%v", len(actual), err)
+	}
+}
+
 func TestOriginalCanonicalEntryRefusesSubstitutedEntryAndRetainsPartialOwner(t *testing.T) {
 	targets, binding := canonicalEntrySetFixture(t)
 	foreign, err := os.ReadFile(targets.CanonicalEntryPath)

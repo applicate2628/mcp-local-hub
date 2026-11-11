@@ -268,6 +268,17 @@ type WindowsProductIdentityV1 struct {
 	SHA256    string              `json:"sha256"`
 }
 
+// Nine metadata fields need only a few hundred bytes. Keep formatting headroom
+// while bounding the original bytes retained and copied on every admission.
+const windowsProductIdentityMaxBytes = 64 << 10
+
+func validateWindowsProductIdentitySize(size int64) error {
+	if size < 0 || size > windowsProductIdentityMaxBytes {
+		return fmt.Errorf("Windows Product identity-v1 size outside 0..%d bytes", windowsProductIdentityMaxBytes)
+	}
+	return nil
+}
+
 func decodeCanonicalEntryJSON(raw []byte, v any) error {
 	if err := uniqueSourceJSON(json.NewDecoder(bytes.NewReader(raw))); err != nil {
 		return err
@@ -302,6 +313,9 @@ func canonicalEntryExactJSONKeys(raw []byte, keys ...string) error {
 }
 
 func ParseWindowsProductIdentity(raw []byte) (v WindowsProductIdentityV1, err error) {
+	if err = validateWindowsProductIdentitySize(int64(len(raw))); err != nil {
+		return v, err
+	}
 	if err = decodeCanonicalEntryJSON(raw, &v); err != nil {
 		return v, err
 	}

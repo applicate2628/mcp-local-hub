@@ -244,6 +244,9 @@ func (o *WindowsCanonicalEntrySetV1) receive(ctx context.Context, binding *Windo
 	if err != nil {
 		return err
 	}
+	if err := validateWindowsProductIdentitySize(ii.Size()); err != nil {
+		return err
+	}
 	raw, err := io.ReadAll(io.NewSectionReader(o.identity.file, 0, ii.Size()))
 	if err != nil {
 		return err

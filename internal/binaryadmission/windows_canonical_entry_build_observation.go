@@ -146,6 +146,9 @@ func CheckWindowsCanonicalEntryBuildV1(ctx context.Context, entryPath string, bi
 		return observation, err
 	}
 	entry, product, identityFile := files[0], files[1], files[2]
+	if err = validateWindowsProductIdentitySize(identityFile.info.Size()); err != nil {
+		return observation, err
+	}
 	entryHeader, err := readWindowsPEHeader(entry.file, entry.info.Size())
 	if err != nil {
 		return observation, err

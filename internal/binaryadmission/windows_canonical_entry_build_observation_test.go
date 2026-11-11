@@ -1,6 +1,7 @@
 package binaryadmission
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -128,6 +129,41 @@ func TestPortableCanonicalEntryBuildObservationRefusesHardlinkAlias(t *testing.T
 	}
 	if _, err := CheckWindowsCanonicalEntryBuildV1(context.Background(), targets.CanonicalEntryPath, binding); err == nil {
 		t.Fatal("hardlink alias accepted as a unique ordinary build artifact")
+	}
+}
+
+func TestPortableCanonicalEntryBuildIdentitySizeBoundary(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("host explicitly unsupported for native file-attribute build observations")
+	}
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"limit", windowsProductIdentityMaxBytes},
+		{"limit_plus_one", windowsProductIdentityMaxBytes + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			targets, binding := portableCanonicalEntryBuildFixture(t)
+			raw, err := os.ReadFile(targets.IdentityPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			padded := append(bytes.Repeat([]byte(" "), tc.size-len(raw)), raw...)
+			if err := os.WriteFile(targets.IdentityPath, padded, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := CheckWindowsCanonicalEntryBuildV1(context.Background(), targets.CanonicalEntryPath, binding)
+			if tc.size > windowsProductIdentityMaxBytes {
+				if err == nil || observation.EntrySet.IdentityBytes != nil {
+					t.Fatalf("oversized identity admitted: bytes=%d error=%v", len(observation.EntrySet.IdentityBytes), err)
+				}
+				return
+			}
+			if err != nil || !bytes.Equal(observation.EntrySet.IdentityBytes, padded) {
+				t.Fatalf("identity at byte limit was not preserved: bytes=%d error=%v", len(observation.EntrySet.IdentityBytes), err)
+			}
+		})
 	}
 }
 

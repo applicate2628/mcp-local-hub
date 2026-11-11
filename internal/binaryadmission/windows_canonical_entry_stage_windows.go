@@ -703,17 +703,22 @@ func (s *StagedWindowsCanonicalEntrySetV1) ReadOriginal(member string) (bool, []
 	if err = errors.Join(err, closeErr); err != nil {
 		return true, nil, "", err
 	}
-	body, hash, err := readCanonicalEntryOriginalBody(original, s.cleanupSHA256[index], "staged")
+	body, hash, err := readCanonicalEntryOriginalBody(original, s.cleanupSHA256[index], member, "staged")
 	return true, body, hash, err
 }
 
-func readCanonicalEntryOriginalBody(original *canonicalEntryNativeFile, expectedHash, ownerName string) ([]byte, string, error) {
+func readCanonicalEntryOriginalBody(original *canonicalEntryNativeFile, expectedHash, member, ownerName string) ([]byte, string, error) {
 	if err := canonicalEntryVerifyOriginalMember(original, expectedHash); err != nil {
 		return nil, "", err
 	}
 	info, err := original.file.Stat()
 	if err != nil {
 		return nil, "", err
+	}
+	if member == "identity" {
+		if err := validateWindowsProductIdentitySize(info.Size()); err != nil {
+			return nil, "", err
+		}
 	}
 	body, err := io.ReadAll(io.NewSectionReader(original.file, 0, info.Size()))
 	if err != nil {
@@ -744,7 +749,7 @@ func (p *WindowsCanonicalEntryPriorSetV1) ReadOriginal(member string) (bool, []b
 		}
 		return false, nil, "", nil
 	}
-	body, hash, err := readCanonicalEntryOriginalBody(p.members[index], p.sha256[index], "prior")
+	body, hash, err := readCanonicalEntryOriginalBody(p.members[index], p.sha256[index], member, "prior")
 	return true, body, hash, err
 }
 

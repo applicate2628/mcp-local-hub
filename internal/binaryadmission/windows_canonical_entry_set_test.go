@@ -106,6 +106,22 @@ func TestCanonicalEntryIdentityV1RejectsExtensionsDuplicatesAndDefaultInputs(t *
 	}
 }
 
+func TestCanonicalEntryIdentityV1SizeBoundary(t *testing.T) {
+	identity := WindowsProductIdentityV1{"windows-product-identity-v1", WindowsArtifactRoleProduct, "mcphub.exe", WindowsGUISubsystem, 0x8664, "0.4.41", strings.Repeat("d", 40), "2026-11-10T12:34:56Z", strings.Repeat("e", 64)}
+	raw, err := json.Marshal(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	atLimit := append(bytes.Repeat([]byte(" "), windowsProductIdentityMaxBytes-len(raw)-1), raw...)
+	atLimit = append(atLimit, '\n')
+	if actual, err := ParseWindowsProductIdentity(atLimit); err != nil || actual != identity {
+		t.Fatalf("identity at byte limit: value=%+v error=%v", actual, err)
+	}
+	if _, err := ParseWindowsProductIdentity(append(atLimit, '\n')); err == nil {
+		t.Fatal("identity one byte above limit accepted")
+	}
+}
+
 func TestCanonicalEntryRegistry3IsClosedAndRetainsFalseFields(t *testing.T) {
 	good, err := json.Marshal(canonicalEntryRegistryV1())
 	if err != nil {
