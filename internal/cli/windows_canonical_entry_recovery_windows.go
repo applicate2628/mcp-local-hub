@@ -425,7 +425,7 @@ func validateCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d 
 			}
 			artifact := runtime.Artifact()
 			originalPath := filepath.Join(filepath.Dir(j.EntrySet.CanonicalEntry.Target), filepath.FromSlash(member.SourceRelative))
-			if !member.Present || !sameWindowsProductPath(artifact.Path, originalPath) || artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem || artifact.Machine != 0x8664 {
+			if !member.Present || !sameWindowsProductPath(artifact.Path, originalPath) || artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem {
 				return ErrWindowsProductRecoveryIdentity
 			}
 		}

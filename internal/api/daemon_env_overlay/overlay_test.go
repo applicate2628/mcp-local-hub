@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func TestLoad_MissingFile_ReturnsEmptyOverlay(t *testing.T) {
@@ -37,7 +39,7 @@ func TestLoad_MissingFile_ReturnsEmptyOverlay(t *testing.T) {
 }
 
 func TestLoad_YAMLRoundTrip_ParsesDaemonRow(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	path := filepath.Join(dir, "overlay.yaml")
 
 	body := `version: 1
@@ -84,4 +86,3 @@ daemons:
 		t.Errorf("ModifiedAt = %q, want empty (omitted)", row.ModifiedAt)
 	}
 }
-

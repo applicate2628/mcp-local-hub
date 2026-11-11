@@ -192,9 +192,25 @@ func TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady(t *testing
 		f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
 		events := make(chan api.LazyProxyReadinessEventV1, 4)
 		p := newReadinessTestProxyWithBudget(t, f, events, make(chan error, 1), 10*time.Millisecond)
+		// Receive materialization before testing the separate post-delivery
+		// budget. Registry/starting publication need not finish within 10ms,
+		// and materializing alone must not publish ready or consume firstSend.
+		if _, _, err := p.ensureMaterialized(context.Background()); err == nil {
+			p.endBackendRequest()
+		} else if !errors.Is(err, ErrMaterializeInFlight) {
+			t.Fatalf("prepare materialized endpoint: %v", err)
+		}
+		waitForCond(t, "unwarmed notification endpoint published", func() bool {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return p.endpoint != nil
+		})
 		rr := postDocNotification(t, p.Handler(), "textDocument/didOpen", "file:///D:/test/ws/a.py")
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		}
+		if sent, warmed := f.sendCount.Load(), p.isWarmed(); sent != 1 || warmed {
+			t.Fatalf("notification sent=%d warmed=%v, want one delivered notification without a response", sent, warmed)
 		}
 		assertReadinessTransitions(t, events, "starting")
 	})

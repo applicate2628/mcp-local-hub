@@ -194,6 +194,7 @@ type targetBoundRollbackDeps struct {
 	retained string
 	restored []string
 	started  []string
+	launches []*fixtureSupervisorLaunch
 }
 
 func (d *targetBoundRollbackDeps) RenameAsideBinary(string, string) (api.RenameAsideResult, error) {
@@ -215,20 +216,19 @@ func (d *targetBoundRollbackDeps) ExitGraceful(context.Context, string, int) (ap
 
 func (d *targetBoundRollbackDeps) StartSupervisor(binary string) (SupervisorLaunch, error) {
 	d.started = append(d.started, binary)
-	return &fixtureSupervisorLaunch{}, nil
+	launch := &fixtureSupervisorLaunch{}
+	d.launches = append(d.launches, launch)
+	return launch, nil
 }
 
-func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t *testing.T) {
+func TestUpgradeRollbackSettlesOwnedCanonicalSuccessorWhenUpdaterLivesElsewhere(t *testing.T) {
 	root := t.TempDir()
 	updaterDir := filepath.Join(root, "build-output")
 	targetDir := filepath.Join(root, "installed")
 	target := filepath.Join(targetDir, "mcphub.exe")
 	retained := filepath.Join(targetDir, "mcphub.exe.old-exact")
 	lockPath := filepath.Join(root, "state", "supervisor.lock")
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	const successorPID = 4242
+	apitest.HardenedDir(t, filepath.Dir(lockPath))
 	writeStateSidecarBytes(t, lockPath+".owner.json", []byte(`{"pid":4242,"started_at":"`+liveSupervisorStartedAt+`"}`))
 
 	swapProcessLookupForTest(t, process.ProcessIdentity{
@@ -272,11 +272,17 @@ func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t
 	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
 		t.Fatalf("upgrade error = %v, want successful retained-prior rollback report", err)
 	}
-	if len(*killed) != 1 || (*killed)[0] != successorPID {
-		t.Fatalf("taskkill targets = %v, want exact canonical successor PID %d", *killed, successorPID)
+	if len(*killed) != 0 {
+		t.Fatalf("creator-owned successor fell back to PID-based taskkill: %v", *killed)
 	}
-	if lockReleaseChecks != 2 {
-		t.Fatalf("lock release checks = %d, want prior release + rollback successor release", lockReleaseChecks)
+	if lockReleaseChecks != 1 {
+		t.Fatalf("lock release checks = %d, want prior release; successor is settled by Abort", lockReleaseChecks)
+	}
+	if len(deps.launches) != 2 || deps.launches[0].aborts != 1 || deps.launches[0].handoffs != 0 || deps.launches[1].aborts != 0 || deps.launches[1].handoffs != 1 {
+		t.Fatalf("successor/prior custody = %+v, want successor aborted and restored prior handed off", deps.launches)
+	}
+	if len(deps.started) != 2 || deps.started[0] != target || deps.started[1] != target {
+		t.Fatalf("starts = %v, want canonical successor and restored prior", deps.started)
 	}
 	if len(deps.restored) != 1 || deps.restored[0] != target+"<-"+retained {
 		t.Fatalf("restores = %v, want exact retained prior restored to canonical target", deps.restored)
@@ -287,7 +293,7 @@ func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t
 }
 
 func TestUpgradeReadinessRejectsWrongLiveExecutableBeforePipeAcceptance(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	lockPath := filepath.Join(dir, "supervisor.lock")
 	owner := api.SupervisorLockOwner{PID: 4242, StartedAt: "2026-08-31T19:00:00Z"}
 	if err := api.WriteStateFileAtomic(lockPath+".owner.json", owner); err != nil {
@@ -497,7 +503,7 @@ func writeAdmissionProductFixture(t *testing.T, tag string) string {
 // TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign pins the
 // genuine-no-supervisor-running path.
 func TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	// Do NOT create supervisor.lock.owner.json — absence is the test.
 
@@ -511,7 +517,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign(t *testing.T) {
 // the round-4 fix: a ReadSupervisorLockOwner error that is NOT
 // os.IsNotExist must propagate.
 func TestV5UpgradeDeps_ForceKillSupervisor_PermissionDeniedPropagates(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -536,7 +542,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_PermissionDeniedPropagates(t *testing
 // round-4 fix: a valid sidecar JSON whose PID is non-positive is a
 // corrupt-sidecar condition that must propagate.
 func TestV5UpgradeDeps_ForceKillSupervisor_InvalidPIDPropagates(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -873,7 +879,7 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 // killPIDViaTaskkillFn(owner.PID) unconditionally → `killed` contains the
 // reused PID.
 func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -899,7 +905,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testin
 // TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor pins the positive
 // path for the upgrade reaper.
 func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -928,7 +934,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 }
 
 func TestV5UpgradeDeps_ForceKillSupervisorForOwner_RefusesNewGeneration(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	writeStateSidecarBytes(t, lockDir+".owner.json", []byte(`{"pid":9001,"started_at":"new"}`))
 	killed := swapKillPIDViaTaskkillForTest(t)
@@ -946,7 +952,7 @@ func TestV5UpgradeDeps_ForceKillSupervisorForOwner_RefusesNewGeneration(t *testi
 // TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar is the
 // Finding-1 regression for the upgrade reaper.
 func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -977,7 +983,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testin
 // orchestrator escalates rather than treating an unprovable supervisor as
 // already-reaped.
 func TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 
@@ -1001,7 +1007,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates(t *tes
 // boundary: ErrProcessNotFound (PID PROVEN gone) is the one lookup-error class
 // that maps to benign no-op, distinct from the transient propagation above.
 func TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := apitest.HardenedTempDir(t)
 	lockDir := filepath.Join(tmpDir, "supervisor.lock")
 	ownerPath := lockDir + ".owner.json"
 

@@ -5,6 +5,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -217,35 +218,54 @@ func TestCanonicalPendingValidationClosesTaskOwnerReturnedWithError(t *testing.T
 }
 
 func TestCanonicalPendingValidationAdmitsOriginalLegacyRootRuntime(t *testing.T) {
-	req, j, files := canonicalPendingValidationFixture(t, WindowsProductRecoveryPrepared)
-	priorPath := j.EntrySet.CanonicalEntry.Target
-	writeUpgradeGUIAdmittedProduct(t, priorPath, "ORIGINAL-LEGACY-RUNTIME")
-	priorBytes := mustReadFile(t, priorPath)
-	j.EntrySet.CanonicalEntry.PriorPresent = true
-	j.EntrySet.CanonicalEntry.PriorSHA256 = recoveryTestSHA(priorBytes)
-	j.Mode = WindowsProductPairModeUpgrade
-	j.FrozenPorts = []api.SupervisorFrozenPort{}
-	j.PreSettlement = &windowsProductPreSettlementV3{Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent}, GUIOwner: windowsProductGUIOwnerConfirmedAbsent, SupervisorLockReleased: true, Ports: []windowsProductPortSettlementV1{}}
-	j.EntrySet.PriorRuntime = &windowsCanonicalEntryRuntimePreimageV1{Path: priorPath, Present: true, SHA256: recoveryTestSHA(priorBytes)}
-	files[priorPath] = priorBytes
-	files[filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)] = writeCanonicalPendingValidationJournal(t, req.StateDir, j)
-	tasks := &recoveryTaskTxnFake{}
-	req.Deps.AdmitProduct = func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
-		t.Fatal("original root runtime replaced with nested Product path admission")
-		return binaryadmission.WindowsArtifact{}, nil
-	}
-	req.Deps.ReopenEntrySetTasks = func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error) {
-		return tasks, nil
-	}
-	if err := validateWindowsProductPendingRecovery(req, j); err != nil {
-		t.Fatal(err)
-	}
-	if tasks.closeCalls != 1 || tasks.restoreCalls != 0 {
-		t.Fatalf("unexpected original runtime validation task effects: %+v", tasks)
-	}
-	for path, expected := range files {
-		if actual, err := os.ReadFile(path); err != nil || !bytes.Equal(actual, expected) {
-			t.Fatalf("original runtime validation changed %q: %v", path, err)
-		}
+	for _, machine := range []struct {
+		name  string
+		value uint16
+	}{{"amd64", 0x8664}, {"arm64", 0xaa64}} {
+		t.Run(machine.name, func(t *testing.T) {
+			req, j, files := canonicalPendingValidationFixture(t, WindowsProductRecoveryPrepared)
+			priorPath := j.EntrySet.CanonicalEntry.Target
+			writeUpgradeGUIAdmittedProduct(t, priorPath, "ORIGINAL-LEGACY-RUNTIME")
+			priorBytes := mustReadFile(t, priorPath)
+			peOffset := binary.LittleEndian.Uint32(priorBytes[0x3c:0x40])
+			binary.LittleEndian.PutUint16(priorBytes[peOffset+4:peOffset+6], machine.value)
+			if err := os.WriteFile(priorPath, priorBytes, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			j.EntrySet.CanonicalEntry.PriorPresent = true
+			j.EntrySet.CanonicalEntry.PriorSHA256 = recoveryTestSHA(priorBytes)
+			j.Mode = WindowsProductPairModeUpgrade
+			j.FrozenPorts = []api.SupervisorFrozenPort{}
+			j.PreSettlement = &windowsProductPreSettlementV3{Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent}, GUIOwner: windowsProductGUIOwnerConfirmedAbsent, SupervisorLockReleased: true, Ports: []windowsProductPortSettlementV1{}}
+			j.EntrySet.PriorRuntime = &windowsCanonicalEntryRuntimePreimageV1{Path: priorPath, Present: true, SHA256: recoveryTestSHA(priorBytes)}
+			files[priorPath] = priorBytes
+			files[filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)] = writeCanonicalPendingValidationJournal(t, req.StateDir, j)
+			tasks := &recoveryTaskTxnFake{}
+			req.Deps.AdmitProduct = func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
+				t.Fatal("original root runtime replaced with nested Product path admission")
+				return binaryadmission.WindowsArtifact{}, nil
+			}
+			req.Deps.ReopenEntrySetTasks = func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error) {
+				return tasks, nil
+			}
+			if err := validateWindowsProductPendingRecovery(req, j); err != nil {
+				t.Fatal(err)
+			}
+			if tasks.closeCalls != 1 || tasks.restoreCalls != 0 {
+				t.Fatalf("unexpected original runtime validation task effects: %+v", tasks)
+			}
+			for path, expected := range files {
+				if actual, err := os.ReadFile(path); err != nil || !bytes.Equal(actual, expected) {
+					t.Fatalf("original runtime validation changed %q: %v", path, err)
+				}
+				file, err := os.OpenFile(path, os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatalf("original runtime validation retained file custody: %v", err)
+				}
+				if err := file.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

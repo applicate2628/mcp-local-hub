@@ -4741,7 +4741,16 @@ func TestCSTSavedFieldProtectedHardlinkAfterDegradedFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, model); err != nil {
-		t.Fatal(err)
+		if !errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+			t.Fatal(err)
+		}
+		// This test requires a failed full inventory before the independent
+		// protected-row check. A hardlink proves that same refusal on hosts
+		// without symlink privilege, while keeping the byte-read assertions.
+		if err := os.Link(outside, model); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("symlink privilege unavailable; full inventory degraded by a hardlink")
 	}
 	protected := filepath.Join(filepath.Dir(project), filepath.FromSlash(pairs[0].M3DPath))
 	if err := os.Remove(protected); err != nil {

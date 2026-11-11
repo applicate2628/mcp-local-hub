@@ -595,6 +595,30 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	pidFile := filepath.Join(root, "child.pid")
+	releaseFile := filepath.Join(root, "release-helper")
+	// Register before launch and before any result assertion. The descendants
+	// also self-expire, so failed containment cannot leave a permanent helper.
+	t.Cleanup(func() {
+		if err := os.WriteFile(releaseFile, nil, 0o600); err != nil {
+			t.Errorf("release fake wrapper: %v", err)
+		}
+		rawPID, err := os.ReadFile(pidFile)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			t.Errorf("read fake child custody receipt: %v", err)
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
+		if err != nil || pid <= 0 {
+			t.Errorf("invalid fake child custody receipt: %v", err)
+			return
+		}
+		if err := waitKimiFakeExit(pid, 15*time.Second); err != nil {
+			t.Errorf("fake descendant fixture release: %v", err)
+		}
+	})
 	receiptBase := filepath.Join(root, "receipts")
 	if err := os.Mkdir(receiptBase, 0o700); err != nil {
 		t.Fatal(err)
@@ -609,7 +633,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 				panic(err)
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestKimiFakeWrapperProcess$")
-			cmd.Env = append(os.Environ(), "GO_WANT_KIMI_WRAPPER=1", "KIMI_HELPER_PID_FILE="+pidFile, "KIMI_HELPER_ARGS="+string(encoded))
+			cmd.Env = append(os.Environ(), "GO_WANT_KIMI_WRAPPER=1", "KIMI_HELPER_PID_FILE="+pidFile, "KIMI_HELPER_RELEASE_FILE="+releaseFile, "KIMI_HELPER_ARGS="+string(encoded))
+			process.NoConsole(cmd)
 			return cmd
 		},
 		runContained: func(ctx context.Context, cmd *exec.Cmd, options process.ContainedStreamOptions, consume func(io.Reader) error) error {
@@ -634,12 +659,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for process.IsPidAlive(pid) && time.Now().Before(deadline) {
-		time.Sleep(25 * time.Millisecond)
-	}
-	if process.IsPidAlive(pid) {
-		t.Fatalf("stubborn descendant %d survived contained timeout", pid)
+	if err := waitKimiFakeExit(pid, 3*time.Second); err != nil {
+		t.Fatalf("stubborn descendant after contained timeout: %v", err)
 	}
 	entries, err := os.ReadDir(receiptBase)
 	if err != nil || len(entries) != 0 {
@@ -649,9 +670,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 
 func TestKimiFakeWrapperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_KIMI_CHILD") == "1" {
-		for {
-			time.Sleep(time.Hour)
-		}
+		waitKimiFakeRelease()
+		return
 	}
 	if os.Getenv("GO_WANT_KIMI_WRAPPER") != "1" {
 		return
@@ -664,15 +684,19 @@ func TestKimiFakeWrapperProcess(t *testing.T) {
 	if topic == "stubborn" {
 		child := exec.Command(os.Args[0], "-test.run=^TestKimiFakeWrapperProcess$")
 		child.Env = append(os.Environ(), "GO_WANT_KIMI_CHILD=1")
+		process.NoConsole(child)
 		if err := child.Start(); err != nil {
 			t.Fatal(err)
 		}
+		defer func() {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+		}()
 		if err := os.WriteFile(os.Getenv("KIMI_HELPER_PID_FILE"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for {
-			time.Sleep(time.Hour)
-		}
+		waitKimiFakeRelease()
+		return
 	}
 	receipt := argumentValue(args, "--terminal-receipt")
 	effort := argumentValue(args, "--kimi-effort")
@@ -684,6 +708,33 @@ func TestKimiFakeWrapperProcess(t *testing.T) {
 	}
 	if err := os.WriteFile(receipt, []byte(ownerReceiptRecord(t, effort, "synthetic result")), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func waitKimiFakeRelease() {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(os.Getenv("KIMI_HELPER_RELEASE_FILE")); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitKimiFakeExit(pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		state, err := process.QueryPIDState(pid)
+		if err != nil {
+			return err
+		}
+		if state == process.PIDStateDead {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("fixture exit was not observed before its deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

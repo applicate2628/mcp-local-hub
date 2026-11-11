@@ -35,6 +35,7 @@ func (ctx *guiQuitAdmissionContext) Err() error {
 func TestGUIQuitCanceledWhileLifecycleBlockedHasNoIntentOrStop(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	lease, err := gui.AcquireSingleInstanceAt(filepath.Join(dir, "gui.pidport"), 9125)
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +94,7 @@ func TestGUIQuitCanceledWhileLifecycleBlockedHasNoIntentOrStop(t *testing.T) {
 func TestGUIQuitSharedOperationRetainsAcceptedErrorAndDoesNotEscalate(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	path := filepath.Join(dir, "gui.pidport")
 	lease, err := gui.AcquireSingleInstanceAt(path, 9125)
 	if err != nil {
@@ -134,6 +136,7 @@ func TestGUIQuitSharedOperationRetainsAcceptedErrorAndDoesNotEscalate(t *testing
 func TestGUIQuitPolicyFailureRefusesButPositiveDaemonFailureStillSettles(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	path := filepath.Join(dir, "gui.pidport")
 	lease, err := gui.AcquireSingleInstanceAt(path, 9125)
 	if err != nil {
@@ -170,6 +173,7 @@ func TestGUIQuitPolicyFailureRefusesButPositiveDaemonFailureStillSettles(t *test
 func TestGUIQuitCancellationBeforeAndAfterDurableAcceptance(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	lease, err := gui.AcquireSingleInstanceAt(filepath.Join(dir, "gui.pidport"), 9125)
 	if err != nil {
 		t.Fatal(err)
@@ -206,6 +210,7 @@ func TestGUIQuitCancellationBeforeAndAfterDurableAcceptance(t *testing.T) {
 func TestQuitCommandAbsentOwnerAcceptsActualNoDeadlineContext(t *testing.T) {
 	dir := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	t.Setenv("USERPROFILE", dir)
 	t.Setenv("XDG_STATE_HOME", dir)
 	var output bytes.Buffer
@@ -243,6 +248,7 @@ func TestQuitCommandAbsentOwnerPositiveReplayDoesNotStopAgain(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := apitest.HardenedTempDir(t)
 			t.Setenv("LOCALAPPDATA", dir)
+			apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 			t.Setenv("USERPROFILE", dir)
 			t.Setenv("XDG_DATA_HOME", dir)
 			t.Setenv("XDG_STATE_HOME", dir)

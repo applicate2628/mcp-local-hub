@@ -4,8 +4,26 @@ package process
 
 import (
 	"errors"
-	"golang.org/x/sys/windows"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+// This is the STARTUPINFOEX ABI with its native allocation kept as an opaque
+// address. LocalAlloc memory is not a Go pointer; only the embedded StartupInfo
+// is passed to CreateProcess. The size and field offset are checked in tests.
+type procThreadAttributeStartupInfo struct {
+	windows.StartupInfo
+	ProcThreadAttributeList uintptr
+}
+
+// Compile-time equality checks cover every Windows architecture, including
+// cross-builds that cannot execute the native layout test on the build host.
+var (
+	_ [unsafe.Sizeof(procThreadAttributeStartupInfo{}) - unsafe.Sizeof(windows.StartupInfoEx{})]byte
+	_ [unsafe.Sizeof(windows.StartupInfoEx{}) - unsafe.Sizeof(procThreadAttributeStartupInfo{})]byte
+	_ [unsafe.Offsetof(procThreadAttributeStartupInfo{}.ProcThreadAttributeList) - unsafe.Offsetof(windows.StartupInfoEx{}.ProcThreadAttributeList)]byte
+	_ [unsafe.Offsetof(windows.StartupInfoEx{}.ProcThreadAttributeList) - unsafe.Offsetof(procThreadAttributeStartupInfo{}.ProcThreadAttributeList)]byte
 )
 
 var procAttributeDLL = windows.NewLazySystemDLL("kernel32.dll")
@@ -16,8 +34,8 @@ var procAttributeDelete = procAttributeDLL.NewProc("DeleteProcThreadAttributeLis
 func newProcThreadAttributeListObserved(count uint32) (*procThreadAttributeListObserved, error) {
 	return newProcThreadAttributeListWithNative(count, procThreadAttributeNative{
 		insufficientBuffer: windows.ERROR_INSUFFICIENT_BUFFER,
-		initialize: func(data unsafe.Pointer, count uint32, size *uintptr) error {
-			result, _, err := procAttributeInitialize.Call(uintptr(data), uintptr(count), 0, uintptr(unsafe.Pointer(size)))
+		initialize: func(data uintptr, count uint32, size *uintptr) error {
+			result, _, err := procAttributeInitialize.Call(data, uintptr(count), 0, uintptr(unsafe.Pointer(size)))
 			if result == 0 {
 				if errors.Is(err, windows.ERROR_SUCCESS) {
 					return errors.New("InitializeProcThreadAttributeList returned false/error0")
@@ -27,8 +45,8 @@ func newProcThreadAttributeListObserved(count uint32) (*procThreadAttributeListO
 			return nil
 		},
 		allocate: func(size uint32) (uintptr, error) { return windows.LocalAlloc(windows.LMEM_FIXED, size) },
-		update: func(data unsafe.Pointer, attribute uintptr, value unsafe.Pointer, size uintptr) error {
-			result, _, err := procAttributeUpdate.Call(uintptr(data), 0, attribute, uintptr(value), size, 0, 0)
+		update: func(data uintptr, attribute uintptr, value unsafe.Pointer, size uintptr) error {
+			result, _, err := procAttributeUpdate.Call(data, 0, attribute, uintptr(value), size, 0, 0)
 			if result == 0 {
 				if errors.Is(err, windows.ERROR_SUCCESS) {
 					return errors.New("UpdateProcThreadAttribute returned false/error0")
@@ -37,12 +55,12 @@ func newProcThreadAttributeListObserved(count uint32) (*procThreadAttributeListO
 			}
 			return nil
 		},
-		delete: func(data unsafe.Pointer) error {
+		delete: func(data uintptr) error {
 			if err := procAttributeDelete.Find(); err != nil {
 				return err
 			}
 			// VOID: defined return is recorded; LastError is not a success code.
-			procAttributeDelete.Call(uintptr(data))
+			procAttributeDelete.Call(data)
 			return nil
 		},
 		free: func(data uintptr) error {
