@@ -507,6 +507,9 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 	}
 	s.mu.Unlock()
 	out, err := s.driver.Run(ctx, em, filepath.Join(r.workspace, "work", filepath.FromSlash(r.ProjectFile)))
+	// Cancellation applies to execution up to the driver's return. Output
+	// attribution and log parsing must not rewrite that execution outcome.
+	executionContextErr := ctx.Err()
 	// Workspace, project file and baseline are immutable after admission.
 	// Keep the worker/lease alive, but do not block status, cancellation or
 	// shutdown admission while hashing potentially large output trees.
@@ -521,8 +524,8 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 	r.Stderr = string(out.Stderr)
 	r.StdoutBytes = len(out.Stdout)
 	r.StderrBytes = len(out.Stderr)
-	if ctx.Err() != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if executionContextErr != nil {
+		if errors.Is(executionContextErr, context.DeadlineExceeded) {
 			r.State = StateTimedOut
 			r.TimedOut = true
 			r.FailureID = "SONNET_RUN_TIMED_OUT"
