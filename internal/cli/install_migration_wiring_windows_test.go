@@ -300,7 +300,7 @@ func TestUpgradeReadinessRejectsWrongLiveExecutableBeforePipeAcceptance(t *testi
 		CreationDateUnix: time.Date(2026, 8, 31, 18, 59, 59, 0, time.UTC).Unix(),
 	}, nil)
 	d := &v5UpgradeDeps{supervisorLockDir: lockPath, pipePath: `\\.\pipe\must-not-dial`}
-	ready, err := d.probeUpgradeReadyOnce(`C:\canonical\mcphub.exe`, UpgradeCandidateV1{SHA256: strings.Repeat("a", 64)})
+	ready, err := d.probeUpgradeReadyOnce(context.Background(), `C:\canonical\mcphub.exe`, UpgradeCandidateV1{SHA256: strings.Repeat("a", 64)})
 	if err == nil || !strings.Contains(err.Error(), "does not match canonical") {
 		t.Fatalf("ready=%v error=%v", ready, err)
 	}

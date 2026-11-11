@@ -503,9 +503,12 @@ func TestBuiltWindowsCanonicalEntrySetTransaction(t *testing.T) {
 		t.Fatalf("fixture input must be one JSON object: %v", err)
 	}
 	if !filepath.IsAbs(input.ProductRoot) || input.ProductVersion == "" ||
-		!validLowerHexSHA256(input.SourceEpoch) || !validLowerHexSHA256(input.ProductSHA256) || !validLowerHexSHA256(input.IdentitySHA256) {
-		t.Fatal("fixture input requires the absolute built package root, source epoch, version, and three file hashes")
+		(input.SourceEpoch != "" && !validLowerHexSHA256(input.SourceEpoch)) || !validLowerHexSHA256(input.ProductSHA256) || !validLowerHexSHA256(input.IdentitySHA256) {
+		t.Fatal("fixture input requires the absolute built package root, version, three file hashes, and a valid source epoch when supplied")
 	}
+	// Source epoch is optional build data. A state-isolated test Product cannot
+	// carry publisher-source metadata; its complete native identity still must
+	// match the supplied binding and every artifact hash below.
 	binding, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(input.BuildID, input.CanonicalEntrySHA256, input.ReverseProjection)
 	if err != nil {
 		t.Fatal(err)

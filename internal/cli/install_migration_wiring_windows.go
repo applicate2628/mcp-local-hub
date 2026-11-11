@@ -1569,6 +1569,37 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 	return runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, exe, target, guiDeps, windowsCanonicalEntryCommandInput{})
 }
 
+// All transaction/rollback/task-close defers must finish before this command
+// boundary projects current policy, releases the GUI lease and outer fence,
+// then reports completion. Earlier failures remain part of the result.
+func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionText string, retErr error, projectCurrentAutorunOff func() error, guiLease gui.OwnedSingleInstanceLease, fence *api.UpgradeFenceLease) error {
+	if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
+		retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
+	}
+	if guiLease != nil {
+		if releaseErr := guiLease.ReleaseErr(); releaseErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_GUI_LEASE_RELEASE_UNCONFIRMED: %w", releaseErr))
+		}
+	}
+	if optIn {
+		if releaseErr := fence.Release(); releaseErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_FENCE_RELEASE_UNCONFIRMED: %w", releaseErr))
+		}
+	} else if retErr != nil {
+		api.ReleaseAndJoin(&retErr, fence.Release, "release upgrade transaction fence")
+	} else if releaseErr := fence.Release(); releaseErr != nil {
+		retErr = fmt.Errorf("v0.5 upgrade: release upgrade transaction fence: %w", releaseErr)
+	}
+	if retErr == nil && completionText != "" {
+		if optIn {
+			retErr = writeUpgradeGUICompletion(cmd.OutOrStdout(), completionText)
+		} else {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), completionText)
+		}
+	}
+	return retErr
+}
+
 func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target string, guiDeps upgradeGUIFencedDeps, input windowsCanonicalEntryCommandInput) (retErr error) {
 	if input.bindingErr != nil {
 		return input.bindingErr
@@ -1626,32 +1657,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		})
 	}
 	defer func() {
-		// All later transaction/rollback/task-close defers have unwound. Apply
-		// current OFF before releasing the outer exclusion or reporting success.
-		if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
-		}
-		if guiLease != nil {
-			if releaseErr := guiLease.ReleaseErr(); releaseErr != nil {
-				retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_GUI_LEASE_RELEASE_UNCONFIRMED: %w", releaseErr))
-			}
-		}
-		if optIn {
-			if releaseErr := fence.Release(); releaseErr != nil {
-				retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_FENCE_RELEASE_UNCONFIRMED: %w", releaseErr))
-			}
-		} else if retErr != nil {
-			api.ReleaseAndJoin(&retErr, fence.Release, "release upgrade transaction fence")
-		} else if releaseErr := fence.Release(); releaseErr != nil {
-			retErr = fmt.Errorf("v0.5 upgrade: release upgrade transaction fence: %w", releaseErr)
-		}
-		if retErr == nil && completionText != "" {
-			if optIn {
-				retErr = writeUpgradeGUICompletion(cmd.OutOrStdout(), completionText)
-			} else {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), completionText)
-			}
-		}
+		retErr = finishV5UpgradeWindowsCommand(cmd, optIn, completionText, retErr, projectCurrentAutorunOff, guiLease, fence)
 	}()
 	if optIn {
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "UPGRADE_GUI_FENCE_HELD: one upgrade fence acquired"); err != nil {
@@ -1724,10 +1730,20 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	deps := buildV5UpgradeDeps(priorPath, stateDir)
 	deps.originalRuntime, deps.originalContext = priorRuntime, ctx
 	successorDeps := buildV5UpgradeDeps(targets.ProductPath, stateDir)
+	// The transaction starts and receives one branch at a time. Equal Product
+	// bytes at the same path can still be different native file objects.
+	readinessDeps := successorDeps
 	productTxn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
 		Context: ctx, StateDir: stateDir, CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,
 		LegacyWindowlessPath: legacyWindowlessTarget, StagedProduct: stageTargets.ProductPath, EntrySet: entrySet, Mode: WindowsProductPairModeUpgrade,
-		StartSupervisor: successorDeps.StartSupervisor, RestartPrior: func(string) (SupervisorLaunch, error) { return deps.StartSupervisor(priorPath) },
+		StartSupervisor: func(path string) (SupervisorLaunch, error) {
+			readinessDeps = successorDeps
+			return successorDeps.StartSupervisor(path)
+		},
+		RestartPrior: func(string) (SupervisorLaunch, error) {
+			readinessDeps = deps
+			return deps.StartSupervisor(priorPath)
+		},
 		SettleSuccessor: func(string) error {
 			err := successorDeps.ForceKillSupervisor(successorDeps.pipePath)
 			if isAlreadyExitedError(err) {
@@ -1736,11 +1752,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			return err
 		},
 		WaitSupervisorReady: func(ctx context.Context, path string, product binaryadmission.WindowsArtifact) error {
-			adapter := successorDeps
-			if samePath(path, priorPath) {
-				adapter = deps
-			}
-			return adapter.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: product.Version, Commit: product.Commit, BuildDate: product.BuildDate, SHA256: product.SHA256})
+			return readinessDeps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: product.Version, Commit: product.Commit, BuildDate: product.BuildDate, SHA256: product.SHA256})
 		},
 	})
 	if productTxn != nil {
@@ -2551,7 +2563,7 @@ func windowsProductPairRecoveryRuntimeRequest(ctx context.Context, stateDir, cli
 			return err
 		},
 		ObservePriorReady: func(ctx context.Context, binaryPath, sha256 string) (bool, error) {
-			ready, err := deps.probeUpgradeReadyOnce(binaryPath, UpgradeCandidateV1{SHA256: sha256})
+			ready, err := deps.probeUpgradeReadyOnce(ctx, binaryPath, UpgradeCandidateV1{SHA256: sha256})
 			if errors.Is(err, os.ErrNotExist) || errors.Is(err, process.ErrProcessNotFound) {
 				return false, nil
 			}
@@ -2852,6 +2864,7 @@ func recoverWindowsCanonicalEntryPriorRuntime(ctx context.Context, stateDir stri
 		runtimePath = original.Artifact().Path
 	}
 	deps := buildV5UpgradeDeps(runtimePath, stateDir)
+	deps.originalRuntime, deps.originalContext = original, ctx
 	return recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(ctx, stateDir, journal, original, deps.StartSupervisor,
 		func(ctx context.Context, path, digest string) error {
 			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{SHA256: digest})
@@ -3236,7 +3249,7 @@ func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, product
 			}
 		},
 		ObserveSuccessorReady: func(ctx context.Context, path, digest string) (bool, error) {
-			return deps.probeUpgradeReadyOnce(path, UpgradeCandidateV1{SHA256: digest})
+			return deps.probeUpgradeReadyOnce(ctx, path, UpgradeCandidateV1{SHA256: digest})
 		},
 		StartSupervisor: deps.StartSupervisor,
 		WaitSupervisorReady: func(ctx context.Context, path, digest string) error {
@@ -3279,12 +3292,20 @@ func recoverGUIOwnedPriorSettlementForExpectation(ctx context.Context, stateDir,
 }
 
 func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, productPath string, journal windowsProductRecoveryJournalV3, ownedLease gui.OwnedSingleInstanceLease, expectation *pendingRuntimeExpectation, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error {
+	ops, err := buildGUIOwnedPriorRecoveryOps(ctx, stateDir, productPath, journal, ownedLease, expectation, original)
+	if err != nil {
+		return err
+	}
+	return recoverGUIOwnedPriorSettlementWithOps(ctx, journal, ops)
+}
+
+func buildGUIOwnedPriorRecoveryOps(ctx context.Context, stateDir, productPath string, journal windowsProductRecoveryJournalV3, ownedLease gui.OwnedSingleInstanceLease, expectation *pendingRuntimeExpectation, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) (guiOwnedPriorRecoveryOps, error) {
 	selectedPath, selectedSHA, present, projectionErr := windowsProductRecoveryPriorRuntime(journal)
 	if projectionErr != nil {
-		return projectionErr
+		return guiOwnedPriorRecoveryOps{}, projectionErr
 	}
 	if journal.EntrySet != nil && (!present || !samePath(productPath, selectedPath)) {
-		return errors.New("original GUI prior runtime projection differs from recovery target")
+		return guiOwnedPriorRecoveryOps{}, errors.New("original GUI prior runtime projection differs from recovery target")
 	}
 	if journal.EntrySet == nil {
 		selectedPath = productPath
@@ -3327,7 +3348,7 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 	// A resumed attempt observes this generation; it never acquires its creator
 	// capability or rewrites the original generation in the durable journal.
 	var recoveredSupervisor *api.SupervisorLockOwner
-	return recoverGUIOwnedPriorSettlementWithOps(ctx, journal, guiOwnedPriorRecoveryOps{
+	return guiOwnedPriorRecoveryOps{
 		Readback: func(journal windowsProductRecoveryJournalV3) error {
 			if expectation != nil {
 				if err := expectation.validate(ctx); err != nil {
@@ -3645,7 +3666,7 @@ func recoverGUIOwnedPriorSettlementWithOriginal(ctx context.Context, stateDir, p
 			}
 			return autostart.StartOwnerForExpectedProduct(ctx, productPath)
 		},
-	})
+	}, nil
 }
 
 func restoreGUIOwnedForward(ctx context.Context, journal windowsProductRecoveryJournalV3, releaseLease func() error) error {
@@ -4346,6 +4367,7 @@ func (d *v5UpgradeDeps) supervisorLaunchDependencies() (supervisorLaunchDependen
 	lockPath := d.supervisorLockDir
 	deps := supervisorLaunchDependencies{
 		exePath:            d.exePath,
+		originalRuntime:    d.originalRuntime,
 		supervisorLockPath: lockPath,
 		pipePath:           d.pipePath,
 		readOwner:          d.ownerReader(),
@@ -4428,7 +4450,7 @@ func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Du
 	defer cancel()
 	var lastErr error
 	for {
-		ready, err := d.probeUpgradeReadyOnce(binaryPath, candidate)
+		ready, err := d.probeUpgradeReadyOnce(waitCtx, binaryPath, candidate)
 		if err == nil && ready {
 			return nil
 		}
@@ -4444,19 +4466,37 @@ func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Du
 	}
 }
 
-func (d *v5UpgradeDeps) probeUpgradeReadyOnce(binaryPath string, candidate UpgradeCandidateV1) (bool, error) {
+func (d *v5UpgradeDeps) probeUpgradeReadyOnce(ctx context.Context, binaryPath string, candidate UpgradeCandidateV1) (bool, error) {
+	if ctx == nil {
+		return false, errors.New("supervisor readiness requires operation context")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	owner, err := api.ReadSupervisorLockOwner(d.supervisorLockDir)
 	if err != nil {
 		return false, fmt.Errorf("read successor supervisor lock owner: %w", err)
 	}
-	if err := d.validateUpgradeSupervisorIdentity(binaryPath, candidate, owner); err != nil {
+	peer, err := d.validateUpgradeSupervisorIdentity(ctx, binaryPath, candidate, owner)
+	if err != nil {
 		return false, err
+	}
+	if d.originalRuntime != nil {
+		stateDir := filepath.Dir(d.supervisorLockDir)
+		if !samePath(binaryPath, d.exePath) || d.pipePath != api.SupervisorIPCAddress(stateDir) {
+			return false, errors.New("original supervisor readiness namespace/target differs from adapter")
+		}
+		readiness, err := api.ReadSupervisorControlReadinessForPeerFromStateDir(ctx, stateDir, owner, peer)
+		return readiness.ReconcileReady, err
 	}
 	return probeReconcileReadyOnceWithOwner(d.pipePath, &owner)
 }
 
-func (d *v5UpgradeDeps) validateUpgradeSupervisorIdentity(binaryPath string, candidate UpgradeCandidateV1, owner api.SupervisorLockOwner) error {
-	return validateSupervisorImageIdentity(binaryPath, candidate.SHA256, owner)
+func (d *v5UpgradeDeps) validateUpgradeSupervisorIdentity(ctx context.Context, binaryPath string, candidate UpgradeCandidateV1, owner api.SupervisorLockOwner) (api.SupervisorProcessIdentityV1, error) {
+	if d.originalRuntime != nil {
+		return observeOriginalSupervisorRuntime(ctx, binaryPath, candidate.SHA256, owner, d.originalRuntime)
+	}
+	return api.SupervisorProcessIdentityV1{}, validateSupervisorImageIdentity(binaryPath, candidate.SHA256, owner)
 }
 
 // sendIPCWithResponse is the response-returning IPC sender used by

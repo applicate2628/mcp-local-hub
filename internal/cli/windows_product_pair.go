@@ -1705,6 +1705,9 @@ func inspectWindowsProductPreflight(txn *WindowsProductTxn) (windowsProductPairP
 		return windowsProductPairPreflightV1{}, errors.New("Windows product transaction is required")
 	}
 	o := txn.Opts
+	if o.EntrySet != nil {
+		return inspectWindowsCanonicalEntryPreflight(o)
+	}
 	d := withWindowsProductDefaults(o.Deps)
 	staged, err := d.AdmitProduct(binaryadmission.WindowsArtifact{
 		Path: o.StagedProduct, Role: binaryadmission.WindowsArtifactRoleProduct,
@@ -1728,6 +1731,88 @@ func inspectWindowsProductPreflight(txn *WindowsProductTxn) (windowsProductPairP
 		PriorCLI:        windowsProductPreimage(productPrior),
 		PriorWindowless: windowsProductPreimage(legacyPrior),
 	}, nil
+}
+
+func inspectWindowsCanonicalEntryPreflight(o WindowsProductTxnOpts) (windowsProductPairPreflightV1, error) {
+	var result windowsProductPairPreflightV1
+	if o.Context == nil || o.EntrySet == nil || o.EntrySet.original == nil {
+		return result, errors.New("original complete-set context and stage are required")
+	}
+	if err := o.Context.Err(); err != nil {
+		return result, err
+	}
+	if err := o.EntrySet.original.VerifyUnchanged(); err != nil {
+		return result, err
+	}
+	stages, err := o.EntrySet.original.Targets()
+	if err != nil {
+		return result, err
+	}
+	targets, err := o.EntrySet.original.DestinationTargets()
+	if err != nil {
+		return result, err
+	}
+	if !sameWindowsProductPath(targets.CanonicalEntryPath, o.CanonicalEntryPath) || !sameWindowsProductPath(targets.ProductPath, o.ProductPath) || !sameWindowsProductPath(targets.IdentityPath, o.IdentityPath) || !sameWindowsProductPath(stages.ProductPath, o.StagedProduct) {
+		return result, errors.New("staged canonical entry set disagrees with transaction paths")
+	}
+	snapshot, err := o.EntrySet.original.Snapshot()
+	if err != nil {
+		return result, err
+	}
+	prior, err := o.EntrySet.acquirePrior(o.Context)
+	if err != nil {
+		return result, err
+	}
+	productPrior, err := canonicalPriorSnapshot(prior, "product", targets.ProductPath)
+	if err != nil {
+		return result, err
+	}
+	entryPrior, err := canonicalPriorSnapshot(prior, "launcher", targets.CanonicalEntryPath)
+	if err != nil {
+		return result, err
+	}
+	identityPrior, err := canonicalPriorSnapshot(prior, "identity", targets.IdentityPath)
+	if err != nil {
+		return result, err
+	}
+	// The legacy quiescence contract names the stopped runtime as CLI. During
+	// migration it is the root Product; for an existing complete set it is the
+	// payload Product. Receive that projection from the same retained prior.
+	runtime, err := prior.RuntimeProduct(o.Context)
+	if err != nil {
+		return result, err
+	}
+	if runtime != nil {
+		if err := runtime.ValidateOriginal(o.Context); err != nil {
+			return result, err
+		}
+		artifact := runtime.Artifact()
+		var runtimePrior productPairFileSnapshot
+		switch {
+		case sameWindowsProductPath(artifact.Path, targets.ProductPath):
+			runtimePrior = productPrior
+		case sameWindowsProductPath(artifact.Path, targets.CanonicalEntryPath):
+			runtimePrior = entryPrior
+		default:
+			return result, errors.New("prior runtime is outside original complete-set targets")
+		}
+		result.PriorCLI = windowsProductPreimage(runtimePrior)
+		if result.PriorCLI != (windowsProductPreimageV1{Present: true, SHA256: artifact.SHA256}) {
+			return result, errors.New("original prior runtime preimage changed")
+		}
+	}
+	legacyPrior, err := snapshotProductPairFile(o.LegacyWindowlessPath)
+	if err != nil {
+		return result, err
+	}
+	result.PriorWindowless = windowsProductPreimage(legacyPrior)
+	result.Disposition = windowsProductPairDispositionV1{
+		CLI: windowsCanonicalSetDisposition(productPrior, &windowsCanonicalEntrySetPrepared{
+			snapshot: snapshot, entryPrior: entryPrior, identityPrior: identityPrior,
+		}, snapshot.ProductArtifact.SHA256),
+		Windowless: windowsProductTargetIdentical,
+	}
+	return result, o.Context.Err()
 }
 
 func validateWindowsProductQuiescenceReceipt(receipt windowsProductQuiescenceReceiptV1) error {

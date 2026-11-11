@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -154,11 +155,13 @@ func TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease(t *testing.T) {
 	}{
 		{name: "ordinary committed Product"},
 		{name: "committed Product retains later policy failure", readbackFailure: true},
-		{name: "rollback retains operation policy and release failures", rollback: true, readbackFailure: true},
+		{name: "rollback retains operation and policy failures", rollback: true, readbackFailure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newUpgradeGUICommandC3Fixture(t)
+			f := newQualifiedUpgradeGUICommandFixture(t)
+			useQualifiedUpgradeCommandSuccessorBackend(t, f)
 			cmd := newUpgradeCmdReal()
+			cmd.SetContext(t.Context())
 			cmd.SetErr(io.Discard)
 			var output bytes.Buffer
 			cmd.SetOut(&output)
@@ -170,17 +173,12 @@ func TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease(t *testing.T) {
 			writeStateSidecarBytes(t, settings, before)
 			backend := &fakeAutostartBackend{installed: true}
 			readbackErr := errors.New("injected OFF absence readback failure")
-			releaseErr := errors.New("injected GUI release failure")
-			var lease *upgradeGUICommandLease
 			backend.statusFn = func(autostart.Options) (autostart.State, error) {
 				if f.tasks == nil || !f.tasks.closed || backend.installed || backend.disableCalls != 1 || len(backend.enableCalls) != 0 {
 					return autostart.StateAbsent, fmt.Errorf("OFF before transaction/task-close settlement: tasks=%+v backend=%+v", f.tasks, backend)
 				}
 				if tc.rollback && !f.tasks.restored {
 					return autostart.StateAbsent, errors.New("OFF preceded original enabled Task restoration")
-				}
-				if lease != nil && lease.released != 0 {
-					return autostart.StateAbsent, errors.New("GUI reservation released before OFF readback")
 				}
 				probe, acquired, err := api.TryAcquireUpgradeFence(context.Background(), f.stateDir)
 				if acquired {
@@ -197,20 +195,10 @@ func TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease(t *testing.T) {
 			priorBackend := autostartBackendFactoryFn
 			autostartBackendFactoryFn = func() (autostart.Backend, error) { return backend, nil }
 			t.Cleanup(func() { autostartBackendFactoryFn = priorBackend })
-			var err error
 			if tc.rollback {
 				f.fault = errors.New("injected Product promotion failure")
-				if flagErr := cmd.Flags().Set("terminate-gui-for-upgrade", "true"); flagErr != nil {
-					t.Fatal(flagErr)
-				}
-				var order []string
-				deps, held, _, _ := upgradeGUICommandC3Deps(t, f, cmd, &order)
-				lease = held
-				lease.releaseErr = releaseErr
-				err = runV5UpgradeWindowsWithPathsAndDeps(cmd, f.candidate, f.target, deps)
-			} else {
-				err = runV5UpgradeWindowsWithPaths(cmd, f.candidate, f.target)
 			}
+			err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, upgradeGUIFencedDepsForCommand(cmd), f.input)
 			if tc.readbackFailure {
 				if !errors.Is(err, readbackErr) || output.Len() != 0 {
 					t.Fatalf("policy failure/corresponding completion lost: err=%v output=%q", err, output.String())
@@ -222,15 +210,15 @@ func TestUpgradeCurrentAutorunOffSettlesBeforeOuterFenceRelease(t *testing.T) {
 				t.Fatalf("restored shim survived outer OFF: %+v", backend)
 			}
 			if tc.rollback {
-				if !errors.Is(err, f.fault) || !errors.Is(err, releaseErr) || !f.tasks.restored || lease.released != 1 {
-					t.Fatalf("original/policy/release outcomes lost: %v", err)
+				if !errors.Is(err, f.fault) || !f.tasks.restored || f.successorStarts != 0 {
+					t.Fatalf("original/policy outcomes lost or successor started after rollback: %v", err)
 				}
 				if _, statErr := os.Stat(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json")); !errors.Is(statErr, os.ErrNotExist) {
 					t.Fatalf("rollback left committed receipt: %v", statErr)
 				}
 			} else {
-				if f.tasks.restored {
-					t.Fatal("post-commit policy error rolled Product back")
+				if f.tasks.restored || f.successorStarts != 1 || f.successorReady != 1 {
+					t.Fatal("committed Product did not complete exactly one successor handoff")
 				}
 				if _, statErr := os.Stat(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json")); statErr != nil {
 					t.Fatalf("committed receipt lost: %v", statErr)
@@ -282,8 +270,10 @@ func TestUpgradeDefaultCompletionOutputCompatibility(t *testing.T) {
 		{name: "writer error", writeErr: errors.New("stdout unavailable")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newUpgradeGUICommandC3Fixture(t)
+			f := newQualifiedUpgradeGUICommandFixture(t)
+			useQualifiedUpgradeCommandSuccessorBackend(t, f)
 			cmd := newUpgradeCmdReal()
+			cmd.SetContext(t.Context())
 			cmd.SetErr(io.Discard)
 			var attempted string
 			cmd.SetOut(upgradeGUICommandWriter(func(p []byte) (int, error) {
@@ -293,14 +283,14 @@ func TestUpgradeDefaultCompletionOutputCompatibility(t *testing.T) {
 				}
 				return 0, tc.writeErr
 			}))
-			err := runV5UpgradeWindowsWithPaths(cmd, f.candidate, f.target)
+			err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, upgradeGUIFencedDepsForCommand(cmd), f.input)
 			if err != nil {
 				t.Fatalf("default settled Product result changed on stdout failure: %v", err)
 			}
 			if attempted != "v0.5 upgrade complete.\n" {
 				t.Fatalf("default completion attempt=%q", attempted)
 			}
-			if f.factoryCalls != 1 || f.txn == nil || f.tasks == nil || !f.tasks.closed {
+			if f.factoryCalls != 1 || f.txn == nil || f.tasks == nil || !f.tasks.closed || f.successorStarts != 1 || f.successorReady != 1 {
 				t.Fatalf("Product did not settle once: calls=%d txn=%v tasks=%v", f.factoryCalls, f.txn, f.tasks)
 			}
 			if _, err := os.Stat(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json")); err != nil {
@@ -315,6 +305,7 @@ type upgradeGUICommandLease struct {
 	released   int
 	order      *[]string
 	releaseErr error
+	owned      gui.OwnedSingleInstanceLease
 }
 
 func (l *upgradeGUICommandLease) Release() { _ = l.ReleaseErr() }
@@ -329,97 +320,103 @@ func (l *upgradeGUICommandLease) ReleaseErr() error {
 	}
 	l.released++
 	*l.order = append(*l.order, "gui-release")
+	if l.owned != nil {
+		return errors.Join(l.owned.ReleaseErr(), l.releaseErr)
+	}
 	return l.releaseErr
 }
 
-func upgradeGUICommandC3Deps(t *testing.T, f *upgradeGUICommandC3Fixture, cmd *cobra.Command, order *[]string) (upgradeGUIFencedDeps, *upgradeGUICommandLease, *int, *int) {
-	t.Helper()
-	deps := upgradeGUIFencedDepsForCommand(cmd)
-	classifications, exits := new(int), new(int)
-	lease := &upgradeGUICommandLease{stateDir: f.stateDir, order: order}
-	checkFence := func() {
-		t.Helper()
-		probe, acquired, err := api.TryAcquireUpgradeFence(context.Background(), f.stateDir)
-		if acquired {
-			_ = probe.Release()
-			t.Fatal("upgrade fence not held")
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	deps.Classify = func(stateDir, candidate, target string) (upgradeGUIProductOutcome, error) {
-		if stateDir != f.stateDir || candidate != f.candidate || target != f.target {
-			return "", errors.New("receipt classification arguments changed")
-		}
-		checkFence()
-		*classifications++
-		if _, err := os.Stat(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json")); !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("test-owned receipt changed: %v", err)
-		}
-		return upgradeGUINewTransactionRequired, nil
-	}
-	deps.ExitAndReserve = func(_ context.Context, stateDir, target string) (gui.OwnedSingleInstanceLease, error) {
-		if stateDir != f.stateDir || target != f.target {
-			return nil, errors.New("GUI reservation arguments changed")
-		}
-		checkFence()
-		*exits++
-		return lease, nil
-	}
-	return deps, lease, classifications, exits
-}
-
-func TestUpgradeGUIOutputSettlement(t *testing.T) {
+// Prepared-journal timing and continuing after a reporter failure are covered
+// by TestRunInstallUpgradePersistsInitialV3JournalBeforeLifecycleMutation. This
+// command boundary owns propagation of that settled result and resource/output
+// ordering, independently of the live independent-supervisor admission path.
+func TestUpgradeGUICommandFinalizationSettlesBeforeCompletion(t *testing.T) {
 	for _, tc := range []struct {
-		name                                  string
-		preparedFailure, rollback, finalShort bool
-		finalErr                              error
+		name                                                                         string
+		preparedFailure, priorFailure, projectionFailure, releaseFailure, finalShort bool
+		finalErr                                                                     error
 	}{
+		{name: "settled completion"},
 		{name: "prepared output after commit", preparedFailure: true},
-		{name: "prepared output and Product rollback", preparedFailure: true, rollback: true},
+		{name: "prepared output and rollback result", preparedFailure: true, priorFailure: true},
 		{name: "short final output after commit", finalShort: true},
 		{name: "failed final output after commit", finalErr: errors.New("stdout unavailable")},
+		{name: "operation policy and release failures remain joined", priorFailure: true, projectionFailure: true, releaseFailure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newUpgradeGUICommandC3Fixture(t)
-			if tc.rollback {
-				f.fault = errors.New("synthetic Product promotion failure")
-			}
-			cmd := newUpgradeCmdReal()
-			if err := cmd.Flags().Set("terminate-gui-for-upgrade", "true"); err != nil {
+			stateDir := withTempStateDir(t)
+			fence, err := api.AcquireUpgradeFence(t.Context(), stateDir)
+			if err != nil {
 				t.Fatal(err)
 			}
-			var order []string
-			preparedObserved := false
-			cmd.SetErr(upgradeGUICommandWriter(func(p []byte) (int, error) {
-				if strings.HasPrefix(string(p), "UPGRADE_GUI_PREPARED:") {
-					raw, err := os.ReadFile(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3))
-					if err != nil {
-						return 0, fmt.Errorf("prepared journal absent: %w", err)
-					}
-					journal, err := decodeWindowsProductRecoveryJournalV3(raw)
-					if err != nil || journal.Phase != WindowsProductRecoveryPrepared {
-						return 0, fmt.Errorf("prepared journal unreadable: %v", err)
-					}
-					preparedObserved = true
-					if tc.preparedFailure {
-						return 0, errors.New("prepared stderr unavailable")
-					}
+			t.Cleanup(func() {
+				if err := fence.Release(); err != nil {
+					t.Error(err)
 				}
-				return len(p), nil
-			}))
-			deps, lease, classifications, exits := upgradeGUICommandC3Deps(t, f, cmd, &order)
+			})
+			leasePath := filepath.Join(stateDir, "gui.pidport")
+			ownedLease, err := gui.AcquireSingleInstanceLockOnlyAt(leasePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := ownedLease.ReleaseErr(); err != nil {
+					t.Error(err)
+				}
+			})
+			var order []string
+			lease := &upgradeGUICommandLease{stateDir: stateDir, order: &order, owned: ownedLease}
+			var priorErr, projectionErr, releaseErr, preparedErr error
+			if tc.priorFailure {
+				priorErr = errors.New("settled Product rollback cause")
+			}
+			if tc.projectionFailure {
+				projectionErr = errors.New("autorun OFF readback unavailable")
+			}
+			if tc.releaseFailure {
+				releaseErr = errors.New("GUI release outcome unavailable")
+				lease.releaseErr = releaseErr
+			}
+			if tc.preparedFailure {
+				preparedErr = errors.New("prepared stderr unavailable")
+			}
+			var preparedOutputErr error
+			if preparedErr != nil {
+				if err := upgradeGUIPreparedStageReporter(upgradeGUIOutputFailure{err: preparedErr}, &preparedOutputErr)(); err != nil {
+					t.Fatalf("prepared reporting aborted Product settlement: %v", err)
+				}
+			}
+			projectOff := func() error {
+				order = append(order, "project-off")
+				if lease.released != 0 {
+					t.Fatal("GUI reservation released before current policy readback")
+				}
+				unheld, err := gui.ProbeSingleInstanceLockUnheld(leasePath)
+				if err != nil || unheld {
+					t.Fatalf("real GUI reservation missing during current policy readback: %v", err)
+				}
+				probe, acquired, err := api.TryAcquireUpgradeFence(t.Context(), stateDir)
+				if acquired {
+					_ = probe.Release()
+					t.Fatal("outer fence released before current policy readback")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return projectionErr
+			}
+			cmd := newUpgradeCmdReal()
 			var completionAttempt string
 			cmd.SetOut(upgradeGUICommandWriter(func(p []byte) (int, error) {
 				completionAttempt = string(p)
 				order = append(order, "completion-write")
-				if lease.released != 1 {
-					return 0, errors.New("GUI lease still held during completion")
+				unheld, err := gui.ProbeSingleInstanceLockUnheld(leasePath)
+				if err != nil || !unheld || lease.released != 1 {
+					return 0, errors.New("real GUI reservation remains during completion")
 				}
-				probe, acquired, err := api.TryAcquireUpgradeFence(context.Background(), f.stateDir)
+				probe, acquired, err := api.TryAcquireUpgradeFence(t.Context(), stateDir)
 				if err != nil || !acquired {
-					return 0, fmt.Errorf("fence still held during completion: %v", err)
+					return 0, fmt.Errorf("fence remains during completion: %v", err)
 				}
 				if err := probe.Release(); err != nil {
 					return 0, err
@@ -432,57 +429,41 @@ func TestUpgradeGUIOutputSettlement(t *testing.T) {
 				}
 				return len(p), nil
 			}))
-			err := runV5UpgradeWindowsWithPathsAndDeps(cmd, f.candidate, f.target, deps)
-			if !preparedObserved || *classifications != 2 || *exits != 1 || lease.released != 1 || f.factoryCalls != 1 {
-				t.Fatalf("path observations: prepared=%v classify=%d exit=%d release=%d Product=%d err=%v", preparedObserved, *classifications, *exits, lease.released, f.factoryCalls, err)
+			const completion = "UPGRADE_GUI_TXN_SETTLED: requested Product transaction complete"
+			err = finishV5UpgradeWindowsCommand(cmd, true, completion, errors.Join(priorErr, preparedOutputErr), projectOff, lease, fence)
+			for _, cause := range []error{priorErr, preparedErr, projectionErr, releaseErr, tc.finalErr} {
+				if cause != nil && !errors.Is(err, cause) {
+					t.Fatalf("finalization lost original cause %v: %v", cause, err)
+				}
 			}
-			if tc.preparedFailure {
-				if err == nil || !strings.Contains(err.Error(), "UPGRADE_GUI_STAGE_OUTPUT_UNCONFIRMED") || !strings.Contains(err.Error(), "prepared stderr unavailable") {
-					t.Fatalf("stage result=%v", err)
-				}
-				if completionAttempt != "" {
-					t.Fatalf("generic completion after stage failure: %q", completionAttempt)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), "UPGRADE_GUI_COMPLETION_OUTPUT_UNCONFIRMED") || completionAttempt != "UPGRADE_GUI_TXN_SETTLED: requested Product transaction complete\n" {
-				t.Fatalf("completion result=(%v,%q)", err, completionAttempt)
+			if tc.finalShort && !errors.Is(err, io.ErrShortWrite) {
+				t.Fatalf("short completion was accepted: %v", err)
 			}
-			if tc.rollback {
-				if !errors.Is(err, f.fault) || !f.tasks.restored {
-					t.Fatalf("Product rollback cause/restore lost: err=%v tasks=%+v", err, f.tasks)
-				}
-				if _, statErr := os.Stat(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json")); !errors.Is(statErr, os.ErrNotExist) {
-					t.Fatalf("rollback left committed receipt: %v", statErr)
-				}
-				priorNow, readErr := os.ReadFile(f.target)
-				if readErr != nil || !bytes.Equal(priorNow, f.priorBytes) {
-					t.Fatalf("rollback did not restore prior Product: %v", readErr)
+			if preparedErr != nil || priorErr != nil || projectionErr != nil || releaseErr != nil {
+				if completionAttempt != "" || strings.Join(order, ">") != "project-off>gui-release" {
+					t.Fatalf("unsettled output/order: output=%q order=%v", completionAttempt, order)
 				}
 			} else {
-				raw, readErr := os.ReadFile(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json"))
-				var receipt UpgradeReceiptV3
-				if readErr != nil || json.Unmarshal(raw, &receipt) != nil || receipt.Mode != WindowsProductPairModeUpgrade {
-					t.Fatalf("committed Product receipt unreadable: %v", readErr)
+				if completionAttempt != completion+"\n" || strings.Join(order, ">") != "project-off>gui-release>completion-write" {
+					t.Fatalf("settled output/order: output=%q order=%v", completionAttempt, order)
 				}
-				candidateSHA, hashErr := hashRecoveryFile(f.candidate)
-				if hashErr != nil || receipt.Artifact.SHA256 != candidateSHA {
-					t.Fatalf("receipt candidate SHA mismatch: %v", hashErr)
-				}
-				if f.tasks.restored {
-					t.Fatal("post-commit reporting failure rolled Product back")
+				if tc.finalErr == nil && !tc.finalShort && err != nil {
+					t.Fatal(err)
 				}
 			}
-			if _, statErr := os.Stat(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)); !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("settled journal remains: %v", statErr)
+			if lease.released != 1 {
+				t.Fatalf("GUI lease release calls=%d", lease.released)
 			}
-			if !tc.preparedFailure && (len(order) != 2 || order[0] != "gui-release" || order[1] != "completion-write") {
-				t.Fatalf("release/output order=%v", order)
+			unheld, probeErr := gui.ProbeSingleInstanceLockUnheld(leasePath)
+			if probeErr != nil || !unheld {
+				t.Fatalf("finalization left real GUI reservation held: %v", probeErr)
 			}
-			probe, acquired, probeErr := api.TryAcquireUpgradeFence(context.Background(), f.stateDir)
+			probe, acquired, probeErr := api.TryAcquireUpgradeFence(t.Context(), stateDir)
 			if probeErr != nil || !acquired {
-				t.Fatalf("fence remained held after return: %v", probeErr)
+				t.Fatalf("finalization left outer fence held: %v", probeErr)
 			}
-			if releaseErr := probe.Release(); releaseErr != nil {
-				t.Fatal(releaseErr)
+			if err := probe.Release(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -1469,9 +1450,34 @@ func TestUpgradeGUIOwnedPriorProductReadbackRejectsDrift(t *testing.T) {
 	}
 }
 
+// During the live command, originals deliberately deny cold acquisition. Check
+// that the durable checkpoint records the actual held directory here; cold
+// readmission after release is covered by TestCanonicalPrepareFirstJournalContainsOriginalDirectory.
+func assertCanonicalPrepareHeldDirectory(t *testing.T, txn *WindowsProductTxn) {
+	t.Helper()
+	if txn.prepared == nil || txn.prepared.entrySet == nil || txn.prepared.entrySet.directory == nil {
+		t.Fatal("prepared command has no original directory owner")
+	}
+	raw, err := api.ReadStateFileInodeAnchored(filepath.Join(txn.Opts.StateDir, WindowsProductRecoveryFileLeafV3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil || j.EntrySet == nil || j.EntrySet.PayloadDirectory.Original == nil {
+		t.Fatalf("durable checkpoint has no original directory identity: %v", err)
+	}
+	actual, err := txn.prepared.entrySet.directory.Snapshot()
+	if err != nil || !reflect.DeepEqual(actual, *j.EntrySet.PayloadDirectory.Original) {
+		t.Fatalf("durable checkpoint does not describe the held directory: %v", err)
+	}
+}
+
 func TestUpgradeGUIOwnedPairCallerPersistsBeforeExitAndRetainsPendingOnFailedRecovery(t *testing.T) {
-	f := newUpgradeGUICommandC3Fixture(t)
+	f := newQualifiedUpgradeGUICommandFixture(t)
+	actors := startQualifiedUpgradeGUIActors(t, f)
+	held := actors.held
 	cmd := newUpgradeCmdReal()
+	cmd.SetContext(t.Context())
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	for _, flag := range []string{"terminate-gui-for-upgrade", "stop-gui-owned-fleet-for-upgrade"} {
@@ -1479,25 +1485,26 @@ func TestUpgradeGUIOwnedPairCallerPersistsBeforeExitAndRetainsPendingOnFailedRec
 			t.Fatal(err)
 		}
 	}
-	guiStart := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
-	held := &upgradeGUIHeldTopology{StateDir: f.stateDir,
-		SupervisorOwner: api.SupervisorLockOwner{PID: 103, StartedAt: guiStart.Add(2 * time.Second).Format(time.RFC3339Nano)},
-		Identity: upgradeGUIIdentitySnapshot{Target: f.target,
-			GUI:                upgradeGUIProcessIdentity{PID: 101, Role: "gui", Image: f.target, StartedAt: guiStart, SameUser: true},
-			Tray:               upgradeGUIProcessIdentity{PID: 102, Role: "tray", Image: f.target, StartedAt: guiStart.Add(time.Second), ParentPID: 101, SameUser: true},
-			Supervisor:         upgradeGUIProcessIdentity{PID: 103, Role: "supervise", Image: f.target, StartedAt: guiStart.Add(2 * time.Second), ParentPID: 101, SameUser: true},
-			SupervisorInAnyJob: true},
-		FrozenPorts: []windowsProductIntentPortV1{{TaskName: `\mcphub-running`, Port: 9137, ArgvSHA256: strings.Repeat("a", 64)}, {TaskName: `\mcphub-stopped`, Port: 9138, ArgvSHA256: strings.Repeat("b", 64)}},
-		PortOwners:  []upgradeGUIPortOwner{{TaskName: `\mcphub-running`, Port: 9137, PID: 104, ParentPID: 103, StartedAt: guiStart.Add(3 * time.Second), ArgvSHA256: strings.Repeat("a", 64)}, {TaskName: `\mcphub-stopped`, Port: 9138}},
-	}
 	stops, callbacks := 0, 0
+	var firstJournal []byte
+	var settlementErr error
+	trigger := errors.New("injected predecision failure")
 	priorRunner := runInstallUpgradeWindowsFn
 	t.Cleanup(func() { runInstallUpgradeWindowsFn = priorRunner })
 	runInstallUpgradeWindowsFn = func(_ context.Context, opts UpgradeOpts) error {
 		if !opts.GUIOwnedPending || opts.WindowsProduct != f.txn || f.txn.prepared == nil || f.txn.prepared.journal.Phase != WindowsProductRecoveryGUIOwnedStopPending || stops != 1 {
 			t.Fatalf("Product run did not receive held pending preimage after exact exit")
 		}
-		return f.txn.rollback(errors.New("injected predecision failure"))
+		recoverPrior := f.txn.prepared.deps.RecoverPriorSettlement
+		if recoverPrior == nil {
+			t.Fatal("complete-set command did not bind native prior recovery")
+		}
+		f.txn.prepared.deps.RecoverPriorSettlement = func(journal windowsProductRecoveryJournalV3) error {
+			callbacks++
+			settlementErr = recoverPrior(journal)
+			return settlementErr
+		}
+		return f.txn.rollback(trigger)
 	}
 	deps := upgradeGUIFencedDeps{
 		Classify: func(string, string, string) (upgradeGUIProductOutcome, error) {
@@ -1513,7 +1520,7 @@ func TestUpgradeGUIOwnedPairCallerPersistsBeforeExitAndRetainsPendingOnFailedRec
 			return nil, nil
 		},
 		ObservePair: func(context.Context, string, string) (*upgradeGUIHeldTopology, error) { return held, nil },
-		ExitPair: func(_ context.Context, got *upgradeGUIHeldTopology, txn *WindowsProductTxn) (gui.OwnedSingleInstanceLease, error) {
+		ExitPair: func(ctx context.Context, got *upgradeGUIHeldTopology, txn *WindowsProductTxn) (gui.OwnedSingleInstanceLease, error) {
 			if got != held || txn != f.txn {
 				t.Fatal("exact pair/transaction changed")
 			}
@@ -1522,31 +1529,52 @@ func TestUpgradeGUIOwnedPairCallerPersistsBeforeExitAndRetainsPendingOnFailedRec
 				t.Fatal(err)
 			}
 			journal, err := decodeWindowsProductRecoveryJournalV3(raw)
-			if err != nil || journal.Phase != WindowsProductRecoveryGUIOwnedStopPending || journal.PreSettlement == nil || journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent {
+			if err != nil || journal.Phase != WindowsProductRecoveryGUIOwnedStopPending || journal.PreSettlement == nil || journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent ||
+				journal.EntrySet == nil || journal.EntrySet.PayloadDirectory.Original == nil || journal.PreSettlement.Supervisor.Generation == nil || journal.PreSettlement.Supervisor.Generation.PID != held.Identity.Supervisor.PID {
 				t.Fatalf("no readback pending journal before stop: %v %+v", err, journal)
 			}
+			assertCanonicalPrepareHeldDirectory(t, txn)
+			firstJournal = append([]byte(nil), raw...)
+			if err := verifyUpgradePriorRuntimeTopology(ctx, held.PriorRuntime, held); err != nil {
+				t.Fatal(err)
+			}
+			actors.stop(t)
 			stops++
-			return &upgradeGUITestLease{}, nil
+			// Reserve the actual isolated GUI lock. No owner record is supplied:
+			// native rollback must retain pending work when absence is unproven.
+			path, err := gui.PidportPath()
+			if err != nil {
+				return nil, err
+			}
+			return gui.AcquireSingleInstanceLockOnlyAt(path)
 		},
 		ObserveAfterPair: func(context.Context, string, string, []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
 			t.Fatal("runner stub should not observe")
 			return windowsProductQuiescenceObservationV1{}, nil
 		},
 		RecoverPriorPair: func(windowsProductRecoveryJournalV3) error {
-			callbacks++
-			return errors.New("prior fleet remains unproven")
+			t.Fatal("complete-set recovery used the legacy callback")
+			return nil
 		},
 		AfterCommitPair: func(windowsProductRecoveryJournalV3, func() error) error {
 			t.Fatal("predecision failure reached committed GUI return")
 			return nil
 		},
 	}
-	err := runV5UpgradeWindowsWithPathsAndDeps(cmd, f.candidate, f.target, deps)
-	if !errors.Is(err, ErrWindowsProductRecoveryPending) || stops != 1 || callbacks != 1 {
+	err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, deps, f.input)
+	if !errors.Is(err, trigger) || !errors.Is(err, ErrWindowsProductRecoveryPending) || stops != 1 || callbacks != 1 || f.factoryCalls != 1 {
 		t.Fatalf("pair predecision result=(%v, stops=%d, callbacks=%d), want typed pending", err, stops, callbacks)
 	}
-	if _, statErr := os.Stat(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)); statErr != nil {
-		t.Fatalf("pending V3 journal was removed: %v", statErr)
+	var diagnostic *upgradeGUIPriorSettlementError
+	if !errors.As(settlementErr, &diagnostic) || diagnostic.operation != upgradeGUIPriorReservation || diagnostic.reservationStep != upgradeGUIReservationFirstAbsence || !errors.Is(settlementErr, os.ErrNotExist) {
+		t.Fatalf("native recovery did not stop at missing original GUI-owner evidence: %v", settlementErr)
+	}
+	retained, readErr := os.ReadFile(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3))
+	if readErr != nil || !bytes.Equal(retained, firstJournal) {
+		t.Fatalf("failed native settlement removed or changed the first pending V3 journal: %v", readErr)
+	}
+	if !f.tasks.restored || !f.tasks.closed || f.tasks.discarded {
+		t.Fatalf("failed recovery task ownership: restored=%v closed=%v discarded=%v", f.tasks.restored, f.tasks.closed, f.tasks.discarded)
 	}
 	got, err := os.ReadFile(f.target)
 	if err != nil || !bytes.Equal(got, f.priorBytes) {
@@ -1554,11 +1582,13 @@ func TestUpgradeGUIOwnedPairCallerPersistsBeforeExitAndRetainsPendingOnFailedRec
 	}
 }
 
-func TestUpgradeGUIOwnedPairSettlesBeforePromotionAndRestoresGUIBeforeJournalRemoval(t *testing.T) {
-	f := newUpgradeGUICommandC3Fixture(t)
-	intent := `{"version":1,"updated_at":"2026-09-28T00:00:00Z","daemons":[{"task_name":"\\mcp-running","command":"mcphub","args":["daemon","running"],"port":9137},{"task_name":"\\mcp-stopped","command":"mcphub","args":["daemon","stopped"],"port":9138}],"strict_mode":false}`
-	writeStateSidecarBytes(t, filepath.Join(f.stateDir, "supervisor-intent.json"), []byte(intent))
+func TestUpgradeGUIOwnedPairCommandSettlesBeforePromotionAndPublishesBeforeGUIHandoff(t *testing.T) {
+	f := newQualifiedUpgradeGUICommandFixture(t)
+	useQualifiedUpgradeCommandSuccessorBackend(t, f)
+	actors := startQualifiedUpgradeGUIActors(t, f)
+	held := actors.held
 	cmd := newUpgradeCmdReal()
+	cmd.SetContext(t.Context())
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	for _, flag := range []string{"terminate-gui-for-upgrade", "stop-gui-owned-fleet-for-upgrade"} {
@@ -1566,17 +1596,8 @@ func TestUpgradeGUIOwnedPairSettlesBeforePromotionAndRestoresGUIBeforeJournalRem
 			t.Fatal(err)
 		}
 	}
-	guiStart := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
-	held := &upgradeGUIHeldTopology{StateDir: f.stateDir,
-		SupervisorOwner: api.SupervisorLockOwner{PID: 103, StartedAt: guiStart.Add(2 * time.Second).Format(time.RFC3339Nano)},
-		Identity: upgradeGUIIdentitySnapshot{Target: f.target,
-			GUI:        upgradeGUIProcessIdentity{PID: 101, Role: "gui", Image: f.target, StartedAt: guiStart, SameUser: true},
-			Tray:       upgradeGUIProcessIdentity{PID: 102, Role: "tray", Image: f.target, StartedAt: guiStart.Add(time.Second), ParentPID: 101, SameUser: true},
-			Supervisor: upgradeGUIProcessIdentity{PID: 103, Role: "supervise", Image: f.target, StartedAt: guiStart.Add(2 * time.Second), ParentPID: 101, SameUser: true}, SupervisorInAnyJob: true},
-		FrozenPorts: []windowsProductIntentPortV1{{TaskName: `\mcp-running`, Port: 9137, ArgvSHA256: windowsProductArgvSHA256([]string{"mcphub", "daemon", "running"})}, {TaskName: `\mcp-stopped`, Port: 9138, ArgvSHA256: windowsProductArgvSHA256([]string{"mcphub", "daemon", "stopped"})}},
-		PortOwners:  []upgradeGUIPortOwner{{TaskName: `\mcp-running`, Port: 9137, PID: 104, ParentPID: 103, StartedAt: guiStart.Add(3 * time.Second), ArgvSHA256: windowsProductArgvSHA256([]string{"mcphub", "daemon", "running"})}, {TaskName: `\mcp-stopped`, Port: 9138}},
-	}
-	lease := &upgradeGUITestLease{}
+	var order []string
+	lease := &upgradeGUICommandLease{stateDir: f.stateDir, order: &order}
 	stops, forward := 0, 0
 	settings := api.SettingsPath()
 	if err := os.MkdirAll(filepath.Dir(settings), 0o700); err != nil {
@@ -1627,19 +1648,31 @@ func TestUpgradeGUIOwnedPairSettlesBeforePromotionAndRestoresGUIBeforeJournalRem
 			return nil, nil
 		},
 		ObservePair: func(context.Context, string, string) (*upgradeGUIHeldTopology, error) { return held, nil },
-		ExitPair: func(_ context.Context, _ *upgradeGUIHeldTopology, txn *WindowsProductTxn) (gui.OwnedSingleInstanceLease, error) {
-			if txn.prepared == nil || txn.prepared.journal.Phase != WindowsProductRecoveryGUIOwnedStopPending {
+		ExitPair: func(ctx context.Context, got *upgradeGUIHeldTopology, txn *WindowsProductTxn) (gui.OwnedSingleInstanceLease, error) {
+			if got != held || txn != f.txn || txn.prepared == nil || txn.prepared.journal.Phase != WindowsProductRecoveryGUIOwnedStopPending {
 				t.Fatal("stop before V3 pending readback")
+			}
+			assertCanonicalPrepareHeldDirectory(t, txn)
+			if err := verifyUpgradePriorRuntimeTopology(ctx, held.PriorRuntime, held); err != nil {
+				t.Fatal(err)
+			}
+			actors.stop(t)
+			path, err := gui.PidportPath()
+			if err != nil {
+				return nil, err
+			}
+			lease.owned, err = gui.AcquireSingleInstanceLockOnlyAt(path)
+			if err != nil {
+				return nil, err
 			}
 			stops++
 			return lease, nil
 		},
-		ObserveAfterPair: func(_ context.Context, _, _ string, ports []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
-			if stops != 1 || len(ports) != 2 {
+		ObserveAfterPair: func(ctx context.Context, stateDir, target string, ports []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
+			if stops != 1 || stateDir != f.stateDir || target != f.target || len(ports) != 0 {
 				t.Fatalf("post-stop observation order/ports: stops=%d ports=%v", stops, ports)
 			}
-			return windowsProductQuiescenceObservationV1{Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent}, GUIOwner: windowsProductGUIOwnerConfirmedAbsent, SupervisorLockReleased: true,
-				Ports: []windowsProductPortSettlementV1{{TaskName: `\mcp-running`, Port: 9137, PreState: windowsProductPortUnbound, PostUnbound: true}, {TaskName: `\mcp-stopped`, Port: 9138, PreState: windowsProductPortUnbound, PostUnbound: true}}}, nil
+			return observeWindowsProductPairQuiescence(ctx, stateDir, target, ports)
 		},
 		AfterCommitPair: func(journal windowsProductRecoveryJournalV3, release func() error) error {
 			forward++
@@ -1652,16 +1685,24 @@ func TestUpgradeGUIOwnedPairSettlesBeforePromotionAndRestoresGUIBeforeJournalRem
 			if _, err := os.Stat(filepath.Join(f.stateDir, UpgradeReceiptSchemaV3+".json")); err != nil {
 				t.Fatalf("receipt not read back before GUI return: %v", err)
 			}
+			raw, err := os.ReadFile(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3))
+			if err != nil {
+				t.Fatal("committed journal removed before GUI handoff", err)
+			}
+			persisted, err := decodeWindowsProductRecoveryJournalV3(raw)
+			if err != nil || persisted.Phase != WindowsProductRecoveryCommitDecided || persisted.EntrySet == nil {
+				t.Fatalf("GUI handoff lacks the durable complete-set commit decision: %v", err)
+			}
 			return release()
 		},
 	}
-	if err := runV5UpgradeWindowsWithPathsAndDeps(cmd, f.candidate, f.target, deps); err != nil {
+	if err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, deps, f.input); err != nil {
 		t.Fatal(err)
 	}
 	if backend.disableCalls != 2 || backend.installed || len(backend.enableCalls) != 0 {
 		t.Fatalf("pair/final OFF projection missing: %+v", backend)
 	}
-	if stops != 1 || forward != 1 || lease.released != 1 || f.txn.prepared.journal.Phase != WindowsProductRecoverySettledCommit {
+	if stops != 1 || forward != 1 || lease.released != 1 || f.successorStarts != 1 || f.successorReady != 1 || f.txn.prepared.journal.Phase != WindowsProductRecoverySettledCommit {
 		t.Fatalf("settlement stops=%d forward=%d release=%d phase=%s", stops, forward, lease.released, f.txn.prepared.journal.Phase)
 	}
 	if _, err := os.Stat(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)); !errors.Is(err, os.ErrNotExist) {
@@ -2114,8 +2155,8 @@ func TestUpgradeGUIOptInBypassesOnlyDefaultLiveGUIRefusal(t *testing.T) {
 	}
 }
 
-func TestUpgradeGUIOptInCandidateAdmissionPrecedesFenceWait(t *testing.T) {
-	withTempStateDir(t)
+func TestUpgradeGUIOptInBuildBindingAdmissionPrecedesFenceWait(t *testing.T) {
+	stateDir := withTempStateDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cmd := newUpgradeCmdReal()
@@ -2124,8 +2165,12 @@ func TestUpgradeGUIOptInCandidateAdmissionPrecedesFenceWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := runV5UpgradeWindowsWithPaths(cmd, filepath.Join(t.TempDir(), "invalid-candidate.exe"), filepath.Join(t.TempDir(), "mcphub.exe"))
-	if err == nil || !strings.Contains(err.Error(), "UPGRADE_GUI_PRIOR_STATE_UNVERIFIABLE") {
-		t.Fatalf("invalid candidate before fence error=%v, want typed admission refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "canonical entry build binding is missing or invalid") || errors.Is(err, context.Canceled) {
+		t.Fatalf("missing immutable binding did not precede the cancelled fence wait: %v", err)
+	}
+	entries, readErr := os.ReadDir(stateDir)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("rejected binding created transaction state: entries=%v error=%v", entries, readErr)
 	}
 }
 
