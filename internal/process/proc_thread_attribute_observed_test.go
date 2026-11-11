@@ -10,16 +10,21 @@ func TestObservedAttributePartialInitAndCloseOnce(t *testing.T) {
 	insufficient := errors.New("insufficient")
 	initFailure := errors.New("init failure")
 	freeFailure := errors.New("free failure")
-	for _, mode := range []string{"success", "init-failure", "free-failure", "size-overflow", "size-zero"} {
+	modes := []string{"success", "init-failure", "free-failure", "size-zero"}
+	if unsafe.Sizeof(uintptr(0)) > unsafe.Sizeof(uint32(0)) {
+		modes = append(modes, "size-overflow")
+	}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
-			buffer := make([]byte, 64)
+			const allocation = uintptr(1) // Opaque native address; the double never dereferences it.
 			deleteCalls, freeCalls := 0, 0
 			native := procThreadAttributeNative{insufficientBuffer: insufficient,
-				initialize: func(data unsafe.Pointer, count uint32, size *uintptr) error {
-					if data == nil {
+				initialize: func(data uintptr, count uint32, size *uintptr) error {
+					if data == 0 {
 						*size = 64
 						if mode == "size-overflow" {
-							*size = uintptr(^uint32(0)) + 1
+							*size = uintptr(^uint32(0))
+							*size++
 						}
 						if mode == "size-zero" {
 							*size = 0
@@ -31,9 +36,9 @@ func TestObservedAttributePartialInitAndCloseOnce(t *testing.T) {
 					}
 					return nil
 				},
-				allocate: func(uint32) (uintptr, error) { return uintptr(unsafe.Pointer(&buffer[0])), nil },
-				update:   func(unsafe.Pointer, uintptr, unsafe.Pointer, uintptr) error { return nil },
-				delete:   func(unsafe.Pointer) error { deleteCalls++; return nil },
+				allocate: func(uint32) (uintptr, error) { return allocation, nil },
+				update:   func(uintptr, uintptr, unsafe.Pointer, uintptr) error { return nil },
+				delete:   func(uintptr) error { deleteCalls++; return nil },
 				free: func(uintptr) error {
 					freeCalls++
 					if mode == "free-failure" {

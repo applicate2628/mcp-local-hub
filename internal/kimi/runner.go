@@ -131,7 +131,7 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 		return RunOutput{}, newFailure("E_KIMI_RECEIPT_INVALID", err)
 	}
 	var runErr error
-	var runCtx context.Context
+	var runFailure string
 	defer func() {
 		if cleanupErr := deps.removeAll(receiptDir); cleanupErr != nil {
 			var causes []error
@@ -150,7 +150,7 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 				}
 			} else if runErr != nil {
 				causes = append(causes, runErr)
-				primaryID = runFailureID(runCtx, ctx)
+				primaryID = runFailure
 			}
 			causes = append(causes, cleanupErr)
 			failure := newFailure("E_KIMI_CLEANUP_FAILED", errors.Join(causes...))
@@ -179,13 +179,16 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 		_, err := io.Copy(io.Discard, reader)
 		return err
 	})
+	// The contained runner retains the execution cause before cleanup. Current
+	// context state may already reflect a later deadline or cancellation.
+	runFailure, runCause := classifyRunFailure(runErr, runCtx, ctx)
 
 	var contained *process.ContainedRunError
 	if errors.As(runErr, &contained) && (contained.CleanupCause != nil || (contained.Stage == process.ContainedStageCleanup && contained.Cause != nil) || errors.Is(runErr, process.ErrCleanupTimeout)) {
 		failure := newFailure("E_KIMI_CLEANUP_FAILED", runErr)
 		failure.cleanupFailures = []string{"contained_process"}
 		if contained.Cause != nil && (contained.Stage != process.ContainedStageCleanup || contained.CleanupCause != nil) {
-			failure.primaryFailureID = runFailureID(runCtx, ctx)
+			failure.primaryFailureID = runFailure
 		}
 		return RunOutput{}, failure
 	}
@@ -199,15 +202,9 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 		}
 		selectedFailureID = "E_KIMI_RECEIPT_INVALID"
 		selectedCause = parseErr
-	} else if errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-		selectedFailureID = "E_KIMI_TIMEOUT"
-		selectedCause = runCtx.Err()
-	} else if ctx.Err() != nil {
-		selectedFailureID = "E_KIMI_CANCELLED"
-		selectedCause = ctx.Err()
 	} else if runErr != nil {
-		selectedFailureID = "E_KIMI_RUN_FAILED"
-		selectedCause = runErr
+		selectedFailureID = runFailure
+		selectedCause = runCause
 	} else {
 		selectedFailureID = "E_KIMI_RECEIPT_INVALID"
 		selectedCause = readErr
@@ -222,14 +219,40 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 	return RunOutput{}, newFailure(selectedFailureID, selectedCause)
 }
 
-func runFailureID(runCtx, ctx context.Context) string {
-	if runCtx != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-		return "E_KIMI_TIMEOUT"
+func classifyRunFailure(runErr error, runCtx, ctx context.Context) (string, error) {
+	if runErr == nil {
+		return "", nil
 	}
-	if ctx.Err() != nil {
-		return "E_KIMI_CANCELLED"
+	var contained *process.ContainedRunError
+	if errors.As(runErr, &contained) {
+		// Validation may refuse an already-cancelled context before allocation.
+		// Every other non-context stage records an independent lifecycle failure.
+		if contained.Stage == process.ContainedStageContext || contained.Stage == process.ContainedStageValidate {
+			if errors.Is(contained.Cause, context.DeadlineExceeded) {
+				return "E_KIMI_TIMEOUT", runErr
+			}
+			if errors.Is(contained.Cause, context.Canceled) {
+				return "E_KIMI_CANCELLED", runErr
+			}
+		}
+		return "E_KIMI_RUN_FAILED", runErr
 	}
-	return "E_KIMI_RUN_FAILED"
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return "E_KIMI_TIMEOUT", runErr
+	}
+	if errors.Is(runErr, context.Canceled) {
+		return "E_KIMI_CANCELLED", runErr
+	}
+	// Untyped injected runners have no retained lifecycle observation. Freeze
+	// their context fallback here, before receipt reads and directory cleanup.
+	workErr, requestErr := runCtx.Err(), ctx.Err()
+	if errors.Is(workErr, context.DeadlineExceeded) && requestErr == nil {
+		return "E_KIMI_TIMEOUT", errors.Join(runErr, workErr)
+	}
+	if requestErr != nil {
+		return "E_KIMI_CANCELLED", errors.Join(runErr, requestErr)
+	}
+	return "E_KIMI_RUN_FAILED", runErr
 }
 
 func buildWrapperArgs(wrapper, receipt, capabilityFile string, request RunRequest) []string {

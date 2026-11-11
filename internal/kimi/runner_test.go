@@ -157,7 +157,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 		deps := base
 		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
 			<-ctx.Done()
-			return ctx.Err()
+			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
 		_, err := runWithDependencies(context.Background(), req, deps)
 		if failureID(err) != "E_KIMI_TIMEOUT" {
@@ -168,7 +168,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 		deps := base
 		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
 			<-ctx.Done()
-			return ctx.Err()
+			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -179,6 +179,8 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 	})
 	t.Run("cleanup", func(t *testing.T) {
 		deps := base
+		cleanupRequest := req
+		cleanupRequest.TimeoutSeconds = 30 // This case tests cleanup failure, not a racing work deadline.
 		primaryErr := errors.New("synthetic run failure")
 		cleanupErr := errors.New("synthetic cleanup failure")
 		var args []string
@@ -193,7 +195,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 			return primaryErr
 		}
 		deps.removeAll = func(string) error { return cleanupErr }
-		output, err := runWithDependencies(context.Background(), req, deps)
+		output, err := runWithDependencies(context.Background(), cleanupRequest, deps)
 		if failureID(err) != "E_KIMI_CLEANUP_FAILED" {
 			t.Fatalf("error = %v", err)
 		}
@@ -211,6 +213,67 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 			t.Fatalf("cleanup failure JSON = %s", failure.JSON())
 		}
 	})
+	for _, execution := range []struct {
+		name  string
+		stage process.ContainedRunStage
+		cause error
+		want  string
+	}{
+		{"exit", process.ContainedStageExit, errors.New("original nonzero exit"), "E_KIMI_RUN_FAILED"},
+		{"timeout", process.ContainedStageContext, context.DeadlineExceeded, "E_KIMI_TIMEOUT"},
+	} {
+		for _, cleanup := range []string{"none", "contained_process", "receipt_directory"} {
+			t.Run(execution.name+" before late cancellation/"+cleanup, func(t *testing.T) {
+				deps := base
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				cleanupErr := errors.New("cleanup after retained execution outcome")
+				var args []string
+				deps.command = func(name string, values ...string) *exec.Cmd {
+					args = append([]string(nil), values...)
+					return exec.Command(name, values...)
+				}
+				deps.runContained = func(work context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+					// Execution has already produced the retained typed outcome.
+					// Model a later parent cancellation while its cleanup finishes.
+					cancel()
+					if !errors.Is(work.Err(), context.Canceled) {
+						t.Fatalf("work context was not cancelled: %v", work.Err())
+					}
+					contained := &process.ContainedRunError{Stage: execution.stage, Cause: execution.cause}
+					if execution.stage == process.ContainedStageExit {
+						code := 17
+						contained.ExitCode = &code
+					}
+					if cleanup == "contained_process" {
+						contained.CleanupStage = process.ContainedStageCleanup
+						contained.CleanupCause = cleanupErr
+					}
+					if cleanup == "receipt_directory" {
+						if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "acquired result")), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return contained
+				}
+				if cleanup == "receipt_directory" {
+					deps.removeAll = func(string) error { return cleanupErr }
+				}
+				_, err := runWithDependencies(ctx, req, deps)
+				var failure *Failure
+				if !errors.As(err, &failure) || !errors.Is(err, execution.cause) {
+					t.Fatalf("execution cause lost: %v", err)
+				}
+				if cleanup == "none" {
+					if failure.ID != execution.want || failure.primaryFailureID != "" {
+						t.Fatalf("late cancellation rewrote failure: %s", failure.JSON())
+					}
+				} else if failure.ID != "E_KIMI_CLEANUP_FAILED" || failure.primaryFailureID != execution.want || !errors.Is(err, cleanupErr) || !reflect.DeepEqual(failure.cleanupFailures, []string{cleanup}) {
+					t.Fatalf("cleanup lost original execution outcome: %s; %v", failure.JSON(), err)
+				}
+			})
+		}
+	}
 }
 
 func TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure(t *testing.T) {
@@ -438,6 +501,30 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	pidFile := filepath.Join(root, "child.pid")
+	releaseFile := filepath.Join(root, "release-helper")
+	// Register before launch and before any result assertion. The descendants
+	// also self-expire, so failed containment cannot leave a permanent helper.
+	t.Cleanup(func() {
+		if err := os.WriteFile(releaseFile, nil, 0o600); err != nil {
+			t.Errorf("release fake wrapper: %v", err)
+		}
+		rawPID, err := os.ReadFile(pidFile)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			t.Errorf("read fake child custody receipt: %v", err)
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
+		if err != nil || pid <= 0 {
+			t.Errorf("invalid fake child custody receipt: %v", err)
+			return
+		}
+		if err := waitKimiFakeExit(pid, 15*time.Second); err != nil {
+			t.Errorf("fake descendant fixture release: %v", err)
+		}
+	})
 	receiptBase := filepath.Join(root, "receipts")
 	if err := os.Mkdir(receiptBase, 0o700); err != nil {
 		t.Fatal(err)
@@ -452,7 +539,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 				panic(err)
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestKimiFakeWrapperProcess$")
-			cmd.Env = append(os.Environ(), "GO_WANT_KIMI_WRAPPER=1", "KIMI_HELPER_PID_FILE="+pidFile, "KIMI_HELPER_ARGS="+string(encoded))
+			cmd.Env = append(os.Environ(), "GO_WANT_KIMI_WRAPPER=1", "KIMI_HELPER_PID_FILE="+pidFile, "KIMI_HELPER_RELEASE_FILE="+releaseFile, "KIMI_HELPER_ARGS="+string(encoded))
+			process.NoConsole(cmd)
 			return cmd
 		},
 		runContained: func(ctx context.Context, cmd *exec.Cmd, options process.ContainedStreamOptions, consume func(io.Reader) error) error {
@@ -477,12 +565,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for process.IsPidAlive(pid) && time.Now().Before(deadline) {
-		time.Sleep(25 * time.Millisecond)
-	}
-	if process.IsPidAlive(pid) {
-		t.Fatalf("stubborn descendant %d survived contained timeout", pid)
+	if err := waitKimiFakeExit(pid, 3*time.Second); err != nil {
+		t.Fatalf("stubborn descendant after contained timeout: %v", err)
 	}
 	entries, err := os.ReadDir(receiptBase)
 	if err != nil || len(entries) != 0 {
@@ -492,9 +576,8 @@ func TestRunWithContainedStreamSettlesStubbornChild(t *testing.T) {
 
 func TestKimiFakeWrapperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_KIMI_CHILD") == "1" {
-		for {
-			time.Sleep(time.Hour)
-		}
+		waitKimiFakeRelease()
+		return
 	}
 	if os.Getenv("GO_WANT_KIMI_WRAPPER") != "1" {
 		return
@@ -507,15 +590,19 @@ func TestKimiFakeWrapperProcess(t *testing.T) {
 	if topic == "stubborn" {
 		child := exec.Command(os.Args[0], "-test.run=^TestKimiFakeWrapperProcess$")
 		child.Env = append(os.Environ(), "GO_WANT_KIMI_CHILD=1")
+		process.NoConsole(child)
 		if err := child.Start(); err != nil {
 			t.Fatal(err)
 		}
+		defer func() {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+		}()
 		if err := os.WriteFile(os.Getenv("KIMI_HELPER_PID_FILE"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		for {
-			time.Sleep(time.Hour)
-		}
+		waitKimiFakeRelease()
+		return
 	}
 	receipt := argumentValue(args, "--terminal-receipt")
 	effort := argumentValue(args, "--kimi-effort")
@@ -527,5 +614,32 @@ func TestKimiFakeWrapperProcess(t *testing.T) {
 	}
 	if err := os.WriteFile(receipt, []byte(ownerReceiptRecord(t, effort, "synthetic result")), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func waitKimiFakeRelease() {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(os.Getenv("KIMI_HELPER_RELEASE_FILE")); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitKimiFakeExit(pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		state, err := process.QueryPIDState(pid)
+		if err != nil {
+			return err
+		}
+		if state == process.PIDStateDead {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("fixture exit was not observed before its deadline")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

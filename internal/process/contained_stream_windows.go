@@ -155,15 +155,15 @@ func (c *windowsContainedChild) start(
 	if err != nil {
 		return fixedContainedError(ContainedStageStart, err)
 	}
-	si := &windows.StartupInfoEx{
+	si := &procThreadAttributeStartupInfo{
 		StartupInfo: windows.StartupInfo{
-			Cb:        uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			Cb:        uint32(unsafe.Sizeof(procThreadAttributeStartupInfo{})),
 			Flags:     windows.STARTF_USESTDHANDLES,
 			StdInput:  stdHandles[0],
 			StdOutput: stdHandles[1],
 			StdErr:    stdHandles[2],
 		},
-		ProcThreadAttributeList: (*windows.ProcThreadAttributeList)(attrList.List()),
+		ProcThreadAttributeList: attrList.List(),
 	}
 
 	var pi windows.ProcessInformation

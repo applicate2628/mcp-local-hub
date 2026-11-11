@@ -118,8 +118,8 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: job handle is 0 (closed?)"))
 	}
 
-	// Allocate a one-attribute thread-attribute list via x/sys helper.
-	// The container owns the LocalAlloc'd buffer; Delete frees it.
+	// The observed owner retains its LocalAlloc buffer through native deletion
+	// and LocalFree, including partial initialization failures.
 	attributeCount := 1
 	if stdin != nil || (observer != nil && len(observer.childHandles) != 0) {
 		attributeCount++
@@ -223,11 +223,11 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 
 	// Build STARTUPINFOEX. Cb must be sizeof(StartupInfoEx) — the
 	// kernel uses this to decide whether to read the extended fields.
-	si := &windows.StartupInfoEx{
+	si := &procThreadAttributeStartupInfo{
 		StartupInfo: windows.StartupInfo{
-			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			Cb: uint32(unsafe.Sizeof(procThreadAttributeStartupInfo{})),
 		},
-		ProcThreadAttributeList: (*windows.ProcThreadAttributeList)(attrList.List()),
+		ProcThreadAttributeList: attrList.List(),
 	}
 	if stdin != nil {
 		si.StartupInfo.Flags |= windows.STARTF_USESTDHANDLES

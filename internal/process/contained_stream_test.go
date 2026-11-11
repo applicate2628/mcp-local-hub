@@ -402,6 +402,10 @@ func TestRunContainedStream_CancellationTerminatesThenWaitsOnce(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v, want context.Canceled", err)
 	}
+	var lifecycle *ContainedRunError
+	if !errors.As(err, &lifecycle) || lifecycle.Stage != ContainedStageContext || lifecycle.CleanupCause != nil {
+		t.Fatalf("settled cancellation was reported as a cleanup failure: %#v", err)
+	}
 	if child.startCalls.Load() != 1 || child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 {
 		t.Fatalf("start/terminate/wait=%d/%d/%d, want 1/1/1",
 			child.startCalls.Load(), child.terminateCalls.Load(), child.waitCalls.Load())
