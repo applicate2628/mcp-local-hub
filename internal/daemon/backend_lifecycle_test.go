@@ -46,7 +46,7 @@ func fakeLSPCommand(t *testing.T, modes ...fakeLSPMode) (cmd string, args []stri
 		if mode.receiptPath == "" {
 			t.Fatal("owned-tree mode requires a receipt path")
 		}
-		return "python", []string{"-u", "-c", `
+		return daemonTestPython(t), []string{"-u", "-c", `
 import json, os, subprocess, sys, time
 
 receipt_path = sys.argv[1]
@@ -71,7 +71,7 @@ def reply(message):
 try:
     first_line = sys.stdin.readline()
     first = json.loads(first_line)
-    child = subprocess.Popen([sys.executable, "-u", "-c", "import time; time.sleep(3600)"], stdin=subprocess.DEVNULL)
+    child = subprocess.Popen([sys.executable, "-u", "-c", "import time; time.sleep(3600)"], stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     with open(receipt_path, "x", encoding="utf-8") as receipt:
         json.dump({"child_pid": child.pid, "parent_pid": os.getpid(), "ready": True}, receipt)
         receipt.flush()
@@ -104,9 +104,9 @@ finally:
 `, mode.receiptPath, mode.handshake, mode.releasePath}
 	}
 	if runtime.GOOS == "windows" {
-		// Windows: python is consistently on PATH for the project's test
-		// suite (TestHostSubprocessLifecycle relies on it).
-		return "python", []string{"-u", "-c",
+		// Resolve an actual installed interpreter; Windows Store aliases
+		// cannot run the local backend fixture.
+		return daemonTestPython(t), []string{"-u", "-c",
 			`import sys, json
 # Echo back whatever id the host wrote for the initialize request.
 line = sys.stdin.readline()
@@ -221,7 +221,7 @@ func TestBackendLifecycle_GoplsMissingBinarySurfaces(t *testing.T) {
 func echoLSPCommand(t *testing.T) (cmd string, args []string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		return "python", []string{"-u", "-c",
+		return daemonTestPython(t), []string{"-u", "-c",
 			`import sys, json
 for line in sys.stdin:
     line = line.strip()
@@ -404,7 +404,7 @@ func TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess(t *testing.T) {
 	var cmd string
 	var args []string
 	if runtime.GOOS == "windows" {
-		cmd = "python"
+		cmd = daemonTestPython(t)
 		args = []string{"-u", "-c", `import sys
 # Silent backend: never replies, just drains stdin.
 for _ in sys.stdin:
@@ -544,8 +544,17 @@ func TestBackendLifecycle_DummyOwnedResourcesSettle(t *testing.T) {
 		}
 		assertDummyReceiptLive(t, targetReceipt)
 		assertDummyReceiptLive(t, controlReceipt)
-		if runtime.GOOS == "windows" && targetHost.job == nil {
-			t.Fatal("handle owner StdioHost.job is nil after the receipt-bound child spawned")
+		if runtime.GOOS == "windows" {
+			targetHost.mu.Lock()
+			original := targetHost.original
+			targetHost.mu.Unlock()
+			if original == nil || original.original == nil || original.job == nil {
+				t.Fatal("original process/Job owner is missing after the receipt-bound child spawned")
+			}
+			identity, err := original.original.Identity()
+			if err != nil || !identity.Known || identity.PID != targetReceipt.ParentPID || identity.NativeBirthFILETIME == 0 {
+				t.Fatalf("original parent identity=%+v receipt=%+v err=%v", identity, targetReceipt, err)
+			}
 		}
 
 		server := httptest.NewServer(targetHost.HTTPHandler())
@@ -915,6 +924,7 @@ func dummyHostSettledFailures(lifecycle *mcpLanguageServerStdio, host *StdioHost
 	host.mu.Lock()
 	stopped := host.stopped
 	job := host.job
+	original := host.original
 	logFile := host.logFile
 	host.mu.Unlock()
 	if !stopped {
@@ -922,6 +932,22 @@ func dummyHostSettledFailures(lifecycle *mcpLanguageServerStdio, host *StdioHost
 	}
 	if job != nil {
 		failures = append(failures, "handle owner StdioHost.job is non-nil")
+	}
+	if original != nil {
+		// The original owner retains its diagnostic pointers after closing.
+		// Receive its completed stop result; a nil legacy job is not evidence
+		// that native handles, pipes and their workers were settled.
+		select {
+		case <-original.stopDone:
+			settlement := original.terminal
+			if !settlement.Complete() || settlement.NoNativeAttempt || settlement.OriginalIdentity != original.identity || settlement.OriginalIdentity.PID != receipt.ParentPID {
+				failures = append(failures, fmt.Sprintf("original custody settlement incomplete or foreign: %+v", settlement))
+			}
+		default:
+			failures = append(failures, "original custody stop worker remains unjoined")
+		}
+	} else if runtime.GOOS == "windows" {
+		failures = append(failures, "original process/Job owner is missing after Stop")
 	}
 	if logFile != nil {
 		failures = append(failures, "handle owner StdioHost.logFile is non-nil")
