@@ -184,14 +184,13 @@ func TestSettleConfiguredCacheFailureClearsPriorMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &builder{configured: map[configuredCacheKey]string{
-		{sourceDir: sourceKey, preset: "dev"}: filepath.Join(source, "old-build"),
-	}}
+	key := configuredCacheKey{sourceDir: projectPathKey(sourceKey), preset: "dev"}
+	b := &builder{configured: map[configuredCacheKey]string{key: filepath.Join(source, "old-build")}}
 	if _, err := b.settleConfiguredCache(source, "dev", "CMake completed without a locator"); err == nil {
 		t.Fatal("settlement accepted output without CMake's completion line")
 	}
 	b.configuredMu.Lock()
-	_, retained := b.configured[configuredCacheKey{sourceDir: sourceKey, preset: "dev"}]
+	_, retained := b.configured[key]
 	b.configuredMu.Unlock()
 	if retained {
 		t.Fatal("failed configure settlement retained a stale cache mapping")
