@@ -52,10 +52,8 @@ func seedMigrateRoutingSettings(t *testing.T, body string) string {
 	t.Setenv("LOCALAPPDATA", stateRoot)
 	t.Setenv("XDG_DATA_HOME", stateRoot)
 	path := api.SettingsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir routing settings dir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	apitest.HardenedDir(t, filepath.Dir(path))
+	if err := api.WriteStateFileBytesAtomic(path, []byte(body)); err != nil {
 		t.Fatalf("write routing settings: %v", err)
 	}
 	return home

@@ -11,6 +11,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/tray"
 )
 
@@ -770,7 +771,7 @@ collectLoop:
 // stops" with nil Err since there is genuinely no contention on the sub-block
 // read).
 func TestDefaultIntentReader_DoesNotBlockOnHeldDaemonIntentLock(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 

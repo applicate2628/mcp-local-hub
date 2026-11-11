@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -835,7 +836,7 @@ func TestMCPFrontV3_SerenaConflictClassifierMutationTable(t *testing.T) {
 			if test.want != mcpFrontSerenaConflictInvalid {
 				return
 			}
-			reportPath := filepath.Join(t.TempDir(), "recovery.json")
+			reportPath := filepath.Join(apitest.HardenedTempDir(t), "recovery.json")
 			if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
 				t.Fatal(err)
 			}
@@ -1397,7 +1398,7 @@ func TestMCPFrontV3_PersistTerminalDispositionConsumesPreconditionConflictAttemp
 		{name: "rollback-conflict", state: mcpFrontDispositionConflict, reason: "rollback-cas-conflict"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			reportPath := filepath.Join(t.TempDir(), "recovery.json")
+			reportPath := filepath.Join(apitest.HardenedTempDir(t), "recovery.json")
 			record := newV3RollbackRecord(t, reportPath, 9137, "claude-code")
 			key := v3SerenaRowKeyFor("claude-code")
 			row := record.Rows[key]

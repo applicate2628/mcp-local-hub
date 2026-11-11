@@ -202,11 +202,11 @@ func TestValidateClangTidyInputs_DisallowedExtraArgs(t *testing.T) {
 		"--load=plugin.so",
 		"-fix",
 		"--fix-errors",
-		"--fix-notes",         // implicitly enables --fix per clang-tidy docs
-		"-fix-notes",          // single-dash form
+		"--fix-notes", // implicitly enables --fix per clang-tidy docs
+		"-fix-notes",  // single-dash form
 		"--export-fixes=/tmp/fixes.yaml",
-		"--config=path",       // config file can carry ExtraArgs / ExtraArgsBefore
-		"-config-file=foo",    // single-dash form
+		"--config=path",    // config file can carry ExtraArgs / ExtraArgsBefore
+		"-config-file=foo", // single-dash form
 		"--config-file=/etc/x",
 	}
 
@@ -308,15 +308,15 @@ func TestHyperfine_ComparesTwoCommands(t *testing.T) {
 	}
 
 	tb := &PerfToolbox{tools: cat}
-	// Two trivially different commands — timing gap is tiny but measurable.
+	// Shell builtins are available on both Windows and POSIX. Select the
+	// shell explicitly so hyperfine does not infer a command execution mode.
+	commands := []string{"echo first", "echo second"}
 	args, _ := json.Marshal(map[string]any{
-		"commands": []string{
-			"cmd /c exit 0",                    // near-instant
-			"cmd /c ping -n 1 127.0.0.1 > nul", // ~1ms
-		},
-		"warmup":   1,
-		"min_runs": 3,
-		"max_runs": 5,
+		"commands":   commands,
+		"extra_args": []string{"--shell=default"},
+		"warmup":     1,
+		"min_runs":   3,
+		"max_runs":   5,
 	})
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: args}}
 
@@ -329,25 +329,39 @@ func TestHyperfine_ComparesTwoCommands(t *testing.T) {
 	}
 
 	body := contentText(result)
-	var parsed map[string]any
+	var parsed struct {
+		Results []struct {
+			Command string   `json:"command"`
+			Mean    *float64 `json:"mean"`
+			Summary struct {
+				TimeWallClock struct {
+					Mean *float64 `json:"mean"`
+					Unit string   `json:"unit"`
+				} `json:"time_wall_clock"`
+			} `json:"summary"`
+		} `json:"results"`
+	}
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		t.Fatalf("tool output not valid JSON: %v\n%s", err, body)
 	}
-	results, ok := parsed["results"].([]any)
-	if !ok || len(results) != 2 {
-		t.Fatalf("expected results[] of length 2, got %+v", parsed["results"])
+	if len(parsed.Results) != len(commands) {
+		t.Fatalf("expected %d results, got %+v", len(commands), parsed.Results)
 	}
-	// Each result must at minimum carry mean + command.
-	for i, r := range results {
-		m, ok := r.(map[string]any)
-		if !ok {
-			t.Fatalf("results[%d] is not an object: %T", i, r)
+	// The adapter preserves the installed tool's JSON. Older hyperfine puts
+	// mean at the result root; newer versions expose named timing summaries.
+	for i, r := range parsed.Results {
+		mean := r.Mean
+		if mean == nil {
+			mean = r.Summary.TimeWallClock.Mean
+			if r.Summary.TimeWallClock.Unit != "second" {
+				t.Errorf("results[%d] wall-clock unit = %q", i, r.Summary.TimeWallClock.Unit)
+			}
 		}
-		if _, ok := m["mean"]; !ok {
-			t.Errorf("results[%d] missing mean: %+v", i, m)
+		if mean == nil || *mean < 0 {
+			t.Errorf("results[%d] missing or negative wall-clock mean: %+v", i, r)
 		}
-		if _, ok := m["command"]; !ok {
-			t.Errorf("results[%d] missing command: %+v", i, m)
+		if r.Command != commands[i] {
+			t.Errorf("results[%d] command = %q, want %q", i, r.Command, commands[i])
 		}
 	}
 }
