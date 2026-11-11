@@ -105,10 +105,12 @@ func TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry(t *testin
 			cause := errors.New("controlled original Serena preparation input refusal")
 			assembly := &refusingMigrateSerenaPreparation{t: t, root: root, task: api.SerenaTaskNameForWorkspace(workspace), rawSHA: api.ManifestHashContent(before), cause: cause}
 			factories := 0
-			err = runMigrateSerenaDynamicPoolWithDeps(context.Background(), io.Discard, migrateSerenaRunDeps{newInstallAPI: func() *api.API {
+			deps := defaultMigrateSerenaRunDeps()
+			deps.newInstallAPI = func() *api.API {
 				factories++
 				return api.NewAPIWithSerenaPreparation(assembly)
-			}})
+			}
+			err = runMigrateSerenaDynamicPoolWithDeps(context.Background(), io.Discard, deps)
 			if !errors.Is(err, cause) || assembly.calls != 1 || factories != 1 {
 				t.Fatalf("original preparation cause/owner was lost: err=%v inputs=%d factories=%d", err, assembly.calls, factories)
 			}
