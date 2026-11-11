@@ -135,6 +135,57 @@ func TestRunWithDependenciesReturnsReceiptAndExactArgv(t *testing.T) {
 	}
 }
 
+func TestRunWithDependenciesPreservesCompletedOutcome(t *testing.T) {
+	root := t.TempDir()
+	receiptBase := t.TempDir()
+	prompt := filepath.Join(root, "prompt.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(root, ".agents", "skills", "lead", "scripts", "invoke-kimi-prompt.py")
+	if err := os.MkdirAll(filepath.Dir(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{wrapper, filepath.Join(filepath.Dir(wrapper), "provider_prompt.py"), filepath.Join(root, "python.exe")} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := runnerDependencies{
+		homeDir:   func() (string, error) { return root, nil },
+		lookPath:  func(string) (string, error) { return filepath.Join(root, "python.exe"), nil },
+		command:   func(name string, args ...string) *exec.Cmd { return exec.Command(name, args...) },
+		mkdirTemp: func(_, pattern string) (string, error) { return os.MkdirTemp(receiptBase, pattern) },
+		removeAll: os.RemoveAll,
+	}
+	req := RunRequest{Topic: "topic", PromptFile: prompt, Cwd: root, TaskClass: "review", Role: "external-reviewer", Effort: "high", TimeoutSeconds: 1, CapabilityChoice: CapabilityChoice{Kind: "none"}}
+
+	for _, late := range []string{"deadline", "cancellation"} {
+		t.Run("success before late "+late, func(t *testing.T) {
+			deps := base
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			deps.runContained = func(work context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+				// The wrapper's successful outcome and receipt precede cleanup.
+				// Only cleanup crosses the work deadline or parent cancellation.
+				if err := os.WriteFile(argumentValue(cmd.Args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "completed before cleanup")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if late == "cancellation" {
+					cancel()
+				}
+				<-work.Done()
+				return nil // Successful execution and successful contained cleanup.
+			}
+			out, err := runWithDependencies(ctx, req, deps)
+			if err != nil || out.Receipt.ResultText != "completed before cleanup" || out.Receipt.IsError() {
+				t.Fatalf("late context changed completed result: output=%+v err=%v", out, err)
+			}
+		})
+	}
+
+}
+
 func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 	root := t.TempDir()
 	receiptBase := t.TempDir()
@@ -169,7 +220,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			<-ctx.Done()
-			return ctx.Err()
+			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
 		out, err := runWithDependencies(context.Background(), req, deps)
 		if failureID(err) != "E_KIMI_TIMEOUT" || out.Receipt.Payload != "" {
@@ -185,7 +236,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			<-ctx.Done()
-			return ctx.Err()
+			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -194,8 +245,32 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	for _, legacy := range []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"legacy timeout receipt", context.DeadlineExceeded, "E_KIMI_TIMEOUT"},
+		{"legacy cancel receipt", context.Canceled, "E_KIMI_CANCELLED"},
+	} {
+		t.Run(legacy.name, func(t *testing.T) {
+			deps := base
+			deps.runContained = func(_ context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+				if err := os.WriteFile(argumentValue(cmd.Args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return legacy.cause
+			}
+			out, err := runWithDependencies(context.Background(), req, deps)
+			if failureID(err) != legacy.want || !errors.Is(err, legacy.cause) || out.Receipt.Payload != "" {
+				t.Fatalf("legacy cancellation accepted receipt: output=%+v err=%v", out, err)
+			}
+		})
+	}
 	t.Run("cleanup", func(t *testing.T) {
 		deps := base
+		cleanupRequest := req
+		cleanupRequest.TimeoutSeconds = 30 // This case tests cleanup failure, not a racing work deadline.
 		primaryErr := errors.New("synthetic run failure")
 		cleanupErr := errors.New("synthetic cleanup failure")
 		var args []string
@@ -210,7 +285,7 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 			return primaryErr
 		}
 		deps.removeAll = func(string) error { return cleanupErr }
-		output, err := runWithDependencies(context.Background(), req, deps)
+		output, err := runWithDependencies(context.Background(), cleanupRequest, deps)
 		if failureID(err) != "E_KIMI_CLEANUP_FAILED" {
 			t.Fatalf("error = %v", err)
 		}
@@ -228,6 +303,71 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 			t.Fatalf("cleanup failure JSON = %s", failure.JSON())
 		}
 	})
+	for _, execution := range []struct {
+		name  string
+		stage process.ContainedRunStage
+		cause error
+		want  string
+	}{
+		{"exit", process.ContainedStageExit, errors.New("original nonzero exit"), "E_KIMI_RUN_FAILED"},
+		{"timeout", process.ContainedStageContext, context.DeadlineExceeded, "E_KIMI_TIMEOUT"},
+	} {
+		for _, cleanup := range []string{"none", "contained_process", "receipt_directory"} {
+			t.Run(execution.name+" before late cancellation/"+cleanup, func(t *testing.T) {
+				deps := base
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				cleanupErr := errors.New("cleanup after retained execution outcome")
+				var args []string
+				deps.command = func(name string, values ...string) *exec.Cmd {
+					args = append([]string(nil), values...)
+					return exec.Command(name, values...)
+				}
+				deps.runContained = func(work context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+					// Execution has already produced the retained typed outcome.
+					// Model a later parent cancellation while its cleanup finishes.
+					cancel()
+					if !errors.Is(work.Err(), context.Canceled) {
+						t.Fatalf("work context was not cancelled: %v", work.Err())
+					}
+					contained := &process.ContainedRunError{Stage: execution.stage, Cause: execution.cause}
+					if execution.stage == process.ContainedStageExit {
+						code := 17
+						contained.ExitCode = &code
+					}
+					if cleanup == "contained_process" {
+						contained.CleanupStage = process.ContainedStageCleanup
+						contained.CleanupCause = cleanupErr
+					}
+					if cleanup == "receipt_directory" {
+						if err := os.WriteFile(argumentValue(args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "acquired result")), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return contained
+				}
+				if cleanup == "receipt_directory" {
+					deps.removeAll = func(string) error { return cleanupErr }
+				}
+				output, err := runWithDependencies(ctx, req, deps)
+				wantReceipt := execution.stage == process.ContainedStageExit && cleanup == "receipt_directory"
+				if (output.Receipt.Payload != "") != wantReceipt {
+					t.Fatalf("receipt admission ignored original outcome: payload_present=%t want=%t", output.Receipt.Payload != "", wantReceipt)
+				}
+				var failure *Failure
+				if !errors.As(err, &failure) || !errors.Is(err, execution.cause) {
+					t.Fatalf("execution cause lost: %v", err)
+				}
+				if cleanup == "none" {
+					if failure.ID != execution.want || failure.primaryFailureID != "" {
+						t.Fatalf("late cancellation rewrote failure: %s", failure.JSON())
+					}
+				} else if failure.ID != "E_KIMI_CLEANUP_FAILED" || failure.primaryFailureID != execution.want || !errors.Is(err, cleanupErr) || !reflect.DeepEqual(failure.cleanupFailures, []string{cleanup}) {
+					t.Fatalf("cleanup lost original execution outcome: %s; %v", failure.JSON(), err)
+				}
+			})
+		}
+	}
 }
 
 func TestRunWithDependenciesHoldsReceiptIntakeAfterContainedCleanupFailure(t *testing.T) {
