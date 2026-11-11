@@ -603,6 +603,7 @@ type windowsProductPreparedTxn struct {
 type WindowsProductTxn struct {
 	Opts             WindowsProductTxnOpts
 	prepared         *windowsProductPreparedTxn
+	prepareError     error
 	constructorStore interface{ Close() error }
 }
 
@@ -664,9 +665,12 @@ func (t *WindowsProductTxn) Close() (retErr error) {
 	return lockErr
 }
 
-func (t *WindowsProductTxn) Prepare() error {
+func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if t == nil {
 		return errors.New("Windows product transaction is required")
+	}
+	if t.prepareError != nil {
+		return t.prepareError
 	}
 	if t.prepared != nil {
 		return nil
@@ -823,16 +827,26 @@ func (t *WindowsProductTxn) Prepare() error {
 		journal.Quiescence = &projection
 		journal.QuiescenceReceiptSHA256 = digest
 	}
-	path := filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)
-	if err := persistWindowsProductRecoveryJournalV3(path, journal, d.WriteRecoveryJournal, d.ReadRecoveryJournal); err != nil {
-		return fmt.Errorf("%w: prepare V3 journal: %v", ErrWindowsProductPairRecoveryPrepare, err)
-	}
 	t.Opts = o
 	t.prepared = &windowsProductPreparedTxn{
 		deps: d, staged: staged, productPrior: productPrior, legacyPrior: legacyPrior,
 		receiptV3Prior: v3Prior, receiptV2Prior: v2Prior, journal: journal,
 		disposition: disposition, entrySet: entryState,
 	}
+	transferred := false
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if entryState != nil {
+			retErr = errors.Join(retErr, t.settleUnpublishedCanonicalPreparation(transferred))
+		}
+		// A failed preparation keeps its error but never arms GUI stop or
+		// promotion. Native owners were released above; durable recovery inputs
+		// remain available through the journal to a fresh recovery owner.
+		t.prepareError = retErr
+		t.prepared = nil
+	}()
 	if entryState != nil {
 		if err := t.receiveOriginalPayloadDirectory(); err != nil {
 			return err
@@ -841,9 +855,16 @@ func (t *WindowsProductTxn) Prepare() error {
 		if err != nil {
 			return err
 		}
+		transferred = true
 		if !reflect.DeepEqual(snapshot, entryState.snapshot) || paths != entryState.stages {
 			return errors.New("original canonical stage changed during ownership transfer")
 		}
+	}
+	// The first checkpoint already owns its directory identity. Transfer stage
+	// disposition first so an uncertain write cannot make Close remove bytes
+	// referenced by a journal that reached disk before its writer failed.
+	if err := t.persistProductJournal(); err != nil {
+		return fmt.Errorf("%w: prepare V3 journal: %w", ErrWindowsProductPairRecoveryPrepare, err)
 	}
 	return nil
 }

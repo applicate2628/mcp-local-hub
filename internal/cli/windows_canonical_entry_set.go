@@ -346,7 +346,33 @@ func (t *WindowsProductTxn) receiveOriginalPayloadDirectory() error {
 	if observation.Created {
 		record.State = "created_identity_received"
 	}
-	return t.persistProductJournal()
+	return nil // Prepare publishes this evidence in its first durable checkpoint.
+}
+
+// No final file or task has changed during preparation. Clean only unpublished
+// originals; a present or unverifiable journal retains every recovery input.
+func (t *WindowsProductTxn) settleUnpublishedCanonicalPreparation(transferred bool) error {
+	p := t.prepared
+	present, inspectErr := inspectWindowsProductRecoveryLeaves(t.Opts.StateDir)
+	var cleanupErr error
+	if !present && inspectErr == nil && transferred {
+		cleanupErr = t.cleanupCanonicalOwnedFiles(false)
+	}
+	// Untaken stages dispose their own files here. Taken stages only release
+	// handles, preserving any bytes needed by an uncertain journal publication.
+	closeErr := closeCanonicalEntryFileOwners(t.Opts, p)
+	directory := p.entrySet.directory
+	if directory == nil {
+		return errors.Join(inspectErr, cleanupErr, closeErr)
+	}
+	record := p.journal.EntrySet.PayloadDirectory
+	if !present && inspectErr == nil && closeErr == nil && record.Original != nil && record.Created {
+		result, err := directory.DisposeOriginalIfEmpty(context.WithoutCancel(t.Opts.Context))
+		p.entrySet.nativeResults = append(p.entrySet.nativeResults, result)
+		p.entrySet.nativeErrors = append(p.entrySet.nativeErrors, err)
+		cleanupErr = errors.Join(cleanupErr, canonicalEntryDiscardResultError(result, err, "payload-directory", record.Original.RelativePath))
+	}
+	return errors.Join(inspectErr, cleanupErr, closeErr, directory.Close())
 }
 
 func (t *WindowsProductTxn) ensureCanonicalPayloadDirectory() error {

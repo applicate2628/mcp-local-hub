@@ -300,7 +300,7 @@ func (s *windowsCanonicalJournalRecoverySource) WithOriginalPayloadDirectoryReco
 		return err
 	}
 	if s.journal.EntrySet == nil || s.journal.EntrySet.PayloadDirectory.Original == nil || use == nil {
-		return fmt.Errorf("%w: native payload directory identity was not durably received", ErrWindowsProductRecoveryPending)
+		return fmt.Errorf("%w: legacy checkpoint has no durable payload directory identity; preserve the journal and payload directory for manual recovery", ErrWindowsProductRecoveryPending)
 	}
 	return use(*s.journal.EntrySet.PayloadDirectory.Original)
 }

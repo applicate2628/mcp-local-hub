@@ -47,15 +47,18 @@ type upgradeGUICommandC3Fixture struct {
 	priorBytes                  []byte
 }
 
-func writeUpgradeGUIAdmittedProduct(t *testing.T, path, tag string) {
+func writeUpgradeGUIAdmittedProduct(t *testing.T, path, tag string, comments ...string) {
 	t.Helper()
 	children := [][]byte{
 		recoveryVersionString("ProductName", "mcp-local-hub"),
 		recoveryVersionString("ProductVersion", "0.4.38"),
-		recoveryVersionString("PrivateBuild", "mcphub-build-v1;commit=abcdef1;build_date=2026-09-28T00:00:00Z"),
+		recoveryVersionString("PrivateBuild", "mcphub-build-v1;commit=abcdef1234567890abcdef1234567890abcdef12;build_date=2026-09-28T00:00:00Z"),
 		recoveryVersionString("SpecialBuild", "mcphub-role-v1;role=product"),
 		recoveryVersionString("InternalName", "mcphub"),
 		recoveryVersionString("OriginalFilename", "mcphub.exe"),
+	}
+	for _, value := range comments {
+		children = append(children, recoveryVersionString("Comments", value))
 	}
 	stringInfo := recoveryVersionBlock("StringFileInfo", nil, 0, 1, recoveryVersionBlock("040904B0", nil, 0, 1, children...))
 	translation := []byte{0x09, 0x04, 0xb0, 0x04}

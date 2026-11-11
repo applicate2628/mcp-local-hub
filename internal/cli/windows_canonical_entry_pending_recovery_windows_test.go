@@ -168,6 +168,30 @@ func TestCanonicalPendingValidationRejectsUnknownCompanionBeforeTaskAdmission(t 
 	}
 }
 
+func TestCanonicalPendingValidationLegacyCheckpointPreservesState(t *testing.T) {
+	req, journal, files := canonicalPendingValidationFixture(t, WindowsProductRecoveryPrepared)
+	journal.EntrySet.PayloadDirectory.Original = nil
+	journal.EntrySet.PayloadDirectory.Created = false
+	journal.EntrySet.PayloadDirectory.State = ""
+	path := filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)
+	files[path] = writeCanonicalPendingValidationJournal(t, req.StateDir, journal)
+	tasks := &recoveryTaskTxnFake{}
+	validationErr := validateWindowsProductPendingRecovery(req, journal)
+	settled, recoveryErr := rollbackCanonicalEntryRecovery(req, withWindowsProductRecoveryDefaults(req.Deps), path, journal, tasks)
+	for _, err := range []error{validationErr, recoveryErr} {
+		if !errors.Is(err, ErrWindowsProductRecoveryPending) || !strings.Contains(err.Error(), "preserve the journal and payload directory for manual recovery") {
+			t.Fatalf("ambiguous legacy directory ownership was accepted or obscured: %v", err)
+		}
+	}
+	if settled != nil || tasks.restoreCalls != 0 {
+		t.Fatal("legacy checkpoint changed task state or claimed settlement")
+	}
+	assertCanonicalPendingValidationUnchanged(t, journal, files)
+	if info, err := os.Lstat(journal.EntrySet.PayloadDirectory.Path); err != nil || !info.IsDir() {
+		t.Fatalf("unproven payload directory was removed: %v", err)
+	}
+}
+
 type canonicalPendingTaskCloseFailure struct {
 	recoveryTaskTxnFake
 	failure error
