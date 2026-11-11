@@ -58,8 +58,11 @@ var installSupervisorRunningProbeFn = SupervisorRunningUnderStateDir
 // deferred-start contract is structural, not a runtime knob.
 type InstallParsedManifestOpts struct {
 	SerenaPreparationPolicy *SerenaPreparationPolicyV1
-	// A held intent/quiet-lock caller supplies an already prepared binding;
-	// this path cannot perform installation under that exclusion.
+	// A held intent/quiet-lock caller supplies the original prepared invocation;
+	// a binding alone is insufficient. Its context must remain bounded by the
+	// invocation deadline through CloseObserved. PreparedSerenaParsedInstall's
+	// WithConsumerInvocation owns that scope; package preparation never runs
+	// under caller-held exclusion.
 	SerenaPreparedBinding    *PreparedSerenaRuntimeBinding
 	SerenaPreparedInvocation *PreparedSerenaConsumerInvocation
 	Writer                   io.Writer
@@ -229,9 +232,19 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// 1a. Preflight: check-only gate shared with the legacy install paths.
 	// Before the pre-flight intent write and before any mutation, so a missing
 	// command or unresolved secret: ref fails fast.
-	if err := Preflight(m, ""); err != nil {
+	var runtimeProduct *InstallParsedManifestBypass
+	if opts.SupervisorLockBypass.lk != nil {
+		runtimeProduct = &opts.SupervisorLockBypass
+	}
+	scope := scopeForPreflight("")
+	scope.runtimeProduct = runtimeProduct
+	if err := preflightWithScope(m, scope); err != nil {
 		return "", fmt.Errorf("preflight: %w", err)
 	}
+	planOpts := a.installBuildPlanOpts(InstallOpts{
+		ClientsInclude: opts.ClientsInclude, IncludeAllClients: opts.IncludeAllClients,
+	})
+	planOpts.runtimeProduct = runtimeProduct
 
 	// 1b. Dry-run short-circuit — runs BEFORE the state-dir resolve, the
 	// intent flock, and the read-merge. A dry run must print the plan and make
@@ -244,10 +257,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// before any mutation or the intermediate hook), then return an empty path
 	// — nothing was committed, so the caller must not dereference a path.
 	if opts.DryRun {
-		plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
-			ClientsInclude:    opts.ClientsInclude,
-			IncludeAllClients: opts.IncludeAllClients,
-		}))
+		plan, err := BuildPlanWithOpts(m, planOpts)
 		if err != nil {
 			return "", err
 		}
@@ -279,10 +289,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		return "", fmt.Errorf("InstallParsedManifest: a non-nil Workspaces snapshot is required for a non-dry install of %q (pass an empty non-nil slice to install with zero registered workspaces; a nil snapshot would drop the server's existing supervisor-intent daemon rows)", m.Name)
 	}
 
-	plan, planErr := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
-		ClientsInclude:    opts.ClientsInclude,
-		IncludeAllClients: opts.IncludeAllClients,
-	}))
+	plan, planErr := BuildPlanWithOpts(m, planOpts)
 	if planErr != nil {
 		return "", planErr
 	}
@@ -296,6 +303,33 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	var preparedPlan *Plan
 	invocation := opts.SerenaPreparedInvocation
 	ownInvocation := false
+	var binding PreparedSerenaRuntimeBinding
+	var record PreparedSerenaRuntimeRecord
+	operationID := ""
+	if invocation != nil {
+		if ctx == nil {
+			return "", errors.New("SERENA_PARSED_CONTEXT_MISSING")
+		}
+		// The acquiring owner also receives the final mutation/namespace
+		// closes after this function returns. Borrow that owner's bounded
+		// context; cancelling a local child here would invalidate the
+		// original mutation observations before their close is received.
+		if deadline, finite := ctx.Deadline(); !finite || deadline.After(invocation.deadline) {
+			return "", errors.New("SERENA_PARSED_INVOCATION_CONTEXT_UNBOUNDED")
+		}
+		owner, ownerErr := a.preparedSerenaRuntimeOwner()
+		if ownerErr != nil {
+			return "", ownerErr
+		}
+		if err = invocation.Validate(ctx, owner, invocation.request); err != nil {
+			return "", err
+		}
+		binding, record = invocation.request.Binding, invocation.record
+		operationID = invocation.request.OperationID
+		if opts.SerenaPreparedBinding != nil && *opts.SerenaPreparedBinding != binding {
+			return "", errors.New("SERENA_PARSED_BINDING_DRIFT")
+		}
+	}
 	if IsSerenaServer(m.Name) && len(opts.Workspaces) > 0 {
 		live := filterExistingWorkspaceRows(m.Name, opts.Workspaces, w)
 		opts.Workspaces = live
@@ -303,9 +337,6 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 			if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
 				return "", err
 			}
-			var binding PreparedSerenaRuntimeBinding
-			var record PreparedSerenaRuntimeRecord
-			operationID := ""
 			if invocation == nil {
 				if opts.SupervisorLockBypass.lk != nil || opts.SerenaPreparedBinding != nil {
 					return "", errors.New("SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED")
@@ -323,28 +354,9 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 				defer cancel()
 				ctx = bounded
 				operationID = request.OperationID
-			} else {
-				if ctx == nil {
-					return "", errors.New("SERENA_PARSED_CONTEXT_MISSING")
-				}
-				bounded, cancel := context.WithDeadline(ctx, invocation.deadline)
-				defer cancel()
-				ctx = bounded
-				owner, ownerErr := a.preparedSerenaRuntimeOwner()
-				if ownerErr != nil {
-					return "", ownerErr
-				}
-				if err = invocation.Validate(ctx, owner, invocation.request); err != nil {
-					return "", err
-				}
-				binding, record = invocation.request.Binding, invocation.record
-				operationID = invocation.request.OperationID
-				if opts.SerenaPreparedBinding != nil && *opts.SerenaPreparedBinding != binding {
-					return "", errors.New("SERENA_PARSED_BINDING_DRIFT")
-				}
 			}
-			preparedPlan = &Plan{serenaPreparedBinding: &binding, serenaPreparedRecord: &record}
-			image, imageErr := canonicalMcphubPath()
+			preparedPlan = &Plan{serenaPreparedBinding: &binding, serenaPreparedRecord: &record, runtimeProduct: runtimeProduct}
+			image, imageErr := resolveInstallRuntimeProduct(runtimeProduct)
 			if imageErr != nil {
 				return "", imageErr
 			}
@@ -365,7 +377,11 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 			} else if !reflect.DeepEqual(expected, invocation.request.ExpectedDescriptors) {
 				return "", errors.New("SERENA_PARSED_DESCRIPTOR_SCOPE_DRIFT")
 			}
+		} else if invocation != nil {
+			return "", errors.New("SERENA_PARSED_DESCRIPTOR_SCOPE_DRIFT")
 		}
+	} else if invocation != nil {
+		return "", errors.New("SERENA_PARSED_DESCRIPTOR_SCOPE_DRIFT")
 	}
 	if ownInvocation {
 		defer func() {
@@ -468,7 +484,9 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 			if err != nil {
 				return "", err
 			}
-			desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntentFromPrior(m, preparedPlan, opts.ManifestHash, opts.Workspaces, "", w, priorIntent, priorExisted)
+			desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntentFromPriorWithProjection(m, opts.Workspaces, "", priorIntent, priorExisted, func() ([]SupervisorDaemon, error) {
+				return parsedSerenaConsumerDaemons(m, preparedPlan, opts.ManifestHash, opts.Workspaces, w, invocation)
+			})
 		} else {
 			desiredIntent, priorIntent, priorExisted, err = a.buildMergedSupervisorIntent(m, preparedPlan, opts.ManifestHash, intentPath, opts.Workspaces, "", w)
 		}
@@ -545,7 +563,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 			// gate means a misconfigured Phase-2 call site (wrong resolver) cannot
 			// silently re-open the split-brain.
 			gateLockPath := filepath.Join(stateDir, "supervisor.lock")
-			if bp := opts.SupervisorLockBypass.lk; bp != nil && bp.fl != nil && bp.path == gateLockPath {
+			if opts.SupervisorLockBypass.holdsSupervisorLock(stateDir) {
 				// Verified bypass: the caller holds this gate's exact lock. Emit the
 				// info audit row (mirrors emitSpecBearingInstallRefusedEvent) and skip
 				// the probe so the spec-bearing write proceeds.
@@ -2652,6 +2670,20 @@ func fanOutAuditTaskNames(m *config.ServerManifest, desired *SupervisorIntentFil
 	return names
 }
 
+// The final filesystem filter may drop a workspace after invocation admission.
+// Compare the actual rows this producer contributes before merge/publication,
+// including an empty result. Sibling rows remain the merge owner's concern.
+func parsedSerenaConsumerDaemons(m *config.ServerManifest, plan *Plan, manifestHash string, workspaces []WorkspaceEntry, w io.Writer, invocation *PreparedSerenaConsumerInvocation) ([]SupervisorDaemon, error) {
+	daemons, err := serenaOrPlanDaemons(m, plan, manifestHash, workspaces, "", w)
+	if err != nil {
+		return nil, err
+	}
+	if invocation == nil || !reflect.DeepEqual(daemons, invocation.request.ExpectedDescriptors) {
+		return nil, errors.New("SERENA_PARSED_DESCRIPTOR_SCOPE_DRIFT")
+	}
+	return daemons, nil
+}
+
 // serenaOrPlanDaemons returns the SupervisorDaemon descriptors this install
 // contributes for m. It fans out per registered serena workspace when m is a
 // workspace-scoped dynamic-pool manifest (DaemonTemplate != nil) and the
@@ -2685,7 +2717,11 @@ func collectSupervisorDaemonsForInstall(m *config.ServerManifest, plan *Plan, dy
 		live := filterExistingWorkspaceRows(m.Name, workspaces, w)
 		// Fan-out must retain the admitted runtime-image authority and its
 		// causal errors; a PATH script is not a native product fallback.
-		mcphubPath, perr := canonicalMcphubPath()
+		var runtimeProduct *InstallParsedManifestBypass
+		if plan != nil {
+			runtimeProduct = plan.runtimeProduct
+		}
+		mcphubPath, perr := resolveInstallRuntimeProduct(runtimeProduct)
 		if perr != nil {
 			return nil, fmt.Errorf("resolve workspace runtime image: %w", perr)
 		}
