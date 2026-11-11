@@ -126,6 +126,13 @@ func TestRunWithDependenciesReturnsReceiptAndExactArgv(t *testing.T) {
 	if string(gotNoneCapabilities) != string(noneCapabilityJSON) {
 		t.Fatalf("none capabilities = %s", gotNoneCapabilities)
 	}
+
+	// A receipt from the old role must not satisfy a different caller request.
+	req.Role = "qa-engineer"
+	got, err = runWithDependencies(context.Background(), req, deps)
+	if failureID(err) != "E_KIMI_RECEIPT_INVALID" || got.Receipt.Payload != "" {
+		t.Fatalf("mismatched role accepted by runner: output=%+v err=%v", got, err)
+	}
 }
 
 func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
@@ -155,28 +162,60 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 
 	t.Run("timeout", func(t *testing.T) {
 		deps := base
-		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+		deps.runContained = func(ctx context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			// A valid successful receipt must not mask process termination.
+			path := argumentValue(cmd.Args, "--terminal-receipt")
+			if err := os.WriteFile(path, []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			<-ctx.Done()
 			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
-		_, err := runWithDependencies(context.Background(), req, deps)
-		if failureID(err) != "E_KIMI_TIMEOUT" {
+		out, err := runWithDependencies(context.Background(), req, deps)
+		if failureID(err) != "E_KIMI_TIMEOUT" || out.Receipt.Payload != "" {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
 		deps := base
-		deps.runContained = func(ctx context.Context, _ *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+		deps.runContained = func(ctx context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+			// A valid successful receipt must not mask process termination.
+			path := argumentValue(cmd.Args, "--terminal-receipt")
+			if err := os.WriteFile(path, []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			<-ctx.Done()
 			return &process.ContainedRunError{Stage: process.ContainedStageContext, Cause: ctx.Err()}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := runWithDependencies(ctx, req, deps)
-		if failureID(err) != "E_KIMI_CANCELLED" {
+		out, err := runWithDependencies(ctx, req, deps)
+		if failureID(err) != "E_KIMI_CANCELLED" || out.Receipt.Payload != "" {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	for _, legacy := range []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"legacy timeout receipt", context.DeadlineExceeded, "E_KIMI_TIMEOUT"},
+		{"legacy cancel receipt", context.Canceled, "E_KIMI_CANCELLED"},
+	} {
+		t.Run(legacy.name, func(t *testing.T) {
+			deps := base
+			deps.runContained = func(_ context.Context, cmd *exec.Cmd, _ process.ContainedStreamOptions, _ func(io.Reader) error) error {
+				if err := os.WriteFile(argumentValue(cmd.Args, "--terminal-receipt"), []byte(ownerReceiptRecord(t, "high", "stale success")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return legacy.cause
+			}
+			out, err := runWithDependencies(context.Background(), req, deps)
+			if failureID(err) != legacy.want || !errors.Is(err, legacy.cause) || out.Receipt.Payload != "" {
+				t.Fatalf("legacy cancellation accepted receipt: output=%+v err=%v", out, err)
+			}
+		})
+	}
 	t.Run("cleanup", func(t *testing.T) {
 		deps := base
 		cleanupRequest := req
@@ -259,7 +298,11 @@ func TestRunWithDependenciesMapsTimeoutCancelAndCleanupFailure(t *testing.T) {
 				if cleanup == "receipt_directory" {
 					deps.removeAll = func(string) error { return cleanupErr }
 				}
-				_, err := runWithDependencies(ctx, req, deps)
+				output, err := runWithDependencies(ctx, req, deps)
+				wantReceipt := execution.stage == process.ContainedStageExit && cleanup == "receipt_directory"
+				if (output.Receipt.Payload != "") != wantReceipt {
+					t.Fatalf("receipt admission ignored original outcome: payload_present=%t want=%t", output.Receipt.Payload != "", wantReceipt)
+				}
 				var failure *Failure
 				if !errors.As(err, &failure) || !errors.Is(err, execution.cause) {
 					t.Fatalf("execution cause lost: %v", err)
@@ -641,5 +684,28 @@ func waitKimiFakeExit(pid int, timeout time.Duration) error {
 			return errors.New("fixture exit was not observed before its deadline")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReadReceiptFileSizeBound(t *testing.T) {
+	for _, size := range []int{0, 64, maxReceiptBytes, maxReceiptBytes + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "receipt")
+			want := bytes.Repeat([]byte("x"), size)
+			if err := os.WriteFile(path, want, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := readReceiptFile(path)
+			if size > maxReceiptBytes {
+				if !errors.Is(err, errReceiptInvalid) || got != nil {
+					t.Fatalf("oversize receipt: len=%d err=%v", len(got), err)
+				}
+			} else if err != nil || !bytes.Equal(got, want) {
+				t.Fatalf("bounded receipt: len=%d err=%v", len(got), err)
+			}
+		})
+	}
+	if _, err := readReceiptFile(t.TempDir()); !errors.Is(err, errReceiptInvalid) {
+		t.Fatalf("directory receipt: %v", err)
 	}
 }

@@ -1405,6 +1405,7 @@ func (plan *AdoptPlan) hasCodexTransportRelocation() bool {
 		(plan.projectSource != nil || plan.targetEntryName("codex-cli") != plan.EntryName)
 }
 
+// Compare roots using the canonical owner of project fingerprints.
 func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, projectIdentitySHA256, entryName, manifestName string) bool {
 	if rec == nil || rec.ManifestName != manifestName || rec.SourceClient != "codex-cli" || rec.SourceEntryName != entryName || rec.ProviderSource != nil || rec.ProjectService != nil {
 		return false
@@ -1415,7 +1416,8 @@ func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, 
 			continue
 		}
 		if client.Client != "codex-cli" || adoptClientTargetEntryName(*rec, client) != entryName ||
-			client.ConfigTarget.Kind != adoptClientConfigTargetKindCodexProject || client.ConfigTarget.ProjectRoot != projectRoot ||
+			client.ConfigTarget.Kind != adoptClientConfigTargetKindCodexProject ||
+			clients.CanonicalProjectKey(client.ConfigTarget.ProjectRoot) != clients.CanonicalProjectKey(projectRoot) ||
 			client.ConfigTarget.ProjectIdentitySHA256 != projectIdentitySHA256 {
 			return false
 		}

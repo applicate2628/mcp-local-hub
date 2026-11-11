@@ -3,7 +3,7 @@
 #
 # Produces the Windows product payload declared in
 # windows-product-artifacts.json:
-#   * mcphub.exe: the sole native product executable (GUI subsystem 2).
+#   * mcphub.exe: the waiting CUI entry; mcphub-product/mcphub.exe: GUI Product.
 #   * windows-product-identity.json: generated non-executable admitted identity.
 # The product receives VERSIONINFO and linker metadata from one captured
 # version/commit/build-date tuple.
@@ -35,7 +35,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.4.41"
+$version = "0.4.59"
 try { $commit = (git -C $PSScriptRoot rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -131,12 +131,26 @@ if (-not [string]::IsNullOrEmpty($SourceSnapshotPath)) {
 }
 $contractPath = Join-Path $PSScriptRoot "windows-product-artifacts.json"
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
-if ($contract.schemaVersion -ne 2 -or @($contract.artifacts).Count -ne 1 -or
-    $contract.identityManifest.schema -ne "windows-product-identity-v1" -or
-    $contract.identityManifest.filename -ne "windows-product-identity.json") {
-    throw "windows-product-artifacts.json must be schemaVersion 2 with one product and the V1 identity manifest"
+$registryProducts = @($contract.artifacts | Where-Object { $_.role -ceq "product" })
+$registryLaunchers = @($contract.artifacts | Where-Object { $_.role -ceq "launcher" })
+if ($contract.schemaVersion -ne 3 -or @($contract.artifacts).Count -ne 2 -or
+    $registryProducts.Count -ne 1 -or $registryLaunchers.Count -ne 1 -or
+    $registryProducts[0].filename -cne "mcphub-product/mcphub.exe" -or
+    $registryProducts[0].source -cne "./cmd/mcphub" -or $registryProducts[0].subsystem -ne 2 -or
+    -not $registryProducts[0].productMetadata -or -not $registryProducts[0].npmPayload -or $registryProducts[0].npmBin -or
+    $registryLaunchers[0].filename -cne "mcphub.exe" -or
+    $registryLaunchers[0].source -cne "./cmd/mcphub-launcher" -or $registryLaunchers[0].subsystem -ne 3 -or
+    $registryLaunchers[0].productMetadata -or -not $registryLaunchers[0].npmPayload -or $registryLaunchers[0].npmBin -or
+    $contract.identityManifest.schema -cne "windows-product-identity-v1" -or
+    $contract.identityManifest.filename -cne "windows-product-identity.json") {
+    throw "Windows schema3 requires one root CUI entry, nested GUI Product and identity-v1"
 }
-
+$entrySetBuildID = [Guid]::NewGuid().ToString("N")
+$productRelativePath = [string]$registryProducts[0].filename
+$entryRelativePath = [string]$registryLaunchers[0].filename
+$canonicalEntryReverseProjection = "../" + $entryRelativePath
+$unreceivedEntryHash = "<actual-launcher-sha256>"
+$templateComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
 $artifacts = @(
     foreach ($artifact in $contract.artifacts) {
         if ($artifact.subsystem -notin @(2, 3)) {
@@ -151,6 +165,14 @@ $artifacts = @(
                 $flags += "-X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=$($publisherSource.source_epoch)"
             }
         }
+        if ($artifact.role -ceq "launcher") {
+            $flags += "-X main.productRelativePath=$productRelativePath"
+            $flags += "-X main.publicEntrySetBuildID=$entrySetBuildID"
+        } elseif ($artifact.role -ceq "product") {
+            $flags += "-X main.entrySetBuildID=$entrySetBuildID"
+            $flags += "-X main.expectedCanonicalEntrySHA256=$unreceivedEntryHash"
+            $flags += "-X main.canonicalEntryReverseProjection=$canonicalEntryReverseProjection"
+        }
         if ($artifact.subsystem -eq 2) {
             $flags += "-H windowsgui"
         }
@@ -162,7 +184,8 @@ $artifacts = @(
                 PrivateBuild = "mcphub-build-v1;commit=$commit;build_date=$buildDate"
                 SpecialBuild = "mcphub-role-v1;role=$($artifact.role)"
                 InternalName = "mcphub"
-                OriginalFilename = [string]$artifact.filename
+                OriginalFilename = [IO.Path]::GetFileName([string]$artifact.filename)
+                Comments = $templateComments
             }
             if ($null -ne $publisherSource) {
                 $originalComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
@@ -186,6 +209,8 @@ $artifacts = @(
 )
 
 $productArtifacts = @($artifacts | Where-Object productMetadata)
+$launcherArtifacts = @($artifacts | Where-Object { $_.role -ceq "launcher" })
+$orderedArtifacts = @($launcherArtifacts) + @($productArtifacts)
 if ($productArtifacts.Count -ne 1 -or $productArtifacts[0].role -ne "product" -or
     $productArtifacts[0].subsystem -ne 2 -or $productArtifacts[0].npmBin) {
     throw "Windows artifact contract must declare one GUI product with no platform-package bin owner"
@@ -226,12 +251,25 @@ $retiredOutputFiles = @("mcphub-windowless.exe", "mcphub-pe-admit.exe")
 if ($null -ne $publisherSource) {
     $admissionCommand.argv += @("--expected-source-epoch", [string]$publisherSource.source_epoch)
 }
+$entrySetAdmissionCommand = [ordered]@{
+    executable = "go"
+    argv = @("run", "./tools/windows-product-validate",
+        "--validate-entry-set-build", [IO.Path]::GetFullPath($launcherArtifacts[0].output),
+        "--expected-entry-set-build-id", $entrySetBuildID,
+        "--expected-canonical-entry-sha256", $unreceivedEntryHash,
+        "--canonical-entry-reverse-projection", $canonicalEntryReverseProjection,
+        "--expected-version", $version, "--expected-commit", $commit,
+        "--expected-build-date", $buildDate)
+}
 $buildTags = @()
+if ($null -ne $publisherSource) {
+    $entrySetAdmissionCommand.argv += @("--expected-source-epoch", [string]$publisherSource.source_epoch)
+}
 if ($TestStateIsolatedProduct) {
     $buildTags = @("test_state_path_env")
 }
 $plan = [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     testOnly = [bool]$TestStateIsolatedProduct
     buildTags = @($buildTags)
     version = $version
@@ -243,6 +281,9 @@ $plan = [ordered]@{
     artifacts = $artifacts
     identityManifest = $identityManifest
     admissionCommand = $admissionCommand
+    entrySetBuildID = $entrySetBuildID
+    canonicalEntry = [ordered]@{ entryRelativePath = $entryRelativePath; productRelativePath = $productRelativePath; identityRelativePath = [string]$contract.identityManifest.filename; reverseProjection = $canonicalEntryReverseProjection; expectedCanonicalEntrySHA256 = $null; received = $false; buildOrder = @("launcher", "product") }
+    entrySetAdmissionCommand = $entrySetAdmissionCommand
     retiredOutputFiles = $retiredOutputFiles
 }
 if ($null -ne $publisherSource) {
@@ -289,48 +330,73 @@ $builderPrimaryExitStage = $null
 try {
     New-Item -ItemType Directory -Force -Path $resourceScratch | Out-Null
     $templatePath = Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json"
-    foreach ($artifact in $productArtifacts) {
-        $config = Get-Content -Raw -LiteralPath $templatePath | ConvertFrom-Json
-        $config.IconPath = (Join-Path $PSScriptRoot "cmd/mcphub/mcphub.ico")
-        $config.FixedFileInfo.FileVersion.Major = [int]$versionCore[0]
-        $config.FixedFileInfo.FileVersion.Minor = [int]$versionCore[1]
-        $config.FixedFileInfo.FileVersion.Patch = [int]$versionCore[2]
-        $config.FixedFileInfo.FileVersion.Build = 0
-        $config.FixedFileInfo.ProductVersion.Major = [int]$versionCore[0]
-        $config.FixedFileInfo.ProductVersion.Minor = [int]$versionCore[1]
-        $config.FixedFileInfo.ProductVersion.Patch = [int]$versionCore[2]
-        $config.FixedFileInfo.ProductVersion.Build = 0
-        $config.StringFileInfo.FileVersion = "$($versionCore[0]).$($versionCore[1]).$($versionCore[2]).0"
-        foreach ($entry in $artifact.versionInfo.GetEnumerator()) {
-            if ($config.StringFileInfo.PSObject.Properties.Name -contains $entry.Key) {
-                $config.StringFileInfo.($entry.Key) = $entry.Value
-            } else {
-                $config.StringFileInfo | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value
+    foreach ($artifact in $orderedArtifacts) {
+        if ($artifact.productMetadata) {
+            if (-not $plan.canonicalEntry.received -or
+                (Get-FileHash -LiteralPath $launcherArtifacts[0].output -Algorithm SHA256).Hash.ToLowerInvariant() -cne $plan.canonicalEntry.expectedCanonicalEntrySHA256) {
+                throw "Canonical entry was not received or changed before GUI compilation"
+            }
+            # Reuse this owner's product.json scratch leaf for the encoder request;
+            # the codec's actual result becomes the supported Comments field.
+            $commentsRequestPath = Join-Path $resourceScratch "$($artifact.role).json"
+            $commentsRequest = [ordered]@{
+                existing_comments = [string]$artifact.versionInfo.Comments
+                build_id = $entrySetBuildID
+                launcher_sha256 = $plan.canonicalEntry.expectedCanonicalEntrySHA256
+                reverse_projection = $canonicalEntryReverseProjection
+            }
+            [IO.File]::WriteAllText($commentsRequestPath, ($commentsRequest | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+            $encodedRows = @(& go run ./tools/windows-product-validate --encode-entry-comments $commentsRequestPath)
+            if ($LASTEXITCODE -ne 0) { $builderPrimaryExitCode = [int]$LASTEXITCODE; $builderPrimaryExitStage = "entry-comments"; exit $LASTEXITCODE }
+            if ($encodedRows.Count -ne 1) { throw "Entry comments encoder must emit exactly one JSON line" }
+            $encoded = [string]$encodedRows[0] | ConvertFrom-Json
+            if (@($encoded.PSObject.Properties).Count -ne 1 -or
+                $encoded.PSObject.Properties.Name -cne "comments" -or $encoded.comments -isnot [string]) {
+                throw "Entry comments encoder response shape changed"
+            }
+            $artifact.versionInfo.Comments = [string]$encoded.comments
+            $config = Get-Content -Raw -LiteralPath $templatePath | ConvertFrom-Json
+            $config.IconPath = (Join-Path $PSScriptRoot "cmd/mcphub/mcphub.ico")
+            $config.FixedFileInfo.FileVersion.Major = [int]$versionCore[0]
+            $config.FixedFileInfo.FileVersion.Minor = [int]$versionCore[1]
+            $config.FixedFileInfo.FileVersion.Patch = [int]$versionCore[2]
+            $config.FixedFileInfo.FileVersion.Build = 0
+            $config.FixedFileInfo.ProductVersion.Major = [int]$versionCore[0]
+            $config.FixedFileInfo.ProductVersion.Minor = [int]$versionCore[1]
+            $config.FixedFileInfo.ProductVersion.Patch = [int]$versionCore[2]
+            $config.FixedFileInfo.ProductVersion.Build = 0
+            $config.StringFileInfo.FileVersion = "$($versionCore[0]).$($versionCore[1]).$($versionCore[2]).0"
+            foreach ($entry in $artifact.versionInfo.GetEnumerator()) {
+                if ($config.StringFileInfo.PSObject.Properties.Name -contains $entry.Key) {
+                    $config.StringFileInfo.($entry.Key) = $entry.Value
+                } else {
+                    $config.StringFileInfo | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value
+                }
+            }
+            $resourceJson = Join-Path $resourceScratch "$($artifact.role).json"
+            [IO.File]::WriteAllText($resourceJson, ($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+            $commandDir = Join-Path $PSScriptRoot ($artifact.source -replace '^\./', '')
+            $resourcePath = Join-Path $commandDir "zz_product_versioninfo.syso"
+            if (Test-Path -LiteralPath $resourcePath) {
+                Remove-Item -LiteralPath $resourcePath -Force
+            }
+            $generatedResources += $resourcePath
+            Write-Host "==> Generating VERSIONINFO role=$($artifact.role)"
+            & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 @resourceGeneratorArgs -o $resourcePath $resourceJson
+            if ($LASTEXITCODE -ne 0) {
+                $builderPrimaryExitCode = [int]$LASTEXITCODE
+                $builderPrimaryExitStage = "version-resource"
+                exit $LASTEXITCODE
             }
         }
-        $resourceJson = Join-Path $resourceScratch "$($artifact.role).json"
-        [IO.File]::WriteAllText($resourceJson, ($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
-        $commandDir = Join-Path $PSScriptRoot ($artifact.source -replace '^\./', '')
-        $resourcePath = Join-Path $commandDir "zz_product_versioninfo.syso"
-        if (Test-Path -LiteralPath $resourcePath) {
-            Remove-Item -LiteralPath $resourcePath -Force
+        # Host-run metadata/resource tools keep the caller's GOOS/GOARCH.
+        # Only each actual artifact compilation selects the requested target.
+        if (-not [string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
+            $env:GOOS = "windows"
+            $env:GOARCH = $WindowsTargetArch
         }
-        $generatedResources += $resourcePath
-        Write-Host "==> Generating VERSIONINFO role=$($artifact.role)"
-        & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 @resourceGeneratorArgs -o $resourcePath $resourceJson
-        if ($LASTEXITCODE -ne 0) {
-            $builderPrimaryExitCode = [int]$LASTEXITCODE
-            $builderPrimaryExitStage = "version-resource"
-            exit $LASTEXITCODE
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
-        $env:GOOS = "windows"
-        $env:GOARCH = $WindowsTargetArch
-    }
-    foreach ($artifact in $artifacts) {
         $outFile = Join-Path $outDir $artifact.filename
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outFile) | Out-Null
         $buildArgs = @("build", "-trimpath")
         if ($TestStateIsolatedProduct -and $artifact.role -eq "product") {
             $buildArgs += @("-tags", $buildTags[0])
@@ -345,6 +411,17 @@ try {
             $builderPrimaryExitCode = [int]$LASTEXITCODE
             $builderPrimaryExitStage = "product-build"
             exit $LASTEXITCODE
+        }
+        if ($hadGOOS) { $env:GOOS = $priorGOOS } elseif (Test-Path Env:GOOS) { Remove-Item Env:GOOS -ErrorAction Stop }
+        if ($hadGOARCH) { $env:GOARCH = $priorGOARCH } elseif (Test-Path Env:GOARCH) { Remove-Item Env:GOARCH -ErrorAction Stop }
+        if ($artifact.role -ceq "launcher") {
+            $actualEntryHash = (Get-FileHash -LiteralPath $outFile -Algorithm SHA256).Hash.ToLowerInvariant()
+            $plan.canonicalEntry.expectedCanonicalEntrySHA256 = $actualEntryHash
+            $plan.canonicalEntry.received = $true
+            $productArtifacts[0].ldflags = $productArtifacts[0].ldflags.Replace($unreceivedEntryHash, $actualEntryHash)
+            $entrySetAdmissionCommand.argv = @($entrySetAdmissionCommand.argv | ForEach-Object {
+                if ($_ -ceq $unreceivedEntryHash) { $actualEntryHash } else { $_ }
+            })
         }
     }
 } catch {
@@ -466,7 +543,7 @@ $identityBuildDate = if ($identity.build_date -is [datetime]) {
 $identityChecks = @(
     @("schema", [string]$identity.schema, $identityManifest.schema),
     @("role", [string]$identity.role, "product"),
-    @("filename", [string]$identity.filename, $productArtifacts[0].filename),
+    @("filename", [string]$identity.filename, [IO.Path]::GetFileName($productArtifacts[0].filename)),
     @("subsystem", [int]$identity.subsystem, 2),
     @("machine", [int]$identity.machine, $expectedMachine),
     @("version", [string]$identity.version, $version),
@@ -493,6 +570,21 @@ if ([string]$identity.sha256 -cne $candidateHash) {
     $identityLine + [char]10,
     (New-Object Text.UTF8Encoding($false)))
 
+$entrySetValidatorArgs = @($entrySetAdmissionCommand.argv)
+$entrySetRows = @(& go @entrySetValidatorArgs)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($entrySetRows.Count -ne 1) { throw "Complete entry-set validator must emit exactly one JSON line" }
+$entrySetResult = [string]$entrySetRows[0] | ConvertFrom-Json
+if ($entrySetResult.schema -cne "windows-canonical-entry-build-observation-v1" -or
+    $entrySetResult.build_id -cne $entrySetBuildID -or
+    $entrySetResult.canonical_entry_sha256 -cne $plan.canonicalEntry.expectedCanonicalEntrySHA256 -or
+    $entrySetResult.product_sha256 -cne $candidateHash -or
+    $entrySetResult.identity_sha256 -cne (Get-FileHash -LiteralPath $identityManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
+    throw "Actual portable entry-set observation does not match this original build"
+}
+if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$publisherSource.source_epoch) {
+    throw "Portable build observation does not preserve the original Source epoch"
+}
 foreach ($artifact in $artifacts) {
     $outFile = Join-Path $outDir $artifact.filename
     if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
@@ -504,17 +596,15 @@ if (-not (Test-Path -LiteralPath $identityManifestPath -PathType Leaf)) {
     Write-Error "$identityManifestPath missing after product admission."
     exit 1
 }
-$mcpHubExecutables = @(Get-ChildItem -LiteralPath $outDir -File -Filter "mcphub*.exe")
-if ($mcpHubExecutables.Count -ne 1 -or
-    $mcpHubExecutables[0].Name -cne $productArtifacts[0].filename) {
-    Write-Error "Windows build output must contain exactly one MCPHub executable: $($productArtifacts[0].filename)"
-    exit 1
+$mcpHubExecutables = @(Get-ChildItem -LiteralPath $outDir -File -Filter "mcphub*.exe" -Recurse | ForEach-Object { $_.FullName } | Sort-Object)
+$expectedExecutables = @($artifacts | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $outDir $_.filename)) } | Sort-Object)
+if (($mcpHubExecutables -join [char]0) -cne ($expectedExecutables -join [char]0)) {
+    throw "Windows output must contain exactly the registry's CUI and GUI executable paths"
 }
-
 if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
     Write-Host "==> Product VERSIONINFO resources:"
     foreach ($artifact in $productArtifacts) {
         (Get-Item (Join-Path $outDir $artifact.filename)).VersionInfo | Format-List ProductVersion,PrivateBuild,SpecialBuild,InternalName,OriginalFilename
     }
 }
-Write-Host "==> Done. Single-product admission passed; identity manifest=$identityManifestPath version=$version commit=$commit buildDate=$buildDate."
+Write-Host "==> Done. Complete canonical entry-set build observation passed; identity manifest=$identityManifestPath version=$version commit=$commit buildDate=$buildDate."

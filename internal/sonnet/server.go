@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ const (
 )
 
 var (
+	ErrIdempotencyConflict = errors.New("SONNET_IDEMPOTENCY_CONFLICT")
 	ErrResultPending      = errors.New("SONNET_RESULT_PENDING")
 	ErrForceRequired      = errors.New("SONNET_FORCE_REQUIRED")
 	ErrUnknownRun         = errors.New("SONNET_RUN_NOT_FOUND")
@@ -182,6 +184,7 @@ type Server struct {
 	markActive      func(string) (func(), error)
 	removeWork      func(string) error
 	afterCopy       func()
+	beforeOutput    func() // test barrier; set before starting workers
 }
 
 func NewServer(c Config) *Server {
@@ -319,6 +322,30 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	if req.TimeoutSeconds <= 0 || req.TimeoutSeconds > maxTimeoutSeconds {
 		return StartResponse{}, fmt.Errorf("SONNET_PROJECT_INVALID: timeout_seconds must be 1..%d", maxTimeoutSeconds)
 	}
+	requestHash, err := startRequestHash(req)
+	if err != nil {
+		return StartResponse{}, err
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return StartResponse{}, errRunOwnerClosed
+	}
+	if req.IdempotencyKey != "" {
+		if id := s.keys[req.IdempotencyKey]; id != "" {
+			r := s.runs[id]
+			if r.RequestHash != requestHash {
+				s.mu.Unlock()
+				return StartResponse{}, ErrIdempotencyConflict
+			}
+			out := startFrom(r)
+			out.RequestDisposition = "replayed"
+			s.mu.Unlock()
+			return out, nil
+		}
+	}
+	s.mu.Unlock()
+	// Only a new execution requires current product discovery.
 	p, err := s.locator()
 	if err != nil {
 		if stableFailureID(err) != "SONNET_INTERNAL_ERROR" {
@@ -330,20 +357,11 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		return StartResponse{}, errors.New("SONNET_PRODUCT_NOT_FOUND")
 	}
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
 		return StartResponse{}, errRunOwnerClosed
 	}
-	if req.IdempotencyKey != "" {
-		if id := s.keys[req.IdempotencyKey]; id != "" {
-			r := s.runs[id]
-			out := startFrom(r)
-			out.RequestDisposition = "replayed"
-			s.mu.Unlock()
-			return out, nil
-		}
-	}
-	s.mu.Unlock()
 	work, sourceHash, copiedHash, admission, err := s.copyProject(req.ProjectRoot, req.ProjectFile)
 	if err != nil {
 		return StartResponse{}, err
@@ -367,6 +385,9 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	if req.IdempotencyKey != "" {
 		if id := s.keys[req.IdempotencyKey]; id != "" {
 			r := s.runs[id]
+			if r.RequestHash != requestHash {
+				return StartResponse{}, s.cleanupPreTransferWork(work, ErrIdempotencyConflict)
+			}
 			out := startFrom(r)
 			out.RequestDisposition = "replayed"
 			if err := s.cleanupPreTransferWork(work, nil); err != nil {
@@ -388,7 +409,7 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 		primary := fmt.Errorf("SONNET_PROJECT_COPY_FAILED: mark active workspace: %w", err)
 		return StartResponse{}, s.cleanupPreTransferWork(work, primary)
 	}
-	r := &record{SchemaVersion: runStoreSchemaV1, StatusResponse: StatusResponse{RunID: id, Generation: s.next, State: StatePrepared, Phase: "prepared", Reportable: false, UpdatedAt: now()}, SourceManifestSHA256: sourceHash, CopiedProjectSHA256: copiedHash, IdempotencyKey: req.IdempotencyKey, workspace: work, ProjectFile: filepath.ToSlash(filepath.Clean(req.ProjectFile)), Baseline: baseline, PathAdmission: admission, ResolvedProduct: resolvedProduct(p), RunSummary: SonnetRunSummaryV1{State: "unknown"}, cancel: cancel, done: make(chan struct{}), operations: map[string]StatusResponse{}, clearActive: clearActive}
+	r := &record{SchemaVersion: runStoreSchemaV1, RequestHash: requestHash, StatusResponse: StatusResponse{RunID: id, Generation: s.next, State: StatePrepared, Phase: "prepared", Reportable: false, UpdatedAt: now()}, SourceManifestSHA256: sourceHash, CopiedProjectSHA256: copiedHash, IdempotencyKey: req.IdempotencyKey, workspace: work, ProjectFile: filepath.ToSlash(filepath.Clean(req.ProjectFile)), Baseline: baseline, PathAdmission: admission, ResolvedProduct: resolvedProduct(p), RunSummary: SonnetRunSummaryV1{State: "unknown"}, cancel: cancel, done: make(chan struct{}), operations: map[string]StatusResponse{}, clearActive: clearActive}
 	s.runs[id] = r
 	if req.IdempotencyKey != "" {
 		s.keys[req.IdempotencyKey] = id
@@ -430,6 +451,39 @@ func (s *Server) cleanupPreTransferWork(work string, primary error) error {
 	return primary
 }
 
+// startRequestHash binds a key to normalized request arguments, not mutable
+// source bytes. Legacy receipts without a digest cannot prove an exact replay.
+func startRequestHash(req StartRequest) (string, error) {
+	if req.ProjectRoot == "" || req.ProjectFile == "" || filepath.IsAbs(req.ProjectFile) ||
+		strings.ToLower(filepath.Ext(req.ProjectFile)) != ".son" {
+		return "", errors.New("SONNET_PROJECT_INVALID")
+	}
+	root, err := filepath.Abs(req.ProjectRoot)
+	if err != nil {
+		return "", fmt.Errorf("SONNET_PROJECT_INVALID: %w", err)
+	}
+	file := filepath.Clean(req.ProjectFile)
+	if !within(root, filepath.Join(root, file)) {
+		return "", errors.New("SONNET_PROJECT_INVALID")
+	}
+	// Windows project identity is case-insensitive, including the relative
+	// project filename. Keep POSIX casing significant and do not alter the
+	// actual paths used for copying or invoking the driver.
+	rootKey, fileKey := filepath.ToSlash(root), filepath.ToSlash(file)
+	if runtime.GOOS == "windows" {
+		rootKey, fileKey = strings.ToLower(rootKey), strings.ToLower(fileKey)
+	}
+	payload, err := json.Marshal(struct {
+		ProjectRoot    string
+		ProjectFile    string
+		TimeoutSeconds int
+	}{rootKey, fileKey, req.TimeoutSeconds})
+	if err != nil {
+		return "", fmt.Errorf("SONNET_PROJECT_INVALID: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+}
+
 func startFrom(r *record) StartResponse {
 	return StartResponse{RunID: r.RunID, State: r.State, RequestDisposition: "started", SourceManifestSHA256: r.SourceManifestSHA256, CopiedProjectSHA256: r.CopiedProjectSHA256}
 }
@@ -453,6 +507,14 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 	}
 	s.mu.Unlock()
 	out, err := s.driver.Run(ctx, em, filepath.Join(r.workspace, "work", filepath.FromSlash(r.ProjectFile)))
+	// Workspace, project file and baseline are immutable after admission.
+	// Keep the worker/lease alive, but do not block status, cancellation or
+	// shutdown admission while hashing potentially large output trees.
+	if s.beforeOutput != nil {
+		s.beforeOutput()
+	}
+	manifest, manifestErr := compareOutput(filepath.Join(r.workspace, "work"), r.Baseline)
+	summary := summarizeRunLog(filepath.Join(r.workspace, "work"), r.ProjectFile)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r.Stdout = string(out.Stdout)
@@ -462,6 +524,7 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			r.State = StateTimedOut
+			r.TimedOut = true
 			r.FailureID = "SONNET_RUN_TIMED_OUT"
 		} else {
 			r.State = StateForceCancelled
@@ -492,13 +555,12 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 		r.Reportable = true
 	}
 	r.Phase = "settled"
-	manifest, manifestErr := compareOutput(filepath.Join(r.workspace, "work"), r.Baseline)
 	r.OutputManifest = manifest
 	if manifestErr != nil || !manifest.Reportable {
 		r.Reportable = false
 		r.FailureID = "SONNET_OUTPUT_UNATTRIBUTABLE"
 	}
-	r.RunSummary = summarizeRunLog(filepath.Join(r.workspace, "work"), r.ProjectFile)
+	r.RunSummary = summary
 	r.UpdatedAt = now()
 	r.Generation++
 	if err := s.persist(r); err != nil {
@@ -827,6 +889,10 @@ func knownState(v State) bool {
 }
 
 func (s *Server) sweepExpiredRuns() {
+	// Startup cleanup is valid only after acquiring exclusive store ownership.
+	if s.lease == nil {
+		return
+	}
 	runsRoot := filepath.Join(s.root, "runs")
 	entries, err := os.ReadDir(runsRoot)
 	if err != nil {
@@ -839,7 +905,16 @@ func (s *Server) sweepExpiredRuns() {
 		}
 		workspace := filepath.Join(runsRoot, entry.Name())
 		r, found, err := loadRunRecord(workspace)
-		if err != nil || !found || !terminal(r.State) {
+		if err != nil {
+			continue
+		}
+		if !found {
+			if expiredRecordlessWorkspace(workspace, entry.Name(), cutoff) {
+				_ = os.RemoveAll(workspace)
+			}
+			continue
+		}
+		if !terminal(r.State) {
 			continue
 		}
 		if marker, err := os.Lstat(filepath.Join(workspace, activeMarkerLeaf)); err == nil && marker.ModTime().After(cutoff) {
@@ -851,6 +926,35 @@ func (s *Server) sweepExpiredRuns() {
 		}
 		_ = os.RemoveAll(workspace)
 	}
+}
+
+// MkdirTemp(base, "run-") owns only this numeric namespace. Inspect metadata,
+// not contents, and preserve anything recent, irregular or unreadable. A recent
+// copied file/control temporary/active marker must protect an otherwise old root.
+func expiredRecordlessWorkspace(workspace, name string, cutoff time.Time) bool {
+	suffix := strings.TrimPrefix(name, "run-")
+	if suffix == name || suffix == "" {
+		return false
+	}
+	for _, ch := range suffix {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	err := filepath.WalkDir(workspace, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if (!info.IsDir() && !info.Mode().IsRegular()) || !info.ModTime().Before(cutoff) {
+			return errors.New("recordless workspace is not safely expired")
+		}
+		return nil
+	})
+	return err == nil
 }
 
 func (s *Server) releaseLeaseWhenSettled() error {
@@ -1301,7 +1405,7 @@ func stableFailureID(err error) string {
 	if err == nil {
 		return "SONNET_INTERNAL_ERROR"
 	}
-	for _, known := range []error{errRunOwnerClosed, ErrResultPending, ErrForceRequired, ErrUnknownRun, ErrRunStoreOwned, ErrRunStoreInvalid, ErrShutdownIncomplete} {
+	for _, known := range []error{ErrIdempotencyConflict, errRunOwnerClosed, ErrResultPending, ErrForceRequired, ErrUnknownRun, ErrRunStoreOwned, ErrRunStoreInvalid, ErrShutdownIncomplete} {
 		if errors.Is(err, known) {
 			return known.Error()
 		}

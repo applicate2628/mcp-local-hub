@@ -18,6 +18,7 @@ import (
 const (
 	maxTimeoutSeconds = 3600
 	cleanupTimeout    = 5 * time.Second
+	maxReceiptBytes   = 8 << 20 // Bound terminal envelope, including result text.
 )
 
 var noneCapabilityJSON = []byte(`{"v":1,"tools":[],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}`)
@@ -192,22 +193,29 @@ func runWithDependencies(ctx context.Context, request RunRequest, deps runnerDep
 		}
 		return RunOutput{}, failure
 	}
-	record, readErr := readReceiptFile(receiptPath)
 	selectedFailureID := ""
 	var selectedCause error
-	if readErr == nil {
-		receipt, parseErr := parseProviderReceipt(record, request.Effort, request.CapabilityChoice)
-		if parseErr == nil {
-			return RunOutput{Receipt: receipt}, nil
-		}
-		selectedFailureID = "E_KIMI_RECEIPT_INVALID"
-		selectedCause = parseErr
-	} else if runErr != nil {
+	// A retained cancellation/timeout must reject even a valid receipt. Use
+	// the original outcome so a later cleanup cancellation cannot rewrite exit.
+	if runFailure == "E_KIMI_TIMEOUT" || runFailure == "E_KIMI_CANCELLED" {
 		selectedFailureID = runFailure
 		selectedCause = runCause
 	} else {
-		selectedFailureID = "E_KIMI_RECEIPT_INVALID"
-		selectedCause = readErr
+		record, readErr := readReceiptFile(receiptPath)
+		if readErr == nil {
+			receipt, parseErr := parseProviderReceipt(record, request.Effort, request.Role, request.CapabilityChoice)
+			if parseErr == nil {
+				return RunOutput{Receipt: receipt}, nil
+			}
+			selectedFailureID = "E_KIMI_RECEIPT_INVALID"
+			selectedCause = parseErr
+		} else if runErr != nil {
+			selectedFailureID = runFailure
+			selectedCause = runCause
+		} else {
+			selectedFailureID = "E_KIMI_RECEIPT_INVALID"
+			selectedCause = readErr
+		}
 	}
 	if runErr != nil && selectedFailureID != "E_KIMI_RUN_FAILED" && !errors.Is(selectedCause, runErr) {
 		if errors.Is(runErr, selectedCause) {
@@ -363,15 +371,35 @@ func resolveOrdinaryFile(path string) (string, error) {
 	return resolved, nil
 }
 
-func readReceiptFile(path string) ([]byte, error) {
+func readReceiptFile(path string) (body []byte, err error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
+	if !info.Mode().IsRegular() || info.Size() > maxReceiptBytes {
 		return nil, errReceiptInvalid
 	}
-	return os.ReadFile(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	opened, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() > maxReceiptBytes {
+		return nil, errReceiptInvalid
+	}
+	// The file can grow after either stat; the read itself must remain bounded.
+	body, err = io.ReadAll(io.LimitReader(file, maxReceiptBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxReceiptBytes {
+		return nil, errReceiptInvalid
+	}
+	return body, nil
 }
 
 func writePrivateFile(path string, body []byte) (err error) {
