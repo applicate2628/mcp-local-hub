@@ -17,8 +17,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Stage creates only operation-owned, exclusive leaves in the existing ordinary
-// canonical root. The transaction alone creates/owns the Product subdirectory.
+// Stage creates a missing canonical root through retained, no-reparse directory
+// handles, then stages operation-owned exclusive leaves in that root. The
+// transaction alone creates/owns the Product subdirectory.
 // Even on failure, the returned owner retains every acquired disposition.
 func (o *WindowsCanonicalEntrySetV1) Stage(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV1, error) {
 	s := &StagedWindowsCanonicalEntrySetV1{root: &WindowsCanonicalEntrySetV1{payloadDirectoryLink: &canonicalEntryPayloadDirectoryLinkV1{}}}
@@ -41,7 +42,7 @@ func (o *WindowsCanonicalEntrySetV1) Stage(ctx context.Context, canonicalEntryPa
 	if err != nil {
 		return s, err
 	}
-	s.parent, err = s.root.openAbsolute(filepath.Dir(canonicalEntryPath), true)
+	s.parent, err = s.root.openAbsoluteWithOptions(filepath.Dir(canonicalEntryPath), true, windows.FILE_SHARE_READ, windows.FILE_OPEN_IF)
 	if err != nil {
 		return s, err
 	}

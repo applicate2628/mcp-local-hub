@@ -79,10 +79,12 @@ func nativeCanonicalEntryPathParts(name string) (string, []string, error) {
 }
 
 func (o *WindowsCanonicalEntrySetV1) openAbsolute(name string, directory bool) (*canonicalEntryNativeFile, error) {
-	return o.openAbsoluteWithLeafShare(name, directory, windows.FILE_SHARE_READ)
+	return o.openAbsoluteWithOptions(name, directory, windows.FILE_SHARE_READ, windows.FILE_OPEN)
 }
 
-func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithLeafShare(name string, directory bool, leafShare uint32) (*canonicalEntryNativeFile, error) {
+// Only destination staging permits FILE_OPEN_IF for directories. Source and
+// recovery admission keep FILE_OPEN and cannot create missing evidence.
+func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithOptions(name string, directory bool, leafShare, directoryDisposition uint32) (*canonicalEntryNativeFile, error) {
 	volume, parts, err := nativeCanonicalEntryPathParts(name)
 	if err != nil {
 		return nil, err
@@ -115,11 +117,13 @@ func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithLeafShare(name string, dire
 		}
 		access := uint32(windows.FILE_READ_DATA)
 		share := leafShare
+		disposition := uint32(windows.FILE_OPEN)
 		if isDir {
 			access = windows.FILE_TRAVERSE
 			share = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE
+			disposition = directoryDisposition
 		}
-		h, err = canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), part, isDir, access, share, windows.FILE_OPEN)
+		h, err = canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), part, isDir, access, share, disposition)
 		if err != nil {
 			return nil, fmt.Errorf("open original component %q: %w", part, err)
 		}
@@ -444,7 +448,7 @@ func verifyCanonicalEntryOriginalProductProcessHandle(product *canonicalEntryNat
 	if prior != nil {
 		probe.payloadDirectoryLink = prior.root.payloadDirectoryLink
 	}
-	f, err := probe.openAbsoluteWithLeafShare(actualImagePath, false, leafShare)
+	f, err := probe.openAbsoluteWithOptions(actualImagePath, false, leafShare, windows.FILE_OPEN)
 	if err == nil && f.identity != product.identity {
 		err = errors.New("actual original process image differs from retained Product")
 	}

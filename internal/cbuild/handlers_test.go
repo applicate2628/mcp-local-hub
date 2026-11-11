@@ -286,7 +286,7 @@ func TestExecutionResultsRetainRawTailInMCPChannels(t *testing.T) {
 	}{
 		{"configure", configureResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
 		{"build", buildResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
-		{"test", testResult{}, `{"success":false,"exit_code":0,"total":0,"passed":0,"failed":0,"tests":null,"wall_ms":0,"raw_tail":""}`},
+		{"test", testResult{}, `{"results_partial":false,"output_truncated":false,"success":false,"exit_code":0,"total":0,"passed":0,"failed":0,"tests":null,"wall_ms":0,"raw_tail":""}`},
 		{"workflow", workflowResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
 		{"clean", cleanResult{}, `{"success":false,"purged":false,"raw_tail":""}`},
 		{"vcpkg_install", vcpkgInstallResult{}, `{"success":false,"exit_code":0,"installed":null,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},

@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -287,7 +289,8 @@ func TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(t.TempDir(), "mcphub.exe")
+	// A fresh Windows profile has neither .local nor bin yet.
+	destination := filepath.Join(t.TempDir(), ".local", "bin", "mcphub.exe")
 	staged, err := o.Stage(context.Background(), destination)
 	if err != nil {
 		if staged != nil {
@@ -310,6 +313,10 @@ func TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages(t *testing.T
 			t.Fatalf("stage still present after Close: %s %v", path, err)
 		}
 	}
+	entries, err := os.ReadDir(filepath.Dir(destination))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("fresh installation directory must remain empty after stage cleanup: %v, %v", entries, err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	partial, err := o.Stage(ctx, destination)
@@ -318,6 +325,37 @@ func TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages(t *testing.T
 	}
 	if err = partial.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCanonicalEntryStageRefusesRedirectedInstallationDirectory(t *testing.T) {
+	targets, binding := canonicalEntrySetFixture(t)
+	o, err := AdmitWindowsCanonicalEntrySetV1(context.Background(), targets.CanonicalEntryPath, binding)
+	closeCanonicalEntryFixtureOwner(t, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	redirect := filepath.Join(root, ".local")
+	// Directory junctions exercise the no-reparse contract without requiring
+	// the Windows privilege needed to create directory symbolic links.
+	junction := exec.Command("cmd", "/c", "mklink", "/J", redirect, outside)
+	junction.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if output, err := junction.CombinedOutput(); err != nil {
+		t.Skipf("directory junctions unavailable: %v: %s", err, output)
+	}
+	staged, stageErr := o.Stage(context.Background(), filepath.Join(redirect, "bin", "mcphub.exe"))
+	if staged != nil {
+		if err := staged.Close(); err != nil {
+			t.Error(err)
+		}
+	}
+	if stageErr == nil {
+		t.Fatal("staging accepted a redirected installation directory")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("staging created directories beyond a reparse point: %v, %v", entries, err)
 	}
 }
 
