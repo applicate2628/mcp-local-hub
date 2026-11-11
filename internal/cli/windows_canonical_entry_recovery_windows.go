@@ -376,6 +376,89 @@ func (s *windowsCanonicalJournalRecoverySource) acquireDirectory(ctx context.Con
 	}
 	return nil
 }
+
+// Validation borrows the same original objects as rollback, but never moves or
+// disposes them, settles runtime, or discards the retained task store.
+func validateCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, j windowsProductRecoveryJournalV3) (retErr error) {
+	source, err := prepareCanonicalRecoverySource(req, d, filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3), j, canonicalRecoveryRollback)
+	if err != nil {
+		return err
+	}
+	defer func() { source.active = false }()
+	defer func() {
+		if source.directory != nil {
+			retErr = errors.Join(retErr, source.directory.Close())
+		}
+	}()
+	if err := source.acquireDirectory(req.Context); err != nil {
+		return err
+	}
+	prior, err := binaryadmission.AcquireWindowsCanonicalEntryForRecoveryV1(req.Context, source, binaryadmission.WindowsCanonicalRecoveryPriorV1)
+	if prior != nil {
+		defer func() { retErr = errors.Join(retErr, prior.Close()) }()
+	}
+	if err != nil {
+		return err
+	}
+	successor, err := binaryadmission.AcquireWindowsCanonicalEntryForRecoveryV1(req.Context, source, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	if successor != nil {
+		defer func() { retErr = errors.Join(retErr, successor.Close()) }()
+	}
+	if err != nil {
+		return err
+	}
+	if prior == nil || successor == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	runtime, err := prior.RuntimeProduct(req.Context)
+	if err != nil {
+		return fmt.Errorf("%w: original prior runtime admission: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	if expected := j.EntrySet.PriorRuntime; expected != nil {
+		if expected.Present != (runtime != nil) {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		if runtime != nil {
+			member := source.prior.Product
+			if sameWindowsProductPath(expected.Path, j.EntrySet.CanonicalEntry.Target) {
+				member = source.prior.Launcher
+			}
+			artifact := runtime.Artifact()
+			originalPath := filepath.Join(filepath.Dir(j.EntrySet.CanonicalEntry.Target), filepath.FromSlash(member.SourceRelative))
+			if !member.Present || !sameWindowsProductPath(artifact.Path, originalPath) || artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem || artifact.Machine != 0x8664 {
+				return ErrWindowsProductRecoveryIdentity
+			}
+		}
+	}
+	legacy := windowsProductPairRecoveryArtifact{Target: j.LegacyWindowless.Target, PriorPresent: j.LegacyWindowless.PriorPresent, PriorSHA256: j.LegacyWindowless.PriorSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.LegacyWindowless.BaselineAsides)}
+	if _, err := inspectWindowsProductLegacyRecoveryArtifact(legacy, d); err != nil {
+		return fmt.Errorf("%w: legacy inverse: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	// Settled rollback has already restored its tasks, and its retained store
+	// may have been discarded before the journal's final removal was interrupted.
+	if j.Phase == WindowsProductRecoverySettledRollback {
+		return source.ValidateOriginalRecovery(req.Context)
+	}
+	if d.ReopenEntrySetTasks == nil {
+		return fmt.Errorf("%w: complete-set task inverse validation owner unavailable", ErrWindowsProductRecoveryIdentity)
+	}
+	targets, err := canonicalEntrySetJournalTargets(j)
+	if err != nil {
+		return err
+	}
+	tasks, err := d.ReopenEntrySetTasks(req.Context, j.Tasks, targets)
+	if tasks != nil {
+		defer func() { retErr = errors.Join(retErr, tasks.Close()) }()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: complete-set task inverse validation: %w", ErrWindowsProductRecoveryIdentity, err)
+	}
+	if tasks == nil {
+		return fmt.Errorf("%w: complete-set task inverse validation returned no owner", ErrWindowsProductRecoveryIdentity)
+	}
+	return source.ValidateOriginalRecovery(req.Context)
+}
+
 func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (result *WindowsProductPairRecoverySettled, retErr error) {
 	source, err := prepareCanonicalRecoverySource(req, d, path, j, canonicalRecoveryRollback)
 	if err != nil {

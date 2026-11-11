@@ -354,6 +354,9 @@ func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j 
 		return err
 	}
 	d := withWindowsProductRecoveryDefaults(req.Deps)
+	if j.EntrySet != nil {
+		return validateCanonicalEntryPendingRecovery(req, d, j)
+	}
 	product := windowsProductPairRecoveryArtifact{Target: j.Product.Target, PriorPresent: j.Product.PriorPresent, PriorSHA256: j.Product.PriorSHA256, NewSHA256: j.Product.NewSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.Product.BaselineAsides)}
 	state, err := inspectWindowsProductPairRecoveryArtifact(product, pairRecoveryDepsFromProduct(d))
 	if err != nil {
