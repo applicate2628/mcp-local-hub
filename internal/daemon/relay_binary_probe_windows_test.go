@@ -134,12 +134,22 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 			// Explicit idle settling interval; not used to assert concurrency correctness.
 			time.Sleep(150 * time.Millisecond)
 			readyRSS := uint64(0)
+			privateEnabled := os.Getenv("MCPHUB_RX_RELAY_PRIVATE_MEMORY") == "1"
+			var readyPrivate, readyCommit, postPrivate, postCommit uint64
 			for _, c := range children {
 				rss, ok := hubprocess.ResidentSetSizeByPID(c.cmd.Process.Pid)
 				if !ok {
 					t.Fatal("owned running child RSS unknown")
 				}
 				readyRSS += rss
+				if privateEnabled {
+					private, err := observeRelayPrivateMemory(c.cmd.Process.Pid)
+					if err != nil {
+						t.Fatalf("owned child private memory unknown: %v", err)
+					}
+					readyPrivate += private.PrivateWorkingSet
+					readyCommit += private.PrivateCommit
+				}
 			}
 			samples := make(chan float64, count*16)
 			failures := make(chan error, count)
@@ -190,6 +200,14 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 					t.Fatal("owned running child post-load RSS unknown")
 				}
 				activeRSS += rss
+				if privateEnabled {
+					private, err := observeRelayPrivateMemory(c.cmd.Process.Pid)
+					if err != nil {
+						t.Fatalf("owned child post-load private memory unknown: %v", err)
+					}
+					postPrivate += private.PrivateWorkingSet
+					postCommit += private.PrivateCommit
+				}
 			}
 			cpu := time.Duration(0)
 			for _, c := range children {
@@ -219,6 +237,13 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 			}
 			sort.Float64s(startups)
 			result := map[string]any{"processes": count, "payload_bytes": 1024, "samples": len(latency), "ready_working_set_sum_bytes": readyRSS, "post_load_working_set_sum_bytes": activeRSS, "startup_median_ms": startups[len(startups)/2], "closed_loop_p50_ms": latency[len(latency)/2], "closed_loop_p95_ms": latency[(len(latency)-1)*95/100], "owned_process_lifetime_cpu_ms": float64(cpu.Nanoseconds()) / 1e6, "qualification": "default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim"}
+			if privateEnabled {
+				result["ready_private_working_set_sum_bytes"] = readyPrivate
+				result["ready_private_commit_sum_bytes"] = readyCommit
+				result["post_load_private_working_set_sum_bytes"] = postPrivate
+				result["post_load_private_commit_sum_bytes"] = postCommit
+				result["private_memory_method"] = "PROCESS_MEMORY_COUNTERS_EX2; resident private pages and commit reported separately; not peak"
+			}
 			encoded, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
 				t.Fatal(err)
