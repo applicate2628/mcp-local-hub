@@ -32,6 +32,16 @@ type HTTPToStdioRelay struct {
 	Stdout io.Writer // usually os.Stdout
 	Stderr io.Writer // usually os.Stderr (logging only; never echoed to client)
 
+	// InterruptStdin is an explicit capability granted by the input owner.
+	// Nil keeps the existing borrowed-input contract. When set, cancellation
+	// may call it once while the input pump is active, concurrently with Read.
+	// It must make current/future reads terminate and must itself finish; Run
+	// joins both operations. Return an error if interruption/cleanup failed.
+	// Run never infers permission from io.Closer and never closes Stdout.
+	// Expected interrupted reads should return EOF or context.Canceled;
+	// unrelated read errors and this callback's error remain observable.
+	InterruptStdin func() error
+
 	// HTTPClient is optional; a sensible default is used if nil.
 	HTTPClient *http.Client
 
@@ -86,9 +96,11 @@ var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
 // Run must not overlap another Run on the same instance. Its exported
 // configuration must remain unchanged until the lifetime has settled.
 //
-// Stdin and Stdout remain borrowed: Run does not close them. Cancellation stops
-// context-aware HTTP work, but cannot forcibly interrupt an arbitrary blocking
-// Reader/Writer. Their owner must provide termination for any such operation.
+// Stdin and Stdout are borrowed by default; Run never implicitly closes them.
+// Cancellation stops context-aware HTTP work, but cannot interrupt an arbitrary blocking
+// Reader/Writer. For input, its owner may grant InterruptStdin; Run joins that
+// callback as well as the read. Without it, the owner must terminate input.
+// Output still requires its owner's termination mechanism if Write can block.
 // No detached reader goroutine or implicit ownership transfer is introduced.
 //
 // The first output failure is retained even when it causes context cancellation.
@@ -139,7 +151,7 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 		sseErrCh <- r.sseListener(runCtx)
 	}()
 
-	stdinErr := r.stdinPump(runCtx, &postWG)
+	stdinErr, interruptErr := r.pumpInput(runCtx, &postWG)
 
 	// Drain in-flight POSTs before canceling SSE — we don't want to
 	// drop the last responses the client is waiting for.
@@ -153,13 +165,51 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	r.terminateSession()
 
 	outputErr := r.stdoutFailure()
-	if stdinErr != nil && !errors.Is(stdinErr, io.EOF) && !errors.Is(stdinErr, context.Canceled) {
+	if interruptErr != nil {
+		outputErr = errors.Join(outputErr, interruptErr)
+	}
+	if errors.Is(stdinErr, context.DeadlineExceeded) || (stdinErr != nil && !errors.Is(stdinErr, io.EOF) && !errors.Is(stdinErr, context.Canceled)) {
 		if outputErr != nil {
 			return errors.Join(stdinErr, outputErr)
 		}
 		return stdinErr
 	}
 	return outputErr
+}
+
+// pumpInput attaches only the interruption capability explicitly granted by
+// the input owner. Reading stays on the Run goroutine; no reader is abandoned.
+// Disarm before draining accepted POSTs so normal EOF does not later interrupt
+// settled input when Run cancels its HTTP context. If interruption already
+// started, join it and retain its outcome independently of the read outcome.
+func (r *HTTPToStdioRelay) pumpInput(ctx context.Context, wg *sync.WaitGroup) (error, error) {
+	if err := ctx.Err(); err != nil {
+		return err, nil
+	}
+	interrupt := r.InterruptStdin
+	if interrupt == nil {
+		return r.stdinPump(ctx, wg), nil
+	}
+	done := make(chan struct{})
+	var interruptErr error
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		interruptErr = interrupt()
+	})
+	stdinErr := r.stdinPump(ctx, wg)
+	if !stop() {
+		<-done
+		if interruptErr != nil {
+			interruptErr = fmt.Errorf("relay stdin interruption: %w", interruptErr)
+		}
+	}
+	// An input adapter may use Canceled as its interruption sentinel even
+	// when the Run deadline caused the interruption. Retain that cause too;
+	// neither callback cleanup errors nor a deadline are a clean detach.
+	if errors.Is(stdinErr, context.Canceled) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		stdinErr = errors.Join(ctx.Err(), stdinErr)
+	}
+	return stdinErr, interruptErr
 }
 
 // stdinPump reads JSON-RPC lines from stdin and POSTs each to /mcp.
@@ -186,6 +236,12 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 				return io.EOF
 			}
 			return fmt.Errorf("stdin read: %w", err)
+		}
+		// A blocked read may complete with data concurrently with interruption.
+		// Such data is not new admission after cancellation, even if a custom
+		// HTTP transport would accept an already-canceled request.
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
