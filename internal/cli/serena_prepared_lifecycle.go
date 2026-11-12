@@ -12,7 +12,7 @@ import (
 // Global and workspace callers enter the SAME pending registration and host
 // combiner. Construction failure leaves its exact ticket pending until actual
 // no-child/IO evidence can release it; a nil host is not such evidence.
-func newPreparedConsumerHTTPHost(ctx context.Context, owner *api.PreparedSerenaRuntimeOwner, descriptor api.SupervisorDaemon, cfg daemon.HTTPHostConfig) (*daemon.HTTPHost, *preparedConsumerLifecycleAdapter, error) {
+func newPreparedConsumerHTTPHost(ctx context.Context, owner *api.PreparedSerenaRuntimeOwner, descriptor api.SupervisorDaemon, cfg daemon.HTTPHostConfig, launch *api.PreparedSerenaLaunchObservation) (*daemon.HTTPHost, *preparedConsumerLifecycleAdapter, error) {
 	if owner == nil {
 		return nil, nil, errors.New("SERENA_PREPARED_LIFECYCLE_UNAVAILABLE")
 	}
@@ -36,7 +36,7 @@ func newPreparedConsumerHTTPHost(ctx context.Context, owner *api.PreparedSerenaR
 	if err != nil {
 		return nil, nil, err
 	}
-	ticket, err := owner.ResolveReady(ctx, api.PreparedConsumerRequestV1{OperationID: consumerID, ConsumerKind: kind, Binding: *binding, ExpectedDescriptor: descriptor})
+	ticket, err := owner.ResolveReady(ctx, api.PreparedConsumerRequestV1{OperationID: consumerID, ConsumerKind: kind, Binding: *binding, ExpectedDescriptor: descriptor, Launch: launch})
 	if err != nil {
 		return nil, nil, err
 	}

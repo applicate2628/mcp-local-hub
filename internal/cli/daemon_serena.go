@@ -185,7 +185,7 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 					return err
 				}
 				defer cancel()
-				h, _, err = newPreparedConsumerHTTPHost(startCtx, owner, *desc, cfg)
+				h, _, err = newPreparedConsumerHTTPHost(startCtx, owner, *desc, cfg, nil)
 			} else {
 				h, err = daemon.NewHTTPHost(cfg)
 			}

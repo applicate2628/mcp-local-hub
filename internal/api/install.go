@@ -380,7 +380,7 @@ type InstallOpts struct {
 	requireExistingStdioBridge bool
 	ProjectClientRollback      *InstallProjectClientRollback
 	ProjectClientCreate        *InstallProjectClientCreate
-	SerenaPreparationPolicy    *SerenaPreparationPolicyV1
+	SerenaPreparationPolicy    *SerenaPreparationPolicyV2
 	Server                     string
 	DaemonFilter               string   // empty = all daemons in the manifest
 	ClientsInclude             []string // empty = default install clients

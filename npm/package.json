@@ -1,6 +1,6 @@
 {
   "name": "mcp-local-hub",
-  "version": "0.4.59",
+  "version": "0.4.60",
   "description": "mcp-local-hub (mcphub): a local supervisor + router that compresses duplicate MCP (Model Context Protocol) server processes across clients into one managed hub. The npm distribution supports Windows x64; other platforms are deferred.",
   "keywords": [
     "mcp",
@@ -35,7 +35,7 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@applicate2628/mcp-local-hub-win32-x64": "0.4.59"
+    "@applicate2628/mcp-local-hub-win32-x64": "0.4.60"
   },
   "engines": {
     "node": ">=18"

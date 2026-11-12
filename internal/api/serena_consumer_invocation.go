@@ -14,6 +14,8 @@ type PreparedSerenaConsumerInvocationRequest struct {
 	OperationID         string
 	Binding             PreparedSerenaRuntimeBinding
 	ExpectedDescriptors []SupervisorDaemon
+	Environment         *SerenaConsumerEnvironmentObservation `json:"-"`
+	preparation         *serenaPreparationContext
 }
 type PreparedSerenaConsumerInvocation struct {
 	mu                                                                                        sync.Mutex
@@ -38,6 +40,7 @@ type PreparedSerenaConsumerInvocation struct {
 	sealed, finalizing                                                                        bool
 	primary, cleanup                                                                          error
 	close                                                                                     *PreparedSerenaConsumerInvocationCloseObservation
+	selectedContext                                                                           *serenaSelectedContext
 	heldMutations                                                                             []heldSerenaIntentMutation
 	heldRestorations                                                                          []*SupervisorIntentAbsenceRestorationObservation
 }
@@ -84,6 +87,13 @@ func (o *PreparedSerenaRuntimeOwner) AcquireConsumerInvocation(ctx context.Conte
 		seen[d.TaskName] = true
 		if _, err = preparedSerenaDescriptorSHA(d); err != nil {
 			return nil, err
+		}
+	}
+	if r.Environment != nil {
+		for _, d := range r.ExpectedDescriptors {
+			if r.Environment.binding == nil || d.TaskName != r.Environment.binding.task || d.ManifestHash != r.Environment.binding.rawManifestSHA {
+				return nil, errors.New("SERENA_SELECTED_CONTEXT_DESCRIPTOR_DRIFT")
+			}
 		}
 	}
 	cloned := cloneSupervisorIntentFile(&SupervisorIntentFile{Version: 2, Daemons: r.ExpectedDescriptors})
@@ -173,7 +183,7 @@ func (o *PreparedSerenaRuntimeOwner) AcquireConsumerInvocation(ctx context.Conte
 	scope.io.intentNamespace = scope.intentNamespace
 	scope.io.intentRequestSHA256 = sha
 	scope.publishedAttempted = true
-	scope.published, err = AcquireSerenaPublishedGenerationObserved(ctx, scope.record, original.limits)
+	scope.published, err = AcquireSerenaPublishedGenerationObserved(ctx, scope.record, scope.selectedContext.limits)
 	if err != nil {
 		return scope, err
 	}
@@ -194,7 +204,7 @@ func (s *PreparedSerenaConsumerInvocation) beginCall(ctx context.Context, owner 
 		return errors.New("SERENA_CONSUMER_INVOCATION_SOURCE_INVALID")
 	}
 	sha, err := consumerInvocationRequestSHA(r)
-	if err != nil || sha != s.requestSHA {
+	if err != nil || sha != s.requestSHA || r.Environment != s.request.Environment || r.preparation != s.request.preparation {
 		return errors.Join(err, errors.New("SERENA_CONSUMER_INVOCATION_REQUEST_DRIFT"))
 	}
 	if !time.Now().Before(s.deadline) {
@@ -218,6 +228,9 @@ func (s *PreparedSerenaConsumerInvocation) validateSources(ctx context.Context) 
 	}
 	if err = s.intentNamespace.ValidateOperation(ctx, s.request.OperationID, s.requestSHA); err != nil {
 		return err
+	}
+	if s.selectedContext == nil {
+		return errors.New("SERENA_SELECTED_CONTEXT_MISSING")
 	}
 	return s.published.ValidatePublished(ctx, s.record)
 }
@@ -538,5 +551,18 @@ func (s *PreparedSerenaConsumerInvocation) validateProtectedOperation(ctx contex
 	if err != nil || leaf != op.LeafParentSHA256 {
 		return errors.Join(err, errors.New("SERENA_CONSUMER_OPERATION_LEAF_DRIFT"))
 	}
-	return s.publication.validateCurrentOperation(ctx, s.record, s.request.Binding.RecordSHA256, op, raw)
+	if err = s.publication.validateCurrentOperation(ctx, s.record, s.request.Binding.RecordSHA256, op, raw); err != nil {
+		return err
+	}
+	selected, err := receiveSerenaSelectedContext(ctx, s.record, op, s.request.Environment, s.request.preparation, s.selectedContext)
+	if err != nil {
+		return err
+	}
+	if s.selectedContext != nil && *s.selectedContext != selected {
+		return errors.New("SERENA_SELECTED_CONTEXT_DRIFT")
+	}
+	if s.selectedContext == nil {
+		s.selectedContext = &selected
+	}
+	return nil
 }

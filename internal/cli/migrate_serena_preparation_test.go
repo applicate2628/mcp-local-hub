@@ -26,7 +26,7 @@ func (assembly *refusingMigrateSerenaPreparation) QualificationPort() api.Prepar
 	return nil
 }
 
-func (assembly *refusingMigrateSerenaPreparation) PrepareInputs(_ context.Context, manifest *config.ServerManifest, rawSHA string, tasks []string, _ *api.SerenaPreparationPolicyV1) (api.SerenaPreparationInputs, error) {
+func (assembly *refusingMigrateSerenaPreparation) PrepareInputs(_ context.Context, manifest *config.ServerManifest, rawSHA string, tasks []string, _ *api.SerenaPreparationPolicyV2) (api.SerenaPreparationInputs, error) {
 	assembly.calls++
 	if manifest == nil || manifest.DaemonTemplate == nil || rawSHA != assembly.rawSHA || len(tasks) != 1 || tasks[0] != assembly.task {
 		assembly.t.Fatalf("preparation lost exact source/task: manifest=%+v rawSHA=%q tasks=%v", manifest, rawSHA, tasks)

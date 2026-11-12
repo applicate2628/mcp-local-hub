@@ -419,9 +419,9 @@ foreach ($arch in @("amd64", "arm64")) {
 }
 
 $publishWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".github/workflows/npm-publish.yml")
-if ($publishWorkflow -notmatch "(?m)^\s*node-version:\s*'24\.21\.0'\s*$" -or
+if ($publishWorkflow -notmatch "(?m)^\s*node-version:\s*'\d+\.\d+\.\d+'\s*$" -or
     $publishWorkflow -notmatch "(?m)^\s*package-manager-cache:\s*false\s*$") {
-    throw "npm publish workflow must pin the Trusted Publishing Node 24.21.0 distribution with package-manager caching disabled"
+    throw "npm publish workflow must select a reproducible Node distribution with package-manager caching disabled"
 }
 if ($publishWorkflow -notmatch 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' -or
     $publishWorkflow -notmatch "(?m)^\s*runs-on:\s*ubuntu-latest\s*$" -or
@@ -449,10 +449,45 @@ if ($toolchainStepStart -lt 0 -or $nextStepAfterToolchain -lt 0 -or
     throw "npm publish workflow must run the named Trusted Publishing toolchain gate before the publish step"
 }
 $toolchainStep = $publishWorkflow.Substring($toolchainStepStart, $nextStepAfterToolchain - $toolchainStepStart)
-if ($toolchainStep -notmatch '\$\(node --version\)" != "v24\.21\.0"' -or
-    $toolchainStep -notmatch '\$\(npm --version\)" != "11\.19\.0"') {
-    throw "npm publish workflow must fail closed unless Node and npm match the exact Trusted Publishing toolchain"
+$toolchainProgramMatch = [regex]::Match($toolchainStep, '(?ms)^ {10}node - "\$NODE_VERSION" "\$NPM_VERSION" <<''NODE''\r?\n(?<program>.*?)^ {10}NODE[ \t]*\r?$')
+if (-not $toolchainProgramMatch.Success -or
+    $toolchainStep -notmatch '(?m)^ {10}NODE_VERSION="\$\(node --version\)" \|\| \{ echo "::error::could not read Node version"; exit 1; \}' -or
+    $toolchainStep -notmatch '(?m)^ {10}NPM_VERSION="\$\(npm --version\)" \|\| \{ echo "::error::could not read npm version"; exit 1; \}') {
+    throw "npm publish workflow must read actual Node/npm versions and fail closed through its minimum-version gate"
 }
+$toolchainProgram = [regex]::Replace($toolchainProgramMatch.Groups['program'].Value, '(?m)^ {10}', '')
+$toolchainNode = Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1
+function Test-PublishingToolchainGate {
+    param([string[]]$Versions, [string]$ExpectedError = '')
+    # Expected rejection diagnostics are captured; their nonzero exit remains required.
+    $ErrorActionPreference = 'Continue'
+    # JSON preserves empty arguments even under Windows PowerShell 5.1.
+    $versionArguments = ConvertTo-Json -InputObject @($Versions) -Compress
+    $testProgram = "process.argv = [process.argv[0], '-', ...$versionArguments];`n$toolchainProgram"
+    $diagnostic = ($testProgram | & $toolchainNode.Source - 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    if (($ExpectedError -eq '' -and $exitCode -ne 0) -or
+        ($ExpectedError -ne '' -and ($exitCode -eq 0 -or $diagnostic -notmatch [regex]::Escape('::error::' + $ExpectedError)))) {
+        throw "Trusted Publishing minimum-version gate returned an unexpected exit or diagnostic: $diagnostic"
+    }
+}
+Test-PublishingToolchainGate -Versions @('v22.14.0', '11.5.1')
+Test-PublishingToolchainGate -Versions @('v24.21.0', '11.19.0')
+Test-PublishingToolchainGate -Versions @('v26.12.1', '11.11.0')
+Test-PublishingToolchainGate -Versions @('v100.0.0', '100.0.0')
+Test-PublishingToolchainGate -Versions @('v22.14.0+build.1', '11.5.2-beta.1')
+foreach ($versions in @(@('v22.13.99', '11.5.1'), @('v22.9.0', '11.5.1'), @('v22.14.0-rc.1', '11.5.1'), @('v0.0.0', '11.5.1'))) {
+    Test-PublishingToolchainGate -Versions $versions -ExpectedError 'Node 22.14.0 or newer is required'
+}
+foreach ($versions in @(@('v22.14.0', '11.5.0'), @('v22.14.0', '11.5.1-rc.1'), @('v22.14.0', '0.0.0'))) {
+    Test-PublishingToolchainGate -Versions $versions -ExpectedError 'npm 11.5.1 or newer is required'
+}
+foreach ($value in @('', '22', '22.14', '022.14.0', '22.14.0-01', '22.14.0 trailing')) {
+    Test-PublishingToolchainGate -Versions @($value, '11.5.1') -ExpectedError 'Node version is missing or malformed'
+}
+Test-PublishingToolchainGate -Versions @('v22.14.0', '') -ExpectedError 'npm version is missing or malformed'
+Test-PublishingToolchainGate -Versions @() -ExpectedError 'Node version is missing or malformed'
+Test-PublishingToolchainGate -Versions @('v22.14.0') -ExpectedError 'npm version is missing or malformed'
 if ($publishWorkflow -notmatch "(?s)push:\s*\n\s*tags:\s*\n\s*- 'v\*\.\*\.\*'" -or
     $publishWorkflow -notmatch "(?s)workflow_dispatch:.+dry_run:.+default:\s*true" -or
     $publishWorkflow -notmatch "\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+" -or

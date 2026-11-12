@@ -57,7 +57,7 @@ var installSupervisorRunningProbeFn = SupervisorRunningUnderStateDir
 // seam always passes StartTasks=false into the materialization core. The
 // deferred-start contract is structural, not a runtime knob.
 type InstallParsedManifestOpts struct {
-	SerenaPreparationPolicy *SerenaPreparationPolicyV1
+	SerenaPreparationPolicy *SerenaPreparationPolicyV2
 	// A held intent/quiet-lock caller supplies the original prepared invocation;
 	// a binding alone is insufficient. Its context must remain bounded by the
 	// invocation deadline through CloseObserved. PreparedSerenaParsedInstall's
@@ -304,6 +304,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	invocation := opts.SerenaPreparedInvocation
 	ownInvocation := false
 	var binding PreparedSerenaRuntimeBinding
+	var preparation *serenaPreparationContext
 	var record PreparedSerenaRuntimeRecord
 	operationID := ""
 	if invocation != nil {
@@ -350,6 +351,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 				if err != nil {
 					return "", err
 				}
+				preparation = request.preparationContext
 				bounded, cancel := context.WithDeadline(ctx, request.AbsoluteCleanupDeadline)
 				defer cancel()
 				ctx = bounded
@@ -369,7 +371,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 				if ownerErr != nil {
 					return "", ownerErr
 				}
-				invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operationID, Binding: binding, ExpectedDescriptors: expected})
+				invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operationID, Binding: binding, ExpectedDescriptors: expected, preparation: preparation})
 				if err != nil {
 					return "", err
 				}

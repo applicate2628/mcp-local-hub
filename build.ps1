@@ -35,7 +35,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.4.59"
+$version = "0.4.60"
 try { $commit = (git -C $PSScriptRoot rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")

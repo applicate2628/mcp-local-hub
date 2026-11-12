@@ -18,7 +18,7 @@ type PreparedSerenaParsedInstall struct {
 	owner       *PreparedSerenaRuntimeOwner
 	manifest    *config.ServerManifest
 	manifestSHA string
-	policy      SerenaPreparationPolicyV1
+	policy      SerenaPreparationPolicyV2
 	request     PreparedSerenaRequest
 	binding     PreparedSerenaRuntimeBinding
 	record      PreparedSerenaRuntimeRecord
@@ -72,7 +72,7 @@ func (a *API) PrepareSerenaParsedInstall(ctx context.Context, m *config.ServerMa
 	if err := selected.admitPrepared(m, plan, selected.opts, false); err != nil {
 		return nil, err
 	}
-	policy, err := resolveSerenaPreparationPolicy(opts.SerenaPreparationPolicy)
+	policy, err := ResolveSerenaPreparationPolicy(opts.SerenaPreparationPolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func (prepared *PreparedSerenaParsedInstall) acquireConsumerInvocation(work cont
 	if err != nil {
 		return nil, err
 	}
-	invocation, err := owner.AcquireConsumerInvocation(work, PreparedSerenaConsumerInvocationRequest{OperationID: operationID, Binding: prepared.binding, ExpectedDescriptors: descriptors})
+	invocation, err := owner.AcquireConsumerInvocation(work, PreparedSerenaConsumerInvocationRequest{OperationID: operationID, Binding: prepared.binding, ExpectedDescriptors: descriptors, preparation: prepared.request.preparationContext})
 	if err != nil && invocation != nil {
 		proof, closeErr := invocation.CloseObserved()
 		return nil, errors.Join(err, closeErr, proof.Validate(invocation))
