@@ -13,6 +13,33 @@ fn main() {
     }
     let mode = args[1].to_string_lossy();
     let marker = std::path::PathBuf::from(&args[2]);
+    #[cfg(windows)]
+    if mode == "context" || mode == "context-relative" {
+        use std::os::windows::ffi::OsStrExt;
+        // Observe only explicitly requested test keys, never dump inherited
+        // environment or user secrets. UTF-16 framing preserves non-Unicode.
+        assert!(args.len() <= 19);
+        let mut report = Vec::new();
+        let cwd = env::current_dir().expect("child cwd").into_os_string();
+        let fields = std::iter::once(Some(cwd)).chain(args[3..].iter().map(env::var_os));
+        for field in fields {
+            if let Some(value) = field {
+                let wide: Vec<_> = value.encode_wide().collect();
+                assert!(wide.len() <= 32768);
+                report.extend_from_slice(&(wide.len() as u32).to_le_bytes());
+                for unit in wide {
+                    report.extend_from_slice(&unit.to_le_bytes());
+                }
+            } else {
+                report.extend_from_slice(&u32::MAX.to_le_bytes());
+            }
+        }
+        if mode == "context-relative" {
+            fs::write("relative-proof.bin", b"owned-context").expect("owned relative artifact");
+        }
+        fs::write(marker, report).expect("owned context report");
+        return;
+    }
     if mode == "stdio" || mode == "stdio-probe" {
         use std::io::{Read, Write};
         fs::write(&marker, b"reading").expect("owned readiness marker");

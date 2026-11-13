@@ -405,3 +405,28 @@ fn pseudo_null_and_nonfile_sources_are_rejected_before_create() {
         HANDLE_FLAG_INHERIT
     );
 }
+
+#[test]
+fn explicit_context_composes_with_borrowed_stdio_owner() {
+    let f = Fixture::new();
+    let before = f.flags();
+    let mut owner = NativeOwner::create_suspended_with_context(
+        child(),
+        &f.args("stdio"),
+        mcphub_process_owner_spike::LaunchContext {
+            current_dir: &f.root,
+            environment: &[],
+        },
+        Some(f.stdio()),
+    )
+    .unwrap();
+    assert!(!f.root.join("marker").exists());
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    finish(&mut owner);
+    assert_eq!(fs::read(f.root.join("output")).unwrap(), BYTES);
+    assert_eq!(
+        fs::read(f.root.join("error")).unwrap(),
+        b"native-stderr\0\xff"
+    );
+    assert_eq!(f.flags(), before);
+}

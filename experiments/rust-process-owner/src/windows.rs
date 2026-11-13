@@ -1,4 +1,4 @@
-use crate::{NativeFailure, Settlement};
+use crate::{LaunchContext, NativeFailure, Settlement};
 use std::{
     alloc::{alloc_zeroed, dealloc, Layout},
     ffi::{c_void, OsStr, OsString},
@@ -30,8 +30,8 @@ use windows_sys::Win32::{
             CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess, GetProcessId,
             InitializeProcThreadAttributeList, QueryFullProcessImageNameW, ResumeThread,
             UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
-            EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+            CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
+            PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
             STARTF_USESTDHANDLES, STARTUPINFOEXW,
         },
     },
@@ -218,6 +218,18 @@ impl BorrowedStdio<'_> {
 }
 
 impl NativeOwner {
+    /// Use a complete explicit environment and absolute child directory.
+    /// Optional stdio has exactly the same borrowed contract as the stdio API.
+    /// Context is validated before acquiring native owner resources. Its buffers
+    /// live through creation; nothing changes the parent's environment or cwd.
+    pub fn create_suspended_with_context(
+        program: &Path,
+        args: &[OsString],
+        context: LaunchContext<'_>,
+        stdio: Option<BorrowedStdio<'_>>,
+    ) -> io::Result<Self> {
+        Self::create_suspended_impl(program, args, stdio, Some(context))
+    }
     /// Create with exactly these borrowed, already-inheritable disk/pipe
     /// sources. This does not change flags, duplicate or close parent handles.
     /// Source owners must not change native flags while creation is in progress.
@@ -227,17 +239,18 @@ impl NativeOwner {
         args: &[OsString],
         stdio: BorrowedStdio<'_>,
     ) -> io::Result<Self> {
-        Self::create_suspended_impl(program, args, Some(stdio))
+        Self::create_suspended_impl(program, args, Some(stdio), None)
     }
 
     pub fn create_suspended(program: &Path, args: &[OsString]) -> io::Result<Self> {
-        Self::create_suspended_impl(program, args, None)
+        Self::create_suspended_impl(program, args, None, None)
     }
 
     fn create_suspended_impl(
         program: &Path,
         args: &[OsString],
         stdio: Option<BorrowedStdio<'_>>,
+        context: Option<LaunchContext<'_>>,
     ) -> io::Result<Self> {
         if !program.is_absolute() {
             return Err(io::Error::new(
@@ -247,6 +260,7 @@ impl NativeOwner {
         }
         let application = wide_z(program.as_os_str())?;
         let mut command = command_line(program.as_os_str(), args)?;
+        let prepared = context.as_ref().map(LaunchContext::prepare).transpose()?;
         // Validate before acquiring any native owner or starting a child.
         let stdio_handles = stdio
             .as_ref()
@@ -330,8 +344,18 @@ impl NativeOwner {
             startup.StartupInfo.hStdError = error;
         }
         let mut created: PROCESS_INFORMATION = unsafe { zeroed() };
+        let mut flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT;
+        let (environment, directory) = if let Some(ref prepared) = prepared {
+            flags |= CREATE_UNICODE_ENVIRONMENT;
+            (
+                prepared.environment.as_ptr().cast::<c_void>(),
+                prepared.directory.as_ptr(),
+            )
+        } else {
+            (null(), null())
+        };
         // SAFETY: all UTF-16 buffers are NUL-terminated and command is writable;
-        // attribute backing and Job are live; structure size/flag are paired.
+        // attribute backing, context buffers and Job are live; native flags match buffers.
         // Optional inheritance uses only the validated explicit HANDLE_LIST;
         // existing no-stdio creation keeps inheritance disabled.
         let ok = unsafe {
@@ -341,9 +365,9 @@ impl NativeOwner {
                 null(),
                 null(),
                 i32::from(stdio_handles.is_some()),
-                CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-                null(),
-                null(),
+                flags,
+                environment,
+                directory,
                 &startup.StartupInfo,
                 &mut created,
             )

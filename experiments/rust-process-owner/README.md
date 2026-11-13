@@ -6,10 +6,11 @@
 
 1. [Process and settlement contract](#process-and-settlement-contract)
 2. [Explicit borrowed standard streams](#explicit-borrowed-standard-streams)
-3. [Evidence and negative controls](#evidence-and-negative-controls)
-4. [Reproduction](#reproduction)
-5. [Remaining gates](#remaining-gates)
-6. [Decision and sources](#decision-and-sources)
+3. [Explicit environment and working directory](#explicit-environment-and-working-directory)
+4. [Evidence and negative controls](#evidence-and-negative-controls)
+5. [Reproduction](#reproduction)
+6. [Remaining gates](#remaining-gates)
+7. [Decision and sources](#decision-and-sources)
 
 ## Process and settlement contract
 
@@ -47,13 +48,35 @@ Registered attribute values persist until `DeleteProcThreadAttributeList`, not m
 
 This deliberately narrow interface is **not drop-in Go parity**: a non-inheritable Go file is rejected rather than silently made inheritable, duplicated, or consumed. Any conversion owner must be qualified separately, including its own acquisition and cleanup failures.
 
+## Explicit environment and working directory
+
+Windows-only `create_suspended_with_context(program, args, LaunchContext { current_dir, environment }, optional_stdio)` supplies per-child arguments to the **same** native creation core. It does not call `SetEnvironmentVariable`, `SetCurrentDirectory`, a shell, or a second process launcher. Existing `create_suspended` and `create_suspended_with_stdio` signatures still inherit the parent environment/directory as before.
+
+**Table 2. Explicit context boundary.**
+
+| Property | Contract and evidence boundary |
+|---|---|
+| Full environment | A complete supplied ordinary-name block, not an overlay. No implicit copying of parent PATH, SystemRoot, credentials or SDK variables |
+| Empty environment | A non-null UTF-16 buffer containing two NUL units; NULL would mean inheritance, not empty |
+| Caller ordering | Names must be strictly increasing by Windows case-insensitive ordinal comparison; wrong order and duplicate/case-aliased names are rejected rather than silently sorted or resolved |
+| Entry syntax | Nonempty ordinary names, no '=' or NUL in names, no NUL in values. Empty values and '=' inside values are preserved. Hidden per-drive '=X:' entries are not supported by this slice |
+| Encoding | `CREATE_UNICODE_ENVIRONMENT`; raw Windows UTF-16 units are preserved, including the exercised unpaired-surrogate value |
+| Input budgets | Environment block including separators/terminators: at most 1,048,576 UTF-16 units. Directory including terminator: at most 32,767 units. These are experimental input budgets, not claims about every OS/program limit |
+| Working directory | Absolute caller-supplied path, passed directly to CreateProcessW. Missing/inaccessible directories retain native failure; the parent directory is never changed |
+| Timing and ownership | Validation/encoding happens before native owner acquisition. Context buffers live through CreateProcessW; afterwards the child has its OS copy. Caller strings are not retained or modified |
+| Composition | Optional borrowed stdio uses its existing allowlist/admission/ownership contract; no extra privileges or new stream owner |
+
+The caller must prepare the required, already ordered environment for the intended program. No automatic inheritance fallback is performed on invalid input. This low-level pilot is **not** a complete Go environment overlay/sanitization policy. In particular, Windows or the child runtime may synthesize variables after creation; the guarantee is the block supplied by the library, not a promise that every later process environment contains exactly those entries and no others. Tests examine only explicit fake keys, never dump a user's environment.
+
+A working-directory path is **not** an anchored directory identity, filesystem sandbox, or protection against an external rename/reparse race. Native Windows resolves it. Only owned local drive-absolute directories are tested; UNC/device/other namespaces and additional filesystem behavior are not qualified. Environment buffers are bounded and errors omit their contents; secure erasure of all copies is not claimed.
+
 ## Evidence and negative controls
 
-Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. Additional FileSystem/Pipes features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
+Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
 
-**23 native tests and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
+**34 native integration tests, three encoding/validation unit tests, and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
 
-**Table 2. Ten new native stdio cases.**
+**Table 3. Ten original native stdio cases (plus explicit-context composition).**
 
 | Tested behavior | Evidence |
 |---|---|
@@ -69,6 +92,11 @@ Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `wi
 | Pseudo/null/non-file sources | Rejected before child creation; actual event and parent files remain valid |
 
 The second compile-fail example rejects dropping a source `File` while its borrowed streams are still used for creation. The first still rejects retaining `ProcessView` past admission.
+The context suite adds ten native cases: Unicode/case-insensitive lookup, empty values and parent-sentinel exclusion; explicit empty environment; unchanged legacy inheritance; source strings released/changed after creation; denied admission; malformed/duplicate/unordered/oversized entries; malformed cwd; native missing-directory error; a non-Unicode UTF-16 value; and two simultaneously live children with separate contexts. An eleventh new native case combines explicit context with borrowed stdin/stdout/stderr. Three unit tests check exact double-NUL framing, total budget boundaries including separators, directory cap and non-echoing errors.
+
+A compiling context-ignoring stub failed eight native cases. Temporarily replacing only the environment pointer with NULL made the empty-environment test observe the fake parent sentinel. Omitting only the native directory pointer made the two-context test observe the parent's directory. Both negative changes were removed, and all tests repeated. These controls distinguish actual native parameter use from merely preparing plausible buffers.
+
+The new test report decoder initially failed a Clippy constant-chunk lint. It now uses the standard-library fixed-size chunk view, with no suppressed warning. No production behavior was changed to satisfy that lint.
 
 The initial stdio-ignoring stub compiled and failed eight behavioral cases. Temporarily removing only the HANDLE_LIST registration made the unrelated-event test observe the real event becoming signaled; after restoration the full suite passed. This checks the protected object, not just a potentially reused numeric handle.
 
@@ -85,6 +113,7 @@ $env:CARGO_NET_OFFLINE = 'true'
 $env:CARGO_TARGET_DIR = '<owned-work-area>\target'
 $env:TEMP = '<owned-work-area>\tmp'
 $env:TMP = $env:TEMP
+$env:MCPHUB_RX02_PARENT_SENTINEL = 'owned-test-parent-only-20261113'
 $env:MCPHUB_RX02_FIXTURES = '<new-owned-fixture-directory>'
 New-Item -ItemType Directory -Path $env:MCPHUB_RX02_FIXTURES | Out-Null
 cargo test --offline --locked -- --test-threads=1
@@ -96,10 +125,10 @@ Tests run serially because process handle counts are not meaningful if unrelated
 
 ## Remaining gates
 
-1. Exact accepted Go-contract comparison, including non-inheritable source conversion, environment/current-directory policy and selected-activation identity. No production caller is wired here.
+1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
 2. Native acquisition, attribute, resume and close failure injection; cancellation while native I/O is already blocked; parent-crash qualification. A successful stdio test is not a complete I/O pump or recovery contract.
 3. Reviewed Go/Rust application binary interface (ABI) and real foreign-caller tests. Safe Rust borrowing does not prove Go/Python callers obey it.
-4. Native Linux/macOS implementations and tests. The Windows borrowed-handle API is intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
+4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
 
 There is no restart policy, persisted state, scheduler, sandbox, new permission, COM client, capture daemon or vendor/model execution. The build and tests do not qualify unsupported consoles, sockets, network/device handles or Windows versions beyond the actually exercised environment.
@@ -108,6 +137,8 @@ There is no restart policy, persisted state, scheduler, sandbox, new permission,
 
 **Decision for this experiment:** require pre-authorized inheritable sources instead of toggling caller flags or making temporary inheritable duplicates behind the caller's back. This avoids another cleanup/ownership protocol in the first stdio slice. The tradeoff is an explicit qualification gate for production callers whose sources are non-inheritable. Revisit only when that caller's actual contract is fixed.
 
+**Context decision:** accept a complete, already ordered explicit block rather than adding an environment-merging framework or silently using parent variables. This keeps native mechanism separate from caller policy and makes invalid ordering/duplicates observable. Revisit caller preparation only against its accepted contract; do not fix unknown required variables by copying the entire parent environment.
+
 The underlying creation, admission and settlement code is shared with `create_suspended`; no second process-owner implementation was introduced. Changes are confined to this experimental crate and its tests.
 
 1. [Microsoft: HANDLE_LIST and Job attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
@@ -115,5 +146,8 @@ The underlying creation, admission and settlement code is shared with `create_su
 3. [Rust: BorrowedHandle lifetime and non-consuming use](https://doc.rust-lang.org/std/os/windows/io/struct.BorrowedHandle.html).
 4. [Microsoft: GetFileType categories, including socket classification](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletype).
 5. [MCPHub foreground/admission reference](https://github.com/applicate2628/mcp-local-hub/blob/53645ec7170c9d56073ab5140dec865b23ce7c21/internal/process/foreground_windows.go).
+6. [Microsoft: CreateProcessW environment and current-directory arguments](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+7. [Microsoft: environment-block syntax and ordering](https://learn.microsoft.com/en-us/windows/win32/procthread/changing-environment-variables).
+8. [Microsoft: non-linguistic ordinal sorting](https://learn.microsoft.com/en-us/windows/win32/intl/handling-sorting-in-your-applications) and [CompareStringOrdinal](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal).
 
 **Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface. No property of one OS mechanism is transferred to another by naming it alike.
