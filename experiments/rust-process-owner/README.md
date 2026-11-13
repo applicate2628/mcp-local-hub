@@ -7,10 +7,11 @@
 1. [Process and settlement contract](#process-and-settlement-contract)
 2. [Explicit borrowed standard streams](#explicit-borrowed-standard-streams)
 3. [Explicit environment and working directory](#explicit-environment-and-working-directory)
-4. [Evidence and negative controls](#evidence-and-negative-controls)
-5. [Reproduction](#reproduction)
-6. [Remaining gates](#remaining-gates)
-7. [Decision and sources](#decision-and-sources)
+4. [Creator-crash qualification](#creator-crash-qualification)
+5. [Evidence and negative controls](#evidence-and-negative-controls)
+6. [Reproduction](#reproduction)
+7. [Remaining gates](#remaining-gates)
+8. [Decision and sources](#decision-and-sources)
 
 ## Process and settlement contract
 
@@ -70,13 +71,35 @@ The caller must prepare the required, already ordered environment for the intend
 
 A working-directory path is **not** an anchored directory identity, filesystem sandbox, or protection against an external rename/reparse race. Native Windows resolves it. Only owned local drive-absolute directories are tested; UNC/device/other namespaces and additional filesystem behavior are not qualified. Environment buffers are bounded and errors omit their contents; secure erasure of all copies is not claimed.
 
+## Creator-crash qualification
+
+`tests/owner_crash.rs` uses a finite, hidden `owner_crash_fixture` executable to exercise the **existing** native owner in another process. No runtime API or production creation/settlement implementation is changed by this increment.
+
+**Table 3. Distinct observed termination scenarios.**
+
+| Point | Required observation |
+|---|---|
+| Before admission, root remains suspended | Killing the creator terminates the root without its execution marker ever appearing |
+| Admitted root and descendant are alive | Both retained process observations become signaled after creator death |
+| Root has exited with code 7; descendant remains alive | Creator death stops the descendant, while the retained root result is still 7 |
+| Explicit environment/cwd and borrowed stdio are used | The same crash guarantee survives the inheritance-enabled creation route |
+| Normal explicit finish control | Root/descendant settle with the requested code; the Rust Drop witness is present, unlike abrupt death |
+
+The driver kills **only its directly created owner process**, not the owner's Job or descendants. It retains identity-checked process observation handles acquired before that failure, never a Job handle that could keep the Job alive. Completed fixture records contain PID and native creation time; the observer verifies both creation time and the exact fixture executable before retaining cleanup authority. This is a controlled test-fixture protocol, not a new production authorization mechanism based on PID or a path.
+
+A separately created control process stays alive through each measured failure. The owner fixture's stack Drop marker must be absent after forced termination and present after normal finish. Process exit is observed with native handle waits: readiness, return from kill, and elapsed time alone are not completion. The known root/one-descendant outcomes are captured **before** the test's own safety cleanup. The safety cleanup cannot make a failing crash assertion pass. Owned running fixtures have a 30-second fallback lifetime; successful/negative measurements and cleanup finish before it. Suspended-root failures are cleaned through the retained, verified process handle.
+
+Negative control: removing only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` makes all three initial abrupt scenarios fail while the normal `finish` control still passes. A separate repetition also fails the explicit-context/stdio scenario. The production source is restored byte-for-byte before the final suite. Thus the tests distinguish kernel last-Job-handle-close behavior from Rust destructors, explicit `finish`, a watchdog, parent-side EOF, or an accidentally terminated surrounding process set.
+
+**Scope limits:** these are selected points **after CreateProcessW returned successfully**, not proof about creator death inside an in-progress native create, exhaustive crash schedules, system/power loss, hostile breakaway, remote effects or durable recovery. The observer knows the finite fixture membership; this is not a generic census algorithm. No extra Job handle is deliberately kept alive; any retained/duplicated Job handle would change the last-close condition. No Linux/macOS equivalent is inferred.
+
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
 
-**34 native integration tests, three encoding/validation unit tests, and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
+**39 native integration tests, three encoding/validation unit tests, and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
 
-**Table 3. Ten original native stdio cases (plus explicit-context composition).**
+**Table 4. Ten original native stdio cases (plus explicit-context composition).**
 
 | Tested behavior | Evidence |
 |---|---|
@@ -121,12 +144,12 @@ cargo clippy --offline --locked --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Tests run serially because process handle counts are not meaningful if unrelated tests concurrently acquire resources. Only the locally built finite `owner_child` fixture is launched with no console window. The stdio fixture reads at most 4096 bytes; production streams are not implicitly capped by that test-fixture choice. A bounded owner wait protects the test; a failed assertion still has the owner's Job-close fallback.
+Tests run serially because process handle counts are not meaningful if unrelated tests concurrently acquire resources. Only the locally built finite `owner_child` and `owner_crash_fixture` programs are launched with no console window. The stdio fixture reads at most 4096 bytes; production streams are not implicitly capped by that test-fixture choice. A bounded owner wait protects the test; a failed assertion still has the owner's Job-close fallback.
 
 ## Remaining gates
 
 1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
-2. Native acquisition, attribute, resume and close failure injection; cancellation while native I/O is already blocked; parent-crash qualification. A successful stdio test is not a complete I/O pump or recovery contract.
+2. Native acquisition, attribute, resume and close failure injection; cancellation while native I/O is already blocked; crash timing inside acquisition/native create and broader recovery qualification. The post-create crash points above are exercised, not all failure schedules. A successful stdio test is not a complete I/O pump or recovery contract.
 3. Reviewed Go/Rust application binary interface (ABI) and real foreign-caller tests. Safe Rust borrowing does not prove Go/Python callers obey it.
 4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
@@ -149,5 +172,7 @@ The underlying creation, admission and settlement code is shared with `create_su
 6. [Microsoft: CreateProcessW environment and current-directory arguments](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
 7. [Microsoft: environment-block syntax and ordering](https://learn.microsoft.com/en-us/windows/win32/procthread/changing-environment-variables).
 8. [Microsoft: non-linguistic ordinal sorting](https://learn.microsoft.com/en-us/windows/win32/intl/handling-sorting-in-your-applications) and [CompareStringOrdinal](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal).
+9. [Microsoft: Job lifetime, last-handle-close and membership](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+10. [Microsoft: TerminateProcess is asynchronous; wait for the retained process](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
 
 **Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface. No property of one OS mechanism is transferred to another by naming it alike.
