@@ -18,6 +18,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -383,30 +384,54 @@ func writeStateSidecarBytes(t *testing.T, path string, raw []byte) {
 // daemon ports unbound — exactly the regression codex-r2-c-p1-8
 // already paid for).
 func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
-	withNoopSchedulerEnv(t)
-	stateDir := withTempStateDir(t)
+	// This gate follows original executing-Product admission and native staging.
+	// Require its qualified test Product explicitly; never skip the intent oracle.
+	if !filepath.IsAbs(os.Getenv("MCPHUB_CANONICAL_ENTRY_FIXTURE")) {
+		t.Fatal("unreadable-intent regression requires the qualified CLI test Product and an absolute MCPHUB_CANONICAL_ENTRY_FIXTURE")
+	}
+	f := newQualifiedUpgradeGUICommandFixture(t)
 
 	// Seed a corrupt supervisor-intent.json (not valid JSON).
-	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
-	writeStateSidecarBytes(t, intentPath, []byte("not-valid-json{{{"))
+	intentPath := filepath.Join(f.stateDir, "supervisor-intent.json")
+	corruptIntent := []byte("not-valid-json{{{")
+	writeStateSidecarBytes(t, intentPath, corruptIntent)
+	priorRunner := runInstallUpgradeWindowsFn
+	t.Cleanup(func() { runInstallUpgradeWindowsFn = priorRunner })
+	runnerCalls := 0
+	runInstallUpgradeWindowsFn = func(context.Context, UpgradeOpts) error {
+		runnerCalls++
+		return errors.New("unexpected upgrade runner after invalid intent")
+	}
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	exe := writeAdmissionProductFixture(t, "UNREADABLE-INTENT")
-	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
-	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
+	err := runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, f.candidate, f.target, upgradeGUIFencedDepsForCommand(cmd), f.input)
 	if err == nil {
 		t.Fatal("runV5UpgradeWindows must return non-nil error when supervisor-intent.json is unreadable; got nil")
 	}
 	if !strings.Contains(err.Error(), "supervisor-intent.json present but unreadable") {
 		t.Fatalf("error must name the unreadable-intent cause so operators can diagnose; got %v", err)
 	}
+	if runnerCalls != 0 {
+		t.Fatalf("unreadable intent entered upgrade runner %d times", runnerCalls)
+	}
+	if got, readErr := os.ReadFile(f.target); readErr != nil || !bytes.Equal(got, f.priorBytes) {
+		t.Fatalf("unreadable intent changed prior Product: %v", readErr)
+	}
+	if got, readErr := os.ReadFile(intentPath); readErr != nil || !bytes.Equal(got, corruptIntent) {
+		t.Fatalf("unreadable intent changed its original bytes: %v", readErr)
+	}
 }
 
 func TestRunV5UpgradeWindows_ExistingLivenessTickBlocksBeforeStaging(t *testing.T) {
 	stateDir := withTempStateDir(t)
+	// Admit immutable command inputs before testing the held transaction fence.
+	binding, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(strings.Repeat("a", 32), strings.Repeat("b", 64), binaryadmission.WindowsCanonicalEntryReverseProjectionV1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	holder, err := api.AcquireUpgradeFence(context.Background(), stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -418,7 +443,7 @@ func TestRunV5UpgradeWindows_ExistingLivenessTickBlocksBeforeStaging(t *testing.
 	cmd := &cobra.Command{}
 	cmd.SetContext(ctx)
 	target := filepath.Join(t.TempDir(), "mcphub.exe")
-	err = runV5UpgradeWindowsWithPaths(cmd, filepath.Join(t.TempDir(), "does-not-exist.exe"), target)
+	err = runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, filepath.Join(t.TempDir(), "does-not-exist.exe"), target, upgradeGUIFencedDepsForCommand(cmd), windowsCanonicalEntryCommandInput{binding: binding})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("upgrade behind held liveness fence error = %v, want context.Canceled", err)
 	}

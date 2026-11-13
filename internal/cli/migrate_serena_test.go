@@ -2962,7 +2962,7 @@ func TestMigrateSerena_StartUnsupported_Workspaces_FailsBeforeCommit(t *testing.
 // supervisor (willStart false), so even on an unsupported-start platform it
 // proceeds and writes the zero-row intent (no reap/start required).
 func TestMigrateSerena_StartUnsupported_EmptyRegistry_Proceeds(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	// No serena workspaces → willStart false → no preflight trip.
 	defer stubStartSupported(t, func() bool { return false })()
@@ -3955,7 +3955,7 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			stateDir, manifestDir := migrateSerenaTestEnv(t)
+			stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: !tc.workspace})
 			seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 			var ws string
 			if tc.workspace {
