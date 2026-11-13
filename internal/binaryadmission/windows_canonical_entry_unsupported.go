@@ -72,6 +72,9 @@ func (*StagedWindowsCanonicalEntrySetV1) DiscardOriginal(context.Context, string
 func (*WindowsCanonicalEntryPriorSetV1) RuntimeProduct(context.Context) (*WindowsCanonicalEntryPriorRuntimeV1, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
 }
+func (*StagedWindowsCanonicalEntrySetV1) SuccessorRuntimeProduct(context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
+	return nil, errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntryPriorRuntimeV1) ValidateOriginal(context.Context) error {
 	return errWindowsCanonicalEntryUnsupported
 }

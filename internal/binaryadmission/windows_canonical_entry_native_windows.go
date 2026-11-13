@@ -60,7 +60,7 @@ func (o *WindowsCanonicalEntrySetV1) retain(h windows.Handle, name string, direc
 	if err != nil {
 		return nil, err
 	}
-	return &canonicalEntryNativeFile{f, id, name}, nil
+	return &canonicalEntryNativeFile{file: f, identity: id, path: name}, nil
 }
 
 func nativeCanonicalEntryPathParts(name string) (string, []string, error) {
@@ -427,6 +427,17 @@ func verifyCanonicalEntryOriginalProductProcessHandle(product *canonicalEntryNat
 		}
 		leafShare = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 	}
+	var payloadDirectoryLink *canonicalEntryPayloadDirectoryLinkV1
+	if prior != nil {
+		payloadDirectoryLink = prior.root.payloadDirectoryLink
+	}
+	return verifyCanonicalEntryProductProcessImage(product, borrowedProcessHandle, leafShare, payloadDirectoryLink)
+}
+
+// Callers retain and validate the original Product under its owning set's
+// mutex. This compatible name probe only compares the process image to that
+// object; it never replaces the original handle or grants disposition rights.
+func verifyCanonicalEntryProductProcessImage(product *canonicalEntryNativeFile, borrowedProcessHandle uintptr, leafShare uint32, payloadDirectoryLink *canonicalEntryPayloadDirectoryLinkV1) error {
 	if borrowedProcessHandle == 0 || windows.Handle(borrowedProcessHandle) == windows.InvalidHandle {
 		return errors.New("missing original process handle")
 	}
@@ -447,10 +458,7 @@ func verifyCanonicalEntryOriginalProductProcessHandle(product *canonicalEntryNat
 		}
 		size *= 2
 	}
-	probe := &WindowsCanonicalEntrySetV1{}
-	if prior != nil {
-		probe.payloadDirectoryLink = prior.root.payloadDirectoryLink
-	}
+	probe := &WindowsCanonicalEntrySetV1{payloadDirectoryLink: payloadDirectoryLink}
 	f, err := probe.openAbsoluteWithOptions(actualImagePath, false, leafShare, windows.FILE_OPEN)
 	if err == nil && f.identity != product.identity {
 		err = errors.New("actual original process image differs from retained Product")

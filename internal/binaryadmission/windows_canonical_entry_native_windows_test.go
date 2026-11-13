@@ -422,6 +422,93 @@ func TestCanonicalEntryStageCloseBeforeTakeCleansOnlyOriginalStages(t *testing.T
 	}
 }
 
+func TestCanonicalEntryPartialStageCleanupPreservesChangedOrBusyFile(t *testing.T) {
+	for _, state := range []string{"writer-live", "changed-before-seal", "unchanged"} {
+		t.Run(state, func(t *testing.T) {
+			directory := t.TempDir()
+			root := &WindowsCanonicalEntrySetV1{}
+			staged := &StagedWindowsCanonicalEntrySetV1{root: root}
+			var writer *os.File
+			t.Cleanup(func() {
+				if writer != nil {
+					if err := writer.Close(); err != nil {
+						t.Error(err)
+					}
+				}
+				if !staged.closed {
+					if err := staged.Close(); err != nil {
+						t.Error(err)
+					}
+				}
+			})
+			var err error
+			staged.parent, err = root.openAbsolute(directory, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const leaf = "partial.stage"
+			path := filepath.Join(staged.parent.path, leaf)
+			h, err := canonicalEntryOpenNative(windows.Handle(staged.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_CREATE)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged.members[0], err = root.retain(h, path, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged.cleanupSHA256[0] = canonicalEntrySHA256(nil)
+			h, err = canonicalEntryOpenNative(windows.Handle(staged.parent.file.Fd()), leaf, false, windows.FILE_WRITE_DATA, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer = os.NewFile(uintptr(h), path)
+			if writer == nil {
+				t.Fatal(errors.Join(errors.New("test writer wrapper unavailable"), windows.CloseHandle(h)))
+			}
+			foreign := []byte("bytes outside the owned cleanup preimage")
+			if state != "unchanged" {
+				if _, err := writer.Write(foreign); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state != "writer-live" {
+				err := writer.Close()
+				writer = nil
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			closeErr := staged.Close()
+			if state == "unchanged" {
+				if closeErr != nil {
+					t.Fatal(closeErr)
+				}
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("partial original must be absent after both closes: %v", err)
+				}
+				return
+			}
+			if closeErr == nil {
+				t.Fatal("cleanup accepted a busy or changed original")
+			}
+			if state == "writer-live" && !errors.Is(closeErr, windows.STATUS_SHARING_VIOLATION) {
+				t.Fatalf("live writer must prevent read-only sealing: %v", closeErr)
+			}
+			if writer != nil {
+				err := writer.Close()
+				writer = nil
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			actual, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(actual, foreign) {
+				t.Fatalf("cleanup changed unowned bytes: %q %v", actual, err)
+			}
+		})
+	}
+}
+
 func TestCanonicalEntryStageRefusesRedirectedInstallationDirectory(t *testing.T) {
 	targets, binding := canonicalEntrySetFixture(t)
 	o, err := AdmitWindowsCanonicalEntrySetV1(context.Background(), targets.CanonicalEntryPath, binding)
@@ -477,6 +564,21 @@ func TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireWriteDenied := func(path string) {
+		t.Helper()
+		// Accept every outstanding share mode so refusal proves WRITE exclusion,
+		// rather than an ordinary open conflicting with retained DELETE access.
+		h, err := canonicalEntryOpenNative(windows.Handle(staged.parent.file.Fd()), filepath.Base(path), false, windows.FILE_WRITE_DATA, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+		if err == nil {
+			t.Fatal(errors.Join(errors.New("foreign writer bypassed ready stage guard"), windows.CloseHandle(h)))
+		}
+		if !errors.Is(err, windows.STATUS_SHARING_VIOLATION) {
+			t.Fatalf("unexpected write exclusion error: %v", err)
+		}
+	}
+	for _, path := range []string{paths.CanonicalEntryPath, paths.ProductPath, paths.IdentityPath} {
+		requireWriteDenied(path)
+	}
 	if _, _, err = staged.TakeForTransaction(context.Background(), destination); err != nil {
 		t.Fatal(err)
 	}
@@ -506,6 +608,7 @@ func TestCanonicalEntryStageOriginalMoveDeniesForeignSwapAtPromotionBarrier(t *t
 	if err != nil || !result.Applied || !result.Readback || !result.NativeStatusKnown || result.NativeStatus != 0 {
 		t.Fatalf("original move=%+v error=%v", result, err)
 	}
+	requireWriteDenied(destination)
 	present, actual, actualHash, err := staged.ReadOriginal("launcher")
 	if err != nil || !present || actualHash != binding.ExpectedCanonicalEntrySHA256() || bytes.Equal(actual, foreign) {
 		t.Fatalf("destination is not original entry: %v", err)

@@ -59,37 +59,41 @@ func (o *WindowsCanonicalEntrySetV1) Stage(ctx context.Context, canonicalEntryPa
 		}
 		leaf := fmt.Sprintf("%s-%d.stage", stem, i)
 		path := filepath.Join(filepath.Dir(canonicalEntryPath), leaf)
-		// The creation FileObject continuously denies foreign write/delete/name
-		// changes. Its retained DELETE handle alone owns later native rename.
-		h, createErr := canonicalEntryOpenNative(windows.Handle(s.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.FILE_WRITE_DATA|windows.DELETE, windows.FILE_SHARE_READ, windows.FILE_CREATE)
+		// The original disposition FileObject continuously denies foreign
+		// delete/name changes, but never acquires WRITE_DATA: even a reduced-
+		// access duplicate of a writable FileObject prevents image execution.
+		h, createErr := canonicalEntryOpenNative(windows.Handle(s.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_CREATE)
 		if createErr != nil {
 			return s, createErr
 		}
+		s.members[i] = &canonicalEntryNativeFile{path: path}
+		original, retainErr := s.root.retain(h, path, false)
+		if retainErr != nil {
+			return s, retainErr
+		}
+		s.members[i] = original
+		// FILE_CREATE establishes this empty preimage even if acquiring the
+		// separate writer fails. Cleanup must seal and compare it before delete.
+		s.cleanupSHA256[i] = canonicalEntrySHA256(nil)
+		h, openErr := canonicalEntryOpenNative(windows.Handle(s.parent.file.Fd()), leaf, false, windows.FILE_WRITE_DATA, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+		if openErr != nil {
+			return s, openErr
+		}
 		out := os.NewFile(uintptr(h), path)
 		if out == nil {
-			return s, errors.Join(errors.New("stage native file wrapper unavailable"), windows.CloseHandle(h))
+			return s, errors.Join(errors.New("stage writer wrapper unavailable"), windows.CloseHandle(h))
 		}
 		id, idErr := canonicalEntryNativeID(h, false)
-		// Retain actual leaf identity before copying, including partial failures.
-		s.members[i] = &canonicalEntryNativeFile{identity: id, path: path}
-		if idErr != nil {
-			return s, errors.Join(idErr, out.Close())
+		if idErr != nil || id != original.identity {
+			return s, errors.Join(errors.New("stage writer differs from original creation object"), idErr, out.Close())
 		}
-		var original windows.Handle
-		duplicateErr := windows.DuplicateHandle(windows.CurrentProcess(), h, windows.CurrentProcess(), &original, windows.FILE_READ_DATA|windows.DELETE|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, false, 0)
-		if duplicateErr != nil {
-			return s, errors.Join(duplicateErr, out.Close())
+		initial, initialErr := original.file.Stat()
+		if initialErr != nil {
+			return s, errors.Join(initialErr, out.Close())
 		}
-		// Register the same creation object before any copy/Sync can fail. This
-		// reduced-access duplicate survives the original writer's received Close.
-		guard, retainErr := s.root.retain(original, path, false)
-		if retainErr != nil {
-			return s, errors.Join(retainErr, out.Close())
+		if initial.Size() != 0 {
+			return s, errors.Join(errors.New("original stage changed before writer acquisition"), out.Close())
 		}
-		if guard.identity != id {
-			return s, errors.Join(errors.New("stage duplicate is not the original creation object"), out.Close())
-		}
-		s.members[i] = guard
 		info, statErr := source.file.Stat()
 		var copyErr error
 		if statErr == nil {
@@ -98,26 +102,29 @@ func (o *WindowsCanonicalEntrySetV1) Stage(ctx context.Context, canonicalEntryPa
 		syncErr := out.Sync()
 		// Capture the bytes actually produced even on copy/Sync failure, before
 		// releasing the original writer. Cleanup may remove only that preimage.
-		cleanupHash, cleanupHashErr := canonicalEntryHashFile(context.Background(), out)
+		cleanupHash, cleanupHashErr := canonicalEntryHashFile(context.Background(), original.file)
 		s.cleanupSHA256[i] = cleanupHash
 		closeErr := out.Close()
-		if err = errors.Join(statErr, copyErr, syncErr, cleanupHashErr, closeErr); err != nil {
+		// No writable FileObject survives readiness. A writer arriving during
+		// the transition makes sealing fail; changed bytes fail the hash below.
+		sealErr := s.sealOriginalStage(original)
+		if err = errors.Join(statErr, copyErr, syncErr, cleanupHashErr, closeErr, sealErr); err != nil {
 			return s, err
 		}
 		// Receive identity/extent/hash from the retained creation object, never
 		// replacing ownership with a source-path reopen after writer Close.
-		actualID, idErr := canonicalEntryNativeID(windows.Handle(guard.file.Fd()), false)
+		actualID, idErr := canonicalEntryNativeID(windows.Handle(original.file.Fd()), false)
 		if idErr != nil {
 			return s, idErr
 		}
-		actualInfo, extentErr := guard.file.Stat()
+		actualInfo, extentErr := original.file.Stat()
 		if extentErr != nil {
 			return s, extentErr
 		}
 		if actualID != id || actualInfo.Size() != info.Size() {
 			return s, errors.New("stage original object identity or extent differs after Close")
 		}
-		hash, hashErr := canonicalEntryHashFile(ctx, guard.file)
+		hash, hashErr := canonicalEntryHashFile(ctx, original.file)
 		if hashErr != nil {
 			return s, hashErr
 		}
@@ -270,6 +277,11 @@ func (s *StagedWindowsCanonicalEntrySetV1) removeOriginalStage(member *canonical
 	if !validLowerHex(expectedHash, 64, 64) {
 		return errors.New("owned stage cleanup holds: produced byte preimage unavailable")
 	}
+	// Partial staging may have failed before write exclusion was acquired.
+	// Preserve the name if a writer is still live or changed the owned preimage.
+	if err := s.sealOriginalStage(member); err != nil {
+		return err
+	}
 	if err := canonicalEntryVerifyOriginalMember(member, expectedHash); err != nil {
 		return err
 	}
@@ -286,6 +298,40 @@ func (s *StagedWindowsCanonicalEntrySetV1) removeOriginalStage(member *canonical
 	closeErr = canonicalEntryCloseOriginalMember(s.root, member)
 	absenceErr := canonicalEntryRequireAbsent(parent, leaf)
 	return errors.Join(closeErr, absenceErr)
+}
+
+// A creation object must share WRITE for its transient writer. A separate read
+// FileObject denies WRITE after that writer closes, without releasing DELETE.
+func (s *StagedWindowsCanonicalEntrySetV1) sealOriginalStage(member *canonicalEntryNativeFile) error {
+	if member == nil || member.file == nil || s.root == nil || s.root.closed {
+		return errors.New("original stage disposition unavailable for read-only guard")
+	}
+	if member.readOnlyGuard != nil {
+		return nil
+	}
+	relative, err := canonicalEntryMemberRelative(s.parent, member)
+	if err != nil {
+		return err
+	}
+	parent, leaf, err := canonicalEntryRelativeParent(s.root, s.parent, relative)
+	if err != nil {
+		return err
+	}
+	h, err := canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), leaf, false, windows.FILE_READ_DATA, windows.FILE_SHARE_READ|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+	if err != nil {
+		return err
+	}
+	id, idErr := canonicalEntryNativeID(h, false)
+	if idErr != nil || id != member.identity {
+		return errors.Join(errors.New("stage read-only guard differs from original creation object"), idErr, windows.CloseHandle(h))
+	}
+	guard := os.NewFile(uintptr(h), member.path)
+	if guard == nil {
+		return errors.Join(errors.New("stage read-only guard wrapper unavailable"), windows.CloseHandle(h))
+	}
+	member.readOnlyGuard = guard
+	s.root.files = append(s.root.files, guard)
+	return nil
 }
 
 func (s *StagedWindowsCanonicalEntrySetV1) Close() error {
@@ -329,6 +375,12 @@ func canonicalEntryVerifyOriginalMember(member *canonicalEntryNativeFile, expect
 	}
 	if id != member.identity {
 		return errors.New("original canonical entry member identity changed")
+	}
+	if member.readOnlyGuard != nil {
+		guardID, guardErr := canonicalEntryNativeID(windows.Handle(member.readOnlyGuard.Fd()), false)
+		if guardErr != nil || guardID != member.identity {
+			return errors.Join(errors.New("original canonical entry read-only guard changed"), guardErr)
+		}
 	}
 	hash, err := canonicalEntryHashFile(context.Background(), member.file)
 	if err != nil {
@@ -428,14 +480,20 @@ func canonicalEntryCloseOriginalMember(root *WindowsCanonicalEntrySetV1, member 
 	if member == nil || member.file == nil {
 		return errors.New("original member close already received or unavailable")
 	}
-	f := member.file
-	member.file = nil
+	f, guard := member.file, member.readOnlyGuard
+	member.file, member.readOnlyGuard = nil, nil
 	for i, owned := range root.files {
-		if owned == f {
+		if owned == f || owned == guard {
 			root.files[i] = nil
 		}
 	}
-	return f.Close()
+	// A read-only guard is a distinct FileObject. Receive both closes before
+	// probing absence, otherwise the guard keeps a disposed file pending.
+	var guardErr error
+	if guard != nil {
+		guardErr = guard.Close()
+	}
+	return errors.Join(guardErr, f.Close())
 }
 
 // This is the pinned x/sys v0.47.0 syscall test's native FileRenameInformation

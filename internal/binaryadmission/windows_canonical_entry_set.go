@@ -194,9 +194,10 @@ type WindowsCanonicalEntryMoveResultV1 struct {
 
 type canonicalEntryNativeIdentity struct{ volume, high, low uint32 }
 type canonicalEntryNativeFile struct {
-	file     *os.File
-	identity canonicalEntryNativeIdentity
-	path     string
+	file          *os.File
+	readOnlyGuard *os.File
+	identity      canonicalEntryNativeIdentity
+	path          string
 }
 
 // Owner types are host-neutral so legacy transaction declarations remain

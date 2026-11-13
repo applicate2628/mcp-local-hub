@@ -22,7 +22,7 @@ import (
 // control ports without retaining the transaction or GUI that composed them.
 type supervisorLaunchDependencies struct {
 	exePath, supervisorLockPath, pipePath string
-	originalRuntime                       *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	originalRuntime                       *binaryadmission.WindowsCanonicalEntryRuntimeV1
 	readOwner                             func(string) (api.SupervisorLockOwner, error)
 	waitLockReleased                      func(context.Context, time.Duration) error
 	sendIPCPeer                           supervisorPeerIPCSender
@@ -358,11 +358,11 @@ func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectatio
 	return nil
 }
 
-// observeOriginalSupervisorRuntime proves the image through the retained prior
+// observeOriginalSupervisorRuntime proves the image through the retained original
 // objects. Reopening Product to hash its path conflicts with their Windows share
 // mode. The query-only process handle binds that original image proof to the
 // exact generation; it grants no creator or termination authority.
-func observeOriginalSupervisorRuntime(ctx context.Context, binaryPath, expectedSHA256 string, owner api.SupervisorLockOwner, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) (peer api.SupervisorProcessIdentityV1, retErr error) {
+func observeOriginalSupervisorRuntime(ctx context.Context, binaryPath, expectedSHA256 string, owner api.SupervisorLockOwner, original *binaryadmission.WindowsCanonicalEntryRuntimeV1) (peer api.SupervisorProcessIdentityV1, retErr error) {
 	if ctx == nil {
 		return peer, errors.New("original supervisor runtime requires operation context")
 	}

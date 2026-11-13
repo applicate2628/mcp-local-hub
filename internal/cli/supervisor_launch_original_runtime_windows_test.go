@@ -19,7 +19,8 @@ import (
 )
 
 // Exercise the command's real composition with native original/staged files.
-// Both starts deliberately fail the namespace gate before any child is created.
+// Both starts deliberately fail before any child is created: the successor
+// rejects its closed original owner, and the prior rejects the namespace.
 // Only the legacy metadata lookup is supplied so the readiness branch remains
 // observable; this test grants no process-control or successful health proof.
 func TestUpgradeSupervisorReadinessFollowsStartedBranchForIdenticalProduct(t *testing.T) {
@@ -101,8 +102,8 @@ func TestUpgradeSupervisorReadinessFollowsStartedBranchForIdenticalProduct(t *te
 		processLookupIdentityFn = func(int) (process.ProcessIdentity, error) {
 			return process.ProcessIdentity{ExecutablePath: req.ProductPath, CommandLine: `"` + req.ProductPath + `" supervise`, CreationDateUnix: createdUnix}, nil
 		}
-		// StartSupervisor's existing namespace guard refuses both branches before
-		// spawning. Readiness must follow the selected branch even on that error.
+		// Neither branch may start after these original owners were closed.
+		// Readiness must still follow the selected branch after its start error.
 		restoreState := api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
 		defer restoreState()
 		for _, branch := range []string{"successor", "prior", "successor"} {
@@ -111,7 +112,11 @@ func TestUpgradeSupervisorReadinessFollowsStartedBranchForIdenticalProduct(t *te
 				start = req.RestartPrior
 			}
 			launch, startErr := start(req.ProductPath)
-			if launch != nil || startErr == nil || !strings.Contains(startErr.Error(), "namespace/target differs") {
+			wantStart := "receive original successor runtime"
+			if branch == "prior" {
+				wantStart = "namespace/target differs"
+			}
+			if launch != nil || startErr == nil || !strings.Contains(startErr.Error(), wantStart) {
 				if launch != nil {
 					retainCanonicalGUIReplayCleanup(t, launch)
 				}

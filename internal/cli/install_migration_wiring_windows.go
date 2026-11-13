@@ -1738,7 +1738,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		LegacyWindowlessPath: legacyWindowlessTarget, StagedProduct: stageTargets.ProductPath, EntrySet: entrySet, Mode: WindowsProductPairModeUpgrade,
 		StartSupervisor: func(path string) (SupervisorLaunch, error) {
 			readinessDeps = successorDeps
-			return successorDeps.StartSupervisor(path)
+			return successorDeps.startCanonicalEntrySuccessor(ctx, path, entrySet)
 		},
 		RestartPrior: func(string) (SupervisorLaunch, error) {
 			readinessDeps = deps
@@ -4163,7 +4163,7 @@ type supervisorPeerIPCSender func(context.Context, string, api.SupervisorLockOwn
 var errSupervisorPeerIPCSenderRequired = errors.New("original-created supervisor requires a strict peer IPC sender")
 
 type v5UpgradeDeps struct {
-	originalRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	originalRuntime *binaryadmission.WindowsCanonicalEntryRuntimeV1
 	originalContext context.Context
 	// exePath is the canonical transaction target used to start and identify
 	// the managed supervisor. It is deliberately not the updater executable.
@@ -4380,6 +4380,24 @@ func (d *v5UpgradeDeps) supervisorLaunchDependencies() (supervisorLaunchDependen
 		return supervisorLaunchDependencies{}, err
 	}
 	return deps, nil
+}
+
+// Receive the published successor from its still-held transaction originals
+// before launch. Both control and readiness retain this same view; an ordinary
+// path reader cannot reopen these DELETE-owned objects while rollback is armed.
+func (d *v5UpgradeDeps) startCanonicalEntrySuccessor(ctx context.Context, binaryPath string, source *stagedWindowsCanonicalEntrySetV1) (SupervisorLaunch, error) {
+	if source == nil || source.original == nil {
+		return nil, errors.New("original successor entry-set owner unavailable")
+	}
+	original, err := source.original.SuccessorRuntimeProduct(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("receive original successor runtime: %w", err)
+	}
+	if original == nil || !samePath(original.Artifact().Path, binaryPath) {
+		return nil, errors.New("original successor runtime differs from launch target")
+	}
+	d.originalRuntime, d.originalContext = original, ctx
+	return d.StartSupervisor(binaryPath)
 }
 
 func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) (SupervisorLaunch, error) {
