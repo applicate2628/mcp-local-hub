@@ -15,8 +15,10 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        CloseHandle, GetHandleInformation, ERROR_INSUFFICIENT_BUFFER, HANDLE, HANDLE_FLAG_INHERIT,
+        INVALID_HANDLE_VALUE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
     },
+    Storage::FileSystem::{GetFileType, FILE_TYPE_DISK, FILE_TYPE_PIPE},
     System::{
         JobObjects::{
             CreateJobObjectW, JobObjectBasicAccountingInformation,
@@ -29,23 +31,26 @@ use windows_sys::Win32::{
             InitializeProcThreadAttributeList, QueryFullProcessImageNameW, ResumeThread,
             UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
             EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-            PROC_THREAD_ATTRIBUTE_JOB_LIST, STARTUPINFOEXW,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+            STARTF_USESTDHANDLES, STARTUPINFOEXW,
         },
     },
 };
 
-// All pointers passed to native code outlive the CreateProcessW call. This
-// allocation has native-heap-equivalent alignment and never moves its storage.
+// Every registered attribute value must outlive this list, including native
+// deletion, not only CreateProcessW. Its backing allocation has native-heap-
+// equivalent alignment and never moves while registered.
 struct AttributeList {
     ptr: NonNull<c_void>,
     layout: Layout,
     initialized: bool,
 }
 impl AttributeList {
-    fn new() -> io::Result<Self> {
+    fn new(count: u32) -> io::Result<Self> {
         let mut bytes = 0;
         // SAFETY: null is the documented size-query mode; bytes is writable.
-        let queried = unsafe { InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut bytes) };
+        let queried =
+            unsafe { InitializeProcThreadAttributeList(null_mut(), count, 0, &mut bytes) };
         let err = io::Error::last_os_error();
         if queried != 0
             || err.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32)
@@ -64,7 +69,7 @@ impl AttributeList {
             initialized: false,
         };
         // SAFETY: allocated/aligned bytes from the size query, exclusively owned.
-        if unsafe { InitializeProcThreadAttributeList(list.raw(), 1, 0, &mut bytes) } == 0 {
+        if unsafe { InitializeProcThreadAttributeList(list.raw(), count, 0, &mut bytes) } == 0 {
             return Err(io::Error::last_os_error());
         }
         list.initialized = true;
@@ -149,8 +154,91 @@ pub struct NativeOwner {
     terminal: Option<Settlement>,
 }
 
+/// Explicit borrowed standard streams for one synchronous native create.
+/// Source owners retain their handles; no flag mutation or ownership transfer.
+/// All three sources must already be inheritable disk/pipe handles. Stdout and
+/// stderr may refer to the same source; the inheritance allowlist is deduplicated.
+/// The borrow expires after creation, not after process exit: OS handle copies
+/// keep the child's resources alive independently of the parent's file objects.
+///
+/// ```compile_fail,E0505
+/// use mcphub_process_owner_spike::{BorrowedStdio, NativeOwner};
+/// use std::{fs::File, os::windows::io::AsHandle, path::Path};
+/// fn release_source_before_create(file: File, image: &Path) {
+///     let streams = BorrowedStdio {
+///         stdin: file.as_handle(), stdout: file.as_handle(), stderr: file.as_handle(),
+///     };
+///     drop(file);
+///     let _ = NativeOwner::create_suspended_with_stdio(image, &[], streams);
+/// }
+/// ```
+pub struct BorrowedStdio<'a> {
+    pub stdin: BorrowedHandle<'a>,
+    pub stdout: BorrowedHandle<'a>,
+    pub stderr: BorrowedHandle<'a>,
+}
+
+impl BorrowedStdio<'_> {
+    fn validated_handles(&self) -> io::Result<[HANDLE; 3]> {
+        let handles = [
+            self.stdin.as_raw_handle(),
+            self.stdout.as_raw_handle(),
+            self.stderr.as_raw_handle(),
+        ];
+        for handle in handles {
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "stdio requires a real file or pipe handle",
+                ));
+            }
+            let mut flags = 0;
+            // SAFETY: the source owner is borrowed throughout this synchronous
+            // create. This observes flags only and never closes or changes it.
+            if unsafe { GetHandleInformation(handle, &mut flags) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if flags & HANDLE_FLAG_INHERIT == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "stdio source is not explicitly inheritable",
+                ));
+            }
+            // SAFETY: borrowed live handle; this queries its native category.
+            let kind = unsafe { GetFileType(handle) };
+            if kind != FILE_TYPE_DISK && kind != FILE_TYPE_PIPE {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "only disk/pipe stdio is qualified",
+                ));
+            }
+        }
+        Ok(handles)
+    }
+}
+
 impl NativeOwner {
+    /// Create with exactly these borrowed, already-inheritable disk/pipe
+    /// sources. This does not change flags, duplicate or close parent handles.
+    /// Source owners must not change native flags while creation is in progress.
+    /// On return the child owns its OS copies; the Rust owner retains no source.
+    pub fn create_suspended_with_stdio(
+        program: &Path,
+        args: &[OsString],
+        stdio: BorrowedStdio<'_>,
+    ) -> io::Result<Self> {
+        Self::create_suspended_impl(program, args, Some(stdio))
+    }
+
     pub fn create_suspended(program: &Path, args: &[OsString]) -> io::Result<Self> {
+        Self::create_suspended_impl(program, args, None)
+    }
+
+    fn create_suspended_impl(
+        program: &Path,
+        args: &[OsString],
+        stdio: Option<BorrowedStdio<'_>>,
+    ) -> io::Result<Self> {
         if !program.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -159,6 +247,19 @@ impl NativeOwner {
         }
         let application = wide_z(program.as_os_str())?;
         let mut command = command_line(program.as_os_str(), args)?;
+        // Validate before acquiring any native owner or starting a child.
+        let stdio_handles = stdio
+            .as_ref()
+            .map(BorrowedStdio::validated_handles)
+            .transpose()?;
+        let mut inherited = Vec::new();
+        if let Some(handles) = stdio_handles {
+            for handle in handles {
+                if !inherited.contains(&handle) {
+                    inherited.push(handle);
+                }
+            }
+        }
         // SAFETY: unnamed Job with default security; successful handle is unique.
         let raw_job = unsafe { CreateJobObjectW(null(), null()) };
         if raw_job.is_null() {
@@ -181,9 +282,11 @@ impl NativeOwner {
         {
             return Err(io::Error::last_os_error());
         }
-        let attributes = AttributeList::new()?;
+        // Declare all attribute backing before the list so reverse local drop
+        // order destroys the native list before either handle array expires.
         let jobs = [raw_job];
-        // SAFETY: the one-element array and Job outlive CreateProcessW; the
+        let attributes = AttributeList::new(if stdio_handles.is_some() { 2 } else { 1 })?;
+        // SAFETY: the one-element array and Job outlive the attribute list; the
         // attribute performs membership assignment at creation, not post-spawn.
         if unsafe {
             UpdateProcThreadAttribute(
@@ -203,17 +306,41 @@ impl NativeOwner {
         let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.lpAttributeList = attributes.raw();
+        if let Some([input, output, error]) = stdio_handles {
+            // SAFETY: distinct handles remain borrowed and inheritable across
+            // CreateProcessW. The backing list is not moved/reallocated while
+            // registered. This restricts inheritance for THIS child only.
+            if unsafe {
+                UpdateProcThreadAttribute(
+                    attributes.raw(),
+                    0,
+                    PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                    inherited.as_ptr().cast(),
+                    std::mem::size_of_val(inherited.as_slice()),
+                    null_mut(),
+                    null(),
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            startup.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdInput = input;
+            startup.StartupInfo.hStdOutput = output;
+            startup.StartupInfo.hStdError = error;
+        }
         let mut created: PROCESS_INFORMATION = unsafe { zeroed() };
         // SAFETY: all UTF-16 buffers are NUL-terminated and command is writable;
         // attribute backing and Job are live; structure size/flag are paired.
-        // No handle inheritance, stdio capture or external credential is used.
+        // Optional inheritance uses only the validated explicit HANDLE_LIST;
+        // existing no-stdio creation keeps inheritance disabled.
         let ok = unsafe {
             CreateProcessW(
                 application.as_ptr(),
                 command.as_mut_ptr(),
                 null(),
                 null(),
-                0,
+                i32::from(stdio_handles.is_some()),
                 CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                 null(),
                 null(),

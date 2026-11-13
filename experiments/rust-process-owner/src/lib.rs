@@ -1,5 +1,6 @@
 //! Isolated native-owner experiment, not a production Hub backend.
-//! No public C ABI, inherited stdio, policy, retries, or implicit Unix fallback.
+//! Explicit borrowed stdio is Windows-only and separately qualified.
+//! No public C ABI, policy, retries, capture loop, or implicit Unix fallback.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +28,7 @@ pub enum Settlement {
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{NativeOwner, ProcessView};
+pub use windows::{BorrowedStdio, NativeOwner, ProcessView};
 
 #[cfg(not(windows))]
 mod unsupported {

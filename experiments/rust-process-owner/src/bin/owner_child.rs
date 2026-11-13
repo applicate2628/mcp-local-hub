@@ -13,6 +13,34 @@ fn main() {
     }
     let mode = args[1].to_string_lossy();
     let marker = std::path::PathBuf::from(&args[2]);
+    if mode == "stdio" || mode == "stdio-probe" {
+        use std::io::{Read, Write};
+        fs::write(&marker, b"reading").expect("owned readiness marker");
+        #[cfg(windows)]
+        if mode == "stdio-probe" {
+            let raw = args[3]
+                .to_string_lossy()
+                .parse::<usize>()
+                .expect("fixture handle");
+            // SAFETY: fixture asks only SetEvent on a numeric handle. No handle is
+            // borrowed/closed or fabricated into an OwnedHandle. Native failure
+            // is expected when the capability did not cross process creation.
+            unsafe { windows_sys::Win32::System::Threading::SetEvent(raw as _) };
+        }
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .take(4096)
+            .read_to_end(&mut bytes)
+            .expect("owned bounded stdin");
+        std::io::stdout().write_all(&bytes).expect("stdout bytes");
+        std::io::stdout().flush().unwrap();
+        std::io::stderr()
+            .write_all(b"native-stderr\0\xff")
+            .expect("stderr bytes");
+        std::io::stderr().flush().unwrap();
+        fs::write(&marker, b"complete").expect("owned completion marker");
+        return;
+    }
     if mode == "exit" {
         if args.len() != 5 {
             process::exit(91)

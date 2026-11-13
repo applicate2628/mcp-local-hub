@@ -1,64 +1,119 @@
-# RX-02: isolated Windows process-owner experiment
+# RX-02 / RX-03: isolated native process-owner experiment
 
-**Not a Hub backend, not a replacement for `internal/process`, and not admitted to production.** This standalone crate is a reviewable first slice of the [MCPHub Rust plan](https://github.com/applicate2628/mcp-local-hub/pull/623). The existing web UI, Go policy/supervisor, application state and installed binaries are unchanged.
+**Experimental, not a Hub backend and not a replacement for `internal/process`.** This standalone crate implements bounded slices of the [MCPHub Rust plan](https://github.com/applicate2628/mcp-local-hub/pull/623). Web, Go policy/supervisor, installed binaries, configuration and the release build are unchanged.
 
-## Scope
+## Contents
 
-The experiment owns one original process handle, primary thread and unnamed Windows Job. Creation uses `PROC_THREAD_ATTRIBUTE_JOB_LIST` and `CREATE_SUSPENDED`: membership is applied at creation rather than after an already running child. A single-use admission operation exposes a borrowed, observation-only `ProcessView` and then resumes the retained thread.
+1. [Process and settlement contract](#process-and-settlement-contract)
+2. [Explicit borrowed standard streams](#explicit-borrowed-standard-streams)
+3. [Evidence and negative controls](#evidence-and-negative-controls)
+4. [Reproduction](#reproduction)
+5. [Remaining gates](#remaining-gates)
+6. [Decision and sources](#decision-and-sources)
 
-`wait_root` observes the original handle; the numeric exit code `259` is not mistaken for a running process. `finish` distinguishes a pending root, an exited root with active descendants, a settled Job, and failed native close attempts. Pending results keep the same owner. Repeated terminal observations are cached; a failed/ambiguous native action is not automatically retried through another implementation.
+## Process and settlement contract
 
-Rust's `Drop` closes the kill-on-close Job as a fallback but does **not** claim wait/reap or successful cleanup. Only explicit `finish` can produce `Complete`. Failed close attempts are recorded once and are not repeated on a potentially recycled numeric handle. Fault-injection qualification of that path is still required.
+`NativeOwner` owns the original process/thread handles and an unnamed Windows Job with kill-on-close. `PROC_THREAD_ATTRIBUTE_JOB_LIST` establishes membership at creation; `CREATE_SUSPENDED` prevents normal execution before the single-use admission callback. `ProcessView` is borrowed and observation-only, not a grant to close or replace the original process.
 
-## Implemented first slice
+`wait_root` observes the retained handle, including a valid exit code of 259. `finish` distinguishes a pending root, an exited root with active descendants, a settled Job and failed native close attempts. An incomplete result keeps the original owner. Later descendant termination does not overwrite the root's observed exit status. Failed/ambiguous actions are not replayed through a different backend.
 
-- Absolute executable path and lossless UTF-16 command-line quoting; embedded NULs and overlong command lines rejected.
-- At-create Job membership, suspended creation and original process observation.
-- Admission rejection leaves the original suspended owner; it cannot be retried as a new approval.
-- Deadline-bounded wait/settlement and explicit Job termination without PID reopening.
-- Original root result survives later descendant termination and cleanup.
-- Safe Rust borrowing prevents retaining the observation past the admission call; a compile-fail example checks this boundary.
+`Drop` is a best-effort fallback, **not** proof of wait/reap or successful cleanup. Explicit `finish` reports settlement; real close-failure injection remains unqualified.
 
-The Windows target uses only the existing cached `windows-sys = 0.61.2` bindings. `publish = false`; this crate has no connection to the Hub build, installer, dependency files or runtime. No additional COM client or intermediary daemon is introduced.
+## Explicit borrowed standard streams
 
-## Real checks performed
+Windows-only `create_suspended_with_stdio(program, args, BorrowedStdio { stdin, stdout, stderr })` extends the same creation mechanism rather than maintaining another spawn path.
 
-On Windows 11 build 26100, x86_64, Rust 1.99.1 (`x86_64-pc-windows-msvc`):
+**Table 1. Implemented boundary.**
 
-- 13 native tests passed using only the local `owner_child` helper.
-- They cover suspended admission and image/PID observation, denied/repeated admission, finite pending state, root+descendant termination, a completed root with a live descendant, preserved nonzero/259 exit status, wide arguments, invalid arguments, missing executable, and stable handle count over 24 complete lifetimes.
-- One compile-fail doctest rejects a borrowed `ProcessView` escaping admission.
-- `cargo clippy --offline --locked --all-targets -- -D warnings` passed.
-- Negative stub execution failed nine native cases as expected. A temporary mutation treating root exit as whole-Job settlement was detected; the original source was restored and all checks repeated.
+| Property | Contract |
+|---|---|
+| Input authority | Exactly three caller-supplied `BorrowedHandle` values, already marked inheritable |
+| Native category gate | `FILE_TYPE_DISK` / `FILE_TYPE_PIPE`; null, current-process pseudo handle, other native categories and non-inheritable inputs are rejected before acquiring the process owner. This is not a full locality or protocol detector |
+| Parent ownership | No `CloseHandle`, `DuplicateHandle` or inherit-flag mutation of the supplied sources |
+| Child inheritance | Explicit `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` with distinct supplied handles only; stdout/stderr may share one handle |
+| Existing no-stdio route | Inheritance remains disabled; existing public signature preserved |
+| Borrow duration | Source handles live through synchronous creation; on return the child owns its OS copies and the Rust process owner retains no source-handle reference |
+| Admission | The child is still suspended in its Job; denying admission cannot consume input or write output |
+| Stream completion | The caller still owns its pipe ends. No hidden parent-side writer is retained to suppress EOF |
+| Scope | This passes streams, but does not capture, asynchronously drain, interrupt or bound arbitrary caller I/O |
 
-These checks are evidence for their actual scenarios, not a proof of all possible schedules or native API failures.
+The supplied handle's flags must not change concurrently with creation. Borrowing protects Rust object lifetimes; it does not serialize external raw-handle mutations. Caller-provided access rights and stream direction remain caller obligations. Inherited files can share the underlying file position; this is not an isolated content snapshot.
 
-## Reproduce without installs
+The `GetFileType` check is only a native category filter, not proof of supported I/O semantics or a security sandbox. Microsoft includes sockets in `FILE_TYPE_PIPE`; remote/device-backed files may also require additional qualification. Only owned local files and anonymous pipes were exercised here. Passing the category check does not qualify an untested handle. The caller must supply a stream compatible with the child; this experiment does not promise a complete socket/network exclusion detector.
 
-Use an already available compatible Rust toolchain and cached pinned dependencies. If the cache is missing, stop this task rather than downloading dependencies silently.
+Registered attribute values persist until `DeleteProcThreadAttributeList`, not merely until `CreateProcessW` returns. Both backing handle arrays are declared before the native attribute-list owner so reverse local destruction preserves that native lifetime contract.
+
+**No global inheritance claim:** a handle list restricts this child. An unrelated concurrent `CreateProcess` in the same parent that blindly inherits every inheritable handle can still inherit the caller's already-inheritable sources. This experiment neither changes such callers nor adds a broker/global lock pretending to control them. A production caller must satisfy that existing process-wide creation contract.
+
+This deliberately narrow interface is **not drop-in Go parity**: a non-inheritable Go file is rejected rather than silently made inheritable, duplicated, or consumed. Any conversion owner must be qualified separately, including its own acquisition and cleanup failures.
+
+## Evidence and negative controls
+
+Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. Additional FileSystem/Pipes features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
+
+**23 native tests and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
+
+**Table 2. Ten new native stdio cases.**
+
+| Tested behavior | Evidence |
+|---|---|
+| Binary stdin/stdout/stderr | Exact bytes including NUL/non-UTF-8; no output before admission; parent handles/flags remain usable |
+| Aliased stdout/stderr | One underlying handle receives both ordered writes without duplicate-list problems |
+| Parent releases its File objects after create | The child continues through its own inherited OS references |
+| Admission denied | No child marker or output; parent handles/flags survive termination and settlement |
+| Non-inheritable source in each of three slots | Rejected before create, without mutating parent flags |
+| Missing executable | First failure preserves all borrowed handles; 24 subsequent failures do not accumulate handles |
+| Unrelated inheritable event | Child cannot signal the actual parent event, while all explicit streams still work |
+| Anonymous pipes | Child waits until the real writer owner supplies EOF; final bytes arrive; no retained parent writer masks final broken-pipe state |
+| Repeated successful stdio lifetimes | Stable handle count after 16 complete lifetimes |
+| Pseudo/null/non-file sources | Rejected before child creation; actual event and parent files remain valid |
+
+The second compile-fail example rejects dropping a source `File` while its borrowed streams are still used for creation. The first still rejects retaining `ProcessView` past admission.
+
+The initial stdio-ignoring stub compiled and failed eight behavioral cases. Temporarily removing only the HANDLE_LIST registration made the unrelated-event test observe the real event becoming signaled; after restoration the full suite passed. This checks the protected object, not just a potentially reused numeric handle.
+
+**Handle-count qualification:** a first missing-image failure showed a one-time count rise on the preexisting no-stdio route too. In a fresh diagnostic, the sequence was `66, 74, 74, 74, 74, 74, 74`; the stdio route then stayed at 74 for all six failures. The exact process-global allocation source was not identified. The final failure test verifies source preservation on the first attempt and stable repeated-failure counts after that attempt. It does **not** claim first failure allocates no process-global resources.
+
+`clippy --all-targets -- -D warnings` and formatting checks passed. These are actual scenario results, not proof over all schedules, resource-exhaustion states, native APIs or operating systems. No performance comparison or speedup is claimed.
+
+## Reproduction
+
+Use already available toolchains and cached pinned dependencies. All new build/cache/temp/evidence paths should be in the approved work area; do not install missing packages silently. Set a new owned fixture root for each invocation; tests deliberately retain fixture files for review and trash-first disposition.
 
 ```powershell
 $env:CARGO_NET_OFFLINE = 'true'
-$env:MCPHUB_RX02_FIXTURES = Join-Path $env:TEMP ('mcphub-owner-fixtures-' + [Guid]::NewGuid().ToString('N'))
+$env:CARGO_TARGET_DIR = '<owned-work-area>\target'
+$env:TEMP = '<owned-work-area>\tmp'
+$env:TMP = $env:TEMP
+$env:MCPHUB_RX02_FIXTURES = '<new-owned-fixture-directory>'
 New-Item -ItemType Directory -Path $env:MCPHUB_RX02_FIXTURES | Out-Null
 cargo test --offline --locked -- --test-threads=1
 cargo clippy --offline --locked --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Run native tests serially: the handle-count check concerns the test process, not unrelated concurrent tests. Each invocation gets a new owned fixture directory. The fixtures are intentionally retained for review and trash-first disposition, never automatically deleted. Only the explicitly compiled local child executable is launched; it has a finite fallback lifetime and no shell, network, solver or model invocation. Windows child creation requests no console window.
+Tests run serially because process handle counts are not meaningful if unrelated tests concurrently acquire resources. Only the locally built finite `owner_child` fixture is launched with no console window. The stdio fixture reads at most 4096 bytes; production streams are not implicitly capped by that test-fixture choice. A bounded owner wait protects the test; a failed assertion still has the owner's Job-close fallback.
 
-## Remaining gates before any integration
+## Remaining gates
 
-1. Explicit environment/current-directory policy and inherited/borrowed standard streams with an exact inheritance allowlist.
-2. Cancellation during admission/resume/settlement, native failure injection at every acquisition/close step, and owner-crash behavior.
-3. A reviewed Go/Rust ABI and real calling-side tests: safe Rust's borrowing does not prove the foreign caller's correctness.
-4. Equal-contract comparison with the accepted Go owner and the current selected-activation/source identity requirements.
-5. Independent lifecycle/security review and the existing repository integration/merge gates.
-6. Native Linux/macOS contracts and tests. Non-Windows strict creation currently returns `Unsupported` before side effects; that is **not** a functional Unix backend.
+1. Exact accepted Go-contract comparison, including non-inheritable source conversion, environment/current-directory policy and selected-activation identity. No production caller is wired here.
+2. Native acquisition, attribute, resume and close failure injection; cancellation while native I/O is already blocked; parent-crash qualification. A successful stdio test is not a complete I/O pump or recovery contract.
+3. Reviewed Go/Rust application binary interface (ABI) and real foreign-caller tests. Safe Rust borrowing does not prove Go/Python callers obey it.
+4. Native Linux/macOS implementations and tests. The Windows borrowed-handle API is intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
+5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
 
-This first slice has no stdio capture, log pumping, restart policy, persisted state, scheduler, runtime migration or deployment. It does not establish a sandbox or stronger permissions than the launching user. The CMake/relay measurements and mesh-export work remain separate responsibilities.
+There is no restart policy, persisted state, scheduler, sandbox, new permission, COM client, capture daemon or vendor/model execution. The build and tests do not qualify unsupported consoles, sockets, network/device handles or Windows versions beyond the actually exercised environment.
 
-## Source layout
+## Decision and sources
 
-`src/windows.rs` owns the native mechanism; `src/lib.rs` exports the experiment's result types and explicit unsupported route. `src/bin/owner_child.rs` is a finite fixture executable. `tests/lifecycle.rs` validates actual native outcomes. There is deliberately no generic platform framework, callback registry, global owner table or production C ABI.
+**Decision for this experiment:** require pre-authorized inheritable sources instead of toggling caller flags or making temporary inheritable duplicates behind the caller's back. This avoids another cleanup/ownership protocol in the first stdio slice. The tradeoff is an explicit qualification gate for production callers whose sources are non-inheritable. Revisit only when that caller's actual contract is fixed.
+
+The underlying creation, admission and settlement code is shared with `create_suspended`; no second process-owner implementation was introduced. Changes are confined to this experimental crate and its tests.
+
+1. [Microsoft: HANDLE_LIST and Job attributes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
+2. [Microsoft: inheritance, standard handles and shared kernel objects](https://learn.microsoft.com/en-us/windows/win32/procthread/inheritance).
+3. [Rust: BorrowedHandle lifetime and non-consuming use](https://doc.rust-lang.org/std/os/windows/io/struct.BorrowedHandle.html).
+4. [Microsoft: GetFileType categories, including socket classification](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfiletype).
+5. [MCPHub foreground/admission reference](https://github.com/applicate2628/mcp-local-hub/blob/53645ec7170c9d56073ab5140dec865b23ce7c21/internal/process/foreground_windows.go).
+
+**Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface. No property of one OS mechanism is transferred to another by naming it alike.
