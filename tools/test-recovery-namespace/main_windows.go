@@ -155,6 +155,7 @@ func run() (returned error) {
 		"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOFLAGS": "", "GOWORK": "off",
 		"GOOS": "windows", "GOARCH": runtime.GOARCH,
 		"TEMP": filepath.Join(root, "temp"), "TMP": filepath.Join(root, "temp"), "TMPDIR": filepath.Join(root, "temp"),
+		"GOTMPDIR":                                 filepath.Join(root, "temp"),
 		"MCPHUB_RECOVERY_NAMESPACE_ROOT":           root,
 		"MCPHUB_RECOVERY_NAMESPACE_FIXTURE_HELPER": helperPath,
 		"MCPHUB_RECOVERY_NAMESPACE_FIXTURE_SHA256": sourceHashes["scripts/test-recovery-namespace/helper.ps1"],
