@@ -16,6 +16,7 @@ typedef struct {
     mh_stop_fn stop;
     mh_finish_fn finish;
     mh_release_fn release;
+    mh_admit_checked_fn admit_checked;
 } bridge;
 static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     bridge *b = (bridge*)calloc(1, sizeof(*b));
@@ -34,6 +35,7 @@ static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     RESOLVE(b->create,"mh_create1"); RESOLVE(b->admit,"mh_admit1");
     RESOLVE(b->stop,"mh_stop1"); RESOLVE(b->finish,"mh_finish1");
     RESOLVE(b->release,"mh_release1");
+    RESOLVE(b->admit_checked,"mh_admit_checked1");
 #undef RESOLVE
     if (version()!=1) { *error=ERROR_REVISION_MISMATCH; goto fail; }
     return b;
@@ -51,6 +53,15 @@ static uint32_t bridge_admit(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return 
 static uint32_t bridge_stop(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->stop(p,a,o,sizeof(*o));}
 static uint32_t bridge_finish(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->finish(p,a,o,sizeof(*o));}
 static uint32_t bridge_release(bridge *b,mh_owner **p,mh_out *o){return b->release(p,o,sizeof(*o));}
+extern uint32_t mh_go_admission(uint32_t, uint16_t*, size_t, uintptr_t);
+static uint32_t bridge_check(uint32_t pid, const uint16_t *image, size_t n, uintptr_t token) {
+    // cgo exports mutable pointer types; the Go handler treats this as read-only
+    // and immediately copies. No permission to mutate the Rust buffer is granted.
+    return mh_go_admission(pid,(uint16_t*)image,n,token);
+}
+static uint32_t bridge_checked(bridge *b,mh_owner *p,uintptr_t token,mh_out *o) {
+    return b->admit_checked(p,bridge_check,token,o,sizeof(*o));
+}
 */
 import "C"
 
@@ -58,6 +69,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime/cgo"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -276,4 +288,29 @@ func (o *Owner) Release() error {
 		err = errors.New("release did not clear owner")
 	}
 	return err
+}
+
+// AdmitChecked evaluates only copied evidence from the original process handle,
+// inside the native single-use admission. Policy runs with this owner locked:
+// it must return and must not call owner methods (or wait for others to do so).
+// No Go pointer or callback is retained in the DLL. Nil policy has no effect.
+func (o *Owner) AdmitChecked(check func(ProcessObservation) error) (Outcome, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.raw == nil {
+		return Outcome{}, errors.New("owner released")
+	}
+	if check == nil {
+		return Outcome{}, &CallError{argument, 0}
+	}
+	state := &admissionCall{check: check}
+	token := cgo.NewHandle(state)
+	defer token.Delete()
+	var out C.mh_out
+	status := C.bridge_checked(o.lib.raw, o.raw, C.uintptr_t(token), &out)
+	observed, err := result(status, out)
+	if err == nil && state.calls != 1 {
+		err = errors.New("checked admission returned without one policy decision")
+	}
+	return observed, errors.Join(err, state.err)
 }

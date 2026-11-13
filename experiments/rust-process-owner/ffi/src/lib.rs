@@ -5,7 +5,12 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 use mcphub_process_owner_spike::{LaunchContext, NativeOwner, Settlement};
 use std::{
-    ffi::OsString, io, mem::size_of, os::windows::ffi::OsStringExt, path::PathBuf, ptr, slice,
+    ffi::OsString,
+    io,
+    mem::size_of,
+    os::windows::ffi::{OsStrExt, OsStringExt},
+    path::PathBuf,
+    ptr, slice,
     time::Duration,
 };
 
@@ -304,6 +309,57 @@ pub unsafe extern "C" fn mh_admit1(
             }) {
                 Ok(()) => OK,
                 Err(e) => failure(out, e),
+            }
+        })
+    }
+}
+/// Call-scoped native observation callback. Values are not native handles.
+pub type AdmissionCheck = unsafe extern "C" fn(u32, *const u16, usize, usize) -> u32;
+
+/// Run the foreign decision inside the ORIGINAL retained-process admission.
+/// # Safety
+/// Follow the live owner/output contract and header callback obligations.
+/// The callback must use the C ABI, return normally, never mutate/retain the
+/// read-only image slice or reenter this owner, and keep its token state live.
+/// Raw foreign callers, unlike the supplied Go adapter, must contain their own
+/// exceptions/panics before returning across this non-unwinding boundary.
+#[no_mangle]
+pub unsafe extern "C" fn mh_admit_checked1(
+    raw: *mut Owner,
+    check: Option<AdmissionCheck>,
+    token: usize,
+    out: *mut Outcome,
+    bytes: u32,
+) -> u32 {
+    // SAFETY: same exclusive owner/output contract as the original entry point.
+    unsafe {
+        call(raw, out, bytes, |owner, out| {
+            let Some(check) = check else {
+                return ARGUMENT;
+            };
+            let mut invalid_decision = false;
+            let result = owner.inner.admit_and_resume(|view| {
+                let pid = view.process_id()?;
+                let path = view.image_path()?;
+                let image: Vec<u16> = path.as_os_str().encode_wide().collect();
+                // SAFETY: synchronous function pointer and caller token valid by
+                // contract; immutable image stays alive throughout this call. Parent
+                // admission retains its original process, no PID re-open occurs.
+                match check(pid, image.as_ptr(), image.len(), token) {
+                    1 => Ok(()),
+                    0 => Err(io::ErrorKind::PermissionDenied.into()),
+                    _ => {
+                        invalid_decision = true;
+                        Err(io::ErrorKind::InvalidInput.into())
+                    }
+                }
+            });
+            if invalid_decision {
+                return ARGUMENT;
+            }
+            match result {
+                Ok(()) => OK,
+                Err(error) => failure(out, error),
             }
         })
     }

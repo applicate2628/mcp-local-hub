@@ -7,7 +7,7 @@
  * All non-null pointers must be valid/aligned for their stated lengths. Inputs
  * stay immutable through the call and may be released immediately afterwards.
  * Owner calls/release require exclusive access; no stale/copied owner pointer,
- * overlapping buffers or callbacks. DLL stays loaded until all owners release.
+ * overlapping buffers or reentrant owner calls. DLL stays loaded until all owners release.
  * Expected errors are values; an unexpected Rust panic/abort terminates host. */
 typedef struct mh_owner mh_owner;
 typedef struct { const uint16_t *data; size_t len; } mh_u16;
@@ -37,6 +37,18 @@ typedef uint32_t (*mh_create_fn)(const mh_create*, uint32_t, mh_owner**, mh_out*
 /* Allow/deny is the caller's decision, not authorization or image validation.
  * A valid deny consumes the same one-shot NativeOwner admission as allow. */
 typedef uint32_t (*mh_admit_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);
+/* Optional additive export mh_admit_checked1, ABI1 layout unchanged.
+ * Called synchronously inside the existing one-shot native admission, BEFORE
+ * ResumeThread. pid/image are queried through the ORIGINAL process handle.
+ * image is a read-only UTF-16 view valid ONLY until the callback returns.
+ * Copy before retention. Return exactly 1=allow or 0=deny; any other value
+ * rejects and consumes admission. NULL callback rejects without consuming.
+ * The token is an opaque integer, never a pointer the DLL dereferences.
+ * Callback MUST return normally: no unwind/longjmp, Goexit, reentry on the
+ * same owner, or retained native pointers. No callback is stored after return.
+ * PID/image name is evidence, NOT file digest, signature, token or sandbox proof. */
+typedef uint32_t (*mh_check_fn)(uint32_t, const uint16_t*, size_t, uintptr_t);
+typedef uint32_t (*mh_admit_checked_fn)(mh_owner*, mh_check_fn, uintptr_t, mh_out*, uint32_t);
 typedef uint32_t (*mh_stop_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);
 /* Timeout 0..60000ms. Pending retains the same pointer. State and native errors
  * are separate: MH_OK does not turn MH_CLEANUP_FAILED into successful cleanup. */
