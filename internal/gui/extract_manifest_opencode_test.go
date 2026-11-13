@@ -13,6 +13,9 @@ import (
 func TestRealExtractor_OpenCodeConfigPath(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatalf("mkdir client config sandbox root: %v", err)
+	}
 	xdg := filepath.Join(tmp, "xdg")
 	localAppData := filepath.Join(tmp, "localappdata")
 	t.Setenv("HOME", home)
