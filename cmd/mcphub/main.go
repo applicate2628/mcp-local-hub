@@ -77,7 +77,16 @@ func main() {
 	}
 	os.Args = args
 
-	if err := cli.NewRootCmd().Execute(); err != nil {
+	root := cli.NewRootCmd()
+	// Only the executable bootstrap owns this process's inherited stdin.
+	// Library/test command construction keeps its existing borrowed input.
+	if os.Stdin != nil {
+		if err := cli.BindProcessRelayInput(root, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	}
+	if err := root.Execute(); err != nil {
 		// PR #23 C1 stuck-instance recovery: propagate distinct exit
 		// codes from --force / --force --kill (2/3/4/6/7) instead of
 		// cobra's default "1 on error". cli.forceExitError implements
