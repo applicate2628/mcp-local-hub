@@ -410,23 +410,27 @@ func validateCanonicalEntryPendingRecovery(req windowsProductRecoveryRequest, d 
 	if prior == nil || successor == nil {
 		return ErrWindowsProductRecoveryIdentity
 	}
-	runtime, err := prior.RuntimeProduct(req.Context)
-	if err != nil {
-		return fmt.Errorf("%w: original prior runtime admission: %w", ErrWindowsProductRecoveryIdentity, err)
-	}
-	if expected := j.EntrySet.PriorRuntime; expected != nil {
-		if expected.Present != (runtime != nil) {
-			return ErrWindowsProductRecoveryIdentity
+	// Setup/canonicalize can fill missing members of an otherwise identical
+	// partial set. They neither stop a runtime nor journal a runtime projection.
+	if j.Mode == WindowsProductPairModeUpgrade {
+		runtime, err := prior.RuntimeProduct(req.Context)
+		if err != nil {
+			return fmt.Errorf("%w: original prior runtime admission: %w", ErrWindowsProductRecoveryIdentity, err)
 		}
-		if runtime != nil {
-			member := source.prior.Product
-			if sameWindowsProductPath(expected.Path, j.EntrySet.CanonicalEntry.Target) {
-				member = source.prior.Launcher
-			}
-			artifact := runtime.Artifact()
-			originalPath := filepath.Join(filepath.Dir(j.EntrySet.CanonicalEntry.Target), filepath.FromSlash(member.SourceRelative))
-			if !member.Present || !sameWindowsProductPath(artifact.Path, originalPath) || artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem {
+		if expected := j.EntrySet.PriorRuntime; expected != nil {
+			if expected.Present != (runtime != nil) {
 				return ErrWindowsProductRecoveryIdentity
+			}
+			if runtime != nil {
+				member := source.prior.Product
+				if sameWindowsProductPath(expected.Path, j.EntrySet.CanonicalEntry.Target) {
+					member = source.prior.Launcher
+				}
+				artifact := runtime.Artifact()
+				originalPath := filepath.Join(filepath.Dir(j.EntrySet.CanonicalEntry.Target), filepath.FromSlash(member.SourceRelative))
+				if !member.Present || !sameWindowsProductPath(artifact.Path, originalPath) || artifact.SHA256 != expected.SHA256 || artifact.Role != binaryadmission.WindowsArtifactRoleProduct || artifact.Subsystem != binaryadmission.WindowsGUISubsystem {
+					return ErrWindowsProductRecoveryIdentity
+				}
 			}
 		}
 	}
@@ -563,9 +567,12 @@ func rollbackCanonicalEntryRecovery(req windowsProductRecoveryRequest, d windows
 	if req.RecoverPriorSettlementOriginal == nil {
 		return nil, fmt.Errorf("%w: original prior runtime settlement callback unavailable", ErrWindowsProductRecoveryPending)
 	}
-	view, err := prior.RuntimeProduct(req.Context)
-	if err != nil {
-		return nil, err
+	var view *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	if j.Mode == WindowsProductPairModeUpgrade {
+		view, err = prior.RuntimeProduct(req.Context)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := source.ValidateOriginalRecovery(req.Context); err != nil {
 		return nil, err
