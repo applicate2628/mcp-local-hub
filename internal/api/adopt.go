@@ -917,7 +917,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 				return err
 			}
 			if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
-				return fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err)
+				// A repeat reports inconsistent existing state; preserve the
+				// receiver-specific stage as its wrapped cause.
+				return newAdoptStageError(stage, commitState, fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err))
 			}
 			return nil
 		}
