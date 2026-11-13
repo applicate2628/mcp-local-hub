@@ -52,11 +52,18 @@ impl AttributeList {
         let queried =
             unsafe { InitializeProcThreadAttributeList(null_mut(), count, 0, &mut bytes) };
         let err = io::Error::last_os_error();
-        if queried != 0
-            || err.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32)
-            || bytes == 0
-        {
-            return Err(io::Error::other(format!("attribute size query: {err}")));
+        if queried != 0 {
+            return Err(io::Error::other(
+                "attribute size query unexpectedly succeeded",
+            ));
+        }
+        if err.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
+            return Err(err); // keep the native code, not only its formatted text
+        }
+        if bytes == 0 {
+            return Err(io::Error::other(
+                "attribute size query returned an empty buffer",
+            ));
         }
         let layout = Layout::from_size_align(bytes, 16).map_err(|_| io::ErrorKind::InvalidInput)?;
         // SAFETY: valid nonzero layout; allocation is released with this layout.
@@ -631,3 +638,7 @@ fn command_line(program: &OsStr, args: &[OsString]) -> io::Result<Vec<u16>> {
 fn finite_millis(duration: Duration) -> u32 {
     duration.as_millis().min(u32::MAX as u128 - 1) as u32
 }
+
+#[cfg(test)]
+#[path = "native_failure_tests.rs"]
+mod native_failure_tests;

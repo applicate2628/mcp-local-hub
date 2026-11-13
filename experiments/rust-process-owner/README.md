@@ -8,10 +8,11 @@
 2. [Explicit borrowed standard streams](#explicit-borrowed-standard-streams)
 3. [Explicit environment and working directory](#explicit-environment-and-working-directory)
 4. [Creator-crash qualification](#creator-crash-qualification)
-5. [Evidence and negative controls](#evidence-and-negative-controls)
-6. [Reproduction](#reproduction)
-7. [Remaining gates](#remaining-gates)
-8. [Decision and sources](#decision-and-sources)
+5. [Native failure paths](#native-failure-paths)
+6. [Evidence and negative controls](#evidence-and-negative-controls)
+7. [Reproduction](#reproduction)
+8. [Remaining gates](#remaining-gates)
+9. [Decision and sources](#decision-and-sources)
 
 ## Process and settlement contract
 
@@ -93,13 +94,37 @@ Negative control: removing only `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` makes all t
 
 **Scope limits:** these are selected points **after CreateProcessW returned successfully**, not proof about creator death inside an in-progress native create, exhaustive crash schedules, system/power loss, hostile breakaway, remote effects or durable recovery. The observer knows the finite fixture membership; this is not a generic census algorithm. No extra Job handle is deliberately kept alive; any retained/duplicated Job handle would change the last-close condition. No Linux/macOS equivalent is inferred.
 
+## Native failure paths
+
+`src/native_failure_tests.rs` is compiled only under `cfg(test)`. It exercises the same owner methods using real failing Windows calls, not a runtime mock layer, replacement backend, configurable failure registry or global hook. Restricted-right duplicates refer to the test's already-owned process/thread/Job and are substituted into private fields only by the tests. That substitution does not occur through the public API and does not claim that normal creator handles spontaneously lose rights.
+
+**Table 4. Nine failure tests and their observable invariants.**
+
+| Failure | Required outcome |
+|---|---|
+| Invalid native attribute count in the size query | Preserve the actual OS error code rather than convert it to text-only `Other` |
+| Missing executable after native preparation | No owner is returned; repeated attempts preserve the native failure and do not accumulate process handles after the separately noted first-call initialization |
+| Resume denied by thread access rights | Original root stays suspended and retained; the single admission attempt cannot be repeated |
+| Unexpected primary-thread suspend count | Do not report a successful start or repeat admission; the same owner remains stoppable |
+| Process wait without SYNCHRONIZE | Return the native error, not Pending/timeout or Complete; retain owner slots |
+| Signaled process without exit-code query rights | Do not fabricate or cache a root exit; the original process observation can still recover it |
+| Job accounting query denied after root exit | Preserve the known root exit, but do not close resources or assert full settlement |
+| Termination denied, then test rights restored | Return the cached first attempt rather than silently reissue the side effect; later execution settlement is distinct from that failed stop attempt |
+| Protected native handles cannot close | Report every failed close and the original root result; do not turn execution success into cleanup success |
+
+The close case covers all seven nonempty subsets of thread/process/Job close failure. `HANDLE_FLAG_PROTECT_FROM_CLOSE` is applied only to this fixture's real handles. The library detaches an unsuccessfully closed numeric handle, keeps `CleanupFailed`, and does not treat it as reusable ownership. The fixture independently confirms the known protected handle is still live, removes **its own artificial protection**, and releases it. This test cleanup is not a recommended retry policy for an arbitrary ambiguous production close. The handle count after fixture cleanup must return to its prior value. Repeating `finish` returns the same recorded failure; this does not instrument or count every possible kernel call.
+
+A real defect was reproduced at `AttributeList::new`: the OS returned error 87 in the controlled invalid-count call, while `io::Error::other(format!(...))` discarded its `raw_os_error`. The helper now returns the original error for an unexpected native failure, and separately reports impossible success/empty-buffer shapes. The public create route normally requests one or two attributes; the intentionally invalid count is a private fault stimulus, not an exposed input or a claimed ordinary runtime incidence. The correction applies to the common native-error path, not only error 87.
+
+Negative controls deliberately changed `WAIT_FAILED` into timeout and changed failed cleanup into Complete. Both tests failed for the intended semantic reason, all mutations were restored, and the full crate suite was repeated. No allocator, Job creation/security setup, second attribute initialization/update, or already-blocked native I/O failure is implied to be exhaustively covered. Native close protection is tested under the ordinary non-debugger runner, not arbitrary debugger/Application Verifier exception settings.
+
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
 
-**39 native integration tests, three encoding/validation unit tests, and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
+**39 native integration tests, 12 unit tests (nine native-failure and three encoding/validation), and two compile-fail doctests passed** in the current iteration. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts.
 
-**Table 4. Ten original native stdio cases (plus explicit-context composition).**
+**Table 5. Ten original native stdio cases (plus explicit-context composition).**
 
 | Tested behavior | Evidence |
 |---|---|
@@ -149,7 +174,7 @@ Tests run serially because process handle counts are not meaningful if unrelated
 ## Remaining gates
 
 1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
-2. Native acquisition, attribute, resume and close failure injection; cancellation while native I/O is already blocked; crash timing inside acquisition/native create and broader recovery qualification. The post-create crash points above are exercised, not all failure schedules. A successful stdio test is not a complete I/O pump or recovery contract.
+2. Remaining acquisition/setup/allocation/attribute-update failure classes; already-blocked native I/O cancellation; crash timing inside acquisition/native create and broader recovery qualification. The real failure cases and post-create crash points above are exercised, not all native failures/schedules. A successful stdio test is not a complete I/O pump or recovery contract.
 3. Reviewed Go/Rust application binary interface (ABI) and real foreign-caller tests. Safe Rust borrowing does not prove Go/Python callers obey it.
 4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
@@ -176,3 +201,7 @@ The underlying creation, admission and settlement code is shared with `create_su
 10. [Microsoft: TerminateProcess is asynchronous; wait for the retained process](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
 
 **Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface. No property of one OS mechanism is transferred to another by naming it alike.
+11. [Microsoft: DuplicateHandle access masks and same-object identity](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle).
+12. [Microsoft: SetHandleInformation and protection from close](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation).
+13. [Microsoft: InitializeProcThreadAttributeList size-query contract](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-initializeprocthreadattributelist).
+14. [Microsoft: Job access rights](https://learn.microsoft.com/en-us/windows/win32/procthread/job-object-security-and-access-rights), [process rights](https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights), and [thread rights](https://learn.microsoft.com/en-us/windows/win32/procthread/thread-security-and-access-rights).
