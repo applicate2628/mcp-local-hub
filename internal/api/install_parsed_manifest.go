@@ -139,8 +139,8 @@ type InstallParsedManifestOpts struct {
 // (*API).Install), and a non-dry install MUST pass a non-nil Workspaces
 // snapshot (a nil snapshot would silently drop the server's existing daemon
 // rows; pass an empty non-nil slice for an intentional zero-workspace install).
-// On any sub-failure inside step 4, the shared rollback stack runs and the
-// function returns the error with every side effect undone.
+// A failure inside step 4 enters the shared rollback stack. Errors from later
+// settlement retain the completed forward result instead of invoking rollback.
 
 // validateDynamicPoolManifest runs the daemon_template-specific admission
 // gates InstallParsedManifest enforces before any mutation: native-http
@@ -168,6 +168,10 @@ func validateDynamicPoolManifest(m *config.ServerManifest) error {
 	return nil
 }
 
+// InstallParsedManifest returns a nonempty intentPath only after the forward
+// install has committed. Later borrow, release, or observed-close errors retain
+// that path. Callers must preserve the committed state even when err is non-nil.
+// Dry runs and failures before completed execution return an empty path.
 func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifest, opts InstallParsedManifestOpts) (intentPath string, err error) {
 	w := opts.Writer
 	if w == nil {

@@ -461,6 +461,8 @@ new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 // it (composite-error contract per §D.3 defense layer 3).
 type migrateSerenaInstallOperation struct {
 	prepare func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) error
+	// A nonempty intentPath is the install's committed forward result and
+	// survives later settlement errors. It is never inferred from disk state.
 	install func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) (intentPath string, installErr, cleanupErr error)
 }
 
@@ -1222,8 +1224,9 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 	//    would see it held; the minted bypass token (interlockBypass) tells the
 	//    gate the held lock is our OWN handle (verified-identity check, Phase 1) so
 	//    the spec-bearing write proceeds. The inner stack owns scheduler/client/
-	//    intent undos; on error here those are ALREADY undone and the deferred
-	//    outer stack restores the reconcile + registry. The dynamic-pool manifest
+	//    intent undos. A precommit failure runs those undos and leaves the outer
+	//    reconcile + registry rollback armed; later settlement errors retain the
+	//    committed result. The dynamic-pool manifest
 	//    carries no client_bindings (the /serena/mcp router owns routing), so the
 	//    only side effect is the per-workspace supervisor-intent fan-out driven by
 	//    opts.Workspaces (the finding-#2 re-read snapshot).
@@ -1235,7 +1238,7 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 	})
 	var postCommitErr error
 	if ierr != nil || invocationCloseErr != nil {
-		if ierr == nil || deps.isAppliedInstallError(ierr) {
+		if ierr == nil || intentPath != "" || deps.isAppliedInstallError(ierr) {
 			// The intent is durable. Retain the cause and enter the canonical
 			// post-commit continuation below; willStart, verification, interlock
 			// handoff, timeout/liveness policy, and audit projection stay single-owned.
