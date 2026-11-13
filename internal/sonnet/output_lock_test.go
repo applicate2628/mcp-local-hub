@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -117,16 +118,17 @@ func TestOutputSettlementDeadlinePreservesExecutionOutcome(t *testing.T) {
 		{name: "nonzero", outcome: fixedStrictDriverOutcome{result: DriverResult{ExitCode: 3}}, state: StateCompletedNonzero, exitCode: 3, failureID: "SONNET_EM_EXIT_NONZERO"},
 		{name: "cleanup_failed", outcome: fixedStrictDriverOutcome{err: &strictDriverFailure{FailureID: "SONNET_DRIVER_CLEANUP_FAILED", ExitCode: &exitThree, Cause: errors.New("injected cleanup failure")}}, state: StateFailed, exitCode: 3, failureID: "SONNET_DRIVER_CLEANUP_FAILED"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		runCase := func(t *testing.T) {
 			storeRoot := t.TempDir()
 			tc.outcome.result.Stdout = []byte("acquired stdout")
 			tc.outcome.result.Stderr = []byte("acquired stderr")
 			driver := outputDeadlineDriver{fixedStrictDriverOutcome: tc.outcome, context: make(chan context.Context, 1)}
 			s := NewServer(testConfig(storeRoot, driver))
 			defer s.Close(context.Background())
-			var outputContextErr error
+			var beforeOutputContextErr, outputContextErr error
 			s.beforeOutput = func() {
 				ctx := <-driver.context
+				beforeOutputContextErr = ctx.Err()
 				<-ctx.Done()
 				outputContextErr = ctx.Err()
 			}
@@ -143,6 +145,9 @@ func TestOutputSettlementDeadlinePreservesExecutionOutcome(t *testing.T) {
 			case <-done:
 			case <-time.After(5 * time.Second):
 				t.Fatal("worker did not settle after its deadline")
+			}
+			if beforeOutputContextErr != nil {
+				t.Fatalf("execution context expired before output settlement: %v", beforeOutputContextErr)
 			}
 			if !errors.Is(outputContextErr, context.DeadlineExceeded) {
 				t.Fatalf("output context error=%v, want exact worker deadline", outputContextErr)
@@ -165,6 +170,11 @@ func TestOutputSettlementDeadlinePreservesExecutionOutcome(t *testing.T) {
 					t.Errorf("acquired streams=(%q/%d, %q/%d)", stdout, stdoutBytes, stderr, stderrBytes)
 				}
 			}
+		}
+		// Advance the worker deadline only after output settlement blocks.
+		// Admission and durable writes must not consume this test's execution budget.
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, runCase)
 		})
 	}
 }
