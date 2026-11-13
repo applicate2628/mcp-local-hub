@@ -124,13 +124,13 @@ were unchanged on the base are not attributed to PR #616 merely because the broa
 
 ## Delivery plan
 
-Table 3. Current delivery disposition, checked on 2026-11-13. Earlier delivery
-commits are retained in #616; additional audit commits remain unpublished.
+Table 3. Delivery disposition at the 2026-11-13 snapshot. Earlier delivery
+commits are retained in #616; additional audit commits were then unpublished.
 Only #616 remains the merge target for this work.
 
 | Delivery | Included work | State / link |
 | --- | --- | --- |
-| Existing recovery PR | F01–F08, C01–C23, B01–B28 and the incorporated delivery commits. | [PR #616](https://github.com/applicate2628/mcp-local-hub/pull/616) is open at `53645ec7`; the additional November 13 audit corrections are not yet published. |
+| Existing recovery PR | F01–F08, C01–C23, B01–B28 and the incorporated delivery commits. | At the November 13 20:12 UTC snapshot, [PR #616](https://github.com/applicate2628/mcp-local-hub/pull/616) is open at `53645ec7`; the additional audit corrections below are prepared for publication and a fresh review. |
 | Client read-only | C03, isolated from recovery and process custody. | [PR #618](https://github.com/applicate2628/mcp-local-hub/pull/618) closed as incorporated; commit `93cf926a` retained. |
 | Daemon launch / lifecycle | C08 and daemon-specific fixture corrections. | [PR #619](https://github.com/applicate2628/mcp-local-hub/pull/619) closed as incorporated; commit `e30e492d` retained. |
 | Native process / Kimi | C04–C07, C17, native Job qualification and process/runner regressions. | [PR #620](https://github.com/applicate2628/mcp-local-hub/pull/620) merged into the #616 branch, not master; commit `62a7b0dc` retained. |
@@ -162,6 +162,21 @@ A verified Git bundle preserves these eight commits on the Windows audit machine
 and requires the already-present prerequisite `53645ec7`. It does not contain a
 standalone copy of the repository's earlier history. This is a local transfer,
 not a GitHub push.
+
+### Publication continuation — November 14, 2026 (Europe/Moscow)
+
+After reviewing the concrete outstanding checks, the user authorized publishing
+the reviewed corrections and requesting a fresh bot review. This is a bounded
+exception to the complete pre-push test gate for this correction series; the
+remaining merge gates are still open. It does not authorize GitHub Actions,
+compiler/package installation, elevation, installed-state changes or release.
+
+The publication check covers the eight code commits and the committed report:
+30 Go files plus this Markdown plan, with no generated binaries, dependency,
+workflow or hook changes. The final executed code remains `94a75f65`; subsequent
+documentation commits do not change it. Confirm the actual remote head after
+publication and request review for that head. The `53645ec7` bot PASS remains
+historical; do not transfer it to the newly published revision.
 
 ## Verification record
 
@@ -255,8 +270,21 @@ Raw machine-local logs stay out of published plans because they contain private 
    executable cannot supply that authority. The ordinary source-marked Product has
    no sanctioned private-state/autostart test driver: production state resolution
    uses Windows Known Folder, and the corresponding test hooks reject non-test
-   processes. A complete integration driver must preserve both provenance and
-   isolation; do not manually assign source marks or relax these guards.
+   processes. The November 14 source review further confirms that even a marked
+   Go test Product plus `SetDaemonStateRootForTest` would not isolate preparation:
+   `BuildSerenaPreparationInputs` calls `ResolveDaemonStateDirObserved`, whose
+   Windows implementation obtains the native Known Folder for the current token
+   directly. It bypasses both the ordinary test root override and
+   `test_state_path_env` before passing namespace evidence to preparation and
+   `AcquireSerenaOwnedTree`. A complete integration driver must preserve both
+   provenance and isolation; do not manually assign source marks or relax these
+   guards. Qualify a supported observed-namespace fixture or an isolated Windows
+   profile/VM before attempting this positive path on a developer machine.
+   Its read-only acceptance must establish the same private allowed root for the
+   observed preparation namespace and the ordinary API/CLI state resolvers.
+   One qualified positive Product run would not make the 29 existing Go tests
+   pass: a supported test-publisher/namespace contract or a deliberate transfer
+   of their integration oracles remains a separate test-architecture decision.
    It also needs a real pinned HTTPS source, UV/Python probes, installed-tool receipt,
    package metadata and exported-file identity. The installer uses a fresh owned
    attempt/cache; there is no existing verified offline artifact-import fixture.
@@ -270,7 +298,7 @@ Raw machine-local logs stay out of published plans because they contain private 
    not reached. No compiler install, elevation, Developer Mode or policy change
    was performed. In the passing namespace run, actual foreign-owner assignment
    was refused with Win32 1307, so that separate WrongOwner branch remains UNVERIFIED.
-5. **`CLAUDE.md` still requires clean complete runs before push.** The recorded
+5. **The normal `CLAUDE.md` pre-push gates remain unsatisfied.** The recorded
    untagged and tagged attempts are FAIL, including the aggregate 5-minute API/CLI
    deadlines. Isolated tests active at those deadlines subsequently passed; this
    does not make the full commands pass. Qualified namespace and Job controllers
@@ -278,9 +306,9 @@ Raw machine-local logs stay out of published plans because they contain private 
    transplanted into an ordinary `go test ./...` invocation. Keep this workflow
    mismatch explicit rather than weakening native tests or editing the gate to
    authorize this push.
-6. **Publication and merge:** preserve the reviewed correction in #616 after the
-   mandatory verification is satisfied or the user explicitly decides on the
-   concrete outstanding exception. Require a new bot PASS on the resulting exact
+6. **Publication and merge:** publish the reviewed correction in #616 under the
+   bounded November 14 user exception recorded above. Require a new bot PASS on
+   the resulting exact
    head; the PASS on `53645ec7` cannot cover these new changes. An exception limited
    to publishing fixes does not clear the remaining merge gates. Once those gates
    are satisfied, merge #616 using the repository's ordinary squash workflow,
