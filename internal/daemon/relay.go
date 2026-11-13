@@ -168,13 +168,40 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	if interruptErr != nil {
 		outputErr = errors.Join(outputErr, interruptErr)
 	}
-	if errors.Is(stdinErr, context.DeadlineExceeded) || (stdinErr != nil && !errors.Is(stdinErr, io.EOF) && !errors.Is(stdinErr, context.Canceled)) {
+	if !relayInputCleanDetach(stdinErr) {
 		if outputErr != nil {
 			return errors.Join(stdinErr, outputErr)
 		}
 		return stdinErr
 	}
 	return outputErr
+}
+
+// relayInputCleanDetach accepts only error trees composed entirely of the
+// two expected input-end sentinels. errors.Is would match just one branch and
+// incorrectly discard independent read/cleanup failures in errors.Join.
+func relayInputCleanDetach(err error) bool {
+	if err == nil || err == io.EOF || err == context.Canceled {
+		return true
+	}
+	switch e := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := e.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if cause == nil || !relayInputCleanDetach(cause) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		cause := e.Unwrap()
+		return cause != nil && relayInputCleanDetach(cause)
+	default:
+		return false
+	}
 }
 
 // pumpInput attaches only the interruption capability explicitly granted by
@@ -203,10 +230,9 @@ func (r *HTTPToStdioRelay) pumpInput(ctx context.Context, wg *sync.WaitGroup) (e
 			interruptErr = fmt.Errorf("relay stdin interruption: %w", interruptErr)
 		}
 	}
-	// An input adapter may use Canceled as its interruption sentinel even
-	// when the Run deadline caused the interruption. Retain that cause too;
-	// neither callback cleanup errors nor a deadline are a clean detach.
-	if errors.Is(stdinErr, context.Canceled) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	// Interruption may end the read with EOF, Canceled or an independent
+	// native error. None of those replaces an expired operation deadline.
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		stdinErr = errors.Join(ctx.Err(), stdinErr)
 	}
 	return stdinErr, interruptErr
@@ -232,9 +258,6 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 		}
 		line, err := readJSONRPCLine(reader)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return io.EOF
-			}
 			return fmt.Errorf("stdin read: %w", err)
 		}
 		// A blocked read may complete with data concurrently with interruption.

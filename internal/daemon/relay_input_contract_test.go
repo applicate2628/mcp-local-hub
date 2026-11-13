@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -354,6 +355,70 @@ func TestRelayInputBorrowedCloserIsNotImplicitCapability(t *testing.T) {
 		}
 		if result != nil {
 			t.Fatalf("owner-provided clean cancellation failed: %v", result)
+		}
+	})
+}
+
+// A matching sentinel is not proof that an error tree contains no other cause.
+// Check the result visible to Run callers, not an internal classifier alone.
+type relayTerminalInputError struct{ err error }
+
+func (r relayTerminalInputError) Read([]byte) (int, error) { return 0, r.err }
+
+func TestRelayInputCombinedErrorsRemainVisible(t *testing.T) {
+	failure := errors.New("independent input failure")
+	for _, tc := range []struct {
+		name  string
+		input error
+		want  error
+	}{
+		{"EOF", io.EOF, nil},
+		{"canceled", context.Canceled, nil},
+		{"wrapped_EOF", fmt.Errorf("adapter: %w", io.EOF), nil},
+		{"wrapped_canceled", fmt.Errorf("adapter: %w", context.Canceled), nil},
+		{"only_clean_leaves", errors.Join(io.EOF, fmt.Errorf("stop: %w", context.Canceled)), nil},
+		{"failure", failure, failure},
+		{"failure_with_EOF", errors.Join(failure, io.EOF), failure},
+		{"failure_with_canceled", errors.Join(context.Canceled, failure), failure},
+		{"wrapped_nested_failure", fmt.Errorf("adapter: %w", errors.Join(io.EOF, errors.Join(context.Canceled, failure))), failure},
+		{"deadline_with_EOF", errors.Join(io.EOF, context.DeadlineExceeded), context.DeadlineExceeded},
+		{"deadline_with_canceled", errors.Join(context.Canceled, context.DeadlineExceeded), context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &HTTPToStdioRelay{URL: "http://owned.fixture", Stdin: relayTerminalInputError{tc.input}, Stdout: io.Discard, Stderr: io.Discard, HTTPClient: relayInputOnlyClient()}
+			err := r.Run(context.Background())
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("clean input detach rejected: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("input outcome was hidden: got %v, want cause %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRelayInputDeadlineSurvivesEOFAdapter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
+		entered := make(chan struct{})
+		input := &relayOutputStartedReader{Reader: reader, entered: entered}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var calls atomic.Int32
+		r := &HTTPToStdioRelay{URL: "http://owned.fixture", Stdin: input, Stdout: io.Discard, Stderr: io.Discard, HTTPClient: relayInputOnlyClient(), InterruptStdin: func() error { calls.Add(1); return writer.Close() }}
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx) }()
+		<-entered
+		if err := <-done; !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("owner returned EOF but the Run deadline vanished: %v", err)
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("deadline callback count=%d", calls.Load())
 		}
 	})
 }
