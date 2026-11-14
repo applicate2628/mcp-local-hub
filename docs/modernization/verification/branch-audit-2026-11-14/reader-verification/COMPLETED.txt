@@ -1,0 +1,1 @@
+Reader whole crate tests, Clippy and formatting passed on synchronized source using verified existing archives copied to a private cache. No download/install, privilege changes or native Unix claim.

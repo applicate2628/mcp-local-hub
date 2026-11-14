@@ -1,0 +1,42 @@
+[
+    {
+        "name":  "go-version",
+        "command":  "go version",
+        "exit":  0
+    },
+    {
+        "name":  "indexed-tree",
+        "command":  "git write-tree",
+        "exit":  0
+    },
+    {
+        "name":  "daemon-race",
+        "command":  "go test -mod=readonly -race ./internal/daemon -run ^Test(Relay|ReadJSONRPC|Qualif) -count=3 -timeout=120s",
+        "exit":  0
+    },
+    {
+        "name":  "cli-race",
+        "command":  "go test -mod=readonly -race ./internal/cli -run ^Test(BindProcessRelayInput|ProcessRelayInputWindowsQualification|ResolveRelayURL_(DirectURL|MutuallyExclusive|ResolvesFromEmbeddedManifest|MissingFlags)) -count=3 -timeout=90s",
+        "exit":  0
+    },
+    {
+        "name":  "main-race",
+        "command":  "go test -mod=readonly -race ./cmd/mcphub -count=3 -timeout=90s",
+        "exit":  0
+    },
+    {
+        "name":  "selected-json",
+        "command":  "go test -mod=readonly ./internal/daemon ./internal/cli ./cmd/mcphub -run ^Test(Relay|ReadJSONRPC|Qualif|BindProcessRelayInput|ProcessRelayInput|ResolveRelayURL|ClassifyWindowsEntrypoint) -count=1 -json -timeout=90s",
+        "exit":  0
+    },
+    {
+        "name":  "product-build",
+        "command":  "go build -mod=readonly -o D:\\dev\\ChatGPT\\mcphub-relay-converge-20261114\\private-build-artifacts\\mcphub-compile-only.exe ./cmd/mcphub",
+        "exit":  0
+    },
+    {
+        "name":  "affected-vet",
+        "command":  "go vet -mod=readonly ./internal/daemon ./internal/cli ./cmd/mcphub",
+        "exit":  0
+    }
+]

@@ -1,0 +1,80 @@
+[
+  {
+    "pr": 631,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "a7a4c2d19c5a572ae771ab9b9a1511ae2cf9a718",
+    "clean_merge": true,
+    "tree": "65b9d443975aca55eab98fa0f6b7a1b49fd6c926",
+    "diagnostics": []
+  },
+  {
+    "pr": 630,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "1326779cd9b26c5462063d360fe70ea4c8c1c3ce",
+    "clean_merge": false,
+    "tree": "439a504b5dfb0fcfc94e6e44e16fae82612ab5a2",
+    "diagnostics": [
+      "100644 635e22452001d7d5c2d93020f3b92eff502c464f 1\tcmd/mcphub/main.go",
+      "100644 10e7aaf4c614bc9f3bad5c1df404ac7471181f1a 2\tcmd/mcphub/main.go",
+      "100644 e8e014f122fc4e5ad6838e1fbafb97329c17c86f 3\tcmd/mcphub/main.go",
+      "Auto-merging cmd/mcphub/main.go",
+      "CONFLICT (content): Merge conflict in cmd/mcphub/main.go"
+    ]
+  },
+  {
+    "pr": 629,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "fb00f95d0c37f1a8d07ec3e7da0e380c07b2c5ea",
+    "clean_merge": true,
+    "tree": "318f16a3cfb9667f73285d6aa5165b9a7fc82845",
+    "diagnostics": []
+  },
+  {
+    "pr": 628,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "30dc96ded0110984bd66e149d125c3d1178bf1da",
+    "clean_merge": true,
+    "tree": "85e2326f3d2fb34dd7a400ddc5887300fdaf7e2b",
+    "diagnostics": []
+  },
+  {
+    "pr": 627,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "57f69575bbe2276f14e330ecd80249872d690f9a",
+    "clean_merge": true,
+    "tree": "1e5ba03e789f5b4121db5ed2103141314098ee6e",
+    "diagnostics": []
+  },
+  {
+    "pr": 626,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "7dad295acb3e4583e248a761667aea47cb0b0cf1",
+    "clean_merge": true,
+    "tree": "439f45f91f9ffb84348c144381ef759f3ca46121",
+    "diagnostics": []
+  },
+  {
+    "pr": 625,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "7ce04f7ef2f96680ed94db1edaf77cf0358421c4",
+    "clean_merge": true,
+    "tree": "54c2e0cca28a8cf9cf3a20745879b1b156dbe093",
+    "diagnostics": []
+  },
+  {
+    "pr": 624,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "98527f37d432d5b6ad1ffbc60e51959e106fd671",
+    "clean_merge": true,
+    "tree": "f863364235ff720126daf274e4e9f67cd33a3083",
+    "diagnostics": []
+  },
+  {
+    "pr": 623,
+    "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "head": "db7b806b54b0b9d6380365f32d2b39903ca7ddb8",
+    "clean_merge": true,
+    "tree": "e58379214cf57aa52b4ae1d79f0221591537b16a",
+    "diagnostics": []
+  }
+]

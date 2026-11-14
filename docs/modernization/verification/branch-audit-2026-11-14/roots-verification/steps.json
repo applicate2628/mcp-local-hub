@@ -1,0 +1,57 @@
+[
+    {
+        "step":  "worktree",
+        "exit":  0,
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source worktree add --detach D:\\dev\\ChatGPT\\mcphub-roots-check-20261114 87bf2fe6d612de296d4f30a8a5087adb8ee5cdbc"
+    },
+    {
+        "step":  "checkout-624",
+        "exit":  0,
+        "command":  "git switch --detach 87bf2fe6d612de296d4f30a8a5087adb8ee5cdbc"
+    },
+    {
+        "step":  "cmake-tests-race",
+        "exit":  0,
+        "command":  "go test -mod=readonly -race ./internal/vcpkgmcp/cmaketrace ./internal/vcpkgmcp/publicresult -count=1 -timeout=120s"
+    },
+    {
+        "step":  "cmake-vet",
+        "exit":  0,
+        "command":  "go vet -mod=readonly ./internal/vcpkgmcp/cmaketrace ./internal/vcpkgmcp/publicresult"
+    },
+    {
+        "step":  "checkout-626",
+        "exit":  0,
+        "command":  "git switch --detach 06d8706a446b456642a13f23cfa58e10c6e3c28f"
+    },
+    {
+        "step":  "relay-baseline-contracts",
+        "exit":  0,
+        "command":  "go test -mod=readonly -race ./internal/daemon -run ^Test(RelayLoad|Relay|ReadJSONRPC) -count=3 -timeout=120s"
+    },
+    {
+        "step":  "checkout-628",
+        "exit":  0,
+        "command":  "git switch --detach c028db723295f02909969b57f9d1ee8837a22344"
+    },
+    {
+        "step":  "native-observation",
+        "exit":  0,
+        "command":  "go test -mod=readonly -race ./internal/process -run ^TestNativeObservation -count=3 -timeout=60s"
+    },
+    {
+        "step":  "process-vet",
+        "exit":  0,
+        "command":  "go vet -mod=readonly ./internal/process"
+    },
+    {
+        "step":  "checkout-627",
+        "exit":  0,
+        "command":  "git switch --detach 2c13114eabc7ad6cab416788b6e32faaa8c99935"
+    },
+    {
+        "step":  "reader-tests",
+        "exit":  101,
+        "command":  "cargo test --offline --locked -- --test-threads=1"
+    }
+]

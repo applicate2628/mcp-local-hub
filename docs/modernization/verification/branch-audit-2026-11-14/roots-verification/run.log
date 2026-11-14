@@ -1,0 +1,51 @@
+Step: worktree
+Command: git -C <SOURCE> worktree add --detach <WORKTREE> 87bf2fe6d612de296d4f30a8a5087adb8ee5cdbc
+Exit: 0
+Preparing worktree (detached HEAD 87bf2fe6)
+HEAD is now at 87bf2fe6 merge: align PR #624 with accepted master without changing its scoped patch
+Step: checkout-624
+Command: git switch --detach 87bf2fe6d612de296d4f30a8a5087adb8ee5cdbc
+Exit: 0
+HEAD is now at 87bf2fe6 merge: align PR #624 with accepted master without changing its scoped patch
+Step: cmake-tests-race
+Command: go test -mod=readonly -race ./internal/vcpkgmcp/cmaketrace ./internal/vcpkgmcp/publicresult -count=1 -timeout=120s
+Exit: 0
+ok  	mcp-local-hub/internal/vcpkgmcp/cmaketrace	3.020s
+ok  	mcp-local-hub/internal/vcpkgmcp/publicresult	1.174s
+Step: cmake-vet
+Command: go vet -mod=readonly ./internal/vcpkgmcp/cmaketrace ./internal/vcpkgmcp/publicresult
+Exit: 0
+Step: checkout-626
+Command: git switch --detach 06d8706a446b456642a13f23cfa58e10c6e3c28f
+Exit: 0
+Previous HEAD position was 87bf2fe6 merge: align PR #624 with accepted master without changing its scoped patch
+HEAD is now at 06d8706a merge: align PR #626 with accepted master without changing its scoped patch
+Step: relay-baseline-contracts
+Command: go test -mod=readonly -race ./internal/daemon -run ^Test(RelayLoad|Relay|ReadJSONRPC) -count=3 -timeout=120s
+Exit: 0
+ok  	mcp-local-hub/internal/daemon	7.042s
+Step: checkout-628
+Command: git switch --detach c028db723295f02909969b57f9d1ee8837a22344
+Exit: 0
+Previous HEAD position was 06d8706a merge: align PR #626 with accepted master without changing its scoped patch
+HEAD is now at c028db72 merge: align PR #628 with accepted master without changing its scoped patch
+Step: native-observation
+Command: go test -mod=readonly -race ./internal/process -run ^TestNativeObservation -count=3 -timeout=60s
+Exit: 0
+ok  	mcp-local-hub/internal/process	1.034s
+Step: process-vet
+Command: go vet -mod=readonly ./internal/process
+Exit: 0
+Step: checkout-627
+Command: git switch --detach 2c13114eabc7ad6cab416788b6e32faaa8c99935
+Exit: 0
+Previous HEAD position was c028db72 merge: align PR #628 with accepted master without changing its scoped patch
+HEAD is now at 2c13114e merge: align PR #627 with accepted master without changing its scoped patch
+Step: reader-tests
+Command: cargo test --offline --locked -- --test-threads=1
+Exit: 101
+error: no matching package named `sha2` found
+location searched: crates.io index
+required by package `mcphub-anchored-read-spike v0.0.0 (<WORKTREE>\experiments\rust-anchored-read)`
+note: offline mode (via `--offline`) can sometimes cause surprising resolution failures
+help: if this error is too confusing you may wish to retry without `--offline`

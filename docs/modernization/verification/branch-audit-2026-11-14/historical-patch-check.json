@@ -1,0 +1,142 @@
+[
+    {
+        "pr":  612,
+        "patch_equivalent":  0,
+        "sha":  "5d7b9e3980da0c894243177d639a21e970013830",
+        "branch":  "arch/wp11a-repository-ratchet",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ bf7ad88b61fcd950fa7b6970eab90ccd054023a8",
+                                      "+ 2e1b73d2390cd77c9e15e66fce8b6b258bfea575",
+                                      "+ c5bb0591b1a91cde48f2a0307ff05a9ec2a38372",
+                                      "+ 2b71161ac6e4b262141a0361e625267cd052fca0",
+                                      "+ 3ad6f20eeb2d5d139d2fe08a72cced1f239197fc",
+                                      "+ 77a3ecd748a419ce269924351a1bfcffb10f553f",
+                                      "+ 3f24b6a2d86c5b77d53da87877d0c40e99f1e4af",
+                                      "+ 343103eec3953c77d59a6641ad89ac50d12c4fab",
+                                      "+ bcb48a06d0016e74719d8e50a0e064a3240f600d",
+                                      "+ 5d7b9e3980da0c894243177d639a21e970013830"
+                                  ],
+        "not_patch_equivalent":  10
+    },
+    {
+        "pr":  561,
+        "patch_equivalent":  0,
+        "sha":  "1d2fe917cf02577ce2fb95d6b7939f119cbe2214",
+        "branch":  "codex/fix-hub-auto-rebind-token-leak-vulnerability",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 1d2fe917cf02577ce2fb95d6b7939f119cbe2214"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  585,
+        "patch_equivalent":  0,
+        "sha":  "0fd9ec35e28108c2df8af3081b78a8ac5a2ad18a",
+        "branch":  "codex/fix-npm-postinstall-vulnerability",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 0fd9ec35e28108c2df8af3081b78a8ac5a2ad18a"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  608,
+        "patch_equivalent":  0,
+        "sha":  "602f8e883d4cdc16ddc47672ec05cecc15f69027",
+        "branch":  "codex/fix-unbounded-durable-vtune-runs",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 64089bd9f2320b960d362607c4e0a334a3b1df69",
+                                      "+ 602f8e883d4cdc16ddc47672ec05cecc15f69027"
+                                  ],
+        "not_patch_equivalent":  2
+    },
+    {
+        "pr":  597,
+        "patch_equivalent":  0,
+        "sha":  "12db7429a0c3233eb02d8be6d17f2a49a298b3b8",
+        "branch":  "codex/propose-fix-for-attacker-controlled-output-root-vulnerabilit",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 12db7429a0c3233eb02d8be6d17f2a49a298b3b8"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  607,
+        "patch_equivalent":  0,
+        "sha":  "920f0374ec037f081f81f992427f5cc28da09185",
+        "branch":  "codex/propose-fix-for-scheduler-failure-handling",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 920f0374ec037f081f81f992427f5cc28da09185"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  541,
+        "patch_equivalent":  0,
+        "sha":  "d521aad303abca18eef196e7cba5aaf6241f78e1",
+        "branch":  "feat/cbuild-mcp",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ bc167b8979689a8f75a78aecf1c80b90c96c15f2",
+                                      "+ b716208dae36e7b978638eccb3fbda58a6646429",
+                                      "+ 17064a2048967b376763674715d7a801cdd774f7",
+                                      "+ 35855464aaaef8235f7b7b24c8eb08cde5732cbb",
+                                      "+ e4af3a7c61532c88b2bfe47b2753445d90bd7bab",
+                                      "+ d521aad303abca18eef196e7cba5aaf6241f78e1"
+                                  ],
+        "not_patch_equivalent":  6
+    },
+    {
+        "pr":  null,
+        "patch_equivalent":  0,
+        "sha":  "d18783189548234d2676b99de6e30a4dbd186768",
+        "branch":  "feat/mathcad-mcp",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 16bfcd589e63a823a3541932615e5df257996023",
+                                      "+ 5c5978a764f7fc46036f5033e2bb59102c0fb0a4",
+                                      "+ 2fba1963e901353b45d5a6e808982f7d665c3cce",
+                                      "+ d18783189548234d2676b99de6e30a4dbd186768"
+                                  ],
+        "not_patch_equivalent":  4
+    },
+    {
+        "pr":  613,
+        "patch_equivalent":  0,
+        "sha":  "4c20cc5bbdcdf5c860845f0b9ad06d8f52e4e798",
+        "branch":  "fix/archcheck-filename-constraints",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 4c20cc5bbdcdf5c860845f0b9ad06d8f52e4e798"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  565,
+        "patch_equivalent":  0,
+        "sha":  "8234331fcc49f72f6828fcf7b5565b47f09d83d5",
+        "branch":  "fix/auto-reaper-client-direct",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 8234331fcc49f72f6828fcf7b5565b47f09d83d5"
+                                  ],
+        "not_patch_equivalent":  1
+    },
+    {
+        "pr":  564,
+        "patch_equivalent":  0,
+        "sha":  "581dd80e698f71a57e4060d80d91ac1f65ae4a31",
+        "branch":  "fix/supervisor-ipc-poll-flood",
+        "decision":  "retain; patch difference is not proof of still-needed functionality, closure/consumer review required",
+        "commit_classification":  [
+                                      "+ 27e0ac228947ce2ba3fc6060c6b28d215e803120",
+                                      "+ 581dd80e698f71a57e4060d80d91ac1f65ae4a31"
+                                  ],
+        "not_patch_equivalent":  2
+    }
+]

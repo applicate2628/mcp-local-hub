@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" role="img" aria-labelledby="cross-title cross-desc">
+<title id="cross-title">MCP Local Hub: предлагаемые кроссплатформенные границы</title>
+<desc id="cross-desc">Web и Go сохраняются. Rust заменяет ограниченные механизмы нативного владения с разными backend Windows, Linux и macOS. Внешние MCP и Python SDK остаются у поставщиков. Пунктир обозначает предложение, а не реализованную миграцию.</desc>
+<defs><marker id="cross-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#52677e"/></marker></defs>
+<rect width="1180" height="720" rx="18" fill="#f5f7fb"/>
+<g font-family="DejaVu Sans,Arial,sans-serif">
+<text x="36" y="44" font-size="26" font-weight="700" fill="#17394d">Общий контракт. Разные гарантии ОС. Один владелец.</text>
+<text x="36" y="74" font-size="15" fill="#52677e">Пунктир — предлагаемый перенос; внешние SDK и проекты не переписываются.</text>
+<rect x="36" y="103" width="1108" height="68" rx="12" fill="#e5edf7" stroke="#8199b4"/>
+<text x="58" y="132" font-size="22" font-weight="700" fill="#23465f">Существующий web + Go Hub</text>
+<text x="58" y="155" font-size="16" fill="#34546c">MCP · полномочия · выбранные задачи · реестр · установка · транзакции · восстановление</text>
+<path d="M300 172V212M905 172V212" stroke="#52677e" stroke-width="2" fill="none" marker-end="url(#cross-arrow)"/>
+<rect x="36" y="215" width="598" height="116" rx="12" fill="#fff4df" stroke="#b78535" stroke-width="2" stroke-dasharray="8 5"/>
+<text x="58" y="247" font-size="22" font-weight="700" fill="#7b511d">Rust: ограниченные native-механизмы</text>
+<text x="58" y="276" font-size="16" fill="#795829">Процессы / каналы · исходная идентичность · файлы</text>
+<text x="58" y="304" font-size="15" fill="#795829">Явные finish / partial / unsupported; не новый supervisor</text>
+<rect x="682" y="215" width="462" height="116" rx="12" fill="#e5f0ea" stroke="#78a08a"/>
+<text x="704" y="247" font-size="21" font-weight="700" fill="#285c45">Внешние MCP и vendor SDK</text>
+<text x="704" y="276" font-size="16" fill="#38684f">Python сохраняется там, где он нужен API</text>
+<text x="704" y="304" font-size="15" fill="#38684f">Native upstream вместо лишнего launcher</text>
+<path d="M335 332V361H150V384M335 361H540V384M335 361H930V384" fill="none" stroke="#52677e" stroke-width="2" marker-end="url(#cross-arrow)"/>
+<rect x="36" y="388" width="340" height="172" rx="12" fill="#fff" stroke="#91a5b7"/>
+<text x="58" y="420" font-size="22" font-weight="700" fill="#244962">Windows</text>
+<text x="58" y="452" font-size="16" fill="#3e5c72">Job / HANDLE / named pipes</text>
+<text x="58" y="479" font-size="16" fill="#3e5c72">Wide paths / ACL / identity</text>
+<text x="58" y="506" font-size="16" fill="#3e5c72">Без собственного COM-моста</text>
+<text x="58" y="538" font-size="14" fill="#657b8e">System CLI: только при паритете</text>
+<rect x="420" y="388" width="340" height="172" rx="12" fill="#fff" stroke="#91a5b7"/>
+<text x="442" y="420" font-size="22" font-weight="700" fill="#244962">Linux</text>
+<text x="442" y="452" font-size="16" fill="#3e5c72">waitid / группы / Unix sockets</text>
+<text x="442" y="479" font-size="16" fill="#3e5c72">dirfd / права / identity</text>
+<text x="442" y="506" font-size="16" fill="#3e5c72">cgroup: только с полномочиями</text>
+<text x="442" y="538" font-size="14" fill="#657b8e">Pdeathsig ≠ всё дерево потомков</text>
+<rect x="804" y="388" width="340" height="172" rx="12" fill="#fff" stroke="#91a5b7"/>
+<text x="826" y="420" font-size="22" font-weight="700" fill="#244962">macOS</text>
+<text x="826" y="452" font-size="16" fill="#3e5c72">kqueue / группы / Unix sockets</text>
+<text x="826" y="479" font-size="16" fill="#3e5c72">launchd / session boundaries</text>
+<text x="826" y="506" font-size="16" fill="#3e5c72">Недостающие гарантии — явно</text>
+<text x="826" y="538" font-size="14" fill="#657b8e">NOTE_EXIT ≠ очистка при crash</text>
+<rect x="36" y="593" width="1108" height="86" rx="12" fill="#e8edf3"/>
+<text x="58" y="622" font-size="18" font-weight="700" fill="#28495f">Отдельные ветви: relay и парсеры — по профилю; mesh IO — через NablaMesh</text>
+<text x="58" y="651" font-size="16" fill="#52677e">Нативная приёмка каждой ОС · без расширения прав · без второго владельца · без обещаний по компиляции</text>
+</g></svg>

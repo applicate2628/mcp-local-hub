@@ -1,0 +1,2 @@
+Command: go test -mod=readonly -race ./internal/daemon -run ^Test(Relay|ReadJSONRPC|Qualif) -count=3 -timeout=120s Exit: 0
+ok  	mcp-local-hub/internal/daemon	63.107s

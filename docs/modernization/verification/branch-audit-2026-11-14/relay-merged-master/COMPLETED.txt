@@ -1,0 +1,1 @@
+Listed scoped relay/CLI/bootstrap checks passed. Not whole-repository, native Unix, GUI, installed, independent-review or release acceptance.
