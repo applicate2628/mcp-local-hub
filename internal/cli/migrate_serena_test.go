@@ -232,6 +232,8 @@ func TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing(t *testing.T) 
 
 type migrateSerenaTestEnvOptions struct {
 	canonicalRuntimeFixture bool
+	// stateDir is caller-owned; the caller retains responsibility for its lifetime.
+	stateDir string
 }
 
 // migrateSerenaTestEnv redirects state, registry and home resolution into a
@@ -255,7 +257,11 @@ func migrateSerenaTestEnv(t *testing.T, opts ...migrateSerenaTestEnvOptions) (st
 	// strict verdict — retained as the correct production-mirroring posture.
 	// HOME must satisfy the client-parent gate before any descendants are
 	// created. Only manifestDir stays plain, outside the state-file pipeline.
-	stateDir = apitest.HardenedTempDir(t)
+	if len(opts) == 1 && opts[0].stateDir != "" {
+		stateDir = apitest.HardenedDir(t, opts[0].stateDir)
+	} else {
+		stateDir = apitest.HardenedTempDir(t)
+	}
 	manifestDir = filepath.Join(root, "manifests")
 	home := apitest.HardenedDir(t, filepath.Join(root, "home"))
 	for _, d := range []string{manifestDir} {
