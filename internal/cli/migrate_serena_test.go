@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 )
 
 func TestLoadSerenaManifestForMigrateCarriesExactRawHash(t *testing.T) {
@@ -790,6 +792,23 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 
 	var buf bytes.Buffer
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
+		// Keep process causes secret-free while making native start failures
+		// diagnosable in the actual qualification image.
+		var runErr *process.ContainedRunError
+		if errors.As(err, &runErr) {
+			for _, cause := range []struct {
+				stage process.ContainedRunStage
+				err   error
+			}{{runErr.Stage, runErr.Cause}, {runErr.CleanupStage, runErr.CleanupCause}} {
+				if cause.err == nil {
+					continue
+				}
+				var code syscall.Errno
+				known := errors.As(cause.err, &code)
+				t.Logf("contained stage=%q cause_type=%T native_errno_known=%t native_errno=%d canceled=%t deadline=%t",
+					cause.stage, cause.err, known, uint64(code), errors.Is(cause.err, context.Canceled), errors.Is(cause.err, context.DeadlineExceeded))
+			}
+		}
 		t.Fatalf("catalog-dynamic-pool + runtime-missing must PROCEED with the migration; got error: %v", err)
 	}
 
