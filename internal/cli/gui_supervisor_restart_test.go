@@ -406,6 +406,7 @@ func TestSupervisorRestartCommitUsesOriginalLifecycleThenStopLatch(t *testing.T)
 	dir := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(dir))
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	lease, err := gui.AcquireSingleInstanceAt(filepath.Join(dir, "gui.pidport"), 9125)
 	if err != nil {
 		t.Fatal(err)
@@ -464,9 +465,12 @@ func TestSupervisorRestartCommitUsesOriginalLifecycleThenStopLatch(t *testing.T)
 
 func TestSupervisorRestartCommonCompositionNormalReusedAndRoute(t *testing.T) {
 	t.Setenv("MCPHUB_GUI_RESTART_V3", "0")
+	gui.ResetRestartV3ResolvedForTest()
+	t.Cleanup(gui.ResetRestartV3ResolvedForTest)
 	dir := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(dir))
 	t.Setenv("LOCALAPPDATA", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	lease, err := gui.AcquireSingleInstanceAt(filepath.Join(dir, "gui.pidport"), 9125)
 	if err != nil {
 		t.Fatal(err)
@@ -481,9 +485,9 @@ func TestSupervisorRestartCommonCompositionNormalReusedAndRoute(t *testing.T) {
 		t.Run(map[bool]string{false: "normal", true: "reused"}[reused], func(t *testing.T) {
 			var startup *guiServerStartup
 			if reused {
-				startup = &guiServerStartup{server: gui.NewServer(gui.Config{})}
+				startup = &guiServerStartup{server: gui.NewServer(gui.Config{Port: 9125})}
 			}
-			s, err := composeGuiServerRestartV3(context.Background(), &cobra.Command{}, nil, 0, "", startup, nil, restartV3ParentRuntime{})
+			s, err := composeGuiServerRestartV3(context.Background(), &cobra.Command{}, nil, 9125, "", startup, nil, restartV3ParentRuntime{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -494,7 +498,7 @@ func TestSupervisorRestartCommonCompositionNormalReusedAndRoute(t *testing.T) {
 			defer m.loopCancel()
 			m.initialized = false // Prove route reaches coordinator without effects.
 			composeSupervisorRestart(s, m, lease.OwnerLifecycle())
-			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/supervisor/restart", nil)
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125/api/supervisor/restart", nil)
 			response := httptest.NewRecorder()
 			s.ServeHTTP(response, req)
 			if !strings.Contains(response.Body.String(), "RESTART_NOT_READY") {

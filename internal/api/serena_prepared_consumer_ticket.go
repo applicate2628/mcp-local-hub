@@ -13,6 +13,7 @@ type PreparedConsumerRequestV1 struct {
 	OperationID, ConsumerKind string
 	Binding                   PreparedSerenaRuntimeBinding
 	ExpectedDescriptor        SupervisorDaemon
+	Launch                    *PreparedSerenaLaunchObservation
 }
 type PreparedConsumerStartEvidence interface {
 	ValidateOriginalBinding(context.Context, PreparedConsumerBindingV1) error
@@ -44,6 +45,7 @@ type PreparedConsumerTicket struct {
 	registration      *preparedConsumerRegistration
 	readyBinding      PreparedSerenaRuntimeBinding
 	registrationClose *PreparedSerenaConsumerInvocationCloseObservation
+	environment       *SerenaConsumerEnvironmentObservation
 }
 type preparedConsumerRegistration struct {
 	generation         uint64
@@ -103,7 +105,11 @@ func (o *PreparedSerenaRuntimeOwner) RegisterPendingConsumer(ctx context.Context
 	if err = binding.Validate(); err != nil {
 		return nil, err
 	}
-	scope, err := o.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: r.OperationID, Binding: r.Binding, ExpectedDescriptors: []SupervisorDaemon{r.ExpectedDescriptor}})
+	environment, err := r.Launch.consumerEnvironment(ctx, r.ExpectedDescriptor)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := o.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: r.OperationID, Binding: r.Binding, ExpectedDescriptors: []SupervisorDaemon{r.ExpectedDescriptor}, Environment: environment})
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +124,7 @@ func (o *PreparedSerenaRuntimeOwner) RegisterPendingConsumer(ctx context.Context
 	err = scope.receiveBody(ctx, nil, func(store preparedSerenaIntentConsumerEffects) error {
 		registration, writeErr := store.registerPreparedConsumer(ctx, binding, r.ExpectedDescriptor)
 		if registration != nil {
-			ticket = &PreparedConsumerTicket{owner: o, binding: binding, descriptor: r.ExpectedDescriptor, entrypoint: scope.record.EntrypointIdentity, intentGeneration: registration.generation, registration: registration, readyBinding: r.Binding}
+			ticket = &PreparedConsumerTicket{owner: o, binding: binding, descriptor: r.ExpectedDescriptor, entrypoint: scope.record.EntrypointIdentity, intentGeneration: registration.generation, registration: registration, readyBinding: r.Binding, environment: environment}
 		}
 		if writeErr != nil {
 			return writeErr
@@ -301,7 +307,7 @@ func (o *PreparedSerenaRuntimeOwner) withPreparedConsumerExclusions(ctx context.
 	if t == nil || t.owner != o || ctx == nil {
 		return errors.New("SERENA_PREPARED_TICKET_UNAVAILABLE")
 	}
-	scope, err := o.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: t.binding.OperationID, Binding: t.readyBinding, ExpectedDescriptors: []SupervisorDaemon{t.descriptor}})
+	scope, err := o.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: t.binding.OperationID, Binding: t.readyBinding, ExpectedDescriptors: []SupervisorDaemon{t.descriptor}, Environment: t.environment})
 	if err != nil {
 		return err
 	}

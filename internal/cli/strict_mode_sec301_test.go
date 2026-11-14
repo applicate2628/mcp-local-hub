@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // seedStrictIntent writes a strict_mode=true supervisor-intent.json through the
@@ -91,7 +92,7 @@ func TestStrictModeDisable_BroadenedParent_StrictIntent_Succeeds(t *testing.T) {
 
 	deps := StrictModeDeps{
 		StateDir:         dir,
-		GUISettingsPath:  filepath.Join(dir, "gui-preferences.yaml"),
+		GUISettingsPath:  filepath.Join(apitest.HardenedTempDir(t), "gui-preferences.yaml"),
 		IntentPath:       intentPath,
 		BreadcrumbPath:   filepath.Join(dir, "strict-mode-mutation-incomplete.json"),
 		AutostartBackend: &fakeAutostartBackend{currentStrict: true, installed: true},

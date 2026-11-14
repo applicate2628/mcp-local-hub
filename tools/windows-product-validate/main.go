@@ -20,17 +20,23 @@ import (
 const productFilename = "mcphub.exe"
 
 type validatorOptions struct {
-	candidate            string
-	expectedVersion      string
-	expectedCommit       string
-	expectedBuildDate    string
-	expectedSourceEpoch  string
-	sourceSnapshot       string
-	sourceRoot           string
-	prepareSource        string
-	sourceCheckout       string
-	sourceSnapshotOutput string
-	generatedSource      []string
+	encodeEntryComments             string
+	validateEntrySet                string
+	validateEntrySetBuild           string
+	expectedEntrySetBuildID         string
+	expectedCanonicalEntrySHA256    string
+	canonicalEntryReverseProjection string
+	candidate                       string
+	expectedVersion                 string
+	expectedCommit                  string
+	expectedBuildDate               string
+	expectedSourceEpoch             string
+	sourceSnapshot                  string
+	sourceRoot                      string
+	prepareSource                   string
+	sourceCheckout                  string
+	sourceSnapshotOutput            string
+	generatedSource                 []string
 }
 
 type generatedSourceFlags []string
@@ -54,6 +60,12 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 	var options validatorOptions
 	flags := flag.NewFlagSet("windows-product-validate", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	flags.StringVar(&options.encodeEntryComments, "encode-entry-comments", "", "absolute original build metadata request JSON")
+	flags.StringVar(&options.validateEntrySet, "validate-entry-set", "", "absolute original canonical CUI entry")
+	flags.StringVar(&options.validateEntrySetBuild, "validate-entry-set-build", "", "portable DATA observation of original compiled entry set")
+	flags.StringVar(&options.expectedEntrySetBuildID, "expected-entry-set-build-id", "", "original complete-build correlation ID")
+	flags.StringVar(&options.expectedCanonicalEntrySHA256, "expected-canonical-entry-sha256", "", "actual received CUI SHA-256 from this build")
+	flags.StringVar(&options.canonicalEntryReverseProjection, "canonical-entry-reverse-projection", "", "registry-owned Product-to-entry projection")
 	flags.StringVar(&options.candidate, "candidate", "", "path to the candidate mcphub.exe")
 	flags.StringVar(&options.expectedVersion, "expected-version", "", "expected product version")
 	flags.StringVar(&options.expectedCommit, "expected-commit", "", "expected source commit")
@@ -66,6 +78,9 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 	flags.StringVar(&options.sourceSnapshotOutput, "source-snapshot-output", "", "fresh absolute outside-export snapshot file")
 	flags.Var((*generatedSourceFlags)(&options.generatedSource), "generated-source", "literal repository-relative additional generated file (repeatable)")
 	flags.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: windows-product-validate --encode-entry-comments <absolute-request.json>")
+		fmt.Fprintln(stderr, "       windows-product-validate --validate-entry-set <absolute-CUI> --expected-entry-set-build-id <id> --expected-canonical-entry-sha256 <sha256> --canonical-entry-reverse-projection <relative> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC>")
+		fmt.Fprintln(stderr, "       windows-product-validate --validate-entry-set-build <absolute-CUI> --expected-entry-set-build-id <id> --expected-canonical-entry-sha256 <sha256> --canonical-entry-reverse-projection <relative> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC> [--expected-source-epoch <epoch>]")
 		fmt.Fprintln(stderr, "Usage: windows-product-validate --candidate <mcphub.exe> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC>")
 		fmt.Fprintln(stderr, "       windows-product-validate --source-snapshot <snapshot> --source-root <source>")
 		fmt.Fprintln(stderr, "       windows-product-validate --prepare-source <export> --source-checkout <checkout> --source-snapshot-output <snapshot> --expected-commit <commit> [--generated-source <file> ...]")
@@ -76,6 +91,42 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 	}
 	present := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { present[f.Name] = true })
+	if present["encode-entry-comments"] {
+		if flags.NArg() != 0 || len(present) != 1 || !filepath.IsAbs(options.encodeEntryComments) {
+			fmt.Fprintln(stderr, "entry comments encoder requires one absolute request and no other mode flags")
+			return validatorOptions{}, false
+		}
+		return options, true
+	}
+	entrySetFields := present["validate-entry-set"] || present["validate-entry-set-build"] || present["expected-entry-set-build-id"] || present["expected-canonical-entry-sha256"] || present["canonical-entry-reverse-projection"]
+	if entrySetFields {
+		mode := "validate-entry-set"
+		entryPath := options.validateEntrySet
+		if present["validate-entry-set-build"] {
+			mode = "validate-entry-set-build"
+			entryPath = options.validateEntrySetBuild
+		}
+		allowed := map[string]bool{mode: true, "expected-entry-set-build-id": true, "expected-canonical-entry-sha256": true, "canonical-entry-reverse-projection": true, "expected-version": true, "expected-commit": true, "expected-build-date": true}
+		requiredCount := len(allowed)
+		if mode == "validate-entry-set-build" && present["expected-source-epoch"] {
+			allowed["expected-source-epoch"] = true
+			requiredCount++
+			if !validExpectedSourceEpoch(options.expectedSourceEpoch) {
+				return validatorOptions{}, false
+			}
+		}
+		for name := range present {
+			if !allowed[name] {
+				fmt.Fprintln(stderr, "complete entry-set validation cannot mix modes")
+				return validatorOptions{}, false
+			}
+		}
+		if flags.NArg() != 0 || len(present) != requiredCount || !filepath.IsAbs(entryPath) || options.expectedEntrySetBuildID == "" || options.expectedCanonicalEntrySHA256 == "" || options.canonicalEntryReverseProjection == "" || options.expectedVersion == "" || !validExpectedCommit(options.expectedCommit) || options.expectedBuildDate == "" {
+			fmt.Fprintln(stderr, "complete entry-set validation requires the exact original build operands")
+			return validatorOptions{}, false
+		}
+		return options, true
+	}
 	if present["prepare-source"] || present["source-checkout"] || present["source-snapshot-output"] || present["generated-source"] {
 		if flags.NArg() != 0 || options.prepareSource == "" || options.sourceCheckout == "" || options.sourceSnapshotOutput == "" || !validExpectedCommit(options.expectedCommit) || present["candidate"] || present["expected-version"] || present["expected-build-date"] || present["expected-source-epoch"] || present["source-root"] || present["source-snapshot"] {
 			fmt.Fprintln(stderr, "PUBLISHER_SOURCE_TABLE_INVALID: preparation requires complete exclusive operands and a full expected commit")
@@ -135,6 +186,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	options, ok := parseOptions(args, stderr)
 	if !ok {
 		return 2
+	}
+	if options.encodeEntryComments != "" {
+		return runEntryCommentsEncoder(options.encodeEntryComments, stdout, stderr)
+	}
+	if options.validateEntrySet != "" {
+		return runEntrySetValidation(options, stdout, stderr)
+	}
+	if options.validateEntrySetBuild != "" {
+		return runEntrySetBuildValidation(options, stdout, stderr)
 	}
 	if options.prepareSource != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

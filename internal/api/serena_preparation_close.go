@@ -6,15 +6,17 @@ import (
 )
 
 type PreparedSerenaPreparationCloseSnapshot struct {
-	OperationID        string `json:"operation_id"`
-	PackageKey         string `json:"package_key"`
-	Package            string `json:"package"`
-	ReadyNamespace     string `json:"ready_namespace"`
-	OperationNamespace string `json:"operation_namespace"`
-	Generation         string `json:"generation"`
-	Attempt            string `json:"attempt"`
-	PublishedRead      string `json:"published_read"`
-	InOriginalBound    bool   `json:"in_original_bound"`
+	OperationID             string `json:"operation_id"`
+	PackageKey              string `json:"package_key"`
+	Package                 string `json:"package"`
+	ReadyNamespace          string `json:"ready_namespace"`
+	OperationNamespace      string `json:"operation_namespace"`
+	Generation              string `json:"generation"`
+	Attempt                 string `json:"attempt"`
+	PublishedRead           string `json:"published_read"`
+	PriorReadyNamespace     string `json:"prior_ready_namespace"`
+	PriorOperationNamespace string `json:"prior_operation_namespace"`
+	InOriginalBound         bool   `json:"in_original_bound"`
 }
 
 // Only the SAME effects finalizer issues this original local close observation.
@@ -37,7 +39,7 @@ func (o *PreparedSerenaPreparationCloseObservation) Validate(ctx context.Context
 	if o == nil || ctx == nil || o.owner == nil || originalEffects != o.owner || o.request != r || o.err != nil || !o.view.InOriginalBound {
 		return errors.New("SERENA_PREPARATION_ORIGINAL_CLOSE_UNQUALIFIED")
 	}
-	for _, state := range []string{o.view.Package, o.view.ReadyNamespace, o.view.OperationNamespace, o.view.Generation, o.view.Attempt, o.view.PublishedRead} {
+	for _, state := range []string{o.view.Package, o.view.ReadyNamespace, o.view.OperationNamespace, o.view.Generation, o.view.Attempt, o.view.PublishedRead, o.view.PriorReadyNamespace, o.view.PriorOperationNamespace} {
 		if state != "closed" && state != "not_attempted" {
 			return errors.New("SERENA_PREPARATION_RESOURCE_PENDING")
 		}
@@ -54,7 +56,7 @@ func (e *preparedSerenaRuntimeEffects) FinishPreparation(ctx context.Context, r 
 		if e.packageBinding != nil {
 			key = e.packageBinding.key
 		}
-		o := &PreparedSerenaPreparationCloseObservation{owner: e, request: e.acquisition.inputs.Request, lastOutcome: lastOutcome, view: PreparedSerenaPreparationCloseSnapshot{OperationID: e.operationID, PackageKey: key, Package: "not_attempted", ReadyNamespace: "not_attempted", OperationNamespace: "not_attempted", Generation: "not_attempted", Attempt: "not_attempted", PublishedRead: "not_attempted"}}
+		o := &PreparedSerenaPreparationCloseObservation{owner: e, request: e.acquisition.inputs.Request, lastOutcome: lastOutcome, view: PreparedSerenaPreparationCloseSnapshot{OperationID: e.operationID, PackageKey: key, Package: "not_attempted", ReadyNamespace: "not_attempted", OperationNamespace: "not_attempted", Generation: "not_attempted", Attempt: "not_attempted", PublishedRead: "not_attempted", PriorReadyNamespace: "not_attempted", PriorOperationNamespace: "not_attempted"}}
 		if e.packageLeaseAttempted {
 			o.view.Package = "unknown"
 			if e.packageLease != nil {
@@ -66,6 +68,13 @@ func (e *preparedSerenaRuntimeEffects) FinishPreparation(ctx context.Context, r 
 			}
 		}
 		o.err = errors.Join(o.err, e.closeLocalResources(ctx))
+		// The anchored reader already attempted its original closes. Retain
+		// those exact outcomes at this owner; never retry an uncertain close.
+		for _, reader := range e.priorOperationReaders {
+			if reader == nil || reader.issuer == nil || !reader.finalized || !reader.view.OwnedResourcesComplete || !reader.view.BorrowedResourcesComplete {
+				o.err = errors.Join(o.err, errors.New("SERENA_PREPARATION_READER_CLOSE_UNQUALIFIED"))
+			}
+		}
 		if e.priorPublishedReadAttempted {
 			o.view.PublishedRead = "unknown"
 			if e.priorPublishedRead != nil {
@@ -80,7 +89,7 @@ func (e *preparedSerenaRuntimeEffects) FinishPreparation(ctx context.Context, r 
 			attempted bool
 			namespace *SerenaRecordNamespaceObservation
 			state     *string
-		}{{e.readyNamespaceAttempted, e.namespace, &o.view.ReadyNamespace}, {e.operationNamespaceAttempted, e.operationNamespace, &o.view.OperationNamespace}} {
+		}{{e.readyNamespaceAttempted, e.namespace, &o.view.ReadyNamespace}, {e.operationNamespaceAttempted, e.operationNamespace, &o.view.OperationNamespace}, {e.priorReadyAttempted, e.priorReadyNamespace, &o.view.PriorReadyNamespace}, {e.priorOperationAttempted, e.priorOperationNamespace, &o.view.PriorOperationNamespace}} {
 			if !slot.attempted {
 				continue
 			}

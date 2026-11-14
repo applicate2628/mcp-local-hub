@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
 
@@ -217,6 +218,8 @@ type UpgradeReceiptV1 struct {
 //     each method to its real implementation (see file-level
 //     docstring binding table).
 type UpgradeOpts struct {
+	// Borrowed from the same original prior-set owner; never independently closed.
+	priorRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
 	// WindowsProduct is the sole one-artifact Product/V3 transaction.
 	WindowsProduct *WindowsProductTxn
 	// GUIOwnedPending means Prepare already wrote the live GUI-owned V3 preimage
@@ -389,7 +392,16 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 		}
 	}
 	priorSHA256 := ""
-	if opts.AdmitPrior != nil {
+	if opts.priorRuntime != nil {
+		if err := opts.priorRuntime.ValidateOriginal(ctx); err != nil {
+			return err
+		}
+		artifact := opts.priorRuntime.Artifact()
+		if !samePath(artifact.Path, opts.BinaryPath) {
+			return errors.New("original prior runtime differs from upgrade observation target")
+		}
+		priorSHA256 = artifact.SHA256
+	} else if opts.AdmitPrior != nil {
 		var err error
 		priorSHA256, err = opts.AdmitPrior(opts.BinaryPath)
 		if err != nil {
@@ -421,12 +433,12 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 		}
 		if !opts.GUIOwnedPending && lifecycle.Retained != nil && lifecycle.Retained.Observe != nil {
 			paths := opts.WindowsProduct.Opts
-			retainedInitial, err = lifecycle.Retained.Observe(ctx, paths.ProductPath, paths.LegacyWindowlessPath, append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...))
+			retainedInitial, err = lifecycle.Retained.Observe(ctx, opts.BinaryPath, paths.LegacyWindowlessPath, append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...))
 			if err != nil {
 				return err
 			}
 			if retainedInitial != nil {
-				if err := validateRetainedGenerationObservation(*retainedInitial, lifecycle.FrozenPorts, paths.ProductPath, paths.LegacyWindowlessPath); err != nil {
+				if err := validateRetainedGenerationObservation(*retainedInitial, lifecycle.FrozenPorts, opts.BinaryPath, paths.LegacyWindowlessPath); err != nil {
 					return err
 				}
 				pairObservation = retainedGenerationPreSettlement(*retainedInitial, lifecycle.Retained.RequestVersion)
@@ -491,6 +503,27 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// settlement and rollback because those are transaction-specific.
 	var pairReap *windowsProductPairReapRecorder
 	if !pairKnownAbsent && !pairRetainedSettled {
+		if opts.priorRuntime != nil {
+			lifecycle := opts.WindowsProductPairLifecycle
+			if lifecycle == nil || lifecycle.Retained == nil || lifecycle.Retained.HoldSupervisor == nil {
+				return errors.New("original prior supervisor hold unavailable")
+			}
+			owner, err := api.ReadSupervisorLockOwner(filepath.Join(opts.StateDir, "supervisor.lock"))
+			if err != nil {
+				return err
+			}
+			held, err := lifecycle.Retained.HoldSupervisor(owner.PID)
+			if err != nil {
+				return err
+			}
+			defer func() { retErr = errors.Join(retErr, held.Close()) }()
+			if err := held.VerifyIdentity(process.PIDIdentityProof{PID: owner.PID, ExecutablePath: opts.priorRuntime.Artifact().Path, StartedAt: owner.StartedAt}); err != nil {
+				return err
+			}
+			if err := verifyUpgradePriorRuntimeHeld(ctx, opts.priorRuntime, held); err != nil {
+				return err
+			}
+		}
 		reapDeps := api.SupervisorReapDeps(opts.Deps)
 		if pairObservation != nil {
 			pairReap = &windowsProductPairReapRecorder{UpgradeDeps: opts.Deps}
@@ -557,7 +590,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	if pairObservation != nil && pairPreflight != nil &&
 		(opts.WindowsProduct != nil || windowsProductPairDispositionNeedsReplacement(pairPreflight.Disposition)) {
 		receipt, err := mintWindowsProductQuiescenceReceipt(
-			opts.WindowsProduct.Opts.ProductPath,
+			opts.BinaryPath,
 			opts.WindowsProduct.Opts.LegacyWindowlessPath,
 			*pairPreflight, *pairObservation, opts.WindowsProductPairLifecycle.Now,
 		)
@@ -601,7 +634,11 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 				fmt.Errorf("staged candidate identity changed between admission passes: before=%+v after=%+v", admitted, rechecked))
 		}
 	}
-	if opts.VerifyPrior != nil {
+	if opts.priorRuntime != nil {
+		if err := opts.priorRuntime.ValidateOriginal(ctx); err != nil {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, err)
+		}
+	} else if opts.VerifyPrior != nil {
 		if err := opts.VerifyPrior(opts.BinaryPath, priorSHA256); err != nil {
 			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("prior canonical drifted after fleet release and before promotion: %w", err))
@@ -882,7 +919,7 @@ func settleRetainedGenerationFromObservation(ctx context.Context, opts UpgradeOp
 	frozen := append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...)
 	cliPath, windowlessPath := "", ""
 	if opts.WindowsProduct != nil {
-		cliPath, windowlessPath = opts.WindowsProduct.Opts.ProductPath, opts.WindowsProduct.Opts.LegacyWindowlessPath
+		cliPath, windowlessPath = opts.BinaryPath, opts.WindowsProduct.Opts.LegacyWindowlessPath
 	}
 	observation := initial
 	if observation == nil {
@@ -911,6 +948,11 @@ func settleRetainedGenerationFromObservation(ctx context.Context, opts UpgradeOp
 	}
 	if err := held.VerifyIdentity(process.PIDIdentityProof{PID: observation.SupervisorPID, ExecutablePath: observation.SupervisorImagePath, StartedAt: observation.SupervisorStartedAt}); err != nil {
 		return nil, fmt.Errorf("%w: held supervisor identity: %v", ErrRetainedGenerationChanged, err)
+	}
+	if opts.priorRuntime != nil {
+		if err := verifyUpgradePriorRuntimeHeld(ctx, opts.priorRuntime, held); err != nil {
+			return nil, err
+		}
 	}
 	reobserved, err := hooks.Observe(ctx, cliPath, windowlessPath, frozen)
 	if err != nil {
@@ -1465,4 +1507,26 @@ func isAlreadyExitedError(err error) bool {
 		return true
 	}
 	return false
+}
+
+func verifyUpgradePriorRuntimeHeld(ctx context.Context, prior *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1, held any) error {
+	if ctx == nil || prior == nil {
+		return errors.New("original prior runtime context/view unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := prior.ValidateOriginal(ctx); err != nil {
+		return err
+	}
+	borrower, ok := held.(process.HeldOriginalProcessHandleBorrower)
+	if !ok {
+		return errors.New("original held process does not support an identity-bound handle borrow")
+	}
+	return borrower.BorrowOriginalProcessHandle(func(handle uintptr) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return errors.Join(prior.VerifyOriginalProductProcessHandle(handle), ctx.Err())
+	})
 }

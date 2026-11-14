@@ -917,7 +917,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 				return err
 			}
 			if err := opts.verifyReceivers(actionCtx, a, plan, rec); err != nil {
-				return fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err)
+				// A repeat reports inconsistent existing state; preserve the
+				// receiver-specific stage as its wrapped cause.
+				return newAdoptStageError(stage, commitState, fmt.Errorf("existing adopted receiver state does not match its durable receipt: %w", err))
 			}
 			return nil
 		}
@@ -1405,6 +1407,7 @@ func (plan *AdoptPlan) hasCodexTransportRelocation() bool {
 		(plan.projectSource != nil || plan.targetEntryName("codex-cli") != plan.EntryName)
 }
 
+// Compare roots using the canonical owner of project fingerprints.
 func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, projectIdentitySHA256, entryName, manifestName string) bool {
 	if rec == nil || rec.ManifestName != manifestName || rec.SourceClient != "codex-cli" || rec.SourceEntryName != entryName || rec.ProviderSource != nil || rec.ProjectService != nil {
 		return false
@@ -1415,7 +1418,8 @@ func projectAdoptRecordMatchesIdentity(rec *AdoptProvenanceRecord, projectRoot, 
 			continue
 		}
 		if client.Client != "codex-cli" || adoptClientTargetEntryName(*rec, client) != entryName ||
-			client.ConfigTarget.Kind != adoptClientConfigTargetKindCodexProject || client.ConfigTarget.ProjectRoot != projectRoot ||
+			client.ConfigTarget.Kind != adoptClientConfigTargetKindCodexProject ||
+			clients.CanonicalProjectKey(client.ConfigTarget.ProjectRoot) != clients.CanonicalProjectKey(projectRoot) ||
 			client.ConfigTarget.ProjectIdentitySHA256 != projectIdentitySHA256 {
 			return false
 		}

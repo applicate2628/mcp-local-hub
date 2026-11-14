@@ -99,7 +99,16 @@ func (p SerenaBuildEnvironmentProjectionV1) SHA256() (string, error) {
 	return preparedSerenaHash(raw), nil
 }
 
-func BuildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPreparationEnvironmentSource, policy SerenaPreparationPolicyV1) (projection SerenaBuildEnvironmentProjectionV1, execution SerenaPreparationEnvironment, retErr error) {
+const serenaUVNetworkOmissionRule = "serena-uv-tool-network-rule-v1:package-network-default:offline=false"
+
+func BuildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPreparationEnvironmentSource, policy SerenaPreparationPolicyV2) (projection SerenaBuildEnvironmentProjectionV1, execution SerenaPreparationEnvironment, retErr error) {
+	policySHA, err := policy.IdentitySHA256()
+	if err != nil {
+		return projection, execution, err
+	}
+	return buildSerenaBuildEnvironmentProjection(ctx, source, policySHA, serenaUVNetworkOmissionRule)
+}
+func buildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPreparationEnvironmentSource, policySHA, omissionRule string) (projection SerenaBuildEnvironmentProjectionV1, execution SerenaPreparationEnvironment, retErr error) {
 	actual, ok := source.(*serenaPreparationEnvironmentSource)
 	if !ok || actual == nil || actual.issuer == nil || ctx == nil || !preparedSerenaDigest(actual.packageManifestSHA256) || !preparedSerenaDigest(actual.bootstrapSHA256) {
 		return projection, execution, errors.New("SERENA_BUILD_ENVIRONMENT_SOURCE_UNAVAILABLE")
@@ -109,10 +118,6 @@ func BuildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPre
 	}
 	if _, defined := ctx.Deadline(); !defined {
 		return projection, execution, errors.New("SERENA_BUILD_ENVIRONMENT_DEADLINE_REQUIRED")
-	}
-	policySHA, err := policy.IdentitySHA256()
-	if err != nil {
-		return projection, execution, err
 	}
 	projection = SerenaBuildEnvironmentProjectionV1{Schema: "serena-build-environment-v1", Version: 1, PolicySHA256: policySHA, PackageManifestProjectionSHA256: actual.packageManifestSHA256, BootstrapSHA256: actual.bootstrapSHA256, Entries: []SerenaBuildEnvironmentEntryV1{}, CredentialReferences: []SerenaBuildCredentialReferenceV1{}, OwnedPathRoles: []string{"attempt-temp", "build-cache", "tool-bin", "tool-environment"}}
 	values := map[string]string{}
@@ -208,7 +213,7 @@ func BuildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPre
 	values["PYTHONDONTWRITEBYTECODE"] = "1"
 	values["UV_PYTHON_DOWNLOADS"] = "never"
 	if network.decisionSource == "uv-default" {
-		network.entry = SerenaBuildEnvironmentEntryV1{Key: "UV_OFFLINE", ValueKind: "boolean", SourceKind: "uv-default", SourceRefSHA256: preparedSerenaHash([]byte("uv/0.9.21:package-network-default:offline=false")), ValueSHA256: preparedSerenaHash([]byte("false"))}
+		network.entry = SerenaBuildEnvironmentEntryV1{Key: "UV_OFFLINE", ValueKind: "boolean", SourceKind: "uv-default", SourceRefSHA256: preparedSerenaHash([]byte(omissionRule)), ValueSHA256: preparedSerenaHash([]byte("false"))}
 		projection.Entries = append(projection.Entries, network.entry)
 	}
 	sort.Slice(projection.Entries, func(i, j int) bool { return projection.Entries[i].Key < projection.Entries[j].Key })
