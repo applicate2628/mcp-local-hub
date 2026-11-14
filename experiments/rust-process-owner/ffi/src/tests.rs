@@ -175,3 +175,174 @@ fn native_invalid_parameter_code_survives_create_classification() {
     );
     assert_eq!(local.native_error, 0);
 }
+
+#[test]
+fn environment_layout_and_empty_view_match_the_c_contract() {
+    assert_eq!(size_of::<EnvironmentEntry>(), 32);
+    assert_eq!(offset_of!(EnvironmentEntry, value), 16);
+    assert_eq!(size_of::<Environment>(), 16);
+    assert_eq!(offset_of!(Environment, count), 8);
+    // SAFETY: count zero deliberately needs no array; empty never dereferences.
+    let copied = unsafe {
+        copy_environment(&Environment {
+            entries: ptr::null(),
+            count: 0,
+        })
+    }
+    .unwrap();
+    assert!(copied.is_empty());
+}
+
+#[test]
+fn environment_bounds_reject_before_dereferencing_entry_strings() {
+    // SAFETY: each structural error is rejected before touching the absent data.
+    for view in [
+        Environment {
+            entries: ptr::null(),
+            count: 1,
+        },
+        Environment {
+            entries: ptr::null(),
+            count: 257,
+        },
+    ] {
+        assert_eq!(unsafe { copy_environment(&view) }.unwrap_err(), ARGUMENT);
+    }
+    let overflow = EnvironmentEntry {
+        name: U16 {
+            data: ptr::null(),
+            len: usize::MAX,
+        },
+        value: U16 {
+            data: ptr::null(),
+            len: 1,
+        },
+    };
+    // SAFETY: valid initialized entry array; size arithmetic rejects before strings.
+    assert_eq!(
+        unsafe {
+            copy_environment(&Environment {
+                entries: &overflow,
+                count: 1,
+            })
+        }
+        .unwrap_err(),
+        ARGUMENT
+    );
+    let too_large = EnvironmentEntry {
+        name: U16 {
+            data: ptr::null(),
+            len: 1,
+        },
+        value: U16 {
+            data: ptr::null(),
+            len: MAX_UNITS - 3,
+        },
+    };
+    // 1 final NUL + name1 + value(MAX-3) + '='/'NUL'2 = MAX+1.
+    assert_eq!(
+        unsafe {
+            copy_environment(&Environment {
+                entries: &too_large,
+                count: 1,
+            })
+        }
+        .unwrap_err(),
+        ARGUMENT
+    );
+}
+
+#[test]
+fn environment_values_are_owned_and_preserve_raw_windows_units() {
+    let name = [65u16];
+    let mut value = [0xd800u16, 61, 66];
+    let entry = EnvironmentEntry {
+        name: U16 {
+            data: name.as_ptr(),
+            len: 1,
+        },
+        value: U16 {
+            data: value.as_ptr(),
+            len: 3,
+        },
+    };
+    // SAFETY: immutable valid input through copy only; afterwards caller may mutate.
+    let owned = unsafe {
+        copy_environment(&Environment {
+            entries: &entry,
+            count: 1,
+        })
+    }
+    .unwrap();
+    value[0] = 88;
+    assert_eq!(value[0], 88, "caller mutation must be real");
+    assert_eq!(
+        owned[0].1.encode_wide().collect::<Vec<_>>(),
+        vec![0xd800, 61, 66]
+    );
+    let bad = [65u16, 0];
+    let entry = EnvironmentEntry {
+        name: U16 {
+            data: name.as_ptr(),
+            len: 1,
+        },
+        value: U16 {
+            data: bad.as_ptr(),
+            len: 2,
+        },
+    };
+    assert_eq!(
+        unsafe {
+            copy_environment(&Environment {
+                entries: &entry,
+                count: 1,
+            })
+        }
+        .unwrap_err(),
+        ARGUMENT
+    );
+}
+
+#[test]
+fn extended_environment_request_rejects_wrong_size_without_creation() {
+    let program = std::ffi::OsStr::new(r"D:\owned\fixture.exe")
+        .encode_wide()
+        .collect::<Vec<_>>();
+    let cwd = std::ffi::OsStr::new(r"D:\owned")
+        .encode_wide()
+        .collect::<Vec<_>>();
+    let req = Create {
+        version: 1,
+        reserved: 0,
+        program: U16 {
+            data: program.as_ptr(),
+            len: program.len(),
+        },
+        cwd: U16 {
+            data: cwd.as_ptr(),
+            len: cwd.len(),
+        },
+        args: ptr::null(),
+        argc: 0,
+    };
+    let env = Environment {
+        entries: ptr::null(),
+        count: 0,
+    };
+    let mut owner = ptr::null_mut();
+    let mut out = Outcome::default();
+    // SAFETY: real request/output allocations; only declared environment size is wrong.
+    assert_eq!(
+        unsafe { mh_create_env1(&req, 56, &env, 15, &mut owner, &mut out, 48) },
+        ABI
+    );
+    assert!(owner.is_null());
+    assert_eq!(out.pid, 0);
+    // SAFETY: null environment is structurally rejected with no native acquisition.
+    assert_eq!(
+        unsafe { mh_create_env1(&req, 56, ptr::null(), 16, &mut owner, &mut out, 48) },
+        ARGUMENT
+    );
+    assert!(owner.is_null());
+    assert_eq!(out.pid, 0);
+}

@@ -143,3 +143,39 @@ func TestCheckedAdmissionMissingExportFailsClosed(t *testing.T) {
 		t.Fatalf("expected missing export, not unrelated load failure: %v", err)
 	}
 }
+
+func TestEnvironmentCreateRetainsOwnerAfterMetadataFailure(t *testing.T) {
+	if os.Getenv("MCPHUB_FFI_FAULT") != "create-metadata" {
+		t.Fatal("controlled create-metadata DLL required")
+	}
+	lib, child, dir := setup(t)
+	owner, _, err := lib.NewWithEnvironment(child, dir, []string{"exit", filepath.Join(dir, "env-metadata"), "0", "no"}, []EnvironmentEntry{{"A", "v"}})
+	if owner == nil {
+		t.Fatal("explicit environment path discarded a transferred owner")
+	}
+	own(t, owner)
+	if err == nil {
+		t.Fatal("negative DLL did not corrupt response metadata")
+	}
+	if err = lib.Close(); err == nil {
+		t.Fatal("metadata error permitted unload with a live owner")
+	}
+}
+
+func TestEnvironmentMissingExportDoesNotFallBackToEmpty(t *testing.T) {
+	if os.Getenv("MCPHUB_FFI_FAULT") != "environment-no-symbol" {
+		t.Fatal("prior owned DLL without environment export required")
+	}
+	path := os.Getenv("MCPHUB_RX02_FFI_DLL")
+	if !filepath.IsAbs(path) {
+		t.Fatal("explicit owned DLL path required")
+	}
+	lib, err := Open(path)
+	if lib != nil {
+		_ = lib.Close()
+		t.Fatal("missing environment ABI was silently ignored")
+	}
+	if !errors.Is(err, syscall.Errno(127)) {
+		t.Fatalf("not a missing-export failure: %v", err)
+	}
+}

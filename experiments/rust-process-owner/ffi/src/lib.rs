@@ -35,6 +35,17 @@ pub struct U16 {
     len: usize,
 }
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct EnvironmentEntry {
+    name: U16,
+    value: U16,
+}
+#[repr(C)]
+pub struct Environment {
+    entries: *const EnvironmentEntry,
+    count: usize,
+}
+#[repr(C)]
 pub struct Create {
     version: u32,
     reserved: u32,
@@ -101,6 +112,38 @@ unsafe fn copy_string(value: U16) -> Result<OsString, u32> {
         return Err(ARGUMENT);
     }
     Ok(OsString::from_wide(units))
+}
+// This boundary's budget is deliberately smaller than the native core's general
+// block budget. Measure separators before copying, reject overflow/count/null
+// structurally, then let the one native LaunchContext validate names/order.
+unsafe fn copy_environment(view: &Environment) -> Result<Vec<(OsString, OsString)>, u32> {
+    if view.count > 256 {
+        return Err(ARGUMENT);
+    }
+    if view.count == 0 {
+        return Ok(Vec::new());
+    }
+    if view.entries.is_null() || !view.entries.is_aligned() {
+        return Err(ARGUMENT);
+    }
+    // SAFETY: caller promises this immutable initialized view for count entries.
+    let entries = unsafe { slice::from_raw_parts(view.entries, view.count) };
+    let units = entries.iter().try_fold(1usize, |size, entry| {
+        size.checked_add(entry.name.len)?
+            .checked_add(entry.value.len)?
+            .checked_add(2)
+    });
+    if units.is_none_or(|size| size > MAX_UNITS) {
+        return Err(ARGUMENT);
+    }
+    // SAFETY: same copied-input contract as program/argv; no native pointer is
+    // retained. NUL/individual bounds are checked by the shared decoder.
+    unsafe {
+        entries
+            .iter()
+            .map(|entry| Ok((copy_string(entry.name)?, copy_string(entry.value)?)))
+            .collect()
+    }
 }
 fn failure(out: &mut Outcome, e: io::Error) -> u32 {
     if let Some(code) = e.raw_os_error() {
@@ -203,6 +246,37 @@ pub unsafe extern "C" fn mh_create1(
     out: *mut Outcome,
     out_bytes: u32,
 ) -> u32 {
+    // SAFETY: forward the unchanged ABI1 creation contract, with empty environment.
+    unsafe { create_impl(req, req_bytes, slot, out, out_bytes, None) }
+}
+
+/// Create with a complete explicit environment, sharing the original creator.
+/// # Safety
+/// In addition to mh_create1, env must point to a full initialized Environment
+/// with env_bytes equal to its exact layout size. All entries and UTF16 views
+/// are valid, immutable, non-overlapping with outputs, and live through return.
+#[no_mangle]
+pub unsafe extern "C" fn mh_create_env1(
+    req: *const Create,
+    req_bytes: u32,
+    env: *const Environment,
+    env_bytes: u32,
+    slot: *mut *mut Owner,
+    out: *mut Outcome,
+    out_bytes: u32,
+) -> u32 {
+    // SAFETY: forward the caller contract; one common path owns validation/create.
+    unsafe { create_impl(req, req_bytes, slot, out, out_bytes, Some((env, env_bytes))) }
+}
+
+unsafe fn create_impl(
+    req: *const Create,
+    req_bytes: u32,
+    slot: *mut *mut Owner,
+    out: *mut Outcome,
+    out_bytes: u32,
+    environment: Option<(*const Environment, u32)>,
+) -> u32 {
     // SAFETY: valid exclusive caller output, or structural rejection.
     let out = match unsafe { output(out, out_bytes) } {
         Ok(o) => o,
@@ -261,12 +335,28 @@ pub unsafe extern "C" fn mh_create1(
         Ok(p) => p,
         Err(e) => return e,
     };
+    let environment = match environment {
+        None => Vec::new(),
+        Some((view, bytes)) => {
+            if bytes as usize != size_of::<Environment>() {
+                return ABI;
+            }
+            if view.is_null() || !view.is_aligned() {
+                return ARGUMENT;
+            }
+            // SAFETY: full caller environment object; nested view checked above.
+            match unsafe { copy_environment(&*view) } {
+                Ok(entries) => entries,
+                Err(code) => return code,
+            }
+        }
+    };
     match NativeOwner::create_suspended_with_context(
         &program,
         &args,
         LaunchContext {
             current_dir: &cwd,
-            environment: &[],
+            environment: &environment,
         },
         None,
     ) {

@@ -11,6 +11,8 @@
  * Expected errors are values; an unexpected Rust panic/abort terminates host. */
 typedef struct mh_owner mh_owner;
 typedef struct { const uint16_t *data; size_t len; } mh_u16;
+typedef struct { mh_u16 name, value; } mh_env_entry;
+typedef struct { const mh_env_entry *entries; size_t count; } mh_environment;
 typedef struct {
     uint32_t version, reserved;
     mh_u16 program, cwd;
@@ -34,6 +36,16 @@ enum { MH_ROOT_KNOWN=1, MH_ACTIVE_KNOWN=2 };
  * The numeric PID is diagnostic only, never a substitute for owner authority. */
 typedef uint32_t (*mh_version_fn)(void);
 typedef uint32_t (*mh_create_fn)(const mh_create*, uint32_t, mh_owner**, mh_out*, uint32_t);
+/* Additive ABI1 export mh_create_env1. The original mh_create1 still uses a
+ * complete EMPTY environment. New callers explicitly supply the whole ordinary
+ * environment, never an overlay or implicit parent fallback. Empty count is
+ * empty, not inherit. <=256 entries; <=32766 UTF16 units INCLUDING '=' and all
+ * entry/block terminators; names strictly Windows-ordinal-ignore-case ordered
+ * and unique. Hidden '=X:' names are unsupported. All strings copied before
+ * create returns; no parent environment is changed or retained. Other creation,
+ * admission and release rules are identical. env_bytes is sizeof(mh_environment). */
+typedef uint32_t (*mh_create_env_fn)(const mh_create*, uint32_t,
+    const mh_environment*, uint32_t, mh_owner**, mh_out*, uint32_t);
 /* Allow/deny is the caller's decision, not authorization or image validation.
  * A valid deny consumes the same one-shot NativeOwner admission as allow. */
 typedef uint32_t (*mh_admit_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);
@@ -58,6 +70,8 @@ typedef uint32_t (*mh_finish_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);
 typedef uint32_t (*mh_release_fn)(mh_owner**, mh_out*, uint32_t);
 #if UINTPTR_MAX == UINT64_MAX
 _Static_assert(sizeof(mh_u16)==16, "UTF16 view layout");
+_Static_assert(sizeof(mh_env_entry)==32 && offsetof(mh_env_entry,value)==16, "environment entry layout");
+_Static_assert(sizeof(mh_environment)==16 && offsetof(mh_environment,count)==8, "environment view layout");
 _Static_assert(sizeof(mh_create)==56 && offsetof(mh_create,args)==40, "create layout");
 _Static_assert(sizeof(mh_out)==48 && offsetof(mh_out,cleanup_codes)==36, "outcome layout");
 #endif

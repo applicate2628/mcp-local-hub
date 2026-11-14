@@ -12,6 +12,7 @@ package caller
 typedef struct {
     HMODULE module;
     mh_create_fn create;
+    mh_create_env_fn create_env;
     mh_admit_fn admit;
     mh_stop_fn stop;
     mh_finish_fn finish;
@@ -36,6 +37,7 @@ static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     RESOLVE(b->stop,"mh_stop1"); RESOLVE(b->finish,"mh_finish1");
     RESOLVE(b->release,"mh_release1");
     RESOLVE(b->admit_checked,"mh_admit_checked1");
+    RESOLVE(b->create_env,"mh_create_env1");
 #undef RESOLVE
     if (version()!=1) { *error=ERROR_REVISION_MISMATCH; goto fail; }
     return b;
@@ -49,7 +51,10 @@ static uint32_t bridge_close(bridge *b) {
 static uint32_t bridge_create(bridge *b, const mh_create *c, mh_owner **p, mh_out *o) {
     return b->create(c,sizeof(*c),p,o,sizeof(*o));
 }
-static uint32_t bridge_admit(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->admit(p,a,o,sizeof(*o));}
+static uint32_t bridge_create_env(bridge *b,const mh_create *c,const mh_env_entry *entries,size_t count,mh_owner **p,mh_out *o) {
+    mh_environment env={entries,count};
+    return b->create_env(c,sizeof(*c),&env,sizeof(env),p,o,sizeof(*o));
+}static uint32_t bridge_admit(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->admit(p,a,o,sizeof(*o));}
 static uint32_t bridge_stop(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->stop(p,a,o,sizeof(*o));}
 static uint32_t bridge_finish(bridge *b,mh_owner *p,uint32_t a,mh_out *o){return b->finish(p,a,o,sizeof(*o));}
 static uint32_t bridge_release(bridge *b,mh_owner **p,mh_out *o){return b->release(p,o,sizeof(*o));}
@@ -72,6 +77,7 @@ import (
 	"runtime/cgo"
 	"sync"
 	"syscall"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -165,12 +171,15 @@ func (l *Library) Close() error {
 // The Rust API receives a length excluding that terminator and copies it. There
 // are no Go pointers in any input; all C allocations die before New returns.
 func wide(s string) (C.mh_u16, func(), error) {
+	if !utf8.ValidString(s) {
+		return C.mh_u16{}, func() {}, &CallError{argument, 0}
+	}
 	units, err := syscall.UTF16FromString(s)
 	if err != nil {
-		return C.mh_u16{}, func() {}, err
+		return C.mh_u16{}, func() {}, &CallError{argument, 0}
 	}
 	if len(units) > 32767 {
-		return C.mh_u16{}, func() {}, errors.New("input too long")
+		return C.mh_u16{}, func() {}, &CallError{argument, 0}
 	}
 	p := C.malloc(C.size_t(len(units) * 2))
 	if p == nil {
@@ -185,13 +194,23 @@ func wide(s string) (C.mh_u16, func(), error) {
 func (l *Library) New(program, cwd string, args []string) (*Owner, Outcome, error) {
 	return l.newVersion(program, cwd, args, 1)
 }
+
+// NewWithEnvironment supplies the complete explicit child environment. Like New,
+// it may return both an owner and an error after native ownership transfers.
+// Retain every non-nil owner, even on error; never retry an unknown outcome.
+func (l *Library) NewWithEnvironment(program, cwd string, args []string, environment []EnvironmentEntry) (*Owner, Outcome, error) {
+	return l.newRequest(program, cwd, args, 1, environment, true)
+}
 func (l *Library) newVersion(program, cwd string, args []string, version uint32) (*Owner, Outcome, error) {
+	return l.newRequest(program, cwd, args, version, nil, false)
+}
+func (l *Library) newRequest(program, cwd string, args []string, version uint32, environment []EnvironmentEntry, explicitEnvironment bool) (*Owner, Outcome, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.raw == nil {
 		return nil, Outcome{}, errors.New("library closed")
 	}
-	if len(args) > 64 {
+	if len(args) > 64 || len(environment) > 256 {
 		return nil, Outcome{}, &CallError{argument, 0}
 	}
 	p, fp, err := wide(program)
@@ -221,10 +240,42 @@ func (l *Library) newVersion(program, cwd string, args []string, version uint32)
 		defer free()
 		views[i] = v
 	}
+	var envArray unsafe.Pointer
+	if len(environment) > 0 {
+		envArray = C.calloc(C.size_t(len(environment)), C.sizeof_mh_env_entry)
+		if envArray == nil {
+			return nil, Outcome{}, errors.New("environment allocation failed")
+		}
+		defer C.free(envArray)
+	}
+	envViews := unsafe.Slice((*C.mh_env_entry)(envArray), len(environment))
+	blockUnits := 1 // final NUL; each entry includes its own '=' and NUL
+	for i, entry := range environment {
+		name, freeName, e := wide(entry.Name)
+		if e != nil {
+			return nil, Outcome{}, e
+		}
+		defer freeName()
+		value, freeValue, e := wide(entry.Value)
+		if e != nil {
+			return nil, Outcome{}, e
+		}
+		defer freeValue()
+		blockUnits += int(name.len) + int(value.len) + 2
+		if blockUnits > 32766 {
+			return nil, Outcome{}, &CallError{argument, 0}
+		}
+		envViews[i] = C.mh_env_entry{name: name, value: value}
+	}
 	request := C.mh_create{version: C.uint32_t(version), program: p, cwd: d, args: (*C.mh_u16)(array), argc: C.size_t(len(args))}
 	var ptr *C.mh_owner
 	var output C.mh_out
-	status := C.bridge_create(l.raw, &request, &ptr, &output)
+	var status C.uint32_t
+	if explicitEnvironment {
+		status = C.bridge_create_env(l.raw, &request, (*C.mh_env_entry)(envArray), C.size_t(len(environment)), &ptr, &output)
+	} else {
+		status = C.bridge_create(l.raw, &request, &ptr, &output)
+	}
 	out, e := result(status, output)
 	// A transferred owner is an independent fact, even if result metadata is
 	// invalid. The caller must retain any non-nil Owner returned with an error.
