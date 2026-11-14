@@ -747,10 +747,10 @@ func loadRegistrySerenaPorts(t *testing.T, regPath string) map[string]int {
 // runtime check, leaving the legacy clients/supervisor in place with no way to
 // run the cutover.)
 func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
 	// CATALOG is ALREADY dynamic-pool shape (daemon_template present, no
 	// daemons[]) → detectSerenaSourceState classifies it serenaSourceAlreadyMigrated.
-	seedSerenaManifest(t, manifestDir, alreadyMigratedManifestYAML)
+	seedPreparedSerenaManifestForTest(t, manifestDir, alreadyMigratedManifestYAML)
 	// RUNTIME intent is MISSING (no supervisor-intent.json seeded) → the cutover
 	// has NOT happened on this host.
 
@@ -764,9 +764,7 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 	// reaps it before the spec-bearing write. The no-supervisor cutover is its own
 	// test (TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Stub start-support TRUE so this test exercises the install/reconcile/reap/start
-	// path on non-Windows CI too (the default binding is false off Windows — bot PR
-	// #250 finding #3; without it the run exits at the unsupported-start preflight).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked := false
@@ -922,8 +920,8 @@ func TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
-	manifestPath := seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	manifestPath := seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 	before, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("read seeded manifest: %v", err)
@@ -935,8 +933,7 @@ func TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite(t *testing.T) {
 	seedSerenaWorkspace(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
-	// (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
@@ -1275,16 +1272,10 @@ func TestMigrateSerena_RegistryRollback_SkipsConcurrentlyUnregisteredKey(t *test
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
-	ws := t.TempDir()
-	seedSerenaWorkspace(t, ws)
-	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	// Both subtests model a RUNNING supervisor so the cutover reaps it before the
 	// spec-bearing write (finding #3). The parent-level defer covers both subtests.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE (parent-level, covers both subtests) so the install/reap/
-	// start path runs on non-Windows CI too (default false off Windows — finding #3).
+	// Both cases model a supported start operation through their own start seams.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	restoreReconcile := stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
@@ -1293,8 +1284,11 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 	defer restoreReconcile()
 
 	t.Run("reap fires BEFORE the intent write; start fires AFTER", func(t *testing.T) {
-		// Reset any intent from a prior subtest run.
-		_ = os.Remove(intentPath)
+		stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+		seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
+		ws := t.TempDir()
+		seedSerenaWorkspace(t, ws)
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
 		reapCalled := false
 		startCalled := false
@@ -1345,8 +1339,11 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 	})
 
 	t.Run("fail-loud when the prior supervisor cannot be reaped — intent NOT written", func(t *testing.T) {
-		// Reset any intent from a prior subtest run so the absence assertion is real.
-		_ = os.Remove(intentPath)
+		stateDir, manifestDir := migrateSerenaTestEnv(t)
+		seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+		ws := t.TempDir()
+		seedSerenaWorkspace(t, ws)
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
 		installCalled := false
 		startCalled := false
@@ -1530,15 +1527,14 @@ func TestMigrateSerena_ReapVerifiesPortsOnGracefulExit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
-	// (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	// Seed a PRE-EXISTING supervisor-intent.json carrying a nil-spec serena
@@ -1632,13 +1628,12 @@ func stubRestoreReconcile(t *testing.T, fn func(report *api.MigrateReport) error
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
-	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
-	// (default false off Windows — finding #3). Supervisor liveness comes from the
-	// REAL lock (held below), not a stub, so leave migrateSerenaSupervisorRunningFn.
+	// Keep start support enabled. Liveness comes from the REAL lock held below,
+	// so leave migrateSerenaSupervisorRunningFn on its production binding.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	// Hold the supervisor.lock flock → SupervisorRunningUnderStateDir reports a
@@ -2019,8 +2014,8 @@ func TestMigrateSerena_PartialReconcile_FailsBeforeReap_RestoresClientsAndRegist
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	// Seed a serena workspace WITHOUT a port so the driver allocates one; after
 	// the committed install the registry must RETAIN that allocation.
@@ -2028,8 +2023,7 @@ func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *
 	seedSerenaWorkspaceNoPort(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the install commits (and the start then fails) on
-	// non-Windows CI too (default false off Windows — finding #3).
+	// Keep start support enabled so the stubbed failure follows a real commit.
 	defer stubStartSupported(t, func() bool { return true })()
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
@@ -2091,8 +2085,8 @@ func TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry(t *
 // to a warning and return nil (exit 0) — NOT the scary exit-1 a hard start
 // failure produces.
 func TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	ws := t.TempDir()
 	seedSerenaWorkspaceNoPort(t, ws)
@@ -2239,8 +2233,8 @@ func TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud(t *testing.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stateDir, manifestDir := migrateSerenaTestEnv(t)
-			seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+			stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+			seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 			ws := t.TempDir()
 			seedSerenaWorkspaceNoPort(t, ws)
@@ -2414,8 +2408,8 @@ func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
 // the intent IS written (the gate passes — no supervisor), and a supervisor IS
 // started afterward (still needed to bring the dynamic-pool intent live).
 func TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 	// One registered serena workspace (rooted at an existing dir, with a port) so
 	// the install fans out a spec-bearing row — hasWorkspaces is true.
 	ws := t.TempDir()
@@ -2424,8 +2418,7 @@ func TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts(t *testing.
 	// hold the supervisor.lock, so the REAL install's §7.1 gate also sees no
 	// supervisor and ALLOWS the spec-bearing write.
 	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
-	// Start-support TRUE so the write + start path runs on non-Windows CI too
-	// (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	reapInvoked, startInvoked := false, false
@@ -2476,8 +2469,8 @@ func TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts(t *testing.
 // over the current rows), so the concurrently-registered workspace appears in the
 // committed intent's daemon rows.
 func TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	// One workspace registered BEFORE the migrate (the pre-window row).
 	wsBefore := t.TempDir()
@@ -2485,8 +2478,7 @@ func TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent(t *te
 	// Model a running supervisor so the cutover reaps it (the reap stub is where we
 	// simulate the concurrent register landing in the released-lock window).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
-	// (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	// The workspace that gets registered DURING the released-lock window. It is
@@ -2691,8 +2683,8 @@ func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	// FIRST snapshot is EMPTY: no serena workspace registered up front → the driver
 	// computes hasWorkspaces=false, willStart=false, and (hasWorkspaces=false) never
@@ -2705,8 +2697,7 @@ func TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_Recomputes
 	// re-read). Rooted at an existing dir + registered without a port so the re-read
 	// re-allocation assigns one and the install fan-out does not prune it as stale.
 	wsConcurrent := t.TempDir()
-	// Start-support TRUE so the post-re-read recompute + start path runs on
-	// non-Windows CI too (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked := false
@@ -2789,9 +2780,9 @@ func seedDynamicPoolIntentForWorkspaces(t *testing.T, stateDir string, wsPaths .
 }
 
 func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
 	// CATALOG is still legacy — only the runtime intent says dynamic-pool.
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	// Two serena workspaces in the CURRENT registry, both rooted at existing dirs.
 	wsCovered := t.TempDir()
@@ -2810,8 +2801,7 @@ func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
 	defer stubSupervisorHealthy(t, func() (bool, error) { return true, nil })()
 	// A running supervisor → the re-fanout reaps it before the spec-bearing re-write.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the re-fanout install/reap/start path runs on
-	// non-Windows CI too (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	reconcileInvoked, reapInvoked, startInvoked := false, false, false
@@ -3191,8 +3181,8 @@ weekly_refresh: false
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 
 	// FIRST snapshot is EMPTY: no serena workspace registered up front → the driver
 	// computes hasWorkspaces=false, so it never probes supervisor liveness at step 5
@@ -3218,8 +3208,7 @@ func TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate(t
 		t.Fatalf("precondition: supervisor must read as running while the lock is held (running=%v err=%v)", running, perr)
 	}
 
-	// Start-support TRUE so the post-re-read recompute + (late) reap + start path
-	// runs on non-Windows CI too (default false off Windows — finding #3).
+	// Start is stubbed; keep the driver's start-support preflight enabled.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	// The workspace that registers DURING the released-lock window. The first
@@ -3405,8 +3394,8 @@ func readInterlockEventsLog(t *testing.T, stateDir string) string {
 // spec-bearing write still commits (the typed bypass token passes the §7.1 gate
 // because the held lock is the migrate's own handle).
 func TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
-	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	stateDir, manifestDir := migrateSerenaPreparedTestEnv(t)
+	seedPreparedSerenaManifestForTest(t, manifestDir, legacy2DaemonManifestYAML)
 	ws := t.TempDir()
 	seedSerenaWorkspace(t, ws)
 	defer stubStartSupported(t, func() bool { return true })()
