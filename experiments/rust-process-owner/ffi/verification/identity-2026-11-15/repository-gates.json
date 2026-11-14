@@ -1,0 +1,983 @@
+{
+    "schema":  1,
+    "recordedUtc":  "2026-11-14T22:05:47.3438438Z",
+    "gateStatus":  "BLOCKED",
+    "allMandatoryGatesPassed":  false,
+    "collectorExitCode":  0,
+    "collectorExitMeaning":  "The collector recorded all outcomes. Its exit code 0 is not passing repository gates.",
+    "publicationStatus":  "BLOCKED by CLAUDE.md pre-push hard gate unless the user grants an explicit draft-only exception.",
+    "sourceCommit":  "32812fa5c3793d9af9f3d5770b614f0a96d4d8da",
+    "executedQualifiedOverlayBase":  "aa7f4ea41631cbb29bd86b9e3c8c149e4a9f7675",
+    "sourceIdentity":  "Execution used the dirty 38-file runtime overlay over aa7f4ea. The current source commit contains the same 38 bytes-hashed inputs; no clean future head execution is claimed.",
+    "qualifiedRuntimeFiles":  38,
+    "qualifiedRuntimeFilesUnchanged":  true,
+    "masterCommit":  "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "coreTreeEquality":  [
+                             {
+                                 "path":  "internal",
+                                 "masterObject":  "029f9b67889aa1f72aff060f87509c707f15bccc",
+                                 "qualifiedOverlayBaseObject":  "029f9b67889aa1f72aff060f87509c707f15bccc",
+                                 "sourceCommitObject":  "029f9b67889aa1f72aff060f87509c707f15bccc",
+                                 "identical":  true
+                             },
+                             {
+                                 "path":  "cmd",
+                                 "masterObject":  "c6dc475e31c0ed25342c4614abc70353e3328034",
+                                 "qualifiedOverlayBaseObject":  "c6dc475e31c0ed25342c4614abc70353e3328034",
+                                 "sourceCommitObject":  "c6dc475e31c0ed25342c4614abc70353e3328034",
+                                 "identical":  true
+                             },
+                             {
+                                 "path":  "go.mod",
+                                 "masterObject":  "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3",
+                                 "qualifiedOverlayBaseObject":  "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3",
+                                 "sourceCommitObject":  "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3",
+                                 "identical":  true
+                             },
+                             {
+                                 "path":  "go.sum",
+                                 "masterObject":  "a43e43ef814c853dc311aec7558da391b24c6972",
+                                 "qualifiedOverlayBaseObject":  "a43e43ef814c853dc311aec7558da391b24c6972",
+                                 "sourceCommitObject":  "a43e43ef814c853dc311aec7558da391b24c6972",
+                                 "identical":  true
+                             }
+                         ],
+    "coreWorkingTreeChanges":  "",
+    "equalityLimit":  "Object equality localizes the broad failing tests to unchanged core sources. It does not prove those failures are harmless, diagnose their causes, or waive the mandatory gate.",
+    "stepsOriginalSHA256":  "464d4460971039f7da936af006de10bdbfedcb9667e7fd2898f7ca73d8ea3874",
+    "gates":  [
+                  {
+                      "name":  "build",
+                      "program":  "go",
+                      "arguments":  [
+                                        "build",
+                                        "./..."
+                                    ],
+                      "exitCode":  0,
+                      "startedUtc":  "2026-11-14T21:45:38.5762702Z",
+                      "finishedUtc":  "2026-11-14T21:45:48.8505557Z",
+                      "log":  "repository-gates/build.log",
+                      "originalLogSHA256":  "09ecee6880bea63d1e1b72fad4fb28308aec8464511b495476d3611e8ccbaa18",
+                      "originalLogBytes":  1473,
+                      "passed":  true,
+                      "jsonSummary":  null
+                  },
+                  {
+                      "name":  "vet",
+                      "program":  "go",
+                      "arguments":  [
+                                        "vet",
+                                        "./..."
+                                    ],
+                      "exitCode":  0,
+                      "startedUtc":  "2026-11-14T21:45:48.8672653Z",
+                      "finishedUtc":  "2026-11-14T21:45:56.0185068Z",
+                      "log":  "repository-gates/vet.log",
+                      "originalLogSHA256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                      "originalLogBytes":  0,
+                      "passed":  true,
+                      "jsonSummary":  null
+                  },
+                  {
+                      "name":  "test",
+                      "program":  "go",
+                      "arguments":  [
+                                        "test",
+                                        "-json",
+                                        "-count=1",
+                                        "-timeout",
+                                        "5m",
+                                        "./..."
+                                    ],
+                      "exitCode":  1,
+                      "startedUtc":  "2026-11-14T21:45:56.0200103Z",
+                      "finishedUtc":  "2026-11-14T21:51:12.9507344Z",
+                      "log":  "repository-gates/test.log",
+                      "originalLogSHA256":  "3b4e7ab5420eccb275dc49059ad59378dfce24ea084f852917dd937854ada8fa",
+                      "originalLogBytes":  14537421,
+                      "passed":  false,
+                      "jsonSummary":  {
+                                          "counts":  {
+                                                         "jsonEvents":  63266,
+                                                         "nonJsonLines":  0,
+                                                         "nonGoJsonLines":  0,
+                                                         "testRun":  15359,
+                                                         "testPass":  15137,
+                                                         "testFail":  84,
+                                                         "testSkip":  133,
+                                                         "topLevelRun":  9124,
+                                                         "topLevelPass":  8922,
+                                                         "topLevelFail":  67,
+                                                         "topLevelSkip":  131,
+                                                         "nestedRun":  6235,
+                                                         "nestedPass":  6215,
+                                                         "nestedFail":  17,
+                                                         "nestedSkip":  2,
+                                                         "packageStart":  72,
+                                                         "packagePass":  58,
+                                                         "packageFail":  3,
+                                                         "packageSkip":  11
+                                                     },
+                                          "failedTests":  [
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestCheckServerReadinessWithScope_DryRunSkipsUnselectedDaemonBinding"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestDefaultInstallScopeUnchanged"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_DefersDaemonSpawn"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/records_server_install_audit_per_workspace_task"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FansOutPerWorkspaceDaemons"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FiltersStaleWorkspaceRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_NoSchedulerOnNoWork"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_PreservesPriorMaintenanceTimers"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_WorkspaceScoped_SkipsPrune"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestPerServerInstallSkipsHubEntryRemoval"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestProjectSerenaWorkspaceSnapshotCurrent_LegacyWireReturnsUnreadyWorkspace"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestProjectSerenaWorkspaceSnapshotHeld_ProjectsRegisteredRowAndUnreadyEndpoint"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/broadened_empty"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/broadened_ignored"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/missing"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/not_directory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/protected_empty"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/reparse"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceFailurePaths"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceRetainedDirectory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSerenaOrPlanDaemonsCarriesManifestHash"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_LegacySerenaStoppedWireReturnsStoppedRow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_LegacySerenaWireReturnsUnreadyRow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches/intent_status"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches/registry_intent"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionReusesHeldStatusSnapshot"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSupervisorIntentLockOwnershipProductionInventory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSupervisorPeerStrictControlConnections"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_FreshInstall_Success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreOK"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_Success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_OriginalOwnerAndTargetRefusalsPreserveBytes"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_OriginalPreparationFailureAfterUnlockedCapture"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_RepeatLegacyAndPendingRemainDistinct"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestUnregister_SchedulerNotImplementedRemovesIntentAndRegistryWithWarning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce/committed_managed_failure"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce/managed_success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionFreezesPhysicalAliasAndTimeout"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig/empty_targets"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig/skip_client_config"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_PRCoreFailureSkipsManagedSettlement"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_SyntheticReceivingCrossesFrozenInstallFileBoundary"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_DrivesSupervisorRestart"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_DrivesSupervisorRestart/reap_fires_BEFORE_the_intent_write;_start_fires_AFTER"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/dead_supervisor"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/undeterminable_probe"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeDisable_PreservesNonStrictIntentFields"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeRecover_PreservesNonStrictIntentFields"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/process",
+                                                                  "test":  "TestJob_BreakawayEnabledDescendantEscapesClose"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/process",
+                                                                  "test":  "TestJobInformationTransportPreparationBoundary"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/process",
+                                                                  "test":  "TestJobInformationTransportPreparationBoundary/real-native-typed-gc-and-creator"
+                                                              }
+                                                          ],
+                                          "failedPackages":  [
+                                                                 "mcp-local-hub/internal/api",
+                                                                 "mcp-local-hub/internal/cli",
+                                                                 "mcp-local-hub/internal/process"
+                                                             ],
+                                          "startedTestsWithoutTerminalEvent":  [
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestReadSerenaProjectSchema_AcceptsCurrentAndCompatibilityForms"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestReadSerenaProjectSchema_FailsClosedForInvalidForms"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/cli",
+                                                                                       "test":  "TestReconcileIPC_SerenaRepairLockSkipsRemainOK"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/cli",
+                                                                                       "test":  "TestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock"
+                                                                                   }
+                                                                               ],
+                                          "timeoutCount":  2,
+                                          "namedRunningTestsAtTimeout":  [
+                                                                             "TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence",
+                                                                             "TestReconcileIPC_SerenaRepairLockSkipsRemainOK",
+                                                                             "TestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock"
+                                                                         ],
+                                          "timeoutExcerpts":  [
+                                                                  {
+                                                                      "line":  63092,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "panic: test timed out after 5m0s"
+                                                                  },
+                                                                  {
+                                                                      "line":  63093,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "\trunning tests:"
+                                                                  },
+                                                                  {
+                                                                      "line":  63094,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "\t\tTestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence (2m33s)"
+                                                                  },
+                                                                  {
+                                                                      "line":  63171,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "panic: test timed out after 5m0s"
+                                                                  },
+                                                                  {
+                                                                      "line":  63172,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\trunning tests:"
+                                                                  },
+                                                                  {
+                                                                      "line":  63173,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\t\tTestReconcileIPC_SerenaRepairLockSkipsRemainOK (2m35s)"
+                                                                  },
+                                                                  {
+                                                                      "line":  63174,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\t\tTestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock (2m35s)"
+                                                                  }
+                                                              ],
+                                          "timeoutExcerptMaximumLines":  40,
+                                          "interpretation":  "Counts are emitted Go JSON events; nested test counts are separate. A timeout can leave started tests without terminal events; these are listed separately, not silently counted as passing or as individual fail events."
+                                      }
+                  },
+                  {
+                      "name":  "state-tag",
+                      "program":  "go",
+                      "arguments":  [
+                                        "test",
+                                        "-json",
+                                        "-tags=test_state_path_env",
+                                        "-count=1",
+                                        "-timeout",
+                                        "5m",
+                                        "./internal/api/",
+                                        "./internal/cli/"
+                                    ],
+                      "exitCode":  1,
+                      "startedUtc":  "2026-11-14T21:51:12.9512420Z",
+                      "finishedUtc":  "2026-11-14T21:56:22.1327587Z",
+                      "log":  "repository-gates/state-tag.log",
+                      "originalLogSHA256":  "0a0c805ba56b18e9bf0a1ab9be019f8776003af6056c56c77727788d31bebf6c",
+                      "originalLogBytes":  7256364,
+                      "passed":  false,
+                      "jsonSummary":  {
+                                          "counts":  {
+                                                         "jsonEvents":  31419,
+                                                         "nonJsonLines":  0,
+                                                         "nonGoJsonLines":  0,
+                                                         "testRun":  7565,
+                                                         "testPass":  7411,
+                                                         "testFail":  83,
+                                                         "testSkip":  66,
+                                                         "topLevelRun":  4599,
+                                                         "topLevelPass":  4463,
+                                                         "topLevelFail":  67,
+                                                         "topLevelSkip":  65,
+                                                         "nestedRun":  2966,
+                                                         "nestedPass":  2948,
+                                                         "nestedFail":  16,
+                                                         "nestedSkip":  1,
+                                                         "packageStart":  2,
+                                                         "packagePass":  0,
+                                                         "packageFail":  2,
+                                                         "packageSkip":  0
+                                                     },
+                                          "failedTests":  [
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestAttachExisting_PublicCLIReceiving"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestCheckServerReadinessWithScope_DryRunSkipsUnselectedDaemonBinding"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestCheckServerReadinessWithScope_ValidatesExplicitlySelectedClients"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestDefaultInstallScopeUnchanged"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_DefersDaemonSpawn"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks/records_server_install_audit_per_workspace_task"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FansOutPerWorkspaceDaemons"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_FiltersStaleWorkspaceRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_NoSchedulerOnNoWork"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_PreservesPriorMaintenanceTimers"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingLock"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallParsedManifest_WorkspaceScoped_SkipsPrune"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestPerServerInstallSkipsHubEntryRemoval"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestProjectSerenaWorkspaceSnapshotCurrent_LegacyWireReturnsUnreadyWorkspace"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestProjectSerenaWorkspaceSnapshotHeld_ProjectsRegisteredRowAndUnreadyEndpoint"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestProviderWorkingDirectoryIdentityOwnsOnlySelectedLiveInstance"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/broadened_empty"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/broadened_ignored"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/missing"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/not_directory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/protected_empty"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceBoundary/reparse"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceFailurePaths"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSecretsInit_RecoveryNamespaceRetainedDirectory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSerenaOrPlanDaemonsCarriesManifestHash"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_LegacySerenaStoppedWireReturnsStoppedRow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_LegacySerenaWireReturnsUnreadyRow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches/intent_status"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches/registry_intent"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestStatusInternal_SerenaProjectionReusesHeldStatusSnapshot"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSupervisorIntentLockOwnershipProductionInventory"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSupervisorPeerStrictControlConnections"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_FreshInstall_Success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreOK"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestSwapWeeklyTrigger_HadPriorTask_Success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_OriginalOwnerAndTargetRefusalsPreserveBytes"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_OriginalPreparationFailureAfterUnlockedCapture"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestTargetedSerenaRepair_RepeatLegacyAndPendingRemainDistinct"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestUnregister_SchedulerNotImplementedRemovesIntentAndRegistryWithWarning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce/committed_managed_failure"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_CommandCoordinatorMutationThenReceiverOnce/managed_success"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionFreezesPhysicalAliasAndTimeout"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig/empty_targets"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_InstallCompositionSkipsManagedForEmptyDryRunOrNoClientConfig/skip_client_config"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_PRCoreFailureSkipsManagedSettlement"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/api",
+                                                                  "test":  "TestW10_SyntheticReceivingCrossesFrozenInstallFileBoundary"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_DrivesSupervisorRestart"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_DrivesSupervisorRestart/reap_fires_BEFORE_the_intent_write;_start_fires_AFTER"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/dead_supervisor"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/undeterminable_probe"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeDisable_PreservesNonStrictIntentFields"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode"
+                                                              },
+                                                              {
+                                                                  "package":  "mcp-local-hub/internal/cli",
+                                                                  "test":  "TestStrictModeRecover_PreservesNonStrictIntentFields"
+                                                              }
+                                                          ],
+                                          "failedPackages":  [
+                                                                 "mcp-local-hub/internal/api",
+                                                                 "mcp-local-hub/internal/cli"
+                                                             ],
+                                          "startedTestsWithoutTerminalEvent":  [
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestReadSerenaProjectSchema_AcceptsCurrentAndCompatibilityForms"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/api",
+                                                                                       "test":  "TestReadSerenaProjectSchema_FailsClosedForInvalidForms"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/cli",
+                                                                                       "test":  "TestReconcileIPC_SerenaRepairLockSkipsRemainOK"
+                                                                                   },
+                                                                                   {
+                                                                                       "package":  "mcp-local-hub/internal/cli",
+                                                                                       "test":  "TestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock"
+                                                                                   }
+                                                                               ],
+                                          "timeoutCount":  2,
+                                          "namedRunningTestsAtTimeout":  [
+                                                                             "TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence",
+                                                                             "TestReconcileIPC_SerenaRepairLockSkipsRemainOK",
+                                                                             "TestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock"
+                                                                         ],
+                                          "timeoutExcerpts":  [
+                                                                  {
+                                                                      "line":  31245,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "panic: test timed out after 5m0s"
+                                                                  },
+                                                                  {
+                                                                      "line":  31246,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "\trunning tests:"
+                                                                  },
+                                                                  {
+                                                                      "line":  31247,
+                                                                      "package":  "mcp-local-hub/internal/api",
+                                                                      "text":  "\t\tTestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence (2m39s)"
+                                                                  },
+                                                                  {
+                                                                      "line":  31322,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "panic: test timed out after 5m0s"
+                                                                  },
+                                                                  {
+                                                                      "line":  31323,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\trunning tests:"
+                                                                  },
+                                                                  {
+                                                                      "line":  31324,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\t\tTestReconcileIPC_SerenaRepairLockSkipsRemainOK (2m42s)"
+                                                                  },
+                                                                  {
+                                                                      "line":  31325,
+                                                                      "package":  "mcp-local-hub/internal/cli",
+                                                                      "text":  "\t\tTestReconcileIPC_SerenaRepairLockSkipsRemainOK/apply_intent_lock (2m42s)"
+                                                                  }
+                                                              ],
+                                          "timeoutExcerptMaximumLines":  40,
+                                          "interpretation":  "Counts are emitted Go JSON events; nested test counts are separate. A timeout can leave started tests without terminal events; these are listed separately, not silently counted as passing or as individual fail events."
+                                      }
+                  }
+              ]
+}

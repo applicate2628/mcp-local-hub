@@ -1,0 +1,22 @@
+{
+    "schemaVersion":  1,
+    "recordedUtc":  "2026-11-14T21:27:52.0035805Z",
+    "sourceCommit":  "eb4ca1d40244ba1915638b76c3e30b2a684d9b07",
+    "sourcePath":  "experiments/rust-process-owner/ffi/verification/",
+    "archive":  "history.zip",
+    "archiveSha256":  "1df805b8d50ef8e10eaa9404efbee341ba85daeea3c94e3c4a6dd7a572ee342e",
+    "archiveBytes":  660113,
+    "trackedFiles":  624,
+    "verifiedArchiveFiles":  624,
+    "directoryEntries":  42,
+    "uncompressedFileBytes":  2364014,
+    "verification":  "Every decompressed non-directory ZIP entry was hashed as a Git SHA-1 blob and exactly matched immutable ls-tree object ID; SHA-256 recorded separately",
+    "safeEntryPaths":  true,
+    "duplicateEntryNames":  false,
+    "gitArchiveExit":  0,
+    "manifest":  "manifest.tsv",
+    "manifestSha256":  "8d2d16d99c43e33590cadb9c387c5e9f95c1dd354efedd9299243edd46eb8bda",
+    "sourceWritesPerformed":  false,
+    "checkoutExtractionPerformed":  false,
+    "filesRemovedOrMoved":  false
+}

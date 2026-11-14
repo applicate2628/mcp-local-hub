@@ -1,3 +1,0 @@
-Command: go test -race . -run '^TestStdio' -count=3 -timeout=90s
-Actual exit: 0
-ok  	mcphub-owner-ffi-caller	1.742s

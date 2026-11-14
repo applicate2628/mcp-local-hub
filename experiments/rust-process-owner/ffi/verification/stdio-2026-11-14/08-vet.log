@@ -1,2 +1,0 @@
-Command: go vet .
-Actual exit: 0

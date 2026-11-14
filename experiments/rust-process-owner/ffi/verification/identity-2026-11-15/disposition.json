@@ -1,0 +1,50 @@
+{
+    "schema":  1,
+    "recordedUtc":  "2026-11-14T22:09:51.2327713Z",
+    "reason":  "Completed copy-only controls and private identity fixtures; no active owned executable; exact reproduction inputs preserved",
+    "verifiedControlCopyFiles":  494,
+    "qualifiedSourceCommit":  "32812fa5c3793d9af9f3d5770b614f0a96d4d8da",
+    "evidenceArchiveSHA256":  "191731f1deb99ee39ba1b54b3736b51dcdd02d074d74df480eb6f6bd202d027a",
+    "moves":  [
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\control-copies",
+                      "files":  494,
+                      "bytes":  3857712
+                  },
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\control-targets",
+                      "files":  1440,
+                      "bytes":  298538098
+                  },
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\cache\\identity-controls",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\control-cache",
+                      "files":  1399,
+                      "bytes":  94359935
+                  },
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\tmp\\identity-focused",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\identity-focused",
+                      "files":  2,
+                      "bytes":  40
+                  },
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\tmp\\identity-qualified",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\identity-qualified",
+                      "files":  8,
+                      "bytes":  160
+                  },
+                  {
+                      "source":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\tmp\\identity-controls",
+                      "destination":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\identity-controls",
+                      "files":  0,
+                      "bytes":  0
+                  }
+              ],
+    "permanentDeletionPerformed":  false,
+    "trashPurged":  false,
+    "requiredOriginalLogsRetained":  true,
+    "retained":  "Active source; qualified normal target; compatibility input/source/DLL; main caches; broad-failure fixtures; all original evidence and scripts"
+}
