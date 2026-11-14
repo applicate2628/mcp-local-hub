@@ -121,7 +121,7 @@ Negative controls deliberately changed `WAIT_FAILED` into timeout and changed fa
 
 ## Original-process observations
 
-The same borrowed `ProcessView` now exposes the original creation-time binding, exact Job membership and zero-time process wait state. No raw handle or new close/termination authority is exported. These are individual observations, not an atomic snapshot or a complete product admission decision.
+The same borrowed `ProcessView` exposes the original creation-time binding, exact Job membership, zero-time process wait state and a copied binary TokenUser SID. No raw handle or new close/termination authority is exported. These are individual observations, not an atomic snapshot or a complete product admission decision.
 
 **Table 5. Additive Windows observations.**
 
@@ -130,18 +130,23 @@ The same borrowed `ProcessView` now exposes the original creation-time binding, 
 | `creation_time_100ns()` | Unsigned 64-bit Windows creation time: 100 ns intervals since 1601-01-01 UTC [15]. A fresh query on the retained process must match the value captured after creation; zero/mismatch is InvalidData. An initial query error remains the original native error and is never replaced by a later successful query |
 | `is_in_original_job()` | Query the retained process against the retained, non-null original Job [16]. Known non-membership is false; a native query error is not a false value |
 | `wait_state()` | `RootWait::NotSignaled` or `RootWait::Signaled` from a zero-time wait [17]. NotSignaled includes suspended processes. Native wait failure is an error; exit code 259 is never used as liveness |
+| `token_user_sid()` | An independent binary SID copy from the retained process's primary-token user [18–20]. Success requires successful token close. `TokenUserError` preserves an observation error, a close failure, or both; no SID value accompanies cleanup failure |
 
 `create_suspended_impl` captures the creation result only after the original process/thread handles are owned. A failed capture is stored in the returned owner. It must not introduce an ownerless error return after successful process creation. Callers that require the binding propagate `creation_time_100ns()` failure from their one-shot admission callback; the original owner remains available for explicit stop and settlement. Existing callbacks may omit these new observations and are not thereby qualified as product admission.
 
-Eight unit functions and one child-observed integration function qualify this increment. The child independently writes its own PID and creation time after admission. A copy-only constructor experiment triggers actual GetProcessTimes error 6 at initial capture, verifies owner retention/settlement, and rejects an early-return mutation. The ordinary artifact has no fault hook. Five semantic negative controls also reject recapture, any-Job substitution, failed-wait success, false liveness and owner loss. See the [current results, reproduction and exact scope](verification/identity-2026-11-14/RESULTS.md).
+Eight unit functions and one child-observed integration function qualify the earlier creation-time/Job/wait increment. The child independently writes its own PID and creation time after admission. A copy-only constructor experiment triggers actual GetProcessTimes error 6 at initial capture, verifies owner retention/settlement, and rejects an early-return mutation. The ordinary artifact has no fault hook. Five semantic negative controls also reject recapture, any-Job substitution, failed-wait success, false liveness and owner loss. See the [creation-time/Job/wait results, reproduction and exact scope](verification/identity-2026-11-14/RESULTS.md).
 
-The accepted Go contract at merged master additionally requires token-user SID and its formatting/resource evidence, the original Go capability and real consumer integration. Those are not supplied by these methods. A copied timestamp, PID or digest cannot grant process ownership.
+The TokenUser increment adds another eight unit functions and one child-observed integration function. A fixed aligned buffer uses the maximum storage documented for TokenUser [20]; returned length, pointer location/alignment, SID header, subauthority count and complete extent are checked before native validation [21–22]. The validator receives a pointer derived from the owned buffer. The result owns its bytes and remains usable after process settlement. No token/process handle is exported.
+
+The token is opened with only query access from the retained process handle [18]. All ordinary query outcomes flow through one explicit close attempt. A close failure retains its immediate native error and any preceding query error, discards an otherwise successful SID copy, and does not leave a second owner to retry the same numeric handle. Best-effort unwind cleanup is separate. The real protected-token tests verify both outcome combinations; source review, not close protection alone, establishes the one-attempt control flow. Six copy-only semantic controls reject ambient-process substitution, ignored close failure, lost query error, changed native close code, ignored returned length and invalid SID acceptance. See the [TokenUser results, exact source identities and reproduction](verification/sid-2026-11-14/RESULTS.md).
+
+The accepted Go contract still requires SID formatting/resource evidence, the original Go capability and real consumer integration. Binary SID bytes provide an observation, not that capability or formatting receipt. A copied timestamp, PID or digest cannot grant process ownership.
 
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
 
-**40 native integration tests, 20 unit tests (nine earlier native-failure, eight identity and three encoding/validation), and two compile-fail doctests passed** in debug and release for the identity increment. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts; the fourteenth compares identity observations with the child itself. Earlier qualification records retain their original counts and source identities.
+**41 native integration tests, 28 unit tests and two compile-fail doctests passed: 71 in each of debug and release** for the TokenUser increment. The unit count comprises nine earlier native-failure, eight creation-time/Job/wait, three encoding/validation and eight TokenUser tests. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts; the fourteenth compares creation identity with the child and the fifteenth compares its independently queried TokenUser SID. Earlier qualification records retain their original counts and source identities.
 
 **Table 6. Ten original native stdio cases (plus explicit-context composition).**
 
@@ -194,7 +199,7 @@ Tests run serially because process handle counts are not meaningful if unrelated
 
 1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
 2. Remaining acquisition/setup/allocation/attribute-update failure classes; already-blocked native I/O cancellation; crash timing inside acquisition/native create and broader recovery qualification. The real failure cases and post-create crash points above are exercised, not all native failures/schedules. A successful stdio test is not a complete I/O pump or recovery contract.
-3. A versioned foreign identity interface and full product admission mapping. The existing frozen [Go/Rust ABI consumer in #631](https://github.com/applicate2628/mcp-local-hub/pull/631) passes with this native increment; it still exports only PID/image, not the new observations. Safe Rust borrowing does not prove arbitrary foreign callers obey it.
+3. A versioned foreign identity interface and full product admission mapping. The existing frozen [Go/Rust ABI consumer in #631](https://github.com/applicate2628/mcp-local-hub/pull/631) passes with this native increment; it still exports only PID/image, not the new observations, including TokenUser SID. Compatibility was rerun against exact #631 source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07`; this is not a new foreign identity API. Safe Rust borrowing does not prove arbitrary foreign callers obey it.
 4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
 
@@ -226,5 +231,11 @@ The underlying creation, admission and settlement code is shared with `create_su
 15. [Microsoft: GetProcessTimes, original process handle rights and FILETIME units](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes).
 16. [Microsoft: IsProcessInJob and the distinction between a specific Job and any Job](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob).
 17. [Microsoft: WaitForSingleObject results and SYNCHRONIZE access](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject).
+
+18. [Microsoft: OpenProcessToken, query rights and token handle lifetime](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken).
+19. [Microsoft: GetTokenInformation and TOKEN_USER](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-gettokeninformation), [TOKEN_USER layout](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-token_user).
+20. [Microsoft: SE_TOKEN_USER documents bounded maximum TokenUser storage](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_se_token_user).
+21. [Microsoft: GetSidLengthRequired and the subauthority-count length](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-getsidlengthrequired).
+22. [Microsoft: IsValidSid has no extended error information](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-isvalidsid).
 
 **Terms:** stdio — standard input/output/error; EOF — end of file/stream; Job — Windows process-group resource object with its configured policies; handle — operating-system resource descriptor; ABI — application binary interface; FFI — foreign-function interface; PID — process identifier; SID — Windows security identifier. No property of one OS mechanism is transferred to another by naming it alike.

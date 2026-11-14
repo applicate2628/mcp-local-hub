@@ -1,0 +1,186 @@
+{
+  "recordedUtc": "2026-11-14T21:11:56.4414019Z",
+  "taskRoot": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114",
+  "trashRoot": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114",
+  "nativeCodeCommit": "3ef24b3473900384d8fc34204d4555a9bb30a5db",
+  "nativeSourceFilesChecked": 13,
+  "consumerSourceFilesChecked": 36,
+  "controlSourceChecks": [
+    {
+      "control": "ambient-process",
+      "files": 13,
+      "matched": true
+    },
+    {
+      "control": "ignore-close",
+      "files": 13,
+      "matched": true
+    },
+    {
+      "control": "erase-query-error",
+      "files": 13,
+      "matched": true
+    },
+    {
+      "control": "wrong-close-code",
+      "files": 13,
+      "matched": true
+    },
+    {
+      "control": "ignore-returned-length",
+      "files": 13,
+      "matched": true
+    },
+    {
+      "control": "accept-invalid-sid",
+      "files": 13,
+      "matched": true
+    }
+  ],
+  "nativeStepCount": 10,
+  "consumerStepCount": 8,
+  "knownOwnedFixtureTestProcessesObserved": 0,
+  "processObservationScope": "Named fixture and test executables under this task root; not a host-wide process census",
+  "archiveSha256": "cb35bc2b31e15267362c5a6d71c52c001cc1da8d542028b9c4dbda2214c7e31d",
+  "archiveEntriesPreviouslyVerified": 21,
+  "moves": [
+    {
+      "name": "copies-native-sid-final",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\copies-native-sid-final",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\copies-native-sid-final",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "consumer-sid-consumer",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\consumer-sid-consumer",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\consumer-sid-consumer",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "target-controls-sid",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\target-controls-sid",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\target-controls-sid",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "target-consumer",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\target-consumer",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\target-consumer",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-sid-first",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-sid-first",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-sid-first",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-fmt",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-fmt",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-fmt",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-debug",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-debug",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-debug",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-release",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-release",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-release",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-clippy",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-clippy",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-clippy",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-ambient-process",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-ambient-process",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-ambient-process",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-ignore-close",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-ignore-close",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-ignore-close",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-erase-query-error",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-erase-query-error",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-erase-query-error",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-wrong-close-code",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-wrong-close-code",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-wrong-close-code",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-ignore-returned-length",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-ignore-returned-length",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-ignore-returned-length",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    },
+    {
+      "name": "fixtures-native-sid-final-accept-invalid-sid",
+      "source": "D:\\dev\\ChatGPT\\mcphub-rust-identity-20261114\\fixtures-native-sid-final-accept-invalid-sid",
+      "destination": "D:\\dev\\ChatGPT\\trash\\mcphub-rust-sid-20261114\\fixtures-native-sid-final-accept-invalid-sid",
+      "sourceAbsent": true,
+      "destinationPresent": true,
+      "reason": "Completed owned qualification copy, build output or fixture; required source/evidence retained separately"
+    }
+  ],
+  "preserved": [
+    "source",
+    "plan-source",
+    "target",
+    "evidence",
+    "go-build-cache",
+    "go-mod-cache",
+    "go-path",
+    "tmp"
+  ],
+  "excludedFromPublication": [
+    "Actual binary TokenUser SID marker files",
+    "Fixture trees",
+    "Binaries",
+    "Mutation checkout copies"
+  ],
+  "deletionAttempted": false,
+  "trashEmptied": false
+}
