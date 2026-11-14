@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -1510,94 +1511,101 @@ func TestExecuteDoesNotHangWhenAuditWorkerNeverSettles(t *testing.T) {
 // late original completion and the retained carrier converge through exact-row
 // replay to one active-plus-.1 row.
 func TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow(t *testing.T) {
-	d := recoveryDescriptor()
-	const ownerPID = 44000
-	calls := &recoveryCallLog{}
-	deps := recoveryDependencies(t, calls, d)
-	deps.AuditEmitTimeout = 60 * time.Millisecond
-	probeCount := 0
-	deps.PortOwner = func(context.Context, int) (int, bool, error) {
-		probeCount++
-		if probeCount <= 2 {
-			return ownerPID, true, nil
+	// This is an ordering/settlement fixture with real carrier I/O. Retain
+	// the original 100/60/20ms budgets without charging host scheduling or
+	// filesystem stalls to the logical audit timeout.
+	synctest.Test(t, func(t *testing.T) {
+		d := recoveryDescriptor()
+		const ownerPID = 44000
+		calls := &recoveryCallLog{}
+		deps := recoveryDependencies(t, calls, d)
+		deps.AuditEmitTimeout = 60 * time.Millisecond
+		probeCount := 0
+		deps.PortOwner = func(context.Context, int) (int, bool, error) {
+			probeCount++
+			if probeCount <= 2 {
+				return ownerPID, true, nil
+			}
+			return 0, false, nil
 		}
-		return 0, false, nil
-	}
 
-	stateDir, err := deps.StateDir()
-	if err != nil {
-		t.Fatalf("state dir: %v", err)
-	}
-	release := recoveryStallAuditWrite(t, stateDir)
-
-	respawnDispatched := make(chan struct{})
-	deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
-		calls.order = append(calls.order, "respawn")
-		calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
-		close(respawnDispatched)
-		return api.RespawnResult{Success: true}, nil
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, executeErr := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
-		done <- executeErr
-	}()
-
-	select {
-	case <-respawnDispatched:
-	case <-time.After(time.Second):
-		t.Fatal("respawn was not dispatched while the audit write was stalled")
-	}
-	// Recovery must ALREADY have returned without waiting for the stalled
-	// write at all -- the fold removed the synchronous wait, so this is not
-	// a race: it must settle well before any old fixed grace window would
-	// have expired.
-	select {
-	case executeErr := <-done:
-		if executeErr != nil {
-			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
+		stateDir, err := deps.StateDir()
+		if err != nil {
+			t.Fatalf("state dir: %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("recovery did not return promptly even though the fold removed the synchronous wait for the stalled write")
-	}
+		release := recoveryStallAuditWrite(t, stateDir)
+		// Join the real late writer before the seam and TempDir cleanups, even
+		// when an assertion calls Fatal before the normal release point.
+		defer func() {
+			release()
+			synctest.Wait()
+		}()
 
-	// Only now -- well after recovery has returned -- let the original
-	// worker's write land, simulating (and exceeding) the round-2 repro's
-	// "released after the grace window expired" timing.
-	release()
+		respawnDispatched := make(chan struct{})
+		deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
+			calls.order = append(calls.order, "respawn")
+			calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
+			close(respawnDispatched)
+			return api.RespawnResult{Success: true}, nil
+		}
 
-	var raw []byte
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+		done := make(chan error, 1)
+		go func() {
+			_, executeErr := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+			done <- executeErr
+		}()
+
+		select {
+		case <-respawnDispatched:
+		case <-time.After(time.Second):
+			t.Fatal("respawn was not dispatched while the audit write was stalled")
+		}
+		// Keep the existing budget and return-before-release assertion. The
+		// bubble clock advances for the blocked emit, not for filesystem latency.
+		select {
+		case executeErr := <-done:
+			if executeErr != nil {
+				t.Fatalf("ExecuteWithDependencies: %v", executeErr)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("recovery did not return promptly even though the fold removed the synchronous wait for the stalled write")
+		}
+
+		if got := recoveryPendingCarrierCount(t, stateDir); got != 1 {
+			t.Fatalf("pending committed-audit carriers=%d want=1 before writer release", got)
+		}
+		logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+		if got := api.SupervisorEventLockStateForPath(logPath); got != api.SupervisorEventLockOutstanding {
+			t.Fatalf("audit lock before release=%q want=%q", got, api.SupervisorEventLockOutstanding)
+		}
+
+		// Only recovery's return permits the original writer to finish. Waiting
+		// for bubble quiescence joins its write and lock release before replay;
+		// synctest.Test also requires every spawned goroutine to exit.
+		release()
+		synctest.Wait()
+		if got := api.SupervisorEventLockStateForPath(logPath); got != api.SupervisorEventLockReleased {
+			t.Fatalf("audit lock after writer settlement=%q want=%q", got, api.SupervisorEventLockReleased)
+		}
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("read event log: %v", err)
+		}
+		if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
+			t.Fatalf("late original audit row count=%d want exactly 1 before replay; log=%s", got, raw)
+		}
+		replayRecoveryPending(t, stateDir)
 		raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
-		if err == nil && strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`) >= 1 {
-			break
+		if err != nil {
+			t.Fatalf("read replayed event log: %v", err)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("committed-kill audit row never landed after release; last read err=%v raw=%s", err, raw)
+		if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
+			t.Fatalf("committed-kill audit row count=%d, want exactly 1 (duplicate audit row); log=%s", got, raw)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	// Give any (incorrect) second writer a further window to land before
-	// the final count -- otherwise a reintroduced duplicate could race
-	// past this check and the test would falsely report success.
-	time.Sleep(200 * time.Millisecond)
-	raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
-	if err != nil {
-		t.Fatalf("read event log: %v", err)
-	}
-	replayRecoveryPending(t, stateDir)
-	raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
-	if err != nil {
-		t.Fatalf("read replayed event log: %v", err)
-	}
-	if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
-		t.Fatalf("committed-kill audit row count=%d, want exactly 1 (duplicate audit row); log=%s", got, raw)
-	}
-	if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
-		t.Fatalf("pending committed-audit carriers after exact-row replay=%d want=0", got)
-	}
+		if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
+			t.Fatalf("pending committed-audit carriers after exact-row replay=%d want=0", got)
+		}
+	})
 }
 
 func TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce(t *testing.T) {
