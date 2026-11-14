@@ -638,5 +638,7 @@ pub unsafe extern "C" fn mh_release1(slot: *mut *mut Owner, out: *mut Outcome, b
     OK
 }
 
+mod identity;
+
 #[cfg(test)]
 mod tests;

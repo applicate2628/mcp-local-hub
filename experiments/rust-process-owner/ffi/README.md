@@ -1,6 +1,6 @@
 # Go ↔ Rust owner: experimental C ABI
 
-**Status:** isolated Windows x86_64 calling-side experiment. This is not a Hub backend, a stable product SDK, a sandbox, or an automatic replacement for Go process ownership. It depends on the unchanged [native-owner experiment](../README.md) from PR #625; the foreign-boundary PR targets that branch so the native implementation is not duplicated in its review diff.
+**Status:** isolated Windows x86_64 calling-side experiment. This is not a Hub backend, a stable product SDK, a sandbox, or an automatic replacement for Go process ownership. Its current [native dependency](../README.md) is [identity PR #644](https://github.com/applicate2628/mcp-local-hub/pull/644), based on [native-owner PR #625](https://github.com/applicate2628/mcp-local-hub/pull/625). The intended review base of existing [foreign-boundary PR #631](https://github.com/applicate2628/mcp-local-hub/pull/631) is #644, keeping native observations and their evidence outside this boundary's own review diff.
 
 ## Contents
 
@@ -9,13 +9,15 @@
 3. [Explicit environment](#explicit-environment)
 4. [Explicit standard streams](#explicit-standard-streams)
 5. [Checked original-process admission](#checked-original-process-admission)
-6. [Memory, concurrency and failures](#memory-concurrency-and-failures)
-7. [Cancelable observation and pipe settlement](#cancelable-observation-and-pipe-settlement)
-8. [Native cleanup across the DLL boundary](#native-cleanup-across-the-dll-boundary)
-9. [Loader refusals and module ownership](#loader-refusals-and-module-ownership)
-10. [Evidence](#evidence)
-11. [Reproduction](#reproduction)
-12. [Remaining gates and references](#remaining-gates-and-references)
+6. [Additive identity protocol](#additive-identity-protocol)
+7. [Memory, concurrency and failures](#memory-concurrency-and-failures)
+8. [Cancelable observation and pipe settlement](#cancelable-observation-and-pipe-settlement)
+9. [Native cleanup across the DLL boundary](#native-cleanup-across-the-dll-boundary)
+10. [Loader refusals and module ownership](#loader-refusals-and-module-ownership)
+11. [Evidence](#evidence)
+12. [Reproduction](#reproduction)
+13. [Remaining gates and references](#remaining-gates-and-references)
+14. [Terms and abbreviations](#terms-and-abbreviations)
 
 ## Scope and ownership
 
@@ -23,7 +25,7 @@
 
 The boundary creates a suspended child with an absolute executable and explicit absolute working directory. The original `New` / `mh_create1` retains its **complete empty environment** behavior; additive `NewWithEnvironment` / `mh_create_env1` supplies a complete explicit set of ordinary environment entries. Those two paths retain no-redirection behavior. `NewWithStdio` / `mh_create_io1` now explicitly combine the full environment with three standard streams through the same native creation core. This is not full parity with current Go launch policy or a complete I/O pump. No parent environment/cwd mutation or implicit inheritance fallback is added.
 
-Go can supply an allow/deny decision, request stop, observe finite settlement, then explicitly release the terminal owner. The boolean is **not** a process-identity or authorization proof. Raw `ProcessView` and its OS handle are never exported. `AdmitChecked` now invokes Go policy with a copied PID/image-name observation from that original view before native resume; the complete product admission policy and additional identity fields remain separate gates. The returned PID is diagnostic, never authority to reopen/kill a process.
+Go can supply an allow/deny decision, request stop, observe finite settlement, then explicitly release the terminal owner. The boolean is **not** a process-identity or authorization proof. Raw `ProcessView` and its OS handle are never exported. `AdmitChecked` preserves the existing copied PID/image-name callback. Additive `AdmitIdentity` supplies creation time, original-Job membership, wait state and binary TokenUser SID as well, using the same original view before native resume. Product capability, SID-formatting evidence and the complete product admission policy remain separate gates. The returned PID is diagnostic, never authority to reopen/kill a process.
 
 **Table 1. Owner transitions.**
 
@@ -42,7 +44,7 @@ Go can supply an allow/deny decision, request stop, observe finite settlement, t
 
 The manually maintained [C header](include/owner_v1.h) is small and verified by both C compile-time assertions and Rust layout tests. `mh_version1` negotiates ABI 1; creation carries a version/reserved field and an exact request byte size. Every operation receives an exact output-buffer size. A mismatch is rejected before native work; no forward-layout guessing or variable-sized Rust types cross the boundary.
 
-Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and additive `mh_admit_checked1` / `mh_create_env1` / `mh_create_io1`. The ABI-1 structure layouts stay unchanged. This updated Go loader requires these additive exports and refuses older DLLs without them; it never silently falls back to unchecked admission. Symbols and numeric values in the header are the source of truth for this experiment, not a promise to keep them as the future product API.
+Existing exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and `mh_admit_checked1` / `mh_create_env1` / `mh_create_io1`. The loader continues to require that established ABI1 baseline. New `mh_admit_identity1` is resolved optionally and has a separately versioned [identity header](include/identity_v1.h); absence is reported when identity admission is requested. `mh_version1` still returns 1 and all existing ABI1 layouts/exports remain unchanged. No missing symbol causes automatic fallback to weaker admission. Symbols and numeric values in the headers are the source of truth for this experiment, not a promise to keep them as the future product API.
 
 **Table 2. Separate facts in `mh_out`.**
 
@@ -81,17 +83,19 @@ resource remains allocated solely from an error response. Valid CleanupFailed
 reports with any of the seven nonempty thread/process/Job masks are accepted
 without turning them into Complete or losing exit259 and the individual codes.
 
-The [outcome report](verification/outcome-2026-11-14/RESULTS.md) distinguishes
+The [outcome report](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/outcome-2026-11-14/RESULTS.md) distinguishes
 17 deliberately inconsistent return variants, seven valid serialized cleanup
 reports, two prior handoff regressions, and separately repeated **actual**
 Windows close-failure tests. The fixture DLL changes only return values after
 real native settlement; it is not evidence that the ordinary Rust producer
 emitted those contradictions and not protection from hostile in-process code.
 
-The [merged-master admission comparison](verification/outcome-2026-11-14/ADMISSION-PARITY.md)
-records that #616 is now merged. The original PID/image observation still lacks
-fields required by the accepted Go creator-identity contract. Those are explicit
-remaining gates, not permissions to fill missing identity with defaults.
+The [merged-master admission comparison](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/outcome-2026-11-14/ADMISSION-PARITY.md)
+records #616's merge and the earlier PID/image-only boundary at the frozen
+source. Its not-yet-exported rows are historical: the additive identity protocol
+below now transports the native birth, Job, wait and binary SID observations.
+The accepted Go creator capability and validated SID-formatting receipt still
+require product integration; missing capability is never supplied by defaults.
 
 ## Explicit environment
 
@@ -198,7 +202,7 @@ There is no shell, inherited-default fallback, I/O worker or finalizer added her
 
 ## Checked original-process admission
 
-`Owner.AdmitChecked(func(ProcessObservation) error)` runs policy synchronously **inside** the existing `NativeOwner::admit_and_resume` closure. The child has not been resumed by this owner yet. Rust calls `ProcessView.process_id()` and `ProcessView.image_path()` using the original retained process handle, not `OpenProcess(PID)` or a stored create-path string. Only the resulting PID and UTF-16 image name cross the callback; the Go handler copies the image into Go-owned memory before policy/GC/retention.
+**Existing PID/image path.** `Owner.AdmitChecked(func(ProcessObservation) error)` runs policy synchronously **inside** the existing `NativeOwner::admit_and_resume` closure. The child has not been resumed by this owner yet. Rust calls `ProcessView.process_id()` and `ProcessView.image_path()` using the original retained process handle, not `OpenProcess(PID)` or a stored create-path string. Only the resulting PID and UTF-16 image name cross the callback; the Go handler copies the image into Go-owned memory before policy/GC/retention.
 
 **Table 4. Checked admission semantics.**
 
@@ -216,7 +220,37 @@ A temporary `runtime/cgo.Handle` carries a Go-side policy record as an integer t
 
 The owner mutex stays held through policy and native resume/denial, so another owner call cannot race its release. **Policy must return and must not reenter this owner, wait for another operation on it, call `runtime.Goexit`, use longjmp, or let an exception escape through C.** A blocked policy is not made cancellable by this API. There is no guarantee against external actors independently altering a process. Panics in this Go policy are contained, but native/Rust panic or fatal runtime failure still has the fail-stop limitation below.
 
-PID/image name is a bounded observation, **not** a hash/signature, executable-file identity guarantee, process-token/user identity, creation-time attestation or a sandbox. Go supplies the actual decision rules. The old boolean `Admit` remains only as the original low-level experiment; it is not transformed into checked product policy. Product admission parity is not claimed by a successful path comparison.
+PID/image name in this existing two-field API is a bounded observation, **not** a hash/signature, executable-file identity guarantee, process-token/user identity, creation-time attestation or a sandbox. The additive identity API below supplies its additional native facts explicitly. Go supplies the actual decision rules. The old boolean `Admit` remains only as the original low-level experiment; it is not transformed into checked product policy. Product admission parity is not claimed by a successful path comparison.
+
+## Additive identity protocol
+
+`Owner.AdmitIdentity(func(IdentityObservation) error) (Outcome, error)` uses optional export `mh_admit_identity1` and the separate version-1 structures in [identity_v1.h](include/identity_v1.h). The same native owner supplies the observations inside its existing single-use admission. There is no second process lookup, owner registry or callback stored after return.
+
+**Table 5. Identity protocol and ownership contract.**
+
+| Surface | Contract |
+|---|---|
+| `mh_identity` | Fixed 120-byte Windows AMD64 callback structure: size/version, PID, typed Job membership, creation time, typed wait state, SID length, UTF-16 image view, inline 68-byte SID storage and zero reserved field |
+| `mh_identity_report` | Separate 24-byte output: size/version, collection stage, query-error kind/native code and independent token-close code. Existing `mh_out` stays 48 bytes |
+| Creation binding | Nonzero `CreationTime100ns`, in 100 ns intervals since 1601-01-01 UTC, freshly checked against the original native creation binding |
+| Exact Job and wait | `OriginalJobMembership` is `JobMember` or `JobNotMember`; `WaitState` is `IdentityNotSignaled` or `IdentitySignaled`. Unknown values are rejected. NotSignaled includes a suspended process and does not promise future execution |
+| Copied values | `ImagePathUTF16 []uint16` and `TokenUserSID []byte` are copied into Go-owned memory before policy runs. UTF-16 units are preserved without an implicit lossy string conversion. SID is binary, not formatted text |
+| Successful collection | Every requested native query and explicit token close succeeded before the policy callback. COMPLETE describes observation collection, not policy approval, resume or process settlement |
+| Observation failure | No policy invocation; admission is consumed and `MH_STATE` accompanies the separate typed report. Query and token-close failures can coexist; no successful SID is exposed after failed token close |
+| Unsupported export | `Open` may load the established ABI1 DLL without the new symbol. `AdmitIdentity` returns `ErrIdentityUnsupported` before native admission, without substituting `AdmitChecked` or boolean `Admit` |
+| Policy decision | Nil policy is rejected before admission. A real policy rejection, contained panic or invalid callback observation denies the attempted single-use admission and leaves the same owner available for explicit stop/finish/release |
+
+`IdentityObservation` contains `PID`, `CreationTime100ns`, `OriginalJobMembership`, `WaitState`, `ImagePathUTF16` and `TokenUserSID`. There is no independent RootAlive boolean to drift from the wait result. Native values are individual observations rather than an atomic snapshot. The protocol's original at-create Job binding comes from the existing native owner's construction and its retained `ProcessView`; a caller-created value does not reproduce that authority.
+
+The Go boundary checks structure sizes/versions, nonzero PID and creation time, known Job/wait values, image bounds, SID length/revision/subauthority shape, zero unused SID bytes and the reserved field. An observed NotSignaled root outside its original Job is rejected before policy. Native pointer validity still depends on the explicit in-process foreign-caller contract; structural validation is not a hostile-memory sandbox.
+
+`IdentityError` exposes `Stage`, `Kind`, `NativeError` and `TokenCloseError` through `errors.As`; its unwrapping retains both OS error causes when both are present. Token cleanup does not use the existing thread/process/Job bits in `mh_out.cleanup_mask`. Report stages distinguish collection not started, the failing PID/image/creation/Job/wait/token query and completed collection. A close-only token failure has no invented query error. Invalid protocol data uses the existing `ErrAdmissionObservation`; policy panic uses `ErrAdmissionPanic`.
+
+A NONE report only means collection did not start. It does not authorize replay after an unknown result or an owner-state refusal. Only a known local capability or argument/version preflight refusal establishes that this call did not consume admission. Once native admission is attempted, there is no automatic second attempt through an older export. A COMPLETE report remains complete if policy rejects or a later native wait/resume fails; the ordinary outcome/error still reports that separate result.
+
+The original owner mutex remains held across observation, policy and native return. The callback must return normally and obey the same non-reentry/no-Goexit restrictions as `AdmitChecked`. Its call-scoped `cgo.Handle` is removed after native return. The callback receives no raw process/token handle, and Go never frees or retains a Rust allocation.
+
+This protocol does **not** construct the product's `CreatorIdentity` capability or `SIDFormatObservation`. The latter records SID-to-text conversion, input binding and associated native allocation/free outcomes; copied bytes, text or a digest cannot recreate its private issuer. Product context/custody, identity-in-flight and retirement rules, actual policy integration and executable-file admission remain open. See the [current identity report](verification/identity-2026-11-15/RESULTS.md) for the exact implementation snapshot, completed checks and remaining qualification.
 
 ## Memory, concurrency and failures
 
@@ -238,7 +272,7 @@ The C shim loads only the caller-supplied absolute DLL path with `LOAD_LIBRARY_S
 
 `Owner.FinishContext(ctx)` waits for native settlement, a native error, or cancellation **of this observer**. It does not call `Stop`, release the owner, close streams or retry a remote effect. The existing Rust owner, ABI and synchronous `Finish(milliseconds)` are unchanged.
 
-**Table 5. Separate cancellation and completion facts.**
+**Table 6. Separate cancellation and completion facts.**
 
 | Situation | Result |
 |---|---|
@@ -267,18 +301,20 @@ This qualifies these Windows pipe profiles and finite payloads, not all files/so
 
 ## Native cleanup across the DLL boundary
 
-The [protected-close qualification](verification/native-cleanup-2026-11-14/RESULTS.md)
-now exercises actual Windows CloseHandle failures through the existing Rust DLL
+**Historical milestone:** the linked results and runner are pinned to the frozen ABI1 source; they are not new qualification of every later head.
+
+The [protected-close qualification](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/native-cleanup-2026-11-14/RESULTS.md)
+records actual Windows CloseHandle failures through the existing Rust DLL
 into Go, rather than inferring that path from separate native/unit tests. It
 covers all seven nonempty thread/process/Job failure masks through both Finish
 and FinishContext, preserves root exit259 and each real error, and checks cached
-failure after explicit test recovery. The ordinary runtime and ABI are unchanged.
+failure after explicit test recovery. That qualification milestone left the ordinary runtime and ABI unchanged.
 
-The [reproducible runner](verification/native-cleanup-2026-11-14/run.ps1) adds a
+The [reproducible runner](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/native-cleanup-2026-11-14/run.ps1) adds a
 read-only accessor only in a disposable source copy, not the normal DLL. Tests
 verify that normal debug/release artifacts lack that accessor. Test-only recovery
 of continuously protected original handles is not general production recovery
-or authority to retry unknown/stale numeric handles. See the [method and limits](verification/native-cleanup-2026-11-14/README.md).
+or authority to retry unknown/stale numeric handles. See the [method and limits](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/native-cleanup-2026-11-14/README.md).
 
 Three functions are enabled only under `ffi_native_faults`: two behavioral tests
 (with14 matrix subcases) and one ordinary-artifact absence control. They are
@@ -288,11 +324,13 @@ remain separate gates.
 
 ## Loader refusals and module ownership
 
-[Native loader qualification](verification/loader-2026-11-14/RESULTS.md) now
-covers individually missing required exports, unsupported ABI versions, native
+**Historical milestone:** this required-export qualification predates the optional identity export. Its exact source and results remain pinned below; current optional-symbol behavior is specified in Table 5.
+
+[Native loader qualification](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/loader-2026-11-14/RESULTS.md) now
+covers individually missing required baseline exports, unsupported ABI versions, native
 image/initialization/dependency failures, independent module references, Unicode
 paths and the explicit dependency-search policy. Seven opt-in functions with20
-subcases run against benign owned DLLs; the ordinary loader was not changed.
+subcases run against benign owned DLLs; that milestone did not change the ordinary loader.
 
 Three deliberately wrong bridge copies are rejected: a retained reference after
 refusal, acceptance of a wrong version, and unintended CWD/PATH dependency
@@ -303,14 +341,16 @@ test assumption and invalid first mutation attempt, both preserved as failures.
 
 ## Evidence
 
-**Table 6. Independent verification layers.**
+The [current identity report](verification/identity-2026-11-15/RESULTS.md) records the new increment's source identities, actual completed runs and limitations. The [verification/archive index](verification/README.md) locates current evidence and preserved history. The counts and milestone narratives below belong to frozen source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07`; they are not the current identity increment's final suite totals.
+
+**Table 7. Historical verification layers at the frozen ABI1 baseline.**
 
 | Layer | What it establishes | What it does not establish |
 |---|---|---|
 | 49 normal Go test functions (47 existing functions plus 2 outcome-value contract functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes, cancelable observation, original-result preservation and owned pipe completion and consistent outcome values | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
 | 14 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
 | Optional `ffi_outcome_faults` and prior handoff regressions | Real foreign calls reject inconsistent serialized outcomes, preserve valid cleanup reports and retain allocation custody after late metadata errors | Native producer spontaneously emitting those contradictions, hostile-native-code isolation or new kernel-failure injection |
-| Existing owner suite | Unchanged native owner behavior against its own full tests | Calling-boundary properties by itself |
+| Native owner suite at that baseline | Behavior of the native source used by that historical run | Calling-boundary properties by itself or qualification of a later native head |
 | Optional `ffi_faults` tests | Ownership-transfer bookkeeping even when an owned test DLL reports malformed create/release metadata | A guarantee that hostile/broken arbitrary native code is safe |
 
 The initial DLL exported callable symbols but always rejected creation. The Go tests compiled, loaded the DLL and failed at the missing behavior. After implementation they passed. Further temporary mutations permitting early release and suppressing native error codes were rejected by the normal Go tests. All mutations were removed before final builds.
@@ -332,16 +372,13 @@ Additional optional checks select `TestCheckedAdmissionRejectsMalformedObservati
 `TestCheckedAdmissionMissingExportFailsClosed` with `checked-no-symbol` uses the prior owned DLL, whose artifact hash is recorded before replacement; missing-export code 127 distinguishes this from an unrelated loader failure. It checks refusal rather than silently using the old boolean entry point. There are five optional test functions: the prior two metadata functions and these three new functions; observation variants share one test function, not four independent functions.
 Restore the exact source bytes and rebuild the normal DLL after each check. Do not use a mutated DLL for ordinary execution or a shared installation. A negative DLL is not a new supported implementation. The ordinary test assertions, not the temporary mutations, are shipped.
 
-See the [cancelable-observation report](verification/cancellation-2026-11-14/RESULTS.md) and [executable negative controls](verification/cancellation-2026-11-14/mutations.ps1) for the current increment. This includes the initial failing implementation stub and native test assumptions, not only the final success.
+See the [cancelable-observation report](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/RESULTS.md) and [executable negative controls](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/mutations.ps1) for that earlier cancellation increment. This includes the initial failing implementation stub and native test assumptions, not only the final success.
 
 ### PR-durable results
 
-[Verification index](verification/README.md) and [execution ledger](verification/PROGRESS.md)
-are committed in this PR. Historical logs for the native dependency and earlier
-FFI stages include successes, negative controls, failures and source hashes;
-they are explicitly historical rather than claims about every later head.
+[Current verification/archive index](verification/README.md) identifies the preserved packages and current report. The [historical execution ledger](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/PROGRESS.md) remains available at its exact source commit. Earlier native/FFI evidence retains successes, negative controls, failures and source hashes without presenting those records as fresh qualification of later heads.
 
-The current environment run also records its initially failing tests, precise
+The historical environment run also records its initially failing tests, precise
 negative mutations and correction of a test-only Clippy warning. A copied-buffer
 unit test first mutated input without reading the changed local value; adding an
 assertion made that test intent explicit instead of suppressing the lint.
@@ -358,9 +395,17 @@ missing-symbol code127. Neither test is counted among the normal functions.
 
 ## Reproduction
 
+### Current identity increment
+
+Use the [current identity report](verification/identity-2026-11-15/RESULTS.md) for the exact source combination, existing toolchain/cache paths, current qualification runner and any frozen old-DLL compatibility inputs. The old milestone scripts below are preserved for reproducing their own immutable sources.
+
+### Frozen ABI1 baseline
+
+The following procedure and command examples belong to source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07`. Run them from that historical checkout when reproducing the earlier baseline; archived paths are not a promise that every historical script remains at the same location in the current tree.
+
 Prerequisites: existing Windows x86_64 Rust/MSVC target, Go with cgo, and a working local C compiler. No tools, crates or Go modules are downloaded by this procedure. The new lockfile resolves only the path dependency and the same pinned Windows crates already used by the owner. The Go module uses the standard library only.
 
-The self-contained [verification/run.ps1](verification/run.ps1) sets all writable
+The historical self-contained [verification/run.ps1](https://github.com/applicate2628/mcp-local-hub/blob/eb4ca1d40244ba1915638b76c3e30b2a684d9b07/experiments/rust-process-owner/ffi/verification/run.ps1) sets all writable
 paths under the user-approved `D:\dev\ChatGPT`, uses existing tools/cache only,
 refuses to overwrite a previous report, and commits no side effects itself:
 
@@ -409,9 +454,9 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus loader/unload failures beyond the selected fixture profiles, allocator and panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: integrate the native identity observations with the actual Go creator capability, validated SID-formatting/resource receipt and required context/custody/retirement rules; qualify executable-file identity and the actual admission policy; extend the existing explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus loader/unload failures beyond the selected fixture profiles, allocator and panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
-The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
+This PR owns the foreign boundary; its required native observations are supplied by #644 on top of #625. Keeping #644 as the intended review base preserves that responsibility split. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. Windows experimental observations and compatibility evidence do not complete the product migration.
 
 References:
 
@@ -431,4 +476,8 @@ References:
 14. [Microsoft CancelIoEx: cancellation request is not completion](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex).
 15. [Microsoft PeekNamedPipe: available data observation](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-peeknamedpipe).
 
-Terms: ABI — application binary interface; FFI — foreign function interface; DLL — dynamic-link library; cgo — Go's C interoperability tool; UTF-16 — 16-bit Unicode encoding; PID — process identifier; OS — operating system. Input lengths are UTF-16 code units, not bytes or Unicode character counts. Timeouts are milliseconds. No formula or platform guarantee is inferred from a passing compile alone.
+## Terms and abbreviations
+
+ABI — application binary interface; FFI — foreign-function interface; DLL — dynamic-link library; SDK — software development kit; cgo — Go's C interoperability tool; UTF-8/UTF-16 — Unicode encoding forms using 8-bit/16-bit code units; PID — process identifier; SID — Windows security identifier; OS — operating system; GC — garbage collection; UTC — Coordinated Universal Time; AMD64/x86_64 — 64-bit x86 architecture. A Job is the retained Windows process-group resource. A capability is the existing owner's restricted authority, not a diagnostic value. `SIDFormatObservation` is the accepted Go object's conversion/input-binding/resource-cleanup receipt.
+
+Input lengths are UTF-16 code units, not bytes or Unicode character counts. Timeouts are milliseconds; `CreationTime100ns` counts 100 ns intervals since 1601-01-01 UTC. No platform guarantee is inferred from a passing compile alone.

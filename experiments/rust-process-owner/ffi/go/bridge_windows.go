@@ -8,7 +8,7 @@ package caller
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../include/owner_v1.h"
+#include "../include/identity_v1.h"
 typedef struct {
     HMODULE module;
     mh_create_fn create;
@@ -19,6 +19,7 @@ typedef struct {
     mh_finish_fn finish;
     mh_release_fn release;
     mh_admit_checked_fn admit_checked;
+    mh_admit_identity_fn admit_identity;
 } bridge;
 static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     bridge *b = (bridge*)calloc(1, sizeof(*b));
@@ -42,6 +43,13 @@ static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     RESOLVE(b->create_io,"mh_create_io1");
 #undef RESOLVE
     if (version()!=1) { *error=ERROR_REVISION_MISMATCH; goto fail; }
+    // Optional identity protocol: old ABI1 DLLs still load. Its absence is
+    // rejected at AdmitIdentity, never downgraded to PID/image admission.
+    p=GetProcAddress(b->module,"mh_admit_identity1");
+    if (p) {
+        _Static_assert(sizeof(b->admit_identity)==sizeof(p), "identity function pointer size");
+        memcpy(&b->admit_identity,&p,sizeof(b->admit_identity));
+    }
     return b;
 fail:
     FreeLibrary(b->module); free(b); return NULL;
@@ -73,6 +81,15 @@ static uint32_t bridge_check(uint32_t pid, const uint16_t *image, size_t n, uint
 }
 static uint32_t bridge_checked(bridge *b,mh_owner *p,uintptr_t token,mh_out *o) {
     return b->admit_checked(p,bridge_check,token,o,sizeof(*o));
+}
+extern uint32_t mh_go_identity(mh_identity*, uint32_t, uintptr_t);
+static uint32_t bridge_identity_check(const mh_identity *v, uint32_t bytes, uintptr_t token) {
+    // cgo's generated declaration is mutable; the handler only reads and copies.
+    return mh_go_identity((mh_identity*)v,bytes,token);
+}
+static int bridge_has_identity(bridge *b) { return b->admit_identity != NULL; }
+static uint32_t bridge_identity(bridge *b,mh_owner *p,uintptr_t token,mh_identity_report *r,mh_out *o) {
+    return b->admit_identity(p,MH_ID_VERSION,bridge_identity_check,token,r,sizeof(*r),o,sizeof(*o));
 }
 */
 import "C"
@@ -400,4 +417,45 @@ func (o *Owner) AdmitChecked(check func(ProcessObservation) error) (Outcome, err
 		err = errors.New("checked admission returned without one policy decision")
 	}
 	return observed, errors.Join(err, state.err)
+}
+
+// AdmitIdentity requires the optional identity protocol. Unsupported libraries,
+// a nil policy and a released owner are rejected before native admission.
+// Policy runs under the same owner mutex and receives only Go-owned values.
+// It must return normally and must not reenter this owner; panics become denial.
+func (o *Owner) AdmitIdentity(check func(IdentityObservation) error) (Outcome, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.raw == nil {
+		return Outcome{}, errors.New("owner released")
+	}
+	if check == nil {
+		return Outcome{}, &CallError{argument, 0}
+	}
+	if C.bridge_has_identity(o.lib.raw) == 0 {
+		return Outcome{}, ErrIdentityUnsupported
+	}
+	state := &identityCall{check: check}
+	token := cgo.NewHandle(state)
+	defer token.Delete()
+	var report C.mh_identity_report
+	var out C.mh_out
+	status := C.bridge_identity(o.lib.raw, o.raw, C.uintptr_t(token), &report, &out)
+	observed, err := result(status, out)
+	stage, reportErr := identityReportResult(report)
+	switch stage {
+	case IdentityStageNone:
+		if status == 0 || state.calls != 0 {
+			reportErr = errors.Join(reportErr, invalidIdentity("missing identity observation"))
+		}
+	case IdentityStageComplete:
+		if state.calls != 1 {
+			reportErr = errors.Join(reportErr, invalidIdentity("completed report without one callback"))
+		}
+	default:
+		if uint32(status) != invalidState || state.calls != 0 {
+			reportErr = errors.Join(reportErr, invalidIdentity("query failure contradicts admission outcome"))
+		}
+	}
+	return observed, errors.Join(err, reportErr, state.err)
 }
