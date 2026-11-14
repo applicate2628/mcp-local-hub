@@ -46,6 +46,19 @@ typedef uint32_t (*mh_create_fn)(const mh_create*, uint32_t, mh_owner**, mh_out*
  * admission and release rules are identical. env_bytes is sizeof(mh_environment). */
 typedef uint32_t (*mh_create_env_fn)(const mh_create*, uint32_t,
     const mh_environment*, uint32_t, mh_owner**, mh_out*, uint32_t);
+/* Additive explicit stdio create, ABI1 request/outcome layouts unchanged.
+ * context and nested env are immutable until return. Three REAL, live,
+ * inheritable disk/pipe handles borrowed from caller; no pseudo handles.
+ * The DLL never changes source flags or closes these values. Caller owns
+ * lifetime through synchronous CreateProcess and may close after return.
+ * Raw handle validity is a native caller obligation, not a sandbox promise. */
+typedef struct { uintptr_t stdin_handle, stdout_handle, stderr_handle; } mh_stdio;
+typedef struct { mh_environment environment; mh_stdio streams; } mh_io_context;
+typedef uint32_t (*mh_create_io_fn)(const mh_create*,uint32_t,const mh_io_context*,uint32_t,mh_owner**,mh_out*,uint32_t);
+#if UINTPTR_MAX == UINT64_MAX
+_Static_assert(sizeof(mh_stdio)==24 && sizeof(mh_io_context)==40, "stdio context layout");
+_Static_assert(offsetof(mh_io_context,streams)==16, "stdio context offset");
+#endif
 /* Allow/deny is the caller's decision, not authorization or image validation.
  * A valid deny consumes the same one-shot NativeOwner admission as allow. */
 typedef uint32_t (*mh_admit_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);

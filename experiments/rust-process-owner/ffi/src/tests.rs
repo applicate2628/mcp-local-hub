@@ -346,3 +346,39 @@ fn extended_environment_request_rejects_wrong_size_without_creation() {
     assert!(owner.is_null());
     assert_eq!(out.pid, 0);
 }
+
+#[test]
+fn stdio_context_layout_matches_the_c_header() {
+    assert_eq!(size_of::<StandardStreams>(), 24);
+    assert_eq!(size_of::<IoContext>(), 40);
+    assert_eq!(offset_of!(IoContext, streams), 16);
+}
+#[test]
+fn stdio_sentinels_are_rejected_before_forming_native_borrows() {
+    for value in [0, usize::MAX, usize::MAX - 1, usize::MAX - 5] {
+        let streams = StandardStreams {
+            stdin: value,
+            stdout: value,
+            stderr: value,
+        };
+        // SAFETY: only defined structural errors, no invalid real-handle borrow.
+        assert!(matches!(unsafe { streams.borrow() }, Err(ARGUMENT)));
+    }
+}
+#[test]
+fn stdio_context_rejects_wrong_size_and_null_before_acquisition() {
+    let mut owner = ptr::null_mut();
+    let mut out = Outcome::default();
+    // SAFETY: valid output/slot; invalid layout/null rejected before any dereference.
+    assert_eq!(
+        unsafe { mh_create_io1(ptr::null(), 56, ptr::null(), 0, &mut owner, &mut out, 48) },
+        ABI
+    );
+    assert!(owner.is_null());
+    assert_eq!(
+        unsafe { mh_create_io1(ptr::null(), 56, ptr::null(), 40, &mut owner, &mut out, 48) },
+        ARGUMENT
+    );
+    assert!(owner.is_null());
+    assert_eq!(out.pid, 0);
+}

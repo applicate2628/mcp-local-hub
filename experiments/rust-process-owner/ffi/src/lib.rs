@@ -3,12 +3,15 @@
 //! checking a numeric address. extern C never unwinds; panic/abort kills host.
 #![cfg(windows)]
 #![deny(unsafe_op_in_unsafe_fn)]
-use mcphub_process_owner_spike::{LaunchContext, NativeOwner, Settlement};
+use mcphub_process_owner_spike::{BorrowedStdio, LaunchContext, NativeOwner, Settlement};
 use std::{
     ffi::OsString,
     io,
     mem::size_of,
-    os::windows::ffi::{OsStrExt, OsStringExt},
+    os::windows::{
+        ffi::{OsStrExt, OsStringExt},
+        io::{BorrowedHandle, RawHandle},
+    },
     path::PathBuf,
     ptr, slice,
     time::Duration,
@@ -68,6 +71,39 @@ pub struct Outcome {
     cleanup_mask: u32,
     cleanup_codes: [i32; 3],
 }
+#[repr(C)]
+pub struct StandardStreams {
+    stdin: usize,
+    stdout: usize,
+    stderr: usize,
+}
+#[repr(C)]
+pub struct IoContext {
+    environment: Environment,
+    streams: StandardStreams,
+}
+impl StandardStreams {
+    /// The foreign owner guarantees real live handles for the entire create.
+    unsafe fn borrow(&self) -> Result<BorrowedStdio<'_>, u32> {
+        if [self.stdin, self.stdout, self.stderr]
+            .iter()
+            .any(|h| *h == 0 || *h >= usize::MAX - 5)
+        {
+            return Err(ARGUMENT); // NULL and documented pseudo-handle sentinels
+        }
+        // SAFETY: live, caller-retained real handle values by the FFI contract;
+        // the references live only through this synchronous creation. Native
+        // BorrowedStdio verifies category/inheritance before creating a process.
+        unsafe {
+            Ok(BorrowedStdio {
+                stdin: BorrowedHandle::borrow_raw(self.stdin as RawHandle),
+                stdout: BorrowedHandle::borrow_raw(self.stdout as RawHandle),
+                stderr: BorrowedHandle::borrow_raw(self.stderr as RawHandle),
+            })
+        }
+    }
+}
+
 // Opaque to C. Caller has exactly one owning slot; never a HANDLE or a PID.
 pub struct Owner {
     inner: NativeOwner,
@@ -247,7 +283,7 @@ pub unsafe extern "C" fn mh_create1(
     out_bytes: u32,
 ) -> u32 {
     // SAFETY: forward the unchanged ABI1 creation contract, with empty environment.
-    unsafe { create_impl(req, req_bytes, slot, out, out_bytes, None) }
+    unsafe { create_impl(req, req_bytes, slot, out, out_bytes, None, None) }
 }
 
 /// Create with a complete explicit environment, sharing the original creator.
@@ -266,7 +302,59 @@ pub unsafe extern "C" fn mh_create_env1(
     out_bytes: u32,
 ) -> u32 {
     // SAFETY: forward the caller contract; one common path owns validation/create.
-    unsafe { create_impl(req, req_bytes, slot, out, out_bytes, Some((env, env_bytes))) }
+    unsafe {
+        create_impl(
+            req,
+            req_bytes,
+            slot,
+            out,
+            out_bytes,
+            Some((env, env_bytes)),
+            None,
+        )
+    }
+}
+
+/// Create using explicit environment and borrowed standard streams.
+/// # Safety
+/// Same request/output/owner contracts as mh_create_env1. context points to a
+/// full initialized IoContext. Its three handles are real live inheritable file
+/// or pipe handles, not arbitrary integers; they remain open and unchanged until
+/// return. The DLL never closes, duplicates or mutates these caller-owned values.
+#[no_mangle]
+pub unsafe extern "C" fn mh_create_io1(
+    req: *const Create,
+    req_bytes: u32,
+    context: *const IoContext,
+    context_bytes: u32,
+    slot: *mut *mut Owner,
+    out: *mut Outcome,
+    out_bytes: u32,
+) -> u32 {
+    // SAFETY: initialize only the valid disjoint output supplied by the caller.
+    if let Err(code) = unsafe { output(out, out_bytes) } {
+        return code;
+    }
+    if context_bytes as usize != size_of::<IoContext>() {
+        return ABI;
+    }
+    if context.is_null() || !context.is_aligned() {
+        return ARGUMENT;
+    }
+    // SAFETY: caller-provided full immutable context, with nested lifetime rules.
+    let context = unsafe { &*context };
+    // SAFETY: same single creation mechanism, no handle ownership transferred.
+    unsafe {
+        create_impl(
+            req,
+            req_bytes,
+            slot,
+            out,
+            out_bytes,
+            Some((&context.environment, size_of::<Environment>() as u32)),
+            Some(&context.streams),
+        )
+    }
 }
 
 unsafe fn create_impl(
@@ -276,6 +364,7 @@ unsafe fn create_impl(
     out: *mut Outcome,
     out_bytes: u32,
     environment: Option<(*const Environment, u32)>,
+    streams: Option<&StandardStreams>,
 ) -> u32 {
     // SAFETY: valid exclusive caller output, or structural rejection.
     let out = match unsafe { output(out, out_bytes) } {
@@ -351,6 +440,14 @@ unsafe fn create_impl(
             }
         }
     };
+    let stdio = match streams {
+        None => None,
+        // SAFETY: inherited handle lifetime is part of the public create contract.
+        Some(streams) => match unsafe { streams.borrow() } {
+            Ok(value) => Some(value),
+            Err(code) => return code,
+        },
+    };
     match NativeOwner::create_suspended_with_context(
         &program,
         &args,
@@ -358,7 +455,7 @@ unsafe fn create_impl(
             current_dir: &cwd,
             environment: &environment,
         },
-        None,
+        stdio,
     ) {
         Ok(inner) => {
             let owner = Box::new(Owner {

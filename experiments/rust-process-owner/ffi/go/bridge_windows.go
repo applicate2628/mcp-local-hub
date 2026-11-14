@@ -13,6 +13,7 @@ typedef struct {
     HMODULE module;
     mh_create_fn create;
     mh_create_env_fn create_env;
+    mh_create_io_fn create_io;
     mh_admit_fn admit;
     mh_stop_fn stop;
     mh_finish_fn finish;
@@ -38,6 +39,7 @@ static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     RESOLVE(b->release,"mh_release1");
     RESOLVE(b->admit_checked,"mh_admit_checked1");
     RESOLVE(b->create_env,"mh_create_env1");
+    RESOLVE(b->create_io,"mh_create_io1");
 #undef RESOLVE
     if (version()!=1) { *error=ERROR_REVISION_MISMATCH; goto fail; }
     return b;
@@ -50,6 +52,11 @@ static uint32_t bridge_close(bridge *b) {
 }
 static uint32_t bridge_create(bridge *b, const mh_create *c, mh_owner **p, mh_out *o) {
     return b->create(c,sizeof(*c),p,o,sizeof(*o));
+}
+static uint32_t bridge_create_io(bridge *b,const mh_create *c,const mh_env_entry *entries,size_t count,
+    uintptr_t in,uintptr_t out,uintptr_t err,mh_owner **p,mh_out *o) {
+    mh_io_context context={{entries,count},{in,out,err}};
+    return b->create_io(c,sizeof(*c),&context,sizeof(context),p,o,sizeof(*o));
 }
 static uint32_t bridge_create_env(bridge *b,const mh_create *c,const mh_env_entry *entries,size_t count,mh_owner **p,mh_out *o) {
     mh_environment env={entries,count};
@@ -199,12 +206,12 @@ func (l *Library) New(program, cwd string, args []string) (*Owner, Outcome, erro
 // it may return both an owner and an error after native ownership transfers.
 // Retain every non-nil owner, even on error; never retry an unknown outcome.
 func (l *Library) NewWithEnvironment(program, cwd string, args []string, environment []EnvironmentEntry) (*Owner, Outcome, error) {
-	return l.newRequest(program, cwd, args, 1, environment, true)
+	return l.newRequest(program, cwd, args, 1, environment, true, nil)
 }
 func (l *Library) newVersion(program, cwd string, args []string, version uint32) (*Owner, Outcome, error) {
-	return l.newRequest(program, cwd, args, version, nil, false)
+	return l.newRequest(program, cwd, args, version, nil, false, nil)
 }
-func (l *Library) newRequest(program, cwd string, args []string, version uint32, environment []EnvironmentEntry, explicitEnvironment bool) (*Owner, Outcome, error) {
+func (l *Library) newRequest(program, cwd string, args []string, version uint32, environment []EnvironmentEntry, explicitEnvironment bool, streams *Stdio) (owner *Owner, observed Outcome, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.raw == nil {
@@ -271,7 +278,17 @@ func (l *Library) newRequest(program, cwd string, args []string, version uint32,
 	var ptr *C.mh_owner
 	var output C.mh_out
 	var status C.uint32_t
-	if explicitEnvironment {
+	if streams != nil {
+		copies, copyErr := duplicateStdio(*streams)
+		if copyErr != nil {
+			return nil, Outcome{}, copyErr
+		}
+		// Keep copy-close errors separate from native effects: an already
+		// returned owner survives even a late temporary-handle cleanup failure.
+		defer func() { err = errors.Join(err, copies.close()) }()
+		status = C.bridge_create_io(l.raw, &request, (*C.mh_env_entry)(envArray), C.size_t(len(environment)),
+			C.uintptr_t(copies[0]), C.uintptr_t(copies[1]), C.uintptr_t(copies[2]), &ptr, &output)
+	} else if explicitEnvironment {
 		status = C.bridge_create_env(l.raw, &request, (*C.mh_env_entry)(envArray), C.size_t(len(environment)), &ptr, &output)
 	} else {
 		status = C.bridge_create(l.raw, &request, &ptr, &output)
