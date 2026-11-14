@@ -380,6 +380,11 @@ func (w *windowsSerenaOwnedTree) observeStreams(ctx context.Context, handle wind
 			}
 			return decodeSerenaTreeStreams(raw, w.request.Limits)
 		}
+		// FileStreamInfo reports EOF when the object has no streams. The
+		// unused buffer is not a stream record; cancellation still wins.
+		if errors.Is(err, windows.ERROR_HANDLE_EOF) {
+			return nil, ctx.Err()
+		}
 		if !errors.Is(err, windows.ERROR_MORE_DATA) && !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
 			return nil, err
 		}
