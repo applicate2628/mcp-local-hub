@@ -1,0 +1,424 @@
+## fmt
+## debug
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running unittests src\lib.rs (<task-root>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 28 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test token_user::tests::copies_minimum_and_maximum_valid_sid_extents ... ok
+test token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities ... ok
+test token_user::tests::rejects_null_foreign_overlapping_and_misaligned_sid_pointers ... ok
+test token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::identity_initial_capture_error_is_not_repaired_by_later_success ... ok
+test windows::native_failure_tests::identity_job_query_failure_is_not_false_membership ... ok
+test windows::native_failure_tests::identity_membership_checks_exact_job_instead_of_any_job ... ok
+test windows::native_failure_tests::identity_process_query_failure_is_not_an_empty_observation ... ok
+test windows::native_failure_tests::identity_signaled_process_with_exit_259_is_not_alive_or_resumed ... ok
+test windows::native_failure_tests::identity_wait_failure_is_not_a_liveness_result ... ok
+test windows::native_failure_tests::identity_zero_or_changed_creation_binding_is_rejected ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::repeated_identity_observations_do_not_accumulate_handles ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner ... ok
+test windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes ... ok
+test windows::native_failure_tests::token_user_query_failure_preserves_native_error_and_closes_token ... ok
+test windows::native_failure_tests::token_user_repeated_observation_closes_handles_and_copy_survives ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running unittests src\bin\owner_child.rs (<task-root>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<task-root>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<task-root>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests\lifecycle.rs (<task-root>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 15 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test identity_observation_matches_child_and_does_not_resume_it ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test token_user_observation_matches_child_and_survives_settlement ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.07s
+
+     Running tests\owner_crash.rs (<task-root>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\stdio.rs (<task-root>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 240) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 106) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+## release
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\source\experiments\rust-process-owner)
+    Finished `release` profile [optimized] target(s) in 1.28s
+     Running unittests src\lib.rs (<task-root>\target\release\deps\mcphub_process_owner_spike-b478d0084b4e3761.exe)
+
+running 28 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test token_user::tests::copies_minimum_and_maximum_valid_sid_extents ... ok
+test token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities ... ok
+test token_user::tests::rejects_null_foreign_overlapping_and_misaligned_sid_pointers ... ok
+test token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::identity_initial_capture_error_is_not_repaired_by_later_success ... ok
+test windows::native_failure_tests::identity_job_query_failure_is_not_false_membership ... ok
+test windows::native_failure_tests::identity_membership_checks_exact_job_instead_of_any_job ... ok
+test windows::native_failure_tests::identity_process_query_failure_is_not_an_empty_observation ... ok
+test windows::native_failure_tests::identity_signaled_process_with_exit_259_is_not_alive_or_resumed ... ok
+test windows::native_failure_tests::identity_wait_failure_is_not_a_liveness_result ... ok
+test windows::native_failure_tests::identity_zero_or_changed_creation_binding_is_rejected ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::repeated_identity_observations_do_not_accumulate_handles ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner ... ok
+test windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes ... ok
+test windows::native_failure_tests::token_user_query_failure_preserves_native_error_and_closes_token ... ok
+test windows::native_failure_tests::token_user_repeated_observation_closes_handles_and_copy_survives ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running unittests src\bin\owner_child.rs (<task-root>\target\release\deps\owner_child-744f801171fca2c6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<task-root>\target\release\deps\owner_crash_fixture-76f284dbb358a7ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<task-root>\target\release\deps\launch_context-961cf2dda6b5df70.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests\lifecycle.rs (<task-root>\target\release\deps\lifecycle-ca7795dbe300e93c.exe)
+
+running 15 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test identity_observation_matches_child_and_does_not_resume_it ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test token_user_observation_matches_child_and_survives_settlement ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.35s
+
+     Running tests\owner_crash.rs (<task-root>\target\release\deps\owner_crash-b954f4d41e4aa395.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests\stdio.rs (<task-root>\target\release\deps\stdio-2425427e316e40c1.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 240) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 106) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+## clippy
+    Checking mcphub-process-owner-spike v0.0.0 (<task-root>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s
+## ambient-process
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\ambient-process)
+warning: unused variable: `process`
+  --> src\token_user.rs:69:5
+   |
+69 |     process: BorrowedHandle<'_>,
+   |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_process`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib test) generated 1 warning (run `cargo fix --lib -p mcphub-process-owner-spike --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.55s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner stdout ----
+
+thread 'windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner' (100212) panicked at src\native_failure_tests.rs:70:26:
+token lookup ignored retained process handle
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::token_user_open_failure_uses_original_process_and_keeps_owner
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+## ignore-close
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\ignore-close)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.75s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes stdout ----
+
+thread 'windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes' (79292) panicked at src\native_failure_tests.rs:204:18:
+protected token close became success or lost its receipt
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+## erase-query-error
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\erase-query-error)
+warning: unused variable: `result`
+   --> src\token_user.rs:102:10
+    |
+102 |         (result, Some(failure)) => Err(TokenUserError::Cleanup {
+    |          ^^^^^^ help: if this is intentional, prefix it with an underscore: `_result`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib test) generated 1 warning (run `cargo fix --lib -p mcphub-process-owner-spike --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes stdout ----
+
+thread 'windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes' (137384) panicked at src\native_failure_tests.rs:195:30:
+token cleanup erased the query error
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`
+## wrong-close-code
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\wrong-close-code)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes stdout ----
+
+thread 'windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes' (103404) panicked at src\native_failure_tests.rs:187:17:
+assertion `left == right` failed: token close changed native error
+  left: 7
+ right: 6
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::token_user_protected_close_preserves_both_outcomes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+## ignore-returned-length
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\ignore-returned-length)
+warning: unused variable: `returned`
+   --> src\token_user.rs:139:50
+    |
+139 | fn copy_token_user_sid(buffer: &TokenUserBuffer, returned: usize) -> io::Result<Vec<u8>> {
+    |                                                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_returned`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib test) generated 1 warning (run `cargo fix --lib -p mcphub-process-owner-spike --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage ... FAILED
+
+failures:
+
+---- token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage stdout ----
+
+thread 'token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage' (80308) panicked at src\token_user.rs:248:59:
+called `Result::unwrap_err()` on an `Ok` value: [1, 1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    token_user::tests::rejects_short_headers_and_lengths_outside_returned_storage
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+## accept-invalid-sid
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\copies-native-sid-final\accept-invalid-sid)
+warning: unused variable: `valid`
+   --> src\token_user.rs:208:9
+    |
+208 |     let valid = unsafe { IsValidSid(base.add(offset).cast_mut().cast()) };
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_valid`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib test) generated 1 warning (run `cargo fix --lib -p mcphub-process-owner-spike --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src\lib.rs (<task-root>\target-controls-sid\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities ... FAILED
+
+failures:
+
+---- token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities stdout ----
+
+thread 'token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities' (134600) panicked at src\token_user.rs:248:59:
+called `Result::unwrap_err()` on an `Ok` value: [0, 1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    token_user::tests::rejects_invalid_revision_excessive_count_and_truncated_subauthorities
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
