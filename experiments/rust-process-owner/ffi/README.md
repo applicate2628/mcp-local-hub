@@ -6,17 +6,18 @@
 
 1. [Scope and ownership](#scope-and-ownership)
 2. [ABI and outcomes](#abi-and-outcomes)
-3. [Checked original-process admission](#checked-original-process-admission)
-4. [Memory, concurrency and failures](#memory-concurrency-and-failures)
-5. [Evidence](#evidence)
-6. [Reproduction](#reproduction)
-7. [Remaining gates and references](#remaining-gates-and-references)
+3. [Explicit environment](#explicit-environment)
+4. [Checked original-process admission](#checked-original-process-admission)
+5. [Memory, concurrency and failures](#memory-concurrency-and-failures)
+6. [Evidence](#evidence)
+7. [Reproduction](#reproduction)
+8. [Remaining gates and references](#remaining-gates-and-references)
 
 ## Scope and ownership
 
 **One actual creation engine:** Go caller → small C dynamic-call shim → this Rust DLL → the existing `NativeOwner` → Windows. The shim does not spawn, supervise or close process handles. Rust owns its allocation and the original Job/process/thread resources. Go owns the library lifetime and the single opaque owner reference, and serializes each owner's calls.
 
-The first slice creates a suspended child with an absolute executable, an explicit absolute working directory, a **complete empty environment**, and **no redirected standard streams**. This deliberate restriction avoids claiming complete parity with the larger Rust context/stdio API or current Go launch policy. No parent environment/cwd mutation or implicit inheritance fallback is added.
+The boundary creates a suspended child with an absolute executable and explicit absolute working directory. The original `New` / `mh_create1` retains its **complete empty environment** behavior; additive `NewWithEnvironment` / `mh_create_env1` supplies a complete explicit set of ordinary environment entries. Neither path redirects standard streams yet. This is not full parity with current Go launch policy or the native stdio API. No parent environment/cwd mutation or implicit inheritance fallback is added.
 
 Go can supply an allow/deny decision, request stop, observe finite settlement, then explicitly release the terminal owner. The boolean is **not** a process-identity or authorization proof. Raw `ProcessView` and its OS handle are never exported. `AdmitChecked` now invokes Go policy with a copied PID/image-name observation from that original view before native resume; the complete product admission policy and additional identity fields remain separate gates. The returned PID is diagnostic, never authority to reopen/kill a process.
 
@@ -37,7 +38,7 @@ Go can supply an allow/deny decision, request stop, observe finite settlement, t
 
 The manually maintained [C header](include/owner_v1.h) is small and verified by both C compile-time assertions and Rust layout tests. `mh_version1` negotiates ABI 1; creation carries a version/reserved field and an exact request byte size. Every operation receives an exact output-buffer size. A mismatch is rejected before native work; no forward-layout guessing or variable-sized Rust types cross the boundary.
 
-Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and additive `mh_admit_checked1`. The ABI-1 structure layouts stay unchanged. This updated Go loader requires the checked-admission export and refuses older DLLs without it; it never silently falls back to unchecked admission. Symbols and numeric values in the header are the source of truth for this experiment, not a promise to keep them as the future product API.
+Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and additive `mh_admit_checked1` / `mh_create_env1`. The ABI-1 structure layouts stay unchanged. This updated Go loader requires both additive exports and refuses older DLLs without them; it never silently falls back to unchecked admission. Symbols and numeric values in the header are the source of truth for this experiment, not a promise to keep them as the future product API.
 
 **Table 2. Separate facts in `mh_out`.**
 
@@ -51,7 +52,56 @@ Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and
 | `cleanup_mask` / `cleanup_codes` | Up to three separate thread/process/Job close failures, preserving the root code |
 | `pid` | Original process diagnostic identifier, not a capability |
 
-Bounds are explicit experimental budgets: no more than 64 argument views, no embedded NUL, at most 32,766 UTF-16 units per string and in the combined executable/cwd/argument input. Finite wait accepts 0..60,000 milliseconds. These are not claims about universal OS or SDK limits. Environment/stdio marshalling, streaming buffers and arbitrary long-lived asynchronous calls are not part of this ABI slice.
+Bounds are explicit experimental budgets: no more than 64 argument views, no embedded NUL, at most 32,766 UTF-16 units per string and in the combined executable/cwd/argument input. Finite wait accepts 0..60,000 milliseconds. These are not claims about universal OS or SDK limits. The explicit environment has a separate total block budget below; stdio marshalling, streaming buffers and arbitrary long-lived asynchronous calls remain outside this ABI slice.
+
+## Explicit environment
+
+`NewWithEnvironment(program, cwd, args, []EnvironmentEntry{{Name, Value}, ...})`
+supplies the complete environment through the same native creation core. The
+original request and outcome layouts, `mh_version1`, and `mh_create1` behavior
+are unchanged. New C view types (`mh_env_entry` and `mh_environment`) are sized
+explicitly and checked on both sides; `mh_create_env1` is an additive symbol.
+
+The following contract is intentional, not inferred from Go map iteration:
+
+- Entries are an ordered slice, already strictly sorted by Windows ordinal
+  case-insensitive name comparison. The existing Rust `LaunchContext` validates
+  order/uniqueness using the native comparator. No duplicate first/last-wins rule,
+  locale-specific sorting, or hidden Go uppercase conversion is added.
+- Empty/nil is **empty**, not inherit. The caller explicitly selects any PATH,
+  SystemRoot or vendor-required values. No overlay/secret/parent-variable merge
+  or fallback is performed, even if a program cannot start with the chosen set.
+- Ordinary names must be nonempty and contain neither '=' nor NUL. Values may be
+  empty or contain '='. Hidden Windows per-drive `=X:` entries remain unsupported.
+- At most **256 entries** and **32,766 UTF-16 units for the full block**, including
+  each name/value, '=', entry terminator and final terminator. This is an
+  experimental ABI budget, smaller than the native library's general budget,
+  not a universal Windows/SDK limitation. Exactly empty has two NUL units.
+- Go strings must be valid UTF-8. Invalid UTF-8 is now rejected at the **shared
+  string boundary**, including legacy program/cwd/argument input; it is not
+  silently replaced with a different character. Raw C UTF-16 input can preserve
+  non-Unicode Windows units subject to the native name/shape constraints. The Go
+  string adapter does not claim arbitrary non-Unicode Windows-string support.
+- C arrays are zero-initialized, and strings are C-owned for the synchronous call.
+  Rust checks count/size before copying, copies before native creation returns,
+  and retains no Go/C input pointers. Caller mutation after return and Go GC
+  cannot alter the child's selected values. Concurrent caller mutation during
+  the call is prohibited, as for argv.
+
+`NewWithEnvironment` can return an owner **and** an error after ownership already
+transferred; retain every non-null owner exactly as with `New`. Its common
+creation path preserves original native errors, checked admission, pending state,
+late metadata handling and explicit release. This is not a new process manager.
+
+The loader refuses a DLL without `mh_create_env1` rather than silently dropping
+requested entries or switching to inherited/empty mode. Old ABI-1 consumers can
+still use the unchanged original exports. Different child environments do not
+require temporarily modifying the parent process environment or directory.
+
+An environment block is not a sandbox. Windows and child runtimes may synthesize
+additional entries after creation; only fake named values are inspected by tests,
+not real secrets. Required SDK policy, environment overlay design, secret-memory
+erasure and complete product launch parity are not claimed.
 
 ## Checked original-process admission
 
@@ -97,8 +147,8 @@ The C shim loads only the caller-supplied absolute DLL path with `LOAD_LIBRARY_S
 
 | Layer | What it establishes | What it does not establish |
 |---|---|---|
-| 15 normal Go integration test functions (including 7 checked-admission functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
-| 7 Rust ABI unit tests | C layout constants, initialized output/short-buffer protection, bad versions, structural input rejection, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
+| 23 normal Go integration test functions (including 7 checked-admission and 8 environment/text-boundary functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
+| 11 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
 | Existing owner suite | Unchanged native owner behavior against its own full tests | Calling-boundary properties by itself |
 | Optional `ffi_faults` tests | Ownership-transfer bookkeeping even when an owned test DLL reports malformed create/release metadata | A guarantee that hostile/broken arbitrary native code is safe |
 
@@ -121,9 +171,46 @@ Additional optional checks select `TestCheckedAdmissionRejectsMalformedObservati
 `TestCheckedAdmissionMissingExportFailsClosed` with `checked-no-symbol` uses the prior owned DLL, whose artifact hash is recorded before replacement; missing-export code 127 distinguishes this from an unrelated loader failure. It checks refusal rather than silently using the old boolean entry point. There are five optional test functions: the prior two metadata functions and these three new functions; observation variants share one test function, not four independent functions.
 Restore the exact source bytes and rebuild the normal DLL after each check. Do not use a mutated DLL for ordinary execution or a shared installation. A negative DLL is not a new supported implementation. The ordinary test assertions, not the temporary mutations, are shipped.
 
+### PR-durable results
+
+[Verification index](verification/README.md) and [execution ledger](verification/PROGRESS.md)
+are committed in this PR. Historical logs for the native dependency and earlier
+FFI stages include successes, negative controls, failures and source hashes;
+they are explicitly historical rather than claims about every later head.
+
+The current environment run also records its initially failing tests, precise
+negative mutations and correction of a test-only Clippy warning. A copied-buffer
+unit test first mutated input without reading the changed local value; adding an
+assertion made that test intent explicit instead of suppressing the lint.
+
+The negative environment omission uses the single `LaunchContext` assignment in
+`create_impl`: temporarily replace `environment: &environment` with
+`environment: &[]`. Three observed-child tests must fail. Restore exact source
+and rebuild the normal DLL before ordinary qualification. No runtime hook is
+added. `TestEnvironmentCreateRetainsOwnerAfterMetadataFailure` reuses the existing
+create-metadata mutation and proves the new path does not drop a transferred
+owner. `TestEnvironmentMissingExportDoesNotFallBackToEmpty`, with
+`environment-no-symbol`, uses the hash-verified previous DLL and must observe
+missing-symbol code127. Neither test is counted among the normal23 functions.
+
 ## Reproduction
 
 Prerequisites: existing Windows x86_64 Rust/MSVC target, Go with cgo, and a working local C compiler. No tools, crates or Go modules are downloaded by this procedure. The new lockfile resolves only the path dependency and the same pinned Windows crates already used by the owner. The Go module uses the standard library only.
+
+The self-contained [verification/run.ps1](verification/run.ps1) sets all writable
+paths under the user-approved `D:\dev\ChatGPT`, uses existing tools/cache only,
+refuses to overwrite a previous report, and commits no side effects itself:
+
+```powershell
+.\verification\run.ps1 -LabRoot 'D:\dev\ChatGPT\your-owned-lab' `
+  -CCompiler 'C:\msys64\ucrt64\bin\gcc.exe' -RunName 'new-distinct-run'
+```
+
+It records commands/exits, code hashes, tool versions, complete experimental
+suites, Go race/cgo checks and the unchanged parent suite in
+`verification/runs/<RunName>/`. A deliberate exit7 control validates native exit
+propagation; only a completed successful run gets `COMPLETED.txt`. Failed runs
+remain visible. No uncommitted environment script from a PC is required.
 
 Use a private checkout, existing caches and `TEMP`, `TMP`, `CARGO_HOME`, `CARGO_TARGET_DIR`, `GOCACHE`, `GOTMPDIR` under the approved work area. Set `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOSUMDB=off`, `CARGO_NET_OFFLINE=true`. Example commands from this `ffi` directory:
 
@@ -159,7 +246,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); define non-inheritable stdio conversion and custom environment marshalling; reconcile current Go/selected-activation contracts; native Unix backends; full blocking I/O/cancel/drain/join; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); define non-inheritable stdio conversion, redirected-stream marshalling and product-specific required-environment/overlay policy; reconcile current Go/selected-activation contracts; native Unix backends; full blocking I/O/cancel/drain/join; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
 The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
 

@@ -1,0 +1,98 @@
+[
+    {
+        "name":  "00-exit-propagation-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "utc":  "2026-11-14T01:01:04.7370354Z",
+        "matched":  true
+    },
+    {
+        "name":  "01-source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:04.8162067Z",
+        "matched":  true
+    },
+    {
+        "name":  "02-source-status",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source status --short",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:04.8861437Z",
+        "matched":  true
+    },
+    {
+        "name":  "03-go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:04.9550442Z",
+        "matched":  true
+    },
+    {
+        "name":  "04-rust-version",
+        "command":  "rustc --version --verbose",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:05.0229036Z",
+        "matched":  true
+    },
+    {
+        "name":  "05-build-child",
+        "command":  "cargo build --manifest-path ../Cargo.toml --offline --locked --bin owner_child",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:05.1173936Z",
+        "matched":  true
+    },
+    {
+        "name":  "06-abi-debug",
+        "command":  "cargo test --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:05.2177784Z",
+        "matched":  true
+    },
+    {
+        "name":  "07-abi-release",
+        "command":  "cargo test --release --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:05.8000299Z",
+        "matched":  true
+    },
+    {
+        "name":  "08-abi-clippy",
+        "command":  "cargo clippy --offline --locked --all-targets -- -D warnings",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:07.5913001Z",
+        "matched":  true
+    },
+    {
+        "name":  "09-abi-format",
+        "command":  "cargo fmt --all -- --check",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:09.0387909Z",
+        "matched":  true
+    },
+    {
+        "name":  "10-debug-dll",
+        "command":  "cargo build --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:10.0413320Z",
+        "matched":  true
+    },
+    {
+        "name":  "11-release-dll",
+        "command":  "cargo build --release --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T01:01:11.2523224Z",
+        "matched":  true
+    }
+]

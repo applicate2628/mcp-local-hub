@@ -1,0 +1,58 @@
+[
+    {
+        "path":  "experiments/rust-process-owner/ffi/Cargo.lock",
+        "sha256":  "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/Cargo.toml",
+        "sha256":  "2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/admission_windows.go",
+        "sha256":  "4a3185d4edd221e943ffae73192c7a4b75501c9a80624426612ce88078e939c2"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+        "sha256":  "650c67c78d4a69d999493735a05e6203859f8805c5f64b95d2d41e8226da9575"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+        "sha256":  "75794e071dc7cd821490aaebd806755273646c8f06896f8d7e0ae97b094686cc"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+        "sha256":  "6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/environment_windows.go",
+        "sha256":  "668c882783b0a9120a6e706652bd2fce25e435be846a2f03ef6319abc17b011f"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+        "sha256":  "b09048f7ce6fb84430c91dc27211fefbd514ca89404893bc1ae30e8f341b2860"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+        "sha256":  "2f9211921935a923de3032905f3192e1b711b02de373103e76399aec74d7f27f"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/go/go.mod",
+        "sha256":  "99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "sha256":  "71463699aada16acf52da1490e4a1d0903c147684c2ef2893538de72724e9459"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/src/lib.rs",
+        "sha256":  "c13c070cb52d32b32e3c16a3549284c6a2ccac00a895fa37ce6325613f1fc655"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/src/tests.rs",
+        "sha256":  "3ffa19ab2c542bdf09d4f7784fb298742f4ee7ae150cdc572bcc7196199a836c"
+    },
+    {
+        "path":  "experiments/rust-process-owner/ffi/verification/run.ps1",
+        "sha256":  "5648e9be7a5913241d9c7cc5955f6dd6e11efda7e10fd2225025b32f2b494190"
+    }
+]

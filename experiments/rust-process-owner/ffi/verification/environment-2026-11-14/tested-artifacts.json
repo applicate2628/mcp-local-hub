@@ -1,0 +1,23 @@
+[
+    {
+        "configuration":  "debug",
+        "name":  "mcphub_owner_ffi_spike.dll",
+        "sha256":  "66484a5570d5f6708ab180dc4d196015206970d9a5b5898083fe4cb84d0a8e7c",
+        "implementation":  "96cd48c2dfe0bee5291bc3e3c7c235f954c01743",
+        "binary_in_git":  false
+    },
+    {
+        "configuration":  "release",
+        "name":  "mcphub_owner_ffi_spike.dll",
+        "sha256":  "9cd9009b5e8e7f4897ff67452f3524b910dd61eddbf746f07874a1cedfe9f7a6",
+        "implementation":  "96cd48c2dfe0bee5291bc3e3c7c235f954c01743",
+        "binary_in_git":  false
+    },
+    {
+        "configuration":  "debug",
+        "name":  "owner_child.exe",
+        "sha256":  "d5fd79ffd569671ae80c88127b5ffb05ccefdb0759ba43d4b2f307f7fc999ded",
+        "implementation":  "96cd48c2dfe0bee5291bc3e3c7c235f954c01743",
+        "binary_in_git":  false
+    }
+]

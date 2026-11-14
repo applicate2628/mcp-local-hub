@@ -1,0 +1,6 @@
+Command: go test . -count=1 -timeout=90s
+Scope: entire isolated ffi/go module, debug DLL; parent native source unchanged
+Exit:
+0
+
+ok  	mcphub-owner-ffi-caller	0.489s

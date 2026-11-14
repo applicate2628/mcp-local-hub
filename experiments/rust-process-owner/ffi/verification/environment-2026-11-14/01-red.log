@@ -1,0 +1,46 @@
+Command: go test . -run ^Test(ExplicitEnvironment|TextBoundary) -count=1 -timeout=90s
+Baseline: ddbf21581a96a417c204fa8396b9c69a6ef9caee + ignoring-environment Go stub + new tests
+Expected: failing behavior assertions, no compile/link failure
+Exit:
+1
+
+--- FAIL: TestExplicitEnvironmentCopiesValuesWithoutParentInheritance (0.03s)
+    environment_windows_test.go:105: environment value got=<nil> want length=13
+--- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect (0.07s)
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/equals-key (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/drive-key (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-case (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-unicode (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/wrong-order (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-value-utf8 (0.00s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/block-budget (0.00s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/key-nul (0.00s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/value-nul (0.00s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-key-utf8 (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/entry-count (0.00s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/string-budget (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+    --- FAIL: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/empty-key (0.01s)
+        environment_windows_test.go:183: invalid environment acquired an owner
+--- FAIL: TestExplicitEnvironmentConcurrentChildrenStaySeparated (0.03s)
+    environment_windows_test.go:241: environment value got=<nil> want length=5
+--- FAIL: TestExplicitEnvironmentPreservesNativeFailure (0.00s)
+    environment_windows_test.go:292: got owner ABI status=3 native=2; want status 1
+--- FAIL: TestExplicitEnvironmentBudgetCountsAllTerminators (0.03s)
+    environment_windows_test.go:311: environment value got=<nil> want length=32762
+--- FAIL: TestTextBoundaryRejectsInvalidUTF8InsteadOfReplacing (0.01s)
+    environment_windows_test.go:325: invalid UTF-8 silently replaced in native input
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.264s
+FAIL

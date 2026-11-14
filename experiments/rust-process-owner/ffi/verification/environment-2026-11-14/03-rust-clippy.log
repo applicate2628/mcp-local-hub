@@ -1,0 +1,13 @@
+Command: cargo clippy --offline --locked --all-targets -- -D warnings Scope: FFI crate; native dependency unchanged Exit: 101
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+error: value assigned to `value` is never read
+   --> src\tests.rs:277:5
+    |
+277 |     value[0] = 88;
+    |     ^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `-D unused-assignments` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unused_assignments)]`
+System.Management.Automation.RemoteException
+error: could not compile `mcphub-owner-ffi-spike` (lib test) due to 1 previous error

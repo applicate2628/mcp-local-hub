@@ -1,0 +1,10 @@
+Command: go test . -run ^TestExplicitEnvironment(CopiesValuesWithoutParentInheritance|ConcurrentChildrenStaySeparated|BudgetCountsAllTerminators)$ -count=1 -timeout=30s Expected: FAIL from wrong observed child values, not compilation Exit: 1
+--- FAIL: TestExplicitEnvironmentCopiesValuesWithoutParentInheritance (0.04s)
+    environment_windows_test.go:105: environment value got=<nil> want length=13
+--- FAIL: TestExplicitEnvironmentConcurrentChildrenStaySeparated (0.04s)
+    environment_windows_test.go:241: environment value got=<nil> want length=4
+--- FAIL: TestExplicitEnvironmentBudgetCountsAllTerminators (0.04s)
+    environment_windows_test.go:311: environment value got=<nil> want length=32762
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.152s
+FAIL

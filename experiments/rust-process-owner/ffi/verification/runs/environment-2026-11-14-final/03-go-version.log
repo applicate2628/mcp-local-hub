@@ -1,0 +1,2 @@
+Command: go version UTC: 2026-11-14T01:02:00.4276059Z Expected exit: 0 Actual exit: 0
+go version go1.27.4 windows/amd64

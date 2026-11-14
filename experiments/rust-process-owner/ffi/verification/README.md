@@ -38,3 +38,12 @@ New work must commit its reproducible commands, results (including failures),
 source identity and limitations in this directory or the owning PR before being
 reported as complete. A local machine is disposable; no required recovery step
 may depend solely on an uncommitted file, cache or session transcript.
+## Current explicit-environment increment
+
+[Results and limits](environment-2026-11-14/RESULTS.md),
+[successful full run](runs/environment-2026-11-14-published/COMPLETED.txt),
+[failed first run](runs/environment-2026-11-14/steps.json), and
+[self-contained offline runner](run.ps1) are versioned here.
+
+Historical sanitized-content hashes apply to the normalized record text before
+the bundle's separator newline; the bundle SHA256 covers all published bytes.

@@ -1,0 +1,2 @@
+Command: go test -tags ffi_faults . -run ^Test(EnvironmentCreateRetainsOwnerAfterMetadataFailure|CorruptCreateRetainsTransferredOwner)$ -count=1 -timeout=30s Expected: PASS: both create paths preserve transferred owner with response error Exit: 0
+ok  	mcphub-owner-ffi-caller	0.038s

@@ -1,0 +1,2 @@
+Tested compiling RED implementation of NewWithEnvironment: return l.New(program,cwd,args), ignoring environment.
+Existing wide() used syscall.UTF16FromString with no utf8.ValidString rejection. This reproduced invalid UTF-8 being normalized rather than rejected.

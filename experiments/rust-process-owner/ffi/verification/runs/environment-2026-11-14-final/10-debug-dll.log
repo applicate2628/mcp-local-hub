@@ -1,0 +1,3 @@
+Command: cargo build --offline --locked UTC: 2026-11-14T01:02:02.3570097Z Expected exit: 0 Actual exit: 0
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.43s
