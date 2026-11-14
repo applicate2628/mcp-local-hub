@@ -147,7 +147,9 @@ func (r *PreparedSerenaQualificationResources) HostInputs(ctx context.Context, r
 		return PreparedSerenaQualificationHostInputs{}, errors.New("SERENA_QUALIFICATION_ORIGINAL_RESERVATION_NOT_RELEASED")
 	}
 	root := filepath.Join(r.request.Namespace, r.key, "qualifications", r.qualificationID)
-	return PreparedSerenaQualificationHostInputs{WorkingDirectory: root, SerenaHome: root, TemporaryDirectory: root, Entrypoint: r.installation.Entrypoint, Args: []string{"start-mcp-server", "--transport", "streamable-http", "--host", "127.0.0.1", "--port", strconv.Itoa(r.port), "--enable-web-dashboard", "false", "--open-web-dashboard", "false", "--enable-gui-log-window", "false"}, Environment: preparedSerenaEnvironmentWith(request.Inputs.Environment, map[string]string{"SERENA_HOME": root, "TMP": root, "TEMP": root, "PYTHONDONTWRITEBYTECODE": "1"}), Host: "127.0.0.1", Transport: "streamable-http", Port: r.port, OperationID: r.request.OperationID, QualificationID: r.qualificationID, GenerationID: r.request.GenerationID, RequestIdentitySHA256: r.key}, nil
+	// Python resolves Path.home() during import even when SERENA_HOME is set.
+	// Keep Windows home lookup within the same retained qualification directory.
+	return PreparedSerenaQualificationHostInputs{WorkingDirectory: root, SerenaHome: root, TemporaryDirectory: root, Entrypoint: r.installation.Entrypoint, Args: []string{"start-mcp-server", "--transport", "streamable-http", "--host", "127.0.0.1", "--port", strconv.Itoa(r.port), "--enable-web-dashboard", "false", "--open-web-dashboard", "false", "--enable-gui-log-window", "false"}, Environment: preparedSerenaEnvironmentWith(request.Inputs.Environment, map[string]string{"SERENA_HOME": root, "USERPROFILE": root, "TMP": root, "TEMP": root, "PYTHONDONTWRITEBYTECODE": "1"}), Host: "127.0.0.1", Transport: "streamable-http", Port: r.port, OperationID: r.request.OperationID, QualificationID: r.qualificationID, GenerationID: r.request.GenerationID, RequestIdentitySHA256: r.key}, nil
 }
 
 // Called by the configured original-host before-create admission, after its
