@@ -165,6 +165,69 @@ func TestPreparePublisherSourceUsesExistingIssuerAndActualGeneratedBytes(t *test
 	}
 }
 
+func TestPreparePublisherSourceMarksStagedDeletionDirty(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		retained bool
+	}{{"retained physical file", true}, {"removed physical file", false}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newPublisherPreparationFixture(t)
+			const omitted = "qualification_test.go"
+			committed := []byte("package qualification\n\nimport \"testing\"\n\nfunc TestQualificationMustRun(t *testing.T) {}\n")
+			// Git's immutable tree contains the committed test; its stage-0
+			// index record is absent, as after a staged deletion.
+			f.base = append(f.base, []byte("100644 blob "+publisherGitBlob(committed)+"\t"+omitted+"\x00")...)
+			physical := filepath.Join(f.request.Checkout, omitted)
+			if scenario.retained {
+				if err := os.WriteFile(physical, committed, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			selected, err := os.ReadFile(filepath.Join(f.request.Checkout, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			if err := preparePublisherSource(context.Background(), f.request, &output, f.git); err != nil {
+				t.Fatal(err)
+			}
+			var row publisherPreparationResult
+			if err := json.Unmarshal(output.Bytes(), &row); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := os.ReadFile(f.request.Snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verified, err := VerifyPublisherSourceSnapshot(context.Background(), f.request.Export, snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verified != row.SourceInput.PublisherSourceInput || verified.FileCount != 1 {
+				t.Fatalf("dirty export lost its actual issued closure: row=%+v verified=%+v", row.SourceInput, verified)
+			}
+			exported, err := os.ReadFile(filepath.Join(f.request.Export, "go.mod"))
+			if err != nil || !bytes.Equal(exported, selected) {
+				t.Fatalf("remaining committed bytes changed: got=%q want=%q err=%v", exported, selected, err)
+			}
+			if _, err := os.Lstat(filepath.Join(f.request.Export, omitted)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("omitted index path entered the selected export: %v", err)
+			}
+			if scenario.retained {
+				actual, err := os.ReadFile(physical)
+				if err != nil || !bytes.Equal(actual, committed) {
+					t.Fatalf("retained checkout file changed: %q %v", actual, err)
+				}
+			} else if _, err := os.Lstat(physical); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("absent checkout file was recreated: %v", err)
+			}
+			if row.GitCommit != f.request.ExpectedCommit || !row.DirtySelectedSource {
+				t.Fatalf("staged deletion was attributed to a clean committed closure: %s", output.Bytes())
+			}
+		})
+	}
+}
+
 func TestPreparePublisherSourceRefusesInvalidInputsWithoutSuccess(t *testing.T) {
 	for _, scenario := range []string{"commit", "commit mismatch", "duplicate", "case", "directory", "traversal", "empty", "glob", "overlap", "snapshot overlap", "existing", "unmerged", "link", "git drift", "head drift", "source drift", "cancel"} {
 		t.Run(scenario, func(t *testing.T) {
