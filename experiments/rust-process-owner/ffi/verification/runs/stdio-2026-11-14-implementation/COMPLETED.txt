@@ -1,0 +1,1 @@
+All commands matched expected exits. This qualifies only the experiment on this Windows host, not the product, native Unix, independent review or installed acceptance. Step00 is an intentional exit7 control, not a product failure.

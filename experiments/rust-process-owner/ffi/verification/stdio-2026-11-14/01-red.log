@@ -1,0 +1,19 @@
+Command: go test . -run ^TestStdio -count=1 -timeout=45s
+Actual exit: 1
+--- FAIL: TestStdioCopiesNonInheritableSourcesAndPreservesOwnership (0.04s)
+    stdio_windows_test.go:98: owner ABI status=5 native=0
+--- FAIL: TestStdioCallerMayCloseSourcesAfterCreate (0.00s)
+    stdio_windows_test.go:127: owner ABI status=5 native=0
+--- FAIL: TestStdioSharedOutputUsesOneUnderlyingFilePosition (0.00s)
+    stdio_windows_test.go:151: owner ABI status=5 native=0
+--- FAIL: TestStdioPipeEOFHasNoHiddenParentWriter (0.00s)
+    stdio_windows_test.go:183: owner ABI status=5 native=0
+--- FAIL: TestStdioDenialAndNativeFailureKeepSourceFiles (0.00s)
+    stdio_windows_test.go:223: got owner ABI status=5 native=0; want status 3
+--- FAIL: TestStdioInheritanceExcludesUnrelatedParentEvent (0.00s)
+    stdio_windows_test.go:298: owner ABI status=5 native=0
+--- FAIL: TestStdioComposesWithEnvironmentAndCheckedAdmission (0.00s)
+    stdio_windows_test.go:318: owner ABI status=5 native=0
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.078s
+FAIL

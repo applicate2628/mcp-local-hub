@@ -1,0 +1,14 @@
+[
+    {
+        "path":  "\u003cLAB\u003e\\target\\debug\\mcphub_owner_ffi_spike.dll",
+        "sha256":  "7c965ca0bbaa0fbfae1dbc9f95a11bbf1cc89ba0c2aa0f9de7e28a5254281060"
+    },
+    {
+        "path":  "\u003cLAB\u003e\\target\\release\\mcphub_owner_ffi_spike.dll",
+        "sha256":  "144e3cc185c3cdf0edd3f3637681c9499f320cf6c486257d53afa50c10f14fdb"
+    },
+    {
+        "path":  "\u003cLAB\u003e\\target\\debug\\owner_child.exe",
+        "sha256":  "d5fd79ffd569671ae80c88127b5ffb05ccefdb0759ba43d4b2f307f7fc999ded"
+    }
+]

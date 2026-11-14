@@ -179,3 +179,39 @@ func TestEnvironmentMissingExportDoesNotFallBackToEmpty(t *testing.T) {
 		t.Fatalf("not a missing-export failure: %v", err)
 	}
 }
+
+func TestStdioMalformedCreateRetainsOwnerAndSourceFiles(t *testing.T) {
+	if os.Getenv("MCPHUB_FFI_FAULT") != "stdio-metadata" {
+		t.Fatal("owned metadata-fault DLL required")
+	}
+	lib, child, dir := setup(t)
+	s := streamFiles(t, dir)
+	owner, _, err := lib.NewWithStdio(child, dir, []string{"stdio", filepath.Join(dir, "never-admitted")}, nil, s)
+	if owner == nil {
+		t.Fatal("stdio create lost transferred owner on metadata error")
+	}
+	own(t, owner)
+	if err == nil {
+		t.Fatal("controlled metadata mutation absent")
+	}
+	if err = lib.Close(); err == nil {
+		t.Fatal("DLL unloaded with transferred owner")
+	}
+	for _, f := range []*os.File{s.Stdin, s.Stdout, s.Stderr} {
+		_ = flagsOf(t, f)
+	}
+	absent(t, filepath.Join(dir, "never-admitted"))
+}
+func TestStdioMissingExportIsNotSilentlyIgnored(t *testing.T) {
+	if os.Getenv("MCPHUB_FFI_FAULT") != "stdio-no-symbol" {
+		t.Fatal("owned older DLL required")
+	}
+	lib, err := Open(os.Getenv("MCPHUB_RX02_FFI_DLL"))
+	if lib != nil {
+		_ = lib.Close()
+		t.Fatal("stdio downgraded silently")
+	}
+	if !errors.Is(err, syscall.Errno(127)) {
+		t.Fatalf("wrong missing-export result: %v", err)
+	}
+}

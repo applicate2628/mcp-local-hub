@@ -47,3 +47,11 @@ may depend solely on an uncommitted file, cache or session transcript.
 
 Historical sanitized-content hashes apply to the normalized record text before
 the bundle's separator newline; the bundle SHA256 covers all published bytes.
+
+## Explicit standard-stream calling boundary
+
+[Results and remaining limits](stdio-2026-11-14/RESULTS.md),
+[full final run](runs/stdio-2026-11-14-final/COMPLETED.txt),
+[exact source hashes](runs/stdio-2026-11-14-final/source-hashes.json),
+[negative mutations and commands](stdio-2026-11-14/MUTATIONS.md) and raw logs
+are versioned. File/pipe transfer is not a complete cancellable I/O pump.

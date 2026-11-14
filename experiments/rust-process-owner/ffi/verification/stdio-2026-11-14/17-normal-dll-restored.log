@@ -1,0 +1,6 @@
+Source: 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa + described controlled mutation
+Command: cargo build --offline --locked
+Expected exit: 0
+Actual exit: 0
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s

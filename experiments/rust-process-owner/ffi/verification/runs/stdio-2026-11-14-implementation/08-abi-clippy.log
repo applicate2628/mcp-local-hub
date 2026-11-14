@@ -1,0 +1,2 @@
+Command: cargo clippy --offline --locked --all-targets -- -D warnings UTC: 2026-11-14T02:26:25.4813357Z Expected exit: 0 Actual exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s

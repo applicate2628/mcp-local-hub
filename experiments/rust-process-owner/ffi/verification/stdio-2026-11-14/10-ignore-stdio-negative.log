@@ -1,0 +1,11 @@
+Source: 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa + described controlled mutation
+Command: go test . -run '^TestStdio(CopiesNonInheritableSourcesAndPreservesOwnership|SharedOutputUsesOneUnderlyingFilePosition)$' -count=1 -timeout=30s
+Expected exit: 1
+Actual exit: 1
+--- FAIL: TestStdioCopiesNonInheritableSourcesAndPreservesOwnership (3.01s)
+    stdio_windows_test.go:109: stdio fixture not complete: {State:1 Flags:0 PID:117160 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestStdioSharedOutputUsesOneUnderlyingFilePosition (3.01s)
+    stdio_windows_test.go:156: stdio fixture not complete: {State:1 Flags:0 PID:25544 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+FAIL
+FAIL	mcphub-owner-ffi-caller	6.034s
+FAIL

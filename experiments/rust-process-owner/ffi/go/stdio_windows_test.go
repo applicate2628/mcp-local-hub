@@ -455,3 +455,67 @@ func TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried(t *testing.T)
 		})
 	}
 }
+
+func TestStdioGoPipesCarryBinaryInputAndReachEOF(t *testing.T) {
+	lib, child, dir := setup(t)
+	s := streamFiles(t, dir)
+	inReader, inWriter, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = inReader.Close(); _ = inWriter.Close() })
+	outReader, outWriter, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = outReader.Close(); _ = outWriter.Close() })
+	// Deliberately bounded below the pipe capacity: this qualifies actual Go
+	// pipe handles without pretending to be a general concurrent I/O pump.
+	if _, e = inWriter.Write(streamBytes); e != nil {
+		t.Fatal(e)
+	}
+	if e = inWriter.Close(); e != nil {
+		t.Fatal(e)
+	}
+	s.Stdin = inReader
+	s.Stdout = outWriter
+	owner, _, e := lib.NewWithStdio(child, dir, []string{"stdio", filepath.Join(dir, "go-pipes")}, nil, s)
+	if owner != nil {
+		own(t, owner)
+	}
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = inReader.Close(); e != nil {
+		t.Fatal(e)
+	}
+	if e = outWriter.Close(); e != nil {
+		t.Fatal(e)
+	}
+	runtime.GC()
+	if _, e = owner.AdmitChecked(func(ProcessObservation) error { return nil }); e != nil {
+		t.Fatal(e)
+	}
+	assertStreamFinish(t, owner)
+	done := make(chan error, 1)
+	go func() {
+		got, err := io.ReadAll(io.LimitReader(outReader, 4097))
+		if err == nil && !bytes.Equal(got, streamBytes) {
+			err = errors.New("Go pipe bytes changed")
+		}
+		done <- err
+	}()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case e = <-done:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-timer.C:
+		_ = outReader.Close()
+		e = <-done
+		t.Fatalf("Go pipe did not reach EOF: %v", e)
+	}
+	assertBytes(t, filepath.Join(dir, "error.bin"), streamError)
+}

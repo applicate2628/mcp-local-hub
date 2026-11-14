@@ -1,0 +1,5 @@
+Source: 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa + described controlled mutation
+Command: go test -tags ffi_faults . -run '^TestStdioMalformedCreateRetainsOwnerAndSourceFiles$' -count=1 -timeout=30s
+Expected exit: 0
+Actual exit: 0
+ok  	mcphub-owner-ffi-caller	0.032s

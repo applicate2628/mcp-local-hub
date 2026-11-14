@@ -83,3 +83,67 @@ completed on implementation96cd48c with every recorded source/runner hash
 matching. The earlier interrupted formatting run and earlier passing run are
 both retained with their distinct identities. No generated binary is required
 from this PC; exact build instructions and artifact hashes are committed.
+
+## Stdio calling boundary — 2026-11-14
+
+Base37f0f8bb2b0f4ce068aaeb13000f0ccb6ac7b6f5, same isolated631 branch.
+Preflight: native BorrowedStdio already owns no input handles and uses the
+existing at-create inheritance allowlist/Job. Go files are normally non-inheritable.
+Ruling: add one explicit creation entry point combining env and three borrowed
+stream handles; old create APIs retain their behavior. Convert Go sources to
+three temporary inheritable copies with DuplicateHandle inside RawConn.Control,
+not Fd+KeepAlive and not SetHandleInformation on original sources. Original
+file objects remain caller-owned. Temporary copies are closed once after create
+or acquisition failure; every close error is preserved, and no ambiguous retry
+or success claim is made. An already transferred owner is retained with errors.
+Three bounded duplicate slots avoid a global registry/new process owner; aliased
+stdout/stderr refer to the same native object through separate copies.
+Qualification: binary input/output, shared output, no effect before admission,
+parent close after create, real pipe EOF without hidden writers, denied/native
+failure, allowlist exclusion and partial-copy cleanup. Blocking pumps/cancellation,
+foreign kernel close faults and arbitrary concurrent inheriting launchers remain
+separate gates. A per-child allowlist does not secure unrelated CreateProcess calls.
+All unique commands/results/failures/reproducer notes go under verification/ and
+are committed with this increment. No private env script required for final runs.
+Native parent625, root product, dependencies and installation remain untouched.
+Stdio edit issue: an insertion split a multiline C typedef, caught by the C
+compiler before integration. Moved the new declaration after the complete
+prototype; no platform/API behavior inferred from this editing failure.
+
+Stdio implementation committed as 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa. Six source/test files match the
+complete stdio-implementation run: Go33 top-level/31 nested, ABI14 and unchanged
+parent53 passed in recorded debug/release configurations. Seven close-failure
+masks and partial-copy cleanup passed. Unknown-close recovery, all schedules
+and unrelated launcher inheritance are not claimed. Initial source-hash check
+encountered unavailable Get-FileHash; the existing .NET SHA256 API completed
+the same verification without installing anything. Evidence commit follows.
+
+Stdio qualification extended to ordinary Go os.Pipe after the native synchronous
+pipe case; binary input/output and EOF are separately asserted, not inferred.
+Controlled removal of stdio makes ordinary child tests fail; suppressing close
+errors fails all seven protected-close cases. Late malformed metadata retains
+owner/source files, and a DLL lacking the stdio symbol is rejected. Sources were
+restored exactly and a complete final runner is being recorded.
+Self-review keeps one native process owner; uses stdlib DuplicateHandle and
+RawConn.Control; source flags stay unchanged; process outcome and temporary
+copy cleanup stay separate. Unknown close failure is not automatic recovery,
+and the child allowlist does not protect unrelated blanket-inheritance launches.
+15 relevant skills applied: Using Superpowers; Executing Plans; TDD; API and
+Interface Design; Architecture Review; Go Concurrency Lifecycle; Go Security
+Hardening/process boundary; Go Testing and Verification; Using Git Worktrees
+(existing isolated clone); Rust Unsafe Checker; Rust Resource Lifecycle;
+Ponytail Review; Systematic Debugging; Git Workflow/Versioning; Verification
+Before Completion. Rust skills read through omgskills at5c40d3ad785193231b7d0dbfb8e1eb447e5edd94.
+This is author self-review, not independent review or product acceptance.
+Final stdio qualification:34 normal Go top-level functions,31 nested cases,
+zero skips; complete debug/release DLL race x3, cgocheck2/vet,14 ABI unit tests
+and unchanged native53 checks passed with all22 runner exits matched. One
+runner step deliberately expects7 to verify failure-code capture. The final
+run identifies implementation4fbbea1 plus the later ordinary-Go-pipe test and
+qualification overlay by exact hashes, not a fictional clean later commit.
+All required final/negative logs, RESULTS, mutation reproduction and artifact
+hashes are committed under verification/; no result depends on a local ledger.
+Ordinary source handles and input bytes remain caller-owned. Temporary-copy
+close failure is reported but not claimed fully recovered. Remaining major
+steps: full product identity policy; blocking I/O/cancel/drain/join; broader
+handle profiles/inheritance coordination; native Unix and independent review.

@@ -7,17 +7,18 @@
 1. [Scope and ownership](#scope-and-ownership)
 2. [ABI and outcomes](#abi-and-outcomes)
 3. [Explicit environment](#explicit-environment)
-4. [Checked original-process admission](#checked-original-process-admission)
-5. [Memory, concurrency and failures](#memory-concurrency-and-failures)
-6. [Evidence](#evidence)
-7. [Reproduction](#reproduction)
-8. [Remaining gates and references](#remaining-gates-and-references)
+4. [Explicit standard streams](#explicit-standard-streams)
+5. [Checked original-process admission](#checked-original-process-admission)
+6. [Memory, concurrency and failures](#memory-concurrency-and-failures)
+7. [Evidence](#evidence)
+8. [Reproduction](#reproduction)
+9. [Remaining gates and references](#remaining-gates-and-references)
 
 ## Scope and ownership
 
 **One actual creation engine:** Go caller → small C dynamic-call shim → this Rust DLL → the existing `NativeOwner` → Windows. The shim does not spawn, supervise or close process handles. Rust owns its allocation and the original Job/process/thread resources. Go owns the library lifetime and the single opaque owner reference, and serializes each owner's calls.
 
-The boundary creates a suspended child with an absolute executable and explicit absolute working directory. The original `New` / `mh_create1` retains its **complete empty environment** behavior; additive `NewWithEnvironment` / `mh_create_env1` supplies a complete explicit set of ordinary environment entries. Neither path redirects standard streams yet. This is not full parity with current Go launch policy or the native stdio API. No parent environment/cwd mutation or implicit inheritance fallback is added.
+The boundary creates a suspended child with an absolute executable and explicit absolute working directory. The original `New` / `mh_create1` retains its **complete empty environment** behavior; additive `NewWithEnvironment` / `mh_create_env1` supplies a complete explicit set of ordinary environment entries. Those two paths retain no-redirection behavior. `NewWithStdio` / `mh_create_io1` now explicitly combine the full environment with three standard streams through the same native creation core. This is not full parity with current Go launch policy or a complete I/O pump. No parent environment/cwd mutation or implicit inheritance fallback is added.
 
 Go can supply an allow/deny decision, request stop, observe finite settlement, then explicitly release the terminal owner. The boolean is **not** a process-identity or authorization proof. Raw `ProcessView` and its OS handle are never exported. `AdmitChecked` now invokes Go policy with a copied PID/image-name observation from that original view before native resume; the complete product admission policy and additional identity fields remain separate gates. The returned PID is diagnostic, never authority to reopen/kill a process.
 
@@ -38,7 +39,7 @@ Go can supply an allow/deny decision, request stop, observe finite settlement, t
 
 The manually maintained [C header](include/owner_v1.h) is small and verified by both C compile-time assertions and Rust layout tests. `mh_version1` negotiates ABI 1; creation carries a version/reserved field and an exact request byte size. Every operation receives an exact output-buffer size. A mismatch is rejected before native work; no forward-layout guessing or variable-sized Rust types cross the boundary.
 
-Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and additive `mh_admit_checked1` / `mh_create_env1`. The ABI-1 structure layouts stay unchanged. This updated Go loader requires both additive exports and refuses older DLLs without them; it never silently falls back to unchecked admission. Symbols and numeric values in the header are the source of truth for this experiment, not a promise to keep them as the future product API.
+Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and additive `mh_admit_checked1` / `mh_create_env1` / `mh_create_io1`. The ABI-1 structure layouts stay unchanged. This updated Go loader requires these additive exports and refuses older DLLs without them; it never silently falls back to unchecked admission. Symbols and numeric values in the header are the source of truth for this experiment, not a promise to keep them as the future product API.
 
 **Table 2. Separate facts in `mh_out`.**
 
@@ -52,7 +53,7 @@ Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and
 | `cleanup_mask` / `cleanup_codes` | Up to three separate thread/process/Job close failures, preserving the root code |
 | `pid` | Original process diagnostic identifier, not a capability |
 
-Bounds are explicit experimental budgets: no more than 64 argument views, no embedded NUL, at most 32,766 UTF-16 units per string and in the combined executable/cwd/argument input. Finite wait accepts 0..60,000 milliseconds. These are not claims about universal OS or SDK limits. The explicit environment has a separate total block budget below; stdio marshalling, streaming buffers and arbitrary long-lived asynchronous calls remain outside this ABI slice.
+Bounds are explicit experimental budgets: no more than 64 argument views, no embedded NUL, at most 32,766 UTF-16 units per string and in the combined executable/cwd/argument input. Finite wait accepts 0..60,000 milliseconds. These are not claims about universal OS or SDK limits. The explicit environment has a separate total block budget below; streaming buffers and arbitrary long-lived asynchronous calls remain outside this ABI slice. Explicit stdio is a borrowed native-handle view, not a shared buffer protocol.
 
 ## Explicit environment
 
@@ -103,11 +104,65 @@ additional entries after creation; only fake named values are inspected by tests
 not real secrets. Required SDK policy, environment overlay design, secret-memory
 erasure and complete product launch parity are not claimed.
 
+## Explicit standard streams
+
+`NewWithStdio(program, cwd, args, environment, Stdio{Stdin, Stdout, Stderr})`
+requires three non-nil caller-owned `*os.File` objects. The complete environment
+retains the rules above; nil means empty, not inherit. Source files can start
+non-inheritable. Go acquires at most three short-lived inheritable handle copies
+with `DuplicateHandle(DUPLICATE_SAME_ACCESS)`, borrowing each source through
+`SyscallConn().Control`. It does not race a naked `Fd()` with concurrent Close,
+change original inheritance flags, transfer source ownership, or use
+`DUPLICATE_CLOSE_SOURCE`.
+
+The additive C entry point accepts `mh_io_context`: an environment view plus
+three `uintptr_t` stream handles. Rust creates call-scoped BorrowedHandles and
+passes them to **existing** BorrowedStdio/NativeOwner validation and the native
+inheritance allowlist. This is not a second creator, process owner or descriptor
+registry. Raw C callers must supply real live inheritable file/pipe handles;
+null/pseudo-handle checks are not proof that arbitrary numbers are valid handles.
+
+**Table 3. Standard-stream ownership and consequences.**
+
+| Boundary | Contract |
+|---|---|
+| Original Go file | Remains caller-owned; its flags and lifetime are not silently changed |
+| Temporary Go copy | One per slot, held only through synchronous create; close attempted once on success or partial acquisition failure |
+| Child inheritance | Existing native explicit allowlist, not blanket inheritance of all parent handles |
+| Shared stdout/stderr | Separate handle copies refer to the same underlying kernel object and share its file position; no data snapshot or independent offset is implied |
+| After create returns | Child owns its inherited OS references; caller may close original sources before admission |
+| Late reporting/copy-close error | A transferred Owner is still returned and must be settled; error does not authorize retry or automatic resume |
+| Failed copy close | `StdioCopyError` records operation, stream index and original cause; failure is not proof that the resource was released |
+
+Temporary-copy cleanup does not repeat a failed close using a possibly reused
+numeric handle. Unknown or protected-close failures can leave a native copy
+unreleased; they are reported, not hidden or claimed automatically recoverable.
+This is distinct from the native process owner's thread/process/Job cleanup
+outcome. The seven nonempty protected-close combinations are exercised on
+**test-owned** copies; that test performs explicit recovery while it still knows
+the exact protected objects. It does not grant the production adapter blanket
+recovery authority over arbitrary stale handles.
+
+Qualified cases use local regular files, native synchronous anonymous pipes
+and ordinary Go `os.Pipe` for a bounded binary transfer. Pipe EOF proves there
+is no hidden parent writer in those cases. It does not prove arbitrary overlapped
+I/O, sockets, device handles, console support or full-duplex throughput. The
+existing native category filter does not certify file access rights or every
+FILE_TYPE_PIPE subtype. Caller must supply the right ends and access rights,
+arrange I/O bounds/draining and avoid concurrent shared-position file operations.
+
+The allowlist protects **this child**. Temporary copies are inheritable in the
+parent during create; an unrelated concurrent native launcher that blindly
+inherits all handles is outside this guarantee. No local mutex can silently
+claim global coordination with uncooperative launchers. Product integration must
+reconcile all launch paths or use a stronger architecture if that threat matters.
+There is no shell, inherited-default fallback, I/O worker or finalizer added here.
+
 ## Checked original-process admission
 
 `Owner.AdmitChecked(func(ProcessObservation) error)` runs policy synchronously **inside** the existing `NativeOwner::admit_and_resume` closure. The child has not been resumed by this owner yet. Rust calls `ProcessView.process_id()` and `ProcessView.image_path()` using the original retained process handle, not `OpenProcess(PID)` or a stored create-path string. Only the resulting PID and UTF-16 image name cross the callback; the Go handler copies the image into Go-owned memory before policy/GC/retention.
 
-**Table 3. Checked admission semantics.**
+**Table 4. Checked admission semantics.**
 
 | Event | Result |
 |---|---|
@@ -143,12 +198,12 @@ The C shim loads only the caller-supplied absolute DLL path with `LOAD_LIBRARY_S
 
 ## Evidence
 
-**Table 4. Independent verification layers.**
+**Table 5. Independent verification layers.**
 
 | Layer | What it establishes | What it does not establish |
 |---|---|---|
-| 23 normal Go integration test functions (including 7 checked-admission and 8 environment/text-boundary functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
-| 11 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
+| 34 normal Go integration test functions (including 11 stdio functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
+| 14 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
 | Existing owner suite | Unchanged native owner behavior against its own full tests | Calling-boundary properties by itself |
 | Optional `ffi_faults` tests | Ownership-transfer bookkeeping even when an owned test DLL reports malformed create/release metadata | A guarantee that hostile/broken arbitrary native code is safe |
 
@@ -191,7 +246,7 @@ added. `TestEnvironmentCreateRetainsOwnerAfterMetadataFailure` reuses the existi
 create-metadata mutation and proves the new path does not drop a transferred
 owner. `TestEnvironmentMissingExportDoesNotFallBackToEmpty`, with
 `environment-no-symbol`, uses the hash-verified previous DLL and must observe
-missing-symbol code127. Neither test is counted among the normal23 functions.
+missing-symbol code127. Neither test is counted among the normal functions.
 
 ## Reproduction
 
@@ -246,7 +301,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); define non-inheritable stdio conversion, redirected-stream marshalling and product-specific required-environment/overlay policy; reconcile current Go/selected-activation contracts; native Unix backends; full blocking I/O/cancel/drain/join; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full blocking I/O/cancel/drain/join; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
 The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
 
@@ -260,5 +315,8 @@ References:
 6. [MCPHub full work plan, PR #623](https://github.com/applicate2628/mcp-local-hub/pull/623).
 7. [Go runtime/cgo.Handle: call-scoped integer tokens and explicit deletion](https://pkg.go.dev/runtime/cgo).
 8. [Microsoft QueryFullProcessImageNameW: observed executable name from a process handle](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew).
+9. [Microsoft DuplicateHandle: inheritance flag, shared kernel object and file position](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle).
+10. [Microsoft process attribute list: explicit handle inheritance](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
+11. [Go syscall.RawConn: handle validity during Control](https://pkg.go.dev/syscall#RawConn).
 
 Terms: ABI — application binary interface; FFI — foreign function interface; DLL — dynamic-link library; cgo — Go's C interoperability tool; UTF-16 — 16-bit Unicode encoding; PID — process identifier; OS — operating system. Input lengths are UTF-16 code units, not bytes or Unicode character counts. Timeouts are milliseconds. No formula or platform guarantee is inferred from a passing compile alone.
