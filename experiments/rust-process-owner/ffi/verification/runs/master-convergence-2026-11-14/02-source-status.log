@@ -1,0 +1,2 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T20:12:51.1440437Z Expected exit: 0 Actual exit: 0
+?? experiments/rust-process-owner/ffi/verification/runs/master-convergence-2026-11-14/

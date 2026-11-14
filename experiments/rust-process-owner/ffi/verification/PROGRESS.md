@@ -391,3 +391,11 @@ Five completed disposable copies verified and moved directly to approved trash.
 JSON array-wrapping and an undefined encoding variable initially blocked preflight;
 no movement before corrected explicit identity checks. Diagnostics preserved.
 Normal targets/cache/source and unique results retained; trash not emptied.
+
+## Master convergence - 2026-11-14
+
+Parent 87bf2fe6d612de296d4f30a8a5087adb8ee5cdbc c5672f49f65713c7555e8841e46de75b045da5f8 06d8706a446b456642a13f23cfa58e10c6e3c28f 2c13114eabc7ad6cab416788b6e32faaa8c99935 c028db723295f02909969b57f9d1ee8837a22344 and FFI bb8e316 align to accepted master17bc78fc without
+changing experiment source bytes or rewriting history. Full22-step ordinary
+experiment suite passed49/63/0 Go,14 ABI and53 parent tests. Results and identities
+in runs/master-convergence-2026-11-14; independent acceptance/Unix/product policy
+remain open. Branch audit and own-PR coordination belong to PR623.

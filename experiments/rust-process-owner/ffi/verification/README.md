@@ -108,3 +108,6 @@ fields; no ordinary native-producer bug or hostile-DLL sandbox is claimed.
 Valid cleanup reports and actual protected-close failures have separate evidence.
 The baseline3-case RED is also reproducible from the exact pre-fix bridge commit,
 using a disposable caller copy, not by editing the working implementation.
+## Accepted master convergence
+
+[Non-rewriting synchronization and fresh complete experiment checks](runs/master-convergence-2026-11-14/RESULTS.md) retain the independent native-parent and FFI review boundaries.
