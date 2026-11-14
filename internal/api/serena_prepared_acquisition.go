@@ -115,7 +115,7 @@ func (a *preparedSerenaAcquisition) install(ctx context.Context, r PreparedSeren
 	}
 	a.started = true
 	a.mu.Unlock()
-	installed, retErr = installPreparedSerena(ctx, a.inputs, roots, a.buildConstraint)
+	installed, retErr = installPreparedSerena(ctx, a.inputs, roots, a.generation, a.buildConstraint)
 	if !installed.Closure.complete(r.OperationID) {
 		return installed, retErr
 	}

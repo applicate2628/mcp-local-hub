@@ -76,7 +76,14 @@ func qualifyPreparedSerenaPath(ctx context.Context, path string, capBytes int64,
 			return result, nil, closeErr
 		}
 	}
-	name := parts[len(parts)-1]
+	return qualifyPreparedSerenaLeaf(ctx, path, capBytes, directory, parent, parts[len(parts)-1])
+}
+
+// The caller retains the parent; this shared leaf reader owns only its leaf.
+func qualifyPreparedSerenaLeaf(ctx context.Context, path string, capBytes int64, directory bool, parent windows.Handle, name string) (result PreparedSerenaFile, raw []byte, err error) {
+	if err = ctx.Err(); err != nil {
+		return result, nil, err
+	}
 	if !serenaTreeName(name) {
 		return result, nil, errors.New("SERENA_PREPARED_FILE_COMPONENT_INVALID")
 	}

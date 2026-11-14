@@ -17,6 +17,8 @@ import (
 // and qualified file from the single input owner. It never resolves PATH,
 // merges secrets, chooses a version or renews a work/cleanup budget.
 type preparedSerenaInvocation struct {
+	// Only installed metadata executables borrow the original generation.
+	executableTree           *SerenaOwnedTree
 	OperationID              string
 	Executable               PreparedSerenaFile
 	Args                     []string
@@ -41,7 +43,19 @@ func runPreparedSerenaInvocation(ctx context.Context, r preparedSerenaInvocation
 	if !preparedSerenaID(r.OperationID) || !preparedSerenaFile(r.Executable) || len(r.Environment) == 0 || !filepath.IsAbs(r.WorkingDir) || !preparedSerenaDigest(r.PolicySHA256) || r.StdoutLimit <= 0 || r.StderrLimit <= 0 {
 		return result, errors.New("SERENA_PREPARED_INVOCATION_INVALID")
 	}
-	if err = revalidatePreparedSerenaFile(ctx, r.Executable); err != nil {
+	if r.executableTree != nil {
+		if r.executableTree.request.OperationID != r.OperationID {
+			return result, errors.New("SERENA_PREPARED_EXECUTABLE_GENERATION_DRIFT")
+		}
+		root, rootErr := r.executableTree.WorkingDirectory(ctx)
+		if rootErr != nil || root != r.WorkingDir {
+			return result, errors.Join(rootErr, errors.New("SERENA_PREPARED_EXECUTABLE_WORKING_DIRECTORY_DRIFT"))
+		}
+		err = revalidatePreparedSerenaOwnedFile(ctx, r.executableTree, r.Executable)
+	} else {
+		err = revalidatePreparedSerenaFile(ctx, r.Executable)
+	}
+	if err != nil {
 		return result, err
 	}
 	cmd := &exec.Cmd{Path: r.Executable.Path, Args: append([]string{r.Executable.Path}, r.Args...), Env: append([]string(nil), r.Environment...), Dir: r.WorkingDir}
