@@ -33,6 +33,10 @@ pub use windows::{BorrowedStdio, NativeOwner, ProcessView, RootWait};
 mod launch_context;
 #[cfg(windows)]
 pub use launch_context::LaunchContext;
+#[cfg(windows)]
+mod token_user;
+#[cfg(windows)]
+pub use token_user::TokenUserError;
 
 #[cfg(not(windows))]
 mod unsupported {

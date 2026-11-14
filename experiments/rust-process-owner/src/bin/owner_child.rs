@@ -14,6 +14,84 @@ fn main() {
     let mode = args[1].to_string_lossy();
     let marker = std::path::PathBuf::from(&args[2]);
     #[cfg(windows)]
+    if mode == "token-user" {
+        use std::{
+            io,
+            mem::size_of,
+            os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle},
+            ptr::null_mut,
+        };
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER},
+            Security::{
+                GetLengthSid, GetTokenInformation, IsValidSid, TokenUser, TOKEN_QUERY, TOKEN_USER,
+            },
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+        let mut raw = null_mut();
+        // SAFETY: the child's own pseudo-process handle; writable token output.
+        assert_ne!(
+            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) },
+            0
+        );
+        // SAFETY: successful acquisition transfers exactly one token handle.
+        let token = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let mut needed = 0;
+        // Independent fixture uses the documented size query, not the library's
+        // fixed buffer/parser. It never calls ProcessView::token_user_sid.
+        // SAFETY: live owned token and documented null/zero size-query output.
+        assert_eq!(
+            unsafe {
+                GetTokenInformation(token.as_raw_handle(), TokenUser, null_mut(), 0, &mut needed)
+            },
+            0
+        );
+        assert_eq!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(ERROR_INSUFFICIENT_BUFFER as i32)
+        );
+        assert!((size_of::<TOKEN_USER>() as u32..=4096).contains(&needed));
+        let mut storage = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+        // SAFETY: initialized aligned storage has at least the requested size;
+        // the token stays owned for the complete native observation and copy.
+        assert_ne!(
+            unsafe {
+                GetTokenInformation(
+                    token.as_raw_handle(),
+                    TokenUser,
+                    storage.as_mut_ptr().cast(),
+                    needed,
+                    &mut needed,
+                )
+            },
+            0
+        );
+        // SAFETY: a successful TokenUser query initializes this header and its
+        // SID in storage, which has not moved since the call and remains live.
+        let user = unsafe { storage.as_ptr().cast::<TOKEN_USER>().read() };
+        // SAFETY: native successful TokenUser result supplies a valid SID.
+        assert_ne!(unsafe { IsValidSid(user.User.Sid) }, 0);
+        // SAFETY: IsValidSid just accepted this live native result.
+        let length = unsafe { GetLengthSid(user.User.Sid) } as usize;
+        let start = (user.User.Sid as usize)
+            .checked_sub(storage.as_ptr() as usize)
+            .unwrap();
+        assert!(
+            start >= size_of::<TOKEN_USER>()
+                && start
+                    .checked_add(length)
+                    .is_some_and(|end| end <= needed as usize)
+        );
+        // SAFETY: the exact validated SID extent is still inside owned storage.
+        let report =
+            unsafe { std::slice::from_raw_parts(user.User.Sid.cast::<u8>(), length) }.to_vec();
+        let raw = token.into_raw_handle();
+        // SAFETY: this consumes the sole token owner; no Drop repeats the close.
+        assert_ne!(unsafe { CloseHandle(raw) }, 0);
+        fs::write(marker, report).expect("owned private token-user report");
+        return;
+    }
+    #[cfg(windows)]
     if mode == "identity" {
         use windows_sys::Win32::{
             Foundation::FILETIME,

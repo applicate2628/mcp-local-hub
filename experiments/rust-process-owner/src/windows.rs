@@ -129,6 +129,15 @@ pub enum RootWait {
 }
 
 impl ProcessView<'_> {
+    /// Copy the primary token's user SID from this retained process object.
+    /// Success includes explicit closure of the temporary token handle. A query
+    /// and close failure remain independently available in TokenUserError.
+    /// The copied bytes carry no ownership or admission authority and are not
+    /// an atomic snapshot with the other observations on this view.
+    pub fn token_user_sid(&self) -> Result<Vec<u8>, crate::TokenUserError> {
+        crate::token_user::process_token_user_sid(self.handle)
+    }
+
     /// Creation time in 100-nanosecond units since 1601-01-01 00:00:00 UTC.
     /// Compares a fresh original-handle query with the binding captured at create.
     /// An unavailable initial binding stays unavailable; it is never recaptured.

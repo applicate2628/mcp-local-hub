@@ -54,6 +54,33 @@ fn wait_marker(path: &Path) {
 }
 
 #[test]
+fn token_user_observation_matches_child_and_survives_settlement() {
+    let f = Fixture::new();
+    let mut owner = f.launch("token-user", 0, "");
+    let mut observed = Vec::new();
+    owner
+        .admit_and_resume(|view| {
+            observed = view.token_user_sid().map_err(io::Error::other)?;
+            assert!(!observed.is_empty(), "token observation returned no SID");
+            assert!(!f.marker().exists(), "token observation resumed the child");
+            assert_eq!(view.wait_state()?, RootWait::NotSignaled);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+    drop(owner);
+    let report = fs::read(f.marker()).unwrap();
+    // Compare privately: never include the machine's actual SID in test logs.
+    assert!(
+        observed == report,
+        "original-process SID differs from child observation"
+    );
+}
+
+#[test]
 fn identity_observation_matches_child_and_does_not_resume_it() {
     let f = Fixture::new();
     let mut owner = f.launch("identity", 0, "");
