@@ -19,6 +19,12 @@ Ponytail and Caveman verification guidance, with independent reviews of each
 correction. The earlier CARBON review remains historical; this pass does not
 claim a new complete CARBON workflow.
 
+Continuation on November 14 closes the native consent fixture prerequisite on
+Comet and restores two caller-only refusal oracles. The executed correction is
+[`19f23697`](https://github.com/applicate2628/mcp-local-hub/commit/19f236978fd219d7bc04338f01fdb680354f28fe).
+See [current qualification](#november-14-caller-and-native-consent-qualification)
+for fresh evidence and the still-open complete-test and native integration gates.
+
 ## Contents
 
 1. [Outcome and boundaries](#outcome-and-boundaries)
@@ -27,9 +33,10 @@ claim a new complete CARBON workflow.
 4. [Recovery and ownership decisions](#recovery-and-ownership-decisions)
 5. [Delivery plan](#delivery-plan)
 6. [Verification record](#verification-record)
-7. [Remaining gates and next actions](#remaining-gates-and-next-actions)
-8. [Bot review disposition](#bot-review-disposition)
-9. [Terms and abbreviations](#terms-and-abbreviations)
+7. [November 14 caller and native consent qualification](#november-14-caller-and-native-consent-qualification)
+8. [Remaining gates and next actions](#remaining-gates-and-next-actions)
+9. [Bot review disposition](#bot-review-disposition)
+10. [Terms and abbreviations](#terms-and-abbreviations)
 
 ## Outcome and boundaries
 
@@ -173,10 +180,11 @@ compiler/package installation, elevation, installed-state changes or release.
 
 The publication check covers the eight code commits and the committed report:
 30 Go files plus this Markdown plan, with no generated binaries, dependency,
-workflow or hook changes. The final executed code remains `94a75f65`; subsequent
-documentation commits do not change it. Confirm the actual remote head after
-publication and request review for that head. The `53645ec7` bot PASS remains
-historical; do not transfer it to the newly published revision.
+workflow or hook changes. For that earlier series, the final executed code was
+`94a75f65`; subsequent
+documentation commits through `99b451ae` did not change it. The bot subsequently
+reviewed exact head `99b451ae` with no major issues (see [bot disposition](#bot-review-disposition)).
+The new caller correction below requires review of its own resulting head.
 
 ## Verification record
 
@@ -248,6 +256,87 @@ Reproduction entry points are the focused regressions named above,
 `scripts/test-recovery-namespace/README.md`, now incorporated in #616 (Table 3). They bind source/helper bytes and original native identity, use private
 roots and bounded hidden processes, and retain honest unsupported/refused outcomes.
 Raw machine-local logs stay out of published plans because they contain private temporary paths.
+The November 14 evidence below retains source/binary hashes and focused logs with
+the private qualification root replaced by `<QUALIFICATION>` and trailing
+console whitespace removed.
+
+## November 14 caller and native consent qualification
+
+Code commit: `19f236978fd219d7bc04338f01fdb680354f28fe`,
+parent `99b451ae3b1f6052046d11d71ff04e3f46096cef`.
+The correction changes three Go files (74 added / 18 removed lines); evidence
+and plan updates are separate documentation changes.
+
+The leaf command constructor now receives the existing migration dependencies;
+the production command supplies `defaultMigrateSerenaRunDeps()`.
+The API owner, actual prepared operation and the consent install/restore lifetime
+are unchanged. The native consent fixture resolves the production command route,
+then invokes the same leaf command with the existing caller-only preparation
+operation. Real secure writes, terminal detection, consent, target identity and
+rollback remain active; reap/install/start are explicit traps.
+
+The reap-refusal test now requires exactly one reap and retains the exact error
+cause. The registry test takes the actual registry file lock at reap time,
+observes the saved nonzero port allocation, then deliberately refuses the reap.
+It checks restoration of the original zero port, one reconcile rollback, no
+intent write, no install and no successor start. These two negative oracles
+need no real package preparation. Positive installation cases must retain their
+stronger preparation and durable-intent contracts.
+
+Table 5. Fresh bounded executions on November 14, 2026; timestamps in the linked
+receipts are UTC. Counts are top-level tests / subtests.
+
+| Scope / machine | Observed result | Evidence and interpretation |
+| --- | --- | --- |
+| Native consent / Comet | 1 / 7 PASS, zero skips, original process exit 0. | Real `yes`, `no`, Enter, nonterminal, nil input, strict mode and swapped-target scenarios. The fixture creates and hides its own process console while retaining redirected original handles. |
+| Caller refusal and registry ordering / Comet | 2 / 1 PASS, zero skips; both original processes exit 0. | Exact reap cause is reached; actual registry exclusion is released before reap; saved allocation and rollback are observed. These are two restored cases from the historical 29-case inventory. |
+| Adjacent dependency/preparation/result contracts / cReCS | 3 / 13 PASS, zero skips. | Missing dependency and operation bindings fail before effects; preparation failure retains registry state; committed-result cancellation/release behavior remains intact. |
+| Combined current source / cReCS | `go build ./...` and `go vet ./...` PASS; all three changed Go files are `gofmt`-clean. | Go 1.27.3, Windows/amd64, existing offline caches; completed at 02:32:25 UTC. No complete repository test suite was rerun in this increment. |
+| CST native frontend / Comet | FAIL before compiler invocation, process exit 1. | Existing MSVC/SDK were found, but Windows PowerShell 5.1 refuses the repository's build script with `UnauthorizedAccess`. The frontend/pipe assertions were not reached. |
+
+For affirmative consent, the actual writer was entered twice and consent was
+received twice: the first write succeeded, then the forced later client failure
+exercised compensation. For refusal/Enter, one consent was received; nonterminal,
+nil input and strict mode made zero consent calls. A swapped symbolic-link target
+was refused against the complete operator-consented identity. Every scenario
+reported zero reap/install/start calls and equal nominated file preimages.
+Claude's whole-file byte equality is diagnostic only: rollback asserts the
+required semantic state, and unrelated serialization does not define this oracle.
+
+The CLI test executable was built from the parent plus exactly these three
+source files with `-tags=test_state_path_env` and `-ldflags="-s -w"`.
+Its SHA-256 is
+`7d14a684815ef2348843ca1366a5b9382a696059e3e6ec784a1cdee848f5e750`.
+The daemon test executable's SHA-256 is
+`58a21f5b7c4a768853ce390df5c2f6f7d2cb80217ade82598ee2c0561b586b7d`.
+Transfer integrity and changed-source hashes were checked before execution.
+For unchanged CST inputs, the receipt retains both raw hashes and canonical-LF
+hashes because the two checkouts use different line endings.
+
+Evidence:
+
+- [Native/caller receipt](pr616-qualification-20261114/caller-receipt.json),
+  [consent log](pr616-qualification-20261114/consent.log),
+  [reap refusal log](pr616-qualification-20261114/reap-refusal.log) and
+  [registry lock log](pr616-qualification-20261114/registry-lock.log).
+- [Build, vet, formatting and adjacent-test receipt](pr616-qualification-20261114/verification-receipt.json).
+- [CST attempt receipt](pr616-qualification-20261114/cst-receipt.json) and
+  [policy refusal log](pr616-qualification-20261114/cst-policy-refusal.log).
+
+Reproduction uses a clean, isolated task root, existing Go/module caches and
+the source commit above. The native CLI executable runs from `internal/cli`
+with stdin redirected to NUL, captured stdout/stderr, an original-process wait
+and a two-minute Go test timeout. Execute each exact selector in the caller
+receipt separately with `-test.v -test.count=1 -test.timeout=2m`.
+Private TEMP/TMP/GOTMPDIR and application-data paths remain under the task root;
+ambient helper/actor markers are removed. The focused Go command and result
+names are retained in the verification receipt.
+
+Source review and an independent review found no confirmed defect in this
+three-file change. This establishes the caller and native consent boundaries
+above, not positive package preparation, a complete suite PASS or release
+qualification. No installed hub, vendor solver, external model or scheduled task
+was exercised; no execution policy was changed or bypassed.
 
 ## Remaining gates and next actions
 
@@ -256,13 +345,17 @@ Raw machine-local logs stay out of published plans because they contain private 
    independent native replay gate passes within its explicit headless GUI boundary.
    C09/C11/C12/C22/C23 fixture results are separated from production qualification
    in Table 4; none replaces the complete repository gates.
-2. **Twenty-nine live-workspace Serena cases do not reach their intended oracles.**
-   In the clean CLI run, 28 fail at runtime Product admission (`expected 2, actual 3`)
-   and one reaches `SERENA_BUILD_SOURCE_INVALID`. Their unpinned
-   `git+https://example/serena` fixture is not a valid prepared-package source.
-   Selecting an inert runtime path would only move the first group to the next
-   boundary. Two truly zero-workspace cases were repaired and executed separately;
-   that path requires no package preparation.
+2. **Live-workspace Serena integration fixtures remain an open gate.**
+   The historical clean CLI run had 29 leaf cases that missed their intended
+   oracles: 28 runtime Product admission refusals (`expected 2, actual 3`) and
+   one `SERENA_BUILD_SOURCE_INVALID`. The November 14 correction restores two
+   caller-only refusal cases from that set; both now pass with explicit evidence
+   that the intended boundary was reached (Table 5). The other 27 have not been
+   rerun in this increment; that is a remaining historical inventory, not a newly
+   measured failure count. Their unpinned `git+https://example/serena` source is
+   not a valid prepared-package source. Selecting an inert runtime path would
+   only move the first group to the next boundary. Two truly zero-workspace cases
+   were repaired and executed earlier; that path requires no package preparation.
 3. **Full positive Serena preparation needs a supported isolated publisher fixture.**
    `build.ps1` expressly forbids combining `TestStateIsolatedProduct` with
    `SourceSnapshotPath`. Preparation checks the current process's issued source
@@ -282,22 +375,26 @@ Raw machine-local logs stay out of published plans because they contain private 
    profile/VM before attempting this positive path on a developer machine.
    Its read-only acceptance must establish the same private allowed root for the
    observed preparation namespace and the ordinary API/CLI state resolvers.
-   One qualified positive Product run would not make the 29 existing Go tests
-   pass: a supported test-publisher/namespace contract or a deliberate transfer
+   One qualified positive Product run would not repair the original 29-case test
+   inventory: a supported test-publisher/namespace contract or a deliberate transfer
    of their integration oracles remains a separate test-architecture decision.
+   The caller seam used in Table 5 must not be applied mechanically to cases
+   that call the real installer or assert a committed prepared intent.
    It also needs a real pinned HTTPS source, UV/Python probes, installed-tool receipt,
    package metadata and exported-file identity. The installer uses a fresh owned
    attempt/cache; there is no existing verified offline artifact-import fixture.
    Existing UV/Python availability was not inferred either way. Negative owner
    tests, protocol doubles and C15's actual committed-result test cannot qualify
    unlocked preparation → same-owner consumer → quiet-lock install → observed close.
-4. **Required native prerequisites remain unavailable.** The CST frontend test
-   actually failed because MSVC x64 is absent (`vswhere` returned `[]`). Seven
-   mandatory Serena consent cases actually failed at symbolic-link creation because
-   the ordinary token lacks the required privilege; their consent assertions were
-   not reached. No compiler install, elevation, Developer Mode or policy change
-   was performed. In the passing namespace run, actual foreign-owner assignment
-   was refused with Win32 1307, so that separate WrongOwner branch remains UNVERIFIED.
+4. **Native prerequisites have distinct current outcomes.** All seven mandatory
+   Serena consent cases now pass on Comet, using real symbolic links and an owned
+   private process console (Table 5). Comet already has MSVC x64 and the Windows
+   SDK, but the actual CST test fails before compiler invocation: Windows
+   PowerShell refuses `build_test_frontend.ps1` under its execution policy
+   (`UnauthorizedAccess`). The earlier missing-MSVC result on cReCS remains
+   historical. No compiler install, elevation, Developer Mode, execution-policy
+   bypass or policy change was performed. The separate WrongOwner branch remains
+   UNVERIFIED after the earlier Win32 1307 owner-assignment refusal.
 5. **The normal `CLAUDE.md` pre-push gates remain unsatisfied.** The recorded
    untagged and tagged attempts are FAIL, including the aggregate 5-minute API/CLI
    deadlines. Isolated tests active at those deadlines subsequently passed; this
@@ -306,26 +403,27 @@ Raw machine-local logs stay out of published plans because they contain private 
    transplanted into an ordinary `go test ./...` invocation. Keep this workflow
    mismatch explicit rather than weakening native tests or editing the gate to
    authorize this push.
-6. **Publication and merge:** publish the reviewed correction in #616 under the
-   bounded November 14 user exception recorded above. Require a new bot PASS on
-   the resulting exact
-   head; the PASS on `53645ec7` cannot cover these new changes. An exception limited
-   to publishing fixes does not clear the remaining merge gates. Once those gates
-   are satisfied, merge #616 using the repository's ordinary squash workflow,
-   without reopening duplicates or bypassing protection. Do not trigger GitHub
-   Actions or a paid provider run.
+6. **Publication and merge:** the user requested continuation of the same
+   correction branch, with results committed. This bounded follow-up stays in
+   #616; it does not reopen duplicate pull requests or clear the full-test gate.
+   Require a fresh bot PASS on the resulting exact head: the receipt for
+   `99b451ae` covers its earlier source only. Merge remains blocked while these
+   gates are open. Do not trigger GitHub Actions or a paid provider run.
 7. **No release certification:** native GUI startup/health, installed-version
    acceptance, vendor solvers, optional skipped capabilities and full positive
    Serena preparation are not established by the scoped results in Table 4.
 
 ## Bot review disposition
 
-Table 5. The original 26 inline threads plus follow-ups B27 and B28. The fresh
-November 13 snapshot has 28 resolved / 0 unresolved. Published head `53645ec7`
-has the bot's [no-major-issues receipt](https://github.com/applicate2628/mcp-local-hub/pull/616#issuecomment-6856683088)
-and no inline findings anchored to that head. This is historical review for the
-new correction, not its future bot PASS. The code audit covers 27 addressed
-defect/fixture claims and one false panic claim; resolution alone is not proof.
+Table 6. The original 26 inline threads plus follow-ups B27 and B28. The
+November 14 snapshot has 28 resolved / 0 unresolved. The latest completed bot
+review covers exact head `99b451ae3b1f6052046d11d71ff04e3f46096cef`, with a
+[no-major-issues receipt](https://github.com/applicate2628/mcp-local-hub/pull/616#issuecomment-6866115860)
+at 22:08 UTC on November 13 (01:08 Moscow on November 14). The earlier
+`53645ec7` result and this `99b451ae` result do not cover the new caller
+correction. A fresh exact-head review remains pending. The source audit covers
+27 addressed defect/fixture claims and one false panic claim; resolution alone
+is not proof.
 
 The named regressions below were inspected during this final audit. Their presence is not a claim of a new execution; actual executions and limits are in Table 4. CMake serialization is within one server instance, UNC key tests do not qualify a live network share, and recovery composition tests do not substitute for native replay evidence.
 
@@ -373,7 +471,9 @@ The named regressions below were inspected during this final audit. Their presen
 - SHA-256: 256-bit cryptographic hash used to bind bytes; EOF: end of file/stream, required for completed output draining.
 - Checkpoint / cold rollback: durable intermediate journal state / restoration in a new process after interruption.
 - Fixture / top-level test / subtest: isolated test state and owned processes / outer Go test / named nested test.
-- KiB: 1,024 bytes; MSVC: Microsoft Visual C++ compiler toolchain; CST: the project's CST native frontend integration.
+- KiB: 1,024 bytes; MSVC: Microsoft Visual C++ compiler toolchain; SDK: software development kit.
+- CST: the project's CST native frontend integration; reap: stop and settle the prior supervisor before starting its successor.
+- Caller-only seam: an existing dependency boundary used to test command orchestration without claiming prepared-package authority.
 - Quiet lock: retained supervisor-exclusion lock; observed close: completion recorded while its owning operation context is still valid.
 - Postcommit failure: failure after changes were applied; cleanup error does not itself authorize rollback.
 - UNVERIFIED: the required native condition was not established; neither a pass nor fabricated evidence for that branch.

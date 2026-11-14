@@ -1,0 +1,14 @@
+=== RUN   TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe
+    cst_direct_frontend_e2e_windows_test.go:53: build test-only native frontend: exit status 1
+        Невозможно загрузить файл <QUALIFICATION>\source\servers\electromagnetics-mcp\native\cs
+
+        t-runtime\build_test_frontend.ps1, так как выполнение сценариев отключено в этой системе. Для получения дополнительных
+
+        сведений см. about_Execution_Policies по адресу https:/go.microsoft.com/fwlink/?LinkID=135170.
+
+            + CategoryInfo          : Ошибка безопасности: (:) [], ParentContainsErrorRecordException
+
+            + FullyQualifiedErrorId : UnauthorizedAccess
+
+--- FAIL: TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe (0.23s)
+FAIL
