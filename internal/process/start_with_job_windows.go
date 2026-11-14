@@ -78,6 +78,9 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 // startWithJobFilesObserved extends only the at-create owner; nil options
 // follow the ordinary launch path without retaining any additional handle.
 type startWithJobObserverOptions struct {
+	beforeResume              func() error
+	resumeContext             context.Context
+	resumeThread              func(windows.Handle) (uint32, error)
 	retainCreated             func(windows.ProcessInformation)
 	retainOriginal            func(windows.Handle, uint32) error
 	findProcess               func(int) (*os.Process, error)
@@ -118,8 +121,8 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: job handle is 0 (closed?)"))
 	}
 
-	// Allocate a one-attribute thread-attribute list via x/sys helper.
-	// The container owns the LocalAlloc'd buffer; Delete frees it.
+	// The observed owner retains its LocalAlloc buffer through native deletion
+	// and LocalFree, including partial initialization failures.
 	attributeCount := 1
 	if stdin != nil || (observer != nil && len(observer.childHandles) != 0) {
 		attributeCount++
@@ -223,11 +226,11 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 
 	// Build STARTUPINFOEX. Cb must be sizeof(StartupInfoEx) — the
 	// kernel uses this to decide whether to read the extended fields.
-	si := &windows.StartupInfoEx{
+	si := &procThreadAttributeStartupInfo{
 		StartupInfo: windows.StartupInfo{
-			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			Cb: uint32(unsafe.Sizeof(procThreadAttributeStartupInfo{})),
 		},
-		ProcThreadAttributeList: (*windows.ProcThreadAttributeList)(attrList.List()),
+		ProcThreadAttributeList: attrList.List(),
 	}
 	if stdin != nil {
 		si.StartupInfo.Flags |= windows.STARTF_USESTDHANDLES
@@ -250,6 +253,16 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	//     when envPtr is NULL (the kernel inherits the parent's env
 	//     in both cases).
 	creationFlags := startWithJobCreationFlags()
+	var applicationName *uint16
+	if observer != nil && observer.beforeResume != nil {
+		// The admitted original owner alone opts into suspended creation. Its
+		// Job list is assigned atomically by CreateProcess before this hook.
+		creationFlags |= windows.CREATE_SUSPENDED
+		applicationName, err = windows.UTF16PtrFromString(cmd.Path)
+		if err != nil {
+			return 0, startWithJobError(StartWithJobInvalid, err)
+		}
+	}
 
 	var pi windows.ProcessInformation
 	// lpStartupInfo: take &si.StartupInfo (the embedded first field of StartupInfoEx).
@@ -259,7 +272,7 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	// padding. Verified against windows.StartupInfoEx struct definition in
 	// golang.org/x/sys/windows.
 	if err := windows.CreateProcess(
-		nil,                      // lpApplicationName (NULL → use cmd line argv[0])
+		applicationName,          // explicit original image for admitted creation
 		commandLine,              // lpCommandLine
 		nil,                      // lpProcessAttributes
 		nil,                      // lpThreadAttributes
@@ -327,6 +340,26 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 		return int(pi.ProcessId), startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: os.FindProcess(pid=%d): %v", ErrSpawnPostCreate, pi.ProcessId, err))
 	}
 	cmd.Process = p
+	if observer != nil && observer.beforeResume != nil {
+		resumeThread := windows.ResumeThread
+		if observer.resumeThread != nil {
+			resumeThread = observer.resumeThread
+		}
+		admissionErr := observer.beforeResume()
+		var cancellationErr error
+		if observer.resumeContext != nil {
+			// This final sample follows all blocking admission/guard/fence work.
+			// A successful sample is the resume admission decision; cancellation
+			// after it may race the native attempt, not an atomic cancellation.
+			cancellationErr = observer.resumeContext.Err()
+		}
+		if err := errors.Join(admissionErr, cancellationErr); err != nil {
+			return int(pi.ProcessId), startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: original pre-resume admission: %w", ErrSpawnPostCreate, err))
+		}
+		if _, err := resumeThread(pi.Thread); err != nil {
+			return int(pi.ProcessId), startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: ResumeThread: %w", ErrSpawnPostCreate, err))
+		}
+	}
 
 	// We opened our own handle via FindProcess; close the duplicate
 	// returned by CreateProcess to avoid leaking it for the lifetime

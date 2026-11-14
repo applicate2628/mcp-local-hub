@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api"
 )
 
 func TestInstallNoClientConfigFlagContract(t *testing.T) {
@@ -117,6 +119,9 @@ func TestNoClientCheckAndDryRunNoMutation(t *testing.T) {
 	if err := os.WriteFile(canonical, []byte("canonical-sentinel\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// This test checks read-only command behavior, not native Product admission.
+	// Bind the sentinel explicitly instead of admitting the Go test runner.
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonical))
 	clientConfig := filepath.Join(home, ".claude.json")
 	if err := os.WriteFile(clientConfig, []byte("client-sentinel\n"), 0o600); err != nil {
 		t.Fatal(err)

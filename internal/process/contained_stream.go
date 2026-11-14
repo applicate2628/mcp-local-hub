@@ -26,6 +26,7 @@ const (
 	ContainedStageStderr      ContainedRunStage = "stderr"
 	ContainedStageWait        ContainedRunStage = "wait"
 	ContainedStageExit        ContainedRunStage = "exit"
+	ContainedStageContext     ContainedRunStage = "context"
 	ContainedStageCleanup     ContainedRunStage = "cleanup"
 )
 
@@ -635,7 +636,7 @@ joinLoop:
 		primaryStage = ContainedStageStdout
 		primary = stdoutResult.err
 	} else if ctxErr != nil {
-		primaryStage = ContainedStageCleanup
+		primaryStage = ContainedStageContext
 		primary = ctxErr
 	} else if stderrResult.err != nil && stderrBeforeReaderClose {
 		primaryStage = ContainedStageStderr

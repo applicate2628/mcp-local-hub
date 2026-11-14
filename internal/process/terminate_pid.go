@@ -61,6 +61,17 @@ type HeldPIDGeneration interface {
 	Close() error
 }
 
+// HeldOriginalProcessHandleBorrower is optional; existing generation and
+// observation interfaces/mocks retain their contracts. The callback runs
+// synchronously under the original owner's query/lifetime gate. It must not
+// retain, duplicate, close, asynchronously use, or reenter that owner through
+// the borrowed handle. A borrow grants no termination authority.
+type HeldOriginalProcessHandleBorrower interface {
+	BorrowOriginalProcessHandle(func(uintptr) error) error
+}
+
+var ErrHeldOriginalProcessRetiring = errors.New("process: original held process is retiring or unavailable")
+
 // HeldPIDExitResult separates a positively signalled original object from an
 // available exit code. Later errors do not erase either acquired fact.
 type HeldPIDExitResult struct {

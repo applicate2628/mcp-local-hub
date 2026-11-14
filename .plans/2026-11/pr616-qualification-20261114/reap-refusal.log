@@ -1,0 +1,5 @@
+=== RUN   TestMigrateSerena_DrivesSupervisorRestart
+=== RUN   TestMigrateSerena_DrivesSupervisorRestart/fail-loud_when_the_prior_supervisor_cannot_be_reaped_—_intent_NOT_written
+--- PASS: TestMigrateSerena_DrivesSupervisorRestart (0.34s)
+    --- PASS: TestMigrateSerena_DrivesSupervisorRestart/fail-loud_when_the_prior_supervisor_cannot_be_reaped_—_intent_NOT_written (0.12s)
+PASS

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -38,6 +39,10 @@ import (
 // same WindowsProductTxn used by upgrade; non-Windows keeps the established
 // single-binary replacement path.
 func newCanonicalizeCmdReal() *cobra.Command {
+	return newCanonicalizeCmdRealWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+func newCanonicalizeCmdRealWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	return &cobra.Command{
 		Use:   "canonicalize",
 		Short: "Copy this product into canonical ~/.local/bin (no PATH or fleet restart)",
@@ -65,7 +70,10 @@ Skipping npm lifecycle scripts does not require this action.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return canonicalizeBinaryOnly(cmd.OutOrStdout())
+			if runtime.GOOS == "windows" && input.bindingErr != nil {
+				return input.bindingErr
+			}
+			return canonicalizeBinaryOnlyWithWindowsCanonicalEntryInput(cmd.Context(), cmd.OutOrStdout(), input)
 		},
 	}
 }
@@ -74,6 +82,10 @@ Skipping npm lifecycle scripts does not require this action.`,
 // canonical ~/.local/bin target. It resolves both endpoints and delegates the
 // (testable) core to canonicalizeBinaryToTarget.
 func canonicalizeBinaryOnly(w io.Writer) error {
+	return canonicalizeBinaryOnlyWithWindowsCanonicalEntryInput(context.Background(), w, windowsCanonicalEntryCommandInput{})
+}
+
+func canonicalizeBinaryOnlyWithWindowsCanonicalEntryInput(ctx context.Context, w io.Writer, input windowsCanonicalEntryCommandInput) error {
 	target, err := setupTargetPath()
 	if err != nil {
 		return fmt.Errorf("resolve canonical target: %w", err)
@@ -82,7 +94,7 @@ func canonicalizeBinaryOnly(w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
-	return canonicalizeBinaryToTarget(w, curExe, target)
+	return canonicalizeProductToTargetWithWindowsCanonicalEntryInput(ctx, w, curExe, target, input)
 }
 
 // canonicalizeBinaryToTarget is the pure core of canonicalizeBinaryOnly,

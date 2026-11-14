@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func TestWriteMCPFrontReconcileReport_RejectsUnreadableOversize(t *testing.T) {
-	path := t.TempDir() + "/report.json"
+	path := filepath.Join(apitest.HardenedTempDir(t), "report.json")
 	report := &mcpFrontReconcileReport{
 		Version:          mcpFrontReconcileReportVersion,
 		SnapshotComplete: true,

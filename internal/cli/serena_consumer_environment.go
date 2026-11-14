@@ -16,18 +16,15 @@ import (
 
 func apiConsumerSHA(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
 
-func (*serenaPreparationAssembly) ObserveConsumerEnvironment(ctx context.Context, manifest *config.ServerManifest, rawSHA, task string, override *api.SerenaPreparationPolicyV1) (*api.SerenaConsumerEnvironmentObservation, error) {
+func (*serenaPreparationAssembly) ObserveConsumerEnvironment(ctx context.Context, manifest *config.ServerManifest, rawSHA, task string, override *api.SerenaPreparationPolicyV2) (*api.SerenaConsumerEnvironmentObservation, error) {
 	if ctx == nil || ctx.Err() != nil || manifest == nil || task == "" {
 		return nil, errors.New("SERENA_CONSUMER_ENVIRONMENT_INPUT_MISSING")
 	}
 	if _, finite := ctx.Deadline(); !finite {
 		return nil, errors.New("SERENA_CONSUMER_ENVIRONMENT_DEADLINE_MISSING")
 	}
-	policy := api.DefaultSerenaPreparationPolicy()
-	if override != nil {
-		policy = *override
-	}
-	if err := policy.Validate(); err != nil {
+	policy, err := api.ResolveSerenaPreparationPolicy(override)
+	if err != nil {
 		return nil, err
 	}
 	root, resolution, err := api.ResolveDaemonStateDirObserved(ctx)

@@ -10,16 +10,20 @@ import (
 	"os"
 	"strings"
 
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/cli"
 )
 
 // These are populated at build time via `-ldflags "-X ..."` (see build
 // scripts). Defaults are useful for `go run` / unmarked dev builds.
 var (
-	version         = "dev"
-	commit          = "unknown"
-	buildDate       = "unknown"
-	launchBareGUIFn = cli.LaunchBareGUI
+	version                         = "dev"
+	commit                          = "unknown"
+	buildDate                       = "unknown"
+	entrySetBuildID                 string
+	expectedCanonicalEntrySHA256    string
+	canonicalEntryReverseProjection string
+	launchBareGUIFn                 = cli.LaunchBareGUI
 )
 
 type windowsEntrypointMode uint8
@@ -77,7 +81,10 @@ func main() {
 	}
 	os.Args = args
 
-	if err := cli.NewRootCmd().Execute(); err != nil {
+	// The immutable linker tuple is received once. Its original error belongs to
+	// the new install paths; ordinary help/version/status keep their old flow.
+	entryBinding, entryBindingErr := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(entrySetBuildID, expectedCanonicalEntrySHA256, canonicalEntryReverseProjection)
+	if err := cli.NewRootCmdWithWindowsCanonicalEntryBinding(entryBinding, entryBindingErr).Execute(); err != nil {
 		// PR #23 C1 stuck-instance recovery: propagate distinct exit
 		// codes from --force / --force --kill (2/3/4/6/7) instead of
 		// cobra's default "1 on error". cli.forceExitError implements

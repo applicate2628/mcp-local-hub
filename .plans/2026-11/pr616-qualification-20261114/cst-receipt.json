@@ -1,0 +1,42 @@
+{
+  "base": "99b451ae3b1f6052046d11d71ff04e3f46096cef",
+  "binarySHA256": "58a21f5b7c4a768853ce390df5c2f6f7d2cb80217ade82598ee2c0561b586b7d",
+  "selector": "^TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe$",
+  "exitCode": 1,
+  "startedUTC": "2026-11-14T02:29:55.682038+00:00",
+  "finishedUTC": "2026-11-14T02:29:55.970380+00:00",
+  "shell": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "PATH": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0;C:\\WINDOWS\\System32",
+  "source": [
+    {
+      "path": "go.mod",
+      "sha256": "7d6564a1636c774ae2aa27edca3a9ce4dff1c078455f0f99aab24e096c2d7679",
+      "canonicalLF_SHA256": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+      "executedSourceSHA256": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd"
+    },
+    {
+      "path": "go.sum",
+      "sha256": "2d18cdb2555f22255c14ae760a49262e602646c0029aa1cb5bfc348d8cd4b2ad",
+      "canonicalLF_SHA256": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2",
+      "executedSourceSHA256": "61f4a30f006f3bc99b1d2500646d9fd381c3c8d72050ca76dce2f9321c3ecae2"
+    },
+    {
+      "path": "internal/daemon/cst_direct_frontend_e2e_windows_test.go",
+      "sha256": "9b144545336d3c05b2530eafd2ca1e45b577e227c3b02f31ed095df1c582e765",
+      "canonicalLF_SHA256": "62fa983625f042a9adb632671e42c37443745a81d687815ecbe01474ad7e0e97",
+      "executedSourceSHA256": "62fa983625f042a9adb632671e42c37443745a81d687815ecbe01474ad7e0e97"
+    },
+    {
+      "path": "servers/electromagnetics-mcp/native/cst-runtime/build_test_frontend.ps1",
+      "sha256": "862c501edea3aa638e8ff3ad3157bb514cd6edc7fb2157c8b824938b28621d12",
+      "canonicalLF_SHA256": "dcfbd6de04040ea835acdb6e552cdb11a9ba8e8b2134572def75977b4620693d",
+      "executedSourceSHA256": "dcfbd6de04040ea835acdb6e552cdb11a9ba8e8b2134572def75977b4620693d"
+    },
+    {
+      "path": "servers/electromagnetics-mcp/native/cst-runtime/mcphub_cst_runtime.c",
+      "sha256": "037394a86da35cbb23abd12e842f42411cbadf641118daa14bbce8ccae978595",
+      "canonicalLF_SHA256": "af793a2656e09c5f2646078938688d7a8f199194b69682724e7d3966498ea041",
+      "executedSourceSHA256": "af793a2656e09c5f2646078938688d7a8f199194b69682724e7d3966498ea041"
+    }
+  ]
+}

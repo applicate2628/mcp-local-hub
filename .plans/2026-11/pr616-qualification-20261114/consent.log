@@ -1,0 +1,25 @@
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows
+    migrate_serena_consent_windows_test.go:39: private test-process console allocated, hidden; original pipe handles retained
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/yes
+    migrate_serena_consent_windows_test.go:306: writer-port=true codex-writes=2 consent-calls=2 first-error=<nil>; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=true (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/no
+    migrate_serena_consent_windows_test.go:306: writer-port=true codex-writes=1 consent-calls=1 first-error=secure write: target <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsno2509644436\001\home\.codex\config.toml: pre-existing reparse point refused; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/enter
+    migrate_serena_consent_windows_test.go:306: writer-port=true codex-writes=1 consent-calls=1 first-error=secure write: target <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsenter398747231\001\home\.codex\config.toml: pre-existing reparse point refused; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/nonterminal
+    migrate_serena_consent_windows_test.go:306: writer-port=false codex-writes=1 consent-calls=0 first-error=secure write: target <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsnonterminal3396198559\001\home\.codex\config.toml: pre-existing reparse point refused; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/nil
+    migrate_serena_consent_windows_test.go:306: writer-port=false codex-writes=1 consent-calls=0 first-error=secure write: target <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsnil808307621\001\home\.codex\config.toml: pre-existing reparse point refused; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/strict
+    migrate_serena_consent_windows_test.go:306: writer-port=true codex-writes=1 consent-calls=0 first-error=secure write: target <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsstrict4013647296\001\home\.codex\config.toml: pre-existing reparse point refused; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+=== RUN   TestMigrateSerena_RealWriterConsentReceivingWindows/swapped_target
+    migrate_serena_consent_windows_test.go:306: writer-port=true codex-writes=1 consent-calls=1 first-error=secure write: symlink <QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsswapped_targ834344472\001\home\.codex\config.toml now resolves to a target (<QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsswapped_targ834344472\001\home\dotfiles\.codex\other.toml) that does not match the operator-consented target (<QUALIFICATION>\tmp\TestMigrateSerena_RealWriterConsentReceivingWindowsswapped_targ834344472\001\home\dotfiles\.codex\config.toml); refusing the write — the symlink may have been repointed after consent; reap/install/start=0/0/0; nominated-preimages=equal; Claude-whole-byte-equal=false (non-gate)
+--- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows (4.64s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/yes (0.75s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/no (0.64s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/enter (0.62s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/nonterminal (0.60s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/nil (0.62s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/strict (0.71s)
+    --- PASS: TestMigrateSerena_RealWriterConsentReceivingWindows/swapped_target (0.60s)
+PASS

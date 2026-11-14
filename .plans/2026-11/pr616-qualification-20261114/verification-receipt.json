@@ -1,0 +1,88 @@
+{
+  "base": "99b451ae3b1f6052046d11d71ff04e3f46096cef",
+  "go": "go version go1.27.3 windows/amd64",
+  "source": [
+    {
+      "path": "internal/cli/migrate_serena.go",
+      "sha256": "7d538d0e04ff27ebef203b0b8d48a6e7a9d7c18c5f3ca0aa835f7bb04bb1b617"
+    },
+    {
+      "path": "internal/cli/migrate_serena_consent_windows_test.go",
+      "sha256": "3db357c7bb849dc839c1cc220d6420e1b3d62f496d81a5e1b6c939d3a5c60cd4"
+    },
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "sha256": "faf8d32d846e0228e440c6e91dab9ae636e6b7c4bdc86e911ae92706229f7a0a"
+    }
+  ],
+  "runs": [
+    {
+      "name": "format",
+      "args": [
+        "-l",
+        "internal/cli/migrate_serena.go",
+        "internal/cli/migrate_serena_consent_windows_test.go",
+        "internal/cli/migrate_serena_test.go"
+      ],
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:31:33.221213+00:00",
+      "finishedUTC": "2026-11-14T02:31:33.275314+00:00",
+      "unformatted": []
+    },
+    {
+      "name": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:31:33.314805+00:00",
+      "finishedUTC": "2026-11-14T02:31:48.682051+00:00"
+    },
+    {
+      "name": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:31:48.719399+00:00",
+      "finishedUTC": "2026-11-14T02:32:06.015366+00:00"
+    },
+    {
+      "name": "adjacent",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout=2m",
+        "-run=^TestMigrateSerena(InstallOperationBindingsFailBeforeEffects|InstallPathPreservesCommittedOutcome|PreparationFailurePrecedesReapAndRetainsRegistry)$",
+        "./internal/cli"
+      ],
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:32:06.604976+00:00",
+      "finishedUTC": "2026-11-14T02:32:25.403705+00:00",
+      "passTests": [
+        "TestMigrateSerenaInstallPathPreservesCommittedOutcome/late_cancellation",
+        "TestMigrateSerenaInstallPathPreservesCommittedOutcome/package_release_failure",
+        "TestMigrateSerenaInstallPathPreservesCommittedOutcome/precommit_cancellation",
+        "TestMigrateSerenaInstallPathPreservesCommittedOutcome",
+        "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry/initial_workspace",
+        "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry/first_workspace_registered_during_reconcile",
+        "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/zero_dependencies",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_registry_acquire",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_API_factory",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_operation_factory",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/nil_API",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/factory_refusal",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_prepare",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_install",
+        "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects"
+      ],
+      "failTests": [],
+      "skipTests": []
+    }
+  ]
+}

@@ -25,7 +25,7 @@ type PreparedSerenaLaunchObservation struct {
 	manifest                                           *config.ServerManifest
 	manifestRaw                                        []byte
 	environment                                        *SerenaConsumerEnvironmentObservation
-	policy                                             SerenaPreparationPolicyV1
+	policy                                             SerenaPreparationPolicyV2
 	source                                             *buildinfo.PublisherSourceObservation
 	namespace                                          *SupervisorStateNamespaceObservation
 	namespaceClose                                     *StateFileFreshNamespaceCloseObservation
@@ -227,4 +227,11 @@ func (o *PreparedSerenaLaunchObservation) Manifest(ctx context.Context) (*config
 		return nil, err
 	}
 	return config.ParseManifest(bytes.NewReader(o.manifestRaw))
+}
+
+func (o *PreparedSerenaLaunchObservation) consumerEnvironment(ctx context.Context, descriptor SupervisorDaemon) (*SerenaConsumerEnvironmentObservation, error) {
+	if e := o.Validate(ctx, descriptor); e != nil {
+		return nil, e
+	}
+	return o.environment, nil
 }

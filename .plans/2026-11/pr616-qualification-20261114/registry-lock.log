@@ -1,0 +1,3 @@
+=== RUN   TestMigrateSerena_RegistryLockReleasedBeforeReap
+--- PASS: TestMigrateSerena_RegistryLockReleasedBeforeReap (0.28s)
+PASS

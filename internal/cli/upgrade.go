@@ -36,6 +36,10 @@ import (
 //     showing this command's Long block with the same diagnostic guide
 //     as `mcphub install --help`'s --upgrade flag entry.
 func newUpgradeCmdReal() *cobra.Command {
+	return newUpgradeCmdRealWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+func newUpgradeCmdRealWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Transactionally apply an admitted Product to canonical mcphub.exe (alias for `install --upgrade`)",
@@ -116,7 +120,7 @@ See also: install, setup, restart, stop.`,
 				return fmt.Errorf("--stop-gui-owned-fleet-for-upgrade requires --terminate-gui-for-upgrade")
 			}
 			// The alias owns no flags; the shared dispatcher owns all policy.
-			return dispatchUpgrade(cmd)
+			return dispatchUpgradeWithWindowsCanonicalEntryInput(cmd, input)
 		},
 	}
 	c.Flags().Bool("terminate-gui-for-upgrade", false,
