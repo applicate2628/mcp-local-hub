@@ -11,9 +11,10 @@
 5. [Checked original-process admission](#checked-original-process-admission)
 6. [Memory, concurrency and failures](#memory-concurrency-and-failures)
 7. [Cancelable observation and pipe settlement](#cancelable-observation-and-pipe-settlement)
-8. [Evidence](#evidence)
-9. [Reproduction](#reproduction)
-10. [Remaining gates and references](#remaining-gates-and-references)
+8. [Native cleanup across the DLL boundary](#native-cleanup-across-the-dll-boundary)
+9. [Evidence](#evidence)
+10. [Reproduction](#reproduction)
+11. [Remaining gates and references](#remaining-gates-and-references)
 
 ## Scope and ownership
 
@@ -228,6 +229,27 @@ The first native I/O run exposed two incorrect test assumptions: `PeekNamedPipe`
 
 This qualifies these Windows pipe profiles and finite payloads, not all files/sockets/consoles/device handles or all native I/O cancellation APIs. There is no universal pump, backpressure policy, hard cancellation deadline, automatic tree shutdown, remote-effect rollback or full product lifecycle admission. Real operations may need caller-specific authority, buffering, drain and cancellation mechanisms.
 
+## Native cleanup across the DLL boundary
+
+The [protected-close qualification](verification/native-cleanup-2026-11-14/RESULTS.md)
+now exercises actual Windows CloseHandle failures through the existing Rust DLL
+into Go, rather than inferring that path from separate native/unit tests. It
+covers all seven nonempty thread/process/Job failure masks through both Finish
+and FinishContext, preserves root exit259 and each real error, and checks cached
+failure after explicit test recovery. The ordinary runtime and ABI are unchanged.
+
+The [reproducible runner](verification/native-cleanup-2026-11-14/run.ps1) adds a
+read-only accessor only in a disposable source copy, not the normal DLL. Tests
+verify that normal debug/release artifacts lack that accessor. Test-only recovery
+of continuously protected original handles is not general production recovery
+or authority to retry unknown/stale numeric handles. See the [method and limits](verification/native-cleanup-2026-11-14/README.md).
+
+Three functions are enabled only under `ffi_native_faults`: two behavioral tests
+(with14 matrix subcases) and one ordinary-artifact absence control. They are
+executed explicitly, not added to normal test counts or silently skipped. Other
+kernel failure classes, loader/allocator/panic paths, Unix and product policy
+remain separate gates.
+
 ## Evidence
 
 **Table 6. Independent verification layers.**
@@ -335,7 +357,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
 The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
 

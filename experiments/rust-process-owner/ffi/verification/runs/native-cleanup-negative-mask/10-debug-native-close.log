@@ -1,0 +1,145 @@
+Command: go test -race -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=3 -timeout=90s -v Expected exit: 1 Actual exit: 1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:137740 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:132648 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:137416 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:131012 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:77452 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:136916 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:122940 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:133204 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:129972 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:127336 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:56920 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:127136 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:132312 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:77084 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.39s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.03s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+    native_cleanup_windows_test.go:254: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:34768 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:23776 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:137236 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:86092 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:138156 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:135436 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:124496 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:130920 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:69696 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:128480 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:128044 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:137520 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:50328 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:80132 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:129904 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.40s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+    native_cleanup_windows_test.go:254: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:132232 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:134696 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:118844 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:135800 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:136000 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:135092 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:134816 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:130836 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:105248 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 0]}; mask=1 codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:127384 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 0]}; mask=2 codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:133500 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 0]}; mask=3 codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:87636 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 6]}; mask=4 codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:137064 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 0 6]}; mask=5 codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:136976 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 6 6]}; mask=6 codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:213: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:115444 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.41s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.02s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.03s)
+    --- FAIL: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+    native_cleanup_windows_test.go:254: real native cleanup outcome altered across FFI: {State:3 Flags:1 PID:125832 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[6 6 6]}; mask=7 codes=[6 6 6]
+--- FAIL: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	1.316s
+FAIL

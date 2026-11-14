@@ -1,0 +1,4 @@
+Command: cargo build --offline --locked Expected exit: 0 Actual exit: 0
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-negative-mask\native)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-native-cleanup-negative-mask\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.64s

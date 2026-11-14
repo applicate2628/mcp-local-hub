@@ -1,0 +1,13 @@
+Command: cargo build --offline --locked Expected exit: 0 Actual exit: 0
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-negative-failure\native)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-native-cleanup-negative-failure\native\ffi)
+warning: constant `CLEANUP_FAILED` is never used
+  --> src\lib.rs:31:7
+   |
+31 | const CLEANUP_FAILED: u32 = 3;
+   |       ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-owner-ffi-spike` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s

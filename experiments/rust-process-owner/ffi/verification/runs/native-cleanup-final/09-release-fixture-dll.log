@@ -1,0 +1,7 @@
+Command: cargo build --release --offline --locked
+Expected exit: 0
+Actual exit: 0
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-final\native)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-native-cleanup-final\native\ffi)
+    Finished `release` profile [optimized] target(s) in 0.81s

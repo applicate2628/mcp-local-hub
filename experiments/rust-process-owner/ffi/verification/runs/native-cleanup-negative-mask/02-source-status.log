@@ -1,0 +1,8 @@
+Command: git -C <LAB>\source status --short Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go
+?? experiments/rust-process-owner/ffi/verification/native-cleanup-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/native-cleanup-initial/
+?? experiments/rust-process-owner/ffi/verification/runs/native-cleanup-negative-failure/
+?? experiments/rust-process-owner/ffi/verification/runs/native-cleanup-negative-mask/
+?? experiments/rust-process-owner/ffi/verification/runs/native-cleanup-positive-1/

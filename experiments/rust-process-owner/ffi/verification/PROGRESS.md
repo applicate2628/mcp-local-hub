@@ -218,3 +218,52 @@ line endings/trailing whitespace only. No source changes or reclassified tests.
 A second evidence-only check caught ConvertTo-Json CRLF in the newly generated
 normalization manifest. Repeated failure preserved; normalized through the same
 text writer. This did not change code, test values or source qualifications.
+
+## Actual native cleanup failures across FFI - 2026-11-14
+
+Base a59a867d0d8a44d156ab783c78f91a02fe4d83e5 verified clean on private631 clone.
+Next gate: actual OS CloseHandle failure through the existing DLL into Go,
+not merely separately passing native tests and ABI mapping unit tests.
+Ruling: use a disposable COPY of the native/FFI source, append a read-only
+qualification export that exposes the original owner slots only to opt-in tests.
+Normal library/ABI/Go runtime and parent625 stay unchanged; no fault feature,
+registry, env-trigger or exported test API in ordinary artifacts.
+The test owns the fixtures and temporarily sets PROTECT_FROM_CLOSE on known
+original thread/process/Job handles. Native close/settlement code stays exact.
+It records the real OS error, verifies all seven nonempty masks, preservation of
+root result259, cached results/no retry, Finish and FinishContext, and Release.
+Test recovery alone can unprotect and close these known-live protected handles;
+it does not grant production a stale-numeric-handle retry. If slots were not
+consumed, recovery only restores flags and leaves cleanup to the actual owner.
+Run normal-artifact absence control, instrumented-positive tests, wrong-mapping
+negative controls, then full ordinary suites. No product/installation activity,
+new dependencies, external models, independent review or native Unix claim.
+Required code, logs, source identity, commands and limits will be committed in PR.Native-close positive qualification passed on actual protected handles through
+Finish and FinishContext for all7 masks; root259 and each real OS error code
+survived. A separate case reclaimed known resources in the fixture and verified
+that the recorded failure remained failure, not retroactive success.
+Normal debug/release artifacts lack the qualification export. Two copy-only
+mutations (CleanupFailed->Complete and dropped cleanup mask) each failed the
+expected native outcome assertions, not just compilation. No runtime bug was
+found by this gate; existing native/FFI behavior is characterized, not rewritten.
+One harness preparation error attempted to recreate existing tmp; failure and
+runner hash retained. Only empty owned aborted copy moved to trash, not deleted.
+Self-review keeps accessor read-only and disposable, test cleanup distinguishes
+still-owned slots from detached known-live protected handles, no stale retry.
+Native cleanup qualification implementation committed: c3fca608507d2c5a655e583116f06950c6d8dd4c
+Final instrumented run and complete ordinary suites passed; corresponding source hashes matched before commit. Evidence/docs commit follows. Ordinary runtime unchanged.
+
+Final native-close evidence:3 opt-in functions (2 behavioral with14 matrix
+subcases +1 normal-DLL control), both profiles race x3, cgocheck2/tagged vet,
+and fixture Clippy passed. All47 normal Go functions/31 nested/0 skips,14 ABI
+unit tests and53 parent checks passed in full ordinary debug/release runs.
+Runtime code/ABI/dependencies unchanged. This qualifies protected-close masks,
+not every kernel failure or general recovery.11 selected/read/applied skills
+and concrete self-review are recorded in native-cleanup-2026-11-14/RESULTS.md.
+Publication will include every positive/negative/preparation record and exact
+copy-only runner; no required result depends on this machine remaining available.
+
+Completed instrumented source copies matched their recorded manifests; four
+copies and their unused test-only target moved directly to approved trash.
+Normal target/Cargo cache and active source remain; necessary results are under
+verification/ and source control. Movements confirmed, trash not emptied.

@@ -1,0 +1,4 @@
+OS=Microsoft Windows NT 10.0.26100.0
+Arch=AMD64
+Offline=true
+Mutation=erase-failure

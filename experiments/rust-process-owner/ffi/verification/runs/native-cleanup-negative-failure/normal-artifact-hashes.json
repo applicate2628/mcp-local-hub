@@ -1,0 +1,10 @@
+[
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\target\\debug\\mcphub_owner_ffi_spike.dll",
+        "sha256":  "027c8879508554f5c094e980683c24214635c39b0ac39d38d8eabf825ec70662"
+    },
+    {
+        "path":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\target\\release\\mcphub_owner_ffi_spike.dll",
+        "sha256":  "93aed1b8d782dad75f5ad5605695401f49920dfc28566488c488957e8ee0ca71"
+    }
+]

@@ -1,0 +1,4 @@
+Runner SHA256: d5ab56d29c2db4f8a1e6f836469adeb886d16e75b95f73a78a5ad0a5817aad31
+Failure before any native test: New-Item attempted to create existing <LAB>/tmp with ErrorAction Stop.
+Fresh report/copy directories were created before this preparation failure. No build/process fixture was started.
+Fix: create report/copy strictly new; create shared temporary directory only if absent. This is a runner defect, not native owner failure.

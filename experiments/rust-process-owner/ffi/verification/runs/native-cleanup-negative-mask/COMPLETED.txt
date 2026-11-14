@@ -1,0 +1,1 @@
+All recorded expected exits matched. Mutation=erase-mask. Original source and ordinary DLLs unchanged. Qualifies selected owned Windows cleanup failures, not a new recovery API or arbitrary OS failure schedules.

@@ -1,0 +1,6 @@
+Command: cargo build --manifest-path ../Cargo.toml --offline --locked --bin owner_child
+Expected exit: 0
+Actual exit: 0
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-final\native)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.58s

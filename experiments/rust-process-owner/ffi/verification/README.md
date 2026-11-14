@@ -70,3 +70,14 @@ was repeated after implementation commit `e973ee2`; code/runner hashes match.
 Both complete runs and both negative-control passes are retained with exact
 source identities. The later negative script improves reproducibility, not the
 production implementation or its recorded successful outcomes.
+## Actual native cleanup failures across FFI
+
+[Results and self-review](native-cleanup-2026-11-14/RESULTS.md),
+[method, boundaries and exact mutations](native-cleanup-2026-11-14/README.md),
+[copy-only runner](native-cleanup-2026-11-14/run.ps1),
+[final native qualification](runs/native-cleanup-final/steps.json), and
+[full ordinary regression run](runs/native-cleanup-ordinary-final/steps.json)
+are versioned here. The runtime did not need a fix: the new result is a tested
+end-to-end path for selected real Windows failures. Negative controls and the
+initial preparation failure remain visible, and ordinary artifacts are checked
+not to contain the fixture-only handle accessor.
