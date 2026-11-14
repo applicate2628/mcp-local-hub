@@ -169,7 +169,9 @@ func (p SerenaPreparationPolicyV2) canonicalIdentitySHA256() (string, error) {
 	return preparedSerenaHash(raw), nil
 }
 func (p SerenaPreparationPolicyV2) pythonFindArgs() []string {
-	return []string{"python", "find", "--no-project", "--system", "--no-config", "--no-python-downloads", "--offline", ">=" + p.PythonMinimumVersion}
+	// --system excludes virtual environments only. Prefer system installations
+	// from the qualified bootstrap PATH, while retaining managed Python fallback.
+	return []string{"python", "find", "--no-project", "--system", "--no-config", "--no-python-downloads", "--offline", "--python-preference", "system", ">=" + p.PythonMinimumVersion}
 }
 
 // The token grammar accepts stable, pre-release and build versions. A release
