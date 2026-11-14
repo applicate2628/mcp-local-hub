@@ -84,7 +84,16 @@ func main() {
 	// The immutable linker tuple is received once. Its original error belongs to
 	// the new install paths; ordinary help/version/status keep their old flow.
 	entryBinding, entryBindingErr := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(entrySetBuildID, expectedCanonicalEntrySHA256, canonicalEntryReverseProjection)
-	if err := cli.NewRootCmdWithWindowsCanonicalEntryBinding(entryBinding, entryBindingErr).Execute(); err != nil {
+	root := cli.NewRootCmdWithWindowsCanonicalEntryBinding(entryBinding, entryBindingErr)
+	// Only the executable bootstrap owns this process's inherited stdin.
+	// Keep canonical-entry admission and borrowed library inputs unchanged.
+	if os.Stdin != nil {
+		if err := cli.BindProcessRelayInput(root, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	}
+	if err := root.Execute(); err != nil {
 		// PR #23 C1 stuck-instance recovery: propagate distinct exit
 		// codes from --force / --force --kill (2/3/4/6/7) instead of
 		// cobra's default "1 on error". cli.forceExitError implements

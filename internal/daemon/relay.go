@@ -32,6 +32,16 @@ type HTTPToStdioRelay struct {
 	Stdout io.Writer // usually os.Stdout
 	Stderr io.Writer // usually os.Stderr (logging only; never echoed to client)
 
+	// InterruptStdin is an explicit capability granted by the input owner.
+	// Nil keeps the existing borrowed-input contract. When set, cancellation
+	// may call it once while the input pump is active, concurrently with Read.
+	// It must make current/future reads terminate and must itself finish; Run
+	// joins both operations. Return an error if interruption/cleanup failed.
+	// Run never infers permission from io.Closer and never closes Stdout.
+	// Expected interrupted reads should return EOF or context.Canceled;
+	// unrelated read errors and this callback's error remain observable.
+	InterruptStdin func() error
+
 	// HTTPClient is optional; a sensible default is used if nil.
 	HTTPClient *http.Client
 
@@ -42,9 +52,11 @@ type HTTPToStdioRelay struct {
 	qualificationMu sync.Mutex
 	qualification   *mcpHTTPQualificationOwner
 
-	// stdoutMu serializes writes from both stdin-pump and sse-listener
-	// goroutines so interleaved JSON lines never corrupt the wire.
-	stdoutMu sync.Mutex
+	// stdoutMu owns complete frame writes and the first output failure.
+	// Once a frame fails, every producer must stop using this stream.
+	stdoutMu     sync.Mutex
+	stdoutErr    error
+	stdoutCancel context.CancelFunc // this Run's network/dispatch context only
 }
 
 // jsonrpcMeta captures the three fields relay needs to route/synthesize
@@ -79,12 +91,22 @@ const (
 
 var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
 
-// Run starts the relay. It returns when stdin reaches EOF (client detached)
-// or ctx is canceled, whichever comes first, after issuing a best-effort
-// DELETE /mcp to the server for graceful session termination.
+// Run starts one relay lifetime and joins its POST/SSE workers before returning.
+// Normal stdin EOF drains accepted responses before best-effort DELETE /mcp.
+// Run must not overlap another Run on the same instance. Its exported
+// configuration must remain unchanged until the lifetime has settled.
 //
-// Errors from either goroutine propagate; the first error wins. Context
-// cancellation is not an error — clean client detach returns nil.
+// Stdin and Stdout are borrowed by default; Run never implicitly closes them.
+// Cancellation stops context-aware HTTP work, but cannot interrupt an arbitrary blocking
+// Reader/Writer. For input, its owner may grant InterruptStdin; Run joins that
+// callback as well as the read. Without it, the owner must terminate input.
+// Output still requires its owner's termination mechanism if Write can block.
+// No detached reader goroutine or implicit ownership transfer is introduced.
+//
+// The first output failure is retained even when it causes context cancellation.
+// A separately observed stdin failure is returned alongside it. Failure to
+// deliver an answer does not prove the remote operation did not execute and
+// never triggers a replay. Clean EOF/cancellation alone retains the nil result.
 //
 // Lifecycle rules:
 //   - stdin pump reads lines and dispatches POSTs in parallel goroutines
@@ -92,11 +114,9 @@ var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
 //   - When stdin returns (EOF or read error), Run first waits for all
 //     in-flight POSTs to drain so the last response reaches stdout before
 //     the SSE listener is canceled and DELETE /mcp is sent.
-//   - If external ctx cancels, SSE listener exits immediately and POST
-//     goroutines either complete (if their HTTP response was already
-//     in flight) or abort with ctx.Canceled. In-flight responses from
-//     concurrent POSTs race with cancel but we prefer clean shutdown
-//     over forcing completion.
+//   - Cancellation stops context-aware HTTP work; responses already in flight
+//     may race with it. Run still joins its workers. Borrowed blocking I/O has
+//     the separate termination requirement described above.
 func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	if r.URL == "" {
 		return errors.New("relay: URL is required")
@@ -114,6 +134,15 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	r.stdoutMu.Lock()
+	r.stdoutErr = nil
+	r.stdoutCancel = cancel
+	r.stdoutMu.Unlock()
+	defer func() {
+		r.stdoutMu.Lock()
+		r.stdoutCancel = nil
+		r.stdoutMu.Unlock()
+	}()
 
 	var postWG sync.WaitGroup
 	sseErrCh := make(chan error, 1)
@@ -122,7 +151,7 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 		sseErrCh <- r.sseListener(runCtx)
 	}()
 
-	stdinErr := r.stdinPump(runCtx, &postWG)
+	stdinErr, interruptErr := r.pumpInput(runCtx, &postWG)
 
 	// Drain in-flight POSTs before canceling SSE — we don't want to
 	// drop the last responses the client is waiting for.
@@ -135,10 +164,78 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	// Best-effort session termination — don't block caller on failure.
 	r.terminateSession()
 
-	if stdinErr != nil && !errors.Is(stdinErr, io.EOF) && !errors.Is(stdinErr, context.Canceled) {
+	outputErr := r.stdoutFailure()
+	if interruptErr != nil {
+		outputErr = errors.Join(outputErr, interruptErr)
+	}
+	if !relayInputCleanDetach(stdinErr) {
+		if outputErr != nil {
+			return errors.Join(stdinErr, outputErr)
+		}
 		return stdinErr
 	}
-	return nil
+	return outputErr
+}
+
+// relayInputCleanDetach accepts only error trees composed entirely of the
+// two expected input-end sentinels. errors.Is would match just one branch and
+// incorrectly discard independent read/cleanup failures in errors.Join.
+func relayInputCleanDetach(err error) bool {
+	if err == nil || err == io.EOF || err == context.Canceled {
+		return true
+	}
+	switch e := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := e.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if cause == nil || !relayInputCleanDetach(cause) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		cause := e.Unwrap()
+		return cause != nil && relayInputCleanDetach(cause)
+	default:
+		return false
+	}
+}
+
+// pumpInput attaches only the interruption capability explicitly granted by
+// the input owner. Reading stays on the Run goroutine; no reader is abandoned.
+// Disarm before draining accepted POSTs so normal EOF does not later interrupt
+// settled input when Run cancels its HTTP context. If interruption already
+// started, join it and retain its outcome independently of the read outcome.
+func (r *HTTPToStdioRelay) pumpInput(ctx context.Context, wg *sync.WaitGroup) (error, error) {
+	if err := ctx.Err(); err != nil {
+		return err, nil
+	}
+	interrupt := r.InterruptStdin
+	if interrupt == nil {
+		return r.stdinPump(ctx, wg), nil
+	}
+	done := make(chan struct{})
+	var interruptErr error
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		interruptErr = interrupt()
+	})
+	stdinErr := r.stdinPump(ctx, wg)
+	if !stop() {
+		<-done
+		if interruptErr != nil {
+			interruptErr = fmt.Errorf("relay stdin interruption: %w", interruptErr)
+		}
+	}
+	// Interruption may end the read with EOF, Canceled or an independent
+	// native error. None of those replaces an expired operation deadline.
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		stdinErr = errors.Join(ctx.Err(), stdinErr)
+	}
+	return stdinErr, interruptErr
 }
 
 // stdinPump reads JSON-RPC lines from stdin and POSTs each to /mcp.
@@ -161,10 +258,13 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 		}
 		line, err := readJSONRPCLine(reader)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return io.EOF
-			}
 			return fmt.Errorf("stdin read: %w", err)
+		}
+		// A blocked read may complete with data concurrently with interruption.
+		// Such data is not new admission after cancellation, even if a custom
+		// HTTP transport would accept an already-canceled request.
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -326,6 +426,9 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 
 		lastEventID = r.readSSEStream(ctx, resp.Body, lastEventID)
 		resp.Body.Close()
+		if err := r.stdoutFailure(); err != nil {
+			return err // a damaged output stream must not reconnect and write again
+		}
 
 		// Stream ended cleanly (server closed). Reconnect after brief pause.
 		if !sleepOrDone(ctx, time.Second) {
@@ -340,8 +443,7 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 // last observed event ID so the caller may resume.
 func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string) string {
 	lastID, _ := readRelaySSE(ctx, body, startID, 0, func(payload []byte) (bool, error) {
-		r.writeLine(payload)
-		return false, nil
+		return false, r.writeLine(payload)
 	})
 	return lastID
 }
@@ -410,7 +512,7 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 // request-scoped responses.
 func (r *HTTPToStdioRelay) pipeSSE(ctx context.Context, body io.Reader) error {
 	r.readSSEStream(ctx, body, "")
-	return nil
+	return r.stdoutFailure()
 }
 
 // terminateSession issues a best-effort DELETE /mcp with the session
@@ -464,12 +566,33 @@ func (r *HTTPToStdioRelay) sendSyntheticError(meta *jsonrpcMeta, metaErr error, 
 // writeLine writes a single JSON-RPC message plus trailing newline under
 // the stdout mutex. The message must be a single-line JSON payload —
 // line-delimited framing per MCP stdio transport spec.
-func (r *HTTPToStdioRelay) writeLine(msg []byte) {
+func (r *HTTPToStdioRelay) writeLine(msg []byte) error {
 	msg = bytes.TrimRight(msg, "\r\n")
 	r.stdoutMu.Lock()
 	defer r.stdoutMu.Unlock()
-	_, _ = r.Stdout.Write(msg)
-	_, _ = r.Stdout.Write([]byte("\n"))
+	if r.stdoutErr != nil {
+		return r.stdoutErr
+	}
+	for _, part := range [][]byte{msg, []byte("\n")} {
+		n, err := r.Stdout.Write(part)
+		if err == nil && n != len(part) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			r.stdoutErr = fmt.Errorf("relay stdout: %w", err)
+			if r.stdoutCancel != nil {
+				r.stdoutCancel()
+			}
+			return r.stdoutErr
+		}
+	}
+	return nil
+}
+
+func (r *HTTPToStdioRelay) stdoutFailure() error {
+	r.stdoutMu.Lock()
+	defer r.stdoutMu.Unlock()
+	return r.stdoutErr
 }
 
 func (r *HTTPToStdioRelay) logErr(format string, args ...any) {
