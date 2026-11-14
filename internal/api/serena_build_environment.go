@@ -35,8 +35,9 @@ type SerenaBuildEnvironmentProjectionV1 struct {
 	OwnedPathRoles                  []string                           `json:"owned_path_roles"`
 }
 type SerenaPreparationEnvironment struct {
-	values        []string
-	networkPolicy *serenaPackageNetworkPolicy
+	values          []string
+	networkPolicy   *serenaPackageNetworkPolicy
+	buildConstraint bool
 }
 type serenaPackageNetworkPolicy struct {
 	source                   *serenaPreparationEnvironmentSource
@@ -238,6 +239,16 @@ func buildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPre
 				SourceRefSHA256: gitRuleSHA, ValueSHA256: preparedSerenaHash([]byte(value)),
 			})
 		}
+		// Bind the fixed bytes before request identity exists. The eventual
+		// attempt-owned path is passed only to the UV install command.
+		projection.Entries = append(projection.Entries, SerenaBuildEnvironmentEntryV1{
+			Key: "UV_BUILD_CONSTRAINT", ValueKind: "policy", SourceKind: "hub-policy",
+			SourceRefSHA256: preparedSerenaHash([]byte(preparedSerenaBuildConstraintRule)),
+			ValueSHA256:     preparedSerenaHash([]byte(preparedSerenaBuildConstraintContent)),
+		})
+		projection.OwnedPathRoles = append(projection.OwnedPathRoles, "build-constraint")
+		sort.Strings(projection.OwnedPathRoles)
+		execution.buildConstraint = true
 	}
 	if network.decisionSource == "uv-default" {
 		network.entry = SerenaBuildEnvironmentEntryV1{Key: "UV_OFFLINE", ValueKind: "boolean", SourceKind: "uv-default", SourceRefSHA256: preparedSerenaHash([]byte(omissionRule)), ValueSHA256: preparedSerenaHash([]byte("false"))}
