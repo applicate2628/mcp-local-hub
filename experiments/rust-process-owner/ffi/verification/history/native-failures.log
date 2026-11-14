@@ -1,0 +1,844 @@
+# Historical verification bundle: native-failures
+Associated completed source: 7ce04f7ef2f96680ed94db1edaf77cf0358421c4
+Imported existing evidence; NOT a new execution. Individual RED/mutation logs may precede this commit.
+
+===== BEGIN attribute-code-red.txt =====
+Original-SHA256: 29e5070de88baad9d9a0d42905c4173a6aaee512d4256becd822ff9999c78c5a
+Sanitized-content-SHA256: d8b3d4b1c46a4554d5c3a2c9a2239129d76ba372c71314e1cd7f3e70a33f75aa
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::attribute_query_failure_preserves_native_error_code stdout ----
+
+thread 'windows::native_failure_tests::attribute_query_failure_preserves_native_error_code' (49320) panicked at src\native_failure_tests.rs:23:5:
+assertion `left == right` failed: formatting the native failure must not discard its machine-readable code
+  left: None
+ right: Some(87)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::attribute_query_failure_preserves_native_error_code
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+===== END attribute-code-red.txt =====
+
+===== BEGIN baseline.txt =====
+Original-SHA256: 3d9fcc1516caf772a31a21b3bf2211f551b3f05dc8d76b7efa1056abd68d9c87
+Sanitized-content-SHA256: ae01c517447a11ae89c3513b21b422dbe067cbc7ae8df4c8a2c62172760a93e8
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+===== END baseline.txt =====
+
+===== BEGIN clippy-initial.txt =====
+Original-SHA256: ea65e981f8f9e370a2e03c2ac9b780acf6a0fa59dba88e248514275af7c55de4
+Sanitized-content-SHA256: 05e2f49e2745c255ae12a3b9fab44ad3279d1b4e0a5f183549b907fe7f2aaf33
+
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s
+===== END clippy-initial.txt =====
+
+===== BEGIN close-false-success-negative.txt =====
+Original-SHA256: 9e9498f022c4986500bae12657374d3da7ce6a60e8834d76464a8116990852bf
+Sanitized-content-SHA256: 6a0d3a5b311b3a694104322434bcf46fdcfdfebd953f572af7e8720d00ef00c2
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.37s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result stdout ----
+
+thread 'windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result' (102324) panicked at src\native_failure_tests.rs:353:22:
+native close failures became success or timeout: Complete { root_exit: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--lib`
+===== END close-false-success-negative.txt =====
+
+===== BEGIN final-clippy.txt =====
+Original-SHA256: c0798824d3607b08a90352929c7358afb0f64e11fc6a304ed3b6464e022b361a
+Sanitized-content-SHA256: 446395a49b5301a7db09e3459f81046df56e20f602a7029834934b556afc7112
+
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+===== END final-clippy.txt =====
+
+===== BEGIN final-debug-1.txt =====
+Original-SHA256: 2dca1bddac64df0a72bfe187f732f0d639b23d74d13b7f9847b26b3d84f029be
+Sanitized-content-SHA256: b84a86054531d4b5a3b2d9daf73e33c9ed3c814026d868e52fa3af910280006a
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-debug-1.txt =====
+
+===== BEGIN final-debug-2.txt =====
+Original-SHA256: 66b7e45f170c46b34189ea245120e92595295c735951b3704b08e28f3169be38
+Sanitized-content-SHA256: be36625969e1f29f4c23f9929b576038e60470c553fd13f7417cb11ae578ce6e
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-debug-2.txt =====
+
+===== BEGIN final-debug-3.txt =====
+Original-SHA256: 18b0830d884f0e1a1568eeb1574836153bd3d1847c826dbe2fa369000b7215f9
+Sanitized-content-SHA256: 9b636d0cd0bede8bbaa62a5cf77f428f635dd41e020cc4bf82db6f70449ac663
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-debug-3.txt =====
+
+===== BEGIN final-release.txt =====
+Original-SHA256: 81fa3c4b571b0e92908adba6b3522be2e1353403234d7318b7ef5c6c19009a3e
+Sanitized-content-SHA256: 6ff6367fb8c203d29f7f2d0ff4599b196ad6ef888e335c4deb5e6fcebb99e6b1
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `release` profile [optimized] target(s) in 1.24s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_process_owner_spike-b478d0084b4e3761.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\release\deps\owner_child-744f801171fca2c6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\release\deps\owner_crash_fixture-76f284dbb358a7ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\release\deps\launch_context-961cf2dda6b5df70.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\lifecycle.rs (<LAB>\target\release\deps\lifecycle-ca7795dbe300e93c.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s
+
+     Running tests\owner_crash.rs (<LAB>\target\release\deps\owner_crash-b954f4d41e4aa395.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\stdio.rs (<LAB>\target\release\deps\stdio-2425427e316e40c1.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END final-release.txt =====
+
+===== BEGIN native-cases-initial.txt =====
+Original-SHA256: f0cb5777d7be40ee94cd547b59b74ab3e759ac2e3c01fdee4d78140f828c12aa
+Sanitized-content-SHA256: e8db61b4be3724429d79d03b979dd3403cf89cdb903b122136a96549f26aef96
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 9 tests
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.25s
+
+===== END native-cases-initial.txt =====
+
+===== BEGIN push.txt =====
+Original-SHA256: 4574f573fa29396e1c3d06e9b1e4606815d84b437a9681c5bc6e2760bd8bd9e0
+Sanitized-content-SHA256: 197bda20451c86b52d9e2cc9118b4b9d49653532793c3665c8a010dd4149bdbd
+
+To https://github.com/applicate2628/mcp-local-hub.git
+   8698d24..7ce04f7  HEAD -> spike/rx02-native-process-owner-20261112
+===== END push.txt =====
+
+===== BEGIN restored-full-suite.txt =====
+Original-SHA256: a488d99613aad6510d410e9937fe2dc0152af6d9c89877aad15d1112a90d7ae9
+Sanitized-content-SHA256: e0f57790fcda958098c395a33a412dd1b144860401348b4a372000b274e2516f
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.01s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.81s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.36s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END restored-full-suite.txt =====
+
+===== BEGIN RESULTS.md =====
+Original-SHA256: 3904e946f6528c9f8b87d23338cc0b3300099b071fc338f1fe4fc73aa87ffe88
+Sanitized-content-SHA256: 233f83b63a216383396a376bd913e6e12d96ba54078b910ebec6b6580d39c588
+
+# RX-02 native failure qualification and error preservation
+PR: https://github.com/applicate2628/mcp-local-hub/pull/625
+Commit:
+7ce04f7ef2f96680ed94db1edaf77cf0358421c4
+Base: 8698d24e622253b8d9e2d1bd96d29fb97e5de4f1
+
+## Actual implementation
+One narrow library change: unexpected native attribute-size-query failure returns original io::Error, preserving raw_os_error; impossible success/empty buffer shapes remain explicit internal errors.
+Private actual invalid-count repro returned OS87 but old wrapper lost code. Public callers normally select1/2 attributes: no claim that u32MAX is a public supported input.
+Test-only module uses real reduced-right handles/private-slot substitution, suspend count changes and native protect-from-close. No public injection feature, global hooks, new runtime layer or dependencies.
+
+## Fresh evidence
+Nine native-failure tests: attribute query; repeated missing image; resume denied; unexpected suspend count; wait denied; exit-code query denied; Job-query denied; failed-stop replay prevention; seven subsets of protected close failure.
+Negative controls WAIT_FAILED->timeout and cleanup->Complete were detected. Original source restored before final suite.
+Full crate:39 native integration tests,12 unit tests(9native-failure+3encoding),2compile-fail docs. Three full debug runs and one release run passed with zero ignored/filtered.
+Clippy(all-targets,-Dwarnings),fmt,git diff-check passed. Runtime/public API/Cargo manifest and lock otherwise unchanged.
+Windows11 build26100/x86_64/Rust1.99.1 offline locked cached dependencies; no target installation or Unix runtime/cross-build in this increment.
+Only own bounded hidden fixture/test binaries run. Protector removes its own flag only from confirmed live handle; count after fixture cleanup returns. No product rule to retry ambiguous close.
+
+## Review and limits
+Self-review across requirements, correctness, ownership, security, compatibility and complexity;13 relevant skills applied and primary API sources checked. No independent agent/reviewer run.
+Not complete failure coverage: allocator/Job setup/attribute init+update/in-progress create and already blocked IO remain. Calling-side noninheritable conversion, Go/Rust interface, native Unix, performance comparison and production admission remain.
+The failed stop result and later known execution settlement are separate; no automatic retry. Repeated finish returns stored cleanup failure, not proof of every possible kernel call count.
+Previously reported first-call handle delta remains unresolved; warm repeated-create evidence does not establish zero first-call growth.
+
+## Recovery / preservation
+Exact remote head matches checked local head and tested source hashes; working clone clean. Needed source/evidence/cache retained outside trash inside D:\dev\ChatGPT.
+No newly discarded on-disk mutation backup was created; mutations were restored from in-memory exact bytes. Unique failed/success evidence preserved. No trash emptying.
+Other code PRs, active main workspace, installed Hub/config/autostart/secrets untouched. No merge/release/install/paid-model/provider or explicit bot/CI dispatch.
+Next integration boundary: Go↔Rust, preserving one resource owner and the now-tested outcomes; this task does not assert its implementation.
+===== END RESULTS.md =====
+
+===== BEGIN SHA256SUMS.txt =====
+Original-SHA256: 6bc315523be722194eaa11ffb6bb0ab43a11ef579bb0353d5dbed202bba222ad
+Sanitized-content-SHA256: 22e0731ccbf23a8cf36c3317bc8ca11cfea0323f3464b79bdca546d7c470d120
+
+29e5070de88baad9d9a0d42905c4173a6aaee512d4256becd822ff9999c78c5a  attribute-code-red.txt
+3d9fcc1516caf772a31a21b3bf2211f551b3f05dc8d76b7efa1056abd68d9c87  baseline.txt
+ea65e981f8f9e370a2e03c2ac9b780acf6a0fa59dba88e248514275af7c55de4  clippy-initial.txt
+9e9498f022c4986500bae12657374d3da7ce6a60e8834d76464a8116990852bf  close-false-success-negative.txt
+c0798824d3607b08a90352929c7358afb0f64e11fc6a304ed3b6464e022b361a  final-clippy.txt
+2dca1bddac64df0a72bfe187f732f0d639b23d74d13b7f9847b26b3d84f029be  final-debug-1.txt
+66b7e45f170c46b34189ea245120e92595295c735951b3704b08e28f3169be38  final-debug-2.txt
+18b0830d884f0e1a1568eeb1574836153bd3d1847c826dbe2fa369000b7215f9  final-debug-3.txt
+81fa3c4b571b0e92908adba6b3522be2e1353403234d7318b7ef5c6c19009a3e  final-release.txt
+f0cb5777d7be40ee94cd547b59b74ab3e759ac2e3c01fdee4d78140f828c12aa  native-cases-initial.txt
+4574f573fa29396e1c3d06e9b1e4606815d84b437a9681c5bc6e2760bd8bd9e0  push.txt
+a488d99613aad6510d410e9937fe2dc0152af6d9c89877aad15d1112a90d7ae9  restored-full-suite.txt
+3904e946f6528c9f8b87d23338cc0b3300099b071fc338f1fe4fc73aa87ffe88  RESULTS.md
+28597a0f320b34ccc3064e440b832ac284e4059f1a141f37630e634b0754face  verified-source-hashes.txt
+59a04b8d324a13a4971b0cd4bbd8ecb5d21e90685c2ff12168912177378b9859  wait-swallowed-negative.txt
+===== END SHA256SUMS.txt =====
+
+===== BEGIN verified-source-hashes.txt =====
+Original-SHA256: 28597a0f320b34ccc3064e440b832ac284e4059f1a141f37630e634b0754face
+Sanitized-content-SHA256: 2878cc3aeed84a00519f769d4f7c9ca272309b8869519dc0cadadb1b2ac4f0e5
+
+README.md git=1b86c887e3db53318766d3a721ed543ed8a9845f sha256=9ce624d619ca8e78d3d082ec8b4a26917bf2cd65a27c2d0dd890c1d546e639b5
+src/windows.rs git=e6acaf745aff9accb73cf945f019920238a8f37b sha256=2892528debec626ea74ac44b826895753fbeff3d0abd9577042e8bafe3c6d59e
+src/native_failure_tests.rs git=300873b429e4aed1039f8ccc755a8a2b46922145 sha256=d8003ca327e2a6a970ea349fff0d375214c95ea9e0129602e6d43a9c038cac04
+===== END verified-source-hashes.txt =====
+
+===== BEGIN wait-swallowed-negative.txt =====
+Original-SHA256: 59a04b8d324a13a4971b0cd4bbd8ecb5d21e90685c2ff12168912177378b9859
+Sanitized-content-SHA256: 73dfcbf6767771ed3c91bd68863b36cabfaa2e90fc6105c5e18e127894ef1d32
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 1 test
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... FAILED
+
+failures:
+
+---- windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion stdout ----
+
+thread 'windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion' (106288) panicked at src\native_failure_tests.rs:190:42:
+called `Result::unwrap_err()` on an `Ok` value: Pending { root_exit: None, active_processes: None }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+===== END wait-swallowed-negative.txt =====

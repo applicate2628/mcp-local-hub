@@ -1,0 +1,1112 @@
+# Historical verification bundle: stdio
+Associated completed source: 7257b97b19f06ab50402c620ec75b13fc53b1836
+Imported existing evidence; NOT a new execution. Individual RED/mutation logs may precede this commit.
+
+===== BEGIN allowlist-mutation-red.txt =====
+Original-SHA256: e8ba09ddccecaddf5a40b9105c23856f06aac945f91edb3c8dfa28dc548e1746
+Sanitized-content-SHA256: 2d674eb7dd79d1fd683dc005f219166f044688118df064292c8056c2b73603cb
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+warning: unused import: `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`
+  --> src\windows.rs:34:13
+   |
+34 |             PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib) generated 1 warning (run `cargo fix --lib -p mcphub-process-owner-spike` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.60s
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 1 test
+test unrelated_inheritable_event_does_not_cross_create_boundary ... FAILED
+
+failures:
+
+---- unrelated_inheritable_event_does_not_cross_create_boundary stdout ----
+
+thread 'unrelated_inheritable_event_does_not_cross_create_boundary' (6596) panicked at tests\stdio.rs:281:5:
+assertion `left == right` failed: foreign inheritable capability leaked
+  left: 0
+ right: 258
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    unrelated_inheritable_event_does_not_cross_create_boundary
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test stdio`
+===== END allowlist-mutation-red.txt =====
+
+===== BEGIN baseline-tests.txt =====
+Original-SHA256: 50fe392d2eae065cc6d6fffd14f1f21cff6357d42b007e8270696e6ed4ad04a7
+Sanitized-content-SHA256: a1e85b8119fd239dbe93250c4d3ce1d5f6591508ea7631ea9d014b21736f9858
+
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.34s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-dc426ea18daec8df.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5baa0e8b4d953d1f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-03162710448e3c93.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.06s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 1 test
+test src\windows.rs - windows::ProcessView (line 93) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+===== END baseline-tests.txt =====
+
+===== BEGIN clippy.txt =====
+Original-SHA256: 8c7151498459ce255ca336b72725dbc6af303db2e32d58d7eeaf6b85b51b0f04
+Sanitized-content-SHA256: 7032c14befbc56f4c964307a9a7721f1ae8c0ae173b511d10d025ecbd3ff06ea
+
+    Checking windows-link v0.2.1
+    Checking windows-sys v0.61.2
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.91s
+===== END clippy.txt =====
+
+===== BEGIN clone.txt =====
+Original-SHA256: d4a0a5fe8d16df319dc70aa1cd4d26e0119dd1c09e7b90bf0333f124741ec5f7
+Sanitized-content-SHA256: 1326c92c861307d1c5e304ed17909ac0b692bf640848956c5f3b52fe59a0ab56
+
+Cloning into '<LAB>\source'...
+===== END clone.txt =====
+
+===== BEGIN failure-count-sequence.txt =====
+Original-SHA256: 5eebe1a12e68b2d479883379ae2327642a16bef0615d5a80329bdb33a1ef52c1
+Sanitized-content-SHA256: 19a3e837597f9ac6f4195f6f9b27224e88439e57ca56cf0484c40a2d95809d4e
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 1 test
+no-stdio before/after failures: [66, 74, 74, 74, 74, 74, 74]; stdio failures: [74, 74, 74, 74, 74, 74, 74]
+test characterize_missing_image_handle_sequence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+===== END failure-count-sequence.txt =====
+
+===== BEGIN final-clippy.txt =====
+Original-SHA256: 631da212726d3a275f69be5dc83ad76169b20aa4f929e13bc968aeb48b7e565f
+Sanitized-content-SHA256: d1c3fb097008f8b2336373acaabfd95553b5244fe5e210b20a913bc252c4d41e
+
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+===== END final-clippy.txt =====
+
+===== BEGIN final-debug-1.txt =====
+Original-SHA256: c86ed704e3ef159334fa988440f7406b72c133615b7db1bf410ca2bd99685834
+Sanitized-content-SHA256: a2723d8526a1e77f1ab38229e0b1271de9e02d8e4b9acbc2840d55ba5cda6b66
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.66s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-debug-1.txt =====
+
+===== BEGIN final-debug-2.txt =====
+Original-SHA256: da486787a828d1fdac43bdb7048db9b3137d09531864a2746aa8f00a04302aaa
+Sanitized-content-SHA256: 5a674ec1d349892b7f4e925cebaeef2af289e817bf6d6527738c30dd7f60d206
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+===== END final-debug-2.txt =====
+
+===== BEGIN final-debug-3.txt =====
+Original-SHA256: 20a497437998a4b6c1b92225508163b361ed13287ec19c27686f5c2bd51fc7cc
+Sanitized-content-SHA256: 665418b07d9a4c1b0b7c7d812e74b8187be3bc7cf4a5fa7bdbc86a57e3755bf6
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-debug-3.txt =====
+
+===== BEGIN final-release.txt =====
+Original-SHA256: f89fef4dc340774c72ed7a60d7e232570420360ecb8385051ce761e96c6f4c83
+Sanitized-content-SHA256: b9ed3257d6649e53aaaf9cc518e4edd58c4483a63a50522e77f915f590adb3fa
+
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `release` profile [optimized] target(s) in 1.51s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_process_owner_spike-caf490f449910eae.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\release\deps\owner_child-a76aaaca022a0472.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\release\deps\lifecycle-8dbfc2f9c692ce00.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests\stdio.rs (<LAB>\target\release\deps\stdio-0c878e49e7d81761.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-release.txt =====
+
+===== BEGIN full-green.txt =====
+Original-SHA256: bd868fe15aea70b28fa40c8921b878fc0efbe625ee3bb1acc27ba2e1725bc3c8
+Sanitized-content-SHA256: 5d1f2cf708379d5c5b88ab3efa2e08f2d223e0362874626e8922dc8101e2e9f8
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.72s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 163) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 97) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END full-green.txt =====
+
+===== BEGIN push.txt =====
+Original-SHA256: 016033453aa4d0d9494dc0e0ccdf39ce6077237d58358faa77b0bd8d5032e8f1
+Sanitized-content-SHA256: f4626af4263865f974a687b59695dfe7ab071e013da54916bf40b45a4d35f409
+
+To https://github.com/applicate2628/mcp-local-hub.git
+   e13cf2d..7257b97  HEAD -> spike/rx02-native-process-owner-20261112
+===== END push.txt =====
+
+===== BEGIN restored-tests.txt =====
+Original-SHA256: d035f64253c641930912945f50d6bb1230cf55c9c83cf7f7534c975c72cb6747
+Sanitized-content-SHA256: 8087f8e11eb622f6ff47bfec782f8c6d24db056657642fe4c149932f0a8101d5
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.86s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 163) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 97) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END restored-tests.txt =====
+
+===== BEGIN RESULTS.md =====
+Original-SHA256: 677f184c460d0724d082a223b4a7cfc64f905bc3a7c7151fa951033857c39aca
+Sanitized-content-SHA256: 23af7868a0d49cecd4a7cfafd692163d28b5d3ec97e6683a484908b2220fb016
+
+# RX-02 / RX-03 stdio result — 2026-11-13
+Published draft: https://github.com/applicate2628/mcp-local-hub/pull/625
+Base: e13cf2d8b4e09ab7c7e26fb7f864fda3672dd58d
+Verified head:
+7257b97b19f06ab50402c620ec75b13fc53b1836
+Plan owner: #623. Increment is scoped to experiments/rust-process-owner.
+
+## Actual result
+Shared native creation path now supports explicit BorrowedStdio using pre-inheritable disk/pipe-category handles and an exact unique HANDLE_LIST. Parent sources are never closed/duplicated/flag-mutated by this path. Child OS copies remain valid after parent File release. Job containment and suspended admission are preserved. No FFI or product switch.
+
+## Fresh verification
+Windows x86_64-pc-windows-msvc, rustc 1.99.1. Dependencies exactly windows-sys0.61.2/windows-link0.2.1 from previously existing cache. Cargo.lock unchanged.
+23 native tests + 2 compile-fail doctests, zero ignored. Three complete debug runs and one complete release run all exit0.
+clippy --all-targets -- -D warnings, fmt --check, git diff --check all exit0.
+Initial compiled stdio-ignoring stub failed eight behavioral cases. Removing HANDLE_LIST allowed the actual protected event to be signaled and the negative control failed as required. Source restored and whole suite repeated.
+No new Unix targets installed; no Unix cross-build or native runtime verification claimed.
+
+## Findings and limits
+First missing-image failure increases handle count on the earlier no-stdio path too; subsequent attempts are stable. Exact process-global source unknown. Initial first-attempt zero-growth assumption was not retained as proof.
+GetFileType(FILE_TYPE_PIPE) includes sockets; category is not a socket/locality security detector. Tested owned local files and anonymous pipes only.
+Attribute backing data must survive list deletion; declaration order adjusted to keep both arrays alive through DeleteProcThreadAttributeList.
+Noninheritable production source conversion, access direction, environment/cwd policy, native close/failure/crash injection, full IO cancellation/drain, Go/Rust ABI and independent admission remain open.
+No speedup, total leak-freedom, sandbox, global inheritance exclusion or ready-to-merge product claims.
+
+## Author review / skills
+14 relevant skills read/applied: Using Superpowers; Executing Plans; TDD; Using Git Worktrees/isolation; Architecture Review; Architecture Decisions; API and Interface Design; Go Security Hardening process boundary; Intuitive Software Design; Ponytail Review; Systematic Debugging; Verification Before Completion; Rust Unsafe Checker; Rust Resource Lifecycle.
+Rust skills pinned actionbook/rust-skills@5c40d3ad785193231b7d0dbfb8e1eb447e5edd94. Trail of Bits full external orchestration was inspected as candidate only and NOT executed.
+All new work/cache/target/temp/fixtures/evidence are in D:\dev\ChatGPT. No installed Hub/config, original #616, other PR source, model/vendor launches, installations, merge or explicit workflow/bot dispatch.
+
+## Recovery and disposition
+Keep source, tests, raw logs, negative diagnostic and fixtures: they are the reproducibility/recovery evidence. Target/cache are reused by the next native-failure experiment, not currently discarded. No trash purge performed.
+Next dependency: qualify noninheritable-source conversion only at its proper caller/owner, then FFI/native failure injection; do not silently widen this slice.
+===== END RESULTS.md =====
+
+===== BEGIN stdio-green.txt =====
+Original-SHA256: 113dbdd23bfbb5680614d99232b189f5c9f50ff2540f1ba1439fa855ad3baa09
+Sanitized-content-SHA256: 7df851109f03c6cf00b4551bc4da6b98d024c9288c74d36e61e760ea1bb04433
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.62s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 9 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... FAILED
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+failures:
+
+---- missing_image_preserves_borrowed_handles stdout ----
+
+thread 'missing_image_preserves_borrowed_handles' (110252) panicked at tests\stdio.rs:245:5:
+assertion `left == right` failed
+  left: 76
+ right: 72
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    missing_image_preserves_borrowed_handles
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+error: test failed, to rerun pass `--test stdio`
+===== END stdio-green.txt =====
+
+===== BEGIN stdio-red.txt =====
+Original-SHA256: 3a0a9d9939650f200a67e6dbe234efad8bbdc8edc173c3b590b9202874295fde
+Sanitized-content-SHA256: e52d8a6748db4121cb30b428274bf0828edda2dbbe7835e09f77bf56aa5080da
+
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.43s
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 9 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... FAILED
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... FAILED
+test missing_image_preserves_borrowed_handles ... FAILED
+test noninheritable_stdio_is_rejected_without_changing_flags ... FAILED
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... FAILED
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... FAILED
+test stdout_and_stderr_may_share_one_borrowed_handle ... FAILED
+test unrelated_inheritable_event_does_not_cross_create_boundary ... FAILED
+
+failures:
+
+---- child_keeps_os_copies_after_parent_releases_its_files stdout ----
+
+thread 'child_keeps_os_copies_after_parent_releases_its_files' (109492) panicked at tests\stdio.rs:141:5:
+assertion `left == right` failed
+  left: Pending { root_exit: None, active_processes: None }
+ right: Complete { root_exit: 0 }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- exact_stdio_bytes_and_parent_ownership_survive_settlement stdout ----
+
+thread 'exact_stdio_bytes_and_parent_ownership_survive_settlement' (31864) panicked at tests\stdio.rs:141:5:
+assertion `left == right` failed
+  left: Pending { root_exit: None, active_processes: None }
+ right: Complete { root_exit: 0 }
+
+---- missing_image_preserves_borrowed_handles stdout ----
+
+thread 'missing_image_preserves_borrowed_handles' (90400) panicked at tests\stdio.rs:245:5:
+assertion `left == right` failed
+  left: 82
+ right: 78
+
+---- noninheritable_stdio_is_rejected_without_changing_flags stdout ----
+
+thread 'noninheritable_stdio_is_rejected_without_changing_flags' (112196) panicked at tests\stdio.rs:227:9:
+slot 0 must be rejected before create
+
+---- pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner stdout ----
+
+thread 'pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner' (40708) panicked at tests\stdio.rs:297:35:
+called `Result::unwrap()` on an `Err` value: Os { code: 232, kind: BrokenPipe, message: "The pipe is being closed." }
+
+---- repeated_stdio_lifetimes_do_not_accumulate_handles stdout ----
+
+thread 'repeated_stdio_lifetimes_do_not_accumulate_handles' (76256) panicked at tests\stdio.rs:141:5:
+assertion `left == right` failed
+  left: Pending { root_exit: None, active_processes: None }
+ right: Complete { root_exit: 0 }
+
+---- stdout_and_stderr_may_share_one_borrowed_handle stdout ----
+
+thread 'stdout_and_stderr_may_share_one_borrowed_handle' (108280) panicked at tests\stdio.rs:141:5:
+assertion `left == right` failed
+  left: Pending { root_exit: None, active_processes: None }
+ right: Complete { root_exit: 0 }
+
+---- unrelated_inheritable_event_does_not_cross_create_boundary stdout ----
+
+thread 'unrelated_inheritable_event_does_not_cross_create_boundary' (31652) panicked at tests\stdio.rs:141:5:
+assertion `left == right` failed
+  left: Pending { root_exit: None, active_processes: None }
+ right: Complete { root_exit: 0 }
+
+
+failures:
+    child_keeps_os_copies_after_parent_releases_its_files
+    exact_stdio_bytes_and_parent_ownership_survive_settlement
+    missing_image_preserves_borrowed_handles
+    noninheritable_stdio_is_rejected_without_changing_flags
+    pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner
+    repeated_stdio_lifetimes_do_not_accumulate_handles
+    stdout_and_stderr_may_share_one_borrowed_handle
+    unrelated_inheritable_event_does_not_cross_create_boundary
+
+test result: FAILED. 1 passed; 8 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.06s
+
+error: test failed, to rerun pass `--test stdio`
+===== END stdio-red.txt =====
+
+===== BEGIN stdio-with-count-diagnostic.rs =====
+Original-SHA256: 9ab88ad26cea2eb9706fba51400d06a23d438e28f21fb4ac6105143d74bd9d72
+Sanitized-content-SHA256: 9ab88ad26cea2eb9706fba51400d06a23d438e28f21fb4ac6105143d74bd9d72
+
+#![cfg(windows)]
+use mcphub_process_owner_spike::{BorrowedStdio, NativeOwner, Settlement};
+use std::{
+    ffi::OsString,
+    fs::{self, File},
+    io::{self, Read, Write},
+    os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle},
+    path::{Path, PathBuf},
+    ptr::{null, null_mut},
+    sync::atomic::{AtomicU64, Ordering},
+    thread,
+    time::{Duration, Instant},
+};
+use windows_sys::Win32::{
+    Foundation::{
+        GetHandleInformation, SetHandleInformation, ERROR_BROKEN_PIPE, HANDLE_FLAG_INHERIT,
+        WAIT_TIMEOUT,
+    },
+    Security::SECURITY_ATTRIBUTES,
+    System::{
+        Pipes::{CreatePipe, PeekNamedPipe},
+        Threading::{CreateEventW, GetCurrentProcess, GetProcessHandleCount, WaitForSingleObject},
+    },
+};
+
+const DEADLINE: Duration = Duration::from_secs(3);
+const BYTES: &[u8] = b"\0MCP\r\n\xff\x80binary\n";
+const STDERR: &[u8] = b"native-stderr\0\xff";
+static NEXT: AtomicU64 = AtomicU64::new(1);
+
+struct Fixture {
+    root: PathBuf,
+    input: File,
+    output: File,
+    error: File,
+}
+impl Fixture {
+    fn new() -> Self {
+        let root =
+            PathBuf::from(std::env::var_os("MCPHUB_RX02_FIXTURES").expect("owned fixture root"))
+                .join(format!(
+                    "stdio-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("input"), BYTES).unwrap();
+        let input = File::open(root.join("input")).unwrap();
+        let output = File::create(root.join("output")).unwrap();
+        let error = File::create(root.join("error")).unwrap();
+        for file in [&input, &output, &error] {
+            inheritable(file.as_handle(), true);
+        }
+        Self {
+            root,
+            input,
+            output,
+            error,
+        }
+    }
+    fn args(&self, mode: &str) -> Vec<OsString> {
+        vec![mode.into(), self.root.join("marker").into_os_string()]
+    }
+    fn stdio(&self) -> BorrowedStdio<'_> {
+        BorrowedStdio {
+            stdin: self.input.as_handle(),
+            stdout: self.output.as_handle(),
+            stderr: self.error.as_handle(),
+        }
+    }
+    fn launch(&self) -> NativeOwner {
+        NativeOwner::create_suspended_with_stdio(child(), &self.args("stdio"), self.stdio())
+            .unwrap()
+    }
+    fn flags(&self) -> [u32; 3] {
+        [
+            flags(self.input.as_handle()),
+            flags(self.output.as_handle()),
+            flags(self.error.as_handle()),
+        ]
+    }
+}
+fn child() -> &'static Path {
+    Path::new(env!("CARGO_BIN_EXE_owner_child"))
+}
+fn flags(handle: BorrowedHandle<'_>) -> u32 {
+    let mut flags = 0;
+    // SAFETY: the test keeps the borrowed owner open; output is writable.
+    assert_ne!(
+        unsafe { GetHandleInformation(handle.as_raw_handle(), &mut flags) },
+        0
+    );
+    flags
+}
+fn inheritable(handle: BorrowedHandle<'_>, yes: bool) {
+    // SAFETY: only this fixture's handle is changed before concurrent use.
+    assert_ne!(
+        unsafe {
+            SetHandleInformation(
+                handle.as_raw_handle(),
+                HANDLE_FLAG_INHERIT,
+                if yes { HANDLE_FLAG_INHERIT } else { 0 },
+            )
+        },
+        0
+    );
+}
+fn handles() -> u32 {
+    let mut count = 0;
+    // SAFETY: current-process pseudo handle and writable count.
+    assert_ne!(
+        unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut count) },
+        0
+    );
+    count
+}
+fn pipe() -> (File, File) {
+    let mut read = null_mut();
+    let mut write = null_mut();
+    let security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: null_mut(),
+        bInheritHandle: 1,
+    };
+    // SAFETY: valid POD security and exclusive output handle slots.
+    assert_ne!(
+        unsafe { CreatePipe(&mut read, &mut write, &security, 4096) },
+        0
+    );
+    // SAFETY: successful CreatePipe transfers two distinct owned handles.
+    unsafe { (File::from_raw_handle(read), File::from_raw_handle(write)) }
+}
+fn wait_marker(path: &Path) {
+    let until = Instant::now() + DEADLINE;
+    while !path.exists() {
+        assert!(Instant::now() < until, "child readiness missing");
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+fn finish(owner: &mut NativeOwner) {
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+}
+
+#[test]
+fn exact_stdio_bytes_and_parent_ownership_survive_settlement() {
+    let mut f = Fixture::new();
+    let before = f.flags();
+    let mut owner = f.launch();
+    assert_eq!(owner.active_processes().unwrap(), 1);
+    assert!(!f.root.join("marker").exists());
+    assert_eq!(fs::metadata(f.root.join("output")).unwrap().len(), 0);
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    finish(&mut owner);
+    assert_eq!(fs::read(f.root.join("output")).unwrap(), BYTES);
+    assert_eq!(fs::read(f.root.join("error")).unwrap(), STDERR);
+    assert_eq!(f.flags(), before);
+    f.output.write_all(b"parent-still-owns-output").unwrap();
+    f.error.write_all(b"parent-still-owns-error").unwrap();
+    assert_eq!(f.flags(), before);
+}
+
+#[test]
+fn stdout_and_stderr_may_share_one_borrowed_handle() {
+    let f = Fixture::new();
+    let io = BorrowedStdio {
+        stdin: f.input.as_handle(),
+        stdout: f.output.as_handle(),
+        stderr: f.output.as_handle(),
+    };
+    let mut owner =
+        NativeOwner::create_suspended_with_stdio(child(), &f.args("stdio"), io).unwrap();
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    finish(&mut owner);
+    let mut expected = BYTES.to_vec();
+    expected.extend_from_slice(STDERR);
+    assert_eq!(fs::read(f.root.join("output")).unwrap(), expected);
+    assert_eq!(fs::metadata(f.root.join("error")).unwrap().len(), 0);
+}
+
+#[test]
+fn child_keeps_os_copies_after_parent_releases_its_files() {
+    let f = Fixture::new();
+    let root = f.root.clone();
+    let mut owner = f.launch();
+    drop(f); // borrow ends after synchronous CreateProcess; child owns its copies
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    finish(&mut owner);
+    assert_eq!(fs::read(root.join("output")).unwrap(), BYTES);
+    assert_eq!(fs::read(root.join("error")).unwrap(), STDERR);
+}
+
+#[test]
+fn denied_admission_does_not_consume_or_close_borrowed_streams() {
+    let f = Fixture::new();
+    let before = f.flags();
+    let mut owner = f.launch();
+    let err = owner
+        .admit_and_resume(|_| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "fixture denies",
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+    owner.terminate(73).unwrap();
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 73 }
+    );
+    assert!(!f.root.join("marker").exists());
+    assert_eq!(fs::metadata(f.root.join("output")).unwrap().len(), 0);
+    assert_eq!(f.flags(), before);
+}
+
+#[test]
+fn noninheritable_stdio_is_rejected_without_changing_flags() {
+    for slot in 0..3 {
+        let f = Fixture::new();
+        let files = [&f.input, &f.output, &f.error];
+        inheritable(files[slot].as_handle(), false);
+        let before = f.flags();
+        let result = NativeOwner::create_suspended_with_stdio(child(), &f.args("stdio"), f.stdio());
+        assert!(
+            matches!(result, Err(ref e) if e.kind() == io::ErrorKind::InvalidInput),
+            "slot {slot} must be rejected before create"
+        );
+        assert_eq!(f.flags(), before);
+        assert!(!f.root.join("marker").exists());
+    }
+}
+
+#[test]
+fn missing_image_preserves_borrowed_handles() {
+    let f = Fixture::new();
+    let before = f.flags();
+    let count = handles();
+    let result =
+        NativeOwner::create_suspended_with_stdio(&f.root.join("absent.exe"), &[], f.stdio());
+    assert!(result.is_err());
+    assert_eq!(f.flags(), before);
+    assert_eq!(handles(), count);
+}
+
+#[test]
+fn unrelated_inheritable_event_does_not_cross_create_boundary() {
+    let f = Fixture::new();
+    let security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: null_mut(),
+        bInheritHandle: 1,
+    };
+    // SAFETY: unnamed private manual-reset event; its handle is retained until child exit.
+    let raw = unsafe { CreateEventW(&security, 1, 0, null()) };
+    assert!(!raw.is_null());
+    // SAFETY: the successful native create transfers ownership exactly once.
+    let extra = unsafe { OwnedHandle::from_raw_handle(raw) };
+    let mut args = f.args("stdio-probe");
+    args.push((raw as usize).to_string().into());
+    let mut owner = NativeOwner::create_suspended_with_stdio(child(), &args, f.stdio()).unwrap();
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    finish(&mut owner);
+    // The actual event, not merely a reused numeric handle, must remain unsignaled.
+    assert_eq!(
+        unsafe { WaitForSingleObject(extra.as_raw_handle(), 0) },
+        WAIT_TIMEOUT,
+        "foreign inheritable capability leaked"
+    );
+    assert_eq!(fs::read(f.root.join("output")).unwrap(), BYTES);
+    assert_eq!(
+        flags(extra.as_handle()) & HANDLE_FLAG_INHERIT,
+        HANDLE_FLAG_INHERIT
+    );
+}
+
+#[test]
+fn pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner() {
+    let f = Fixture::new();
+    let (child_input, mut parent_write) = pipe();
+    let (mut parent_read, child_output) = pipe();
+    inheritable(parent_write.as_handle(), false);
+    inheritable(parent_read.as_handle(), false);
+    let io = BorrowedStdio {
+        stdin: child_input.as_handle(),
+        stdout: child_output.as_handle(),
+        stderr: f.error.as_handle(),
+    };
+    let mut owner =
+        NativeOwner::create_suspended_with_stdio(child(), &f.args("stdio"), io).unwrap();
+    drop(child_input);
+    drop(child_output);
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    wait_marker(&f.root.join("marker"));
+    parent_write.write_all(BYTES).unwrap();
+    assert!(
+        matches!(
+            owner.finish(Duration::from_millis(20)).unwrap(),
+            Settlement::Pending {
+                root_exit: None,
+                ..
+            }
+        ),
+        "EOF must wait for the actual writer owner"
+    );
+    drop(parent_write);
+    finish(&mut owner);
+    let mut available = 0;
+    // SAFETY: owned read end, no competing reader, only availability is requested.
+    assert_ne!(
+        unsafe {
+            PeekNamedPipe(
+                parent_read.as_raw_handle(),
+                null_mut(),
+                0,
+                null_mut(),
+                &mut available,
+                null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(available as usize, BYTES.len());
+    let mut result = vec![0; BYTES.len()];
+    parent_read.read_exact(&mut result).unwrap();
+    assert_eq!(result, BYTES);
+    // Never perform an unbounded read_to_end in a regression: an extra parent-side
+    // writer would suppress EOF. Peek detects that error without hanging the test.
+    assert_eq!(
+        unsafe {
+            PeekNamedPipe(
+                parent_read.as_raw_handle(),
+                null_mut(),
+                0,
+                null_mut(),
+                &mut available,
+                null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(
+        io::Error::last_os_error().raw_os_error(),
+        Some(ERROR_BROKEN_PIPE as i32)
+    );
+}
+
+#[test]
+fn repeated_stdio_lifetimes_do_not_accumulate_handles() {
+    let baseline = handles();
+    for _ in 0..16 {
+        let f = Fixture::new();
+        let mut owner = f.launch();
+        owner.admit_and_resume(|_| Ok(())).unwrap();
+        finish(&mut owner);
+    }
+    assert_eq!(handles(), baseline);
+}
+
+// Temporary diagnostic: separate first-failure process-wide initialization from
+// per-attempt resource growth. Removed from published tests after investigation.
+#[test]
+fn characterize_missing_image_handle_sequence() {
+    let f = Fixture::new();
+    let image = f.root.join("absent.exe");
+    let mut plain = vec![handles()];
+    for _ in 0..6 {
+        assert!(NativeOwner::create_suspended(&image, &[]).is_err());
+        plain.push(handles());
+    }
+    let mut with_stdio = vec![handles()];
+    for _ in 0..6 {
+        assert!(NativeOwner::create_suspended_with_stdio(&image, &[], f.stdio()).is_err());
+        with_stdio.push(handles());
+    }
+    eprintln!("no-stdio before/after failures: {plain:?}; stdio failures: {with_stdio:?}");
+}
+===== END stdio-with-count-diagnostic.rs =====
+
+===== BEGIN verified-blobs.txt =====
+Original-SHA256: 9f92b91098fce63a75499c7e24cd9c746a360f85809ddd5773c1885bd895a05c
+Sanitized-content-SHA256: 3b06c8c8e93f3bd481307fca49cb362d5620878edbb9e7045ef9a045cc3f5b9d
+
+432ae8d2515350aba7848ed1737394a8a0b0dd0e  experiments/rust-process-owner/Cargo.toml
+63f5fb559dd5656a87a7b6c3f84bacd9f9eb39fe  experiments/rust-process-owner/README.md
+af12447c67532e163b5d966268039024769a364f  experiments/rust-process-owner/src/lib.rs
+7a113fdc53563089b0c43189370e4ba0dcf44007  experiments/rust-process-owner/src/windows.rs
+44f930b83812e4d58842f9b4b9e4bbaea972e510  experiments/rust-process-owner/src/bin/owner_child.rs
+8f9a18320d7054106a01ee899e40c7f0e5a68faf  experiments/rust-process-owner/tests/stdio.rs
+===== END verified-blobs.txt =====
