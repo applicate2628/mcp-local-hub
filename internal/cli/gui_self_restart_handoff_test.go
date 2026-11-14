@@ -660,7 +660,7 @@ func waitForHandoffMarkerClear(t *testing.T, store *gui.HandoffMarkerStore, time
 // once.
 func TestAcquireHandoff_NoEnvSingleShot(t *testing.T) {
 	t.Setenv(selfRestartHandoffEnv, "") // ensure not set
-	pidport := filepath.Join(t.TempDir(), "gui.pidport")
+	pidport := filepath.Join(apitest.HardenedTempDir(t), "gui.pidport")
 
 	held, err := gui.AcquireSingleInstanceAt(pidport, 1)
 	if err != nil {
@@ -695,7 +695,7 @@ func TestAcquireHandoff_OrdinaryEntrantHonorsRestartV3Reservation(t *testing.T) 
 	// the legacy no-options acquire takes the free flock and this test fails
 	// (bot #568 P2). Mirrors the gate-on idiom used by the other handoff tests.
 	t.Setenv("MCPHUB_GUI_RESTART_V3", "1")
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(stateDir, gui.PidportFileLeaf)
 	deadlines := gui.DefaultRestartDeadlines()
 	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
@@ -753,7 +753,7 @@ func TestAcquireHandoff_EnvRetriesUntilRelease(t *testing.T) {
 		selfRestartHandoffAcquireBackoff = origBackoff
 	})
 
-	pidport := filepath.Join(t.TempDir(), "gui.pidport")
+	pidport := filepath.Join(apitest.HardenedTempDir(t), "gui.pidport")
 	held, err := gui.AcquireSingleInstanceAt(pidport, 1)
 	if err != nil {
 		t.Fatalf("seed lock: %v", err)
@@ -792,7 +792,7 @@ func TestAcquireHandoff_EnvDeadlineExpires(t *testing.T) {
 		selfRestartHandoffAcquireBackoff = origBackoff
 	})
 
-	pidport := filepath.Join(t.TempDir(), "gui.pidport")
+	pidport := filepath.Join(apitest.HardenedTempDir(t), "gui.pidport")
 	held, err := gui.AcquireSingleInstanceAt(pidport, 1)
 	if err != nil {
 		t.Fatalf("seed lock: %v", err)

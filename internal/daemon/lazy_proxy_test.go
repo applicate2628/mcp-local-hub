@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -1971,37 +1972,41 @@ func TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline(t *testing.T) {
 }
 
 func TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget(t *testing.T) {
-	// N concurrent cold callers collapse to ONE materialize (singleflight) and,
-	// because the materialize outlasts every caller's budget, ALL fast-fail 503.
-	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 800 * time.Millisecond}
-	p, _ := newTestProxy(t, "mcp-language-server", f)
-	p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
-	h := p.Handler()
+	// The budget bounds the gate wait, not end-to-end registry/HTTP latency.
+	// Let all callers finish reservation I/O before advancing the shared clock.
+	synctest.Test(t, func(t *testing.T) {
+		// N concurrent cold callers collapse to ONE materialize (singleflight) and,
+		// because the materialize outlasts every caller's budget, ALL fast-fail 503.
+		f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 800 * time.Millisecond}
+		p, _ := newTestProxy(t, "mcp-language-server", f)
+		p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
+		h := p.Handler()
 
-	const n = 8
-	codes := make([]int, n)
-	var wg sync.WaitGroup
-	for i := range n {
-		wg.Go(func() {
-			rr := postRPC(t, h, "tools/call", i)
-			codes[i] = rr.Code
-		})
-	}
-	wg.Wait()
-	if got := f.materializeCount.Load(); got != 1 {
-		t.Errorf("materializeCount = %d under %d concurrent cold callers, want 1 (singleflight)", got, n)
-	}
-	for i, c := range codes {
-		if c != http.StatusServiceUnavailable {
-			t.Errorf("caller[%d] code = %d, want 503 (all bounded at budget)", i, c)
+		const n = 8
+		codes := make([]int, n)
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Go(func() {
+				rr := postRPC(t, h, "tools/call", i)
+				codes[i] = rr.Code
+			})
 		}
-	}
-	// Settle: wait for the detached materialize (800ms) to publish so its registry
-	// write is not racing the TempDir cleanup (Windows: "directory not empty").
-	waitForCond(t, "detached materialize published", func() bool {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		return p.endpoint != nil
+		wg.Wait()
+		if got := f.materializeCount.Load(); got != 1 {
+			t.Errorf("materializeCount = %d under %d concurrent cold callers, want 1 (singleflight)", got, n)
+		}
+		for i, c := range codes {
+			if c != http.StatusServiceUnavailable {
+				t.Errorf("caller[%d] code = %d, want 503 (all bounded at budget)", i, c)
+			}
+		}
+		// Settle: wait for the detached materialize (800ms) to publish so its registry
+		// write is not racing the TempDir cleanup (Windows: "directory not empty").
+		waitForCond(t, "detached materialize published", func() bool {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			return p.endpoint != nil
+		})
 	})
 }
 
@@ -2453,39 +2458,42 @@ func TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint(t *tes
 // rather than 503+rollback prevents the client from re-forwarding a duplicate
 // didOpen on retry. No teardown, warmed stays false (no response yet).
 func TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay(t *testing.T) {
-	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
-	p, _ := newTestProxy(t, "mcp-language-server", f)
-	p.cfg.MaterializeWaitBudget = 40 * time.Millisecond
-	h := p.Handler()
-	const uri = "file:///ws/foo.go"
+	// Keep registry I/O outside the tested post-delivery deadline.
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+		p, _ := newTestProxy(t, "mcp-language-server", f)
+		p.cfg.MaterializeWaitBudget = 40 * time.Millisecond
+		h := p.Handler()
+		const uri = "file:///ws/foo.go"
 
-	// Cold didOpen: the send is written to the backend, then blocks on the gate
-	// until our budget fires. The notification is delivered → 202, NOT 503.
-	rr := postDocNotification(t, h, "textDocument/didOpen", uri)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("cold didOpen code = %d, want 202 (delivered once, no replay); body=%s", rr.Code, rr.Body.String())
-	}
-	if got := f.sendCount.Load(); got != 1 {
-		t.Fatalf("sendCount = %d, want 1 (notification written exactly once)", got)
-	}
-	if p.isWarmed() {
-		t.Fatal("warmed set despite no backend response (only a deadline)")
-	}
-	if sc := f.stopCount.Load(); sc != 0 {
-		t.Fatalf("probation deadline tore down backend: stopCount=%d", sc)
-	}
+		// Cold didOpen: the send is written to the backend, then blocks on the gate
+		// until our budget fires. The notification is delivered → 202, NOT 503.
+		rr := postDocNotification(t, h, "textDocument/didOpen", uri)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("cold didOpen code = %d, want 202 (delivered once, no replay); body=%s", rr.Code, rr.Body.String())
+		}
+		if got := f.sendCount.Load(); got != 1 {
+			t.Fatalf("sendCount = %d, want 1 (notification written exactly once)", got)
+		}
+		if p.isWarmed() {
+			t.Fatal("warmed set despite no backend response (only a deadline)")
+		}
+		if sc := f.stopCount.Load(); sc != 0 {
+			t.Fatalf("probation deadline tore down backend: stopCount=%d", sc)
+		}
 
-	// The refcount was NOT rolled back, so a genuine second open of the same URI
-	// is ABSORBED (1->2) and never re-forwarded — proving no duplicate replay. If
-	// the first open had been rolled back (old bug), this would be a 0->1 forward
-	// and reach the backend (sendCount would climb).
-	rr = postDocNotification(t, h, "textDocument/didOpen", uri)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("duplicate didOpen code = %d, want 202", rr.Code)
-	}
-	if got := f.sendCount.Load(); got != 1 {
-		t.Fatalf("sendCount = %d after duplicate didOpen, want 1 (first open's refcount must be retained — no replay)", got)
-	}
+		// The refcount was NOT rolled back, so a genuine second open of the same URI
+		// is ABSORBED (1->2) and never re-forwarded — proving no duplicate replay. If
+		// the first open had been rolled back (old bug), this would be a 0->1 forward
+		// and reach the backend (sendCount would climb).
+		rr = postDocNotification(t, h, "textDocument/didOpen", uri)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("duplicate didOpen code = %d, want 202", rr.Code)
+		}
+		if got := f.sendCount.Load(); got != 1 {
+			t.Fatalf("sendCount = %d after duplicate didOpen, want 1 (first open's refcount must be retained — no replay)", got)
+		}
+	})
 }
 
 // TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed confirms a genuinely
@@ -2990,40 +2998,43 @@ func TestLazyProxy_ColdRequestHoldCeilingInvariantClamped(t *testing.T) {
 // lsp-cold-forward-held observability event fires when a request is held past
 // ~MaterializeWaitBudget, and a fast/warm forward does NOT fire it.
 func TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget(t *testing.T) {
-	var fired atomic.Int32
-	var gotMethod atomic.Value
-	override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
-		gotMethod.Store(method)
-		fired.Add(1)
-	}
-	// Atomic seam: a detached timer callback can outlive this test, so the
-	// override + restore go through the atomic pointer (plain-var swap raced).
-	coldForwardHeldEventFn.Store(&override)
-	t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
+	// Registry I/O must not consume the budget before the held timer is armed.
+	synctest.Test(t, func(t *testing.T) {
+		var fired atomic.Int32
+		var gotMethod atomic.Value
+		override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+			gotMethod.Store(method)
+			fired.Add(1)
+		}
+		// Atomic seam: a detached timer callback can outlive this test, so the
+		// override + restore go through the atomic pointer (plain-var swap raced).
+		coldForwardHeldEventFn.Store(&override)
+		t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
 
-	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
-	p, _ := newTestProxy(t, "mcp-language-server", f)
-	p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
-	p.cfg.ColdRequestHoldCeiling = 5 * time.Second // long: event fires before the ceiling
-	h := p.Handler()
+		f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+		p, _ := newTestProxy(t, "mcp-language-server", f)
+		p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
+		p.cfg.ColdRequestHoldCeiling = 5 * time.Second // long: event fires before the ceiling
+		h := p.Handler()
 
-	done := make(chan struct{})
-	go func() { _ = postRPC(t, h, "tools/call", 1); close(done) }()
-	waitForCond(t, "cold-forward-held event fired", func() bool { return fired.Load() >= 1 })
-	if m, _ := gotMethod.Load().(string); m != "tools/call" {
-		t.Fatalf("event method = %q, want tools/call", m)
-	}
-	close(f.firstSendGate)
-	<-done
+		done := make(chan struct{})
+		go func() { _ = postRPC(t, h, "tools/call", 1); close(done) }()
+		waitForCond(t, "cold-forward-held event fired", func() bool { return fired.Load() >= 1 })
+		if m, _ := gotMethod.Load().(string); m != "tools/call" {
+			t.Fatalf("event method = %q, want tools/call", m)
+		}
+		close(f.firstSendGate)
+		<-done
 
-	// A fast/warm forward must NOT fire the event (timer stopped before firing).
-	before := fired.Load()
-	if rr := postRPC(t, h, "tools/call", 2); rr.Code != http.StatusOK {
-		t.Fatalf("warm code=%d", rr.Code)
-	}
-	if fired.Load() != before {
-		t.Fatalf("fast warm forward fired the held event (%d -> %d)", before, fired.Load())
-	}
+		// A fast/warm forward must NOT fire the event (timer stopped before firing).
+		before := fired.Load()
+		if rr := postRPC(t, h, "tools/call", 2); rr.Code != http.StatusOK {
+			t.Fatalf("warm code=%d", rr.Code)
+		}
+		if fired.Load() != before {
+			t.Fatalf("fast warm forward fired the held event (%d -> %d)", before, fired.Load())
+		}
+	})
 }
 
 // --- PR #489 round-4: commission findings F1-F5 ------------------------------
@@ -3142,31 +3153,34 @@ func TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError(t *te
 // TestLazyProxy_ColdForward_HeldEventFires is F2: the lsp-cold-forward-held event
 // fires for a held generic forward too.
 func TestLazyProxy_ColdForward_HeldEventFires(t *testing.T) {
-	var fired atomic.Int32
-	var gotMethod atomic.Value
-	override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
-		gotMethod.Store(method)
-		fired.Add(1)
-	}
-	// Atomic seam: a detached timer callback can outlive this test, so the
-	// override + restore go through the atomic pointer (plain-var swap raced).
-	coldForwardHeldEventFn.Store(&override)
-	t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
+	// Registry I/O must not consume the budget before the held timer is armed.
+	synctest.Test(t, func(t *testing.T) {
+		var fired atomic.Int32
+		var gotMethod atomic.Value
+		override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+			gotMethod.Store(method)
+			fired.Add(1)
+		}
+		// Atomic seam: a detached timer callback can outlive this test, so the
+		// override + restore go through the atomic pointer (plain-var swap raced).
+		coldForwardHeldEventFn.Store(&override)
+		t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
 
-	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
-	p, _ := newTestProxy(t, "mcp-language-server", f)
-	p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
-	p.cfg.ColdRequestHoldCeiling = 5 * time.Second
-	h := p.Handler()
+		f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+		p, _ := newTestProxy(t, "mcp-language-server", f)
+		p.cfg.MaterializeWaitBudget = 50 * time.Millisecond
+		p.cfg.ColdRequestHoldCeiling = 5 * time.Second
+		h := p.Handler()
 
-	done := make(chan struct{})
-	go func() { _ = postRPC(t, h, "workspace/symbol", 1); close(done) }()
-	waitForCond(t, "held event fired for forward", func() bool { return fired.Load() >= 1 })
-	if m, _ := gotMethod.Load().(string); m != "workspace/symbol" {
-		t.Fatalf("event method = %q, want workspace/symbol", m)
-	}
-	close(f.firstSendGate)
-	<-done
+		done := make(chan struct{})
+		go func() { _ = postRPC(t, h, "workspace/symbol", 1); close(done) }()
+		waitForCond(t, "held event fired for forward", func() bool { return fired.Load() >= 1 })
+		if m, _ := gotMethod.Load().(string); m != "workspace/symbol" {
+			t.Fatalf("event method = %q, want workspace/symbol", m)
+		}
+		close(f.firstSendGate)
+		<-done
+	})
 }
 
 // TestLazyProxy_NegativeColdStartMaxProbation_NotClamped is F3: a negative

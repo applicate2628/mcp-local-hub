@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // seedSerenaIntent writes a supervisor-intent.json into a test-redirected
@@ -16,7 +17,7 @@ import (
 // resolves to the same file — no env vars, no real %LOCALAPPDATA% touch.
 func seedSerenaIntent(t *testing.T, daemons []api.SupervisorDaemon) string {
 	t.Helper()
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
@@ -260,7 +261,7 @@ func TestSerenaProxy_IntentPathFromEnvChannel_ImmuneToUpstreamHome(t *testing.T)
 
 	// Write the REAL intent at a path under a dedicated temp dir that the
 	// state-dir resolver does NOT point at.
-	realIntentDir := t.TempDir()
+	realIntentDir := apitest.HardenedTempDir(t)
 	realIntentPath := filepath.Join(realIntentDir, "supervisor-intent.json")
 	if err := api.WriteSupervisorIntent(realIntentPath, &api.SupervisorIntentFile{
 		Version: 1,

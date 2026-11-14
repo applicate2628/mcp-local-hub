@@ -11,6 +11,10 @@ import (
 
 type preparedSerenaCombinedClosure struct {
 	receipts []process.ContainedStreamReceiptV1
+	// Retain original private outcomes even when later interpretation fails.
+	commands      []preparedSerenaCommandResult
+	commandErrors []error
+	receiptRaw    []byte
 }
 
 func (c *preparedSerenaCombinedClosure) Complete() bool {
@@ -50,28 +54,27 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	}
 	uv, installErr := invoke(r.UV, inputs.InstallArgs)
 	installed.Closure = uv.Closure
+	combined := &preparedSerenaCombinedClosure{receipts: []process.ContainedStreamReceiptV1{uv.Receipt}, commands: []preparedSerenaCommandResult{uv}, commandErrors: []error{installErr}}
+	installed.Closure.nativeEvidence = combined
 	if installErr != nil || !uv.Closure.complete(r.OperationID) || !uv.Closure.RootExitKnown || uv.Closure.RootExitCode != 0 {
 		return installed, errors.Join(installErr, errors.New("SERENA_PREPARED_INSTALL_REFUSED"))
 	}
-	combined := &preparedSerenaCombinedClosure{receipts: []process.ContainedStreamReceiptV1{uv.Receipt}}
-	installed.Closure.nativeEvidence = combined
 	// UV's installed-tool metadata, not a guessed executable basename, owns
 	// the tool's declared entrypoint. The package leaf is the exact installed
 	// distribution selected by the pinned source requirement.
 	toolRoot := filepath.Join(roots.Generation.Path, "tools", r.Package)
 	receiptPath := filepath.Join(toolRoot, "uv-receipt.toml")
 	_, receiptRaw, readErr := qualifyPreparedSerenaFile(work, receiptPath, 1<<20)
+	combined.receiptRaw = append([]byte(nil), receiptRaw...)
+	if len(receiptRaw) != 0 {
+		installed.UVReceiptSHA256 = preparedSerenaHash(receiptRaw)
+	}
 	if readErr != nil {
 		return installed, readErr
 	}
-	_, entryPath, parseErr := parsePreparedSerenaUVReceipt(receiptRaw, r, roots.Generation.Path)
+	receipt, entryPath, parseErr := parsePreparedSerenaUVReceipt(receiptRaw, r, roots.Generation.Path)
 	if parseErr != nil {
 		return installed, parseErr
-	}
-	installed.UVReceiptSHA256 = preparedSerenaHash(receiptRaw)
-	installed.Entrypoint, _, err = qualifyPreparedSerenaFile(work, entryPath, 64<<20)
-	if err != nil {
-		return installed, err
 	}
 	environmentPython, _, err := qualifyPreparedSerenaFile(work, filepath.Join(toolRoot, "Scripts", "python.exe"), 64<<20)
 	if err != nil {
@@ -85,11 +88,17 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	}
 	metadataCommand, metadataErr := invoke(environmentPython, []string{"-I", "-B", "-c", preparedSerenaMetadataCollector})
 	combined.receipts = append(combined.receipts, metadataCommand.Receipt)
+	combined.commands = append(combined.commands, metadataCommand)
+	combined.commandErrors = append(combined.commandErrors, metadataErr)
 	installed.Closure.HandlesClosed = combined.Complete()
 	installed.Closure.IOClosed = combined.Complete()
 	installed.Closure.MembersExited = combined.Complete()
-	if metadataErr != nil || !metadataCommand.Closure.RootExitKnown || metadataCommand.Closure.RootExitCode != 0 || !combined.Complete() {
+	if !combined.Complete() {
+		installed.Closure.Pending = append(installed.Closure.Pending, "metadata-command-settlement")
 		return installed, errors.Join(metadataErr, errors.New("SERENA_PREPARED_METADATA_CUSTODY_PENDING"))
+	}
+	if metadataErr != nil || !metadataCommand.Closure.RootExitKnown || metadataCommand.Closure.RootExitCode != 0 {
+		return installed, errors.Join(metadataErr, errors.New("SERENA_PREPARED_METADATA_REFUSED"))
 	}
 	metadata, resolution, parseErr := parsePreparedSerenaMetadata(metadataCommand.Stdout, r, toolRoot)
 	if parseErr != nil {
@@ -100,14 +109,39 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	}
 	// Re-read each observed distribution file through the same no-follow
 	// identity/byte owner. Python's content digest is not a path authority.
+	qualifiedMembers := map[string]PreparedSerenaFile{}
 	for _, distribution := range metadata.Distributions {
 		for _, file := range distribution.Files {
 			actual, _, fileErr := qualifyPreparedSerenaFile(work, file.Path, 64<<20)
 			if fileErr != nil || actual.SHA256 != file.SHA256 {
 				return installed, errors.Join(fileErr, errors.New("SERENA_PREPARED_METADATA_FILE_DRIFT"))
 			}
+			qualifiedMembers[file.Path] = actual
 		}
 	}
+	associations, associationErr := bindPreparedSerenaReceiptAssociations(receipt, metadata, r, toolRoot, "serena")
+	if associationErr != nil {
+		return installed, associationErr
+	}
+	identities := map[string]string{}
+	var selected PreparedSerenaFile
+	for _, association := range associations {
+		path := filepath.FromSlash(association.Receipt.InstallPath)
+		exported, _, exportErr := qualifyPreparedSerenaFile(work, path, 64<<20)
+		if exportErr != nil {
+			return installed, exportErr
+		}
+		if associationErr = bindPreparedSerenaExportIdentity(identities, association.Receipt.Name, qualifiedMembers[association.Member.Path], exported); associationErr != nil {
+			return installed, associationErr
+		}
+		if path == entryPath {
+			selected = exported
+		}
+	}
+	if !preparedSerenaFile(selected) {
+		return installed, errors.New("SERENA_PREPARED_EXPORT_SELECTED_MISSING")
+	}
+	installed.Entrypoint = selected
 	installed.SourceSHA256 = preparedSerenaHash([]byte(r.SourceRequirement))
 	installed.ResolutionSHA256 = resolution
 	summary, encodeErr := json.Marshal(struct{ Install, Metadata, UVReceipt, Resolution, Entry string }{uv.Closure.ReceiptSHA256, metadataCommand.Closure.ReceiptSHA256, installed.UVReceiptSHA256, resolution, installed.Entrypoint.SHA256})

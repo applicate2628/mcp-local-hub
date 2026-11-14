@@ -51,7 +51,9 @@ func (f *fakeBackend) StatusSnapshot(opts autostart.Options) (autostart.StatusSn
 // the test can inspect it. Restores the prior factory on cleanup.
 func withFakeBackend(t *testing.T, fb *fakeBackend) {
 	t.Helper()
-	t.Setenv("LOCALAPPDATA", apitest.HardenedTempDir(t))
+	root := apitest.HardenedTempDir(t)
+	t.Setenv("LOCALAPPDATA", root)
+	apitest.HardenedDir(t, filepath.Join(root, "mcp-local-hub"))
 	prev := autostartBackendFactoryFn
 	autostartBackendFactoryFn = func() (autostart.Backend, error) { return fb, nil }
 	prevPolicy := autostartStatusOptionsFn
@@ -325,7 +327,7 @@ func TestAutostartStatusDetailsUsesPersistedPolicyWithoutChangingStateToken(t *t
 	if len(fb.statusCalls) != 1 || fb.statusCalls[0].OwnerMode != autostart.OwnerModeSupervise || !fb.statusCalls[0].StrictMode {
 		t.Fatalf("status options=%+v, want persisted supervise strict policy", fb.statusCalls)
 	}
-	if got := out.String(); got != "enabled-running\nowner-mode=supervise\nstrict-mode=true\n" {
+	if got := out.String(); got != "enabled-running\nowner-mode=supervise\nstrict-mode=true\nautorun-policy=legacy\nrun-desired=running\n" {
 		t.Fatalf("details output=%q", got)
 	}
 }

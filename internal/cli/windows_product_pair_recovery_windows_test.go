@@ -1048,6 +1048,11 @@ func TestWindowsProductPairRecoveryWiringReopensExistingSchedulerStore(t *testin
 
 func TestWindowsProductPairSetupAndCanonicalizeFenceBeforeRecoveryOrMutation(t *testing.T) {
 	stateDir := withTempStateDir(t)
+	binding, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(strings.Repeat("a", 32), strings.Repeat("b", 64), binaryadmission.WindowsCanonicalEntryReverseProjectionV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := windowsCanonicalEntryCommandInput{binding: binding}
 	holder, err := api.AcquireUpgradeFence(context.Background(), stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -1065,14 +1070,14 @@ func TestWindowsProductPairSetupAndCanonicalizeFenceBeforeRecoveryOrMutation(t *
 		fn   func() error
 	}{
 		{name: "setup", fn: func() error {
-			return bootstrapProductToTarget(new(bytes.Buffer), filepath.Join(t.TempDir(), "source.exe"), filepath.Join(t.TempDir(), "mcphub.exe"))
+			return bootstrapProductToTargetWithWindowsCanonicalEntryInput(context.Background(), new(bytes.Buffer), filepath.Join(t.TempDir(), "source.exe"), filepath.Join(t.TempDir(), "mcphub.exe"), input)
 		}},
 		{name: "canonicalize", fn: func() error {
-			return canonicalizeProductToTarget(new(bytes.Buffer), filepath.Join(t.TempDir(), "source.exe"), filepath.Join(t.TempDir(), "mcphub.exe"))
+			return canonicalizeProductToTargetWithWindowsCanonicalEntryInput(context.Background(), new(bytes.Buffer), filepath.Join(t.TempDir(), "source.exe"), filepath.Join(t.TempDir(), "mcphub.exe"), input)
 		}},
 	} {
 		t.Run(run.name, func(t *testing.T) {
-			if err := run.fn(); err == nil || !strings.Contains(err.Error(), "another product-pair transaction is active") {
+			if err := run.fn(); err == nil || !strings.Contains(err.Error(), "another Windows product transaction is active") {
 				t.Fatalf("error=%v", err)
 			}
 		})

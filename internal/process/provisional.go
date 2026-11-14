@@ -902,6 +902,9 @@ func (p *ProvisionalProcess) terminateAndWaitObserved(timeout time.Duration) (ob
 		var admissionErr error
 		permit, admissionErr = beginOriginalOwnerTerminal(ctx, p.owner)
 		if admissionErr != nil {
+			if errors.Is(admissionErr, context.DeadlineExceeded) {
+				return false, errors.Join(ErrCleanupTimeout, admissionErr)
+			}
 			return false, admissionErr
 		}
 		defer permit.finish()
@@ -917,6 +920,9 @@ func (p *ProvisionalProcess) terminateAndWaitObserved(timeout time.Duration) (ob
 		terminateErr = p.owner.terminate(uint32(timeout / time.Millisecond))
 	}
 	if terminateErr != nil {
+		if errors.Is(terminateErr, context.DeadlineExceeded) {
+			return false, errors.Join(ErrCleanupTimeout, terminateErr)
+		}
 		return false, terminateErr
 	}
 	result, completed := containedWaitResult{}, false

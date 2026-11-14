@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -38,12 +39,13 @@ type HeldPIDIdentity interface {
 }
 
 type heldPIDGeneration struct {
-	mu             sync.Mutex
-	pid            int
-	handle         windows.Handle
-	ops            heldPIDGenerationOps
-	closeAttempted bool
-	closeErr       error
+	mu                sync.Mutex
+	terminalRequested atomic.Bool
+	pid               int
+	handle            windows.Handle
+	ops               heldPIDGenerationOps
+	closeAttempted    bool
+	closeErr          error
 }
 
 // HeldPIDJobObservation owns a query-only process handle. The caller must
@@ -80,6 +82,7 @@ func (h *heldPIDObservation) Close() error {
 	if h == nil || h.heldPIDJobObservation == nil {
 		return errors.New("process: original held observation required")
 	}
+	h.terminalRequested.Store(true)
 	h.closeMu.Lock()
 	defer h.closeMu.Unlock()
 	if h.closeAttempted {
@@ -99,7 +102,12 @@ func HoldPIDForObservation(pid int) (HeldPIDObservation, error) {
 }
 
 func (h *heldPIDObservation) OwnerSID() (string, error) {
-	if h == nil || h.heldPIDJobObservation == nil || h.handle == 0 {
+	if h == nil || h.heldPIDJobObservation == nil {
+		return "", errors.New("process: held observation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
 		return "", errors.New("process: held observation is closed")
 	}
 	sid, err := h.ownerSID(h.handle)
@@ -121,7 +129,12 @@ func (h *heldPIDObservation) OwnerSID() (string, error) {
 }
 
 func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
-	if h == nil || h.heldPIDJobObservation == nil || h.handle == 0 || !h.verified {
+	if h == nil || h.heldPIDJobObservation == nil {
+		return PIDWaitObservation{}, errors.New("process: held observation lacks verified identity")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || !h.verified {
 		return PIDWaitObservation{}, errors.New("process: held observation lacks verified identity")
 	}
 	result, err := h.wait(h.handle, 0)
@@ -138,13 +151,45 @@ func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
 }
 
 type heldPIDJobObservation struct {
-	pid      int
-	handle   windows.Handle
-	verified bool
-	verify   func(PIDIdentityProof, windows.Handle) error
-	query    func(windows.Handle) (bool, error)
-	close    func(windows.Handle) error
-	identity func(int, windows.Handle) (processHandleIdentity, error)
+	mu                sync.Mutex
+	terminalRequested atomic.Bool
+	pid               int
+	handle            windows.Handle
+	verified          bool
+	verify            func(PIDIdentityProof, windows.Handle) error
+	query             func(windows.Handle) (bool, error)
+	close             func(windows.Handle) error
+	identity          func(int, windows.Handle) (processHandleIdentity, error)
+}
+
+func borrowHeldOriginalProcessHandle(mu *sync.Mutex, terminal *atomic.Bool, handle *windows.Handle, closed *bool, consume func(uintptr) error) error {
+	if consume == nil || terminal.Load() {
+		return ErrHeldOriginalProcessRetiring
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if terminal.Load() || *handle == 0 || (closed != nil && *closed) {
+		return ErrHeldOriginalProcessRetiring
+	}
+	callbackErr := consume(uintptr(*handle))
+	if terminal.Load() {
+		return errors.Join(callbackErr, ErrHeldOriginalProcessRetiring)
+	}
+	return callbackErr
+}
+
+func (h *heldPIDGeneration) BorrowOriginalProcessHandle(consume func(uintptr) error) error {
+	if h == nil {
+		return ErrHeldOriginalProcessRetiring
+	}
+	return borrowHeldOriginalProcessHandle(&h.mu, &h.terminalRequested, &h.handle, &h.closeAttempted, consume)
+}
+
+func (h *heldPIDJobObservation) BorrowOriginalProcessHandle(consume func(uintptr) error) error {
+	if h == nil {
+		return ErrHeldOriginalProcessRetiring
+	}
+	return borrowHeldOriginalProcessHandle(&h.mu, &h.terminalRequested, &h.handle, nil, consume)
 }
 
 func HoldPIDForJobObservation(pid int) (HeldPIDJobObservation, error) {
@@ -167,14 +212,24 @@ func holdPIDForJobObservationWithAccess(pid int, access uint32, open func(uint32
 }
 
 func (h *heldPIDJobObservation) Identity() (PIDHandleIdentity, error) {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return PIDHandleIdentity{}, errors.New("process: held PID job observation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
 		return PIDHandleIdentity{}, errors.New("process: held PID job observation is closed")
 	}
 	return identityFromHeld(h.pid, h.handle, h.identity)
 }
 
 func (h *heldPIDJobObservation) VerifyIdentity(proof PIDIdentityProof) error {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return errors.New("process: held PID job observation is closed")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
 		return errors.New("process: held PID job observation is closed")
 	}
 	h.verified = false
@@ -189,7 +244,12 @@ func (h *heldPIDJobObservation) VerifyIdentity(proof PIDIdentityProof) error {
 }
 
 func (h *heldPIDJobObservation) InAnyJob() (bool, error) {
-	if h == nil || h.handle == 0 || !h.verified {
+	if h == nil {
+		return false, errors.New("process: held PID job observation lacks verified identity")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 || !h.verified {
 		return false, errors.New("process: held PID job observation lacks verified identity")
 	}
 	member, err := h.query(h.handle)
@@ -200,7 +260,13 @@ func (h *heldPIDJobObservation) InAnyJob() (bool, error) {
 }
 
 func (h *heldPIDJobObservation) Close() error {
-	if h == nil || h.handle == 0 {
+	if h == nil {
+		return nil
+	}
+	h.terminalRequested.Store(true)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
 		return nil
 	}
 	err := h.close(h.handle)
@@ -313,6 +379,7 @@ func (h *heldPIDGeneration) Terminate() (bool, error) {
 	if h == nil {
 		return false, fmt.Errorf("process: held PID generation is closed")
 	}
+	h.terminalRequested.Store(true)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.handle == 0 || h.closeAttempted {
@@ -343,6 +410,7 @@ func (h *heldPIDGeneration) Close() error {
 	if h == nil {
 		return nil
 	}
+	h.terminalRequested.Store(true)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closeAttempted {

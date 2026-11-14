@@ -435,7 +435,7 @@ func (a *API) ReconcileSerenaIntentForSupervisor(ctx context.Context, stateDir s
 	if imageErr != nil {
 		return result, nil, imageErr
 	}
-	binding, record, _, prepareErr := a.prepareSerenaInstall(ctx, dynamic, ManifestHashContent(raw), []string{canonicalIntentTaskKey(target.TaskName)}, nil)
+	binding, record, request, prepareErr := a.prepareSerenaInstall(ctx, dynamic, ManifestHashContent(raw), []string{canonicalIntentTaskKey(target.TaskName)}, nil)
 	if prepareErr != nil {
 		return result, nil, prepareErr
 	}
@@ -452,7 +452,7 @@ func (a *API) ReconcileSerenaIntentForSupervisor(ctx context.Context, stateDir s
 	if operationErr != nil {
 		return result, nil, operationErr
 	}
-	invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operation, Binding: binding, ExpectedDescriptors: descriptors})
+	invocation, err = owner.AcquireConsumerInvocation(ctx, PreparedSerenaConsumerInvocationRequest{OperationID: operation, Binding: binding, ExpectedDescriptors: descriptors, preparation: request.preparationContext})
 	if err != nil {
 		return result, invocation, err
 	}

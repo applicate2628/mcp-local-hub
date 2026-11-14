@@ -10,16 +10,20 @@ import (
 	"os"
 	"strings"
 
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/cli"
 )
 
 // These are populated at build time via `-ldflags "-X ..."` (see build
 // scripts). Defaults are useful for `go run` / unmarked dev builds.
 var (
-	version         = "dev"
-	commit          = "unknown"
-	buildDate       = "unknown"
-	launchBareGUIFn = cli.LaunchBareGUI
+	version                         = "dev"
+	commit                          = "unknown"
+	buildDate                       = "unknown"
+	entrySetBuildID                 string
+	expectedCanonicalEntrySHA256    string
+	canonicalEntryReverseProjection string
+	launchBareGUIFn                 = cli.LaunchBareGUI
 )
 
 type windowsEntrypointMode uint8
@@ -77,9 +81,12 @@ func main() {
 	}
 	os.Args = args
 
-	root := cli.NewRootCmd()
+	// The immutable linker tuple is received once. Its original error belongs to
+	// the new install paths; ordinary help/version/status keep their old flow.
+	entryBinding, entryBindingErr := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(entrySetBuildID, expectedCanonicalEntrySHA256, canonicalEntryReverseProjection)
+	root := cli.NewRootCmdWithWindowsCanonicalEntryBinding(entryBinding, entryBindingErr)
 	// Only the executable bootstrap owns this process's inherited stdin.
-	// Library/test command construction keeps its existing borrowed input.
+	// Keep canonical-entry admission and borrowed library inputs unchanged.
 	if os.Stdin != nil {
 		if err := cli.BindProcessRelayInput(root, os.Stdin); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)

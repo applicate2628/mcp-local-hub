@@ -36,10 +36,11 @@ const waitDelay = 8 * time.Second
 
 // execResult is the outcome of a single external-command run.
 type execResult struct {
-	ExitCode int
-	Combined string // interleaved stdout+stderr
-	TimedOut bool
-	Canceled bool
+	ExitCode        int
+	Combined        string // interleaved stdout+stderr
+	TimedOut        bool
+	Canceled        bool
+	OutputTruncated bool // leading command output was discarded
 	// startErr is set when the process could not be started or waited on for a
 	// reason other than a non-zero exit (e.g. binary vanished, ctx canceled).
 	startErr error
@@ -83,6 +84,12 @@ func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return string(b.buf)
+}
+
+func (b *boundedBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.truncated
 }
 
 // runCommand executes bin with args in dir, bounded by timeout (clamped to the
@@ -137,7 +144,7 @@ func runCommand(ctx context.Context, timeout time.Duration, dir, bin string, arg
 	err := cmd.Wait()
 	wall := time.Since(start).Milliseconds()
 
-	res := execResult{Combined: out.String(), WallMs: wall}
+	res := execResult{Combined: out.String(), WallMs: wall, OutputTruncated: out.Truncated()}
 
 	if err == nil {
 		res.ExitCode = 0

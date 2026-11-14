@@ -228,7 +228,18 @@ func selectRuntimeMcphubImage(candidate string, owner *SupervisorRecoveryStatusV
 }
 
 func ensureCanonicalMcphubPresent() (string, error) {
-	canonicalPath, err := canonicalMcphubPath()
+	return ensureRuntimeMcphubPresent(nil)
+}
+
+func resolveInstallRuntimeProduct(bypass *InstallParsedManifestBypass) (string, error) {
+	if bypass != nil {
+		return runtimeMcphubExecutableUnderSupervisorLock(*bypass)
+	}
+	return canonicalMcphubPath()
+}
+
+func ensureRuntimeMcphubPresent(bypass *InstallParsedManifestBypass) (string, error) {
+	canonicalPath, err := resolveInstallRuntimeProduct(bypass)
 	if err != nil {
 		return "", err
 	}
@@ -266,9 +277,10 @@ func CanonicalAutostartEntrypoint() (string, error) {
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type Plan struct {
-	ownedBackendInstall *managedBackendInstallOperation
-	projectAttachment *projectClientAttachmentPlan
-	selectedExecutionPhase  *selectedInstallExecutionPhase
+	runtimeProduct           *InstallParsedManifestBypass
+	ownedBackendInstall      *managedBackendInstallOperation
+	projectAttachment        *projectClientAttachmentPlan
+	selectedExecutionPhase   *selectedInstallExecutionPhase
 	serenaPreparedRecord     *PreparedSerenaRuntimeRecord
 	serenaPreparedBinding    *PreparedSerenaRuntimeBinding
 	serenaPreparationRequest *PreparedSerenaRequest
@@ -366,13 +378,13 @@ type ClientUpdatePlan struct {
 // InstallOpts controls an install invocation.
 type InstallOpts struct {
 	requireExistingStdioBridge bool
-	ProjectClientRollback *InstallProjectClientRollback
-	ProjectClientCreate *InstallProjectClientCreate
-	SerenaPreparationPolicy *SerenaPreparationPolicyV1
-	Server                  string
-	DaemonFilter            string   // empty = all daemons in the manifest
-	ClientsInclude          []string // empty = default install clients
-	IncludeAllClients       bool
+	ProjectClientRollback      *InstallProjectClientRollback
+	ProjectClientCreate        *InstallProjectClientCreate
+	SerenaPreparationPolicy    *SerenaPreparationPolicyV2
+	Server                     string
+	DaemonFilter               string   // empty = all daemons in the manifest
+	ClientsInclude             []string // empty = default install clients
+	IncludeAllClients          bool
 	// SkipClientConfigWrites materializes daemon/supervisor intent while
 	// producing no client-config updates. It conflicts with client selectors.
 	SkipClientConfigWrites bool
@@ -717,7 +729,11 @@ func freezeInstallRelayExePath(plan *Plan) error {
 	if plan.installRelayExePath != "" {
 		return nil
 	}
-	path, err := canonicalInstallRelayPathFn()
+	resolve := canonicalInstallRelayPathFn
+	if plan.runtimeProduct != nil {
+		resolve = func() (string, error) { return resolveInstallRuntimeProduct(plan.runtimeProduct) }
+	}
+	path, err := resolve()
 	if err != nil {
 		return fmt.Errorf("resolve install relay executable: %w", err)
 	}
@@ -2256,10 +2272,11 @@ func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []sch
 
 // BuildPlanOpts controls plan-time filtering.
 type BuildPlanOpts struct {
+	runtimeProduct      *InstallParsedManifestBypass
 	ProjectClientCreate *InstallProjectClientCreate
-	DaemonFilter      string
-	ClientsInclude    []string
-	IncludeAllClients bool
+	DaemonFilter        string
+	ClientsInclude      []string
+	IncludeAllClients   bool
 	// SkipClientConfigWrites selects no client bindings while preserving the
 	// daemon and supervisor-intent portions of the plan.
 	SkipClientConfigWrites bool
@@ -2335,13 +2352,13 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	}
 	// Both direct supervisor intent and Windows Scheduler actions remain bound
 	// to the canonical one-executable product.
-	canonicalPath, err := canonicalMcphubPath()
+	canonicalPath, err := resolveInstallRuntimeProduct(opts.runtimeProduct)
 	if err != nil {
 		return nil, err
 	}
 	taskCommand := canonicalPath
 	workDir := filepath.Dir(canonicalPath)
-	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == ""}
+	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == "", runtimeProduct: opts.runtimeProduct}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	// SupervisorIntent mirrors SchedulerTasks during the v0.5.x transition
 	// (plan §2611-2644). Both fields stay in sync until the supervisor pivot
@@ -3413,18 +3430,18 @@ func selectedInstallActions(p *Plan, startTasks, skipPrune, skipTasks bool) inst
 // Manifest encoding is compared in memory only; it is never a persisted phase,
 // capability, issuer or write proof. The held caller supplies the real commit.
 type selectedInstallExecutionPhase struct {
-	manifest *config.ServerManifest
-	plan *Plan
-	manifestInput []byte
-	server string
+	manifest                                              *config.ServerManifest
+	plan                                                  *Plan
+	manifestInput                                         []byte
+	server                                                string
 	fullInstall, hashesBound, supervisorCommit, workspace bool
-	tasks []ScheduledTaskPlan
-	intent []SupervisorIntentEntry
-	clients []ClientUpdatePlan
-	opts installPlanOpts
-	backend *managedBackendInstallOperation
-	attachment, backendAttachment *projectClientAttachmentPlan
-	backendPublic, attachmentPublic ProjectClientCreatePlanV1
+	tasks                                                 []ScheduledTaskPlan
+	intent                                                []SupervisorIntentEntry
+	clients                                               []ClientUpdatePlan
+	opts                                                  installPlanOpts
+	backend                                               *managedBackendInstallOperation
+	attachment, backendAttachment                         *projectClientAttachmentPlan
+	backendPublic, attachmentPublic                       ProjectClientCreatePlanV1
 }
 
 func selectInstallExecutionPhase(m *config.ServerManifest, p *Plan, opts installPlanOpts, supervisorCommit, workspace bool) (*selectedInstallExecutionPhase, error) {
@@ -3708,7 +3725,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	canonical := p.installRelayExePath
 	if canonical == "" {
 		var err error
-		canonical, err = canonicalMcphubPath()
+		canonical, err = resolveInstallRuntimeProduct(p.runtimeProduct)
 		if err != nil {
 			return err
 		}
