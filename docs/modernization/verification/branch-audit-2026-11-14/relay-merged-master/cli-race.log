@@ -1,0 +1,2 @@
+Command: go test -mod=readonly -race ./internal/cli -run ^Test(BindProcessRelayInput|ProcessRelayInputWindowsQualification|ResolveRelayURL_(DirectURL|MutuallyExclusive|ResolvesFromEmbeddedManifest|MissingFlags)) -count=3 -timeout=90s Exit: 0
+ok  	mcp-local-hub/internal/cli	1.120s

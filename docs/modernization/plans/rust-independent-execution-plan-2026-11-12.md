@@ -1,3 +1,5 @@
+> Current checkpoint (2026-11-14): [all-branch audit, convergence and reserved parallel work](../verification/branch-audit-2026-11-14/RESULTS.md). The original November 12 baseline below is historical; completed work and current integration boundaries are recorded in the linked report and existing PRs.
+
 # Полный план работ MCPHub → Rust
 
 **Дата:** 12 ноября 2026 года. **Статус:** план исполнения, корректируемый по evidence. Полнота плана означает решение по каждому R01–R24, а не обязательство переписать все 24 участка. Исследования и тестовый код не означают готовую миграцию.

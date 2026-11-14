@@ -1,0 +1,14 @@
+[
+    {
+        "exit":  0,
+        "name":  "test"
+    },
+    {
+        "exit":  0,
+        "name":  "clippy"
+    },
+    {
+        "exit":  0,
+        "name":  "fmt"
+    }
+]
