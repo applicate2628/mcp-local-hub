@@ -129,7 +129,7 @@ func TestOriginalCreatorEnrollmentRefusesAndWrapperFailureRetains(t *testing.T) 
 				options.newAttributeList = func(count uint32) (*procThreadAttributeListObserved, error) {
 					al, err := newProcThreadAttributeListObserved(count)
 					if al != nil {
-						al.native.update = func(unsafe.Pointer, uintptr, unsafe.Pointer, uintptr) error { return fault }
+						al.native.update = func(uintptr, uintptr, unsafe.Pointer, uintptr) error { return fault }
 					}
 					return al, err
 				}

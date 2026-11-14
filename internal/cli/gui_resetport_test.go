@@ -44,7 +44,7 @@ func resetPortHermeticHome(t *testing.T) string {
 // to 0 while preserving instance_id + StartedAt, exits 0 without
 // binding any listener, and emits the credential-rotation warning.
 func TestGuiResetPortClearsPortKeepsInstanceID(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
@@ -64,19 +64,9 @@ func TestGuiResetPortClearsPortKeepsInstanceID(t *testing.T) {
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
 	// Seed endpoint state so reset has something to clear.
-	// On Windows, the DACL allowlist gate (Phase 1 §"State-dir DACL
-	// allowlist verifier") rejects t.TempDir() because %TEMP%
-	// inherits a non-allowlist SID via Authenticated Users. The
-	// hardenedTempDir helper in internal/api package handles this
-	// case but is package-private. Skip when EnsureHubEndpoint
-	// surfaces that DACL rejection — the full state-mutation flow
-	// is exercised by api-package tests with hardenedTempDir; this
-	// test covers the CLI surface specifically.
+	// The fixture supplies an owner-only state root on every platform.
 	originalEp, err := api.EnsureHubEndpoint(9120, 12345)
 	if err != nil {
-		if strings.Contains(err.Error(), "DACL") || strings.Contains(err.Error(), "not single-user safe") {
-			t.Skipf("skipping state-mutation test on host where %%TEMP%% fails DACL allowlist gate: %v", err)
-		}
 		t.Fatalf("EnsureHubEndpoint: %v", err)
 	}
 	if originalEp.InstanceID == "" {
@@ -124,7 +114,7 @@ func TestGuiResetPortClearsPortKeepsInstanceID(t *testing.T) {
 // --reset-port without --yes in a non-TTY context exits 6 (matches
 // the existing forceExitError code 6 convention).
 func TestGuiResetPortNonTTYRequiresYes(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
@@ -161,7 +151,7 @@ func TestGuiResetPortNonTTYRequiresYes(t *testing.T) {
 // commands (regenerate-token, install --reconcile-hub-mode) that
 // the hub isn't running, silently dropping the token reload.
 func TestGuiResetPortRefusedWhenHubRunning(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
@@ -185,9 +175,6 @@ func TestGuiResetPortRefusedWhenHubRunning(t *testing.T) {
 	// Seed endpoint state. ResetHubPort should NOT touch it.
 	originalEp, err := api.EnsureHubEndpoint(9120, 12345)
 	if err != nil {
-		if strings.Contains(err.Error(), "DACL") || strings.Contains(err.Error(), "not single-user safe") {
-			t.Skipf("skipping state-mutation test on host where %%TEMP%% fails DACL allowlist gate: %v", err)
-		}
 		t.Fatalf("EnsureHubEndpoint: %v", err)
 	}
 
@@ -226,7 +213,7 @@ func TestGuiResetPortRefusedWhenHubRunning(t *testing.T) {
 // URL (connection refused for ALL aggregated servers after the next
 // ephemeral re-bind). The endpoint port must be left UNTOUCHED.
 func TestGuiResetPortRefusedWhenClientGatedOn(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
@@ -246,9 +233,6 @@ func TestGuiResetPortRefusedWhenClientGatedOn(t *testing.T) {
 	// Seed endpoint state so we can prove the refusal left it untouched.
 	originalEp, err := api.EnsureHubEndpoint(9120, 12345)
 	if err != nil {
-		if strings.Contains(err.Error(), "DACL") || strings.Contains(err.Error(), "not single-user safe") {
-			t.Skipf("skipping state-mutation test on host where %%TEMP%% fails DACL allowlist gate: %v", err)
-		}
 		t.Fatalf("EnsureHubEndpoint: %v", err)
 	}
 

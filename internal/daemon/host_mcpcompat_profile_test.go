@@ -65,7 +65,7 @@ for line in sys.stdin.buffer:
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h, err := NewStdioHost(HostConfig{
-		Command:                         "python",
+		Command:                         daemonTestPython(t),
 		Args:                            []string{"-u", "-c", bridge, fmt.Sprint(port)},
 		MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05",
 	})
@@ -118,7 +118,7 @@ for line in sys.stdin.buffer:
 
 func TestNewStdioHostRejectsUnknownCompatibilityProfileBeforeStart(t *testing.T) {
 	if _, err := NewStdioHost(HostConfig{
-		Command:                         echoSubprocCommand(),
+		Command:                         echoSubprocCommand(t),
 		Args:                            echoSubprocArgs(),
 		MCPProtocolCompatibilityProfile: "unknown",
 	}); err == nil {

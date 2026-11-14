@@ -14,6 +14,7 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/daemonrecovery"
+	"mcp-local-hub/internal/gui"
 )
 
 // withTempHome redirects SettingsPath to a tempdir for the test duration.
@@ -22,6 +23,7 @@ func withTempHome(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("LOCALAPPDATA", dir)
 	t.Setenv("XDG_DATA_HOME", dir)
+	apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
 	return filepath.Join(dir, "mcp-local-hub", "gui-preferences.yaml")
 }
 
@@ -431,6 +433,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
 	}
+	// Protect the empty root before materializing the sandbox. Replacing its
+	// DACL afterward can remove inherited access from existing descendants.
+	if err := apitest.HardenedDirForTestMain(tmp); err != nil {
+		panic(errors.Join(err, apitest.RemoveTestMainRoot(tmp)))
+	}
 	restore := api.SetDaemonStateRootForTest(tmp)
 	// Install/adopt transaction fixtures deliberately use non-runnable
 	// canonical descriptor paths to isolate their later mutation stages. The
@@ -444,6 +451,19 @@ func TestMain(m *testing.M) {
 		restoreStdioAdmission()
 		restore()
 		panic(errors.Join(err, apitest.RemoveTestMainRoot(tmp)))
+	}
+	pidportPath, err := gui.PidportPathNoCreate()
+	if err != nil {
+		panic("internal/cli TestMain: resolve sandbox GUI state: " + err.Error())
+	}
+	stateParents := []string{filepath.Dir(api.SettingsPath())}
+	if dir := filepath.Dir(pidportPath); dir != stateParents[0] {
+		stateParents = append(stateParents, dir)
+	}
+	for _, dir := range stateParents {
+		if err := apitest.HardenedDirForTestMain(dir); err != nil {
+			panic("internal/cli TestMain: harden sandbox state parent: " + err.Error())
+		}
 	}
 
 	// Default subprocess state-env safety net (see doc comment above).

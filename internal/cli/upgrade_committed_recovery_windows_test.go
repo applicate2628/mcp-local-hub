@@ -676,7 +676,8 @@ func TestPendingRecoveryResultsAndUnknownOwnerStayDistinctAndPrivate(t *testing.
 			}
 			cmd, out := committedRecoveryCommand()
 			err := runWindowsProductRecoveryCommandWithDeps(cmd, f.stateDir, executor, f.product, windowsRecoveryCommandPending, deps)
-			if err == nil || calls != 1 || fence.releases != 1 || !errors.Is(err, ErrWindowsProductRecoveryPending) || err.Error() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result="+tc.want || strings.Contains(err.Error(), private) || out.Len() != 0 {
+			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=" + tc.want + "; runtime_basis=current-intent; runtime_snapshot=UNAVAILABLE"
+			if err == nil || calls != 1 || fence.releases != 1 || !errors.Is(err, ErrWindowsProductRecoveryPending) || err.Error() != want || strings.Contains(err.Error(), private) || out.Len() != 0 {
 				t.Fatalf("safe result receiving failed: %v", err)
 			}
 			if tc.cause != nil && !errors.Is(err, tc.cause) {

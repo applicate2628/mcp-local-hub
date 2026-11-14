@@ -247,7 +247,19 @@ func admitCommittedRecoveryExecutor(path string, admit func(binaryadmission.Wind
 	if version != admitted.Version || commit != admitted.Commit || date != admitted.BuildDate || version == "dev" || commit == "unknown" || date == "unknown" {
 		return binaryadmission.WindowsArtifact{}, "", errors.New("executor embedded build identity differs")
 	}
-	raw, err := readCommittedRecoveryRegular(filepath.Join(filepath.Dir(path), "windows-product-identity.json"))
+	identityPath := filepath.Join(filepath.Dir(path), binaryadmission.WindowsCanonicalIdentityRelativePathV1)
+	raw, err := readCommittedRecoveryRegular(identityPath)
+	// Preserve standalone executors in any directory, including mcphub-product.
+	// Only a missing adjacent sidecar selects the packaged layout; malformed or
+	// unreadable adjacent evidence must still fail its original admission.
+	if errors.Is(err, os.ErrNotExist) && strings.EqualFold(filepath.Base(filepath.Dir(path)), filepath.Dir(filepath.FromSlash(binaryadmission.WindowsCanonicalProductRelativePathV1))) {
+		entry := filepath.Clean(filepath.Join(filepath.Dir(path), filepath.FromSlash(binaryadmission.WindowsCanonicalEntryReverseProjectionV1)))
+		targets, targetErr := binaryadmission.CanonicalEntryTargetsV1(entry)
+		if targetErr != nil || !sameWindowsRecoveryPath(path, targets.ProductPath) {
+			return binaryadmission.WindowsArtifact{}, "", errors.New("executor is outside the canonical Product layout")
+		}
+		raw, err = readCommittedRecoveryRegular(targets.IdentityPath)
+	}
 	if err != nil {
 		return binaryadmission.WindowsArtifact{}, "", fmt.Errorf("executor identity sidecar: %w", err)
 	}
@@ -370,7 +382,16 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 	}
 	failureStage = "verify committed Product targets and receipt"
 	legacy := scheduler.WindowsLegacyEntrypointPath(canonical)
-	if !sameWindowsRecoveryPath(journal.Product.Target, canonical) || !sameWindowsRecoveryPath(journal.LegacyWindowless.Target, legacy) ||
+	product := canonical
+	if journal.EntrySet != nil {
+		targets, targetErr := binaryadmission.CanonicalEntryTargetsV1(canonical)
+		if targetErr != nil || !sameWindowsRecoveryPath(journal.EntrySet.CanonicalEntry.Target, targets.CanonicalEntryPath) ||
+			!sameWindowsRecoveryPath(journal.EntrySet.Identity.Target, targets.IdentityPath) {
+			return fmt.Errorf("%w: journal target paths differ", ErrWindowsProductRecoveryIdentity)
+		}
+		product = targets.ProductPath
+	}
+	if !sameWindowsRecoveryPath(journal.Product.Target, product) || !sameWindowsRecoveryPath(journal.LegacyWindowless.Target, legacy) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V3.Path, filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json")) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(stateDir, UpgradeReceiptSchemaV2+".json")) {
 		return fmt.Errorf("%w: journal target paths differ", ErrWindowsProductRecoveryIdentity)
@@ -379,6 +400,12 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 		runtimeReceiving = new(pendingRuntimeReceiving)
 	}
 	req := windowsProductRecoveryRuntimeRequest(ctx, stateDir, canonical, legacy)
+	if journal.EntrySet != nil {
+		req, err = windowsCanonicalEntryRecoveryRuntimeRequest(ctx, stateDir, canonical, legacy)
+		if err != nil {
+			return fmt.Errorf("%w: recovery target paths: %w", ErrWindowsProductRecoveryIdentity, err)
+		}
+	}
 	if policy == windowsRecoveryCommandPending {
 		req.PendingRuntime = runtimeReceiving
 	}
@@ -400,7 +427,7 @@ func runWindowsProductRecoveryCommandWithDeps(cmd *cobra.Command, stateDir, exec
 		if _, err := readCommittedRecoveryRegular(journal.Receipts.V3.Path); err != nil {
 			return fmt.Errorf("%w: V3 receipt unreadable: %w", ErrWindowsProductRecoveryIdentity, err)
 		}
-		evidence, err := inspectWindowsProductReceiptEvidence(stateDir, canonical, canonical, WindowsProductPairModeUpgrade, deps.AdmitProduct)
+		evidence, err := inspectWindowsProductReceiptEvidence(stateDir, product, product, WindowsProductPairModeUpgrade, deps.AdmitProduct)
 		if err != nil {
 			return fmt.Errorf("%w: receipt admission: %w", ErrWindowsProductRecoveryIdentity, err)
 		}

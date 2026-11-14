@@ -59,6 +59,10 @@ func admissionErrorFromFinding(f AdmissionFinding) *AdmissionError {
 // --server X` uses" — so an unscoped AdmissionScope{} behaves exactly as
 // before this type grew fields.
 type AdmissionScope struct {
+	// runtimeProduct is selected only by the parsed-install composition while
+	// it holds the exact supervisor exclusion token. It still admits a native
+	// Product image; external callers cannot supply a path-only authority.
+	runtimeProduct *InstallParsedManifestBypass
 	// DaemonFilter restricts the evaluation to one daemon (`--daemon`), so a
 	// sibling daemon's invalid binding cannot block a filtered install.
 	DaemonFilter string
@@ -161,7 +165,7 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 	}
 
 	if m.Transport == config.TransportRemoteHTTP {
-		if _, err := ensureCanonicalMcphubPresent(); err != nil {
+		if _, err := ensureRuntimeMcphubPresent(scope.runtimeProduct); err != nil {
 			_, fix := LauncherGuidance("mcphub")
 			add("canonical-mcphub", "mcphub binary", err.Error(), fix, false)
 		}
@@ -234,7 +238,7 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 		}
 	}
 
-	if _, err := ensureCanonicalMcphubPresent(); err != nil {
+	if _, err := ensureRuntimeMcphubPresent(scope.runtimeProduct); err != nil {
 		_, fix := LauncherGuidance("mcphub")
 		add("canonical-mcphub", "mcphub binary", err.Error(), fix, false)
 	}

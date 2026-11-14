@@ -41,6 +41,10 @@ type preparedSerenaRuntimeEffects struct {
 	readyClose                                           *StateFileFreshNamespaceCloseObservation
 	priorPublishedRead                                   *SerenaPublishedGenerationObservation
 	priorPublishedReadAttempted                          bool
+	priorReadyNamespace, priorOperationNamespace         *SerenaRecordNamespaceObservation
+	priorReadyAttempted, priorOperationAttempted         bool
+	priorContext                                         *serenaSelectedContext
+	priorOperationReaders                                []*StateFileReadObservation
 }
 
 func (e *preparedSerenaRuntimeEffects) LockPackage(ctx context.Context, key string) (func() error, error) {
@@ -61,8 +65,13 @@ func (e *preparedSerenaRuntimeEffects) LockPackage(ctx context.Context, key stri
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
+		selected, selectErr := e.receivePriorSelectedContext(ctx, record)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		e.priorContext = &selected
 		e.priorPublishedReadAttempted = true
-		e.priorPublishedRead, err = AcquireSerenaPublishedGenerationObserved(ctx, record, e.acquisition.inputs.Request.OwnedTreeLimits)
+		e.priorPublishedRead, err = AcquireSerenaPublishedGenerationObserved(ctx, record, e.priorContext.limits)
 		if err != nil {
 			return nil, err
 		}
@@ -104,12 +113,15 @@ func (e *preparedSerenaRuntimeEffects) closeLocalResources(ctx context.Context) 
 			proof, closeErr := e.priorPublishedRead.CloseObserved()
 			e.localCloseErr = errors.Join(e.localCloseErr, closeErr, proof.Validate(e.priorPublishedRead))
 		}
-		for _, namespace := range []*SerenaRecordNamespaceObservation{e.operationNamespace, e.namespace} {
+		for _, namespace := range []*SerenaRecordNamespaceObservation{e.priorOperationNamespace, e.priorReadyNamespace, e.operationNamespace, e.namespace} {
 			if namespace == nil {
 				continue
 			}
 			proof, closeErr := namespace.CloseObserved()
 			e.localCloseErr = errors.Join(e.localCloseErr, closeErr, proof.ValidateSource(namespace))
+		}
+		if e.priorReadyAttempted && e.priorReadyNamespace == nil || e.priorOperationAttempted && e.priorOperationNamespace == nil {
+			e.localCloseErr = errors.Join(e.localCloseErr, errors.New("SERENA_PRIOR_CONTEXT_NAMESPACE_CUSTODY_UNKNOWN"))
 		}
 		if ctx == nil {
 			e.localCloseErr = errors.Join(e.localCloseErr, errors.New("SERENA_PREPARED_CLOSE_CONTEXT_MISSING"))
@@ -135,6 +147,9 @@ func NewPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPrepa
 		return nil, errors.New("SERENA_PREPARED_COMPOSITION_INPUT_MISSING")
 	}
 	r := inputs.Request
+	if _, err := r.preparationContext.qualification(r); err != nil {
+		return nil, err
+	}
 	key, err := r.Identity()
 	if err != nil {
 		return nil, err
@@ -224,7 +239,12 @@ func (e *preparedSerenaRuntimeEffects) BeginOperation(ctx context.Context, r Pre
 	if common != e.publisher.NamespaceSHA256 {
 		return PreparedSerenaOperationUpdateV2{}, errors.New("SERENA_PREPARED_PUBLISHER_NAMESPACE_DRIFT")
 	}
-	return PreparedSerenaOperationUpdateV2{Record: PreparedSerenaOperationRecordV2{Schema: PreparedSerenaOperationSchema, Version: 2, OperationID: r.OperationID, GenerationID: r.GenerationID, PackageKey: key, RequestIdentitySHA256: key, PackageManifestProjectionSHA256: r.PackageManifestProjectionSHA256, BuildEnvironmentSHA256: r.BuildEnvironmentSHA256, NamespaceSchema: SerenaPackageNamespaceSchema, NamespaceSHA256: common, LeafParentSHA256: leaf, SourceEpoch: e.sourceSHA256, Phase: "prearmed", PublisherIncarnation: &e.publisher, RootDispositions: []PreparedSerenaRootDispositionV1{}, CleanupErrors: []string{}, OutcomePublication: PreparedSerenaOutcomePublicationV1{Phase: "prearmed"}}, NamespaceSource: e.operationNamespace}, nil
+	q, err := r.preparationContext.qualification(r)
+	if err != nil {
+		return PreparedSerenaOperationUpdateV2{}, err
+	}
+	policy := r.preparationContext.policy
+	return PreparedSerenaOperationUpdateV2{Record: PreparedSerenaOperationRecordV2{PreparationPolicy: &policy, InterpreterQualification: &q, Schema: PreparedSerenaPolicyOperationSchema, Version: 2, OperationID: r.OperationID, GenerationID: r.GenerationID, PackageKey: key, RequestIdentitySHA256: key, PackageManifestProjectionSHA256: r.PackageManifestProjectionSHA256, BuildEnvironmentSHA256: r.BuildEnvironmentSHA256, NamespaceSchema: SerenaPackageNamespaceSchema, NamespaceSHA256: common, LeafParentSHA256: leaf, SourceEpoch: e.sourceSHA256, Phase: "prearmed", PublisherIncarnation: &e.publisher, RootDispositions: []PreparedSerenaRootDispositionV1{}, CleanupErrors: []string{}, OutcomePublication: PreparedSerenaOutcomePublicationV1{Phase: "prearmed"}}, NamespaceSource: e.operationNamespace}, nil
 }
 
 func (e *preparedSerenaRuntimeEffects) ReadyNamespace(ctx context.Context, key string) (*SerenaRecordNamespaceObservation, error) {
@@ -270,6 +290,13 @@ func (e *preparedSerenaRuntimeEffects) WriteReady(ctx context.Context, key strin
 
 func (e *preparedSerenaRuntimeEffects) PersistOperation(ctx context.Context, update PreparedSerenaOperationUpdateV2) (*StateFilePublicationObservation, error) {
 	e.publication.invalidate(e.operationID)
+	q, err := e.acquisition.inputs.Request.preparationContext.qualification(e.acquisition.inputs.Request)
+	if err != nil {
+		return nil, err
+	}
+	if update.Record.Schema != PreparedSerenaPolicyOperationSchema || update.Record.PreparationPolicy == nil || *update.Record.PreparationPolicy != e.acquisition.inputs.Policy || update.Record.InterpreterQualification == nil || *update.Record.InterpreterQualification != q {
+		return nil, errors.New("SERENA_OPERATION_ORIGINAL_INPUTS_DRIFT")
+	}
 	if update.Record.Phase == "published" {
 		writer := e.lastReadyWriter
 		if writer == nil {
@@ -347,12 +374,34 @@ func (e *preparedSerenaRuntimeEffects) ValidateRecord(ctx context.Context, r Pre
 	}
 	if e.finishObservation != nil || r.GenerationID != e.acquisition.inputs.Request.GenerationID || e.acquisition.generation == nil {
 		if e.finishObservation == nil && e.priorPublishedRead != nil {
+			selected, err := e.receivePriorSelectedContext(ctx, r)
+			if err != nil {
+				return err
+			}
+			if e.priorContext == nil || *e.priorContext != selected {
+				return errors.New("SERENA_SELECTED_CONTEXT_DRIFT")
+			}
 			return e.priorPublishedRead.ValidatePublished(ctx, r)
 		}
 		if e.packageLease != nil && e.packageLease.ValidateHeld(ctx, filepath.Join(e.Root, e.packageBinding.key, "package")) == nil {
 			return errors.New("SERENA_PUBLISHED_READ_NOT_PREACQUIRED")
 		}
-		read, err := AcquireSerenaPublishedGenerationObserved(ctx, r, e.acquisition.inputs.Request.OwnedTreeLimits)
+		// Finalization has closed the original read namespaces. Receive their
+		// immutable selected context rather than reacquiring it under a new
+		// policy. PublicationAvailable independently rereads the exact protected
+		// operation through its original publication owner after this validation.
+		limits := SerenaTreeLimits{}
+		if e.priorContext != nil && e.priorPublishedRead != nil && e.priorPublishedRead.recordSHA256 == preparedSerenaHash(raw) {
+			limits = e.priorContext.limits
+		} else if r.GenerationID == e.acquisition.inputs.Request.GenerationID && r.PolicySHA256 == e.acquisition.inputs.Request.PolicySHA256 && r.PlatformABISHA256 == e.acquisition.inputs.Request.PlatformABISHA256 && r.InterpreterSHA256 == e.acquisition.inputs.Request.Interpreter.SHA256 {
+			if _, err := e.acquisition.inputs.Request.preparationContext.qualification(e.acquisition.inputs.Request); err != nil {
+				return err
+			}
+			limits = e.acquisition.inputs.Policy.OwnedTreeLimits
+		} else {
+			return errors.New("SERENA_SELECTED_CONTEXT_UNAVAILABLE_AFTER_CLOSE")
+		}
+		read, err := AcquireSerenaPublishedGenerationObserved(ctx, r, limits)
 		if read != nil {
 			defer func() {
 				proof, closeErr := read.CloseObserved()
@@ -436,3 +485,67 @@ func (e *preparedSerenaRuntimeEffects) RetireGeneration(ctx context.Context, r P
 // Compile-time checks name the actual single storage/acquisition assembly.
 var _ PreparedSerenaRuntimeEffects = (*preparedSerenaRuntimeEffects)(nil)
 var _ preparedSerenaIntentConsumerEffects = (*preparedSerenaRuntimeEffects)(nil)
+
+func (e *preparedSerenaRuntimeEffects) receivePriorSelectedContext(ctx context.Context, record PreparedSerenaRuntimeRecord) (serenaSelectedContext, error) {
+	var zero serenaSelectedContext
+	io, err := NewPreparedSerenaRecordIO(e.Root, e.IntentPath, record.OperationID, e.sourceSHA256)
+	if err != nil {
+		return zero, err
+	}
+	if !e.priorReadyAttempted {
+		if e.packageLeaseAttempted {
+			return zero, errors.New("SERENA_PRIOR_CONTEXT_NOT_PREACQUIRED")
+		}
+		e.priorReadyAttempted = true
+		path, err := io.recordPath(record.RequestIdentitySHA256)
+		if err != nil {
+			return zero, err
+		}
+		e.priorReadyNamespace, err = acquireSerenaRecordNamespaceReadPlatform(ctx, io, record.RequestIdentitySHA256, path)
+		if err != nil {
+			return zero, err
+		}
+	}
+	io, err = io.bindReadRecordNamespace(ctx, e.priorReadyNamespace)
+	if err != nil {
+		return zero, err
+	}
+	if !e.priorOperationAttempted {
+		e.priorOperationAttempted = true
+		e.priorOperationNamespace, err = io.AcquireOperationNamespaceObserved(ctx, record.RequestIdentitySHA256, record.OperationID, false)
+		if err != nil {
+			return zero, err
+		}
+	}
+	namespace := e.priorOperationNamespace
+	if namespace == nil || namespace.io.operationID != record.OperationID {
+		return zero, errors.New("SERENA_PRIOR_OPERATION_CONTEXT_MISSING")
+	}
+	raw, reader, err := ReadStateFileInodeAnchoredObserved(ctx, namespace.path, 64<<20)
+	e.priorOperationReaders = append(e.priorOperationReaders, reader)
+	if err != nil {
+		return zero, err
+	}
+	if reader == nil {
+		return zero, errors.New("SERENA_PRIOR_OPERATION_READER_MISSING")
+	}
+	if err = reader.Validate(ctx, namespace.path, 64<<20, raw, preparedSerenaHash(raw)); err != nil {
+		return zero, err
+	}
+	op, err := decodePreparedSerenaOperation(raw)
+	if err != nil {
+		return zero, err
+	}
+	leaf, err := namespace.LeafParentSHA256(ctx)
+	if err != nil || leaf != op.LeafParentSHA256 {
+		return zero, errors.Join(err, errors.New("SERENA_PRIOR_OPERATION_LEAF_DRIFT"))
+	}
+	readyRaw, exists, err := e.ReadReady(ctx, record.RequestIdentitySHA256)
+	if err != nil || !exists {
+		return zero, errors.Join(err, errors.New("SERENA_PRIOR_READY_MISSING"))
+	}
+	if err = e.publication.validateCurrentOperation(ctx, record, preparedSerenaHash(readyRaw), op, raw); err != nil {
+		return zero, err
+	}
+	return receiveSerenaSelectedContext(ctx, record, op, nil, e.acquisition.inputs.Request.preparationContext, e.priorContext)
+}

@@ -75,7 +75,7 @@ func (s *StdioLaunchContext) LookupEnvironment(name string) (string, bool) {
 		return "", false
 	}
 	for i := len(s.environment) - 1; i >= 0; i-- {
-		key, value, ok := strings.Cut(s.environment[i], "=")
+		key, value, ok := splitStdioEnvironmentEntry(s.environment[i])
 		if ok && (key == name || runtime.GOOS == "windows" && strings.EqualFold(key, name)) {
 			return value, true
 		}
@@ -323,7 +323,7 @@ func (p *StdioLaunchPreparation) EnvironmentValueMatches(name, value string) (pr
 		return false, false
 	}
 	for i := len(p.command.Env) - 1; i >= 0; i-- {
-		key, actual, ok := strings.Cut(p.command.Env[i], "=")
+		key, actual, ok := splitStdioEnvironmentEntry(p.command.Env[i])
 		if ok && envKeyNorm(key) == envKeyNorm(name) {
 			return true, actual == value
 		}
@@ -496,7 +496,7 @@ func (p *StdioLaunchPreparation) SameExecution(other *StdioLaunchPreparation) (b
 func effectiveStdioEnvironment(environment []string) (map[string]string, error) {
 	values := make(map[string]string, len(environment))
 	for _, entry := range environment {
-		key, value, present := strings.Cut(entry, "=")
+		key, value, present := splitStdioEnvironmentEntry(entry)
 		if !present || key == "" || strings.ContainsRune(entry, 0) {
 			return nil, errors.New("stdio environment entry is not representable")
 		}

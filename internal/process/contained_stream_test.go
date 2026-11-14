@@ -402,10 +402,47 @@ func TestRunContainedStream_CancellationTerminatesThenWaitsOnce(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v, want context.Canceled", err)
 	}
+	var lifecycle *ContainedRunError
+	if !errors.As(err, &lifecycle) || lifecycle.Stage != ContainedStageContext || lifecycle.CleanupCause != nil {
+		t.Fatalf("settled cancellation was reported as a cleanup failure: %#v", err)
+	}
 	if child.startCalls.Load() != 1 || child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 {
 		t.Fatalf("start/terminate/wait=%d/%d/%d, want 1/1/1",
 			child.startCalls.Load(), child.terminateCalls.Load(), child.waitCalls.Load())
 	}
+}
+
+func TestRunContainedStream_SuccessBeforeContextExpiresDuringCleanup(t *testing.T) {
+	runContainedSynctest(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		child := newScriptedContainedChild(containedWaitResult{exitCode: 0, exited: true})
+		child.terminateFn = func(uint32) error {
+			// Successful work has already selected teardown. Cleanup may finish
+			// after the work deadline while remaining within its own deadline.
+			<-ctx.Done()
+			return nil
+		}
+		h := &containedDependencyHarness{child: child}
+		if err := runHarness(ctx, h, 2*time.Second, io.Discard, drainContainedReader); err != nil {
+			t.Fatalf("completed work was reclassified during cleanup: %v", err)
+		}
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("work deadline did not expire during cleanup: %v", ctx.Err())
+		}
+		if child.startCalls.Load() != 1 || child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 || child.closeCalls.Load() != 1 {
+			t.Fatalf("start/terminate/wait/close=%d/%d/%d/%d, want 1/1/1/1",
+				child.startCalls.Load(), child.terminateCalls.Load(), child.waitCalls.Load(), child.closeCalls.Load())
+		}
+		for i, pipe := range h.pipes {
+			if pipe.readCloses != 1 || pipe.writeCloses != 1 {
+				t.Fatalf("pipe %d closes=(%d,%d), want (1,1)", i, pipe.readCloses, pipe.writeCloses)
+			}
+		}
+		if got := h.inputs[0].closes.Load(); got != 1 {
+			t.Fatalf("stdin close=%d, want 1", got)
+		}
+	})
 }
 
 func TestRunContainedStream_WaitFailureStillCleansUp(t *testing.T) {
