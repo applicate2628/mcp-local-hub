@@ -35,9 +35,9 @@ type PublisherImageObservation struct {
 }
 
 type publisherImageQualification struct {
-	source *buildinfo.PublisherSourceObservation
-	file PreparedSerenaFile
-	view PublisherImageSnapshotV1
+	source          *buildinfo.PublisherSourceObservation
+	file            PreparedSerenaFile
+	view            PublisherImageSnapshotV1
 	finishedInBound bool
 }
 
@@ -46,26 +46,34 @@ func CapturePublisherImageObserved(ctx context.Context, capture *process.Publish
 		return nil, errors.New("SERENA_PUBLISHER_IMAGE_INPUT_INVALID")
 	}
 	qualified, err := qualifyPublisherImage(ctx, capture.NativeImagePathForQualification(), capture.NativeSnapshot(), expectedSourceEpoch)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &PublisherImageObservation{capture: capture, source: qualified.source, file: qualified.file, view: qualified.view, finishedInBound: qualified.finishedInBound}, nil
 }
 
 // CurrentPublisherImageObservation is read-only image evidence from its
 // original native self observation. BindPublisherIncarnation cannot accept it.
 type CurrentPublisherImageObservation struct {
-	native *process.PublisherNativeObservation
+	native        *process.PublisherNativeObservation
 	qualification *publisherImageQualification
 }
 
 func NewCurrentPublisherImageObservation(ctx context.Context, native *process.PublisherNativeObservation) (*CurrentPublisherImageObservation, error) {
-	if err := native.Validate(ctx); err != nil { return nil, err }
+	if err := native.Validate(ctx); err != nil {
+		return nil, err
+	}
 	qualified, err := qualifyPublisherImage(ctx, native.NativeImagePathForQualification(), native.NativeSnapshot(), "")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &CurrentPublisherImageObservation{native: native, qualification: qualified}, nil
 }
 
 func (o *CurrentPublisherImageObservation) Snapshot() PublisherImageSnapshotV1 {
-	if o == nil || o.qualification == nil { return PublisherImageSnapshotV1{} }
+	if o == nil || o.qualification == nil {
+		return PublisherImageSnapshotV1{}
+	}
 	return o.qualification.view
 }
 
@@ -73,7 +81,9 @@ func (o *CurrentPublisherImageObservation) Validate(ctx context.Context, native 
 	if o == nil || o.qualification == nil || native == nil || native != o.native {
 		return errors.New("SERENA_PUBLISHER_IMAGE_OBSERVATION_UNAVAILABLE")
 	}
-	if err := native.Validate(ctx); err != nil { return err }
+	if err := native.Validate(ctx); err != nil {
+		return err
+	}
 	q := o.qualification
 	return validatePublisherImageQualification(ctx, q.source, q.file, q.view, q.finishedInBound, native.NativeImagePathForQualification(), q.view.SourceEpoch)
 }
@@ -89,7 +99,9 @@ func qualifyPublisherImage(ctx context.Context, path string, native process.Publ
 	if err != nil {
 		return nil, err
 	}
-	if expectedSourceEpoch == "" { expectedSourceEpoch = source.Epoch() }
+	if expectedSourceEpoch == "" {
+		expectedSourceEpoch = source.Epoch()
+	}
 	if err = source.Validate(expectedSourceEpoch); err != nil {
 		return nil, err
 	}
@@ -105,7 +117,7 @@ func qualifyPublisherImage(ctx context.Context, path string, native process.Publ
 		return nil, err
 	}
 	version, commit, date := buildinfo.Get()
-	if parsed.SourceEpoch != source.Epoch() || parsed.SourceEpoch != expectedSourceEpoch || parsed.Version != version || parsed.Commit != commit || parsed.BuildDate != date || parsed.Role != binaryadmission.WindowsArtifactRoleProduct || !preparedPublisherRuntimeMachine(parsed.Machine) {
+	if parsed.SourceEpoch != source.Epoch() || parsed.SourceEpoch != expectedSourceEpoch || parsed.Version != version || parsed.Commit != commit || parsed.BuildDate != date || !serenaPublisherRoleAllowed(parsed.Role) || !preparedPublisherRuntimeMachine(parsed.Machine) {
 		return nil, errors.New("SERENA_PUBLISHER_IMAGE_SOURCE_DRIFT")
 	}
 	identity, err := json.Marshal(struct {

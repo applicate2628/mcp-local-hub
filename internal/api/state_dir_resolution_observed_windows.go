@@ -56,10 +56,6 @@ func stateDirResolverNativeOperations() stateDirResolverOperations {
 	}
 }
 
-func ResolveDaemonStateDirObserved(ctx context.Context) (string, *StateDirResolutionObservation, error) {
-	return resolveDaemonStateDirWithOperations(ctx, stateDirResolverNativeOperations())
-}
-
 func resolveDaemonStateDirWithOperations(ctx context.Context, ops stateDirResolverOperations) (resolved string, observation *StateDirResolutionObservation, retErr error) {
 	o := &StateDirResolutionObservation{issuer: &stateFileReadIssuer{marker: 1}, view: StateDirResolutionSnapshotV1{Schema: "state-dir-resolution-observation-v1", Version: 1, SourceSHA256: stateFileReadObservationDigest([]byte("canonical-state-dir-v1|shell32!SHGetKnownFolderPath|FOLDERID_LocalAppData|flags=0|token=current-null|" + stateDirName)), ReleaseKind: "CoTaskMemFree-void", CleanupErrors: []StateFileReadFailureV1{}}}
 	observation = o
