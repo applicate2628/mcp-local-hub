@@ -28,6 +28,14 @@ import (
 // This fixture owns a private console in the test process. It never feeds the
 // operator's inherited CONIN$; the real terminal predicate and prompt stay live.
 func TestMigrateSerena_RealWriterConsentReceivingWindows(t *testing.T) {
+	// Resolve the production route without executing package preparation. Each
+	// case below executes the same leaf RunE with caller-owned preparation data;
+	// consent, secure writes and rollback stay real, and install remains a trap.
+	route, remaining, err := newMigrateCmdReal().Find([]string{"serena", "legacy-to-dynamic-pool"})
+	if err != nil || route == nil || route.Name() != "legacy-to-dynamic-pool" ||
+		route.CommandPath() != "migrate serena legacy-to-dynamic-pool" || len(remaining) != 0 || route.RunE == nil {
+		t.Fatalf("production migration route did not resolve to the receiving command: remaining=%q err=%v", remaining, err)
+	}
 	console := migrateSerenaPrivateConsole(t)
 	for _, scenario := range []string{"yes", "no", "enter", "nonterminal", "nil", "strict", "swapped target"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -236,10 +244,12 @@ func TestMigrateSerena_RealWriterConsentReceivingWindows(t *testing.T) {
 			}
 			t.Cleanup(func() { clients.WriteConfigFile = originalWriter })
 			var output bytes.Buffer
-			cmd := newMigrateCmdReal()
+			deps := defaultMigrateSerenaRunDeps()
+			deps.newInstallOperation = callerMigrateSerenaInstallOperationForTest
+			cmd := newMigrateSerenaDynamicPoolCmd(deps)
 			cmd.SetOut(&output)
 			cmd.SetErr(&output)
-			cmd.SetArgs([]string{"serena", "legacy-to-dynamic-pool"})
+			cmd.SetArgs([]string{})
 			runErr := cmd.Execute()
 			if runErr == nil || report == nil || len(report.Failed) == 0 {
 				t.Fatalf("receiving did not fail before cutover: report=%+v err=%v", report, runErr)

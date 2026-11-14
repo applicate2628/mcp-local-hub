@@ -425,13 +425,13 @@ existed. The dynamic-pool migration lives under the
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: every binding in the manifest)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, don't write")
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
-	c.AddCommand(newMigrateSerenaDynamicPoolCmd())
+	c.AddCommand(newMigrateSerenaDynamicPoolCmd(defaultMigrateSerenaRunDeps()))
 	return c
 }
 
 // newMigrateSerenaDynamicPoolCmd builds
 // `mcphub migrate serena legacy-to-dynamic-pool`.
-func newMigrateSerenaDynamicPoolCmd() *cobra.Command {
+func newMigrateSerenaDynamicPoolCmd(deps migrateSerenaRunDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "legacy-to-dynamic-pool",
 		Short: "Migrate serena from legacy 2-daemon/unified to the dynamic per-workspace pool",
@@ -450,7 +450,7 @@ new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
-			return runMigrateSerenaDynamicPool(cmd.Context(), cmd.OutOrStdout())
+			return runMigrateSerenaDynamicPoolWithDeps(cmd.Context(), cmd.OutOrStdout(), deps)
 		},
 	}
 }

@@ -1352,25 +1352,36 @@ func TestMigrateSerena_DrivesSupervisorRestart(t *testing.T) {
 		startCalled := false
 		restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
 			installCalled = true
-			return a.InstallParsedManifest(ctx, m, opts)
+			t.Error("a refused reap must not reach the installer")
+			return "", errors.New("unexpected install after reap refusal")
 		})
 		defer restoreInstall()
+		reapCause := errors.New("force-kill supervisor failed during reap-before-restart: ACCESS_DENIED")
+		reapCalls := 0
 		restoreReap := stubReap(t, func(ctx context.Context, w io.Writer) error {
 			// Mirror ReapSupervisorForRestart's non-nil return when ExitGraceful
 			// fails AND force-kill fails with a non-already-exited cause.
-			return errors.New("force-kill supervisor failed during reap-before-restart: ACCESS_DENIED")
+			reapCalls++
+			return reapCause
 		})
 		defer restoreReap()
 		restoreStart := stubStart(t, func(ctx context.Context, w io.Writer) error {
 			startCalled = true
-			return nil
+			t.Error("a refused reap must not start a successor")
+			return errors.New("unexpected start after reap refusal")
 		})
 		defer restoreStart()
 
+		// This caller-only refusal never prepares a package or installs an intent.
+		deps := defaultMigrateSerenaRunDeps()
+		deps.newInstallOperation = callerMigrateSerenaInstallOperationForTest
 		var buf bytes.Buffer
-		err := runMigrateSerenaDynamicPool(context.Background(), &buf)
+		err := runMigrateSerenaDynamicPoolWithDeps(context.Background(), &buf, deps)
 		if err == nil {
 			t.Fatal("migrate must FAIL LOUD when the supervisor reap fails")
+		}
+		if reapCalls != 1 || !errors.Is(err, reapCause) {
+			t.Fatalf("reap refusal was not received: calls=%d err=%v", reapCalls, err)
 		}
 		if !strings.Contains(err.Error(), "supervisor reap (§7.1) failed BEFORE the runtime_spec intent write") {
 			t.Errorf("error should name the §7.1 reap failure; got %v", err)
@@ -2297,15 +2308,14 @@ func TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud(t *testing.
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
-	_, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t)
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 	ws := t.TempDir()
 	seedSerenaWorkspaceNoPort(t, ws) // force an allocation (a real registry mutation under the lock)
 	// Model a running supervisor so the cutover reaps it (finding #3); the reap
 	// stub is where the lock-released assertion runs.
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
-	// Start-support TRUE so the install/reap/start path runs on non-Windows CI too
-	// (default false off Windows — finding #3).
+	// Allow the driver to reach the reap on each platform.
 	defer stubStartSupported(t, func() bool { return true })()
 
 	regPath, err := api.DefaultRegistryPath()
@@ -2313,11 +2323,18 @@ func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
 		t.Fatalf("registry path: %v", err)
 	}
 
+	reapCause := errors.New("controlled reap refusal after the registry lock probe")
 	lockFreeAtReap := false
+	reapCalls, allocatedPortAtReap, restoreCalls := 0, 0, 0
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})()
+	defer stubRestoreReconcile(t, func(*api.MigrateReport) error {
+		restoreCalls++
+		return nil
+	})()
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error {
+		reapCalls++
 		// TryLock the SAME lock file the registry uses (Registry.Lock locks
 		// path + ".lock"). If the migrate still held it across the reap (Fix 3
 		// regression), TryLock returns false. A separate flock handle from this
@@ -2327,22 +2344,51 @@ func TestMigrateSerena_RegistryLockReleasedBeforeReap(t *testing.T) {
 		got, lerr := fl.TryLock()
 		if lerr != nil {
 			t.Errorf("reap-time TryLock errored: %v", lerr)
-			return nil
+			return errors.Join(reapCause, lerr)
 		}
 		if got {
 			lockFreeAtReap = true
-			_ = fl.Unlock()
+			if unlockErr := fl.Unlock(); unlockErr != nil {
+				t.Errorf("release reap-time registry probe: %v", unlockErr)
+				return errors.Join(reapCause, unlockErr)
+			}
+			allocatedPortAtReap = loadRegistrySerenaPorts(t, regPath)[api.WorkspaceKey(ws)]
 		}
-		return nil
+		return reapCause
 	})()
-	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	defer stubInstall(t, func(context.Context, *api.API, *config.ServerManifest, api.InstallParsedManifestOpts) (string, error) {
+		t.Error("the registry lock probe must abort before install")
+		return "", errors.New("unexpected install after the registry lock probe")
+	})()
+	defer stubStart(t, func(context.Context, io.Writer) error {
+		t.Error("the registry lock probe must abort before successor start")
+		return errors.New("unexpected start after the registry lock probe")
+	})()
 
+	// Exercise the real registry exclusion and rollback without claiming a
+	// prepared installation. The controlled reap refusal stops before install.
+	deps := defaultMigrateSerenaRunDeps()
+	deps.newInstallOperation = callerMigrateSerenaInstallOperationForTest
 	var buf bytes.Buffer
-	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
-		t.Fatalf("migrate must succeed: %v (out=%s)", err, buf.String())
+	err = runMigrateSerenaDynamicPoolWithDeps(context.Background(), &buf, deps)
+	if reapCalls != 1 || !errors.Is(err, reapCause) {
+		t.Fatalf("registry probe refusal was not received: calls=%d err=%v (out=%s)", reapCalls, err, buf.String())
 	}
 	if !lockFreeAtReap {
 		t.Fatal("Fix 3: the registry flock must be RELEASED before the reap fires (it was still held)")
+	}
+	if allocatedPortAtReap == 0 {
+		t.Fatal("the reap-time registry probe must observe the driver's saved port allocation")
+	}
+	ports := loadRegistrySerenaPorts(t, regPath)
+	if port, exists := ports[api.WorkspaceKey(ws)]; !exists || port != 0 {
+		t.Fatalf("reap refusal must restore the workspace's original port: exists=%v port=%d", exists, port)
+	}
+	if restoreCalls != 1 {
+		t.Fatalf("reap refusal must restore the client reconcile once; calls=%d", restoreCalls)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("reap refusal must not write an intent: %v", statErr)
 	}
 }
 
