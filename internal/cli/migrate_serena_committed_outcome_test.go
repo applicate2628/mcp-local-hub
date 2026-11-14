@@ -15,6 +15,36 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// installMigrateSerenaNoLiveWorkspacesForTest keeps continuation tests on the
+// real parsed-install commit path without claiming a prepared Serena runtime.
+// The registered candidates still drive allocation, reap and start decisions.
+func installMigrateSerenaNoLiveWorkspacesForTest(t *testing.T, ctx context.Context, installer *api.API, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+	t.Helper()
+	if opts.SerenaPreparedInvocation != nil {
+		t.Fatal("zero-live fixture unexpectedly supplied a prepared consumer")
+	}
+	for _, workspace := range opts.Workspaces {
+		if _, err := os.Stat(workspace.WorkspacePath); !os.IsNotExist(err) {
+			t.Fatalf("continuation fixture requires an absent workspace %q: %v", workspace.WorkspacePath, err)
+		}
+	}
+	path, err := installer.InstallParsedManifest(ctx, manifest, opts)
+	if err != nil {
+		return path, err
+	}
+	if path == "" {
+		t.Fatal("real zero-live install returned no committed path")
+	}
+	intent, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read actual intent before injected continuation failure: %v", err)
+	}
+	if len(intent.Daemons) != 0 {
+		t.Fatalf("zero-live commit unexpectedly materialized daemon rows: %+v", intent.Daemons)
+	}
+	return path, nil
+}
+
 // The stale workspace reaches the real parsed-install commit without issuing a
 // prepared runtime. The returned path and bytes come from InstallParsedManifest;
 // a real observed lease supplies the late-cancellation result. Package-release

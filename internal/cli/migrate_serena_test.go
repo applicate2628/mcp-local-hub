@@ -2158,10 +2158,11 @@ func TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning(t *t
 // intent so the verify re-read fails) returns on ANY non-nil start error, so the
 // SAME reconcile-ready-timeout sentinel must STILL fail loud there.
 func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.T) {
-	_, manifestDir := migrateSerenaTestEnv(t)
+	_, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 
-	ws := t.TempDir()
+	// A registered stale candidate preserves the caller's start decision.
+	ws := filepath.Join(t.TempDir(), "no-longer-present")
 	seedSerenaWorkspace(t, ws)
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
 	defer stubStartSupported(t, func() bool { return true })()
@@ -2170,11 +2171,13 @@ func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.
 		return &api.MigrateReport{}, nil
 	})()
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
-	// REAL install commits the spec-bearing intent, THEN corrupt it so the
-	// post-commit verify re-read errors → the driver takes the scanErr RECOVERY
-	// start branch (the same technique as TestMigrateSerena_PostCommitVerifyError_*).
+	// A real zero-live commit is sufficient for this recovery/error oracle.
+	// Corrupt only its completed result; no prepared package is claimed.
+	installs, starts, restores := 0, 0, 0
+	defer stubRestoreReconcile(t, func(*api.MigrateReport) error { restores++; return nil })()
 	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
-		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		installs++
+		path, ierr := installMigrateSerenaNoLiveWorkspacesForTest(t, ctx, a, m, opts)
 		if ierr != nil {
 			return "", ierr
 		}
@@ -2186,6 +2189,7 @@ func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.
 	// The recovery start returns the SAME timeout sentinel — it must NOT be
 	// downgraded on the recovery path; the migrate must fail loud.
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		starts++
 		return fmt.Errorf("supervisor started but did not reach reconcile-ready within 60s: %w: dial pipe: file does not exist",
 			ErrMigrateSerenaReconcileReadyTimeout)
 	})()
@@ -2194,6 +2198,13 @@ func TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud(t *testing.
 	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
 	if err == nil {
 		t.Fatal("a RECOVERY-path reconcile-ready timeout must fail loud (the downgrade is post-commit-normal-start-only)")
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) || !errors.Is(err, ErrMigrateSerenaReconcileReadyTimeout) {
+		t.Fatalf("recovery lost its independent parse failure or timeout: %v", err)
+	}
+	if installs != 1 || starts != 1 || restores != 0 {
+		t.Fatalf("postcommit install/start/restore calls=%d/%d/%d, want 1/1/0", installs, starts, restores)
 	}
 	if !strings.Contains(err.Error(), "the supervisor start ALSO failed") {
 		t.Errorf("the recovery start failure must surface loudly; got %v", err)
@@ -2546,9 +2557,9 @@ func TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent(t *te
 // ---------------------------------------------------------------------------
 
 func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
-	ws := t.TempDir()
+	ws := filepath.Join(t.TempDir(), "no-longer-present")
 	seedSerenaWorkspace(t, ws)
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	// Model a running supervisor so the cutover reaps it; the reap-specific
@@ -2563,14 +2574,13 @@ func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
 	})()
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
 
-	// Use the REAL install so the intent is genuinely committed; then corrupt the
-	// committed intent file so the post-commit verify re-read (ReadSupervisorIntent)
-	// fails — modeling the Windows file-handle/ACL contention race right after the
-	// write. We do this by overriding the install seam to call the real install
-	// THEN overwrite the file with non-JSON bytes.
-	startCalled := false
+	// Preserve a real zero-live commit, then inject a parse failure at readback.
+	// This is not a native ACL-contention or prepared-package qualification.
+	installs, starts, restores := 0, 0, 0
+	defer stubRestoreReconcile(t, func(*api.MigrateReport) error { restores++; return nil })()
 	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
-		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		installs++
+		path, ierr := installMigrateSerenaNoLiveWorkspacesForTest(t, ctx, a, m, opts)
 		if ierr != nil {
 			return "", ierr
 		}
@@ -2581,7 +2591,7 @@ func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
 		}
 		return path, nil
 	})()
-	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startCalled = true; return nil })()
+	defer stubStart(t, func(ctx context.Context, w io.Writer) error { starts++; return nil })()
 
 	var buf bytes.Buffer
 	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
@@ -2594,25 +2604,29 @@ func TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart(t *testing.T) {
 	// THE Fix 2 guard: even though the verify re-read failed, the recovery start
 	// MUST fire (a supervisor was reaped; the committed intent must be brought
 	// live) so we never leave no-supervisor-running silently.
-	if !startCalled {
-		t.Error("Fix 2: the verify-error path must drive the recovery start when a cutover reap occurred")
+	if installs != 1 || starts != 1 || restores != 0 {
+		t.Fatalf("postcommit install/start/restore calls=%d/%d/%d, want 1/1/0", installs, starts, restores)
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) {
+		t.Fatalf("verify error lost its actual JSON parse cause: %v", err)
 	}
 	if !strings.Contains(buf.String(), "intent-verify re-read failed after the supervisor reap") {
 		t.Errorf("output should explain the verify-error recovery; got %q", buf.String())
 	}
 	// The intent file is still on disk (committed, then corrupted by the model) —
 	// the registry must NOT have been rolled back (it is the commit point).
-	if _, statErr := os.Stat(intentPath); statErr != nil {
-		t.Errorf("the committed intent file must remain on disk: %v", statErr)
+	if after, readErr := os.ReadFile(intentPath); readErr != nil || string(after) != "{not-valid-json" {
+		t.Errorf("the committed readback-failure fixture changed after recovery: bytes=%q err=%v", after, readErr)
 	}
 }
 
 // TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails surfaces BOTH
 // errors when the verify-error recovery start ALSO fails.
 func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T) {
-	_, manifestDir := migrateSerenaTestEnv(t)
+	_, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
-	ws := t.TempDir()
+	ws := filepath.Join(t.TempDir(), "no-longer-present")
 	seedSerenaWorkspace(t, ws)
 	// Model a running supervisor so the cutover reaps it (finding #3).
 	defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
@@ -2625,8 +2639,12 @@ func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T
 		return &api.MigrateReport{}, nil
 	})()
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error { return nil })()
+	// The real zero-live install supplies the commit before either injected error.
+	installs, starts, restores := 0, 0, 0
+	defer stubRestoreReconcile(t, func(*api.MigrateReport) error { restores++; return nil })()
 	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
-		path, ierr := a.InstallParsedManifest(ctx, m, opts)
+		installs++
+		path, ierr := installMigrateSerenaNoLiveWorkspacesForTest(t, ctx, a, m, opts)
 		if ierr != nil {
 			return "", ierr
 		}
@@ -2635,14 +2653,23 @@ func TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails(t *testing.T
 		}
 		return path, nil
 	})()
+	startCause := errors.New("schtasks /Run failed: supervisor task missing")
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
-		return errors.New("schtasks /Run failed: supervisor task missing")
+		starts++
+		return startCause
 	})()
 
 	var buf bytes.Buffer
 	err := runMigrateSerenaDynamicPool(context.Background(), &buf)
 	if err == nil {
 		t.Fatal("a verify-error + failed recovery start must surface a migrate error")
+	}
+	var syntaxErr *json.SyntaxError
+	if !errors.As(err, &syntaxErr) || !errors.Is(err, startCause) {
+		t.Fatalf("recovery lost its independent parse or start cause: %v", err)
+	}
+	if installs != 1 || starts != 1 || restores != 0 {
+		t.Fatalf("postcommit install/start/restore calls=%d/%d/%d, want 1/1/0", installs, starts, restores)
 	}
 	if !strings.Contains(err.Error(), "verify supervisor-intent runtime_spec rows") {
 		t.Errorf("error should carry the verify failure; got %v", err)
@@ -3716,9 +3743,9 @@ func TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap(
 // migrateSerenaHandoffWindowFn), the driver emits the named
 // supervisor-interlock-handoff-window event to supervisor-events.log.
 func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) {
-	stateDir, manifestDir := migrateSerenaTestEnv(t)
+	stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 	seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
-	ws := t.TempDir()
+	ws := filepath.Join(t.TempDir(), "no-longer-present")
 	seedSerenaWorkspace(t, ws)
 	defer stubStartSupported(t, func() bool { return true })()
 	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
@@ -3726,10 +3753,27 @@ func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) 
 	defer stubReconcile(t, func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
 		return &api.MigrateReport{}, nil
 	})()
-	// REAL install (the bypass token clears the gate under our own lock) so the
-	// driver reaches the post-commit start with the hand-off observer wired.
-	// The start stub simulates the Windows primitive observing a >1-retry reconcile.
+	defer stubReap(t, func(context.Context, io.Writer) error {
+		t.Fatal("the no-supervisor handoff fixture must not reap")
+		return nil
+	})()
+	// A real zero-live commit reaches the normal start with its observer wired.
+	// It does not qualify a spec-bearing write or prepared-package installation.
+	installs, starts := 0, 0
+	defer stubInstall(t, func(ctx context.Context, installer *api.API, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installs++
+		return installMigrateSerenaNoLiveWorkspacesForTest(t, ctx, installer, manifest, opts)
+	})()
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error {
+		starts++
+		if installs != 1 {
+			t.Fatalf("start ran before the real intent commit: installs=%d", installs)
+		}
+		_, release, err := realInterlockAcquire()
+		if err != nil {
+			t.Fatalf("handoff start still holds the migration interlock: %v", err)
+		}
+		release()
 		migrateSerenaHandoffWindowFn("reconcile-ready-retry")
 		return nil
 	})()
@@ -3738,12 +3782,29 @@ func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) 
 	if err := runMigrateSerenaDynamicPool(context.Background(), &buf); err != nil {
 		t.Fatalf("migrate must succeed; got error: %v (out=%s)", err, buf.String())
 	}
-	log := readInterlockEventsLog(t, stateDir)
-	if !strings.Contains(log, "supervisor-interlock-handoff-window") {
-		t.Fatalf("expected the Revision-4 hand-off-window event in supervisor-events.log; log=%s", log)
+	if installs != 1 || starts != 1 {
+		t.Fatalf("handoff install/start calls=%d/%d, want 1/1", installs, starts)
 	}
-	if !strings.Contains(log, "reconcile-ready-retry") {
-		t.Errorf("the hand-off event must carry the phase; log=%s", log)
+	log := readInterlockEventsLog(t, stateDir)
+	handoffs := 0
+	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
+		var event api.SupervisorEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode actual audit event: %v", err)
+		}
+		if event.Event == "supervisor-interlock-handoff-window" {
+			handoffs++
+			if event.Source != "migration" || event.Severity != api.SupervisorEventSeverityInfo || event.Body["phase"] != "reconcile-ready-retry" {
+				t.Fatalf("unexpected handoff event: %+v", event)
+			}
+		}
+	}
+	if handoffs != 1 {
+		t.Fatalf("handoff events=%d, want exactly one; log=%s", handoffs, log)
+	}
+	migrateSerenaHandoffWindowFn("duplicate-spawn-exit")
+	if after := readInterlockEventsLog(t, stateDir); after != log {
+		t.Fatalf("migration observer remained active after return: %s", after)
 	}
 }
 
@@ -4001,11 +4062,13 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: !tc.workspace})
+			stateDir, manifestDir := migrateSerenaTestEnv(t, migrateSerenaTestEnvOptions{canonicalRuntimeFixture: true})
 			seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
 			var ws string
 			if tc.workspace {
-				ws = t.TempDir()
+				// Keep the registered candidate and its allocation, but let the
+				// real installer commit without live package preparation.
+				ws = filepath.Join(t.TempDir(), "no-longer-present")
 				seedSerenaWorkspaceNoPort(t, ws)
 			}
 			defer stubStartSupported(t, func() bool { return true })()
@@ -4028,7 +4091,7 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 			defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) {
 				return &api.MigrateReport{}, nil
 			})()
-			var restoreCalls, reapCalls, startCalls int
+			var restoreCalls, reapCalls, startCalls, installCalls int
 			defer stubRestoreReconcile(t, func(*api.MigrateReport) error {
 				restoreCalls++
 				return nil
@@ -4043,12 +4106,19 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 				if ctx.Err() != nil {
 					t.Fatalf("migration start received cancelled migration ctx: %v", ctx.Err())
 				}
+				_, release, lockErr := realInterlockAcquire()
+				if lockErr != nil {
+					t.Fatalf("postcommit start still holds the migration interlock: %v", lockErr)
+				}
+				release()
 				return tc.startErr
 			})()
 
+			var committedBytes []byte
 			appliedCause := errors.New("injected applied migration install release failure")
 			defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
-				path, err := a.InstallParsedManifest(ctx, m, opts)
+				installCalls++
+				path, err := installMigrateSerenaNoLiveWorkspacesForTest(t, ctx, a, m, opts)
 				if err != nil {
 					return path, err
 				}
@@ -4056,6 +4126,10 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 					if err := os.WriteFile(path, []byte("{not-valid-json"), 0o600); err != nil {
 						t.Fatalf("corrupt committed intent: %v", err)
 					}
+				}
+				committedBytes, err = os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read committed fixture before continuation: %v", err)
 				}
 				return path, appliedCause
 			})()
@@ -4072,6 +4146,9 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 			}
 			if tc.livenessErr != nil && !errors.Is(err, tc.livenessErr) {
 				t.Fatalf("error = %v, want independent liveness cause %v", err, tc.livenessErr)
+			}
+			if installCalls != 1 {
+				t.Fatalf("real install calls=%d, want one", installCalls)
 			}
 			if reapCalls != tc.wantReap || startCalls != tc.wantStart {
 				t.Fatalf("reap/start calls = %d/%d, want %d/%d", reapCalls, startCalls, tc.wantReap, tc.wantStart)
@@ -4103,8 +4180,9 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 					t.Fatalf("error = %v, want independently discoverable committed-intent verification cause", err)
 				}
 			}
-			if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); statErr != nil {
-				t.Fatalf("committed intent missing: %v", statErr)
+			after, readErr := os.ReadFile(filepath.Join(stateDir, "supervisor-intent.json"))
+			if readErr != nil || !bytes.Equal(after, committedBytes) {
+				t.Fatalf("postcommit continuation changed the committed fixture: bytes=%q err=%v", after, readErr)
 			}
 		})
 	}
