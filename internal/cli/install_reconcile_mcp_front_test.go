@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/process"
 
 	"github.com/gofrs/flock"
@@ -211,7 +212,7 @@ func redirectMCPFrontTestEnv(t *testing.T) string {
 // a temp path for the duration of the test and restores it afterward.
 func withMCPFrontReportPathSeam(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "mcp-front-reconcile-serena-report.json")
+	path := filepath.Join(apitest.HardenedTempDir(t), "mcp-front-reconcile-serena-report.json")
 	orig := mcpFrontReconcileSerenaReportPathFn
 	mcpFrontReconcileSerenaReportPathFn = func() (string, error) { return path, nil }
 	t.Cleanup(func() { mcpFrontReconcileSerenaReportPathFn = orig })

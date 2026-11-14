@@ -56,6 +56,7 @@ jobs:
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
+          # Reproducible CI distribution choice; support is minimum-only below.
           node-version: '24.21.0'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
@@ -63,12 +64,28 @@ jobs:
       - name: Verify Trusted Publishing toolchain
         shell: bash
         run: |
-          if [ "$(node --version)" != "v24.21.0" ]; then
-            echo "::error::expected Node v24.21.0"; exit 1
-          fi
-          if [ "$(npm --version)" != "11.19.0" ]; then
-            echo "::error::expected npm 11.19.0"; exit 1
-          fi
+          NODE_VERSION="$(node --version)" || { echo "::error::could not read Node version"; exit 1; }
+          NPM_VERSION="$(npm --version)" || { echo "::error::could not read npm version"; exit 1; }
+          node - "$NODE_VERSION" "$NPM_VERSION" <<'NODE'
+          // https://docs.npmjs.com/trusted-publishers/ defines these minima.
+          try {
+            const versions = process.argv.slice(2);
+            for (const [name, raw, minimum] of [['Node', versions[0], [22, 14, 0]], ['npm', versions[1], [11, 5, 1]]]) {
+              const match = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(raw ?? '');
+              if (!match || (match[4] ?? '').split('.').some((part) => /^0\d+$/.test(part))) {
+                throw new Error(`${name} version is missing or malformed`);
+              }
+              const components = match.slice(1, 4).map(BigInt);
+              const different = components.findIndex((part, i) => part !== BigInt(minimum[i]));
+              if ((different < 0 && match[4]) || (different >= 0 && components[different] < BigInt(minimum[different]))) {
+                throw new Error(`${name} ${minimum.join('.')} or newer is required for Trusted Publishing`);
+              }
+            }
+          } catch (error) {
+            process.stderr.write('::error::' + error.message + '\n');
+            process.exitCode = 1;
+          }
+          NODE
 
       - name: Resolve version
         id: ver

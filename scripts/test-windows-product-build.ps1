@@ -57,12 +57,13 @@ if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
     $outputIndex = [Array]::IndexOf($CommandArgs, "-o")
     if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $CommandArgs.Count) { exit 81 }
     [IO.File]::WriteAllText($CommandArgs[$outputIndex + 1], "fake-resource")
+    if ($env:MCPHUB_FAKE_RESOURCE_EXIT -eq "93") { exit 93 }
     exit 0
 }
 if ($CommandArgs.Count -ge 1 -and $CommandArgs[0] -eq "build") {
     $outputIndex = [Array]::IndexOf($CommandArgs, "-o")
     if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $CommandArgs.Count) { exit 82 }
-    [IO.File]::WriteAllText($CommandArgs[$outputIndex + 1], "fake-product")
+    [IO.File]::WriteAllText($CommandArgs[$outputIndex + 1], $(if ($CommandArgs[-1] -eq "./cmd/mcphub-launcher") { "fake-launcher" } else { "fake-product" }))
     exit 0
 }
 if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
@@ -71,6 +72,26 @@ if ($CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "run" -and
         $index = [Array]::IndexOf($CommandArgs, $Name)
         if ($index -lt 0 -or $index + 1 -ge $CommandArgs.Count) { exit 83 }
         return $CommandArgs[$index + 1]
+    }
+    if ($CommandArgs -contains "--encode-entry-comments") {
+        $request = Get-Content -Raw -LiteralPath (Value-After "--encode-entry-comments") | ConvertFrom-Json
+        [IO.File]::WriteAllText(($env:MCPHUB_FAKE_GO_LOG + ".comments-request.json"), ($request | ConvertTo-Json -Compress))
+        Write-Output '{"comments":"synthetic-codec-result"}'
+        exit 0
+    }
+    if ($CommandArgs -contains "--validate-entry-set-build") {
+        $entry = Value-After "--validate-entry-set-build"
+        $identityPath = Join-Path (Split-Path $entry) "windows-product-identity.json"
+        $identity = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+        Write-Output ([ordered]@{
+            schema = "windows-canonical-entry-build-observation-v1"
+            build_id = Value-After "--expected-entry-set-build-id"
+            registry_projection_sha256 = ("b" * 64)
+            canonical_entry_sha256 = (Get-FileHash $entry -Algorithm SHA256).Hash.ToLowerInvariant()
+            product_sha256 = $identity.sha256
+            identity_sha256 = (Get-FileHash $identityPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        } | ConvertTo-Json -Compress)
+        exit 0
     }
     $candidate = Value-After "--candidate"
     $identity = [ordered]@{
@@ -97,6 +118,7 @@ $fakeGoCommand = @"
 @exit /b %ERRORLEVEL%
 "@
 [IO.File]::WriteAllText((Join-Path $fakeBuildTools "go.cmd"), $fakeGoCommand)
+[IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), ($fakeGoCommand.Replace("@echo off", "@echo off" + [char]13 + [char]10 + "set MCPHUB_FAKE_RESOURCE_EXIT=93" + [char]13 + [char]10 + "set MCPHUB_FAKE_GO_LOG=" + $fakeBuildLog)))
 
 $priorPath = $env:PATH
 try {
@@ -180,7 +202,9 @@ try {
             $env:MCPHUB_FAKE_GO_LOG = $fakeBuildLog
             $escapedBuildScript = (Join-Path $fixtureRoot "build.ps1").Replace("'", "''")
             $escapedTestOutput = $testOutput.Replace("'", "''")
+            $escapedFakeGoScript = $fakeGoScriptPath.Replace("'", "''")
             $probeCommand = @"
+Set-Alias -Name go -Value '$escapedFakeGoScript' -Scope Local
 `$env:GOFLAGS = '-tags=ambient_should_not_apply'
 . '$escapedBuildScript' -TestStateIsolatedProduct -OutputDirectory '$escapedTestOutput'
 Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
@@ -198,14 +222,14 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
         }
         $fakeGoCalls = @(Get-Content -LiteralPath $fakeBuildLog | ForEach-Object { $_ | ConvertFrom-Json })
         $buildCalls = @($fakeGoCalls | Where-Object { $_.argv[0] -eq "build" })
-        if ($buildCalls.Count -ne 1) { throw "test-state-isolated build call count=$($buildCalls.Count), want 1" }
-        $buildArgv = @($buildCalls[0].argv)
+        if ($buildCalls.Count -ne 2 -or $buildCalls[0].argv[-1] -ne "./cmd/mcphub-launcher" -or $buildCalls[1].argv[-1] -ne "./cmd/mcphub") { throw "CUI must compile once before the GUI Product" }
+        $buildArgv = @($buildCalls[1].argv)
         $tagIndexes = @(0..($buildArgv.Count - 1) | Where-Object { $buildArgv[$_] -eq "-tags" })
         if ($tagIndexes.Count -ne 1 -or $tagIndexes[0] + 1 -ge $buildArgv.Count -or
             $buildArgv[$tagIndexes[0] + 1] -ne "test_state_path_env") {
             throw "test-state-isolated build tag argv drift: $($buildArgv -join '|')"
         }
-        if ([string]$buildCalls[0].goflags -ne "") {
+        if (@($buildCalls | Where-Object { [string]$_.goflags -ne "" }).Count -ne 0) {
             throw "test-state-isolated build inherited GOFLAGS=$($buildCalls[0].goflags)"
         }
         $compilePhaseCalls = @($fakeGoCalls | Where-Object {
@@ -218,9 +242,39 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
         $validatorCalls = @($fakeGoCalls | Where-Object {
             $_.argv[0] -eq "run" -and $_.argv[1] -eq "./tools/windows-product-validate"
         })
-        if ($validatorCalls.Count -ne 1 -or
-            [string]$validatorCalls[0].goflags -ne "-tags=ambient_should_not_apply") {
+        $postBuildValidatorCalls = @($validatorCalls | Where-Object { $_.argv -notcontains "--encode-entry-comments" })
+        if ($postBuildValidatorCalls.Count -ne 2 -or
+            @($postBuildValidatorCalls | Where-Object { [string]$_.goflags -ne "-tags=ambient_should_not_apply" }).Count -ne 0) {
             throw "test-state-isolated build did not restore GOFLAGS before repository validation"
+        }
+        $cuiFlags = [string]$buildCalls[0].argv[[Array]::IndexOf([string[]]$buildCalls[0].argv, "-ldflags") + 1]
+        $guiFlags = [string]$buildCalls[1].argv[[Array]::IndexOf([string[]]$buildCalls[1].argv, "-ldflags") + 1]
+        $request = Get-Content -Raw -LiteralPath ($fakeBuildLog + ".comments-request.json") | ConvertFrom-Json
+        $fakeEntryHash = (Get-FileHash -LiteralPath (Join-Path $testOutput "mcphub.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($request.build_id -notmatch '^[0-9a-f]{32}$' -or $request.launcher_sha256 -cne $fakeEntryHash -or $request.reverse_projection -cne "../mcphub.exe" -or
+            $cuiFlags -notlike ("*-X main.publicEntrySetBuildID=" + $request.build_id + "*") -or
+            $guiFlags -notlike ("*-X main.entrySetBuildID=" + $request.build_id + "*") -or
+            $guiFlags -notlike ("*-X main.expectedCanonicalEntrySHA256=" + $fakeEntryHash + "*") -or
+            $guiFlags.Contains("<actual-launcher-sha256>")) {
+            throw ("Original CUI hash/BuildID did not reach the GUI and encoder; witness=" + ([ordered]@{
+                predicates = [ordered]@{
+                    buildIDValid = ($request.build_id -match '^[0-9a-f]{32}$')
+                    launcherHashMatches = ($request.launcher_sha256 -ceq $fakeEntryHash)
+                    reverseProjectionMatches = ($request.reverse_projection -ceq "../mcphub.exe")
+                    cuiBuildIDMatches = ($cuiFlags -like ("*-X main.publicEntrySetBuildID=" + $request.build_id + "*"))
+                    guiBuildIDMatches = ($guiFlags -like ("*-X main.entrySetBuildID=" + $request.build_id + "*"))
+                    guiLauncherHashMatches = ($guiFlags -like ("*-X main.expectedCanonicalEntrySHA256=" + $fakeEntryHash + "*"))
+                    guiPlaceholderAbsent = (-not $guiFlags.Contains("<actual-launcher-sha256>"))
+                }
+                request = [ordered]@{ build_id = $request.build_id; launcher_sha256 = $request.launcher_sha256; reverse_projection = $request.reverse_projection }
+                fakeEntryHash = $fakeEntryHash
+                cuiFlags = $cuiFlags
+                guiFlags = $guiFlags
+            } | ConvertTo-Json -Depth 4 -Compress))
+        }
+        $encoderCalls = @($validatorCalls | Where-Object { $_.argv -contains "--encode-entry-comments" })
+        if ($encoderCalls.Count -ne 1 -or $cuiFlags.Contains("expectedCanonicalEntrySHA256") -or $buildCalls[0].argv -contains "-tags") {
+            throw "Build topology contains a launcher hash cycle, extra launcher build, or tagged CUI"
         }
         $env:MCPHUB_FAKE_GOARCH = "arm64"
         $nativeArmJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
@@ -269,11 +323,12 @@ Write-Output ('__GOFLAGS_AFTER__=' + `$env:GOFLAGS)
 
 $plan = $json | ConvertFrom-Json
 
-if ($plan.schemaVersion -ne 2) { throw "schemaVersion=$($plan.schemaVersion), want 2" }
-if ($plan.artifacts.Count -ne 1) { throw "artifact count=$($plan.artifacts.Count), want 1" }
+if ($plan.schemaVersion -ne 3) { throw "schemaVersion=$($plan.schemaVersion), want 3" }
+if ($plan.artifacts.Count -ne 2) { throw "artifact count=$($plan.artifacts.Count), want 2" }
 
 $expected = @(
-    [pscustomobject]@{ role = "product"; filename = "mcphub.exe"; source = "./cmd/mcphub"; subsystem = 2; productMetadata = $true; npmPayload = $true; npmBin = $false }
+    [pscustomobject]@{ role = "product"; filename = "mcphub-product/mcphub.exe"; source = "./cmd/mcphub"; subsystem = 2; productMetadata = $true; npmPayload = $true; npmBin = $false }
+    [pscustomobject]@{ role = "launcher"; filename = "mcphub.exe"; source = "./cmd/mcphub-launcher"; subsystem = 3; productMetadata = $false; npmPayload = $true; npmBin = $false }
 )
 
 for ($i = 0; $i -lt $expected.Count; $i++) {
@@ -286,6 +341,15 @@ for ($i = 0; $i -lt $expected.Count; $i++) {
     }
 }
 
+if ($plan.entrySetBuildID -notmatch '^[0-9a-f]{32}$' -or $plan.canonicalEntry.received -or
+    $null -ne $plan.canonicalEntry.expectedCanonicalEntrySHA256 -or
+    ($plan.canonicalEntry.buildOrder -join "|") -cne "launcher|product" -or
+    $plan.canonicalEntry.reverseProjection -cne "../mcphub.exe") {
+    throw "PrintPlan must expose one build ID and unreceived CUI digest"
+}
+if ($plan.artifacts[1].productMetadata -or $null -ne $plan.artifacts[1].versionInfo) {
+    throw "CUI launcher must not receive Product VERSIONINFO"
+}
 $product = $plan.artifacts[0]
 if ($product.ldflags -notmatch '(?:^| )-H windowsgui(?: |$)') { throw "product linker flags missing -H windowsgui: $($product.ldflags)" }
 
@@ -327,7 +391,7 @@ $admissionArgs = @($plan.admissionCommand.argv | ForEach-Object {
 })
 if ($plan.admissionCommand.executable -ne "go" -or
     ($admissionArgs -join "|") -ne
-        "run|./tools/windows-product-validate|--candidate|bin/mcphub.exe|--expected-version|$($plan.version)|--expected-commit|$($plan.commit)|--expected-build-date|$planBuildDate") {
+        "run|./tools/windows-product-validate|--candidate|bin/mcphub-product/mcphub.exe|--expected-version|$($plan.version)|--expected-commit|$($plan.commit)|--expected-build-date|$planBuildDate") {
     throw "product admission command drift: $($admissionArgs -join '|')"
 }
 
@@ -355,9 +419,9 @@ foreach ($arch in @("amd64", "arm64")) {
 }
 
 $publishWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".github/workflows/npm-publish.yml")
-if ($publishWorkflow -notmatch "(?m)^\s*node-version:\s*'24\.21\.0'\s*$" -or
+if ($publishWorkflow -notmatch "(?m)^\s*node-version:\s*'\d+\.\d+\.\d+'\s*$" -or
     $publishWorkflow -notmatch "(?m)^\s*package-manager-cache:\s*false\s*$") {
-    throw "npm publish workflow must pin the Trusted Publishing Node 24.21.0 distribution with package-manager caching disabled"
+    throw "npm publish workflow must select a reproducible Node distribution with package-manager caching disabled"
 }
 if ($publishWorkflow -notmatch 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' -or
     $publishWorkflow -notmatch "(?m)^\s*runs-on:\s*ubuntu-latest\s*$" -or
@@ -385,10 +449,45 @@ if ($toolchainStepStart -lt 0 -or $nextStepAfterToolchain -lt 0 -or
     throw "npm publish workflow must run the named Trusted Publishing toolchain gate before the publish step"
 }
 $toolchainStep = $publishWorkflow.Substring($toolchainStepStart, $nextStepAfterToolchain - $toolchainStepStart)
-if ($toolchainStep -notmatch '\$\(node --version\)" != "v24\.21\.0"' -or
-    $toolchainStep -notmatch '\$\(npm --version\)" != "11\.19\.0"') {
-    throw "npm publish workflow must fail closed unless Node and npm match the exact Trusted Publishing toolchain"
+$toolchainProgramMatch = [regex]::Match($toolchainStep, '(?ms)^ {10}node - "\$NODE_VERSION" "\$NPM_VERSION" <<''NODE''\r?\n(?<program>.*?)^ {10}NODE[ \t]*\r?$')
+if (-not $toolchainProgramMatch.Success -or
+    $toolchainStep -notmatch '(?m)^ {10}NODE_VERSION="\$\(node --version\)" \|\| \{ echo "::error::could not read Node version"; exit 1; \}' -or
+    $toolchainStep -notmatch '(?m)^ {10}NPM_VERSION="\$\(npm --version\)" \|\| \{ echo "::error::could not read npm version"; exit 1; \}') {
+    throw "npm publish workflow must read actual Node/npm versions and fail closed through its minimum-version gate"
 }
+$toolchainProgram = [regex]::Replace($toolchainProgramMatch.Groups['program'].Value, '(?m)^ {10}', '')
+$toolchainNode = Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1
+function Test-PublishingToolchainGate {
+    param([string[]]$Versions, [string]$ExpectedError = '')
+    # Expected rejection diagnostics are captured; their nonzero exit remains required.
+    $ErrorActionPreference = 'Continue'
+    # JSON preserves empty arguments even under Windows PowerShell 5.1.
+    $versionArguments = ConvertTo-Json -InputObject @($Versions) -Compress
+    $testProgram = "process.argv = [process.argv[0], '-', ...$versionArguments];`n$toolchainProgram"
+    $diagnostic = ($testProgram | & $toolchainNode.Source - 2>&1 | Out-String)
+    $exitCode = $LASTEXITCODE
+    if (($ExpectedError -eq '' -and $exitCode -ne 0) -or
+        ($ExpectedError -ne '' -and ($exitCode -eq 0 -or $diagnostic -notmatch [regex]::Escape('::error::' + $ExpectedError)))) {
+        throw "Trusted Publishing minimum-version gate returned an unexpected exit or diagnostic: $diagnostic"
+    }
+}
+Test-PublishingToolchainGate -Versions @('v22.14.0', '11.5.1')
+Test-PublishingToolchainGate -Versions @('v24.21.0', '11.19.0')
+Test-PublishingToolchainGate -Versions @('v26.12.1', '11.11.0')
+Test-PublishingToolchainGate -Versions @('v100.0.0', '100.0.0')
+Test-PublishingToolchainGate -Versions @('v22.14.0+build.1', '11.5.2-beta.1')
+foreach ($versions in @(@('v22.13.99', '11.5.1'), @('v22.9.0', '11.5.1'), @('v22.14.0-rc.1', '11.5.1'), @('v0.0.0', '11.5.1'))) {
+    Test-PublishingToolchainGate -Versions $versions -ExpectedError 'Node 22.14.0 or newer is required'
+}
+foreach ($versions in @(@('v22.14.0', '11.5.0'), @('v22.14.0', '11.5.1-rc.1'), @('v22.14.0', '0.0.0'))) {
+    Test-PublishingToolchainGate -Versions $versions -ExpectedError 'npm 11.5.1 or newer is required'
+}
+foreach ($value in @('', '22', '22.14', '022.14.0', '22.14.0-01', '22.14.0 trailing')) {
+    Test-PublishingToolchainGate -Versions @($value, '11.5.1') -ExpectedError 'Node version is missing or malformed'
+}
+Test-PublishingToolchainGate -Versions @('v22.14.0', '') -ExpectedError 'npm version is missing or malformed'
+Test-PublishingToolchainGate -Versions @() -ExpectedError 'Node version is missing or malformed'
+Test-PublishingToolchainGate -Versions @('v22.14.0') -ExpectedError 'npm version is missing or malformed'
 if ($publishWorkflow -notmatch "(?s)push:\s*\n\s*tags:\s*\n\s*- 'v\*\.\*\.\*'" -or
     $publishWorkflow -notmatch "(?s)workflow_dispatch:.+dry_run:.+default:\s*true" -or
     $publishWorkflow -notmatch "\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+" -or
@@ -397,7 +496,7 @@ if ($publishWorkflow -notmatch "(?s)push:\s*\n\s*tags:\s*\n\s*- 'v\*\.\*\.\*'" -
     throw "npm publish workflow must preserve trigger, dry-run, semver, beta-tag, and provenance behavior"
 }
 $publishStep = $publishWorkflow.Substring($publishStepStart)
-$platformLoop = $publishStep.IndexOf('for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64')
+$platformLoops = @([regex]::Matches($publishStep, '(?ms)^ {10}for d in \$TARGETS; do\r?\n.*?^ {10}done[ \t]*\r?$'))
 $platformPublishPattern = '(?m)^ {12}\( cd "npm/packages/\$d" && npm publish --provenance --access public \$TAG \$DRY \)\s*$'
 $metaPublishPattern = '(?m)^ {10}\( cd npm && npm publish --provenance --access public \$TAG \$DRY \)\s*$'
 $platformPublishes = @([regex]::Matches($publishStep, $platformPublishPattern))
@@ -405,9 +504,11 @@ $metaPublishes = @([regex]::Matches($publishStep, $metaPublishPattern))
 if ($publishStep -match '\|\|\s*true' -or $platformPublishes.Count -ne 1 -or $metaPublishes.Count -ne 1) {
     throw "npm publish workflow must use exactly two direct unmasked fail-propagating publish commands"
 }
-if ($platformLoop -lt 0 -or $platformPublishes[0].Index -le $platformLoop -or
-    $metaPublishes[0].Index -le $platformPublishes[0].Index) {
-    throw "npm publish workflow must publish the real six-package loop before the meta package"
+if ($platformLoops.Count -ne 1 -or
+    $platformPublishes[0].Index -le $platformLoops[0].Index -or
+    $platformPublishes[0].Index -ge ($platformLoops[0].Index + $platformLoops[0].Length) -or
+    $metaPublishes[0].Index -le ($platformLoops[0].Index + $platformLoops[0].Length)) {
+    throw "npm publish workflow must publish platform packages inside the catalog loop and the meta package after it"
 }
 if ($publishWorkflow -match [regex]::Escape("go generate ./cmd/mcphub")) {
     throw "npm publish workflow must not call the retired go:generate resource path"
@@ -415,15 +516,20 @@ if ($publishWorkflow -match [regex]::Escape("go generate ./cmd/mcphub")) {
 if ($publishWorkflow -notmatch 'COMMIT="\$\(git rev-parse HEAD\)"') {
     throw "npm publish workflow must capture the full Windows release commit"
 }
-if ($publishWorkflow -notmatch 'SHORT_COMMIT="\$\(git rev-parse --short HEAD\)"' -or
-    $publishWorkflow -notmatch 'main\.commit=\$SHORT_COMMIT') {
-    throw "npm publish workflow must preserve short commit metadata for non-Windows payloads"
+$packageSetStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: package_set[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
+$targetAdmissionPattern = '(?m)^ {10}TARGETS="\$\(node -e "process\.stdout\.write\(Object\.keys\(require\(''\./npm/lib/platform-binary''\)\.PACKAGE_BY_PLATFORM\)\.join\('' ''\)\)"\)"\r?\n {10}if \[ "\$TARGETS" != "win32-x64" \]; then\r?\n {12}echo "::error::[^"\r\n]*"; exit 1\r?\n {10}fi\r?\n {10}echo "targets=\$TARGETS" >> "\$GITHUB_OUTPUT"[ \t]*\r?$'
+if ($packageSetStep -notmatch $targetAdmissionPattern -or
+    $publishStep -notmatch '(?m)^ {10}TARGETS: \$\{\{ steps\.package_set\.outputs\.targets \}\}[ \t]*\r?$') {
+    throw "npm publish workflow must publish only the admitted Windows x64 catalog target"
 }
 if ($publishWorkflow -notmatch '(?s)build\.ps1.+-WindowsTargetArch.+-ReleaseVersion.+-ReleaseCommit.+-ReleaseBuildDate') {
     throw "npm publish workflow must delegate Windows payload generation to build.ps1 with the captured tuple"
 }
-if ($publishWorkflow -notmatch '-ReleaseBuildDate "\$DATE" \|\| return \$\?') {
-    throw "npm publish workflow must propagate build.ps1 failure from the build function"
+$nativeBuildStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: native[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
+$directWindowsBuildPattern = '(?m)^ {14}win32-x64\)\r?\n {16}\(\r?\n {18}cd "\$SOURCE_EXPORT"\r?\n {18}pwsh -NoProfile -File \./build\.ps1 \\\r?\n {20}-WindowsTargetArch amd64 \\\r?\n {20}-OutputDirectory "\$CHECKOUT/npm/packages/\$d/bin" \\\r?\n {20}-ReleaseVersion "\$V" \\\r?\n {20}-ReleaseCommit "\$COMMIT" \\\r?\n {20}-ReleaseBuildDate "\$DATE" \\\r?\n {20}-SourceSnapshotPath "\$SOURCE_SNAPSHOT"\r?\n {16}\)\r?\n {16};;[ \t]*\r?$'
+if ($nativeBuildStep -notmatch '(?m)^ {8}shell: bash[ \t]*\r?$' -or
+    $nativeBuildStep -notmatch $directWindowsBuildPattern) {
+    throw "npm publish workflow must run the snapshot-bound Windows build as an unmasked Bash subshell"
 }
 if ($publishWorkflow -notmatch 'tools/windows-product-validate' -or
     $publishWorkflow -match 'mcphub-pe-admit') {

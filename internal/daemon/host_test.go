@@ -41,7 +41,7 @@ func setSessionForNonInitialize(t *testing.T, req *http.Request, body, sid strin
 func TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
 func TestStdioHostLoopbackGuardAllowsNoOriginPOST(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestHostSubprocessLifecycle(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: echoSubprocCommand(),
+		Command: echoSubprocCommand(t),
 		Args:    echoSubprocArgs(),
 	})
 	if err != nil {
@@ -183,8 +183,8 @@ func TestHostSubprocessLifecycle(t *testing.T) {
 
 // echoSubprocCommand returns a command that reads lines from stdin
 // and writes each line back to stdout verbatim. Used only in tests.
-func echoSubprocCommand() string {
-	return "python"
+func echoSubprocCommand(t *testing.T) string {
+	return daemonTestPython(t)
 }
 
 func echoSubprocArgs() []string {
@@ -199,7 +199,7 @@ func TestHostEnvAppendsToOSEnviron(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import os, sys, json
 out = {
@@ -252,7 +252,7 @@ func TestHostWorkingDirSetsSubprocessCwd(t *testing.T) {
 	wantDir := t.TempDir()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import os, sys, json
 print(json.dumps({"cwd": os.path.realpath(os.getcwd())}))
@@ -300,7 +300,7 @@ func TestStdioHost_TeesStderrToLogFile(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "stdio-host.log")
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys, time
 sys.stderr.write("PROBE_STDERR_MARKER\n")
@@ -340,7 +340,7 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: echoSubprocCommand(),
+		Command: echoSubprocCommand(t),
 		Args:    echoSubprocArgs(),
 	})
 	if err != nil {
@@ -393,7 +393,7 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 
 func TestHostHTTPRejectsOversizedPOSTBody(t *testing.T) {
 	h, err := NewStdioHost(HostConfig{
-		Command: echoSubprocCommand(),
+		Command: echoSubprocCommand(t),
 		Args:    echoSubprocArgs(),
 	})
 	if err != nil {
@@ -428,7 +428,7 @@ func TestHostInitializeCached(t *testing.T) {
 	// fixed result, then the test asserts the second request never reaches it
 	// by checking the stdin counter from inside the script.
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys, json
 seen = 0
@@ -486,7 +486,7 @@ func TestHostInitializeCacheSkipsErrors(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys, json
 seen = 0
@@ -558,7 +558,7 @@ func TestHostStopUnblocksPendingHandlers(t *testing.T) {
 
 	// Silent subprocess: reads stdin but never writes stdout.
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args:    []string{"-u", "-c", "import sys\nfor _ in sys.stdin: pass"},
 	})
 	if err != nil {
@@ -625,7 +625,7 @@ func TestHostStopUnblocksSSE(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +699,7 @@ func TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest(t *testing.T) {
 	// This simulates the real failure mode: request forwarded to child,
 	// child dies before sending the JSON-RPC response.
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args:    []string{"-u", "-c", "import sys\nsys.stdin.readline()\nsys.exit(0)"},
 	})
 	if err != nil {
@@ -756,7 +756,7 @@ func TestStdioHost_Stop_DoesNotRaceWithChildExit(t *testing.T) {
 
 	// Long-running subprocess: sleeps reading stdin until killed.
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args:    []string{"-u", "-c", "import sys\nfor _ in sys.stdin: pass"},
 	})
 	if err != nil {
@@ -803,7 +803,7 @@ func TestStdioHost_SSE_ChildExitUnblocksStream(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args:    []string{"-u", "-c", "import sys, time\ntime.sleep(0.5)\nsys.exit(0)"},
 	})
 	if err != nil {
@@ -847,7 +847,7 @@ func TestStdioHost_SSE_ChildExitUnblocksStream(t *testing.T) {
 func TestHostDELETETerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -872,7 +872,7 @@ func TestHostDELETETerminates(t *testing.T) {
 func TestHostSSERequiresSessionID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}

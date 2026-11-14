@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
 
@@ -21,6 +22,7 @@ import (
 // control ports without retaining the transaction or GUI that composed them.
 type supervisorLaunchDependencies struct {
 	exePath, supervisorLockPath, pipePath string
+	originalRuntime                       *binaryadmission.WindowsCanonicalEntryRuntimeV1
 	readOwner                             func(string) (api.SupervisorLockOwner, error)
 	waitLockReleased                      func(context.Context, time.Duration) error
 	sendIPCPeer                           supervisorPeerIPCSender
@@ -124,6 +126,10 @@ func (l *ownedSupervisorLaunch) observeControl(ctx context.Context, expected Sup
 	}
 	original := api.SupervisorLockOwner{PID: l.original.PID, StartedAt: l.original.StartedAt.UTC().Format(time.RFC3339Nano)}
 	return observeCreatedSupervisorControl(ctx, expected, original, l.peer, func(owner api.SupervisorLockOwner) error {
+		if l.deps.originalRuntime != nil {
+			_, err := observeOriginalSupervisorRuntime(ctx, expected.ProductPath, expected.ProductSHA256, owner, l.deps.originalRuntime)
+			return err
+		}
 		return validateCreatedSupervisorNativeControl(expected, owner)
 	}, l.deps.readOwner)
 }
@@ -350,4 +356,69 @@ func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectatio
 		return errors.New("created supervisor current user mismatch")
 	}
 	return nil
+}
+
+// observeOriginalSupervisorRuntime proves the image through the retained original
+// objects. Reopening Product to hash its path conflicts with their Windows share
+// mode. The query-only process handle binds that original image proof to the
+// exact generation; it grants no creator or termination authority.
+func observeOriginalSupervisorRuntime(ctx context.Context, binaryPath, expectedSHA256 string, owner api.SupervisorLockOwner, original *binaryadmission.WindowsCanonicalEntryRuntimeV1) (peer api.SupervisorProcessIdentityV1, retErr error) {
+	if ctx == nil {
+		return peer, errors.New("original supervisor runtime requires operation context")
+	}
+	if err := ctx.Err(); err != nil {
+		return peer, err
+	}
+	if original == nil {
+		return peer, errors.New("original supervisor runtime unavailable")
+	}
+	artifact := original.Artifact()
+	if !cleanAbsolutePath(binaryPath) || !validLowerHexSHA256(expectedSHA256) || !samePath(binaryPath, artifact.Path) || expectedSHA256 != artifact.SHA256 {
+		return peer, errors.New("original supervisor runtime path/SHA-256 mismatch")
+	}
+	if err := original.ValidateOriginal(ctx); err != nil {
+		return peer, fmt.Errorf("validate original supervisor runtime: %w", err)
+	}
+	held, err := process.HoldPIDForObservation(owner.PID)
+	if err != nil {
+		return peer, fmt.Errorf("hold original supervisor generation: %w", err)
+	}
+	defer func() {
+		retErr = errors.Join(retErr, held.Close())
+		if retErr != nil {
+			peer = api.SupervisorProcessIdentityV1{}
+		}
+	}()
+	if err := held.VerifyIdentity(process.PIDIdentityProof{
+		PID: owner.PID, ExecutablePath: binaryPath, StartedAt: owner.StartedAt, StartTolerance: time.Nanosecond,
+	}); err != nil {
+		return peer, fmt.Errorf("verify original supervisor generation: %w", err)
+	}
+	// Query the role while this exact generation is held. The operation's
+	// context also bounds the underlying WMI lookup during Abort cleanup.
+	identity, err := process.LookupProcessIdentityContext(ctx, owner.PID)
+	if err != nil {
+		return peer, fmt.Errorf("probe original supervisor role: %w", err)
+	}
+	if supervisorCommandLineSubcommand(identity.CommandLine) != "supervise" {
+		return peer, fmt.Errorf("original PID %d is not a supervise process", owner.PID)
+	}
+	sameUser, err := process.ProcessOwnerSIDMatchesCurrent(owner.PID)
+	if err != nil {
+		return peer, fmt.Errorf("original supervisor current user unconfirmed: %w", err)
+	}
+	if !sameUser {
+		return peer, errors.New("original supervisor current user mismatch")
+	}
+	if err := verifyUpgradePriorRuntimeHeld(ctx, original, held); err != nil {
+		return peer, fmt.Errorf("verify original supervisor Product: %w", err)
+	}
+	peer, err = api.ObserveSupervisorProcessIdentityV1(owner.PID)
+	if err != nil {
+		return peer, err
+	}
+	if err := api.ValidateSupervisorStatusServerIdentityV1(owner, peer, peer.UserSID, peer.SessionID, binaryPath); err != nil {
+		return peer, err
+	}
+	return peer, ctx.Err()
 }

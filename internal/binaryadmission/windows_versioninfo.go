@@ -353,11 +353,24 @@ func parseWindowsBuildIdentity(payload []byte) (windowsBuildIdentityV1, error) {
 }
 
 func parsePublisherSourceComments(comments string) (string, error) {
+	if strings.Contains(comments, canonicalEntryCommentsNamespace) {
+		prior, _, err := ParseWindowsCanonicalEntryCommentsV1(comments)
+		if err != nil {
+			return "", err
+		}
+		comments = prior
+	}
 	const marker = "mcphub-source-v1;sha256="
-	if !strings.Contains(comments, marker) { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_UNMARKED") }
-	if strings.Count(comments, marker) != 1 { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: duplicate source suffix") }
+	if !strings.Contains(comments, marker) {
+		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_UNMARKED")
+	}
+	if strings.Count(comments, marker) != 1 {
+		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: duplicate source suffix")
+	}
 	i := strings.Index(comments, marker)
-	if i == 0 || comments[i-1] != '\n' || !validLowerHex(comments[i+len(marker):], 64, 64) { return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: source suffix grammar") }
+	if i == 0 || comments[i-1] != '\n' || !validLowerHex(comments[i+len(marker):], 64, 64) {
+		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: source suffix grammar")
+	}
 	return comments[i+len(marker):], nil
 }
 
@@ -365,22 +378,34 @@ func parsePublisherSourceComments(comments string) (string, error) {
 // It grants no image observation, native identity or file-resource proof.
 type WindowsPublisherSourceIdentity struct {
 	SourceEpoch, Version, Commit, BuildDate string
-	Role WindowsArtifactRole
-	Machine, Subsystem uint16
+	Role                                    WindowsArtifactRole
+	Machine, Subsystem                      uint16
 }
 
 func ParseWindowsPublisherSourceIdentity(raw []byte) (WindowsPublisherSourceIdentity, error) {
 	r := bytes.NewReader(raw)
 	h, err := readWindowsPEHeader(r, int64(len(raw)))
-	if err != nil { return WindowsPublisherSourceIdentity{}, err }
-	if h.characteristics & windowsPEDLLCharacteristic != 0 { return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: DLL") }
+	if err != nil {
+		return WindowsPublisherSourceIdentity{}, err
+	}
+	if h.characteristics&windowsPEDLLCharacteristic != 0 {
+		return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: DLL")
+	}
 	i, err := readWindowsBuildIdentityAt(r, int64(len(raw)))
-	if err != nil { return WindowsPublisherSourceIdentity{}, err }
+	if err != nil {
+		return WindowsPublisherSourceIdentity{}, err
+	}
 	want := WindowsGUISubsystem
-	if i.Role == WindowsArtifactRoleCLI { want = WindowsCUISubsystem }
-	if h.subsystem != want { return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: role/subsystem") }
+	if i.Role == WindowsArtifactRoleCLI {
+		want = WindowsCUISubsystem
+	}
+	if h.subsystem != want {
+		return WindowsPublisherSourceIdentity{}, fmt.Errorf("PUBLISHER_IMAGE_IDENTITY_DRIFT: role/subsystem")
+	}
 	epoch, err := parsePublisherSourceComments(i.Comments)
-	if err != nil { return WindowsPublisherSourceIdentity{}, err }
+	if err != nil {
+		return WindowsPublisherSourceIdentity{}, err
+	}
 	return WindowsPublisherSourceIdentity{epoch, i.Version, i.Commit, i.BuildDate, i.Role, h.machine, h.subsystem}, nil
 }
 

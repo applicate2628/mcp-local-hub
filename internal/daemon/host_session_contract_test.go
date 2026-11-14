@@ -23,7 +23,7 @@ func TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession(t *testing
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys
 sys.stdin.readline()
@@ -112,7 +112,7 @@ func TestStdioHostHTTPProtocolAndSessionContractR1(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import json, sys
 seen = 0
@@ -203,7 +203,7 @@ func TestStdioHostInvalidInitializeResponseDoesNotPoisonCache(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import json, sys
 seen = 0
@@ -258,7 +258,7 @@ for line in sys.stdin:
 }
 
 func TestStdioHostSessionRegistryEvictsOldestAtBoundR1(t *testing.T) {
-	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
+	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(t), Args: echoSubprocArgs()})
 	if err != nil {
 		t.Fatal(err)
 	}

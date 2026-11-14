@@ -6,7 +6,6 @@ type preparedSerenaConsumerCoordinator struct {
 	root, intentPath, sourceEpoch string
 	publication                   *PreparedSerenaPublicationOwner
 	runtimeIdentity               SerenaTreeObject
-	limits                        SerenaTreeLimits
 	recovered                     *SerenaPublicationObservation
 }
 
@@ -25,5 +24,5 @@ func (o *PreparedSerenaRuntimeOwner) consumerCoordinator() (*preparedSerenaConsu
 	if !ok || original == nil || original.publication == nil || original.packageBinding == nil {
 		return nil, errors.New("SERENA_CONSUMER_PUBLICATION_ISSUER_MISSING")
 	}
-	return &preparedSerenaConsumerCoordinator{root: original.Root, intentPath: original.IntentPath, sourceEpoch: original.sourceSHA256, publication: original.publication, runtimeIdentity: original.packageBinding.identity.runtimeRoot, limits: original.acquisition.inputs.Request.OwnedTreeLimits}, nil
+	return &preparedSerenaConsumerCoordinator{root: original.Root, intentPath: original.IntentPath, sourceEpoch: original.sourceSHA256, publication: original.publication, runtimeIdentity: original.packageBinding.identity.runtimeRoot}, nil
 }

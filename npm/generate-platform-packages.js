@@ -65,19 +65,26 @@ function readWindowsArtifactContract() {
   const npmPayload = artifacts.filter((artifact) => artifact.npmPayload === true);
   const npmBins = npmPayload.filter((artifact) => artifact.npmBin === true);
   const identityManifest = contract.identityManifest || {};
+  const product = npmPayload.find((artifact) => artifact.role === "product");
+  const launcher = npmPayload.find((artifact) => artifact.role === "launcher");
   if (
-    contract.schemaVersion !== 2 ||
-    artifacts.length !== 1 ||
-    npmPayload.length !== 1 ||
+    contract.schemaVersion !== 3 ||
+    Object.hasOwn(contract, "runtimePayload") ||
+    artifacts.length !== 2 ||
+    npmPayload.length !== 2 ||
     npmBins.length !== 0 ||
-    npmPayload[0].role !== "product" ||
-    npmPayload[0].filename !== "mcphub.exe" ||
-    npmPayload[0].subsystem !== 2 ||
+    !product || !launcher ||
+    product.filename !== "mcphub-product/mcphub.exe" ||
+    product.source !== "./cmd/mcphub" ||
+    product.subsystem !== 2 || product.productMetadata !== true || product.npmBin !== false ||
+    launcher.filename !== "mcphub.exe" ||
+    launcher.source !== "./cmd/mcphub-launcher" ||
+    launcher.subsystem !== 3 || launcher.productMetadata !== false || launcher.npmBin !== false ||
     identityManifest.filename !== "windows-product-identity.json" ||
     identityManifest.schema !== "windows-product-identity-v1"
   ) {
     throw new Error(
-      "windows-product-artifacts.json must declare schemaVersion 2, one GUI product, no platform bin, and the V1 identity manifest",
+      "windows-product-artifacts.json must declare schemaVersion 3, the CUI entry/nested GUI product, no platform bin, and the V1 identity manifest",
     );
   }
   return { npmPayload, identityManifest };

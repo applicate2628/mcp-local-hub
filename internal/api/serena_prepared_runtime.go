@@ -41,6 +41,7 @@ type PreparedSerenaRequest struct {
 	WorkDeadline                    time.Time          `json:"work_deadline_utc"`
 	AbsoluteCleanupDeadline         time.Time          `json:"cleanup_deadline_utc"`
 	OwnedTreeLimits                 SerenaTreeLimits   `json:"owned_tree_limits"`
+	preparationContext              *serenaPreparationContext
 }
 type PreparedSerenaFile struct {
 	Path   string `json:"path"`
@@ -489,7 +490,9 @@ func (o *PreparedSerenaRuntimeOwner) Prepare(ctx context.Context, r PreparedSere
 		return binding, namespaceErr
 	}
 	ready := true
-	record := PreparedSerenaRuntimeRecord{Schema: PreparedSerenaRecordSchema, OperationID: r.OperationID, GenerationID: r.GenerationID, RequestIdentitySHA256: key, NamespaceSHA256: common, NamespaceSchema: SerenaPackageNamespaceSchema, LeafParentSHA256: leafParent, SourceSHA256: installed.SourceSHA256, UVSHA256: r.UV.SHA256, InterpreterSHA256: r.Interpreter.SHA256, PlatformABISHA256: r.PlatformABISHA256, PolicySHA256: r.PolicySHA256, ResolutionSHA256: installed.ResolutionSHA256, EnvironmentInventorySHA256: qualified.FinalEnvironmentInventorySHA256, EntrypointIdentity: installed.Entrypoint, QualificationReceiptSHA256: qualified.ReceiptSHA256, CleanupReceiptSHA256: disposal.ReceiptSHA256, Ready: &ready, PublishedAtUTC: time.Now().UTC().Format(time.RFC3339Nano)}
+	// Ready binds the qualified publisher source epoch. Installation retains
+	// its distinct package-source-requirement digest in the installation receipt.
+	record := PreparedSerenaRuntimeRecord{Schema: PreparedSerenaRecordSchema, OperationID: r.OperationID, GenerationID: r.GenerationID, RequestIdentitySHA256: key, NamespaceSHA256: common, NamespaceSchema: SerenaPackageNamespaceSchema, LeafParentSHA256: leafParent, SourceSHA256: operation.Record.SourceEpoch, UVSHA256: r.UV.SHA256, InterpreterSHA256: r.Interpreter.SHA256, PlatformABISHA256: r.PlatformABISHA256, PolicySHA256: r.PolicySHA256, ResolutionSHA256: installed.ResolutionSHA256, EnvironmentInventorySHA256: qualified.FinalEnvironmentInventorySHA256, EntrypointIdentity: installed.Entrypoint, QualificationReceiptSHA256: qualified.ReceiptSHA256, CleanupReceiptSHA256: disposal.ReceiptSHA256, Ready: &ready, PublishedAtUTC: time.Now().UTC().Format(time.RFC3339Nano)}
 	raw, e := json.Marshal(record)
 	if e != nil {
 		return binding, e

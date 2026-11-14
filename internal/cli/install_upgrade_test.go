@@ -475,6 +475,7 @@ type fakeUpgradeDeps struct {
 
 	startErr    error
 	startCalled bool
+	startLaunch func() SupervisorLaunch
 }
 
 func (f *fakeUpgradeDeps) RenameAsideBinary(target, newSrc string) (api.RenameAsideResult, error) {
@@ -520,6 +521,9 @@ func (f *fakeUpgradeDeps) StartSupervisor(binaryPath string) (SupervisorLaunch, 
 	f.startCalled = true
 	if f.startErr != nil {
 		return nil, f.startErr
+	}
+	if f.startLaunch != nil {
+		return f.startLaunch(), nil
 	}
 	return &fixtureSupervisorLaunch{}, nil
 }
@@ -960,6 +964,7 @@ func TestInstallUpgrade_RollbackProvesReleaseAndExactPriorBeforeStart(t *testing
 		exitResult:    api.IPCResponse{Final: true},
 	}
 	order := make([]string, 0)
+	mock.startLaunch = func() SupervisorLaunch { return &fixtureSupervisorLaunch{order: &order} }
 	lockCalls := 0
 	portCalls := 0
 	readyCalls := 0
@@ -1007,10 +1012,13 @@ func TestInstallUpgrade_RollbackProvesReleaseAndExactPriorBeforeStart(t *testing
 	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
 		t.Fatalf("error = %v", err)
 	}
-	wantSuffix := []string{"successor-readback-fail", "fenced-kill", "force-kill", "lock-2", "ports-2", "verify-retained", "restore", "verify-restored", "start", "ready-2"}
+	wantSuffix := []string{"successor-readback-fail", "abort-launch", "verify-retained", "restore", "verify-restored", "start", "bind-launch", "ready-2", "handoff-launch"}
 	got := strings.Join(order, ",")
 	if !strings.HasSuffix(got, strings.Join(wantSuffix, ",")) {
 		t.Fatalf("rollback order = %v, want suffix %v", order, wantSuffix)
+	}
+	if lockCalls != 1 || portCalls != 1 || mock.forceKillCalled {
+		t.Fatalf("owned successor must settle through Abort; lock=%d ports=%d force-kill=%v", lockCalls, portCalls, mock.forceKillCalled)
 	}
 }
 
@@ -1631,6 +1639,7 @@ func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
 		}, Final: true},
 		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
 	}
+	mock.startLaunch = func() SupervisorLaunch { return &fixtureSupervisorLaunch{order: &mock.calls} }
 	readyCalls := 0
 	var swept int
 	cleanupSweep := setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
@@ -1658,7 +1667,7 @@ func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
 		t.Fatalf("error=%v, want successful automatic rollback report", err)
 	}
-	want := []string{"quiesce", "exit", "rename", "start", "force-kill", "restore", "start"}
+	want := []string{"quiesce", "exit", "rename", "start", "bind-launch", "abort-launch", "restore", "start", "bind-launch", "handoff-launch"}
 	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls=%v, want %v", mock.calls, want)
 	}
@@ -1667,6 +1676,31 @@ func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
 	}
 	if swept != 0 {
 		t.Fatalf("rollback must preserve retained artifacts; sweep calls=%d", swept)
+	}
+}
+
+func TestInstallUpgrade_OwnedRollbackRefusesUnconfirmedSettlement(t *testing.T) {
+	settlementErr := errors.New("owned successor remains unsettled")
+	launch := &fixtureSupervisorLaunch{abortErr: settlementErr}
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{Final: true},
+		startLaunch:   func() SupervisorLaunch { return launch },
+	}
+	trigger := errors.New("successor readiness failed")
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+		WaitSupervisorReady: func(context.Context, time.Duration, string, UpgradeCandidateV1) error { return trigger },
+	})
+	if !errors.Is(err, trigger) || !errors.Is(err, settlementErr) {
+		t.Fatalf("rollback must retain trigger and settlement failure: %v", err)
+	}
+	if launch.aborts != 1 || launch.handoffs != 0 {
+		t.Fatalf("unsettled launch custody = %+v", launch)
+	}
+	want := []string{"quiesce", "exit", "rename", "start"}
+	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("unsettled successor allowed rollback side effects: calls=%v, want %v", mock.calls, want)
 	}
 }
 
