@@ -28,7 +28,7 @@ pub enum Settlement {
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{BorrowedStdio, NativeOwner, ProcessView};
+pub use windows::{BorrowedStdio, NativeOwner, ProcessView, RootWait};
 #[cfg(windows)]
 mod launch_context;
 #[cfg(windows)]

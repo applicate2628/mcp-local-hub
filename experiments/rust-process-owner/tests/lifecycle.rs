@@ -1,5 +1,5 @@
 #![cfg(windows)]
-use mcphub_process_owner_spike::{NativeOwner, Settlement};
+use mcphub_process_owner_spike::{NativeOwner, RootWait, Settlement};
 use std::{
     ffi::OsString,
     fs, io,
@@ -51,6 +51,34 @@ fn wait_marker(path: &Path) {
         );
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+#[test]
+fn identity_observation_matches_child_and_does_not_resume_it() {
+    let f = Fixture::new();
+    let mut owner = f.launch("identity", 0, "");
+    let pid = owner.root_pid();
+    let mut birth = 0;
+    owner
+        .admit_and_resume(|view| {
+            assert_eq!(view.process_id()?, pid);
+            birth = view.creation_time_100ns()?;
+            assert_ne!(birth, 0);
+            assert_eq!(view.creation_time_100ns()?, birth);
+            assert!(view.is_in_original_job()?);
+            assert_eq!(view.wait_state()?, RootWait::NotSignaled);
+            assert!(!f.marker().exists(), "observation resumed the child");
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+    let report = fs::read(f.marker()).unwrap();
+    assert_eq!(report.len(), 12);
+    assert_eq!(u32::from_le_bytes(report[..4].try_into().unwrap()), pid);
+    assert_eq!(u64::from_le_bytes(report[4..].try_into().unwrap()), birth);
 }
 
 #[test]

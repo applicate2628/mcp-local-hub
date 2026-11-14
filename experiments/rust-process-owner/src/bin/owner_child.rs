@@ -14,6 +14,39 @@ fn main() {
     let mode = args[1].to_string_lossy();
     let marker = std::path::PathBuf::from(&args[2]);
     #[cfg(windows)]
+    if mode == "identity" {
+        use windows_sys::Win32::{
+            Foundation::FILETIME,
+            System::Threading::{GetCurrentProcess, GetProcessTimes},
+        };
+        let mut creation = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut exit = creation;
+        let mut kernel = creation;
+        let mut user = creation;
+        // SAFETY: this process's pseudo-handle is valid and never closed; four
+        // separate FILETIME outputs are writable. Only creation is consumed.
+        assert_ne!(
+            unsafe {
+                GetProcessTimes(
+                    GetCurrentProcess(),
+                    &mut creation,
+                    &mut exit,
+                    &mut kernel,
+                    &mut user,
+                )
+            },
+            0
+        );
+        let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+        let mut report = process::id().to_le_bytes().to_vec();
+        report.extend_from_slice(&ticks.to_le_bytes());
+        fs::write(marker, report).expect("owned identity report");
+        return;
+    }
+    #[cfg(windows)]
     if mode == "context" || mode == "context-relative" {
         use std::os::windows::ffi::OsStrExt;
         // Observe only explicitly requested test keys, never dump inherited
