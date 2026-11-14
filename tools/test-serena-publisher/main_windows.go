@@ -326,6 +326,7 @@ func buildEnvironment(o options) []string {
 		"GOPRIVATE": "", "GONOPROXY": "none", "GONOSUMDB": "none",
 		"GOWORK": "off", "GOFLAGS": "", "CGO_ENABLED": "0", "GOOS": "windows", "GOARCH": "amd64",
 		"GOROOT": o.goRoot, "GOCACHEPROG": "", "GO111MODULE": "on", "GOEXPERIMENT": "",
+		"GOAMD64": "v1", "GOFIPS140": "off",
 		"GOMODCACHE": o.moduleCache, "GOCACHE": filepath.Join(o.root, "gocache"), "GOPATH": filepath.Join(o.root, "gopath"),
 		"TEMP": filepath.Join(o.root, "temp"), "TMP": filepath.Join(o.root, "temp"), "TMPDIR": filepath.Join(o.root, "temp"),
 		"GOTMPDIR": filepath.Join(o.root, "temp"),

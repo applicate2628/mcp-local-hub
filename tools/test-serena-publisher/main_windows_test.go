@@ -59,6 +59,8 @@ func TestQualificationBuildEnvironmentCannotInheritSourceOrTagOverrides(t *testi
 	t.Setenv("GOCACHEPROG", "D:\\foreign-cache.exe")
 	t.Setenv("GO111MODULE", "off")
 	t.Setenv("GOEXPERIMENT", "foreign")
+	t.Setenv("GOAMD64", "v3")
+	t.Setenv("GOFIPS140", "latest")
 	t.Setenv("GOPROXY", "https://foreign.invalid,direct")
 	t.Setenv("GOPRIVATE", "*")
 	t.Setenv("GONOPROXY", "*")
@@ -87,6 +89,7 @@ func TestQualificationBuildEnvironmentCannotInheritSourceOrTagOverrides(t *testi
 		"GOPROXY": "file:///D:/cache/modules/cache/download", "GOSUMDB": "off", "GOVCS": "*:off", "CGO_ENABLED": "0",
 		"GOOS": "windows", "GOARCH": "amd64", "GOMODCACHE": o.moduleCache,
 		"GOROOT": o.goRoot, "GOCACHEPROG": "", "GO111MODULE": "on", "GOEXPERIMENT": "",
+		"GOAMD64": "v1", "GOFIPS140": "off",
 		"GOPRIVATE": "", "GONOPROXY": "none", "GONOSUMDB": "none",
 		"APPDATA": filepath.Join(o.root, "appdata"), "LOCALAPPDATA": filepath.Join(o.root, "localappdata"),
 		"GOCACHE": filepath.Join(o.root, "gocache"), "GOTMPDIR": filepath.Join(o.root, "temp"),
