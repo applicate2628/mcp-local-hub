@@ -50,10 +50,10 @@ func TestSerenaPreparationPolicySelection(t *testing.T) {
 		t.Fatal("raised complete override", e)
 	}
 	args := raised.pythonFindArgs()
-	if !reflect.DeepEqual(args, []string{"python", "find", "--no-project", "--system", "--no-config", "--no-python-downloads", "--offline", ">=3.12"}) {
+	if !reflect.DeepEqual(args, []string{"python", "find", "--no-project", "--system", "--no-config", "--no-python-downloads", "--offline", "--python-preference", "system", ">=3.12"}) {
 		t.Fatal(args)
 	}
-	if p.pythonFindArgs()[7] != ">=3.11" {
+	if args := p.pythonFindArgs(); args[len(args)-1] != ">=3.11" {
 		t.Fatal("default discovery floor")
 	}
 	baseline, _ := p.IdentitySHA256()
