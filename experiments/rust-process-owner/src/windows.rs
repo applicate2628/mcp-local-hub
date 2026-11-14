@@ -15,24 +15,25 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, GetHandleInformation, ERROR_INSUFFICIENT_BUFFER, HANDLE, HANDLE_FLAG_INHERIT,
-        INVALID_HANDLE_VALUE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        CloseHandle, GetHandleInformation, GetLastError, ERROR_INSUFFICIENT_BUFFER, FILETIME,
+        HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, WAIT_FAILED, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
     },
     Storage::FileSystem::{GetFileType, FILE_TYPE_DISK, FILE_TYPE_PIPE},
     System::{
         JobObjects::{
-            CreateJobObjectW, JobObjectBasicAccountingInformation,
+            CreateJobObjectW, IsProcessInJob, JobObjectBasicAccountingInformation,
             JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
             TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         },
         Threading::{
             CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess, GetProcessId,
-            InitializeProcThreadAttributeList, QueryFullProcessImageNameW, ResumeThread,
-            UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
-            CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
-            PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-            STARTF_USESTDHANDLES, STARTUPINFOEXW,
+            GetProcessTimes, InitializeProcThreadAttributeList, QueryFullProcessImageNameW,
+            ResumeThread, UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW,
+            CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+            LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            PROC_THREAD_ATTRIBUTE_JOB_LIST, STARTF_USESTDHANDLES, STARTUPINFOEXW,
         },
     },
 };
@@ -115,8 +116,75 @@ impl Drop for AttributeList {
 /// ```
 pub struct ProcessView<'a> {
     handle: BorrowedHandle<'a>,
+    job: BorrowedHandle<'a>,
+    original_creation: &'a Result<u64, i32>,
 }
+
+/// The original process object's zero-time wait observation, not an exit code.
+/// NotSignaled includes a suspended process; it does not promise future life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootWait {
+    NotSignaled,
+    Signaled,
+}
+
 impl ProcessView<'_> {
+    /// Copy the primary token's user SID from this retained process object.
+    /// Success includes explicit closure of the temporary token handle. A query
+    /// and close failure remain independently available in TokenUserError.
+    /// The copied bytes carry no ownership or admission authority and are not
+    /// an atomic snapshot with the other observations on this view.
+    pub fn token_user_sid(&self) -> Result<Vec<u8>, crate::TokenUserError> {
+        crate::token_user::process_token_user_sid(self.handle)
+    }
+
+    /// Creation time in 100-nanosecond units since 1601-01-01 00:00:00 UTC.
+    /// Compares a fresh original-handle query with the binding captured at create.
+    /// An unavailable initial binding stays unavailable; it is never recaptured.
+    /// This observation is neither a new process handle nor admission authority.
+    pub fn creation_time_100ns(&self) -> io::Result<u64> {
+        let original = (*self.original_creation).map_err(io::Error::from_raw_os_error)?;
+        let observed = creation_time_100ns(self.handle).map_err(io::Error::from_raw_os_error)?;
+        if original == 0 || original != observed {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "original process creation-time binding does not match",
+            ));
+        }
+        Ok(observed)
+    }
+
+    /// Membership in this owner's exact at-create Job, not in any ambient Job.
+    /// False is an observed non-membership; query failure is an error, not false.
+    pub fn is_in_original_job(&self) -> io::Result<bool> {
+        let mut member = 0;
+        // SAFETY: both original handles are borrowed from the same live owner.
+        // The Job is deliberately non-null: null would ask about any Job.
+        if unsafe {
+            IsProcessInJob(
+                self.handle.as_raw_handle(),
+                self.job.as_raw_handle(),
+                &mut member,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(member != 0)
+    }
+
+    /// Observe only the original process's wait state, without waiting or reaping.
+    /// Calls on this view are separate observations, not an atomic snapshot.
+    pub fn wait_state(&self) -> io::Result<RootWait> {
+        // SAFETY: the process handle cannot close while its view is borrowed.
+        match unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) } {
+            WAIT_TIMEOUT => Ok(RootWait::NotSignaled),
+            WAIT_OBJECT_0 => Ok(RootWait::Signaled),
+            WAIT_FAILED => Err(io::Error::last_os_error()),
+            _ => Err(io::Error::other("unexpected process wait result")),
+        }
+    }
+
     pub fn process_id(&self) -> io::Result<u32> {
         // SAFETY: borrowed live original process handle, no concurrent close.
         let id = unsafe { GetProcessId(self.handle.as_raw_handle()) };
@@ -155,6 +223,7 @@ pub struct NativeOwner {
     process: Option<OwnedHandle>,
     thread: Option<OwnedHandle>,
     pid: u32,
+    original_creation: Result<u64, i32>,
     admission_attempted: bool,
     root_exit: Option<u32>,
     termination: Option<(u32, Option<NativeFailure>)>,
@@ -385,11 +454,15 @@ impl NativeOwner {
         // SAFETY: on success CreateProcessW returns two distinct owned handles.
         let process = unsafe { OwnedHandle::from_raw_handle(created.hProcess) };
         let thread = unsafe { OwnedHandle::from_raw_handle(created.hThread) };
+        // Creation has already had an effect. Retain every original resource even
+        // if this observation fails; do not turn that failure into ownerless Err.
+        let original_creation = creation_time_100ns(process.as_handle());
         Ok(Self {
             job: Some(job),
             process: Some(process),
             thread: Some(thread),
             pid: created.dwProcessId,
+            original_creation,
             admission_attempted: false,
             root_exit: None,
             termination: None,
@@ -437,8 +510,11 @@ impl NativeOwner {
         }
         self.admission_attempted = true;
         let process = self.process.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
+        let job = self.job.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
         check(ProcessView {
             handle: process.as_handle(),
+            job: job.as_handle(),
+            original_creation: &self.original_creation,
         })?;
         if self.wait_root(Duration::ZERO)?.is_some() {
             return Err(io::Error::new(
@@ -573,6 +649,32 @@ impl NativeOwner {
         self.terminal = Some(result.clone());
         Ok(result)
     }
+}
+
+fn creation_time_100ns(handle: BorrowedHandle<'_>) -> Result<u64, i32> {
+    let mut created = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exited = created;
+    let mut kernel = created;
+    let mut user = created;
+    // SAFETY: the original process handle stays live; all four FILETIME outputs
+    // are writable. The undefined exit time of a live process is never consumed.
+    if unsafe {
+        GetProcessTimes(
+            handle.as_raw_handle(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    } == 0
+    {
+        // SAFETY: capture the error immediately on the thread that made the call.
+        return Err(unsafe { GetLastError() } as i32);
+    }
+    Ok((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
 impl Drop for NativeOwner {

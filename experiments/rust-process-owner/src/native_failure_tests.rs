@@ -42,6 +42,381 @@ const WAIT: Duration = Duration::from_secs(3);
 const JOB_QUERY: u32 = 0x0004;
 const JOB_TERMINATE: u32 = 0x0008;
 
+fn query_token(owner: &NativeOwner) -> OwnedHandle {
+    let mut raw = null_mut();
+    // SAFETY: the original process remains owned and the output is writable.
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::System::Threading::OpenProcessToken(
+                owner.process.as_ref().unwrap().as_raw_handle(),
+                windows_sys::Win32::Security::TOKEN_QUERY,
+                &mut raw,
+            )
+        },
+        0
+    );
+    // SAFETY: successful acquisition grants exactly one owned token handle.
+    unsafe { OwnedHandle::from_raw_handle(raw) }
+}
+
+#[test]
+fn token_user_open_failure_uses_original_process_and_keeps_owner() {
+    let mut owner = suspended();
+    let original = restrict(&mut owner.process, PROCESS_SYNCHRONIZE);
+    let failure = owner
+        .admit_and_resume(|view| {
+            let failure = match view.token_user_sid() {
+                Err(failure) => failure,
+                Ok(_) => panic!("token lookup ignored retained process handle"),
+            };
+            match failure {
+                crate::TokenUserError::Observation(error) => {
+                    denied(&error);
+                    Err(error)
+                }
+                other => panic!("open failure claimed token cleanup: {other:?}"),
+            }
+        })
+        .unwrap_err();
+    denied(&failure);
+    drop(owner.process.replace(original));
+    assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+    assert_eq!(owner.active_processes().unwrap(), 1);
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn token_user_query_failure_preserves_native_error_and_closes_token() {
+    let mut owner = suspended();
+    let source = query_token(&owner);
+    let before = handle_count();
+    let restricted = duplicate_with_access(&source, 0);
+    match crate::token_user::owned_token_user_sid(restricted) {
+        Err(crate::TokenUserError::Observation(error)) => denied(&error),
+        _ => panic!("denied token query lost its outcome"),
+    }
+    assert_eq!(
+        handle_count(),
+        before,
+        "failed token query leaked its handle"
+    );
+    drop(source);
+    stop_and_finish(&mut owner);
+}
+
+// Fixture-only recovery authority: protection proves this exact owned handle
+// cannot have closed/recycled. There is never a second OwnedHandle alias.
+struct ProtectedToken {
+    token: Option<OwnedHandle>,
+    raw: HANDLE,
+}
+impl ProtectedToken {
+    fn new(token: OwnedHandle) -> Self {
+        let raw = token.as_raw_handle();
+        // SAFETY: this fixture controls the live owned token handle exclusively.
+        assert_ne!(
+            unsafe {
+                SetHandleInformation(
+                    raw,
+                    HANDLE_FLAG_PROTECT_FROM_CLOSE,
+                    HANDLE_FLAG_PROTECT_FROM_CLOSE,
+                )
+            },
+            0
+        );
+        Self {
+            token: Some(token),
+            raw,
+        }
+    }
+    fn take(&mut self) -> OwnedHandle {
+        self.token.take().unwrap()
+    }
+}
+impl Drop for ProtectedToken {
+    fn drop(&mut self) {
+        let mut flags = 0;
+        // SAFETY: this is the protected fixture handle, not a PID or reopened resource.
+        if unsafe { GetHandleInformation(self.raw, &mut flags) } == 0
+            || flags & HANDLE_FLAG_PROTECT_FROM_CLOSE == 0
+        {
+            eprintln!("token fixture protection lost; refusing numeric-handle cleanup");
+            return;
+        }
+        // SAFETY: protection still proves identity; revoke only this fixture's bit.
+        if unsafe { SetHandleInformation(self.raw, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0) } == 0 {
+            eprintln!("token fixture could not remove close protection");
+            return;
+        }
+        if self.token.is_none() {
+            // SAFETY: the observing helper consumed its sole owner and failed to
+            // close the protected handle; only the fixture can now reclaim it.
+            if unsafe { CloseHandle(self.raw) } == 0 {
+                eprintln!("token fixture final close failed");
+            }
+        }
+    }
+}
+
+#[test]
+fn token_user_protected_close_preserves_both_outcomes() {
+    for deny_query in [false, true] {
+        let mut owner = suspended();
+        let before = handle_count();
+        let source = query_token(&owner);
+        let token = if deny_query {
+            let restricted = duplicate_with_access(&source, 0);
+            drop(source);
+            restricted
+        } else {
+            source
+        };
+        let mut fixture = ProtectedToken::new(token);
+        // SAFETY: fixture-only native reference failure. Protection guarantees
+        // this attempt cannot close/recycle the handle; it is not a runtime retry.
+        let rejected = unsafe { CloseHandle(fixture.raw) };
+        let expected = io::Error::last_os_error();
+        assert_eq!(rejected, 0);
+        let expected_code = expected.raw_os_error().unwrap();
+        match crate::token_user::owned_token_user_sid(fixture.take()) {
+            Err(crate::TokenUserError::Cleanup {
+                observation,
+                failure,
+            }) => {
+                assert_eq!(failure.operation, "CloseToken");
+                assert_eq!(
+                    failure.code, expected_code,
+                    "token close changed native error"
+                );
+                if deny_query {
+                    denied(
+                        observation
+                            .as_ref()
+                            .expect("token cleanup erased the query error"),
+                    );
+                } else {
+                    assert!(
+                        observation.is_none(),
+                        "successful query was replaced by an error"
+                    );
+                }
+            }
+            _ => panic!("protected token close became success or lost its receipt"),
+        }
+        assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+        drop(fixture);
+        assert_eq!(
+            handle_count(),
+            before,
+            "protected token fixture leaked a handle"
+        );
+        stop_and_finish(&mut owner);
+    }
+}
+
+#[test]
+fn token_user_repeated_observation_closes_handles_and_copy_survives() {
+    let mut owner = suspended();
+    let mut observed = Vec::new();
+    owner
+        .admit_and_resume(|view| {
+            observed = view.token_user_sid().map_err(io::Error::other)?;
+            assert!(!observed.is_empty());
+            let before = handle_count();
+            for _ in 0..64 {
+                let next = view.token_user_sid().map_err(io::Error::other)?;
+                assert!(
+                    observed == next,
+                    "token user changed during fixture observation"
+                );
+                assert_eq!(handle_count(), before, "token observation leaked a handle");
+            }
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = observed.clone();
+    assert_eq!(
+        owner.finish(WAIT).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+    drop(owner);
+    assert!(observed == snapshot, "copied SID changed after settlement");
+}
+
+#[test]
+fn identity_initial_capture_error_is_not_repaired_by_later_success() {
+    let mut owner = suspended();
+    let restricted = duplicate_with_access(owner.process.as_ref().unwrap(), PROCESS_SYNCHRONIZE);
+    // A real denied query supplies the stored failure. This tests retention of
+    // capture failure, not a claim that normal creator handles lose their rights.
+    let capture = creation_time_100ns(restricted.as_handle());
+    assert_eq!(capture, Err(ERROR_ACCESS_DENIED as i32));
+    owner.original_creation = capture;
+    assert!(creation_time_100ns(owner.process.as_ref().unwrap().as_handle()).is_ok());
+    let failure = owner
+        .admit_and_resume(|view| view.creation_time_100ns().map(|_| ()))
+        .unwrap_err();
+    denied(&failure);
+    assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+    let mut repeated = false;
+    assert!(owner
+        .admit_and_resume(|_| {
+            repeated = true;
+            Ok(())
+        })
+        .is_err());
+    assert!(!repeated);
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn identity_zero_or_changed_creation_binding_is_rejected() {
+    for zero in [false, true] {
+        let mut owner = suspended();
+        let original = owner.original_creation.unwrap();
+        owner.original_creation = Ok(if zero { 0 } else { original + 1 });
+        let failure = owner
+            .admit_and_resume(|view| view.creation_time_100ns().map(|_| ()))
+            .unwrap_err();
+        assert_eq!(failure.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+        stop_and_finish(&mut owner);
+    }
+}
+
+#[test]
+fn identity_process_query_failure_is_not_an_empty_observation() {
+    let mut owner = suspended();
+    let original = restrict(&mut owner.process, PROCESS_SYNCHRONIZE);
+    let failure = owner
+        .admit_and_resume(|view| {
+            denied(&view.is_in_original_job().unwrap_err());
+            view.creation_time_100ns().map(|_| ())
+        })
+        .unwrap_err();
+    denied(&failure);
+    drop(owner.process.replace(original));
+    assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn identity_job_query_failure_is_not_false_membership() {
+    let mut owner = suspended();
+    let original = restrict(&mut owner.job, JOB_TERMINATE);
+    let failure = owner
+        .admit_and_resume(|view| {
+            assert_ne!(view.creation_time_100ns()?, 0);
+            view.is_in_original_job().map(|_| ())
+        })
+        .unwrap_err();
+    denied(&failure);
+    drop(owner.job.replace(original));
+    assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn identity_membership_checks_exact_job_instead_of_any_job() {
+    let mut owner = suspended();
+    // SAFETY: a new unnamed, exclusively owned test Job with default security.
+    let unrelated = unsafe { CreateJobObjectW(null(), null()) };
+    assert!(!unrelated.is_null());
+    // SAFETY: successful acquisition grants exactly this one owned handle.
+    let original = owner
+        .job
+        .replace(unsafe { OwnedHandle::from_raw_handle(unrelated) })
+        .unwrap();
+    let failure = owner
+        .admit_and_resume(|view| {
+            assert!(
+                !view.is_in_original_job()?,
+                "membership in another Job was accepted"
+            );
+            assert_eq!(view.wait_state()?, RootWait::NotSignaled);
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "test policy rejects wrong Job",
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(failure.kind(), io::ErrorKind::PermissionDenied);
+    drop(owner.job.replace(original));
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn identity_wait_failure_is_not_a_liveness_result() {
+    let mut owner = suspended();
+    let original = restrict(&mut owner.process, PROCESS_QUERY_LIMITED_INFORMATION);
+    let failure = owner
+        .admit_and_resume(|view| {
+            assert_ne!(view.creation_time_100ns()?, 0);
+            assert!(view.is_in_original_job()?);
+            let failure = view
+                .wait_state()
+                .expect_err("failed observation became a liveness value");
+            denied(&failure);
+            Err(failure)
+        })
+        .unwrap_err();
+    denied(&failure);
+    drop(owner.process.replace(original));
+    stop_and_finish(&mut owner);
+}
+
+#[test]
+fn identity_signaled_process_with_exit_259_is_not_alive_or_resumed() {
+    use windows_sys::Win32::System::Threading::TerminateProcess;
+    let mut owner = suspended();
+    let birth = owner.original_creation.unwrap();
+    // SAFETY: terminate only the original process owned by this test fixture.
+    assert_ne!(
+        unsafe { TerminateProcess(owner.process.as_ref().unwrap().as_raw_handle(), 259) },
+        0
+    );
+    assert_eq!(owner.wait_root(WAIT).unwrap(), Some(259));
+    let mut observed = false;
+    let failure = owner
+        .admit_and_resume(|view| {
+            observed = true;
+            assert_eq!(view.creation_time_100ns()?, birth);
+            assert_eq!(view.wait_state()?, RootWait::Signaled);
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(observed);
+    assert_eq!(failure.kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(
+        owner.finish(WAIT).unwrap(),
+        Settlement::Complete { root_exit: 259 }
+    );
+}
+
+#[test]
+fn repeated_identity_observations_do_not_accumulate_handles() {
+    let mut owner = suspended();
+    owner
+        .admit_and_resume(|view| {
+            let birth = view.creation_time_100ns()?;
+            assert!(view.is_in_original_job()?);
+            assert_eq!(view.wait_state()?, RootWait::NotSignaled);
+            let baseline = handle_count();
+            for _ in 0..64 {
+                assert_eq!(view.creation_time_100ns()?, birth);
+                assert!(view.is_in_original_job()?);
+                assert_eq!(view.wait_state()?, RootWait::NotSignaled);
+            }
+            assert_eq!(handle_count(), baseline);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        owner.finish(WAIT).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+}
+
 fn suspended() -> NativeOwner {
     // This unit-test executable only lists its tests if resumed: no recursive
     // test execution, external program, UI, network or indefinite work.
