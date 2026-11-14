@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 type qualificationFakeHTTP func(*http.Request) (*http.Response, error)
@@ -102,5 +104,103 @@ func TestQualificationZeroObservationRefuses(t *testing.T) {
 	}
 	if (&MCPHTTPQualificationObservation{}).ReceiptSHA256() != "" {
 		t.Fatal("zero receipt")
+	}
+}
+
+// This probe checks argument binding only. It always refuses live admission
+// and cannot issue native, connection, or resource-close evidence.
+type qualificationEndpointBindingProbe struct {
+	endpointSHA, startSHA string
+	refusal               error
+	calls                 int
+}
+
+func (p *qualificationEndpointBindingProbe) ValidateOriginalEndpoint(_ context.Context, endpointSHA, startSHA string) error {
+	p.calls++
+	if endpointSHA != p.endpointSHA || startSHA != p.startSHA {
+		return errors.New("qualification endpoint digest differs")
+	}
+	if p.refusal == nil {
+		return errors.New("binding probe grants no live admission")
+	}
+	return p.refusal
+}
+func (*qualificationEndpointBindingProbe) ValidateOriginalConnection(context.Context, *MCPHTTPOriginalConnection) error {
+	return errors.New("binding probe has no original connection")
+}
+func (*qualificationEndpointBindingProbe) CloseObserved(context.Context) (*process.OriginalJobMemberCloseObservation, error) {
+	return nil, errors.New("binding probe has no native close")
+}
+func (*qualificationEndpointBindingProbe) ValidateOriginalClose(context.Context, *process.OriginalJobMemberCloseObservation, string) error {
+	return errors.New("binding probe has no original close evidence")
+}
+
+func TestQualificationLiveBindingPassesExactDigests(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	const endpoint = "http://127.0.0.1:32123/mcp"
+	refusal := errors.New("original endpoint admission refused")
+	source := &qualificationEndpointBindingProbe{
+		endpointSHA: qualificationSHA([]byte(endpoint)), startSHA: strings.Repeat("c", 64), refusal: refusal,
+	}
+	binding := MCPHTTPQualificationBinding{
+		OperationID: "operation", QualificationID: "qualification", GenerationID: "generation",
+		RequestIdentitySHA256: strings.Repeat("a", 64), SourceSHA256: strings.Repeat("b", 64),
+		HostStartSHA256: source.startSHA, EndpointSHA256: source.endpointSHA, EndpointSource: source,
+	}
+	if err := binding.validate(ctx, endpoint); !errors.Is(err, refusal) {
+		t.Fatalf("live admission did not receive exact endpoint/start digests: %v", err)
+	}
+	if source.calls != 1 {
+		t.Fatalf("original live admission calls = %d, want 1", source.calls)
+	}
+}
+
+func TestQualificationReceivedObservationDoesNotReopenEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"missing-close", "MCP_QUALIFICATION_CLOSE_FOREIGN"},
+		{"incomplete-close", "MCP_QUALIFICATION_INCOMPLETE"},
+		{"binding-drift", "MCP_QUALIFICATION_BINDING_DRIFT"},
+		{"endpoint-drift", "MCP_QUALIFICATION_ENDPOINT_INVALID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			const endpoint = "http://127.0.0.1:32123/mcp"
+			source := &qualificationEndpointBindingProbe{
+				endpointSHA: qualificationSHA([]byte(endpoint)), startSHA: strings.Repeat("c", 64),
+				refusal: errors.New("original endpoint is already closed"),
+			}
+			binding := MCPHTTPQualificationBinding{
+				OperationID: "operation", QualificationID: "qualification", GenerationID: "generation",
+				RequestIdentitySHA256: strings.Repeat("a", 64), SourceSHA256: strings.Repeat("b", 64),
+				HostStartSHA256: source.startSHA, EndpointSHA256: source.endpointSHA, EndpointSource: source,
+			}
+			owner := &mcpHTTPQualificationOwner{
+				relay: &HTTPToStdioRelay{URL: endpoint}, binding: binding,
+			}
+			switch tc.name {
+			case "incomplete-close":
+				owner.close = &MCPHTTPQualificationCloseObservation{owner: owner}
+			case "binding-drift":
+				binding.GenerationID = "foreign-generation"
+			case "endpoint-drift":
+				binding.EndpointSHA256 = strings.Repeat("d", 64)
+				owner.binding = binding
+			}
+			observation := &MCPHTTPQualificationObservation{owner: owner}
+			err := observation.Validate(ctx, binding)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("received observation error = %v, want %s", err, tc.want)
+			}
+			if source.calls != 0 {
+				t.Fatalf("received observation re-entered live admission %d times", source.calls)
+			}
+			if observation.ReceiptSHA256() != "" {
+				t.Fatal("unsettled HTTP fixture issued a qualification receipt")
+			}
+		})
 	}
 }
