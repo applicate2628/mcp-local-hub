@@ -1348,7 +1348,7 @@ func TestCloseRetainsLeaseUntilStubbornWorkerSettles(t *testing.T) {
 }
 
 func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
-	for _, scenario := range []string{"final admission", "pre-copy replay", "post-copy replay", "cleanup cause", "cleanup wire projection", "already closed"} {
+	for _, scenario := range []string{"final admission", "pre-copy discovery", "post-copy replay", "cleanup cause", "cleanup wire projection", "already closed"} {
 		t.Run(scenario, func(t *testing.T) {
 			storeRoot := t.TempDir()
 			projectRoot := writeProject(t)
@@ -1363,7 +1363,7 @@ func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
 				t.Fatal(s.initErr)
 			}
 			request := StartRequest{ProjectRoot: projectRoot, ProjectFile: "sample.son", TimeoutSeconds: 10}
-			if scenario == "pre-copy replay" || scenario == "post-copy replay" {
+			if scenario == "pre-copy discovery" || scenario == "post-copy replay" {
 				request.IdempotencyKey = "same-request"
 			}
 			seed := func() {
@@ -1375,9 +1375,6 @@ func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
 				done := s.runs[started.RunID].done
 				s.mu.Unlock()
 				<-done
-			}
-			if scenario == "pre-copy replay" {
-				seed()
 			}
 			arrived, release := make(chan struct{}), make(chan struct{})
 			cleanupArrived, cleanupRelease := make(chan struct{}), make(chan struct{})
@@ -1410,7 +1407,7 @@ func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
 				}
 				return os.RemoveAll(work)
 			}
-			if scenario == "pre-copy replay" {
+			if scenario == "pre-copy discovery" {
 				s.locator = func() (Product, error) {
 					close(arrived)
 					<-release
@@ -1474,7 +1471,7 @@ func TestCloseDuringPreparationRejectsLateStartAndRetainsLease(t *testing.T) {
 			var candidate string
 			if scenario != "already closed" {
 				<-arrived
-				if scenario != "pre-copy replay" {
+				if scenario != "pre-copy discovery" {
 					entries, err := os.ReadDir(filepath.Join(storeRoot, "runs"))
 					if err != nil || len(entries) != 1 {
 						t.Fatalf("held candidates=%d err=%v", len(entries), err)

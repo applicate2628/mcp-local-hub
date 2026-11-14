@@ -3,6 +3,7 @@ package cbuild
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,16 +114,19 @@ type testCase struct {
 }
 
 type testResult struct {
-	Success   bool       `json:"success"`
-	ExitCode  int        `json:"exit_code"`
-	Total     int        `json:"total"`
-	Passed    int        `json:"passed"`
-	Failed    int        `json:"failed"`
-	Tests     []testCase `json:"tests"`
-	JUnitPath string     `json:"junit_path,omitempty"`
-	WallMs    int64      `json:"wall_ms"`
-	TimedOut  bool       `json:"timed_out,omitempty"`
-	RawTail   string     `json:"raw_tail"`
+	// When partial, counts and Tests describe only retained observations.
+	ResultsPartial  bool       `json:"results_partial"`
+	OutputTruncated bool       `json:"output_truncated"`
+	Success         bool       `json:"success"`
+	ExitCode        int        `json:"exit_code"`
+	Total           int        `json:"total"`
+	Passed          int        `json:"passed"`
+	Failed          int        `json:"failed"`
+	Tests           []testCase `json:"tests"`
+	JUnitPath       string     `json:"junit_path,omitempty"`
+	WallMs          int64      `json:"wall_ms"`
+	TimedOut        bool       `json:"timed_out,omitempty"`
+	RawTail         string     `json:"raw_tail"`
 }
 
 type workflowResult struct {
@@ -353,6 +357,26 @@ func (b *builder) cmakeConfigure() mcp.Tool {
 				argv = append(argv, "-D", k+"="+a.Defines[k])
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultConfigureTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
+			// Discard the prior binding before CMake can modify its tree, even
+			// when the new configure subsequently fails.
+			if err := b.forgetConfiguredProject(dir); err != nil {
+				return nil, err
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
@@ -430,6 +454,21 @@ func (b *builder) cmakeBuild() mcp.Tool {
 				argv = append(argv, "--verbose")
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultBuildTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
@@ -463,7 +502,7 @@ func (b *builder) cmakeTest() mcp.Tool {
 	return &funcTool{
 		name:        "cmake_test",
 		title:       "CMake test (ctest)",
-		description: "Run `ctest --preset <preset>` (optionally filtered by regex, parallelized, JUnit-exported). Returns per-test outcomes with pass/fail counts and a bounded raw_tail.",
+		description: "Run `ctest --preset <preset>` (optionally filtered by regex, parallelized, JUnit-exported). Returns per-test outcomes with pass/fail counts and a bounded raw_tail. results_partial marks incomplete observations (including capture truncation); counts then describe only retained tests. success reports the command exit status.",
 		schema:      schema,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var a testArgs
@@ -496,6 +535,21 @@ func (b *builder) cmakeTest() mcp.Tool {
 				argv = append(argv, "--output-junit", junitPath)
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultTestTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, ctestBin, argv)
 			if err != nil {
 				return nil, err
@@ -513,15 +567,17 @@ func (b *builder) cmakeTest() mcp.Tool {
 				}
 			}
 			result := testResult{
-				Success:  execOK(res),
-				ExitCode: res.ExitCode,
-				Total:    len(tests),
-				Passed:   passed,
-				Failed:   failed,
-				Tests:    tests,
-				WallMs:   res.WallMs,
-				TimedOut: res.TimedOut,
-				RawTail:  rawTail(res.Combined),
+				ResultsPartial:  res.OutputTruncated || res.TimedOut || res.Canceled || res.startErr != nil,
+				OutputTruncated: res.OutputTruncated,
+				Success:         execOK(res),
+				ExitCode:        res.ExitCode,
+				Total:           len(tests),
+				Passed:          passed,
+				Failed:          failed,
+				Tests:           tests,
+				WallMs:          res.WallMs,
+				TimedOut:        res.TimedOut,
+				RawTail:         rawTail(res.Combined),
 			}
 			if a.OutputJUnit != "" {
 				result.JUnitPath = junitPath
@@ -561,6 +617,24 @@ func (b *builder) cmakeWorkflow() mcp.Tool {
 			}
 			argv := []string{"--workflow", presetFlag(a.Preset)}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultWorkflowTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
+			if err := b.forgetConfiguredProject(dir); err != nil {
+				return nil, err
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
@@ -581,14 +655,14 @@ func (b *builder) cmakeWorkflow() mcp.Tool {
 func (b *builder) cmakeClean() mcp.Tool {
 	schema := objSchema(map[string]any{
 		"working_dir":     workingDirProp(),
-		"preset":          strProp("Configure preset whose build tree to clean (required — resolves the build directory)."),
+		"preset":          strProp("Configure preset successfully configured through cmake_configure in the current server (required)."),
 		"purge_build_dir": boolProp("Instead of `--target clean`, delete the entire resolved build directory. Refused unless the directory is strictly inside the project (path-escape guard)."),
 		"timeout_sec":     intProp("Per-call timeout in seconds (default 300; hard-capped at 60 min)."),
 	}, "preset")
 	return &funcTool{
 		name:        "cmake_clean",
 		title:       "CMake clean",
-		description: "Clean a build tree identified by a successful CMake configure. By default runs `cmake --build <validated build dir> --target clean`. With purge_build_dir it removes that directory only after cache identity and strict containment checks.",
+		description: "Clean a build tree bound to this preset by a successful cmake_configure in the current server. After restart or without that binding, fails closed and requires cmake_configure first. By default runs `cmake --build <validated build dir> --target clean`. With purge_build_dir it removes that directory only after cache identity and strict containment checks.",
 		schema:      schema,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var a cleanArgs
@@ -603,7 +677,23 @@ func (b *builder) cmakeClean() mcp.Tool {
 				return nil, err
 			}
 
-			buildDir, err := b.configuredCacheDir(ctx, dir, a.Preset)
+			timeout := timeoutOrDefault(a.TimeoutSec, defaultCleanTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			defer cancelWait()
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
+			buildDir, err := b.configuredCacheDir(waitCtx, dir, a.Preset)
 			if err != nil {
 				return nil, err
 			}
@@ -613,8 +703,16 @@ func (b *builder) cmakeClean() mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
+				if err := waitCtx.Err(); err != nil {
+					return nil, err
+				}
 				if err := os.RemoveAll(safe); err != nil {
 					return nil, fmt.Errorf("purge build dir %q: %w", safe, err)
+				}
+				// RemoveAll itself is synchronous and cannot be interrupted. Do not
+				// report an on-time success if deletion outlasted the budget.
+				if err := waitCtx.Err(); err != nil {
+					return cleanResult{Success: false, Purged: true, RemovedDir: safe, TimedOut: errors.Is(err, context.DeadlineExceeded)}, nil
 				}
 				return cleanResult{Success: true, Purged: true, RemovedDir: safe}, nil
 			}
@@ -626,7 +724,13 @@ func (b *builder) cmakeClean() mcp.Tool {
 				return nil, err
 			}
 			argv := []string{"--build", buildDir, "--target", "clean"}
-			timeout := timeoutOrDefault(a.TimeoutSec, defaultCleanTimeout)
+			if err := waitCtx.Err(); err != nil {
+				return nil, err
+			}
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
@@ -683,6 +787,21 @@ func (b *builder) vcpkgInstall() mcp.Tool {
 				argv = append(argv, "--clean-after-build")
 			}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultVcpkgTimeout)
+			if timeout <= 0 || timeout > hardCapTimeout {
+				timeout = hardCapTimeout
+			}
+			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			deadline, _ := waitCtx.Deadline()
+			unlock, err := b.lockProjectOperation(waitCtx, dir)
+			cancelWait()
+			if err != nil {
+				return nil, err
+			}
+			defer unlock()
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, vcpkgBin, argv)
 			if err != nil {
 				return nil, err

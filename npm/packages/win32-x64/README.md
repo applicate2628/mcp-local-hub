@@ -5,7 +5,8 @@ Platform binary sub-package for [`mcp-local-hub`](https://www.npmjs.com/package/
 - Target: `win32/x64` (Go `windows/amd64`)
 - Support tier: **GA (generally available)**
 - Native payload (injected by the release job; NOT committed to git):
-  - `bin/mcphub.exe` (product, PE subsystem 2)
+  - `bin/mcphub-product/mcphub.exe` (product, PE subsystem 2)
+  - `bin/mcphub.exe` (launcher, PE subsystem 3)
   - `bin/windows-product-identity.json` (windows-product-identity-v1, non-executable admitted identity)
 - This Windows platform package deliberately declares no npm `bin`; the meta package alone owns the public `mcphub` Node shim so it can wait, relay standard streams, and return the native child's status.
 

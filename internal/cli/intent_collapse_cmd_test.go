@@ -150,7 +150,7 @@ func TestIntentCollapseCmd_CheckEndToEndIsPureRead(t *testing.T) {
 	daemonPath := filepath.Join(stateDir, "daemon-intent.json")
 	freshUpdatedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
 	daemonRaw := []byte(fmt.Sprintf(`{"tasks":{"\\mcp-local-hub-foo-default":{"desired":"stopped","reason":"user-stop","updated_at":%q}}}`, freshUpdatedAt))
-	if err := os.WriteFile(daemonPath, daemonRaw, 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(daemonPath, daemonRaw); err != nil {
 		t.Fatalf("seed daemon-intent.json: %v", err)
 	}
 

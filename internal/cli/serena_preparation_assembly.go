@@ -18,15 +18,12 @@ func newSerenaPreparationAssembly() api.SerenaPreparationAssembly {
 func (*serenaPreparationAssembly) QualificationPort() api.PreparedSerenaQualificationPort {
 	return &PreparedSerenaUnpublishedQualifier{EndpointEvidence: observeSerenaOriginalEndpoint}
 }
-func (*serenaPreparationAssembly) PrepareInputs(ctx context.Context, manifest *config.ServerManifest, rawSHA string, taskNames []string, override *api.SerenaPreparationPolicyV1) (api.SerenaPreparationInputs, error) {
+func (*serenaPreparationAssembly) PrepareInputs(ctx context.Context, manifest *config.ServerManifest, rawSHA string, taskNames []string, override *api.SerenaPreparationPolicyV2) (api.SerenaPreparationInputs, error) {
 	if ctx == nil || manifest == nil || len(taskNames) == 0 {
 		return api.SerenaPreparationInputs{}, errors.New("SERENA_PREPARATION_TASK_SCOPE_MISSING")
 	}
-	policy := api.DefaultSerenaPreparationPolicy()
-	if override != nil {
-		policy = *override
-	}
-	if err := policy.Validate(); err != nil {
+	policy, err := api.ResolveSerenaPreparationPolicy(override)
+	if err != nil {
 		return api.SerenaPreparationInputs{}, err
 	}
 	end := time.Now().Add(policy.WorkLimit)
@@ -78,5 +75,5 @@ func (*serenaPreparationAssembly) PrepareInputs(ctx context.Context, manifest *c
 	}
 	// Unrelated runtime-only secrets do not participate in package preparation.
 	// A relevant reference failure above retains the original vault cause.
-	return api.BuildSerenaPreparationInputs(work, manifest, rawSHA, api.SerenaPreparationAdmission{OperationID: ids.OperationID, GenerationID: ids.GenerationID, EnvironmentSource: selected}, override)
+	return api.BuildSerenaPreparationInputs(work, manifest, rawSHA, api.SerenaPreparationAdmission{OperationID: ids.OperationID, GenerationID: ids.GenerationID, EnvironmentSource: selected}, &policy)
 }

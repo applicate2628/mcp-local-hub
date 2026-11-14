@@ -9,9 +9,28 @@ import (
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/process"
 	"path/filepath"
+	"reflect"
+	"unicode/utf8"
 )
 
 const PreparedSerenaOperationSchema = "serena-preparation-operation-v2"
+const PreparedSerenaPolicyOperationSchema = "serena-preparation-operation-v2-policy-v2"
+
+// These are original ABI provenance data. Neither this digest nor the stored
+// stdout issues native completion/publication authority.
+type PreparedSerenaInterpreterQualificationV1 struct {
+	ProbeStdout          string `json:"probe_stdout"`
+	ClosureReceiptSHA256 string `json:"closure_receipt_sha256"`
+	InterpreterSHA256    string `json:"interpreter_sha256"`
+}
+
+func (q PreparedSerenaInterpreterQualificationV1) validate() error {
+	if q.ProbeStdout == "" || !utf8.ValidString(q.ProbeStdout) || !preparedSerenaDigest(q.ClosureReceiptSHA256) || !preparedSerenaDigest(q.InterpreterSHA256) {
+		return errors.New("SERENA_OPERATION_INTERPRETER_EVIDENCE_INVALID")
+	}
+	_, e := decodeSerenaInterpreterABI([]byte(q.ProbeStdout))
+	return e
+}
 
 type PreparedSerenaRootDispositionV1 struct {
 	Role                 string  `json:"role"`
@@ -40,28 +59,30 @@ type PreparedSerenaOutcomePublicationV1 struct {
 	Error               *string `json:"error"`
 }
 type PreparedSerenaOperationRecordV2 struct {
-	Schema                          string                                `json:"schema"`
-	Version                         int                                   `json:"version"`
-	OperationID                     string                                `json:"operation_id"`
-	GenerationID                    string                                `json:"generation_id"`
-	PackageKey                      string                                `json:"package_key"`
-	RequestIdentitySHA256           string                                `json:"request_identity_sha256"`
-	PackageManifestProjectionSHA256 string                                `json:"package_manifest_projection_sha256"`
-	BuildEnvironmentSHA256          string                                `json:"build_environment_sha256"`
-	NamespaceSHA256                 string                                `json:"namespace_sha256"`
-	NamespaceSchema                 string                                `json:"namespace_schema"`
-	LeafParentSHA256                string                                `json:"leaf_parent_sha256"`
-	SourceEpoch                     string                                `json:"source_epoch"`
-	Phase                           string                                `json:"phase"`
-	PublisherIncarnation            *process.PublisherIncarnationRecordV1 `json:"publisher_incarnation"`
-	RootDispositions                []PreparedSerenaRootDispositionV1     `json:"root_dispositions"`
-	InstallationReceiptSHA256       *string                               `json:"installation_receipt_sha256"`
-	QualificationReceiptSHA256      *string                               `json:"qualification_receipt_sha256"`
-	CleanupReceiptSHA256            *string                               `json:"cleanup_receipt_sha256"`
-	ReadyPublication                PreparedSerenaReadyPublicationV1      `json:"ready_publication"`
-	OutcomePublication              PreparedSerenaOutcomePublicationV1    `json:"outcome_publication"`
-	FirstCause                      *string                               `json:"first_cause"`
-	CleanupErrors                   []string                              `json:"cleanup_errors"`
+	Schema                          string                                    `json:"schema"`
+	Version                         int                                       `json:"version"`
+	OperationID                     string                                    `json:"operation_id"`
+	GenerationID                    string                                    `json:"generation_id"`
+	PackageKey                      string                                    `json:"package_key"`
+	RequestIdentitySHA256           string                                    `json:"request_identity_sha256"`
+	PackageManifestProjectionSHA256 string                                    `json:"package_manifest_projection_sha256"`
+	BuildEnvironmentSHA256          string                                    `json:"build_environment_sha256"`
+	NamespaceSHA256                 string                                    `json:"namespace_sha256"`
+	NamespaceSchema                 string                                    `json:"namespace_schema"`
+	LeafParentSHA256                string                                    `json:"leaf_parent_sha256"`
+	SourceEpoch                     string                                    `json:"source_epoch"`
+	Phase                           string                                    `json:"phase"`
+	PublisherIncarnation            *process.PublisherIncarnationRecordV1     `json:"publisher_incarnation"`
+	RootDispositions                []PreparedSerenaRootDispositionV1         `json:"root_dispositions"`
+	InstallationReceiptSHA256       *string                                   `json:"installation_receipt_sha256"`
+	QualificationReceiptSHA256      *string                                   `json:"qualification_receipt_sha256"`
+	CleanupReceiptSHA256            *string                                   `json:"cleanup_receipt_sha256"`
+	ReadyPublication                PreparedSerenaReadyPublicationV1          `json:"ready_publication"`
+	OutcomePublication              PreparedSerenaOutcomePublicationV1        `json:"outcome_publication"`
+	FirstCause                      *string                                   `json:"first_cause"`
+	CleanupErrors                   []string                                  `json:"cleanup_errors"`
+	PreparationPolicy               *SerenaPreparationPolicyV2                `json:"preparation_policy,omitempty"`
+	InterpreterQualification        *PreparedSerenaInterpreterQualificationV1 `json:"interpreter_qualification,omitempty"`
 }
 type PreparedSerenaOperationUpdateV2 struct {
 	Record                PreparedSerenaOperationRecordV2
@@ -78,8 +99,23 @@ func validPreparedSerenaOperationPhase(phase string) bool {
 	return false
 }
 func (r PreparedSerenaOperationRecordV2) Validate() error {
-	if r.Schema != PreparedSerenaOperationSchema || r.Version != 2 || r.NamespaceSchema != SerenaPackageNamespaceSchema {
+	if (r.Schema != PreparedSerenaOperationSchema && r.Schema != PreparedSerenaPolicyOperationSchema) || r.Version != 2 || r.NamespaceSchema != SerenaPackageNamespaceSchema {
 		return errors.New("SERENA_PREPARED_NAMESPACE_SCHEMA_UNSUPPORTED")
+	}
+	if r.Schema == PreparedSerenaOperationSchema {
+		if r.PreparationPolicy != nil || r.InterpreterQualification != nil {
+			return errors.New("SERENA_OPERATION_POLICY_SCHEMA_DRIFT")
+		}
+	} else {
+		if r.PreparationPolicy == nil || r.InterpreterQualification == nil {
+			return errors.New("SERENA_OPERATION_POLICY_CONTEXT_MISSING")
+		}
+		if e := r.PreparationPolicy.validateCanonical(); e != nil {
+			return e
+		}
+		if e := r.InterpreterQualification.validate(); e != nil {
+			return e
+		}
 	}
 	if !preparedSerenaID(r.OperationID) || !preparedSerenaID(r.GenerationID) || !validPreparedSerenaOperationPhase(r.Phase) || r.PackageKey != r.RequestIdentitySHA256 || r.CleanupErrors == nil || !preparedSerenaDigest(r.SourceEpoch) || !preparedSerenaDigest(r.LeafParentSHA256) {
 		return errors.New("SERENA_OPERATION_RECORD_INVALID")
@@ -152,10 +188,26 @@ func decodePreparedSerenaOperation(raw []byte) (PreparedSerenaOperationRecordV2,
 		return result, err
 	}
 	var schema string
-	if err := json.Unmarshal(fields["schema"], &schema); err != nil || schema != PreparedSerenaOperationSchema {
+	if err := json.Unmarshal(fields["schema"], &schema); err != nil || (schema != PreparedSerenaOperationSchema && schema != PreparedSerenaPolicyOperationSchema) {
 		return result, errors.New("SERENA_PREPARED_NAMESPACE_SCHEMA_UNSUPPORTED")
 	}
 	required := []string{"schema", "version", "operation_id", "generation_id", "package_key", "request_identity_sha256", "package_manifest_projection_sha256", "build_environment_sha256", "namespace_sha256", "namespace_schema", "leaf_parent_sha256", "source_epoch", "phase", "publisher_incarnation", "root_dispositions", "installation_receipt_sha256", "qualification_receipt_sha256", "cleanup_receipt_sha256", "ready_publication", "outcome_publication", "first_cause", "cleanup_errors"}
+	if schema == PreparedSerenaPolicyOperationSchema {
+		required = append(required, "preparation_policy", "interpreter_qualification")
+		if e := requireSerenaOperationFields(fields["preparation_policy"], []string{"version", "uv_minimum_version", "python_minimum_version", "work_limit_ns", "cleanup_limit_ns", "owned_tree_limits"}); e != nil {
+			return result, e
+		}
+		var policyFields map[string]json.RawMessage
+		if e := json.Unmarshal(fields["preparation_policy"], &policyFields); e != nil {
+			return result, e
+		}
+		if e := requireSerenaOperationFields(policyFields["owned_tree_limits"], []string{"entries", "depth", "record_bytes", "encoded_path_bytes", "logical_bytes", "open_handles"}); e != nil {
+			return result, e
+		}
+		if e := requireSerenaOperationFields(fields["interpreter_qualification"], []string{"probe_stdout", "closure_receipt_sha256", "interpreter_sha256"}); e != nil {
+			return result, e
+		}
+	}
 	if len(fields) != len(required) {
 		return result, errors.New("SERENA_OPERATION_RECORD_FIELDS")
 	}
@@ -268,7 +320,7 @@ func (io PreparedSerenaRecordIO) PersistOperation(ctx context.Context, update Pr
 	if err != nil {
 		return nil, err
 	}
-	if prior.OperationID != record.OperationID || prior.GenerationID != record.GenerationID || prior.PackageKey != record.PackageKey || prior.SourceEpoch != record.SourceEpoch {
+	if !sameSerenaOperationInputs(prior, record) {
 		return nil, errors.New("SERENA_OPERATION_PRIOR_BINDING_DRIFT")
 	}
 	transaction, err := clients.CaptureStateFileWriteSnapshotObserved(ctx, path, 64<<20, update.ExpectedBeforeSHA256)
@@ -286,4 +338,8 @@ func (io PreparedSerenaRecordIO) PersistOperation(ctx context.Context, update Pr
 		closeErr = errors.Join(closeErr, publication.ReceiveBorrowedParentClose(close))
 	}
 	return publication, errors.Join(writeErr, closeErr)
+}
+
+func sameSerenaOperationInputs(a, b PreparedSerenaOperationRecordV2) bool {
+	return a.Schema == b.Schema && a.Version == b.Version && a.OperationID == b.OperationID && a.GenerationID == b.GenerationID && a.PackageKey == b.PackageKey && a.RequestIdentitySHA256 == b.RequestIdentitySHA256 && a.PackageManifestProjectionSHA256 == b.PackageManifestProjectionSHA256 && a.BuildEnvironmentSHA256 == b.BuildEnvironmentSHA256 && a.NamespaceSHA256 == b.NamespaceSHA256 && a.NamespaceSchema == b.NamespaceSchema && a.LeafParentSHA256 == b.LeafParentSHA256 && a.SourceEpoch == b.SourceEpoch && reflect.DeepEqual(a.PublisherIncarnation, b.PublisherIncarnation) && reflect.DeepEqual(a.PreparationPolicy, b.PreparationPolicy) && reflect.DeepEqual(a.InterpreterQualification, b.InterpreterQualification)
 }

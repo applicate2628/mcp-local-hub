@@ -27,6 +27,7 @@ type PreparedSerenaColdPublicationReadObservation struct {
 	readers                    []*StateFileReadObservation
 	closedInBound              bool
 	err                        error
+	selectedContext            *serenaSelectedContext
 }
 
 type SerenaPublicationObservation struct {
@@ -106,7 +107,7 @@ func (p *PreparedSerenaPublicationOwner) RecoverColdPublicationObserved(ctx cont
 }
 
 func (o *SerenaPublicationObservation) validate(ctx context.Context, owner *PreparedSerenaPublicationOwner, record PreparedSerenaRuntimeRecord, readySHA string) error {
-	if o == nil || ctx == nil || ctx.Err() != nil || o.owner != owner || o.reads==nil || !reflect.DeepEqual(o.record, record) || o.operation.PublisherIncarnation == nil || preparedSerenaHash(o.reads.readyRaw) != readySHA {
+	if o == nil || ctx == nil || ctx.Err() != nil || o.owner != owner || o.reads == nil || !reflect.DeepEqual(o.record, record) || o.operation.PublisherIncarnation == nil || preparedSerenaHash(o.reads.readyRaw) != readySHA {
 		return errors.New("SERENA_COLD_PUBLICATION_SOURCE_DRIFT")
 	}
 	if err := o.reads.validateClosed(record, o.operation); err != nil {

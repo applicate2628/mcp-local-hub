@@ -132,13 +132,14 @@ test("npm delivery never promotes the native product into a second installation"
   }
 });
 
-test("Windows platform payload has one PE plus the identity manifest and no bin owner", () => {
+test("Windows platform payload has the launcher, nested product, and identity manifest with no bin owner", () => {
   for (const target of ["win32-x64"]) {
     const manifest = require("./packages/" + target + "/package.json");
     assert.deepStrictEqual(
       [...manifest.files].sort(),
       [
         "bin/mcphub.exe",
+        "bin/mcphub-product/mcphub.exe",
         "bin/windows-product-identity.json",
         "README.md",
       ].sort(),

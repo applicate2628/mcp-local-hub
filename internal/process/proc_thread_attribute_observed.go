@@ -17,10 +17,10 @@ func (o ProcThreadAttributeListCloseObservation) Complete() bool {
 }
 
 type procThreadAttributeNative struct {
-	initialize         func(unsafe.Pointer, uint32, *uintptr) error
+	initialize         func(uintptr, uint32, *uintptr) error
 	allocate           func(uint32) (uintptr, error)
-	update             func(unsafe.Pointer, uintptr, unsafe.Pointer, uintptr) error
-	delete             func(unsafe.Pointer) error
+	update             func(uintptr, uintptr, unsafe.Pointer, uintptr) error
+	delete             func(uintptr) error
 	free               func(uintptr) error
 	insufficientBuffer error
 }
@@ -39,7 +39,7 @@ func newProcThreadAttributeListWithNative(count uint32, native procThreadAttribu
 	}
 	al = &procThreadAttributeListObserved{native: native, allocationKnown: true}
 	var size uintptr
-	if err := native.initialize(nil, count, &size); !errors.Is(err, native.insufficientBuffer) {
+	if err := native.initialize(0, count, &size); !errors.Is(err, native.insufficientBuffer) {
 		return al, errors.Join(err, errors.New("PROC_ATTRIBUTE_SIZE_QUERY_UNDEFINED"))
 	}
 	if size == 0 || uint64(size) > uint64(^uint32(0)) {
@@ -53,7 +53,7 @@ func newProcThreadAttributeListWithNative(count uint32, native procThreadAttribu
 	if allocation == 0 {
 		return al, errors.New("PROC_ATTRIBUTE_ALLOCATION_UNDEFINED")
 	}
-	if err = native.initialize(unsafe.Pointer(allocation), count, &size); err != nil {
+	if err = native.initialize(allocation, count, &size); err != nil {
 		return al, err
 	}
 	al.initialized = true
@@ -64,13 +64,16 @@ func (al *procThreadAttributeListObserved) Update(attribute uintptr, value unsaf
 		return errors.New("PROC_ATTRIBUTE_LIST_UNAVAILABLE")
 	}
 	al.pointers = append(al.pointers, value)
-	return al.native.update(unsafe.Pointer(al.data), attribute, value, size)
+	return al.native.update(al.data, attribute, value, size)
 }
-func (al *procThreadAttributeListObserved) List() unsafe.Pointer {
+
+// List returns the native LocalAlloc address. It is never Go-managed memory
+// and remains an integer address through STARTUPINFOEX and the native calls.
+func (al *procThreadAttributeListObserved) List() uintptr {
 	if al == nil || !al.initialized || al.data == 0 || al.closing || al.closed != nil {
-		return nil
+		return 0
 	}
-	return unsafe.Pointer(al.data)
+	return al.data
 }
 func (al *procThreadAttributeListObserved) CloseObserved() (ProcThreadAttributeListCloseObservation, error) {
 	if al == nil {
@@ -92,7 +95,7 @@ func (al *procThreadAttributeListObserved) CloseObserved() (ProcThreadAttributeL
 	if view.Allocated {
 		if view.Initialized {
 			view.DeleteAttempted = true
-			err := al.native.delete(unsafe.Pointer(al.data))
+			err := al.native.delete(al.data)
 			view.DeleteReturned = err == nil
 			view.Error = errors.Join(view.Error, err)
 		}
@@ -104,7 +107,11 @@ func (al *procThreadAttributeListObserved) CloseObserved() (ProcThreadAttributeL
 	view.Returned = true
 	al.mu.Lock()
 	al.closed = &view
-	al.pointers = nil
+	// Payloads remain live until native deletion has returned. A failed
+	// procedure lookup cannot discharge that lifetime, even if LocalFree did.
+	if !view.Initialized || view.DeleteReturned {
+		al.pointers = nil
+	}
 	al.mu.Unlock()
 	return view, view.Error
 }

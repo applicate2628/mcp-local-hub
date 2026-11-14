@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 type e2eEnrollmentClient struct {
@@ -38,7 +40,15 @@ func TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe(t *testing.T) {
 	}
 	nativeRoot := filepath.Join(root, "servers", "electromagnetics-mcp", "native", "cst-runtime")
 	image := filepath.Join(t.TempDir(), "mcphub-cst-test-frontend.exe")
-	build := exec.Command("powershell.exe", "-NoProfile", "-File", filepath.Join(nativeRoot, "build_test_frontend.ps1"), "-OutputPath", image)
+	shell, err := exec.LookPath("pwsh.exe")
+	if errors.Is(err, exec.ErrNotFound) {
+		shell, err = exec.LookPath("powershell.exe")
+	}
+	if err != nil {
+		t.Fatalf("find PowerShell host for test frontend build: %v", err)
+	}
+	build := exec.Command(shell, "-NoProfile", "-File", filepath.Join(nativeRoot, "build_test_frontend.ps1"), "-OutputPath", image)
+	process.NoConsole(build)
 	if output, buildErr := build.CombinedOutput(); buildErr != nil {
 		t.Fatalf("build test-only native frontend: %v\n%s", buildErr, output)
 	}

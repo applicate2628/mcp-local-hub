@@ -266,9 +266,13 @@ func TestStdioLaunchPreparationRejectsForeignReceiver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// All mutex/atomic fields are unused at this point. This is the exact
-	// exported concrete-host copy that previously bypassed owner validation.
-	foreign := *h
+	// Reuse the capability fields on a distinct concrete receiver without
+	// copying the mutexes/atomics already used during preparation.
+	foreign, err := NewStdioHost(h.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign.prepared, foreign.preparedGeneration = h.prepared, h.preparedGeneration
 	if err := foreign.StartPrepared(); !errors.Is(err, ErrStdioLaunchPartial) {
 		t.Fatalf("foreign receiver = %v", err)
 	}

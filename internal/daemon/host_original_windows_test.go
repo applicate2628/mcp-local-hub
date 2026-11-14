@@ -73,6 +73,7 @@ func TestStdioOriginalHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		child := exec.Command(exe, "-test.run=^TestStdioOriginalHelper$")
+		process.NoConsole(child)
 		child.Env = composeChildEnv(map[string]string{stdioOriginalHelperMode: "descendant", stdioOriginalHelperRoot: root}, nil)
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {

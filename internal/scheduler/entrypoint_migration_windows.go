@@ -27,13 +27,14 @@ const ownedEntrypointTaskPrefix = "mcp-local-hub-"
 // lock from inventory through forward verification or symmetric restoration.
 // Callers must Close it after a successful forward verification or restore.
 type OwnedEntrypointTaskTxn struct {
-	backend ownedEntrypointTaskBackend
-	store   RetainedTaskXMLStore
-	ctx     context.Context
-	owner   string
-	prior   string
-	runtime string
-	lock    *flock.Flock
+	backend         ownedEntrypointTaskBackend
+	store           RetainedTaskXMLStore
+	ctx             context.Context
+	owner           string
+	prior           string
+	additionalPrior string
+	runtime         string
+	lock            *flock.Flock
 
 	inventory map[string]ownedEntrypointTaskSnapshot
 	closed    bool
@@ -155,14 +156,14 @@ func (t *OwnedEntrypointTaskTxn) transitionDefinitions(ctx context.Context, targ
 		if shape.enabledError != nil {
 			return nil, entrypointTransitionError("enabled-invalid", fmt.Errorf("%q: %w", key, shape.enabledError))
 		}
-		if shape.uri != key || !sameWindowsEntrypointPath(shape.command, t.prior) {
+		if shape.uri != key || !t.isPriorCommand(shape.command) {
 			return nil, entrypointTransitionError("original-invalid", fmt.Errorf("captured prior identity mismatch for %q", key))
 		}
 		if disabled && shape.enabled {
 			raw = append(append(append([]byte(nil), raw[:shape.enabledStart]...), []byte("false")...), raw[shape.enabledEnd:]...)
 		}
 		if target == EntrypointTaskAdmittedRuntime {
-			raw, err = rewriteOwnedEntrypointTaskCommand(raw, t.prior, t.runtime)
+			raw, err = rewriteOwnedEntrypointTaskCommand(raw, shape.command, t.runtime)
 			if err != nil {
 				return nil, entrypointTransitionError("command-invalid", err)
 			}
@@ -534,6 +535,30 @@ func BeginOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorCL
 	return BeginOwnedEntrypointTaskTxn(ctx, lockPath, priorCLI, runtime, store)
 }
 
+// BeginOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore extends the same
+// locked Task/XML transaction with the two explicit historical command roles.
+// The caller qualifies any nonempty legacy helper through its original owner;
+// no task is selected by an executable prefix, path search or inferred role.
+func BeginOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(ctx context.Context, lockPath, canonicalEntry, legacyWindowless, product string, store RetainedTaskXMLStore) (*OwnedEntrypointTaskTxn, error) {
+	if legacyWindowless != "" && (!sameWindowsEntrypointPath(legacyWindowless, WindowsLegacyEntrypointPath(canonicalEntry)) || sameWindowsEntrypointPath(legacyWindowless, product)) {
+		return nil, errors.New("entrypoint task transaction: invalid explicit legacy helper projection")
+	}
+	txn, err := BeginOwnedEntrypointTaskTxn(ctx, lockPath, canonicalEntry, product, store)
+	if err != nil {
+		return txn, err
+	}
+	txn.additionalPrior = legacyWindowless
+	return txn, nil
+}
+
+func (t *OwnedEntrypointTaskTxn) isPriorCommand(command string) bool {
+	return sameWindowsEntrypointPath(command, t.prior) || (t.additionalPrior != "" && sameWindowsEntrypointPath(command, t.additionalPrior))
+}
+
+func (t *OwnedEntrypointTaskTxn) acceptsCommand(command string) bool {
+	return t.isPriorCommand(command) || sameWindowsEntrypointPath(command, t.runtime)
+}
+
 func beginOwnedEntrypointTaskTxnWith(ctx context.Context, lockPath, priorCLI, runtime string, backend ownedEntrypointTaskBackend, owner string) (*OwnedEntrypointTaskTxn, error) {
 	if backend == nil {
 		return nil, errors.New("entrypoint task transaction: scheduler backend is required")
@@ -598,11 +623,24 @@ func ReopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorC
 	return reopenOwnedEntrypointTaskTxnWithStore(ctx, lockPath, priorCLI, runtime, backend, owner, store, backups)
 }
 
+// Reopen uses the identical explicit target projection and retained XML owner.
+func ReopenOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(ctx context.Context, lockPath, canonicalEntry, legacyWindowless, product string, store RetainedTaskXMLStore, backups []OwnedEntrypointTaskBackup) (*OwnedEntrypointTaskTxn, error) {
+	txn, err := BeginOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(ctx, lockPath, canonicalEntry, legacyWindowless, product, store)
+	if err != nil {
+		return txn, err
+	}
+	return receiveOwnedEntrypointTaskBackups(txn, backups)
+}
+
 func reopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorCLI, runtime string, backend ownedEntrypointTaskBackend, owner string, store RetainedTaskXMLStore, backups []OwnedEntrypointTaskBackup) (*OwnedEntrypointTaskTxn, error) {
 	txn, err := beginOwnedEntrypointTaskTxnWithStore(ctx, lockPath, priorCLI, runtime, backend, owner, store)
 	if err != nil {
 		return nil, err
 	}
+	return receiveOwnedEntrypointTaskBackups(txn, backups)
+}
+
+func receiveOwnedEntrypointTaskBackups(txn *OwnedEntrypointTaskTxn, backups []OwnedEntrypointTaskBackup) (*OwnedEntrypointTaskTxn, error) {
 	inventory := make(map[string]ownedEntrypointTaskSnapshot, len(backups))
 	for _, backup := range backups {
 		name := canonicalOwnedEntrypointTaskName(backup.TaskName)
@@ -614,7 +652,7 @@ func reopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorC
 			_ = txn.Close()
 			return nil, fmt.Errorf("entrypoint task reopen: duplicate backup %q", name)
 		}
-		raw, loadErr := store.Load(txn.ctx, backup.Ref)
+		raw, loadErr := txn.store.Load(txn.ctx, backup.Ref)
 		if loadErr != nil {
 			return nil, errors.Join(fmt.Errorf("entrypoint task reopen: retained XML load failed for %q: %w", name, loadErr), txn.Close())
 		}
@@ -623,7 +661,7 @@ func reopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorC
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML verification failed for %q", name)
 		}
 		shape, parseErr := parseOwnedEntrypointTaskXML(raw)
-		if parseErr != nil || shape.uri != name || (!sameWindowsEntrypointPath(shape.command, priorCLI) && !sameWindowsEntrypointPath(shape.command, runtime)) {
+		if parseErr != nil || shape.uri != name || !txn.acceptsCommand(shape.command) {
 			_ = txn.Close()
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML is invalid for %q", name)
 		}
@@ -697,7 +735,7 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 		if shape.uri != name {
 			return fmt.Errorf("entrypoint task inventory: XML URI mismatch for %q", name)
 		}
-		if !sameWindowsEntrypointPath(shape.command, t.prior) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
+		if !t.isPriorCommand(shape.command) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
 		snapshot := ownedEntrypointTaskSnapshot{name: status.Name, xml: append([]byte(nil), raw...)}
@@ -749,7 +787,7 @@ func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 		if sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
-		rewritten, err := rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
+		rewritten, err := rewriteOwnedEntrypointTaskCommand(snapshot.xml, shape.command, t.runtime)
 		if err != nil {
 			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task rewrite %q: %w", key, err)}
 		}
@@ -788,8 +826,8 @@ func (t *OwnedEntrypointTaskTxn) VerifyRuntimeSHA256() (string, error) {
 			return err
 		}
 		expected := snapshot.xml
-		if sameWindowsEntrypointPath(priorShape.command, t.prior) {
-			expected, err = rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
+		if t.isPriorCommand(priorShape.command) {
+			expected, err = rewriteOwnedEntrypointTaskCommand(snapshot.xml, priorShape.command, t.runtime)
 			if err != nil {
 				return err
 			}
@@ -902,7 +940,7 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 		if shape.uri != name {
 			return nil, fmt.Errorf("XML URI mismatch for %q", name)
 		}
-		if !sameWindowsEntrypointPath(shape.command, t.prior) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
+		if !t.isPriorCommand(shape.command) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
 		live[name] = liveTask{shape: shape, raw: raw}

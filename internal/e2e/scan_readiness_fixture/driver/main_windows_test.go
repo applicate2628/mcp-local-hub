@@ -120,18 +120,10 @@ func TestFocusedPlainStatusDoesNotInventScanOnlyGeneration(t *testing.T) {
 }
 
 func TestClosedWitnessIsDurableAndRedactedBeforeRelease(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if port <= 10000 {
-		t.Fatalf("unexpected test port %d", port)
-	}
 	var g guestRun
 	witness := []byte(`{"released":false,"held":1,"canceled":1,"events":[{"kind":"initialize_held"},{"kind":"initialize_canceled"}],"secret":"must-not-export"}`)
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/fixture/release" || r.Method != http.MethodPost {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "127.0.0.1:28080" || r.URL.Path != "/fixture/release" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -142,11 +134,17 @@ func TestClosedWitnessIsDurableAndRedactedBeforeRelease(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	server.Listener.Close()
-	server.Listener = listener
-	server.Start()
 	defer server.Close()
-	g = guestRun{receiptDir: t.TempDir(), port: port - 10000, client: &http.Client{Timeout: time.Second}}
+	// Preserve the Product-to-fixture port offset in the request, but route
+	// the connection to the OS-assigned listener regardless of its port range.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var dialer net.Dialer
+		return dialer.DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	defer transport.CloseIdleConnections()
+	g = guestRun{receiptDir: t.TempDir(), port: 18080, client: &http.Client{Timeout: time.Second, Transport: transport}}
 	if err := g.releaseAfterWitness(context.Background(), witness); err != nil {
 		t.Fatal(err)
 	}
