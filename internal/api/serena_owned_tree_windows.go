@@ -40,6 +40,7 @@ func (h *serenaTreeHandle) closeOnce() (SerenaTreeClose, error) {
 type windowsSerenaOwnedTree struct {
 	readExisting                 bool
 	inventoryCloseError          error
+	cleanupParentErr             error
 	request                      SerenaOwnedTreeRequest
 	parent, root                 *serenaTreeHandle
 	parentIdentity, rootIdentity SerenaTreeObject
@@ -151,7 +152,26 @@ func acquireSerenaTreePlatformMode(ctx context.Context, r SerenaOwnedTreeRequest
 	w.rootIdentity, err = serenaTreeHandleIdentity(root, nil)
 	return result, err
 }
-func (w *windowsSerenaOwnedTree) checkRoot(ctx context.Context) error {
+func (w *windowsSerenaOwnedTree) parentPath() string {
+	branch := "generations"
+	if w.request.Kind == "attempt" {
+		branch = "attempts"
+	}
+	if w.request.Kind == "qualification" {
+		branch = "qualifications"
+	}
+	return filepath.Join(w.request.Namespace, w.request.PackageIdentitySHA256, branch)
+}
+
+func (w *windowsSerenaOwnedTree) checkRoot(ctx context.Context, policy *ConfigParentPolicyObservation, cleanup bool) error {
+	if ctx == nil {
+		return errors.New("SERENA_TREE_CONTEXT_REQUIRED")
+	}
+	if cleanup {
+		if err := validateSerenaTreeCleanupContext(ctx, w.request.AbsoluteCleanupDeadline); err != nil {
+			return err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -161,44 +181,126 @@ func (w *windowsSerenaOwnedTree) checkRoot(ctx context.Context) error {
 	if w.creation == nil || !w.creation.finalized || !w.creation.view.OwnedResourcesComplete || !w.creation.view.BorrowedResourcesComplete {
 		return errors.New("SERENA_TREE_ACQUISITION_RESOURCES_PENDING")
 	}
-	branch := "generations"
-	if w.request.Kind == "attempt" {
-		branch = "attempts"
-	}
-	if w.request.Kind == "qualification" {
-		branch = "qualifications"
-	}
-	if err := w.parentPolicy.Validate(ctx, filepath.Join(w.request.Namespace, w.request.PackageIdentitySHA256, branch), !w.readExisting); err != nil {
+	if err := policy.Validate(ctx, w.parentPath(), !w.readExisting && !cleanup); err != nil {
 		return err
 	}
 	p, err := serenaTreeHandleIdentity(w.parent.handle, nil)
 	if err != nil {
 		return err
 	}
-	if p.Device != w.parentIdentity.Device || p.FileID != w.parentIdentity.FileID {
+	if !sameSerenaNamespaceID(p, w.parentIdentity) || !namespaceIdentityMatches(p, policy.view.FinalIdentity) {
 		return errors.New("SERENA_TREE_PARENT_DRIFT")
 	}
 	r, err := serenaTreeHandleIdentity(w.root.handle, nil)
 	if err != nil {
 		return err
 	}
-	if r.Device != w.rootIdentity.Device || r.FileID != w.rootIdentity.FileID {
+	if !sameSerenaNamespaceID(r, w.rootIdentity) {
 		return errors.New("SERENA_TREE_ROOT_DRIFT")
 	}
 	return nil
 }
+
 func (w *windowsSerenaOwnedTree) workingDirectory(ctx context.Context) (string, error) {
-	if err := w.checkRoot(ctx); err != nil {
+	if err := w.checkRoot(ctx, w.parentPolicy, false); err != nil {
 		return "", err
 	}
-	branch := "generations"
-	if w.request.Kind == "attempt" {
-		branch = "attempts"
+	return filepath.Join(w.parentPath(), w.rootName), nil
+}
+
+// The original acquisition remains evidence for this retained capability. A
+// fresh, read-only observation receives cleanup's separate bounded context;
+// neither the original observation nor its work deadline is renewed.
+func (w *windowsSerenaOwnedTree) observeCleanupParent(ctx context.Context) (policy *ConfigParentPolicyObservation, retErr error) {
+	if w.readExisting {
+		return nil, errors.New("SERENA_PUBLISHED_READ_HAS_NO_CLEANUP_AUTHORITY")
 	}
-	if w.request.Kind == "qualification" {
-		branch = "qualifications"
+	if err := errors.Join(w.cleanupParentErr, w.inventoryCloseError); err != nil {
+		return nil, err
 	}
-	return filepath.Join(w.request.Namespace, w.request.PackageIdentitySHA256, branch, w.rootName), nil
+	if err := validateSerenaTreeCleanupContext(ctx, w.request.AbsoluteCleanupDeadline); err != nil {
+		return nil, err
+	}
+	if w.closeResult.Attempted || w.root == nil || w.parent == nil || w.root.close.Attempted || w.parent.close.Attempted {
+		return nil, errors.New("SERENA_TREE_ROOT_UNAVAILABLE")
+	}
+	if w.parentPolicy == nil {
+		return nil, errors.New("SERENA_TREE_PARENT_POLICY_UNQUALIFIED")
+	}
+	defer func() { w.cleanupParentErr = errors.Join(w.cleanupParentErr, retErr) }()
+	exists, policy, err := SecureConfigLockParentPolicyObserved(ctx, w.parentPath(), false)
+	if validationErr := policy.Validate(ctx, w.parentPath(), false); err != nil || validationErr != nil || !exists {
+		return nil, errors.Join(err, validationErr, errors.New("SERENA_TREE_CLEANUP_PARENT_UNQUALIFIED"))
+	}
+	if err := validateSerenaCleanupParentBinding(w.parentPolicy, policy, w.parentIdentity); err != nil {
+		return nil, err
+	}
+	return policy, nil
+}
+
+// This compares owner-issued bindings after the fresh observation's actual
+// Validate. Closed Known Folder observations have per-call issuers; a borrowed
+// namespace must keep the exact original issuer, so Close/reopen cannot revive
+// an old tree even with the same path, file ID, principal and source digest.
+func validateSerenaCleanupParentBinding(original, current *ConfigParentPolicyObservation, retained SerenaTreeObject) error {
+	if original == nil || current == nil || original.issuer == nil || current.issuer == nil ||
+		!original.finalized || !original.finishedInBound || !original.view.Complete || !original.view.ResourcesComplete ||
+		!current.finalized || !current.finishedInBound || !current.view.Complete || !current.view.ResourcesComplete ||
+		original.primaryErr != nil || original.cleanupErr != nil || current.primaryErr != nil || current.cleanupErr != nil {
+		return errors.New("SERENA_TREE_CLEANUP_PARENT_EVIDENCE_INCOMPLETE")
+	}
+	if original.path == "" || original.path != current.path || !original.view.Exists || !current.view.Exists ||
+		current.createMissing || current.view.CreateMissing || len(current.view.CreatedComponents) != 0 ||
+		!retained.Directory || !namespaceIdentityMatches(retained, original.view.FinalIdentity) || !namespaceIdentityMatches(retained, current.view.FinalIdentity) {
+		return errors.New("SERENA_TREE_CLEANUP_PARENT_BINDING_DIFFERS")
+	}
+	oldPolicy, newPolicy := original.policy, current.policy
+	if oldPolicy == nil || newPolicy == nil || oldPolicy.issuer == nil || newPolicy.issuer == nil ||
+		!oldPolicy.view.ResourcesComplete || !oldPolicy.view.BootstrapReadComplete || oldPolicy.view.FirstCause != nil ||
+		!newPolicy.view.ResourcesComplete || !newPolicy.view.BootstrapReadComplete || newPolicy.view.FirstCause != nil ||
+		oldPolicy.stateDir == "" || oldPolicy.stateDir != newPolicy.stateDir ||
+		oldPolicy.view.EnvIdentitySHA256 != newPolicy.view.EnvIdentitySHA256 ||
+		oldPolicy.view.EffectiveStrict && !newPolicy.view.EffectiveStrict {
+		return errors.New("SERENA_TREE_CLEANUP_POLICY_BINDING_DIFFERS")
+	}
+	// Acquisition separately admitted the final retained parent through the
+	// strict DACL gate, even when creating it needed a relaxed ancestor descent.
+	if current.view.GateDisposition != "strict-gate" {
+		return errors.New("SERENA_TREE_CLEANUP_PARENT_PROTECTION_WEAKENED")
+	}
+	oldRoot, newRoot := oldPolicy.resolution, newPolicy.resolution
+	if oldRoot == nil || newRoot == nil || oldRoot.issuer == nil || newRoot.issuer == nil ||
+		oldRoot.path != oldPolicy.stateDir || newRoot.path != newPolicy.stateDir ||
+		oldRoot.view.Schema != newRoot.view.Schema || oldRoot.view.Version != newRoot.view.Version ||
+		oldRoot.view.ReleaseKind != newRoot.view.ReleaseKind || oldRoot.view.PathSHA256 != newRoot.view.PathSHA256 ||
+		oldRoot.view.SourceSHA256 == "" || oldRoot.view.SourceSHA256 != newRoot.view.SourceSHA256 ||
+		oldRoot.principal == "" || oldRoot.principal != newRoot.principal {
+		return errors.New("SERENA_TREE_CLEANUP_NAMESPACE_BINDING_DIFFERS")
+	}
+	switch oldRoot.view.ReleaseKind {
+	case "CoTaskMemFree-void":
+		return nil
+	case "borrowed-retained-directory":
+		if oldRoot.issuer == newRoot.issuer {
+			return nil
+		}
+	}
+	return errors.New("SERENA_TREE_CLEANUP_NAMESPACE_OWNER_DIFFERS")
+}
+
+func inventorySerenaOwnedTreeForCleanup(ctx context.Context, tree *SerenaOwnedTree) (SerenaTreeInventory, error) {
+	if tree == nil {
+		return SerenaTreeInventory{}, errors.New("SERENA_TREE_CAPABILITY_MISSING")
+	}
+	owner, ok := tree.platform.(*windowsSerenaOwnedTree)
+	if !ok || owner == nil {
+		return SerenaTreeInventory{}, errors.New("SERENA_TREE_NATIVE_CAPABILITY_REQUIRED")
+	}
+	policy, err := owner.observeCleanupParent(ctx)
+	if err != nil {
+		return SerenaTreeInventory{}, err
+	}
+	return owner.inventoryWithParentPolicy(ctx, policy, true)
 }
 
 // Enumeration uses the installed Go1.27 handle-based Readdirnames. The new
@@ -214,9 +316,15 @@ func (w *windowsSerenaOwnedTree) directoryNames(ctx context.Context, h windows.H
 	}
 	f := os.NewFile(uintptr(duplicate), "serena-owned-directory")
 	if f == nil {
-		return nil, errors.Join(errors.New("SERENA_TREE_ENUMERATION_FILE"), windows.CloseHandle(duplicate))
+		closeErr := windows.CloseHandle(duplicate)
+		w.inventoryCloseError = errors.Join(w.inventoryCloseError, closeErr)
+		return nil, errors.Join(errors.New("SERENA_TREE_ENUMERATION_FILE"), closeErr)
 	}
-	defer func() { retErr = errors.Join(retErr, f.Close()) }()
+	defer func() {
+		closeErr := f.Close()
+		w.inventoryCloseError = errors.Join(w.inventoryCloseError, closeErr)
+		retErr = errors.Join(retErr, closeErr)
+	}()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -310,8 +418,12 @@ func serenaTreeContentHash(ctx context.Context, handle windows.Handle, before Se
 	}
 	return hex.EncodeToString(hash.Sum(nil)), ctx.Err()
 }
-func (w *windowsSerenaOwnedTree) inventory(ctx context.Context) (v SerenaTreeInventory, retErr error) {
-	if err := w.checkRoot(ctx); err != nil {
+func (w *windowsSerenaOwnedTree) inventory(ctx context.Context) (SerenaTreeInventory, error) {
+	return w.inventoryWithParentPolicy(ctx, w.parentPolicy, false)
+}
+
+func (w *windowsSerenaOwnedTree) inventoryWithParentPolicy(ctx context.Context, policy *ConfigParentPolicyObservation, cleanup bool) (v SerenaTreeInventory, retErr error) {
+	if err := w.checkRoot(ctx, policy, cleanup); err != nil {
 		return v, err
 	}
 	currentRoot, err := serenaTreeHandleIdentity(w.root.handle, nil)
@@ -392,9 +504,7 @@ func (w *windowsSerenaOwnedTree) inventory(ctx context.Context) (v SerenaTreeInv
 				}
 			}
 			_, closeErr := h.closeOnce()
-			if w.readExisting {
-				w.inventoryCloseError = errors.Join(w.inventoryCloseError, closeErr)
-			}
+			w.inventoryCloseError = errors.Join(w.inventoryCloseError, closeErr)
 			if err = errors.Join(readErr, closeErr); err != nil {
 				return err
 			}
@@ -405,7 +515,7 @@ func (w *windowsSerenaOwnedTree) inventory(ctx context.Context) (v SerenaTreeInv
 		return v, err
 	}
 	if w.readExisting {
-		if err := w.checkRoot(ctx); err != nil {
+		if err := w.checkRoot(ctx, policy, cleanup); err != nil {
 			return v, err
 		}
 		after, identityErr := serenaTreeHandleIdentity(w.root.handle, nil)
@@ -449,10 +559,11 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 		receipt.Error = retErr
 		w.removeResult = receipt
 	}()
-	if err := w.checkRoot(ctx); err != nil {
+	policy, err := w.observeCleanupParent(ctx)
+	if err != nil {
 		return receipt, err
 	}
-	before, err := w.inventory(ctx)
+	before, err := w.inventoryWithParentPolicy(ctx, policy, true)
 	receipt.Before = before
 	if err != nil {
 		return receipt, err
@@ -467,7 +578,7 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 		if survivor == nil || survivor.request.OperationID != w.request.OperationID || survivor.request.PackageIdentitySHA256 != w.request.PackageIdentitySHA256 {
 			return receipt, errors.New("SERENA_TREE_SURVIVOR_BINDING")
 		}
-		inventory, err := survivor.Inventory(ctx)
+		inventory, err := inventorySerenaOwnedTreeForCleanup(ctx, survivor)
 		if err != nil {
 			return receipt, err
 		}
@@ -557,7 +668,7 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 	if len(expected) != 0 {
 		return receipt, errors.New("SERENA_TREE_MISSING_ENTRY")
 	}
-	if err = w.checkRoot(ctx); err != nil {
+	if err = w.checkRoot(ctx, policy, true); err != nil {
 		return receipt, err
 	}
 	receipt.DeleteAttempts++
@@ -591,7 +702,7 @@ func (w *windowsSerenaOwnedTree) close() (SerenaTreeClose, error) {
 	w.closeResult.Attempted = true
 	_, a := w.root.closeOnce()
 	_, b := w.parent.closeOnce()
-	w.closeResult.Error = errors.Join(a, b, w.inventoryCloseError)
+	w.closeResult.Error = errors.Join(a, b, w.inventoryCloseError, w.cleanupParentErr)
 	if w.creation == nil || !w.creation.finalized || !w.creation.view.OwnedResourcesComplete || !w.creation.view.BorrowedResourcesComplete {
 		w.closeResult.Error = errors.Join(w.closeResult.Error, errors.New("SERENA_TREE_ACQUISITION_RESOURCES_PENDING"))
 	}
