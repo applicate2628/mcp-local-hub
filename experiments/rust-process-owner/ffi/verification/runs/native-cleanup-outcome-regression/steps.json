@@ -1,0 +1,107 @@
+[
+    {
+        "name":  "00-exit-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "matched":  true
+    },
+    {
+        "name":  "01-source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "02-source-status",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source status --short",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "03-go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "04-rust-version",
+        "command":  "rustc --version --verbose",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "05-normal-debug-absent",
+        "command":  "go test -tags ffi_native_faults . -run ^TestNativeCleanupQualificationExportAbsentFromOrdinaryDLL$ -count=1 -timeout=30s",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "05-normal-release-absent",
+        "command":  "go test -tags ffi_native_faults . -run ^TestNativeCleanupQualificationExportAbsentFromOrdinaryDLL$ -count=1 -timeout=30s",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "06-build-child",
+        "command":  "cargo build --manifest-path ../Cargo.toml --offline --locked --bin owner_child",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "07-debug-fixture-dll",
+        "command":  "cargo build --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "08-fixture-clippy",
+        "command":  "cargo clippy --offline --locked --all-targets -- -D warnings",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "09-release-fixture-dll",
+        "command":  "cargo build --release --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "10-debug-native-close",
+        "command":  "go test -race -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=3 -timeout=90s -v",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "10-release-native-close",
+        "command":  "go test -race -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=3 -timeout=90s -v",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "11-native-cgocheck2",
+        "command":  "go test -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=1 -timeout=60s",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    },
+    {
+        "name":  "12-native-go-vet",
+        "command":  "go vet -tags ffi_native_faults .",
+        "expected":  0,
+        "actual":  0,
+        "matched":  true
+    }
+]

@@ -96,3 +96,15 @@ and binary-reproducible builds are not implied.
 The runtime needed no change. Initial oracle/mutation-construction failures,
 three semantically failing negative controls, input hashes and grouped raw logs
 remain visible. Per-run binary identity is not confused with a later rebuild.
+
+## Shared outcome validation and post-merge admission delta
+
+[Outcome contract, findings and results](outcome-2026-11-14/RESULTS.md),
+[reproducible controlled-DLL runner](outcome-2026-11-14/run.ps1),
+[complete26-variant execution](runs/outcome-final/steps.json), and
+[merged-master admission gap](outcome-2026-11-14/ADMISSION-PARITY.md)
+are versioned. This fixes a caller decoder that accepted contradictory completion
+fields; no ordinary native-producer bug or hostile-DLL sandbox is claimed.
+Valid cleanup reports and actual protected-close failures have separate evidence.
+The baseline3-case RED is also reproducible from the exact pre-fix bridge commit,
+using a disposable caller copy, not by editing the working implementation.

@@ -1,0 +1,1 @@
+Command: cargo fmt --all -- --check UTC: 2026-11-14T19:13:50.7403822Z Expected exit: 0 Actual exit: 0

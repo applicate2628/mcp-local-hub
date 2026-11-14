@@ -1,0 +1,146 @@
+[
+    {
+        "case":  "unknown-state",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = 99; return status; }\n    status\n}",
+        "mutated_sha256":  "65758175758a18dcaf59ded420eb39dba2abe6dcf92f6debc0077e9666b5dc9d"
+    },
+    {
+        "case":  "unknown-flags",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.flags |= 4; return status; }\n    status\n}",
+        "mutated_sha256":  "e58e5a52ee2a88edfafd9c190eff26aacf4a1f83981252e097944064c0770f1d"
+    },
+    {
+        "case":  "missing-root",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.flags \u0026= !ROOT_KNOWN; out.root_exit = 0; return status; }\n    status\n}",
+        "mutated_sha256":  "92b8bb17b62fac51ca21385418e701603310bab1940e6e9e867609cfefd33cfc"
+    },
+    {
+        "case":  "unflagged-root",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = PENDING; out.flags = 0; return status; }\n    status\n}",
+        "mutated_sha256":  "2a49c691f5a4c689127107e6875945bb65e4d8e573c3576d37b297c6446d9292"
+    },
+    {
+        "case":  "unflagged-active",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.active = 1; return status; }\n    status\n}",
+        "mutated_sha256":  "97b6b2491ed2cf9bd595b47ec171387f85866301d4be494a5d377f1e56ccbb54"
+    },
+    {
+        "case":  "live-terminal",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.flags |= ACTIVE_KNOWN; out.active = 1; return status; }\n    status\n}",
+        "mutated_sha256":  "0b3383533a386142d15fe99d71b39a85b3ed99359df40d774db0d1652d4ede92"
+    },
+    {
+        "case":  "cleanup-on-complete",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.cleanup_mask = 1; out.cleanup_codes[0] = 5; return status; }\n    status\n}",
+        "mutated_sha256":  "13253bf53536e1596bd04f0ad7c53e4994cef318ad3066698e7c4797fb4b375e"
+    },
+    {
+        "case":  "cleanup-empty",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; return status; }\n    status\n}",
+        "mutated_sha256":  "aac25e90bc918b6d65b3506b3a3c6050a6bf36cc8240664011173c6f1e14cd3d"
+    },
+    {
+        "case":  "cleanup-no-code",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 1; return status; }\n    status\n}",
+        "mutated_sha256":  "b3fa0e7b9a09163cd554288b416241b56adfb79ee3f6f0c418fad1dfcd141518"
+    },
+    {
+        "case":  "cleanup-stray-code",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 1; out.cleanup_codes = [5,0,6]; return status; }\n    status\n}",
+        "mutated_sha256":  "59d30807b16f12c2f6917815554899930b742589da3d7bde1d74ff2201c4aeb3"
+    },
+    {
+        "case":  "cleanup-unknown-bit",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 8; return status; }\n    status\n}",
+        "mutated_sha256":  "7d91ffff3fb805a9d1f7ab99b38997dfbddc5d6da0fb52dc76e39ef53d9a5659"
+    },
+    {
+        "case":  "native-on-success",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.native_error = 87; return status; }\n    status\n}",
+        "mutated_sha256":  "d5751ae55691d1388d25514c6eb06e954307b9957e8ee3f8054884b79940de9f"
+    },
+    {
+        "case":  "finish-unknown",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = 0; return status; }\n    status\n}",
+        "mutated_sha256":  "9728ba60b854f2f5521647e06301e9f1a362a40dd2406d3651540a064b646e31"
+    },
+    {
+        "case":  "unknown-status",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { return 99;  }\n    status\n}",
+        "mutated_sha256":  "d390645a7551924d893010d53cf0c7362c368bbf3be4b026bc31aba8bfad37c8"
+    },
+    {
+        "case":  "native-no-code",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { return NATIVE;  }\n    status\n}",
+        "mutated_sha256":  "04f82280a59f65873585e7c489426707ec2b3f440c33823901e38f828e0ddda4"
+    },
+    {
+        "case":  "native-invalid-flags",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.flags |= 4; out.native_error = 87; return NATIVE;  }\n    status\n}",
+        "mutated_sha256":  "7fa210fb09db3cdc529e96481459200aff0d3bd9b28259b0baf978e859a3cfc9"
+    },
+    {
+        "case":  "bad-layout-native",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.version = 2; out.native_error = 87; return NATIVE;  }\n    status\n}",
+        "mutated_sha256":  "400ff73746aeb451bcc134b09ecb826896e3a9893a1090e577fb6166d165a0dd"
+    },
+    {
+        "case":  "valid-cleanup-1",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 1; out.cleanup_codes = [5,0,0]; return status; }\n    status\n}",
+        "mutated_sha256":  "536a39f43575a75a06f74c2c1547680945e40f525aee929e471a729ec96ac622"
+    },
+    {
+        "case":  "valid-cleanup-2",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 2; out.cleanup_codes = [0,6,0]; return status; }\n    status\n}",
+        "mutated_sha256":  "a7b77e458e6dead2e4f5cee5b274dad0b01d247fd806b6421c673456c1dfb965"
+    },
+    {
+        "case":  "valid-cleanup-3",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 3; out.cleanup_codes = [5,6,0]; return status; }\n    status\n}",
+        "mutated_sha256":  "55392ea618b46bb0d1fd2c8b8640980f0895418ed16d875493836d2f20c1de3e"
+    },
+    {
+        "case":  "valid-cleanup-4",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 4; out.cleanup_codes = [0,0,7]; return status; }\n    status\n}",
+        "mutated_sha256":  "174668f40fb43193166559642e2571cd16b1e705278fe5b867279c8615156231"
+    },
+    {
+        "case":  "valid-cleanup-5",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 5; out.cleanup_codes = [5,0,7]; return status; }\n    status\n}",
+        "mutated_sha256":  "716f4c8c0b4cbbd6327ed5a1fb636154d2c2ef49679c8c13cb855c8c1aba3dd9"
+    },
+    {
+        "case":  "valid-cleanup-6",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 6; out.cleanup_codes = [0,6,7]; return status; }\n    status\n}",
+        "mutated_sha256":  "fd6ae11f6cc88b5062637540029c2f6d0b92a656c5ea30d250a25c2b256c6e55"
+    },
+    {
+        "case":  "valid-cleanup-7",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.state = CLEANUP_FAILED; out.cleanup_mask = 7; out.cleanup_codes = [5,6,7]; return status; }\n    status\n}",
+        "mutated_sha256":  "b04821a0bdf836f34d7feeaf96bdbbeb9ac80161069da8036e1f0082f262de62"
+    }
+]

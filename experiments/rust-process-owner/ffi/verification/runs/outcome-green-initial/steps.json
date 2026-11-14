@@ -1,0 +1,418 @@
+[
+    {
+        "name":  "exit-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "rust-version",
+        "command":  "rustc --version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-unknown-state",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unknown-state",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-unknown-flags",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unknown-flags",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-root",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-missing-root",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-unflagged-root",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unflagged-root",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-unflagged-active",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unflagged-active",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-live-terminal",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-live-terminal",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-on-complete",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-on-complete",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-empty",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-empty",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-no-code",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-no-code",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-stray-code",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-stray-code",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-unknown-bit",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-unknown-bit",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-native-on-success",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-native-on-success",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-finish-unknown",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-finish-unknown",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-unknown-status",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unknown-status",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-native-no-code",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-native-no-code",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-native-invalid-flags",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-native-invalid-flags",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-bad-layout-native",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-bad-layout-native",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-1",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-1",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-2",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-2",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-3",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-3",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-4",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-4",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-5",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-5",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-6",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-6",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid-cleanup-7",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-green-initial\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-valid-cleanup-7",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "PASS",
+        "matched":  true
+    }
+]

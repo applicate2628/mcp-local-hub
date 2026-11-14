@@ -1,0 +1,31 @@
+[
+    {
+        "directory":  "qualification-outcome-red",
+        "report":  "runs/outcome-red",
+        "final_variant":  "bad-layout-native",
+        "verified_source_sha256":  "400ff73746aeb451bcc134b09ecb826896e3a9893a1090e577fb6166d165a0dd"
+    },
+    {
+        "directory":  "qualification-outcome-green-initial",
+        "report":  "runs/outcome-green-initial",
+        "final_variant":  "valid-cleanup-7",
+        "verified_source_sha256":  "b04821a0bdf836f34d7feeaf96bdbbeb9ac80161069da8036e1f0082f262de62"
+    },
+    {
+        "directory":  "qualification-outcome-red-reproducible",
+        "report":  "runs/outcome-red-reproducible",
+        "final_variant":  "bad-layout-native",
+        "verified_source_sha256":  "400ff73746aeb451bcc134b09ecb826896e3a9893a1090e577fb6166d165a0dd"
+    },
+    {
+        "directory":  "qualification-outcome-final",
+        "report":  "runs/outcome-final",
+        "final_variant":  "valid-cleanup-7",
+        "verified_source_sha256":  "b04821a0bdf836f34d7feeaf96bdbbeb9ac80161069da8036e1f0082f262de62"
+    },
+    {
+        "directory":  "qualification-native-cleanup-outcome-regression",
+        "report":  "runs/native-cleanup-outcome-regression",
+        "verified":  "full instrumented-source manifest"
+    }
+]

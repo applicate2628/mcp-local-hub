@@ -1,0 +1,5 @@
+Command: go test -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=1 -timeout=60s
+Expected exit: 0
+Actual exit: 0
+
+ok  	mcphub-owner-ffi-caller	0.470s

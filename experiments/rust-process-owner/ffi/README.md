@@ -58,6 +58,41 @@ Exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and
 
 Bounds are explicit experimental budgets: no more than 64 argument views, no embedded NUL, at most 32,766 UTF-16 units per string and in the combined executable/cwd/argument input. Finite wait accepts 0..60,000 milliseconds. These are not claims about universal OS or SDK limits. The explicit environment has a separate total block budget below; streaming buffers and arbitrary long-lived asynchronous calls remain outside this ABI slice. Explicit stdio is a borrowed native-handle view, not a shared buffer protocol.
 
+### Returned-outcome validation
+
+The common Go decoder now checks ABI1 header size/version on **every** return
+status, then checks the defined state/flag/code relationships. It rejects unknown
+statuses/states/flags/cleanup slots, unflagged values, terminal states with no
+known root or with active members, and cleanup masks inconsistent with their
+codes. A successful `Finish` must include a real settlement state, not UNKNOWN.
+These checks clarify the existing zero-initialized ABI1 value contract; layouts,
+exported functions and the Rust owner are unchanged.
+
+`ErrInvalidOutcome` means the returned `Outcome` is zero because it is **not a
+trusted observation**, not because no effect occurred. A separately returned
+nonzero call status is preserved. An OS error field is retained only where its
+layout is recognized and its status identifies a native failure; an unknown
+layout does not authorize interpreting that field. Typed `CallError` and the
+protocol failure remain discoverable with `errors.As`/`errors.Is`.
+
+Ownership transfer and an already cleared release slot remain independent of
+response validity. Do not retry creation, discard an owner, or infer that a
+resource remains allocated solely from an error response. Valid CleanupFailed
+reports with any of the seven nonempty thread/process/Job masks are accepted
+without turning them into Complete or losing exit259 and the individual codes.
+
+The [outcome report](verification/outcome-2026-11-14/RESULTS.md) distinguishes
+17 deliberately inconsistent return variants, seven valid serialized cleanup
+reports, two prior handoff regressions, and separately repeated **actual**
+Windows close-failure tests. The fixture DLL changes only return values after
+real native settlement; it is not evidence that the ordinary Rust producer
+emitted those contradictions and not protection from hostile in-process code.
+
+The [merged-master admission comparison](verification/outcome-2026-11-14/ADMISSION-PARITY.md)
+records that #616 is now merged. The original PID/image observation still lacks
+fields required by the accepted Go creator-identity contract. Those are explicit
+remaining gates, not permissions to fill missing identity with defaults.
+
 ## Explicit environment
 
 `NewWithEnvironment(program, cwd, args, []EnvironmentEntry{{Name, Value}, ...})`
@@ -272,8 +307,9 @@ test assumption and invalid first mutation attempt, both preserved as failures.
 
 | Layer | What it establishes | What it does not establish |
 |---|---|---|
-| 47 normal Go integration test functions (including 8 cancelable-observation and 5 I/O-lifecycle functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes, cancelable observation, original-result preservation and owned pipe completion | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
+| 49 normal Go test functions (47 existing functions plus 2 outcome-value contract functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes, cancelable observation, original-result preservation and owned pipe completion and consistent outcome values | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
 | 14 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
+| Optional `ffi_outcome_faults` and prior handoff regressions | Real foreign calls reject inconsistent serialized outcomes, preserve valid cleanup reports and retain allocation custody after late metadata errors | Native producer spontaneously emitting those contradictions, hostile-native-code isolation or new kernel-failure injection |
 | Existing owner suite | Unchanged native owner behavior against its own full tests | Calling-boundary properties by itself |
 | Optional `ffi_faults` tests | Ownership-transfer bookkeeping even when an owned test DLL reports malformed create/release metadata | A guarantee that hostile/broken arbitrary native code is safe |
 

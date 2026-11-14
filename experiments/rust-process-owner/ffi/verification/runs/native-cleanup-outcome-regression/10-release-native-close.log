@@ -1,0 +1,144 @@
+Command: go test -race -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=3 -timeout=90s -v
+Expected exit: 0
+Actual exit: 0
+
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.40s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.02s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.39s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.02s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.02s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.02s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=1 OS-codes=[6 0 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=2 OS-codes=[0 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=3 OS-codes=[6 6 0]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=4 OS-codes=[0 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=5 OS-codes=[6 0 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=6 OS-codes=[0 6 6]
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+    native_cleanup_windows_test.go:214: native result: state=3 root=259 mask=7 OS-codes=[6 6 6]
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.53s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	2.428s

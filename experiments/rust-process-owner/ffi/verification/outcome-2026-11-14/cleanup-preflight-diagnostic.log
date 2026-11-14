@@ -1,0 +1,10 @@
+Read-only cleanup preflight diagnostics before movement:
+1. PowerShell array wrapping selected all three JSON mutation records rather
+   than one last record; the comparison refused the copy. Explicit enumeration
+   showed expected and actual last-source SHA256 both equal:
+   400ff73746aeb451bcc134b09ecb826896e3a9893a1090e577fb6166d165a0dd.
+2. The replacement diagnostic command used an undefined encoding variable;
+   WriteAllText rejected it before any Move-Item. The durable retirement script
+   now constructs UTF8Encoding at its write site and reads JSON explicitly.
+No source/fixture was moved on either failed preflight. Identity checks were
+not bypassed. The completed retirement receipt records subsequent verified moves.

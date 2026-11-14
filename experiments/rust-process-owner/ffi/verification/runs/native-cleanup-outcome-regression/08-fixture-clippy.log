@@ -1,0 +1,9 @@
+Command: cargo clippy --offline --locked --all-targets -- -D warnings
+Expected exit: 0
+Actual exit: 0
+
+    Checking windows-link v0.2.1
+    Checking windows-sys v0.61.2
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-outcome-regression\native)
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-native-cleanup-outcome-regression\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.12s

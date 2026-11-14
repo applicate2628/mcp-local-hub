@@ -1,0 +1,558 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T19:10:58.5801059Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T19:10:58.6381164Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+085a47fe165bc4be5fcc6ea6d35e2e8dc5c0b449
+Step: go-version
+Command: go version
+UTC: 2026-11-14T19:10:58.6921292Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: rust-version
+Command: rustc --version
+UTC: 2026-11-14T19:10:58.7527339Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+Step: build-unknown-state
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:00.2424247Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.43s
+Step: test-unknown-state
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:07.1624457Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.099s
+Step: build-unknown-flags
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:07.5241178Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+Step: test-unknown-flags
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:10.0370699Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.10s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.05s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.05s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.139s
+Step: build-missing-root
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:10.4359875Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+Step: test-missing-root
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:12.7145832Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.06s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.085s
+Step: build-unflagged-root
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:13.0614257Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+Step: test-unflagged-root
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:15.3452280Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.080s
+Step: build-unflagged-active
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:15.6233659Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+Step: test-unflagged-active
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:17.8581360Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.06s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.097s
+Step: build-live-terminal
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:18.2336469Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+Step: test-live-terminal
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:20.8465776Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.100s
+Step: build-cleanup-on-complete
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:21.2667334Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+Step: test-cleanup-on-complete
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:23.7266675Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.081s
+Step: build-cleanup-empty
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:24.0340424Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+Step: test-cleanup-empty
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:26.3696445Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.093s
+Step: build-cleanup-no-code
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:26.6852985Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+Step: test-cleanup-no-code
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:29.1405901Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.06s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.093s
+Step: build-cleanup-stray-code
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:29.4807400Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-cleanup-stray-code
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:31.7898702Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.101s
+Step: build-cleanup-unknown-bit
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:32.1053679Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+Step: test-cleanup-unknown-bit
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:34.3665498Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.080s
+Step: build-native-on-success
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:35.2405502Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.81s
+Step: test-native-on-success
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:37.7464797Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.097s
+Step: build-finish-unknown
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:38.0851542Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-finish-unknown
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:40.3811234Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.07s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.091s
+Step: build-unknown-status
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:40.7131875Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+Step: test-unknown-status
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:42.9221322Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.02s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.081s
+Step: build-native-no-code
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:43.2666835Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-native-no-code
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:45.8514156Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.06s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.093s
+Step: build-native-invalid-flags
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:46.2225664Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+Step: test-native-invalid-flags
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:48.4845204Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.06s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.092s
+Step: build-bad-layout-native
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:48.8111617Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+Step: test-bad-layout-native
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:51.3438363Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+--- PASS: TestOutcomeRejectsContradictoryMetadata (0.10s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/finite (0.04s)
+    --- PASS: TestOutcomeRejectsContradictoryMetadata/context (0.06s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.179s
+Step: build-valid-cleanup-1
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:51.7639077Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.36s
+Step: test-valid-cleanup-1
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:54.5867429Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.07s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.098s
+Step: build-valid-cleanup-2
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:54.9389526Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+Step: test-valid-cleanup-2
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:11:57.2598445Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.07s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.099s
+Step: build-valid-cleanup-3
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:11:57.6392084Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+Step: test-valid-cleanup-3
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:12:00.0175643Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.07s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.096s
+Step: build-valid-cleanup-4
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:12:00.3597708Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-valid-cleanup-4
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:12:02.6977156Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.06s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.084s
+Step: build-valid-cleanup-5
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:12:03.0401379Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-valid-cleanup-5
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:12:05.3768558Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.07s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.097s
+Step: build-valid-cleanup-6
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:12:05.7471994Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+Step: test-valid-cleanup-6
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:12:08.0961628Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.07s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.098s
+Step: build-valid-cleanup-7
+Command: cargo build --manifest-path <LAB>\qualification-outcome-green-initial\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:12:08.4997660Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-green-initial\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+Step: test-valid-cleanup-7
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomePreservesValidCleanupReport$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:12:10.8384783Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestOutcomePreservesValidCleanupReport
+=== RUN   TestOutcomePreservesValidCleanupReport/finite
+=== RUN   TestOutcomePreservesValidCleanupReport/context
+--- PASS: TestOutcomePreservesValidCleanupReport (0.05s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/finite (0.03s)
+    --- PASS: TestOutcomePreservesValidCleanupReport/context (0.02s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.083s

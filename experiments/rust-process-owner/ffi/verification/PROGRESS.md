@@ -339,3 +339,55 @@ PowerShell default encoding. Explicit UTF-8 matched its name and unchanged hash;
 no movement preceded that correction. Diagnostic record preserved. Seven
 verified completed fixture/source copies then moved directly to approved trash;
 normal targets/cache/source/results retained, no deletion or trash emptying.
+
+## Outcome boundary validation - 2026-11-14
+
+Base085a47fe165bc4be5fcc6ea6d35e2e8dc5c0b449 verified on private631 clone.
+Live readback:616 merged as17bc78fc602efa204a74596409c939a3bf1ddc42.
+CreatorIdentitySnapshot at that exact commit requires birth, owner SID,
+Job membership and wait/liveness consistency; the current Rust admission view
+still exports only original PID/image. Record the gap; do not invent a weaker
+replacement or rebase the experimental family without integration review.
+Ruling: qualify and fix the shared outcome decoder before adding more fields.
+Current Go result() checks layout only on status0 and accepts contradictory
+state/flags/cleanup fields. Hypothesis: inconsistent DLL response can be
+returned as successful completion. Not a claim that ordinary Rust emits it,
+or that in-process hostile code can be sandboxed. Tests use OWNED processes.
+Contract: validate layout on every status; reject unknown enums/flags and
+contradictory validity/cleanup data. Invalid metadata yields no trusted Outcome;
+retain independent call-status/native code only where its layout is known.
+Owner-transfer and cleared-slot release facts remain independent; no retry.
+Test return mutations in isolated Rust copies, ordinary source/DLL unchanged.
+Positive cleanup codes prove mapping, not actual kernel close failure.
+All results committed; no installs/COM/Python/paid models/merge/release/CI dispatch.
+Initial task command had a PowerShell quoted-pipeline typo: parser rejected the
+whole command before writes. Corrected command executed below, no source defect.Outcome RED confirmed on actual foreign calls: unknown flags and cleanup failure
+attached to COMPLETE returned nil error; incompatible layout on native-failure
+status bypassed layout validation. Controlled DLLs changed only serialization
+after the real child settled. Original native implementation is not claimed to
+emit these states; no hostile-DLL sandbox is implied.
+Shared decoder now validates all statuses and known ABI1 value relationships,
+with a typed protocol sentinel. Invalid observation is not exposed as trusted
+state. Layout-known native code and separately returned call status are kept;
+unknown layouts do not authorize reading a supposedly native-code field.
+Transferred allocation/cleared-slot facts remain independent of decoder errors.
+Initial full matrix passed24 variants (17 invalid,7 valid cleanup masks), each
+through finite Finish and FinishContext. Tests assert release/unload custody and
+real child effects, not just an error string. Valid mask tests are mapping proof,
+NOT induced Windows kernel close failures. No native Rust behavior was changed.
+Outcome implementation commit: 4ebca16f53c4fc3ad4b07c47455745ff5fb58951. Full ordinary suite and initial24 foreign variants passed before commit; checked source hashes matched. Only five Go/header files, no ordinary Rust/parent625 or dependency change. Qualification records follow in a separate commit.
+
+Final outcome26 variants passed all56 expected runner steps on implementation
+4ebca16. Exact-old-decoder replay again failed the three semantic oracles, not
+compilation. Both prior allocation handoff regressions passed. Actual protected
+native close failures also passed through the new decoder (all7 masks, both
+Finish forms/debug/release/race) with unchanged normal DLLs during that runner.
+Final ordinary suite49 top-level/63 nested/0 skip, ABI14 and native53 debug/release,
+race x3, cgocheck2/vet/Clippy/fmt passed; exact source manifests matched.
+Eleven read/applied skills and concrete self-review are recorded in RESULTS.
+Current #616 merged-master identity delta is documented without rebase/merge or
+invented default fields. Full product admission and Unix remain open.
+Five completed disposable copies verified and moved directly to approved trash.
+JSON array-wrapping and an undefined encoding variable initially blocked preflight;
+no movement before corrected explicit identity checks. Diagnostics preserved.
+Normal targets/cache/source and unique results retained; trash not emptied.

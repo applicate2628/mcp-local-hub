@@ -1,0 +1,10 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T19:21:14.7655249Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/verification/outcome-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/native-cleanup-outcome-regression/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-final/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-green-initial/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-ordinary-final/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-ordinary-implementation/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-red-reproducible/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-red/

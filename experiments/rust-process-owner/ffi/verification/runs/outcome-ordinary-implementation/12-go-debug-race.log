@@ -1,0 +1,2 @@
+Command: go test -race . -count=3 -timeout=90s UTC: 2026-11-14T19:13:51.7316735Z Expected exit: 0 Actual exit: 0
+ok  	mcphub-owner-ffi-caller	4.847s
