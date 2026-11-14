@@ -241,7 +241,10 @@ func (w *windowsSerenaOwnedTree) directoryNames(ctx context.Context, h windows.H
 	sort.Strings(names)
 	return names, nil
 }
-func (w *windowsSerenaOwnedTree) openEntry(parent windows.Handle, name string) (*serenaTreeHandle, error) {
+func (w *windowsSerenaOwnedTree) openEntry(parent windows.Handle, name string, forRemoval bool) (*serenaTreeHandle, error) {
+	if forRemoval && w.readExisting {
+		return nil, errors.New("SERENA_PUBLISHED_READ_HAS_NO_DELETE_AUTHORITY")
+	}
 	if !serenaTreeName(name) {
 		return nil, errors.New("SERENA_TREE_NAME_INVALID")
 	}
@@ -249,11 +252,23 @@ func (w *windowsSerenaOwnedTree) openEntry(parent windows.Handle, name string) (
 	if !w.readExisting {
 		access |= windows.DELETE
 	}
+	if forRemoval {
+		access |= windows.FILE_WRITE_ATTRIBUTES
+	}
 	h, err := ntOpenStateReadRelativeMode(parent, name, access, nil, windows.FILE_OPEN, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil)
 	if err != nil {
 		return nil, err
 	}
 	return &serenaTreeHandle{handle: h}, nil
+}
+
+// Unlink owned readonly Git objects without clearing shared inode attributes.
+// No POSIX or ON_CLOSE modifier is used: ordinary close/absence checks remain.
+// The original removal handle must also have FILE_WRITE_ATTRIBUTES access.
+func setSerenaOwnedTreeEntryDeleteOnClose(handle windows.Handle) error {
+	flags := uint32(windows.FILE_DISPOSITION_DELETE | windows.FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE)
+	var iosb windows.IO_STATUS_BLOCK
+	return windows.NtSetInformationFile(handle, &iosb, (*byte)(unsafe.Pointer(&flags)), uint32(unsafe.Sizeof(flags)), windows.FileDispositionInformationEx)
 }
 
 func (w *windowsSerenaOwnedTree) observeStreams(ctx context.Context, handle windows.Handle) ([]SerenaTreeStream, error) {
@@ -343,7 +358,7 @@ func (w *windowsSerenaOwnedTree) inventory(ctx context.Context) (v SerenaTreeInv
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			h, err := w.openEntry(parent, name)
+			h, err := w.openEntry(parent, name, false)
 			if err != nil {
 				return err
 			}
@@ -512,7 +527,7 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 				}
 				want.Links -= removed
 			}
-			h, err := w.openEntry(parent, name)
+			h, err := w.openEntry(parent, name, true)
 			if err != nil {
 				return err
 			}
@@ -528,14 +543,14 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 			}
 			if err == nil {
 				receipt.DeleteAttempts++
-				err = setFileDeleteOnClose(h.handle)
+				err = setSerenaOwnedTreeEntryDeleteOnClose(h.handle)
 			}
 			closed, closeErr := h.closeOnce()
 			receipt.Closes = append(receipt.Closes, closed)
 			if err = errors.Join(err, closeErr); err != nil {
 				return err
 			}
-			probe, probeErr := w.openEntry(parent, name)
+			probe, probeErr := w.openEntry(parent, name, false)
 			if probeErr == nil {
 				c, e := probe.closeOnce()
 				receipt.Closes = append(receipt.Closes, c)
@@ -570,7 +585,7 @@ func (w *windowsSerenaOwnedTree) remove(ctx context.Context, closure PreparedSer
 		return receipt, err
 	}
 	receipt.Removed = true
-	probe, probeErr := w.openEntry(w.parent.handle, w.rootName)
+	probe, probeErr := w.openEntry(w.parent.handle, w.rootName, false)
 	if probeErr == nil {
 		c, e := probe.closeOnce()
 		receipt.Closes = append(receipt.Closes, c)
