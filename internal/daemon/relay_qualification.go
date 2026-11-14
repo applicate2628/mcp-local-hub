@@ -116,6 +116,14 @@ type mcpHTTPQualificationOwner struct {
 func qualificationSHA(raw []byte) string { v := sha256.Sum256(raw); return hex.EncodeToString(v[:]) }
 func qualificationDigest(v string) bool  { b, e := hex.DecodeString(v); return e == nil && len(b) == 32 }
 func (b MCPHTTPQualificationBinding) validate(ctx context.Context, endpoint string) error {
+	if err := b.validateBinding(ctx, endpoint); err != nil {
+		return err
+	}
+	return b.EndpointSource.ValidateOriginalEndpoint(ctx, b.EndpointSHA256, b.HostStartSHA256)
+}
+
+// Static binding checks grant no live endpoint or native-close authority.
+func (b MCPHTTPQualificationBinding) validateBinding(ctx context.Context, endpoint string) error {
 	if ctx == nil || ctx.Err() != nil {
 		return errors.New("MCP_QUALIFICATION_CONTEXT_INVALID")
 	}
@@ -134,7 +142,7 @@ func (b MCPHTTPQualificationBinding) validate(ctx context.Context, endpoint stri
 	if e != nil || u.Scheme != "http" || u.User != nil || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" || qualificationSHA([]byte(endpoint)) != b.EndpointSHA256 {
 		return errors.New("MCP_QUALIFICATION_ENDPOINT_INVALID")
 	}
-	return b.EndpointSource.ValidateOriginalEndpoint(ctx, endpoint, b.HostStartSHA256)
+	return nil
 }
 func qualificationBindingSHA(b MCPHTTPQualificationBinding) string {
 	raw, _ := json.Marshal(struct{ OperationID, QualificationID, RequestIdentitySHA256, GenerationID, SourceSHA256, HostStartSHA256, EndpointSHA256 string }{b.OperationID, b.QualificationID, b.RequestIdentitySHA256, b.GenerationID, b.SourceSHA256, b.HostStartSHA256, b.EndpointSHA256})
@@ -516,7 +524,9 @@ func (o *MCPHTTPQualificationObservation) Validate(ctx context.Context, b MCPHTT
 	if o == nil || o.owner == nil || !reflect.DeepEqual(o.owner.binding, b) {
 		return errors.New("MCP_QUALIFICATION_BINDING_DRIFT")
 	}
-	if e := b.validate(ctx, o.owner.relay.URL); e != nil {
+	// The completed exchange retains its binding. HTTPHost separately receives
+	// the original endpoint's closure before the API receives qualification.
+	if e := b.validateBinding(ctx, o.owner.relay.URL); e != nil {
 		return e
 	}
 	return o.ReceiveClose(ctx, o.owner.close)
