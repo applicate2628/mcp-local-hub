@@ -1,0 +1,7 @@
+Command: go test . -run ^TestFinishContextRootExitDoesNotImplyDescendantSettlement$ -count=1 -timeout=45s -v Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:24:51.5901736Z Expected exit: 1 Actual exit: 1 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+    finish_context_windows_test.go:185: known root/remaining child lost: {State:0 Flags:0 PID:0 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} context deadline exceeded
+--- FAIL: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.10s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.125s
+FAIL

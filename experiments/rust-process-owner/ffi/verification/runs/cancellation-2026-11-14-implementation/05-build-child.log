@@ -1,0 +1,2 @@
+Command: cargo build --manifest-path ../Cargo.toml --offline --locked --bin owner_child UTC: 2026-11-14T08:30:56.7839400Z Expected exit: 0 Actual exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s

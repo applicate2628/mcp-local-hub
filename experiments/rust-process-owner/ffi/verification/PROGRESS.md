@@ -147,3 +147,74 @@ Ordinary source handles and input bytes remain caller-owned. Temporary-copy
 close failure is reported but not claimed fully recovered. Remaining major
 steps: full product identity policy; blocking I/O/cancel/drain/join; broader
 handle profiles/inheritance coordination; native Unix and independent review.
+## Context-aware settlement and pipe termination - 2026-11-14
+
+Base0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 verified clean on own631 clone.
+Ruling: stdio/non-inheritable conversion is already committed; do not repeat it.
+This increment separates canceling a wait from canceling the owned operation.
+Add FinishContext(ctx) as a non-destructive observation loop over existing
+Finish(0), with cancelable acquisition of the existing Go owner mutex. No extra
+waiter goroutine or native thread, no hidden Stop/Release/file-close/retry.
+A canceled observer keeps its last known outcome and cause; no fabricated
+terminal state. Actual native terminal/error results remain visible. A native
+call already entered is not force-interrupted, no hard latency bound claimed.
+
+Rejected alternatives: background goroutine around Finish(60000) would survive
+the request; automatic kill-on-context would replace product policy; replacing
+all mutexes/native waits is an unrelated rewrite. Timed TryLock probing checks
+no owner state without acquiring it and yields between attempts.
+
+Qualify real caller-owned pipe read/write termination separately: effects before
+safety cleanup, original handles only, bounded payloads and joined goroutines.
+Normal EOF must preserve final bytes; a blocked I/O owner is not proof that the
+process stopped or that cancellation of observation interrupted I/O.
+Parent625 library/API/manifest/lock and product files remain unchanged. All
+sources, negative/positive logs, exact commands and remaining limits go to PR.
+Scoped complete experimental suites are gates; no blanket Hub tests, installation,
+external agents/models, merge or workflow dispatch. Existing caches only.
+Native I/O first run exposed two test assumptions, not a library defect:
+PeekNamedPipe can report a whole queued Write while that operation is still
+pending, and this Windows os.Pipe rejects SetReadDeadline. Tests now observe
+completion separately and use their actual endpoint owner's Close+join as the
+failure cleanup, not a presumed deadline feature. Original failing log retained.
+Local installed Go source confirmed pipe-specific CancelIoEx+join in Close;
+this is then exercised natively, not generalized to all File/Reader/Writer types.
+Read-only source lookup initially had a PowerShell quoting/path typo; corrected
+with go env GOROOT and the actual file_windows.go, no installed source changed.
+Cancelable observation implementation and thirteen new selected tests passed.
+Negative controls replacing TryLock with blocking Lock, adding implicit Stop,
+and erasing the last observed outcome each failed the intended tests. Sources
+were restored exactly; the same selected native/race suite passed again.
+Self-review: keep a single native owner and one result mapper; no added worker,
+native ABI change, scheduler, finalizer or automatic failure policy. The 10ms
+timer is a polling choice, not a latency/throughput guarantee. Actual terminal
+and cleanup-failed state remains distinct; cancellation does not erase effects.
+README now distinguishes native settlement, root exit, I/O operation completion
+and drain/EOF. Two legacy control characters in README arrow text were normalized
+to ASCII; no historical evidence log was rewritten or test input changed.Full cancellation implementation run completed:47 Go top-level functions,
+31 nested cases,0 skips; debug/release DLL race x3, cgocheck2/vet, unchanged
+14 ABI unit tests and53 native-parent tests in debug/release, Clippy/fmt all
+matched expected exits. All22 runner steps matched, including deliberate exit7
+control. Runner source manifest matches current implementation bytes.
+Code commit contains only four Go files (shared locked mapper, context observer,
+and two test files). Documentation/raw evidence is committed separately; working
+source was an explicit overlay on0bcb5f0a, not a fictional clean future commit.
+Implementation commit: e973ee2eabb638b6a0372066b6381484ce015dc9
+Final negative-runner self-review strengthened implicit-stop injection from a
+single context-select branch to every cancellation return. This removes a
+scheduler-choice dependency in reproducing the wrong behavior; actual code and
+passed full-suite source bytes are unchanged. Earlier negative1 evidence remains.Final committed-code full runner completed on e973ee2:47 top-level Go tests,
+31 nested cases,0 skips;14 ABI unit tests;53 native-parent checks; debug/release,
+race x3, cgocheck2/vet/Clippy/fmt and all22 expected exits passed. Code/runner
+hashes independently matched. Stronger negative-final run detected all three
+wrong behaviors, restored code bytes and passed13 selected native/race cases.
+Skills13 actually applied and their concrete contribution are recorded in
+cancellation-2026-11-14/RESULTS.md. This is self-review, not independent review.
+No product/parent source, dependency or installation changed; native Unix and
+complete product I/O policy remain open. Required results are staged for PR,
+not left as references to an unversioned local folder.Prepublication evidence-only check caught CRLF/trailing whitespace in two new
+records. Reproduced failure and original/normalized hashes preserved; normalized
+line endings/trailing whitespace only. No source changes or reclassified tests.
+A second evidence-only check caught ConvertTo-Json CRLF in the newly generated
+normalization manifest. Repeated failure preserved; normalized through the same
+text writer. This did not change code, test values or source qualifications.

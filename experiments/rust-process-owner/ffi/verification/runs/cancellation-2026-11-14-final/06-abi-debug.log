@@ -1,0 +1,28 @@
+Command: cargo test --offline --locked UTC: 2026-11-14T08:35:50.2649139Z Expected exit: 0 Actual exit: 0
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_owner_ffi_spike-54361ecab3c15622.exe)
+
+running 14 tests
+test tests::environment_bounds_reject_before_dereferencing_entry_strings ... ok
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::native_invalid_parameter_code_survives_create_classification ... ok
+test tests::environment_values_are_owned_and_preserve_raw_windows_units ... ok
+test tests::stdio_context_layout_matches_the_c_header ... ok
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::environment_layout_and_empty_view_match_the_c_contract ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::extended_environment_request_rejects_wrong_size_without_creation ... ok
+test tests::stdio_context_rejects_wrong_size_and_null_before_acquisition ... ok
+test tests::stdio_sentinels_are_rejected_before_forming_native_borrows ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

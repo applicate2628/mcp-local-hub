@@ -1,0 +1,10 @@
+Command: go test . -run ^Test(FinishContextDeadlineRetainsSuspendedOwner|IOCanceledObserverCanResumeNormalDrainWithoutStop)$ -count=1 -timeout=45s -v Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:24:44.5372971Z Expected exit: 1 Actual exit: 1 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+    finish_context_windows_test.go:112: owner ABI status=5 native=0
+--- FAIL: TestFinishContextDeadlineRetainsSuspendedOwner (0.05s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+    io_lifecycle_windows_test.go:201: native settlement: {State:2 Flags:1 PID:134028 RootExit:93 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.06s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.131s
+FAIL

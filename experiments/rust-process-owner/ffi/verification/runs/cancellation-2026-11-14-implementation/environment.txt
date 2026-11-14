@@ -1,0 +1,5 @@
+OS=Microsoft Windows NT 10.0.26100.0
+Architecture=AMD64
+GOMAXPROCS=4
+Offline=true
+Source overlay, if any, identified by hashes and status log

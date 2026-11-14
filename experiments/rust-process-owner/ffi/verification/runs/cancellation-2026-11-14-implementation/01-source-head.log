@@ -1,0 +1,2 @@
+Command: git -C <LAB>\source rev-parse HEAD UTC: 2026-11-14T08:30:56.0727126Z Expected exit: 0 Actual exit: 0
+0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7

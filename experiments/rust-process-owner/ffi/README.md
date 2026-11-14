@@ -10,9 +10,10 @@
 4. [Explicit standard streams](#explicit-standard-streams)
 5. [Checked original-process admission](#checked-original-process-admission)
 6. [Memory, concurrency and failures](#memory-concurrency-and-failures)
-7. [Evidence](#evidence)
-8. [Reproduction](#reproduction)
-9. [Remaining gates and references](#remaining-gates-and-references)
+7. [Cancelable observation and pipe settlement](#cancelable-observation-and-pipe-settlement)
+8. [Evidence](#evidence)
+9. [Reproduction](#reproduction)
+10. [Remaining gates and references](#remaining-gates-and-references)
 
 ## Scope and ownership
 
@@ -186,7 +187,7 @@ Input text and view arrays are allocated on the **C heap**, not pinned long-live
 
 Non-null pointers must identify real, aligned, initialized input allocations of the declared length. Output storage must be writable and disjoint. The owner pointer must be live and uniquely operated on, with no concurrent release, aliases or use after release. Checking null/alignment/length does **not** establish arbitrary pointer validity or make malicious native callers safe. There is no speculative global owner registry. The Go wrapper provides a mutex and clears its pointer; raw C callers must obey the same lifetime and exclusivity contract themselves. Go `Owner` and `Library` values must not be copied.
 
-`Finish` is synchronous and bounded, with the owner's lock held. It cannot be interrupted by a Go context while already inside native wait; concurrent stop waits its turn. A product cancellation adapter must select polling/budgets or a separately qualified design rather than claim this is cancellable asynchronous I/O.
+`Finish(milliseconds)` retains its synchronous bounded-wait contract with the owner lock held. An already entered native call is not forcibly interrupted by Go. Additive `FinishContext(ctx)` now offers non-destructive cancellation of observation through zero-timeout native probes; it does not convert arbitrary I/O or policy callbacks into cancelable work. See [the separate observation/operation contract](#cancelable-observation-and-pipe-settlement).
 
 **Late result errors do not erase ownership facts.** If native creation transfers a non-null owner but response metadata is invalid, `New` returns **both that owner and an error**. The caller must retain any non-null owner even on error; it may not retry the operation. If release clears the slot but its response is malformed, Go still updates its live-owner count and returns the response error. This avoids both losing a live child and pretending an already deallocated object remains live. The protocol assumes a returned non-null pointer is real native ownership; arbitrary corrupt pointers are outside a safe in-process FFI contract.
 
@@ -196,13 +197,44 @@ The DLL uses non-unwinding `extern "C"` and abort panic profiles. **Unexpected p
 
 The C shim loads only the caller-supplied absolute DLL path with `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`, without changing process-global DLL search settings. Absolute path and constrained dependency search do not prove trust, prevent concurrent replacement, or validate a signature/hash. Tests use the locally built DLL in the owned workspace; product binary admission, load/unload fault recovery and all transitive-dependency qualification remain separate.
 
+## Cancelable observation and pipe settlement
+
+`Owner.FinishContext(ctx)` waits for native settlement, a native error, or cancellation **of this observer**. It does not call `Stop`, release the owner, close streams or retry a remote effect. The existing Rust owner, ABI and synchronous `Finish(milliseconds)` are unchanged.
+
+**Table 5. Separate cancellation and completion facts.**
+
+| Situation | Result |
+|---|---|
+| Nil context | Argument error before native observation |
+| Context already canceled | Zero outcome plus the cancellation sentinel and custom cause; no native call |
+| Owner busy in another native call or policy | Observation can cancel without acquiring that mutex or abandoning the other caller's operation |
+| Native state remains pending | Return the last completed observation when cancellation arrives; owner still supports explicit stop/finish/release under its original contract |
+| Root exited but descendant still alive | Retain known root code and active count; do not call the entire operation complete |
+| Probe observes a native error or terminal result | Return that observed fact even if cancellation arrives concurrently; CleanupFailed is still a distinct terminal state, not success inferred from nil error |
+| Another observer remains active | One observer's context cancellation does not cancel or release the owner or the other observer |
+| Caller wants to stop the operation | Call the existing explicit `Stop`, then observe settlement; observation cancellation itself has no kill authority |
+
+Implementation uses the existing mutex and the same native operation/result mapping, acquired with `TryLock`. No owner fields are read after a failed lock attempt. A reused timer yields between attempts (10 ms is the current polling interval, **not** a real-time latency guarantee or benchmark). No waiter goroutine is spawned by the method, and the mutex is released between probes. The context is rechecked after acquisition before new native work. A system call already entered, a stalled runtime, or arbitrary policy code are not forcibly interrupted. Fair scheduling and complete native-call cancellation are not claimed.
+
+The returned outcome is this call's last **completed** observation; it can be stale relative to another concurrent caller, and zero means no observation was obtained. It does not add a second authoritative state machine. `Context.Err` and a distinct `Context.Cause` are both preserved. The native library remains loaded because the same owner allocation remains live until explicit terminal release.
+
+### Native pipe qualification, not a new I/O framework
+
+Five integration cases use only owned `os.Pipe` endpoints and the existing finite child fixture. They separately test: pending parent write interrupted by its lawful endpoint owner; canceled observation followed by normal input EOF and complete final output; root exit with a descendant retaining the output writer; reading buffered final bytes after process settlement; and interruption/join of a pending read without implicitly stopping the child.
+
+The child, native process wait, read/write operation and output drain are different owners/outcomes. In the measured scenarios, closing a test-owned pipe endpoint makes its pending Go operation return; the test explicitly joins that goroutine and preserves its byte count and error. The production method does **not** infer permission from an `io.Closer`, close caller streams or create a background copy loop. Tests measure results before their safety cleanup; a cleanup path cannot convert a failed assertion into success.
+
+The first native I/O run exposed two incorrect test assumptions: `PeekNamedPipe` can expose all queued bytes while Write is still pending, and this Windows `os.Pipe` does not support `SetReadDeadline`. The corrected tests observe the actual operation completion channel, and use only the actual endpoint owner's Close/join for failure cleanup. A returned byte count and an error are kept separately. Logs of both the failed and corrected test versions are retained.
+
+This qualifies these Windows pipe profiles and finite payloads, not all files/sockets/consoles/device handles or all native I/O cancellation APIs. There is no universal pump, backpressure policy, hard cancellation deadline, automatic tree shutdown, remote-effect rollback or full product lifecycle admission. Real operations may need caller-specific authority, buffering, drain and cancellation mechanisms.
+
 ## Evidence
 
-**Table 5. Independent verification layers.**
+**Table 6. Independent verification layers.**
 
 | Layer | What it establishes | What it does not establish |
 |---|---|---|
-| 34 normal Go integration test functions (including 11 stdio functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
+| 47 normal Go integration test functions (including 8 cancelable-observation and 5 I/O-lifecycle functions) | Real cgo/C-shim/Rust-DLL calls; pre-admission absence of effects, copied Unicode args, pending ownership, deny/stop, native codes, repeated finish, release/unload order, concurrent Go callers, surviving descendant, empty env/cwd, budgets, original image evidence and one-shot policy/panic/cancellation handling, stream ownership/EOF and temporary-copy failure outcomes, cancelable observation, original-result preservation and owned pipe completion | Whole Hub integration, native Unix, raw foreign-pointer safety, or Rust/C race freedom |
 | 14 Rust ABI unit tests | C layout constants including environment views, initialized output/short-buffer protection, bad versions/sizes, structural/overflow input rejection, owned raw UTF-16 copies, exact pending/native-error and seven cleanup-mask encodings | Actual OS cleanup failure transmitted through the foreign caller; those native failures were separately tested in the underlying crate |
 | Existing owner suite | Unchanged native owner behavior against its own full tests | Calling-boundary properties by itself |
 | Optional `ffi_faults` tests | Ownership-transfer bookkeeping even when an owned test DLL reports malformed create/release metadata | A guarantee that hostile/broken arbitrary native code is safe |
@@ -225,6 +257,8 @@ Additional optional checks select `TestCheckedAdmissionRejectsMalformedObservati
 
 `TestCheckedAdmissionMissingExportFailsClosed` with `checked-no-symbol` uses the prior owned DLL, whose artifact hash is recorded before replacement; missing-export code 127 distinguishes this from an unrelated loader failure. It checks refusal rather than silently using the old boolean entry point. There are five optional test functions: the prior two metadata functions and these three new functions; observation variants share one test function, not four independent functions.
 Restore the exact source bytes and rebuild the normal DLL after each check. Do not use a mutated DLL for ordinary execution or a shared installation. A negative DLL is not a new supported implementation. The ordinary test assertions, not the temporary mutations, are shipped.
+
+See the [cancelable-observation report](verification/cancellation-2026-11-14/RESULTS.md) and [executable negative controls](verification/cancellation-2026-11-14/mutations.ps1) for the current increment. This includes the initial failing implementation stub and native test assumptions, not only the final success.
 
 ### PR-durable results
 
@@ -301,7 +335,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full blocking I/O/cancel/drain/join; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; foreign cleanup-failure and DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
 The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
 
@@ -318,5 +352,9 @@ References:
 9. [Microsoft DuplicateHandle: inheritance flag, shared kernel object and file position](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle).
 10. [Microsoft process attribute list: explicit handle inheritance](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute).
 11. [Go syscall.RawConn: handle validity during Control](https://pkg.go.dev/syscall#RawConn).
+12. [Go sync.Mutex.TryLock: successful acquisition versus no ordering from failure](https://pkg.go.dev/sync#Mutex.TryLock).
+13. [Go context.Cause and cancellation semantics](https://pkg.go.dev/context#Cause).
+14. [Microsoft CancelIoEx: cancellation request is not completion](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex).
+15. [Microsoft PeekNamedPipe: available data observation](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-peeknamedpipe).
 
 Terms: ABI — application binary interface; FFI — foreign function interface; DLL — dynamic-link library; cgo — Go's C interoperability tool; UTF-16 — 16-bit Unicode encoding; PID — process identifier; OS — operating system. Input lengths are UTF-16 code units, not bytes or Unicode character counts. Timeouts are milliseconds. No formula or platform guarantee is inferred from a passing compile alone.

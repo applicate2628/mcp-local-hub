@@ -55,3 +55,18 @@ the bundle's separator newline; the bundle SHA256 covers all published bytes.
 [exact source hashes](runs/stdio-2026-11-14-final/source-hashes.json),
 [negative mutations and commands](stdio-2026-11-14/MUTATIONS.md) and raw logs
 are versioned. File/pipe transfer is not a complete cancellable I/O pump.
+## Context-aware observation and pipe completion
+
+[Contract, results and self-review](cancellation-2026-11-14/RESULTS.md),
+[negative-control design](cancellation-2026-11-14/MUTATIONS.md),
+[focused runner](cancellation-2026-11-14/probe.ps1),
+[executable mutation runner](cancellation-2026-11-14/mutations.ps1), and
+[complete implementation-run evidence](runs/cancellation-2026-11-14-implementation/steps.json)
+are committed here. Canceling observation does not grant permission to stop the
+operation or close its streams. Native I/O qualification preserves the initially
+failed assumptions and their corrected tests, not just the final PASS.
+The [final cancellation run](runs/cancellation-2026-11-14-final/COMPLETED.txt)
+was repeated after implementation commit `e973ee2`; code/runner hashes match.
+Both complete runs and both negative-control passes are retained with exact
+source identities. The later negative script improves reproducibility, not the
+production implementation or its recorded successful outcomes.

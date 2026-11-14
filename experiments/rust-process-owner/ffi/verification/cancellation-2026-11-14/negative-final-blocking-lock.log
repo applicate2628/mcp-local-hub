@@ -1,0 +1,7 @@
+Command: go test . -run ^TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel$ -count=1 -timeout=45s -v Source base: e973ee2eabb638b6a0372066b6381484ce015dc9 UTC: 2026-11-14T08:38:07.3940979Z Expected exit: 1 Actual exit: 1 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+    finish_context_windows_test.go:148: canceled observer stayed blocked on the owner mutex
+--- FAIL: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (1.01s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	1.024s
+FAIL

@@ -1,0 +1,9 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T08:30:56.1564007Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/README.md
+ M experiments/rust-process-owner/ffi/go/bridge_windows.go
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/go/finish_context_windows.go
+?? experiments/rust-process-owner/ffi/go/finish_context_windows_test.go
+?? experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go
+?? experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/cancellation-2026-11-14-implementation/

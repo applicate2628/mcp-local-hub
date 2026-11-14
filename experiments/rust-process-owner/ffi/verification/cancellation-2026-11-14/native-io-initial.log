@@ -1,0 +1,14 @@
+Command: go test . -run ^TestIO -count=1 -timeout=45s -v -race Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:17:55.2489124Z Expected exit: 0 Actual exit: 1 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestIOCancelWaitDoesNotCloseBlockedWriter
+    io_lifecycle_windows_test.go:145: fixture failed to establish backpressure
+--- FAIL: TestIOCancelWaitDoesNotCloseBlockedWriter (0.01s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+--- PASS: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.06s)
+=== RUN   TestIORootExitIsNotOutputEOFWhileDescendantLives
+--- PASS: TestIORootExitIsNotOutputEOFWhileDescendantLives (0.10s)
+=== RUN   TestIONativeSettlementDoesNotDiscardUnreadFinalBytes
+    io_lifecycle_windows_test.go:282: file type does not support deadline
+--- FAIL: TestIONativeSettlementDoesNotDiscardUnreadFinalBytes (0.04s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.232s
+FAIL
