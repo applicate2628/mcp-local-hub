@@ -107,63 +107,85 @@ func TestLazyProxyReadinessPublisher_OrganicSuccessArms(t *testing.T) {
 }
 
 func TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure(t *testing.T) {
-	f := &fakeLifecycle{kind: "mcp-language-server"}
-	starting := make(chan struct{})
-	release := make(chan struct{})
-	events := make(chan api.LazyProxyReadinessEventV1, 4)
-	readiness := readinessRecorderConfig(events, make(chan error, 1))
-	baseCommit := readiness.Commit
-	readiness.Commit = func(ctx context.Context, event api.LazyProxyReadinessEventV1) (api.LazyProxyReadinessReceiptV1, error) {
-		if event.Transition == "starting" {
-			select {
-			case <-starting:
-			default:
-				close(starting)
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeLifecycle{kind: "mcp-language-server"}
+		starting := make(chan struct{})
+		release := make(chan struct{})
+		releaseStarting := sync.OnceFunc(func() { close(release) })
+		events := make(chan api.LazyProxyReadinessEventV1, 4)
+		readiness := readinessRecorderConfig(events, make(chan error, 1))
+		baseCommit := readiness.Commit
+		readiness.Commit = func(ctx context.Context, event api.LazyProxyReadinessEventV1) (api.LazyProxyReadinessReceiptV1, error) {
+			if event.Transition == "starting" {
+				select {
+				case <-starting:
+				default:
+					close(starting)
+				}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return api.LazyProxyReadinessReceiptV1{}, ctx.Err()
+				}
 			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return api.LazyProxyReadinessReceiptV1{}, ctx.Err()
-			}
+			return baseCommit(ctx, event)
 		}
-		return baseCommit(ctx, event)
-	}
-	p := NewLazyProxy(LazyProxyConfig{
-		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
-		BackendKind: "mcp-language-server", Lifecycle: f,
-		RegistryPath: seedReadinessTestRegistry(t), MaterializeWaitBudget: time.Second,
-		ColdRequestHoldCeiling: 2 * time.Second, ColdStartMaxProbation: -1,
-		Readiness: readiness,
+		p := NewLazyProxy(LazyProxyConfig{
+			WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+			BackendKind: "mcp-language-server", Lifecycle: f,
+			RegistryPath: seedReadinessTestRegistry(t), MaterializeWaitBudget: time.Second,
+			ColdRequestHoldCeiling: 2 * time.Second, ColdStartMaxProbation: -1,
+			Readiness: readiness,
+		})
+		// Run after Stop and before the registry's TempDir cleanup.
+		t.Cleanup(func() {
+			synctest.Wait()
+			if p.gate.HasActiveFlight(p.inflightKey()) {
+				t.Error("materialization worker still active after proxy cleanup")
+			}
+		})
+		stopProxyOnCleanup(t, p)
+		result := make(chan *httptest.ResponseRecorder, 1)
+		requestCtx, cancelRequest := context.WithCancel(context.Background())
+		requestDone := make(chan struct{})
+		t.Cleanup(func() {
+			releaseStarting()
+			cancelRequest()
+			<-requestDone
+		})
+		go func() {
+			defer close(requestDone)
+			result <- postRPCCtx(t, p.Handler(), "tools/call", 1, requestCtx)
+		}()
+		select {
+		case <-starting:
+		case <-time.After(time.Second):
+			t.Fatal("starting commit was not attempted")
+		}
+		// Settle all workers at the blocked acknowledgement before inspecting state.
+		synctest.Wait()
+		p.mu.Lock()
+		exposed := p.endpoint != nil
+		p.mu.Unlock()
+		if exposed {
+			t.Fatal("endpoint exposed before starting acknowledgement")
+		}
+		select {
+		case <-result:
+			t.Fatal("forward returned before starting acknowledgement")
+		default:
+		}
+		releaseStarting()
+		select {
+		case rr := <-result:
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+			}
+		case <-time.After(time.Second):
+			t.Fatal("forward did not resume after starting acknowledgement")
+		}
+		assertReadinessTransitions(t, events, "starting", "ready")
 	})
-	stopProxyOnCleanup(t, p)
-	result := make(chan *httptest.ResponseRecorder, 1)
-	go func() { result <- postRPC(t, p.Handler(), "tools/call", 1) }()
-	select {
-	case <-starting:
-	case <-time.After(time.Second):
-		t.Fatal("starting commit was not attempted")
-	}
-	p.mu.Lock()
-	exposed := p.endpoint != nil
-	p.mu.Unlock()
-	if exposed {
-		t.Fatal("endpoint exposed before starting acknowledgement")
-	}
-	select {
-	case <-result:
-		t.Fatal("forward returned before starting acknowledgement")
-	default:
-	}
-	close(release)
-	select {
-	case rr := <-result:
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("forward did not resume after starting acknowledgement")
-	}
-	assertReadinessTransitions(t, events, "starting", "ready")
 }
 
 func TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady(t *testing.T) {
