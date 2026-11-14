@@ -81,7 +81,7 @@ func AcquireUnpublishedSerenaQualificationResources(ctx context.Context, r Prepa
 		return nil, errors.New("SERENA_QUALIFICATION_RESOURCE_DEADLINE_INVALID")
 	}
 	resource = &PreparedSerenaQualificationResources{request: r, installation: installed, qualificationID: qualificationID, key: key}
-	resource.tree, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "qualification", QualificationID: qualificationID, Limits: r.OwnedTreeLimits})
+	resource.tree, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "qualification", QualificationID: qualificationID, Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline})
 	if err != nil {
 		return resource, err
 	}
