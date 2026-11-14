@@ -6,6 +6,19 @@ import (
 	"strings"
 )
 
+// Windows includes drive-current-directory entries such as =C:=C:\work.
+// Their first '=' belongs to the key, matching os/exec's environment handling.
+func splitStdioEnvironmentEntry(entry string) (key, value string, ok bool) {
+	separator := strings.IndexByte(entry, '=')
+	if separator == 0 && runtime.GOOS == "windows" {
+		separator = strings.IndexByte(entry[1:], '=') + 1
+	}
+	if separator <= 0 {
+		return "", "", false
+	}
+	return entry[:separator], entry[separator+1:], true
+}
+
 // MergeDaemonEnvironment retains the supervisor owner's platform-aware,
 // deterministic parent < manifest < overlay precedence.
 func MergeDaemonEnvironment(parent []string, manifest, overlay map[string]string) []string {
@@ -35,11 +48,11 @@ func MergeDaemonEnvironment(parent []string, manifest, overlay map[string]string
 	// os.Environ() never emits malformed entries but a test caller
 	// might supply hand-crafted input).
 	for _, kv := range parent {
-		eq := strings.IndexByte(kv, '=')
-		if eq < 0 {
+		key, _, ok := splitStdioEnvironmentEntry(kv)
+		if !ok {
 			continue
 		}
-		entries[normKey(kv[:eq])] = kv
+		entries[normKey(key)] = kv
 	}
 
 	// Manifest overrides parent for the same normalized key.
@@ -95,7 +108,7 @@ func composeChildEnvFrom(parent []string, env map[string]string, unset []string)
 	out := make([]string, 0, len(parent)+len(env))
 	for _, kv := range parent {
 		if unsetSet != nil {
-			if k, _, ok := strings.Cut(kv, "="); ok && unsetSet[envKeyNorm(k)] {
+			if k, _, ok := splitStdioEnvironmentEntry(kv); ok && unsetSet[envKeyNorm(k)] {
 				continue
 			}
 		}

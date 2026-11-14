@@ -270,7 +270,7 @@ func TestResourceBridge_EndToEnd_WrapsResourceAsTool(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys, json
 for line in sys.stdin:
@@ -377,7 +377,7 @@ func TestResourceBridge_NoResourcesCapability_NoInjection(t *testing.T) {
 	defer cancel()
 
 	h, err := NewStdioHost(HostConfig{
-		Command: "python",
+		Command: daemonTestPython(t),
 		Args: []string{"-u", "-c", `
 import sys, json
 for line in sys.stdin:

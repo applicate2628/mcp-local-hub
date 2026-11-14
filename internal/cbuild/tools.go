@@ -33,6 +33,8 @@ type builder struct {
 	defaultDir   string
 	configuredMu sync.Mutex
 	configured   map[configuredCacheKey]string
+	operationsMu sync.Mutex
+	operations   map[string]*projectOperation
 }
 
 type configuredCacheKey struct {

@@ -4,7 +4,7 @@
 
 1. **Go 1.26+** — `go version` must succeed. Required by `go.mod` (uses 1.24+ stdlib APIs such as `strings.SplitSeq`). Tested on 1.26.2 windows/amd64.
 2. **Git for Windows** (includes Git Bash; the CLI expects Unix-style shell for some setup commands).
-3. **uvx** — Python package runner, needed by Serena. Install via [uv](https://github.com/astral-sh/uv). Do NOT pipe the upstream installer directly into a shell — download it first, inspect it, then run:
+3. **uv / uvx** — Python package tools, needed by Serena. Prepared Serena installation requires **uv >= 0.13.4** for the ordinary bundled-certificate installation path and an installed **Python >= 3.11**. Discovery requests the resolved Python lower bound without downloading an interpreter. Actual command, ABI, source, package metadata and native qualification must still succeed; the supplier's own dependency constraints remain effective. Install via [uv](https://github.com/astral-sh/uv). Do NOT pipe the upstream installer directly into a shell — download it first, inspect it, then run:
    ```powershell
    # 1. Fetch the installer to a file you can audit
    irm https://astral.sh/uv/install.ps1 -OutFile "$env:TEMP\uv-install.ps1"

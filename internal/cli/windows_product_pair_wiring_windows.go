@@ -3,8 +3,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +22,9 @@ type windowsProductTxnRequest struct {
 	Context              context.Context
 	StateDir             string
 	ProductPath          string
+	CanonicalEntryPath   string
+	IdentityPath         string
+	EntrySet             *stagedWindowsCanonicalEntrySetV1
 	LegacyWindowlessPath string
 	StagedProduct        string
 	Mode                 WindowsProductPairMode
@@ -56,13 +61,16 @@ func newWindowsProductTxnWith(
 		}
 		return nil, err
 	}
-	taskTxn, err := beginTasks(
-		req.Context,
-		filepath.Join(req.StateDir, "windows-product-entrypoint.lock"),
-		req.LegacyWindowlessPath,
-		req.ProductPath,
-		store,
-	)
+	var taskTxn *scheduler.OwnedEntrypointTaskTxn
+	if req.EntrySet != nil {
+		if req.EntrySet.original == nil || req.CanonicalEntryPath == "" || req.IdentityPath == "" || samePath(req.CanonicalEntryPath, req.ProductPath) {
+			return nil, errors.Join(errors.New("Windows complete-set wiring requires original stage and distinct explicit paths"), store.Close())
+		}
+		taskTxn, err = scheduler.BeginOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(req.Context,
+			filepath.Join(req.StateDir, "windows-product-entrypoint.lock"), req.CanonicalEntryPath, req.LegacyWindowlessPath, req.ProductPath, store)
+	} else {
+		taskTxn, err = beginTasks(req.Context, filepath.Join(req.StateDir, "windows-product-entrypoint.lock"), req.LegacyWindowlessPath, req.ProductPath, store)
+	}
 	if err != nil {
 		if cleanupErr := store.Close(); cleanupErr != nil {
 			return nil, errors.Join(err, fmt.Errorf("UPGRADE_GUI_TASK_STORE_CLEANUP_UNCONFIRMED: constructor task store: %w", cleanupErr))
@@ -71,7 +79,8 @@ func newWindowsProductTxnWith(
 	}
 	tasks := &windowsProductPairTaskOwner{txn: taskTxn, store: store}
 	return &WindowsProductTxn{constructorStore: store, Opts: WindowsProductTxnOpts{
-		StateDir: req.StateDir, ProductPath: req.ProductPath,
+		Context: req.Context, StateDir: req.StateDir, ProductPath: req.ProductPath,
+		CanonicalEntryPath: req.CanonicalEntryPath, IdentityPath: req.IdentityPath, EntrySet: req.EntrySet,
 		LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct,
 		ReceiptV3Path: filepath.Join(req.StateDir, UpgradeReceiptSchemaV3+".json"),
 		ReceiptV2Path: filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json"),
@@ -91,7 +100,7 @@ func windowsProductEventPublisher(stateDir string) func(WindowsProductCommitEven
 			return "", err
 		}
 		defer log.Close()
-		prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+		record := api.SupervisorEvent{
 			SchemaVersion: api.SupervisorEventSchemaVersion,
 			TS:            event.InstalledAt, Severity: api.SupervisorEventSeverityInfo,
 			Source: api.SupervisorEventSourceMigration, Event: "windows-product-committed",
@@ -111,7 +120,11 @@ func windowsProductEventPublisher(stateDir string) func(WindowsProductCommitEven
 					"rollback_images_absent":               event.Retired.RollbackImagesAbsent,
 				},
 			},
-		})
+		}
+		if event.EntrySet != nil {
+			record.Body["entry_set"] = event.EntrySet
+		}
+		prepared, err := api.PrepareSupervisorEvent(record)
 		if err != nil {
 			return "", err
 		}
@@ -229,6 +242,49 @@ func reconcileWindowsProductReceipt(stateDir, sourceProduct, targetProduct strin
 	return true, nil
 }
 
+func reconcileWindowsCanonicalEntryNoop(ctx context.Context, stateDir string, mode WindowsProductPairMode, source *stagedWindowsCanonicalEntrySetV1, tasks WindowsProductTaskTxn) (bool, error) {
+	return reconcileStagedCanonicalEntryNoop(ctx, stateDir, mode, source, func(receipt UpgradeReceiptV3) error {
+		if tasks == nil {
+			return errors.New("complete-set no-op requires its original Task transaction")
+		}
+		if err := tasks.InventoryExport(); err != nil {
+			return err
+		}
+		digest, err := tasks.VerifyRuntimeSHA256()
+		if err != nil {
+			return err
+		}
+		if digest != receipt.TaskSetSHA256 {
+			return errors.New("complete-set no-op Task runtime differs from committed receipt")
+		}
+		raw, err := api.ReadStateFileInodeAnchored(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json"))
+		if err != nil {
+			return err
+		}
+		decoded, err := DecodeUpgradeReceipt(raw)
+		if err != nil || decoded.V3 == nil {
+			return errors.Join(errors.New("complete-set no-op receipt readback unavailable"), err)
+		}
+		actual, err := json.Marshal(decoded.V3)
+		if err != nil {
+			return err
+		}
+		expected, err := json.Marshal(receipt)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(actual, expected) {
+			return errors.New("complete-set no-op receipt changed during Task receiving")
+		}
+		event := WindowsProductCommitEvent{Schema: receipt.Schema, TransactionID: receipt.TransactionID, Mode: receipt.Mode, Artifact: receipt.Artifact, EntrySet: receipt.EntrySet,
+			TaskSetSHA256: receipt.TaskSetSHA256, Retired: receipt.Retired, ReceiptSHA256: fmt.Sprintf("%x", sha256.Sum256(raw)), InstalledAt: receipt.InstalledAt}
+		if _, err := windowsProductEventPublisher(stateDir)(event); err != nil {
+			return err
+		}
+		return tasks.DiscardRecoveryStore()
+	})
+}
+
 func reconcileWiredWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) (*WindowsProductPairRecoverySettled, error) {
 	if req.Context == nil {
 		req.Context = context.Background()
@@ -322,6 +378,24 @@ func wireWindowsProductRecoveryRequest(req windowsProductRecoveryRequest) window
 			return &windowsProductPairTaskOwner{txn: txn, store: store}, nil
 		}
 	}
+	if req.Deps.ReopenEntrySetTasks == nil {
+		req.Deps.ReopenEntrySetTasks = func(ctx context.Context, recovery WindowsProductPairTaskRecovery, targets binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error) {
+			store, err := reopenWindowsProductPairTaskStore(req.StateDir, recovery, true)
+			if err != nil {
+				return nil, err
+			}
+			backups := make([]scheduler.OwnedEntrypointTaskBackup, 0, len(recovery.Backups))
+			for _, backup := range recovery.Backups {
+				backups = append(backups, scheduler.OwnedEntrypointTaskBackup{TaskName: backup.TaskName, Ref: backup.Ref, SHA256: backup.SHA256})
+			}
+			txn, err := scheduler.ReopenOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(ctx,
+				filepath.Join(req.StateDir, "windows-product-entrypoint.lock"), targets.CanonicalEntryPath, req.LegacyWindowlessPath, targets.ProductPath, store, backups)
+			if err != nil {
+				return nil, errors.Join(err, store.Close())
+			}
+			return &windowsProductPairTaskOwner{txn: txn, store: store}, nil
+		}
+	}
 	if req.Deps.DiscardTaskStore == nil {
 		req.Deps.DiscardTaskStore = func(recovery WindowsProductPairTaskRecovery) error {
 			store, err := reopenWindowsProductPairTaskStore(req.StateDir, recovery, false)
@@ -336,6 +410,16 @@ func wireWindowsProductRecoveryRequest(req windowsProductRecoveryRequest) window
 	}
 	if req.ReconcileCommitted == nil {
 		req.ReconcileCommitted = func(journal windowsProductRecoveryJournalV3) error {
+			if journal.EntrySet != nil {
+				matched, err := reconcileCanonicalEntryCommitReceipt(req.Context, req.StateDir, journal, withWindowsProductDefaults(WindowsProductTxnDeps{PublishCommitted: windowsProductEventPublisher(req.StateDir)}))
+				if err != nil {
+					return err
+				}
+				if !matched {
+					return errors.New("recovered complete-set receipt no longer matches its original journal")
+				}
+				return nil
+			}
 			reconciled, err := reconcileWindowsProductReceipt(
 				req.StateDir, req.ProductPath, req.ProductPath, journal.Mode,
 			)

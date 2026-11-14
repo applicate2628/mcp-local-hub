@@ -425,13 +425,13 @@ existed. The dynamic-pool migration lives under the
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: every binding in the manifest)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, don't write")
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
-	c.AddCommand(newMigrateSerenaDynamicPoolCmd())
+	c.AddCommand(newMigrateSerenaDynamicPoolCmd(defaultMigrateSerenaRunDeps()))
 	return c
 }
 
 // newMigrateSerenaDynamicPoolCmd builds
 // `mcphub migrate serena legacy-to-dynamic-pool`.
-func newMigrateSerenaDynamicPoolCmd() *cobra.Command {
+func newMigrateSerenaDynamicPoolCmd(deps migrateSerenaRunDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "legacy-to-dynamic-pool",
 		Short: "Migrate serena from legacy 2-daemon/unified to the dynamic per-workspace pool",
@@ -450,7 +450,7 @@ new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
-			return runMigrateSerenaDynamicPool(cmd.Context(), cmd.OutOrStdout())
+			return runMigrateSerenaDynamicPoolWithDeps(cmd.Context(), cmd.OutOrStdout(), deps)
 		},
 	}
 }
@@ -459,28 +459,97 @@ new one; if the prior supervisor cannot be exited, the migrate fails loud.`,
 //
 // err is named so the deferred outer-rollback closure can inspect and rewrite
 // it (composite-error contract per §D.3 defense layer 3).
+type migrateSerenaInstallOperation struct {
+	prepare func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) error
+	// A nonempty intentPath is the install's committed forward result and
+	// survives later settlement errors. It is never inferred from disk state.
+	install func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) (intentPath string, installErr, cleanupErr error)
+}
+
 type migrateSerenaRunDeps struct {
 	isAppliedInstallError  func(error) bool
 	acquireInitialRegistry func(*api.Registry) (func() error, error)
+	newInstallAPI          func() *api.API
+	newInstallOperation    func(*api.API) (migrateSerenaInstallOperation, error)
 }
 
-func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) error {
-	return runMigrateSerenaDynamicPoolWithDeps(ctx, w, migrateSerenaRunDeps{
+func newPreparedMigrateSerenaInstallOperation(installer *api.API) (migrateSerenaInstallOperation, error) {
+	if installer == nil {
+		return migrateSerenaInstallOperation{}, errors.New("serena migration install API is unavailable")
+	}
+	var prepared *api.PreparedSerenaParsedInstall
+	return migrateSerenaInstallOperation{
+		prepare: func(ctx context.Context, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) error {
+			if prepared != nil || len(opts.Workspaces) == 0 {
+				return nil
+			}
+			var err error
+			prepared, err = installer.PrepareSerenaParsedInstall(ctx, manifest, opts)
+			return err
+		},
+		install: func(ctx context.Context, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error, error) {
+			return installPreparedMigrateSerena(ctx, installer, prepared, manifest, opts)
+		},
+	}, nil
+}
+
+// Keep execution and closure outcomes separate: a failed observed close after
+// a successful intent commit must not re-arm the pre-commit registry rollback.
+func installPreparedMigrateSerena(ctx context.Context, installer *api.API, prepared *api.PreparedSerenaParsedInstall, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (intentPath string, installErr, cleanupErr error) {
+	if prepared == nil {
+		intentPath, installErr = installParsedManifestFn(ctx, installer, manifest, opts)
+		return intentPath, installErr, nil
+	}
+	installErr, cleanupErr = prepared.WithConsumerInvocation(ctx, opts.Workspaces, opts.SupervisorLockBypass, func(bounded context.Context, invocation *api.PreparedSerenaConsumerInvocation) error {
+		opts.SerenaPreparedInvocation = invocation
+		var err error
+		intentPath, err = installParsedManifestFn(bounded, installer, manifest, opts)
+		return err
+	})
+	return intentPath, installErr, cleanupErr
+}
+
+func defaultMigrateSerenaRunDeps() migrateSerenaRunDeps {
+	return migrateSerenaRunDeps{
 		isAppliedInstallError: api.IsAppliedLockReleaseUnconfirmed,
 		acquireInitialRegistry: func(reg *api.Registry) (func() error, error) {
 			return reg.Lock()
 		},
-	})
+		newInstallAPI: func() *api.API {
+			return api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
+		},
+		newInstallOperation: newPreparedMigrateSerenaInstallOperation,
+	}
+}
+
+func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) error {
+	return runMigrateSerenaDynamicPoolWithDeps(ctx, w, defaultMigrateSerenaRunDeps())
 }
 
 func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps migrateSerenaRunDeps) (err error) {
-	if deps.isAppliedInstallError == nil {
-		deps.isAppliedInstallError = api.IsAppliedLockReleaseUnconfirmed
+	switch {
+	case deps.isAppliedInstallError == nil:
+		return errors.New("serena migration applied-install error binding is unavailable")
+	case deps.acquireInitialRegistry == nil:
+		return errors.New("serena migration registry acquire binding is unavailable")
+	case deps.newInstallAPI == nil:
+		return errors.New("serena migration install API factory binding is unavailable")
+	case deps.newInstallOperation == nil:
+		return errors.New("serena migration install operation factory binding is unavailable")
 	}
-	if deps.acquireInitialRegistry == nil {
-		deps.acquireInitialRegistry = func(reg *api.Registry) (func() error, error) {
-			return reg.Lock()
-		}
+	installer := deps.newInstallAPI()
+	if installer == nil {
+		return errors.New("serena migration install API is unavailable")
+	}
+	operation, operationErr := deps.newInstallOperation(installer)
+	if operationErr != nil {
+		return fmt.Errorf("serena migration install operation: %w", operationErr)
+	}
+	if operation.prepare == nil {
+		return errors.New("serena migration install operation prepare binding is unavailable")
+	}
+	if operation.install == nil {
+		return errors.New("serena migration install operation install binding is unavailable")
 	}
 	// 1. Load + parse the serena manifest; detect source state. The manifest
 	//    is READ ONLY — it is the catalog input to the in-memory builder and
@@ -781,6 +850,18 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 		return errMigrateSerenaStartUnsupportedPreflight()
 	}
 
+	// Keep the original preparation/publication owner through the later intent
+	// write. Package preparation runs with neither registry nor supervisor
+	// exclusion held and before a reap can take the existing fleet offline.
+	prepareInstall := func(workspaces []api.WorkspaceEntry) error {
+		return operation.prepare(ctx, dynamicManifest, api.InstallParsedManifestOpts{
+			ManifestHash: manifestHash, Writer: w, Workspaces: workspaces,
+		})
+	}
+	if prepareErr := prepareInstall(allocated); prepareErr != nil {
+		return fmt.Errorf("prepare serena before supervisor cutover: %w", prepareErr)
+	}
+
 	// Fix 6 (PR #250 deeper review — consultant nice-to-have): warn the operator
 	// up front that a cutover briefly takes serena offline. The reap → intent
 	// write → supervisor-start window (tens of seconds: quiesce up to 30s + exit
@@ -994,6 +1075,17 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 		err = errMigrateSerenaStartUnsupportedPreflight()
 		return err
 	}
+	// An initially empty registry can gain its first live workspace during
+	// client reconciliation. This path has not reaped or acquired exclusion yet,
+	// so preparation still runs before the late reap. If an earlier nonempty
+	// snapshot contained only stale paths and the lock is already held, leave
+	// the existing parsed-install refusal in charge; never install a package
+	// inside that critical section.
+	if !interlockHeld {
+		if prepareErr := prepareInstall(installWorkspaces); prepareErr != nil {
+			return fmt.Errorf("prepare newly registered serena workspaces before supervisor cutover: %w", prepareErr)
+		}
+	}
 
 	// 7d. LATE REAP (finding #1 — bot PR #250). The 7c recompute can flip willStart
 	//     true when the FIRST snapshot was EMPTY (so the earlier willReap probe at
@@ -1132,31 +1224,32 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 	//    would see it held; the minted bypass token (interlockBypass) tells the
 	//    gate the held lock is our OWN handle (verified-identity check, Phase 1) so
 	//    the spec-bearing write proceeds. The inner stack owns scheduler/client/
-	//    intent undos; on error here those are ALREADY undone and the deferred
-	//    outer stack restores the reconcile + registry. The dynamic-pool manifest
+	//    intent undos. A precommit failure runs those undos and leaves the outer
+	//    reconcile + registry rollback armed; later settlement errors retain the
+	//    committed result. The dynamic-pool manifest
 	//    carries no client_bindings (the /serena/mcp router owns routing), so the
 	//    only side effect is the per-workspace supervisor-intent fan-out driven by
 	//    opts.Workspaces (the finding-#2 re-read snapshot).
-	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
+	intentPath, ierr, invocationCloseErr := operation.install(ctx, dynamicManifest, api.InstallParsedManifestOpts{
 		ManifestHash:         manifestHash,
 		Writer:               w,
 		Workspaces:           installWorkspaces,
 		SupervisorLockBypass: interlockBypass,
 	})
 	var postCommitErr error
-	if ierr != nil {
-		if deps.isAppliedInstallError(ierr) {
+	if ierr != nil || invocationCloseErr != nil {
+		if ierr == nil || intentPath != "" || deps.isAppliedInstallError(ierr) {
 			// The intent is durable. Retain the cause and enter the canonical
 			// post-commit continuation below; willStart, verification, interlock
 			// handoff, timeout/liveness policy, and audit projection stay single-owned.
-			postCommitErr = ierr
+			postCommitErr = errors.Join(ierr, invocationCloseErr)
 		} else {
 			// Recovery invariant: if we reaped (step 7) but the write failed, NO
 			// supervisor is running and the OLD intent is still on disk. Restart a
 			// supervisor so it reads the still-on-disk old intent (legacy restored)
 			// rather than leaving no-supervisor-running silently. The outer stack
 			// still restores the reconcile + registry (legacy is the source of truth).
-			err = ierr
+			err = errors.Join(ierr, invocationCloseErr)
 			if willReap {
 				// Release the interlock before the recovery start — the started
 				// supervisor must AcquireSupervisorLock itself (the held lock would

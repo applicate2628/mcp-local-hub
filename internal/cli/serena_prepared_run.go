@@ -156,7 +156,7 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 		cfg.UpstreamPort = descriptor.Port + config.NativeHTTPInternalPortOffset
 		cfg.Args = append(cfg.Args, "--port", strconv.Itoa(cfg.UpstreamPort))
 	}
-	h, adapter, err := newPreparedConsumerHTTPHost(start, owner, descriptor, cfg)
+	h, adapter, err := newPreparedConsumerHTTPHost(start, owner, descriptor, cfg, launch)
 	if err != nil {
 		return err
 	}

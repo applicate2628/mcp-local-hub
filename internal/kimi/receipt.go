@@ -30,7 +30,7 @@ type providerReceipt struct {
 }
 
 func (r providerReceipt) IsError() bool {
-	return r.ExitCode != 0 || r.Status != "completed" || r.Cancelled || r.TimedOut ||
+	return r.ExitCode != 0 || r.Status != "completed" || r.Gate != "PASS" || r.Cancelled || r.TimedOut ||
 		r.CleanupStatus != "complete" || r.CleanupIssueCount != 0
 }
 
@@ -92,7 +92,7 @@ type receiptPermissionDecision struct {
 	Decision string `json:"decision"`
 }
 
-func parseProviderReceipt(record []byte, requestedEffort string, capabilityChoice CapabilityChoice) (providerReceipt, error) {
+func parseProviderReceipt(record []byte, requestedEffort, requestedRole string, capabilityChoice CapabilityChoice) (providerReceipt, error) {
 	if bytes.ContainsRune(record, '\r') || len(record) == 0 || record[len(record)-1] != '\n' || bytes.Count(record, []byte{'\n'}) != 1 {
 		return providerReceipt{}, errReceiptInvalid
 	}
@@ -117,14 +117,14 @@ func parseProviderReceipt(record []byte, requestedEffort string, capabilityChoic
 		envelope.Authorizing == nil || *envelope.Authorizing || envelope.ClosesRunIDs == nil || len(envelope.ClosesRunIDs) != 0 ||
 		envelope.IndependentVerificationRequired == nil || !*envelope.IndependentVerificationRequired ||
 		envelope.TerminalClass != "external-nonauthorizing" || envelope.ActualExecutionPath != "direct-external-cli" ||
-		envelope.AssignedRole == "" || envelope.ExecutionRole == "" {
+		envelope.AssignedRole != requestedRole || !validExecutionRole(requestedRole, envelope.ExecutionRole) {
 		return providerReceipt{}, errReceiptInvalid
 	}
 	var flags []string
 	if len(envelope.LaunchFlags) == 0 || json.Unmarshal(envelope.LaunchFlags, &flags) != nil || len(flags) != 0 {
 		return providerReceipt{}, errReceiptInvalid
 	}
-	if err := validatePrimaryOutcome(envelope.PrimaryOutcome); err != nil {
+	if err := validatePrimaryOutcome(envelope.PrimaryOutcome, *envelope.ExitCode, envelope.Status, envelope.Gate); err != nil {
 		return providerReceipt{}, errReceiptInvalid
 	}
 	if err := validateCapabilityEvidence(envelope.Selected, envelope.Observed); err != nil {
@@ -153,9 +153,10 @@ func validateNoneCapabilityBinding(selectedRaw, observedRaw json.RawMessage) boo
 		len(observed.ToolCalls) == 0 && len(observed.PermissionDecisions) == 0 && observed.ObservationsOmitted == nil
 }
 
-func validatePrimaryOutcome(raw json.RawMessage) error {
+func validatePrimaryOutcome(raw json.RawMessage, exitCode int, status, gate string) error {
 	var primary receiptPrimaryOutcome
-	if len(raw) == 0 || json.Unmarshal(raw, &primary) != nil || primary.ExitCode == nil || primary.Status == "" || primary.Gate == "" {
+	if len(raw) == 0 || json.Unmarshal(raw, &primary) != nil || primary.ExitCode == nil || primary.Status == "" || primary.Gate == "" ||
+		*primary.ExitCode != exitCode || primary.Status != status || primary.Gate != gate {
 		return errReceiptInvalid
 	}
 	return nil
@@ -244,4 +245,29 @@ func validReceiptName(value string) bool {
 
 func receiptInvalid(cause error) error {
 	return fmt.Errorf("%w: %v", errReceiptInvalid, cause)
+}
+
+// Role-to-lane binding follows Orchestrarium's external-role-taxonomy.v1.json
+// at 8964852bb0c0a55d2fe2a19fe8475b3b55ca5bd3. This adapter also accepts
+// explicit external-reviewer/worker assignments used by the legacy direct
+// wrapper contract, but never promotes them to another execution lane.
+func validExecutionRole(assigned, execution string) bool {
+	switch assigned {
+	case "consultant":
+		return execution == "consultant"
+	case "external-reviewer", "qa-engineer", "architecture-reviewer",
+		"security-reviewer", "performance-reviewer", "accessibility-reviewer",
+		"ux-reviewer", "ui-test-engineer":
+		return execution == "external-reviewer"
+	case "external-worker", "explorer", "product-analyst", "analyst", "architect",
+		"ux-designer", "planner", "algorithm-scientist", "computational-scientist",
+		"security-engineer", "performance-engineer", "reliability-engineer",
+		"backend-engineer", "frontend-engineer", "qt-ui-engineer", "model-view-engineer",
+		"data-engineer", "platform-engineer", "toolchain-engineer",
+		"scientific-software-engineer", "geometry-engineer", "graphics-engineer",
+		"visualization-engineer":
+		return execution == "external-worker"
+	default:
+		return false
+	}
 }
