@@ -19,11 +19,17 @@ Ponytail and Caveman verification guidance, with independent reviews of each
 correction. The earlier CARBON review remains historical; this pass does not
 claim a new complete CARBON workflow.
 
-Continuation on November 14 closes the native consent fixture prerequisite on
-Comet and restores two caller-only refusal oracles. The executed correction is
+Continuation on November 14 first qualified native consent on Windows and
+restored two caller-only refusal oracles in
 [`19f23697`](https://github.com/applicate2628/mcp-local-hub/commit/19f236978fd219d7bc04338f01fdb680354f28fe).
-See [current qualification](#november-14-caller-and-native-consent-qualification)
-for fresh evidence and the still-open complete-test and native integration gates.
+The next test-only correction,
+[`f45f3fd`](https://github.com/applicate2628/mcp-local-hub/commit/f45f3fd552688a7b7eb4981dddcc230e7afc7490),
+restores 12 postcommit continuation scenarios through a real zero-live install.
+The fresh Windows run of every `TestMigrateSerena` case records 70 passing and
+15 failing leaves, with no skips; build, vet and changed-file formatting pass.
+See [postcommit qualification](#november-14-postcommit-continuation-qualification)
+and [remaining gates](#remaining-gates-and-next-actions). This is not full-suite
+or positive prepared-package qualification.
 
 ## Contents
 
@@ -34,9 +40,10 @@ for fresh evidence and the still-open complete-test and native integration gates
 5. [Delivery plan](#delivery-plan)
 6. [Verification record](#verification-record)
 7. [November 14 caller and native consent qualification](#november-14-caller-and-native-consent-qualification)
-8. [Remaining gates and next actions](#remaining-gates-and-next-actions)
-9. [Bot review disposition](#bot-review-disposition)
-10. [Terms and abbreviations](#terms-and-abbreviations)
+8. [November 14 postcommit continuation qualification](#november-14-postcommit-continuation-qualification)
+9. [Remaining gates and next actions](#remaining-gates-and-next-actions)
+10. [Bot review disposition](#bot-review-disposition)
+11. [Terms and abbreviations](#terms-and-abbreviations)
 
 ## Outcome and boundaries
 
@@ -239,6 +246,7 @@ Table 4. Actual recorded executions. Counts are top-level tests / subtests; over
 | Scan fixture driver / environment overlay | Driver 6 PASS; overlay 1 PASS. | Specific port/transport and overlay regressions. |
 | Earlier API adopt / perftools selections | Earlier passing subsets: adopt 12 / 12; perftools 47 / 26 with 4 optional skips; broader executions required follow-up corrections/checks. | Historical selections, not a single final all-pass run of either complete package. Use the final targeted rows above where applicable. |
 | Serena frozen 10-file candidate | Focused API/CLI tests: 9 / 12 PASS, zero skips; `go vet ./internal/api ./internal/cli` PASS. Own and two independent source reviews completed. | Do not promote static review or pure descriptor tests to positive prepared-install evidence. See open gate below. |
+| November 14 postcommit correction `f45f3fd` | Fresh Windows/amd64 Go 1.27.4 build and vet PASS; changed-file formatting clean. Serena selection: 37 / 42 PASS and 14 / 3 FAIL events, no skips. | 70 passing and 15 failing independent leaves; the five corrected functions contain 13 passing leaves, of which 12 were restored. See the [current receipt and inventory](#november-14-postcommit-continuation-qualification); parent events are not additional cases. |
 
 The early verification used Windows/amd64, Go 1.27.3 and local caches with `GOTOOLCHAIN=local`.
 A later explicitly approved `goversioninfo` 1.5.0 download populated an isolated build cache only;
@@ -338,6 +346,132 @@ above, not positive package preparation, a complete suite PASS or release
 qualification. No installed hub, vendor solver, external model or scheduled task
 was exercised; no execution policy was changed or bypassed.
 
+## November 14 postcommit continuation qualification
+
+Executed code: `f45f3fd552688a7b7eb4981dddcc230e7afc7490`, parent
+`ff623be8302e5ca3985d6b60da142804eb8ae6d3`. Only
+`internal/cli/migrate_serena_test.go` and
+`internal/cli/migrate_serena_committed_outcome_test.go` change in that commit.
+The [normalized execution receipt](pr616-qualification-20261114/postcommit-receipt.json)
+preserves exact commands, times, source hashes, all test-result names and
+classified failure causes without machine-local paths or raw transcripts.
+
+### Corrected boundary and actual result
+
+The earlier native test binary failed 12 selected leaves before their continuation
+oracles; its separate zero-workspace row passed. The correction registers an
+absent workspace as a stale candidate. Registration still drives allocation,
+supervisor reap and start decisions, while the real preparation owner filters
+the absent live selection. The new helper
+`installMigrateSerenaNoLiveWorkspacesForTest` requires an absent workspace and
+no prepared invocation, calls the real `InstallParsedManifest`, reads its
+actual committed intent and requires zero daemon rows.
+
+The tests then inject their intended postcommit failure. They require the
+original parse/start/timeout causes, preservation of committed bytes, no rollback
+after commit, release of the real interlock before start, and correct handoff
+event contents plus observer restoration. Three scalar recovery cases, one
+handoff case and eight previously failing matrix rows are restored: **12 leaves**.
+The matrix also contains its already passing zero-workspace row, so the five
+selected top-level tests contain **13 passing leaves**. These counts overlap
+the larger selection below and must not be added to it.
+
+The exact Git bundle and existing module-download cache were imported after
+SHA-256 verification into a separate clean checkout; the earlier dirty
+qualification checkout was preserved. The two changed source files match their
+earlier executed hashes exactly. No dependency or compiler was installed.
+The previous machine's insufficient-disk build failure remains a historical
+failed observation, superseded only for this source/build claim by the new run.
+
+Fresh execution on Windows/amd64 with existing Go 1.27.4:
+
+- `go build ./...`: exit 0.
+- `go vet ./...`: exit 0.
+- The full `TestMigrateSerena` selection below: exit 1, **70 passing leaves,
+  15 failing leaves, zero skips**. The 17 failure events include two repeated
+  parent events. The run finishes normally; it does not hit its five-minute deadline.
+- `gofmt -l` on the two changed files: exit 0 and no output.
+
+```text
+go test -json -tags=test_state_path_env -count=1 -timeout=5m -run=^TestMigrateSerena ./internal/cli
+```
+
+Reproduction requires a private task directory for TEMP, TMP, GOTMPDIR, application
+data, Go caches and GOPATH, an existing Go toolchain and complete dependency cache.
+Use `GOENV=off`, `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOSUMDB=off`, `GOVCS=*:off`,
+`GOWORK=off` and an empty `GOFLAGS`; retain telemetry off. Resolve GOROOT from the
+installed toolchain when its trimmed executable does not embed that location.
+Remove ambient integration/actor sentinels as in the preceding native receipt;
+leave GUI-spawn and live solver capabilities unrequested and use the existing
+`MCPHUB_E2E_SCHEDULER=none` test setting. These steps do not issue publisher
+authority or establish the full repository gate.
+
+Own source review and an independent review found no required defect in the
+two-file correction. The independent review is source-only; runtime results
+above were checked by the primary session. Applied guidance covered Go test
+oracles, code quality, root-cause investigation and simplicity. No external
+model/provider was launched.
+
+### Remaining positive-integration inventory
+
+Table 6. Newly measured failing leaves, all in `internal/cli/migrate_serena_test.go`.
+Each name below has the `TestMigrateSerena_` prefix. Fourteen leaves stop at
+`E_RUNTIME_PRODUCT_IMAGE` / `E_WINDOWS_PE_SUBSYSTEM` (expected GUI subsystem 2,
+actual test-console subsystem 3); `CallsInstallParsedManifest_NotDiskWrite`
+stops at `SERENA_BUILD_SOURCE_INVALID`. None reaches its intended positive
+prepared-install oracle. These are fixture prerequisites, not evidence of
+15 independently established production defects.
+
+| Test / subtest | Leaves | Intended assertion that must remain |
+| --- | ---: | --- |
+| `CatalogDynamicPool_RuntimeLegacyMissing_Proceeds` | 1 | Missing legacy runtime still produces a spec-bearing intent. |
+| `CallsInstallParsedManifest_NotDiskWrite` | 1 | Real parsed installation writes the runtime row and preserves catalog bytes. |
+| `DrivesSupervisorRestart/reap_fires_BEFORE_the_intent_write;_start_fires_AFTER` | 1 | Reap precedes the real write; start observes the committed runtime row. |
+| `NilSpecRowsHealedBeforeSpawn` | 1 | Real installation replaces nil runtime descriptions before start. |
+| `LiveSupervisor_ReapClearsTheGateBeforeWrite` | 1 | Releasing the real supervisor lock enables the real write. |
+| `StartFailureAfterIntentCommit_DoesNotRollBackRegistry` | 1 | Runtime intent and allocation survive a failed start. |
+| `PostCommitReconcileReadyTimeout_ExitsZeroWithWarning` | 1 | The warning preserves a committed runtime intent and allocation. |
+| `PostCommitTimeoutSupervisorNotAlive_FailsLoud` | 2 | Dead/unknown liveness fails loudly while the runtime commit survives. |
+| `NoRunningSupervisor_SkipsReap_WritesAndStarts` | 1 | The real gated write succeeds without reap and produces a runtime row. |
+| `ConcurrentRegisterInWindow_AppearsInCommittedIntent` | 1 | Original and concurrently registered workspaces appear in the intent. |
+| `EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart` | 1 | A late workspace changes the start decision and appears in the intent. |
+| `AlreadyMigrated_RegistryDrift_RefansOut` | 1 | Real fan-out includes existing and newly registered workspaces. |
+| `EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate` | 1 | Late reap releases the real write gate for a late workspace. |
+| `Interlock_BlocksConcurrentSupervisorStartInWindow` | 1 | Foreign acquisition is excluded while the owned spec-bearing write succeeds. |
+
+### Next fixture contract — proposed, not implemented
+
+The architecture inspection found no additional caller-only conversion that
+preserves Table 6. Ordinary test root overrides do not affect
+`ResolveDaemonStateDirObserved`; Windows preparation observes the current
+token's native Known Folder. `BuildSerenaPreparationInputs` and
+`qualifyPublisherImage` also require the executing image's issued source
+identity. The restriction in `build.ps1` against combining
+`TestStateIsolatedProduct` and `SourceSnapshotPath` must remain.
+
+A supported private integration publisher needs one reviewed contract covering:
+
+1. Exact source issuance and a distinct qualification purpose which ordinary
+   installation/release consumers cannot mistake for a distributable Product.
+2. A truthful native observation of an approved private namespace, shared by
+   preparation, ordinary state resolution and child interprocess communication.
+   A caller-supplied path must not masquerade as a native Known Folder result.
+3. The same API owner retained through preparation, final workspace selection,
+   consumer acquisition, installation and observed close.
+4. Real pinned HTTPS package preparation, UV/Python probes, installed-tool
+   receipt and package/file identities, with all Table 6 assertions preserved.
+
+The affected owners are the Product builder and admission, build information,
+observed state resolution, preparation composition and child initialization.
+An external Product path, synthetic prepared record, manually supplied source
+mark or a zero-live fixture is not an alternative implementation of this contract.
+A genuinely isolated Windows profile/virtual machine may host a positive
+Product smoke, but isolation alone does not qualify an ordinary Go test image
+or exercise these 15 in-process injection cases. Provisioning that environment
+or installing Serena still requires separate user authorization. No such
+environment, new publisher path or package installation was created in this
+increment.
+
 ## Remaining gates and next actions
 
 1. **Completed production correction scope:** C15 and C18–C21 were reproduced,
@@ -346,16 +480,15 @@ was exercised; no execution policy was changed or bypassed.
    C09/C11/C12/C22/C23 fixture results are separated from production qualification
    in Table 4; none replaces the complete repository gates.
 2. **Live-workspace Serena integration fixtures remain an open gate.**
-   The historical clean CLI run had 29 leaf cases that missed their intended
-   oracles: 28 runtime Product admission refusals (`expected 2, actual 3`) and
-   one `SERENA_BUILD_SOURCE_INVALID`. The November 14 correction restores two
-   caller-only refusal cases from that set; both now pass with explicit evidence
-   that the intended boundary was reached (Table 5). The other 27 have not been
-   rerun in this increment; that is a remaining historical inventory, not a newly
-   measured failure count. Their unpinned `git+https://example/serena` source is
-   not a valid prepared-package source. Selecting an inert runtime path would
-   only move the first group to the next boundary. Two truly zero-workspace cases
-   were repaired and executed earlier; that path requires no package preparation.
+   The historical 29-leaf inventory first lost two caller-only refusal cases
+   after the native/caller correction. The postcommit correction restores
+   another 12 leaves. A fresh run of every `TestMigrateSerena` case at `f45f3fd`
+   now measures the remaining **15 failing leaves**, rather than inferring the
+   count from an old log. It also records 70 passing leaves and zero skips.
+   Table 6 preserves each failing test's real runtime-intent/write-gate oracle.
+   Their invalid Product/source prerequisites must be fixed through a supported
+   integration fixture; zero-live or caller-only substitution would remove
+   required coverage. The receipt distinguishes 15 leaves from 17 failure events.
 3. **Full positive Serena preparation needs a supported isolated publisher fixture.**
    `build.ps1` expressly forbids combining `TestStateIsolatedProduct` with
    `SourceSnapshotPath`. Preparation checks the current process's issued source
@@ -375,6 +508,10 @@ was exercised; no execution policy was changed or bypassed.
    profile/VM before attempting this positive path on a developer machine.
    Its read-only acceptance must establish the same private allowed root for the
    observed preparation namespace and the ordinary API/CLI state resolvers.
+   The [proposed fixture contract](#next-fixture-contract--proposed-not-implemented)
+   names the required ownership and identity boundaries; it is not an implemented
+   capability. An isolated profile/VM alone does not qualify the ordinary test
+   image or preserve the in-process injection oracles.
    One qualified positive Product run would not repair the original 29-case test
    inventory: a supported test-publisher/namespace contract or a deliberate transfer
    of their integration oracles remains a separate test-architecture decision.
@@ -391,9 +528,11 @@ was exercised; no execution policy was changed or bypassed.
    private process console (Table 5). Comet already has MSVC x64 and the Windows
    SDK, but the actual CST test fails before compiler invocation: Windows
    PowerShell refuses `build_test_frontend.ps1` under its execution policy
-   (`UnauthorizedAccess`). The earlier missing-MSVC result on cReCS remains
-   historical. No compiler install, elevation, Developer Mode, execution-policy
-   bypass or policy change was performed. The separate WrongOwner branch remains
+   (`UnauthorizedAccess`). That recorded harness exposed only Windows PowerShell
+   and system directories on PATH; the test source already prefers `pwsh.exe`
+   when discoverable. No successful PowerShell 7 host admission is established.
+   The earlier missing-MSVC result on cReCS remains historical. No compiler install,
+   elevation, Developer Mode, execution-policy bypass or policy change was performed. The separate WrongOwner branch remains
    UNVERIFIED after the earlier Win32 1307 owner-assignment refusal.
 5. **The normal `CLAUDE.md` pre-push gates remain unsatisfied.** The recorded
    untagged and tagged attempts are FAIL, including the aggregate 5-minute API/CLI
@@ -406,8 +545,9 @@ was exercised; no execution policy was changed or bypassed.
 6. **Publication and merge:** the user requested continuation of the same
    correction branch, with results committed. This bounded follow-up stays in
    #616; it does not reopen duplicate pull requests or clear the full-test gate.
-   Require a fresh bot PASS on the resulting exact head: the receipt for
-   `99b451ae` covers its earlier source only. Merge remains blocked while these
+   Require a fresh bot PASS on the resulting exact head, including the postcommit
+   test correction and this evidence: the receipt for `99b451ae` covers its
+   earlier source only. Merge remains blocked while these
    gates are open. Do not trigger GitHub Actions or a paid provider run.
 7. **No release certification:** native GUI startup/health, installed-version
    acceptance, vendor solvers, optional skipped capabilities and full positive
@@ -415,13 +555,14 @@ was exercised; no execution policy was changed or bypassed.
 
 ## Bot review disposition
 
-Table 6. The original 26 inline threads plus follow-ups B27 and B28. The
+Table 7. The original 26 inline threads plus follow-ups B27 and B28. The
 November 14 snapshot has 28 resolved / 0 unresolved. The latest completed bot
 review covers exact head `99b451ae3b1f6052046d11d71ff04e3f46096cef`, with a
 [no-major-issues receipt](https://github.com/applicate2628/mcp-local-hub/pull/616#issuecomment-6866115860)
 at 22:08 UTC on November 13 (01:08 Moscow on November 14). The earlier
-`53645ec7` result and this `99b451ae` result do not cover the new caller
-correction. A fresh exact-head review remains pending. The source audit covers
+`53645ec7` result and this `99b451ae` result do not cover the later caller or
+postcommit test corrections. A fresh exact-head review remains pending at this
+pre-publication evidence snapshot. The source audit covers
 27 addressed defect/fixture claims and one false panic claim; resolution alone
 is not proof.
 
@@ -474,6 +615,10 @@ The named regressions below were inspected during this final audit. Their presen
 - KiB: 1,024 bytes; MSVC: Microsoft Visual C++ compiler toolchain; SDK: software development kit.
 - CST: the project's CST native frontend integration; reap: stop and settle the prior supervisor before starting its successor.
 - Caller-only seam: an existing dependency boundary used to test command orchestration without claiming prepared-package authority.
+- PE: Windows Portable Executable format; subsystem 2 is the GUI image class and subsystem 3 the console image class.
+- Leaf case: an executed test result without nested test results; parent result events are not extra independent cases.
+- UV/Python: the `uv` package/environment manager and Python runtime required by the real Serena preparation path.
+- Qualification publisher: the proposed distinct test artifact and source/namespace contract; not an implemented Product capability.
 - Quiet lock: retained supervisor-exclusion lock; observed close: completion recorded while its owning operation context is still valid.
 - Postcommit failure: failure after changes were applied; cleanup error does not itself authorize rollback.
 - UNVERIFIED: the required native condition was not established; neither a pass nor fabricated evidence for that branch.
