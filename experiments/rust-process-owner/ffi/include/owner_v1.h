@@ -29,6 +29,14 @@ enum { MH_OK=0, MH_ARGUMENT=1, MH_ABI=2, MH_NATIVE=3,
        MH_DENIED=4, MH_STATE=5, MH_NOT_SETTLED=6 };
 enum { MH_UNKNOWN=0, MH_PENDING=1, MH_COMPLETE=2, MH_CLEANUP_FAILED=3 };
 enum { MH_ROOT_KNOWN=1, MH_ACTIVE_KNOWN=2 };
+/* ABI1 outcome values are zero-initialized: inactive fields are zero, known
+ * flags are limited to the two bits above, cleanup_mask uses only bits0..2,
+ * and a slot is set iff its cleanup code is nonzero. Only MH_NATIVE carries
+ * native_error, which must be nonzero. COMPLETE/CLEANUP_FAILED require a known
+ * root exit, nonzero diagnostic pid and no active members. Cleanup codes occur
+ * only in CLEANUP_FAILED, with at least one failed slot. MH_OK from finish
+ * supplies PENDING/COMPLETE/CLEANUP_FAILED, not UNKNOWN. Validate layout even on
+ * failure statuses; a bad observation does not revoke transferred ownership. */
 /* Version 1: explicit absolute program/cwd, <=64 args, <=32766 UTF-16 units
  * per string and <=32766 aggregate units; embedded NUL rejected. Complete
  * EMPTY environment, no redirected stdio in this first calling-side slice.

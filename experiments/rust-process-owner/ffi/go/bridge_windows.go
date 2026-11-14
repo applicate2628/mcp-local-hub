@@ -120,13 +120,22 @@ func result(status C.uint32_t, o C.mh_out) (Outcome, error) {
 	for i := range v.CleanupCodes {
 		v.CleanupCodes[i] = int32(o.cleanup_codes[i])
 	}
+	layoutKnown := o.size == C.sizeof_mh_out && o.version == 1
+	var callErr error
 	if status != 0 {
-		return v, &CallError{uint32(status), v.NativeError}
+		var native int32
+		if layoutKnown && uint32(status) == nativeFailure {
+			native = v.NativeError
+		}
+		callErr = &CallError{uint32(status), native}
 	}
-	if o.size != C.sizeof_mh_out || o.version != 1 {
-		return v, errors.New("incompatible outcome layout")
+	if !layoutKnown {
+		return Outcome{}, errors.Join(callErr, fmt.Errorf("%w: incompatible layout", ErrInvalidOutcome))
 	}
-	return v, nil
+	if reason := outcomeViolation(uint32(status), v); reason != "" {
+		return Outcome{}, errors.Join(callErr, fmt.Errorf("%w: %s", ErrInvalidOutcome, reason))
+	}
+	return v, callErr
 }
 
 // Mutexes are intentionally owned at the calling boundary. Raw C callers must
@@ -338,7 +347,11 @@ func (o *Owner) callLocked(operation int, value uint32) (Outcome, error) {
 	default:
 		return Outcome{}, errors.New("invalid local operation")
 	}
-	return result(code, out)
+	observed, err := result(code, out)
+	if err == nil && operation == 2 && observed.State == 0 {
+		return Outcome{}, fmt.Errorf("%w: successful finish omitted settlement", ErrInvalidOutcome)
+	}
+	return observed, err
 }
 
 // Release never silently stops an active child. Call Finish until terminal first.
