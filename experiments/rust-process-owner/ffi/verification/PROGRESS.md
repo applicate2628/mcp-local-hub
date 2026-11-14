@@ -267,3 +267,11 @@ Completed instrumented source copies matched their recorded manifests; four
 copies and their unused test-only target moved directly to approved trash.
 Normal target/Cargo cache and active source remain; necessary results are under
 verification/ and source control. Movements confirmed, trash not emptied.
+
+Post-publication artifact check initially compared current normal DLLs against
+pre-ordinary-rebuild hashes and detected a difference. Source/lock identity was
+unchanged; the later ordinary runner had rebuilt both DLLs. Historical hashes
+remain intact. ARTIFACT_READBACK records both build epochs without claiming
+binary reproducibility. verify-artifacts.ps1 tested the current DLLs without
+rebuilding: debug/release export-absence controls and full normal Go race x1
+passed, each hash unchanged through the check. Extra evidence-only commit follows.

@@ -1,0 +1,12 @@
+[
+    {
+        "path":  "\u003cLAB\u003e/target/debug/mcphub_owner_ffi_spike.dll",
+        "sha256":  "e8908fe2b3c0db3a08c01bd63a3eaa505ba02fe76c34816ec3b4e849402280e6",
+        "last_write_utc":  "2026-11-14T15:25:15.2950633Z"
+    },
+    {
+        "path":  "\u003cLAB\u003e/target/release/mcphub_owner_ffi_spike.dll",
+        "sha256":  "8185d3d7e9109e47d947e0ff1d582b3c744c335768dcf4452659a637f96e94e1",
+        "last_write_utc":  "2026-11-14T15:25:15.7082377Z"
+    }
+]

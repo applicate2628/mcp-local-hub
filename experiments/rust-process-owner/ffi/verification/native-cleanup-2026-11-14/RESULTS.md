@@ -120,3 +120,14 @@ trash, not deleted. Movements are recorded in `disposable-copies.json` and were
 checked at source and destination. Ordinary DLLs, active checkout, Cargo cache,
 all evidence and sole required source copies remain outside trash. Trash was not
 emptied; manual removal of its contents cannot erase a required result.
+
+### Artifact identity across later rebuilds
+
+A final comparison found that the ordinary DLLs no longer matched hashes taken
+before the later ordinary regression runner rebuilt them. Source identities
+still matched. Historical hashes were not changed to conceal this difference.
+The [artifact readback note](ARTIFACT_READBACK.md) records both identities,
+build-log timing, the limit on binary-reproducibility claims, and a fresh
+no-rebuild check of the current binaries. Both current profiles passed absence
+of the qualification export and their full normal Go race suites; their hashes
+remained stable throughout those new checks. Runtime code was not modified.

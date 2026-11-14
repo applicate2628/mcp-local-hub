@@ -1,0 +1,6 @@
+Command: go test . -count=1 -timeout=90s -race
+UTC: 2026-11-14T15:45:24.9351133Z
+Actual exit: 0
+Artifact SHA256: 8185d3d7e9109e47d947e0ff1d582b3c744c335768dcf4452659a637f96e94e1
+
+ok  	mcphub-owner-ffi-caller	2.565s

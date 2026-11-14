@@ -1,0 +1,6 @@
+Command: go test . -count=1 -timeout=90s -race -tags ffi_native_faults -run ^TestNativeCleanupQualificationExportAbsentFromOrdinaryDLL$
+UTC: 2026-11-14T15:45:14.6413837Z
+Actual exit: 0
+Artifact SHA256: e8908fe2b3c0db3a08c01bd63a3eaa505ba02fe76c34816ec3b4e849402280e6
+
+ok  	mcphub-owner-ffi-caller	1.036s

@@ -81,3 +81,8 @@ are versioned here. The runtime did not need a fix: the new result is a tested
 end-to-end path for selected real Windows failures. Negative controls and the
 initial preparation failure remain visible, and ordinary artifacts are checked
 not to contain the fixture-only handle accessor.
+
+The [post-rebuild artifact readback](native-cleanup-2026-11-14/ARTIFACT_READBACK.md)
+keeps per-run DLL identities distinct across the later ordinary rebuild and
+records fresh checks of the current binaries. Old hashes are not overwritten
+and binary-reproducible builds are not implied.
