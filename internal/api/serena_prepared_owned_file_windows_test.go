@@ -166,6 +166,10 @@ func TestPreparedSerenaOwnedFileRejectsUnissuedOwners(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) || file != (PreparedSerenaFile{}) || len(raw) != 0 {
 				t.Fatalf("unissued owner result: file=%v raw=%d error=%v", file, len(raw), err)
 			}
+			files, batchErr := qualifyPreparedSerenaOwnedFiles(ctx, tc.tree, []string{filepath.Join(t.TempDir(), "file")}, 4096)
+			if batchErr == nil || !strings.Contains(batchErr.Error(), tc.want) || files != nil {
+				t.Fatalf("unissued batch result: files=%v error=%v", files, batchErr)
+			}
 		})
 	}
 }
@@ -241,4 +245,161 @@ func TestPreparedSerenaInvocationRejectsForeignGeneration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// This exercises the native batch body with real borrowed handles. The fixture
+// deliberately has no issued creation/namespace observation; the outer qualifier
+// must still reject it, so a primitive PASS is not publisher qualification.
+func TestPreparedSerenaOwnedFileBatchPrimitive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	namespace := t.TempDir()
+	request := SerenaOwnedTreeRequest{Namespace: namespace, PackageIdentitySHA256: "fixture", Kind: "generation", GenerationID: "generation", OperationID: "operation", Limits: DefaultSerenaTreeLimits()}
+	parentPath := filepath.Join(namespace, request.PackageIdentitySHA256, "generations")
+	root := filepath.Join(parentPath, request.GenerationID)
+	if err := os.MkdirAll(filepath.Join(root, "tools"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	first, second := filepath.Join(root, "tools", "a.txt"), filepath.Join(root, "tools", "\U0001F9EA.txt")
+	expected := map[string]PreparedSerenaFile{}
+	for path, raw := range map[string]string{first: "one", second: "twooo"} {
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		file, _, err := qualifyPreparedSerenaFile(ctx, path, 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected[path] = file
+	}
+	parent, err := ntOpenStateReadRootMode(parentPath, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := windows.CloseHandle(parent); err != nil {
+			t.Error(err)
+		}
+	})
+	retained, err := ntOpenStateReadRootMode(root, windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := windows.CloseHandle(retained); err != nil {
+			t.Error(err)
+		}
+	})
+	parentID, err := serenaTreeHandleIdentity(parent, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootID, err := serenaTreeHandleIdentity(retained, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := func() (*SerenaOwnedTree, *windowsSerenaOwnedTree) {
+		owner := &windowsSerenaOwnedTree{
+			request: request, rootName: request.GenerationID,
+			parent: &serenaTreeHandle{handle: parent}, root: &serenaTreeHandle{handle: retained},
+			parentIdentity: parentID, rootIdentity: rootID,
+			parentPolicy: &ConfigParentPolicyObservation{policy: &StateReadPolicyObservation{view: StateReadPolicySnapshotV1{EnvIdentitySHA256: StateReadPolicyEnvironmentIdentity()}}},
+		}
+		return &SerenaOwnedTree{request: request, platform: owner}, owner
+	}
+	t.Run("unique-members-and-duplicate-path", func(t *testing.T) {
+		tree, owner := fixture()
+		// Relative UTF-16 components: tools+a.txt = 20 bytes; tools+U+1F9EA.txt = 22.
+		owner.request.Limits.Entries, owner.request.Limits.EncodedPathBytes, owner.request.Limits.LogicalBytes = 2, 42, 8
+		tree.request = owner.request
+		files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, []string{first, first, second}, 4096)
+		if err != nil || len(files) != 2 || files[first] != expected[first] || files[second] != expected[second] {
+			t.Fatalf("native batch: files=%v error=%v", files, err)
+		}
+	})
+	t.Run("duplicates-do-not-consume-unique-budgets", func(t *testing.T) {
+		tree, owner := fixture()
+		owner.request.Limits.Entries, owner.request.Limits.EncodedPathBytes, owner.request.Limits.LogicalBytes = 1, 20, 3
+		tree.request = owner.request
+		files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, []string{first, first}, 4096)
+		if err != nil || len(files) != 1 || files[first] != expected[first] {
+			t.Fatalf("duplicate batch: files=%v error=%v", files, err)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		change func(*windowsSerenaOwnedTree)
+		want   string
+	}{
+		{"entry-limit-discards-prefix", func(w *windowsSerenaOwnedTree) { w.request.Limits.Entries = 1 }, "FILE_BATCH_LIMIT"},
+		{"utf16-limit-discards-prefix", func(w *windowsSerenaOwnedTree) { w.request.Limits.EncodedPathBytes = 41 }, "FILE_BATCH_LIMIT"},
+		{"logical-limit-discards-prefix", func(w *windowsSerenaOwnedTree) { w.request.Limits.LogicalBytes = 7 }, "FILE_BATCH_LIMIT"},
+		{"parent-identity-drift", func(w *windowsSerenaOwnedTree) { w.parentIdentity.FileID = "different" }, "PARENT_DRIFT"},
+		{"root-identity-drift", func(w *windowsSerenaOwnedTree) { w.rootIdentity.FileID = "different" }, "ROOT_DRIFT"},
+		{"strict-environment-drift", func(w *windowsSerenaOwnedTree) { w.parentPolicy.policy.view.EnvIdentitySHA256 = "different" }, "POLICY_DRIFT"},
+		{"closed-owner", func(w *windowsSerenaOwnedTree) { w.closeResult.Attempted = true }, "ROOT_UNAVAILABLE"},
+		{"sticky-close-debt", func(w *windowsSerenaOwnedTree) { w.inventoryCloseError = errors.New("actual-close-debt-fixture") }, "actual-close-debt-fixture"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tree, owner := fixture()
+			tc.change(owner)
+			tree.request = owner.request
+			files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, []string{first, second}, 4096)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || files != nil {
+				t.Fatalf("failed batch exposed results: files=%v error=%v", files, err)
+			}
+		})
+	}
+	t.Run("missing-member-discards-prefix", func(t *testing.T) {
+		tree, owner := fixture()
+		files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, []string{first, filepath.Join(root, "tools", "missing")}, 4096)
+		if err == nil || !preparedSerenaQualifiedFileMissing(err) || files != nil || owner.inventoryCloseError != nil {
+			t.Fatalf("missing batch member: files=%v error=%v close debt=%v", files, err, owner.inventoryCloseError)
+		}
+	})
+	t.Run("outside-member-discards-prefix", func(t *testing.T) {
+		tree, owner := fixture()
+		files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, []string{first, filepath.Join(namespace, "outside")}, 4096)
+		if err == nil || !strings.Contains(err.Error(), "OUTSIDE_GENERATION") || files != nil {
+			t.Fatalf("outside batch member: files=%v error=%v", files, err)
+		}
+	})
+	t.Run("cancellation-discards-results", func(t *testing.T) {
+		tree, owner := fixture()
+		canceled, stop := context.WithCancel(ctx)
+		stop()
+		files, err := readPreparedSerenaOwnedFiles(canceled, tree, owner, root, []string{first}, 4096)
+		if !errors.Is(err, context.Canceled) || files != nil {
+			t.Fatalf("canceled batch: files=%v error=%v", files, err)
+		}
+	})
+	t.Run("finite-deadline-required", func(t *testing.T) {
+		tree, owner := fixture()
+		files, err := readPreparedSerenaOwnedFiles(context.Background(), tree, owner, root, []string{first}, 4096)
+		if err == nil || !strings.Contains(err.Error(), "WORK_DEADLINE_INVALID") || files != nil {
+			t.Fatalf("unbounded batch: files=%v error=%v", files, err)
+		}
+	})
+	t.Run("traversal-does-not-issue-namespace", func(t *testing.T) {
+		tree, _ := fixture()
+		files, err := qualifyPreparedSerenaOwnedFiles(ctx, tree, []string{first, second}, 4096)
+		if err == nil || !strings.Contains(err.Error(), "ACQUISITION_RESOURCES_PENDING") || files != nil {
+			t.Fatalf("raw native fixture gained namespace authority: files=%v error=%v", files, err)
+		}
+	})
+	t.Run("borrowed-root-live-descendants-closed", func(t *testing.T) {
+		if _, err := serenaTreeHandleIdentity(retained, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := qualifyPreparedSerenaFile(ctx, first, 4096); !errors.Is(err, windows.STATUS_SHARING_VIOLATION) {
+			t.Fatalf("borrowed root lost exclusive ancestor protection: %v", err)
+		}
+		directory, err := ntOpenStateReadRootMode(filepath.Join(root, "tools"), windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES, 0)
+		if err != nil {
+			t.Fatal("batch leaked descendant handle", err)
+		}
+		if err := windows.CloseHandle(directory); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

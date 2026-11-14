@@ -142,30 +142,37 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	if metadata.Executable != environmentPython.Path || metadata.BaseExecutable != r.Interpreter.Path {
 		return installed, errors.New("SERENA_PREPARED_METADATA_INTERPRETER_MISMATCH")
 	}
-	// Re-read each observed distribution file through the same no-follow
-	// identity/byte owner. Python's content digest is not a path authority.
-	qualifiedMembers := map[string]PreparedSerenaFile{}
-	for _, distribution := range metadata.Distributions {
-		for _, file := range distribution.Files {
-			actual, _, fileErr := qualifyPreparedSerenaOwnedFile(work, generation, file.Path, 64<<20)
-			if fileErr != nil || actual.SHA256 != file.SHA256 {
-				return installed, errors.Join(fileErr, errors.New("SERENA_PREPARED_METADATA_FILE_DRIFT"))
-			}
-			qualifiedMembers[file.Path] = actual
-		}
-	}
+	// Associate first, then read the complete member/export set in one bounded
+	// original-owner transaction. Python's digest is not a path authority.
 	associations, associationErr := bindPreparedSerenaReceiptAssociations(receipt, metadata, r, toolRoot, "serena")
 	if associationErr != nil {
 		return installed, associationErr
+	}
+	var paths []string
+	for _, distribution := range metadata.Distributions {
+		for _, file := range distribution.Files {
+			paths = append(paths, file.Path)
+		}
+	}
+	for _, association := range associations {
+		paths = append(paths, filepath.FromSlash(association.Receipt.InstallPath))
+	}
+	qualifiedMembers, readErr := qualifyPreparedSerenaOwnedFiles(work, generation, paths, 64<<20)
+	if readErr != nil {
+		return installed, errors.Join(readErr, errors.New("SERENA_PREPARED_METADATA_FILE_DRIFT"))
+	}
+	for _, distribution := range metadata.Distributions {
+		for _, file := range distribution.Files {
+			if qualifiedMembers[file.Path].SHA256 != file.SHA256 {
+				return installed, errors.New("SERENA_PREPARED_METADATA_FILE_DRIFT")
+			}
+		}
 	}
 	identities := map[string]string{}
 	var selected PreparedSerenaFile
 	for _, association := range associations {
 		path := filepath.FromSlash(association.Receipt.InstallPath)
-		exported, _, exportErr := qualifyPreparedSerenaOwnedFile(work, generation, path, 64<<20)
-		if exportErr != nil {
-			return installed, exportErr
-		}
+		exported := qualifiedMembers[path]
 		if associationErr = bindPreparedSerenaExportIdentity(identities, association.Receipt.Name, qualifiedMembers[association.Member.Path], exported); associationErr != nil {
 			return installed, associationErr
 		}

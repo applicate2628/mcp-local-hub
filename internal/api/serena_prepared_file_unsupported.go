@@ -28,3 +28,6 @@ func revalidatePreparedSerenaOwnedFile(context.Context, *SerenaOwnedTree, Prepar
 func validatePreparedSerenaGeneration(context.Context, *SerenaOwnedTree, PreparedSerenaRequest, PreparedSerenaFile) error {
 	return errors.New("SERENA_PREPARED_FILE_PLATFORM_UNQUALIFIED")
 }
+func qualifyPreparedSerenaOwnedFiles(context.Context, *SerenaOwnedTree, []string, int64) (map[string]PreparedSerenaFile, error) {
+	return nil, errors.New("SERENA_PREPARED_FILE_PLATFORM_UNQUALIFIED")
+}
