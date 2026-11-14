@@ -16,6 +16,35 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// A refused observation is immutable evidence, so test teardown must not
+// replay that policy with fresh operations or a renewed deadline. Close the
+// retained fixture Job as its kill-on-close backstop, join its one original
+// waiter, and only then release the creator handles. No PID is reopened/killed.
+func cleanupProvisionalLifetimeFixture(t *testing.T, child *ProvisionalProcess) {
+	t.Helper()
+	if child == nil || child.job.Handle() == 0 {
+		return
+	}
+	child.job.terminationOps = nil
+	if err := child.job.Close(); err != nil {
+		t.Errorf("owned fixture Job backstop: %v", err)
+		return
+	}
+	select {
+	case <-child.wait():
+	case <-time.After(5 * time.Second):
+		t.Error("owned fixture original waiter did not settle after Job closure")
+		return
+	}
+	if !child.waitResult.exited {
+		t.Errorf("owned fixture original exit remains unproved: %v", child.waitResult.err)
+		return
+	}
+	if err := child.owner.close(); err != nil {
+		t.Errorf("owned fixture creator handle closure: %v", err)
+	}
+}
+
 func TestProvisionalCallerNativeStartupFailureCustody(t *testing.T) {
 	for _, uncertain := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unsettled=%v", uncertain), func(t *testing.T) {
@@ -41,14 +70,7 @@ func TestProvisionalCallerNativeStartupFailureCustody(t *testing.T) {
 				captured = owner.(*provisionalWindowsChild)
 				return owner, err
 			})
-			defer func() {
-				if child != nil && child.job.Handle() != 0 {
-					child.job.terminationOps = nil
-					if err := child.TerminateAndWait(5 * time.Second); err != nil {
-						t.Errorf("retained startup owner cleanup: %v", err)
-					}
-				}
-			}()
+			defer cleanupProvisionalLifetimeFixture(t, child)
 			if !errors.Is(err, startCause) {
 				t.Fatalf("startup cause lost: %v", err)
 			}
@@ -56,19 +78,20 @@ func TestProvisionalCallerNativeStartupFailureCustody(t *testing.T) {
 				if child == nil || !errors.Is(err, snapshotCause) || captured.process == 0 || captured.thread == 0 || captured.job.Handle() == 0 {
 					t.Fatalf("unsettled owner custody discarded: child=%v error=%v", child, err)
 				}
-				// This is a per-case injected observation refusal, not an OS or
-				// host denial; recovery uses the same retained creator owner.
-				captured.job.terminationOps = nil
-				if err := child.TerminateAndWait(5 * time.Second); err != nil {
-					t.Fatalf("owned same-binding recovery: %v", err)
+				// Removing the injection must not turn the original failed
+				// observation into success. Teardown retains and closes the same
+				// Job/creator owners without reconstructing the policy outcome.
+				if captured.job.memberPolicy == nil || !errors.Is(captured.job.memberPolicy.err, snapshotCause) {
+					t.Fatal("original startup observation refusal was not retained")
 				}
+				cleanupProvisionalLifetimeFixture(t, child)
 			} else if child != nil {
 				t.Fatalf("confirmed startup cleanup retained an owner: %v", err)
 			}
 			if captured.process != 0 || captured.thread != 0 || captured.job.Handle() != 0 {
 				t.Fatal("creator startup handles were not closed")
 			}
-			t.Logf("PROVISIONAL_START_ERROR unsettled_initially=%v cause_preserved=true same_owner_recovered=true process_thread_job_closed=true", uncertain)
+			t.Logf("PROVISIONAL_START_ERROR unsettled_initially=%v cause_preserved=true owned_backstop_settled=true process_thread_job_closed=true", uncertain)
 		})
 	}
 }
@@ -77,14 +100,7 @@ func TestProvisionalCallerNativeMemberCloseFailureRemainsVisible(t *testing.T) {
 	root := t.TempDir()
 	cmd := provisionalLifetimeCommand("root", root)
 	child, err := StartProvisional(cmd)
-	defer func() {
-		if child != nil && child.job.Handle() != 0 {
-			child.job.terminationOps = nil
-			if err := child.TerminateAndWait(5 * time.Second); err != nil {
-				t.Errorf("owned close-failure cleanup: %v", err)
-			}
-		}
-	}()
+	defer cleanupProvisionalLifetimeFixture(t, child)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,25 +116,18 @@ func TestProvisionalCallerNativeMemberCloseFailureRemainsVisible(t *testing.T) {
 	if !errors.Is(err, closeCause) || child.job.Handle() == 0 {
 		t.Fatalf("close refusal became success or lost custody: %v", err)
 	}
-	child.job.terminationOps = nil
-	if err := child.TerminateAndWait(5 * time.Second); err != nil {
-		t.Fatal(err)
+	if child.job.memberPolicy == nil || !errors.Is(child.job.memberPolicy.err, closeCause) {
+		t.Fatal("member-close refusal was not retained")
 	}
-	t.Log("PROVISIONAL_CLOSE_ERROR cause_preserved=true no_false_success=true retained_owner_recovery=true")
+	cleanupProvisionalLifetimeFixture(t, child)
+	t.Log("PROVISIONAL_CLOSE_ERROR cause_preserved=true no_false_success=true owned_backstop_settled=true")
 }
 
 func TestProvisionalCallerNativeCleanupTimeoutRetainsCustody(t *testing.T) {
 	root := t.TempDir()
 	cmd := provisionalLifetimeCommand("root", root)
 	child, err := StartProvisional(cmd)
-	defer func() {
-		if child != nil && child.job.Handle() != 0 {
-			child.job.terminationOps = nil
-			if err := child.TerminateAndWait(5 * time.Second); err != nil {
-				t.Errorf("owned timeout fixture cleanup: %v", err)
-			}
-		}
-	}()
+	defer cleanupProvisionalLifetimeFixture(t, child)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +146,8 @@ func TestProvisionalCallerNativeCleanupTimeoutRetainsCustody(t *testing.T) {
 	if child.owner.(*provisionalWindowsChild).process == 0 || child.owner.(*provisionalWindowsChild).thread == 0 {
 		t.Fatal("timeout discarded creator handles")
 	}
-	child.job.terminationOps = nil
-	if err := child.TerminateAndWait(5 * time.Second); err != nil {
-		t.Fatal(err)
-	}
-	t.Log("PROVISIONAL_TIMEOUT cause_preserved=true no_false_success=true creator_handles_retained=true same_binding_recovered=true")
+	cleanupProvisionalLifetimeFixture(t, child)
+	t.Log("PROVISIONAL_TIMEOUT cause_preserved=true no_false_success=true creator_handles_retained=true owned_backstop_settled=true")
 }
 
 const provisionalLifetimeRole = "MCPHUB_TEST_PROVISIONAL_LIFETIME_ROLE"

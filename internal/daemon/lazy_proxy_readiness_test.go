@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -57,6 +58,8 @@ func TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady(t *testin
 	}
 }
 
+// Run the short-budget readiness scenarios with a virtual clock: real registry
+// writes must not consume a deadline meant for a blocked backend or publisher.
 func TestLazyProxyReadinessPublisher_OrganicSuccessArms(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -77,26 +80,28 @@ func TestLazyProxyReadinessPublisher_OrganicSuccessArms(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeLifecycle{kind: "mcp-language-server"}
-			if tc.prepare != nil {
-				tc.prepare(f)
-			}
-			events := make(chan api.LazyProxyReadinessEventV1, 4)
-			fatal := make(chan error, 1)
-			p := newReadinessTestProxy(t, f, events, fatal)
-			rr := tc.invoke(t, p.Handler())
-			if rr.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.wantStatus, rr.Body.String())
-			}
-			got := collectReadinessEvents(t, events, 2)
-			if got[0].Transition != "starting" || got[1].Transition != "ready" || got[0].BackendEpoch != got[1].BackendEpoch {
-				t.Fatalf("events = %+v, want same-epoch starting then ready", got)
-			}
-			select {
-			case err := <-fatal:
-				t.Fatalf("unexpected fatal readiness failure: %v", err)
-			default:
-			}
+			synctest.Test(t, func(t *testing.T) {
+				f := &fakeLifecycle{kind: "mcp-language-server"}
+				if tc.prepare != nil {
+					tc.prepare(f)
+				}
+				events := make(chan api.LazyProxyReadinessEventV1, 4)
+				fatal := make(chan error, 1)
+				p := newReadinessTestProxy(t, f, events, fatal)
+				rr := tc.invoke(t, p.Handler())
+				if rr.Code != tc.wantStatus {
+					t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.wantStatus, rr.Body.String())
+				}
+				got := collectReadinessEvents(t, events, 2)
+				if got[0].Transition != "starting" || got[1].Transition != "ready" || got[0].BackendEpoch != got[1].BackendEpoch {
+					t.Fatalf("events = %+v, want same-epoch starting then ready", got)
+				}
+				select {
+				case err := <-fatal:
+					t.Fatalf("unexpected fatal readiness failure: %v", err)
+				default:
+				}
+			})
 		})
 	}
 }
@@ -163,114 +168,146 @@ func TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure(
 
 func TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady(t *testing.T) {
 	t.Run("synthetic and absorbed", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server"}
-		events := make(chan api.LazyProxyReadinessEventV1, 8)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		for i, method := range []string{"initialize", "tools/list", "ping", "notifications/progress"} {
-			rr := postRPC(t, p.Handler(), method, i+1)
-			if rr.Code != http.StatusOK && rr.Code != http.StatusAccepted {
-				t.Fatalf("%s status = %d; body=%s", method, rr.Code, rr.Body.String())
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server"}
+			events := make(chan api.LazyProxyReadinessEventV1, 8)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			for i, method := range []string{"initialize", "tools/list", "ping", "notifications/progress"} {
+				rr := postRPC(t, p.Handler(), method, i+1)
+				if rr.Code != http.StatusOK && rr.Code != http.StatusAccepted {
+					t.Fatalf("%s status = %d; body=%s", method, rr.Code, rr.Body.String())
+				}
 			}
-		}
-		if len(events) != 0 || f.materializeCount.Load() != 0 {
-			t.Fatalf("synthetic paths materialized=%d events=%d, want zero", f.materializeCount.Load(), len(events))
-		}
+			if len(events) != 0 || f.materializeCount.Load() != 0 {
+				t.Fatalf("synthetic paths materialized=%d events=%d, want zero", f.materializeCount.Load(), len(events))
+			}
+		})
 	})
 
 	t.Run("pre-delivery saturation refusal", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server", sendRequestErr: ErrTooManyPending}
-		events := make(chan api.LazyProxyReadinessEventV1, 4)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		rr := postRPC(t, p.Handler(), "tools/call", 1)
-		if rr.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
-		}
-		assertReadinessTransitions(t, events, "starting")
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server", sendRequestErr: ErrTooManyPending}
+			events := make(chan api.LazyProxyReadinessEventV1, 4)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			rr := postRPC(t, p.Handler(), "tools/call", 1)
+			if rr.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+			}
+			assertReadinessTransitions(t, events, "starting")
+		})
 	})
 
 	t.Run("delivered notification without response", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
-		events := make(chan api.LazyProxyReadinessEventV1, 4)
-		p := newReadinessTestProxyWithBudget(t, f, events, make(chan error, 1), 10*time.Millisecond)
-		rr := postDocNotification(t, p.Handler(), "textDocument/didOpen", "file:///D:/test/ws/a.py")
-		if rr.Code != http.StatusAccepted {
-			t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
-		}
-		assertReadinessTransitions(t, events, "starting")
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+			events := make(chan api.LazyProxyReadinessEventV1, 4)
+			p := newReadinessTestProxyWithBudget(t, f, events, make(chan error, 1), 10*time.Millisecond)
+			// Receive materialization before testing the separate post-delivery
+			// budget. Registry/starting publication need not finish within 10ms,
+			// and materializing alone must not publish ready or consume firstSend.
+			if _, _, err := p.ensureMaterialized(context.Background()); err == nil {
+				p.endBackendRequest()
+			} else if !errors.Is(err, ErrMaterializeInFlight) {
+				t.Fatalf("prepare materialized endpoint: %v", err)
+			}
+			waitForCond(t, "unwarmed notification endpoint published", func() bool {
+				p.mu.Lock()
+				defer p.mu.Unlock()
+				return p.endpoint != nil
+			})
+			rr := postDocNotification(t, p.Handler(), "textDocument/didOpen", "file:///D:/test/ws/a.py")
+			if rr.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+			}
+			if sent, warmed := f.sendCount.Load(), p.isWarmed(); sent != 1 || warmed {
+				t.Fatalf("notification sent=%d warmed=%v, want one delivered notification without a response", sent, warmed)
+			}
+			assertReadinessTransitions(t, events, "starting")
+		})
 	})
 
 	t.Run("client cancellation", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server"}
-		events := make(chan api.LazyProxyReadinessEventV1, 8)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
-			t.Fatalf("warmup status = %d; body=%s", rr.Code, rr.Body.String())
-		}
-		_ = collectReadinessEvents(t, events, 2)
-		f.sendRequestErr = context.Canceled
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}`)).WithContext(ctx)
-		req.Header.Set("Content-Type", "application/json")
-		rr := httptest.NewRecorder()
-		p.Handler().ServeHTTP(rr, req)
-		if len(events) != 0 {
-			t.Fatalf("client-canceled request published %d additional events", len(events))
-		}
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server"}
+			events := make(chan api.LazyProxyReadinessEventV1, 8)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
+				t.Fatalf("warmup status = %d; body=%s", rr.Code, rr.Body.String())
+			}
+			_ = collectReadinessEvents(t, events, 2)
+			f.sendRequestErr = context.Canceled
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}`)).WithContext(ctx)
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			p.Handler().ServeHTTP(rr, req)
+			if len(events) != 0 {
+				t.Fatalf("client-canceled request published %d additional events", len(events))
+			}
+		})
 	})
 }
 
 func TestLazyProxyReadinessPublisher_LifecycleOrdering(t *testing.T) {
 	t.Run("idle and rematerialize", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server"}
-		events := make(chan api.LazyProxyReadinessEventV1, 10)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
-			t.Fatalf("first call status = %d", rr.Code)
-		}
-		p.cfg.IdleBackendTTL = time.Second
-		p.reapIdleBackend(time.Now().UTC().Add(2 * time.Second))
-		if rr := postRPC(t, p.Handler(), "tools/call", 2); rr.Code != http.StatusOK {
-			t.Fatalf("second call status = %d; body=%s", rr.Code, rr.Body.String())
-		}
-		got := collectReadinessEvents(t, events, 5)
-		want := []struct {
-			transition string
-			epoch      uint64
-		}{{"starting", 1}, {"ready", 1}, {"idle", 2}, {"starting", 3}, {"ready", 3}}
-		for i := range want {
-			if got[i].Transition != want[i].transition || got[i].BackendEpoch != want[i].epoch {
-				t.Fatalf("events[%d] = %+v, want %s epoch %d; all=%+v", i, got[i], want[i].transition, want[i].epoch, got)
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server"}
+			events := make(chan api.LazyProxyReadinessEventV1, 10)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
+				t.Fatalf("first call status = %d", rr.Code)
 			}
-		}
+			p.cfg.IdleBackendTTL = time.Second
+			p.reapIdleBackend(time.Now().UTC().Add(2 * time.Second))
+			// Receive idle before starting the next epoch; pending states may coalesce.
+			synctest.Wait()
+			if rr := postRPC(t, p.Handler(), "tools/call", 2); rr.Code != http.StatusOK {
+				t.Fatalf("second call status = %d; body=%s", rr.Code, rr.Body.String())
+			}
+			got := collectReadinessEvents(t, events, 5)
+			want := []struct {
+				transition string
+				epoch      uint64
+			}{{"starting", 1}, {"ready", 1}, {"idle", 2}, {"starting", 3}, {"ready", 3}}
+			for i := range want {
+				if got[i].Transition != want[i].transition || got[i].BackendEpoch != want[i].epoch {
+					t.Fatalf("events[%d] = %+v, want %s epoch %d; all=%+v", i, got[i], want[i].transition, want[i].epoch, got)
+				}
+			}
+		})
 	})
 
 	t.Run("send failure", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server", sendRequestErr: errors.New("stdio failed")}
-		events := make(chan api.LazyProxyReadinessEventV1, 4)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		_ = postRPC(t, p.Handler(), "tools/call", 1)
-		got := collectReadinessEvents(t, events, 2)
-		if got[0].Transition != "starting" || got[0].BackendEpoch != 1 || got[1].Transition != "failed" || got[1].BackendEpoch != 2 {
-			t.Fatalf("events = %+v, want starting/1 then failed/2", got)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server", sendRequestErr: errors.New("stdio failed")}
+			events := make(chan api.LazyProxyReadinessEventV1, 4)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			_ = postRPC(t, p.Handler(), "tools/call", 1)
+			got := collectReadinessEvents(t, events, 2)
+			if got[0].Transition != "starting" || got[0].BackendEpoch != 1 || got[1].Transition != "failed" || got[1].BackendEpoch != 2 {
+				t.Fatalf("events = %+v, want starting/1 then failed/2", got)
+			}
+		})
 	})
 
 	t.Run("probation reap", func(t *testing.T) {
-		f := &fakeLifecycle{kind: "mcp-language-server"}
-		events := make(chan api.LazyProxyReadinessEventV1, 4)
-		p := newReadinessTestProxy(t, f, events, make(chan error, 1))
-		_, _, err := p.ensureMaterialized(context.Background())
-		if err != nil {
-			t.Fatalf("ensure materialized: %v", err)
-		}
-		p.endBackendRequest()
-		p.cfg.ColdStartMaxProbation = time.Second
-		p.reapWedgedProbation(time.Now().UTC().Add(2 * time.Second))
-		got := collectReadinessEvents(t, events, 2)
-		if got[0].Transition != "starting" || got[0].BackendEpoch != 1 || got[1].Transition != "failed" || got[1].BackendEpoch != 2 {
-			t.Fatalf("events = %+v, want starting/1 then failed/2", got)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			f := &fakeLifecycle{kind: "mcp-language-server"}
+			events := make(chan api.LazyProxyReadinessEventV1, 4)
+			p := newReadinessTestProxy(t, f, events, make(chan error, 1))
+			_, _, err := p.ensureMaterialized(context.Background())
+			if err != nil {
+				t.Fatalf("ensure materialized: %v", err)
+			}
+			p.endBackendRequest()
+			p.cfg.ColdStartMaxProbation = time.Second
+			p.reapWedgedProbation(time.Now().UTC().Add(2 * time.Second))
+			got := collectReadinessEvents(t, events, 2)
+			if got[0].Transition != "starting" || got[0].BackendEpoch != 1 || got[1].Transition != "failed" || got[1].BackendEpoch != 2 {
+				t.Fatalf("events = %+v, want starting/1 then failed/2", got)
+			}
+		})
 	})
 }
 
@@ -443,22 +480,24 @@ func TestLazyProxyReadinessPublisher_StopCancelsAndJoinsWorker(t *testing.T) {
 }
 
 func TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch(t *testing.T) {
-	exit := make(chan struct{})
-	ep := &readinessExitEndpoint{exit: exit}
-	lifecycle := &readinessExitLifecycle{endpoint: ep}
-	events := make(chan api.LazyProxyReadinessEventV1, 6)
-	p := newReadinessTestProxyWithLifecycle(t, lifecycle, events, make(chan error, 1), 50*time.Millisecond)
-	if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
-		t.Fatalf("tools/call status = %d; body=%s", rr.Code, rr.Body.String())
-	}
-	close(exit)
-	got := collectReadinessEvents(t, events, 3)
-	if got[2].Transition != "failed" || got[2].BackendEpoch != 2 {
-		t.Fatalf("events = %+v, want backend exit failed epoch 2", got)
-	}
-	if lifecycle.stops.Load() != 1 || !ep.closed.Load() {
-		t.Fatalf("backend exit cleanup: stops=%d endpoint_closed=%v, want 1/true", lifecycle.stops.Load(), ep.closed.Load())
-	}
+	synctest.Test(t, func(t *testing.T) {
+		exit := make(chan struct{})
+		ep := &readinessExitEndpoint{exit: exit}
+		lifecycle := &readinessExitLifecycle{endpoint: ep}
+		events := make(chan api.LazyProxyReadinessEventV1, 6)
+		p := newReadinessTestProxyWithLifecycle(t, lifecycle, events, make(chan error, 1), 50*time.Millisecond)
+		if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
+			t.Fatalf("tools/call status = %d; body=%s", rr.Code, rr.Body.String())
+		}
+		close(exit)
+		got := collectReadinessEvents(t, events, 3)
+		if got[2].Transition != "failed" || got[2].BackendEpoch != 2 {
+			t.Fatalf("events = %+v, want backend exit failed epoch 2", got)
+		}
+		if lifecycle.stops.Load() != 1 || !ep.closed.Load() {
+			t.Fatalf("backend exit cleanup: stops=%d endpoint_closed=%v, want 1/true", lifecycle.stops.Load(), ep.closed.Load())
+		}
+	})
 }
 
 func seedReadinessTestRegistry(t *testing.T) string {

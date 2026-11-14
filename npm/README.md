@@ -39,12 +39,14 @@ The meta package ships **no binary itself**. Version 0.4.41 declares only
 (`bin/cli.js`) then locates that platform binary and execs it, passing your
 arguments through and propagating its exit code.
 
-On Windows x64, the platform package contains one native file, `mcphub.exe`
-(GUI subsystem 2), plus non-executable `windows-product-identity.json`. It
-declares no npm `bin` entry. The meta package is therefore the sole producer of
-the public `mcphub` Node shim, which waits for `mcphub.exe` and preserves argv,
-standard streams, and exit status. No windowless or admission helper executable
-is shipped.
+On Windows x64, the platform package contains the native waiting entry
+`mcphub.exe` (CUI subsystem 3), its bound GUI Product
+`mcphub-product/mcphub.exe` (subsystem 2), and the bundle-root
+`windows-product-identity.json` for that GUI Product. It declares no npm `bin`
+entry. The meta package remains the sole producer of the public `mcphub` Node
+shim, preserving argv, standard streams, and the native entry's exit status.
+Native setup uses the complete entry set without requiring Node. No separate
+windowless or admission helper executable is shipped.
 
 There is **no `postinstall` _download_ script** by design: a postinstall that
 FETCHES a binary over the network is the top npm supply-chain attack vector.

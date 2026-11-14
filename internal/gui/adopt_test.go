@@ -28,6 +28,9 @@ func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath,
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatalf("mkdir client config sandbox root: %v", err)
+	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))

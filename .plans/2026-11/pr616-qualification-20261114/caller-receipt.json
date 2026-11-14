@@ -1,0 +1,41 @@
+{
+  "base": "99b451ae3b1f6052046d11d71ff04e3f46096cef",
+  "binarySHA256": "7d14a684815ef2348843ca1366a5b9382a696059e3e6ec784a1cdee848f5e750",
+  "source": [
+    {
+      "path": "internal/cli/migrate_serena.go",
+      "sha256": "7d538d0e04ff27ebef203b0b8d48a6e7a9d7c18c5f3ca0aa835f7bb04bb1b617"
+    },
+    {
+      "path": "internal/cli/migrate_serena_consent_windows_test.go",
+      "sha256": "3db357c7bb849dc839c1cc220d6420e1b3d62f496d81a5e1b6c939d3a5c60cd4"
+    },
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "sha256": "faf8d32d846e0228e440c6e91dab9ae636e6b7c4bdc86e911ae92706229f7a0a"
+    }
+  ],
+  "runs": [
+    {
+      "name": "reap-refusal",
+      "selector": "^TestMigrateSerena_DrivesSupervisorRestart$/^fail-loud",
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:24:52.140609+00:00",
+      "finishedUTC": "2026-11-14T02:24:52.694215+00:00"
+    },
+    {
+      "name": "registry-lock",
+      "selector": "^TestMigrateSerena_RegistryLockReleasedBeforeReap$",
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:24:52.775785+00:00",
+      "finishedUTC": "2026-11-14T02:24:53.094328+00:00"
+    },
+    {
+      "name": "native-consent",
+      "selector": "^TestMigrateSerena_RealWriterConsentReceivingWindows$",
+      "exitCode": 0,
+      "startedUTC": "2026-11-14T02:24:53.176442+00:00",
+      "finishedUTC": "2026-11-14T02:24:57.858327+00:00"
+    }
+  ]
+}

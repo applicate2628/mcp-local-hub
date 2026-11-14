@@ -58,7 +58,7 @@ func (a *API) PreparedSerenaConsumerOwnerObserved(ctx context.Context, launch *P
 	a.preparedSerenaMu.Lock()
 	existing := a.preparedSerenaOwner
 	a.preparedSerenaMu.Unlock()
-	request := PreparedSerenaConsumerInvocationRequest{OperationID: launch.operationID, Binding: launch.binding, ExpectedDescriptors: []SupervisorDaemon{launch.descriptor}}
+	request := PreparedSerenaConsumerInvocationRequest{OperationID: launch.operationID, Binding: launch.binding, ExpectedDescriptors: []SupervisorDaemon{launch.descriptor}, Environment: launch.environment}
 	if existing != nil {
 		scope, err := existing.AcquireConsumerInvocation(ctx, request)
 		if err != nil {
@@ -89,30 +89,12 @@ func (a *API) PreparedSerenaConsumerOwnerObserved(ctx context.Context, launch *P
 	if err != nil || actual != launch.binding {
 		return nil, errors.Join(err, errors.New("SERENA_COLD_READY_BINDING_DRIFT"))
 	}
-	policySHA, err := launch.policy.IdentitySHA256()
-	if err != nil || record.PolicySHA256 != policySHA {
-		return nil, errors.Join(err, errors.New("SERENA_COLD_POLICY_DRIFT"))
-	}
 	io, err = NewPreparedSerenaRecordIO(launch.root, launch.intentPath, record.OperationID, launch.epoch)
 	if err != nil {
 		return nil, err
 	}
-	reads, err := io.observeColdPublicationReads(ctx, record, launch.policy.OwnedTreeLimits)
+	reads, err := io.observeColdPublicationReads(ctx, record, launch.environment)
 	if err != nil {
-		return nil, err
-	}
-	projection, err := launch.environment.Projection(ctx)
-	if err != nil {
-		return nil, err
-	}
-	projectionSHA, err := projection.SHA256()
-	if err != nil {
-		return nil, err
-	}
-	if projection.PackageManifestProjectionSHA256 != reads.operation.PackageManifestProjectionSHA256 || projectionSHA != reads.operation.BuildEnvironmentSHA256 {
-		return nil, errors.New("SERENA_COLD_CURRENT_BUILD_PROJECTION_DRIFT")
-	}
-	if err = launch.environment.Validate(ctx, launch.rawManifestSHA, launch.task, policySHA, projectionSHA); err != nil {
 		return nil, err
 	}
 	publisher := *reads.operation.PublisherIncarnation
@@ -128,7 +110,7 @@ func (a *API) PreparedSerenaConsumerOwnerObserved(ctx context.Context, launch *P
 	if err != nil {
 		return nil, err
 	}
-	owner := &PreparedSerenaRuntimeOwner{consumer: &preparedSerenaConsumerCoordinator{root: launch.root, intentPath: launch.intentPath, sourceEpoch: launch.epoch, publication: publication, runtimeIdentity: reads.identity.runtimeRoot, limits: launch.policy.OwnedTreeLimits, recovered: recovered}}
+	owner := &PreparedSerenaRuntimeOwner{consumer: &preparedSerenaConsumerCoordinator{root: launch.root, intentPath: launch.intentPath, sourceEpoch: launch.epoch, publication: publication, runtimeIdentity: reads.identity.runtimeRoot, recovered: recovered}}
 	a.preparedSerenaMu.Lock()
 	if a.preparedSerenaOwner != nil && a.preparedSerenaOwner != owner {
 		a.preparedSerenaMu.Unlock()

@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "f45f3fd552688a7b7eb4981dddcc230e7afc7490",
+  "parentCommit": "ff623be8302e5ca3985d6b60da142804eb8ae6d3",
+  "platform": "windows/amd64",
+  "go": "go version go1.27.4 windows/amd64",
+  "telemetry": "off",
+  "source": [
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "sha256": "2d209f5feee08a50ec4389c95306b0299c62a08adf1695bf17397d54d6468774",
+      "canonicalLFSHA256": "2d209f5feee08a50ec4389c95306b0299c62a08adf1695bf17397d54d6468774"
+    },
+    {
+      "path": "internal/cli/migrate_serena_committed_outcome_test.go",
+      "sha256": "4bb7b84ba4de4e8fe693de171cb4bb03c182a4a95b02e4033224a911c973bc5d",
+      "canonicalLFSHA256": "4bb7b84ba4de4e8fe693de171cb4bb03c182a4a95b02e4033224a911c973bc5d"
+    }
+  ],
+  "inputTransfer": [
+    {
+      "name": "source.bundle",
+      "bytes": 15438,
+      "sha256": "e273cbeb09eb4ad9256f90d3a92380861cd347d2038d227da3af4d4c3fac3cfa"
+    },
+    {
+      "name": "module-download-cache.zip",
+      "bytes": 30205600,
+      "sha256": "ad192146343e3b96005204e35f43dc9a9b20ff911ddc8d960c2fb448c60d2a15"
+    }
+  ],
+  "runs": [
+    {
+      "name": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "startedUTC": "2026-11-14T15:24:12.437863+00:00",
+      "finishedUTC": "2026-11-14T15:24:51.684532+00:00",
+      "exitCode": 0
+    },
+    {
+      "name": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "startedUTC": "2026-11-14T15:24:51.684898+00:00",
+      "finishedUTC": "2026-11-14T15:25:03.746305+00:00",
+      "exitCode": 0
+    },
+    {
+      "name": "serena",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout=5m",
+        "-run=^TestMigrateSerena",
+        "./internal/cli"
+      ],
+      "startedUTC": "2026-11-14T15:25:03.746687+00:00",
+      "finishedUTC": "2026-11-14T15:25:56.891497+00:00",
+      "exitCode": 1,
+      "tests": {
+        "pass": [
+          "TestMigrateSerenaInstallPathPreservesCommittedOutcome/late_cancellation",
+          "TestMigrateSerenaInstallPathPreservesCommittedOutcome/package_release_failure",
+          "TestMigrateSerenaInstallPathPreservesCommittedOutcome/precommit_cancellation",
+          "TestMigrateSerenaInstallPathPreservesCommittedOutcome",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/yes",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/no",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/enter",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/nonterminal",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/nil",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/strict",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows/swapped_target",
+          "TestMigrateSerena_RealWriterConsentReceivingWindows",
+          "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry/initial_workspace",
+          "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry/first_workspace_registered_during_reconcile",
+          "TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry",
+          "TestMigrateSerenaReconcileUsesVerifiedLiveGUIAuthority",
+          "TestMigrateSerenaReconcileRetainsExactFrontAuthority",
+          "TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing/missing",
+          "TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing/stale",
+          "TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing/zero",
+          "TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing/refused_identity",
+          "TestMigrateSerenaReconcileGUIObservationFailuresWriteNothing",
+          "TestMigrateSerenaTestEnv_CanonicalFixtureSelectionRestoresBaseline/omitted",
+          "TestMigrateSerenaTestEnv_CanonicalFixtureSelectionRestoresBaseline/opt-in",
+          "TestMigrateSerenaTestEnv_CanonicalFixtureSelectionRestoresBaseline",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/zero_dependencies",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_registry_acquire",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_API_factory",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_operation_factory",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/nil_API",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/factory_refusal",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_prepare",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects/missing_install",
+          "TestMigrateSerenaInstallOperationBindingsFailBeforeEffects",
+          "TestMigrateSerena_Malformed_Errors",
+          "TestMigrateSerena_EmptyRegistry_InstallsZeroWorkspaceIntent",
+          "TestMigrateSerena_RollbackRestoresRegistry_OnInstallFailure",
+          "TestMigrateSerena_RegistryRollback_SurgicalPreservesConcurrentSerenaRow",
+          "TestMigrateSerena_RegistryRollback_SkipsConcurrentlyUnregisteredKey",
+          "TestMigrateSerena_DrivesSupervisorRestart/fail-loud_when_the_prior_supervisor_cannot_be_reaped_—_intent_NOT_written",
+          "TestMigrateSerena_ReapViaFakeDeps",
+          "TestMigrateSerena_ReapVerifiesPortsOnGracefulExit",
+          "TestMigrateSerena_AlreadyMigratedByRuntimeIntent_Idempotent",
+          "TestMigrateSerena_AlreadyMigratedByRuntime_NoHealthySupervisor_Recovers",
+          "TestMigrateSerena_AlreadyMigratedByRuntime_HealthProbeError_Recovers",
+          "TestMigrateSerena_PartialReconcile_FailsBeforeReap_RestoresClientsAndRegistry",
+          "TestMigrateSerena_PostCommitRecoveryStartTimeout_StillFailsLoud",
+          "TestMigrateSerena_RegistryLockReleasedBeforeReap",
+          "TestMigrateSerena_PostCommitVerifyError_DrivesRecoveryStart",
+          "TestMigrateSerena_PostCommitVerifyError_RecoveryStartAlsoFails",
+          "TestMigrateSerena_AlreadyMigrated_FullyCovered_HealthySupervisor_NoOp",
+          "TestMigrateSerena_AlreadyMigrated_StaleRegistryRow_NoDrift_NoOp",
+          "TestMigrateSerena_StartUnsupported_Workspaces_FailsBeforeCommit",
+          "TestMigrateSerena_StartUnsupported_EmptyRegistry_Proceeds",
+          "TestMigrateSerena_StartUnsupported_EmptyFirstSnapshot_WindowRegister_FailsBeforeCommit",
+          "TestMigrateSerena_PreCommitAbort_UndoesReReadAllocation_OnConcurrentRow",
+          "TestMigrateSerena_Interlock_ReleasedBeforeStart",
+          "TestMigrateSerena_Interlock_ReleasedOnRecoveryStartBranch",
+          "TestMigrateSerena_Interlock_AcquireFailsLoud_WhenForeignHolderWonTheWindow",
+          "TestMigrateSerena_Interlock_AcquiredImmediatelyAfterReap_ClosesPostReapGap",
+          "TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/zero-workspace-no-start",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/no-supervisor-start",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/reaped-supervisor-start",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/verify-failure-still-starts",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/verify-and-start-fail-join",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/timeout-alive-warning",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/timeout-dead-hard",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/timeout-probe-error-hard",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix/hard-spawn-error",
+          "TestMigrateSerena_AppliedInstallContinuationMatrix",
+          "TestMigrateSerenaProjectSchema_ReceiptBackupAndCompatibilityForms/plural_aliases_and_excluded_dirs",
+          "TestMigrateSerenaProjectSchema_ReceiptBackupAndCompatibilityForms/singular_alias",
+          "TestMigrateSerenaProjectSchema_ReceiptBackupAndCompatibilityForms",
+          "TestMigrateSerenaProjectSchema_ConflictNoopAndFailureSettlement/conflict_leaves_bytes_untouched",
+          "TestMigrateSerenaProjectSchema_ConflictNoopAndFailureSettlement/current_form_is_explicit_no-op",
+          "TestMigrateSerenaProjectSchema_ConflictNoopAndFailureSettlement/backup_write_failure_preserves_live_bytes",
+          "TestMigrateSerenaProjectSchema_ConflictNoopAndFailureSettlement/readback_failure_returns_committed_receipt",
+          "TestMigrateSerenaProjectSchema_ConflictNoopAndFailureSettlement"
+        ],
+        "fail": [
+          "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+          "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+          "TestMigrateSerena_DrivesSupervisorRestart/reap_fires_BEFORE_the_intent_write;_start_fires_AFTER",
+          "TestMigrateSerena_DrivesSupervisorRestart",
+          "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+          "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+          "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+          "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+          "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/dead_supervisor",
+          "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/undeterminable_probe",
+          "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+          "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+          "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+          "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+          "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+          "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+          "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+        ],
+        "skip": []
+      },
+      "counts": {
+        "pass": {
+          "topLevel": 37,
+          "subtests": 42,
+          "leaves": 70
+        },
+        "fail": {
+          "topLevel": 14,
+          "subtests": 3,
+          "leaves": 15
+        },
+        "skip": {
+          "topLevel": 0,
+          "subtests": 0,
+          "leaves": 0
+        }
+      }
+    },
+    {
+      "name": "format",
+      "args": [
+        "-l",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/migrate_serena_committed_outcome_test.go"
+      ],
+      "startedUTC": "2026-11-14T15:25:56.893987+00:00",
+      "finishedUTC": "2026-11-14T15:25:57.119240+00:00",
+      "exitCode": 0,
+      "unformatted": []
+    }
+  ],
+  "restoredContinuation": {
+    "topLevelTests": 5,
+    "passingLeaves": 13,
+    "previouslyFailingLeavesRestored": 12,
+    "alreadyPassingZeroWorkspaceLeaf": 1,
+    "overlapsLargerSerenaSelection": true
+  },
+  "remainingPositivePreparation": {
+    "leaves": 15,
+    "failureEventsIncludingParents": 17,
+    "causes": [
+      {
+        "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+        "cause": "SERENA_BUILD_SOURCE_INVALID",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_DrivesSupervisorRestart/reap_fires_BEFORE_the_intent_write;_start_fires_AFTER",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/dead_supervisor",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud/undeterminable_probe",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      },
+      {
+        "test": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+        "cause": "E_RUNTIME_PRODUCT_IMAGE/E_WINDOWS_PE_SUBSYSTEM",
+        "intendedOracleReached": false
+      }
+    ],
+    "runtimeImageRefusals": 14,
+    "buildSourceRefusals": 1
+  },
+  "review": {
+    "ownSourceReview": "no required defect in the two-file correction",
+    "independentSourceReview": "no required defect; source-only",
+    "runtimeVerifiedBy": "primary session"
+  },
+  "limits": [
+    "No positive prepared Serena installation or spec-bearing intent qualification.",
+    "The complete repository and tagged API/CLI commands were not rerun in this increment.",
+    "The known full-suite, native CST, WrongOwner and release/installed-version gates remain open.",
+    "No dependency installation, policy change, installed-state change, paid provider or GitHub Actions run.",
+    "Raw logs with machine-local paths remain outside the published evidence."
+  ],
+  "complete": true
+}

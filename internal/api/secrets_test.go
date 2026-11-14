@@ -13,19 +13,23 @@ import (
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/secrets"
 )
 
-// secretsTestEnv redirects DefaultKeyPath / DefaultVaultPath to a
-// per-test tempdir so each test gets isolated vault state.
+// secretsTestEnv redirects vault paths and recovery/audit state to a
+// per-test protected parent. No test shares the TestMain recovery namespace.
 func secretsTestEnv(t *testing.T) (keyPath, vaultPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("LOCALAPPDATA", dir)  // Windows path
 	t.Setenv("XDG_DATA_HOME", dir) // Linux path
 	t.Setenv("HOME", dir)          // macOS Library fallback root
-	keyPath = filepath.Join(dir, "mcp-local-hub", ".age-key")
-	vaultPath = filepath.Join(dir, "mcp-local-hub", "secrets.age")
+	stateDir := apitest.HardenedDir(t, filepath.Join(dir, "mcp-local-hub"))
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	keyPath = filepath.Join(stateDir, ".age-key")
+	vaultPath = filepath.Join(stateDir, "secrets.age")
 	return keyPath, vaultPath
 }
 
@@ -736,21 +740,12 @@ func TestSecretsRotate_OverwritesExisting(t *testing.T) {
 	}
 }
 
-// secretsAuditTestEnv composes secretsTestEnv (vault paths) with a
-// co-located hub-mcp event log so a test can both mutate the vault AND
-// read back the emitted audit line. It points daemonStateRootOverride at
-// the vault's own state dir so LogHubMcpEvent writes
-// <vaultDir>/hub-mcp.log next to the vault, never the operator's real log.
+// secretsAuditTestEnv exposes the event-log path in the same protected
+// namespace as the vault so tests can read back emitted audit lines.
 func secretsAuditTestEnv(t *testing.T) (keyPath, vaultPath, logPath string) {
 	t.Helper()
 	keyPath, vaultPath = secretsTestEnv(t)
-	statePathsHelper(t) // saves+restores daemonStateRootOverride
-	stateDir := filepath.Dir(vaultPath)
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	daemonStateRootOverride = stateDir
-	return keyPath, vaultPath, filepath.Join(stateDir, "hub-mcp.log")
+	return keyPath, vaultPath, filepath.Join(filepath.Dir(vaultPath), "hub-mcp.log")
 }
 
 // TestSecretsRotate_EmitsAuditEventWithoutValue (P2.4): a successful rotate
@@ -992,7 +987,8 @@ func TestVaultFlockHelperProcess(t *testing.T) {
 		if err := os.WriteFile(readyPath, []byte("ready"), 0o600); err != nil {
 			return err
 		}
-		for {
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
 			if _, err := os.Stat(releasePath); err == nil {
 				return nil
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -1000,6 +996,7 @@ func TestVaultFlockHelperProcess(t *testing.T) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
+		return errors.New("vault flock helper release deadline exceeded")
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -1014,6 +1011,7 @@ func startVaultFlockHolder(t *testing.T, vaultPath string) func() {
 	readyPath := filepath.Join(dir, "ready")
 	releasePath := filepath.Join(dir, "release")
 	cmd := exec.Command(os.Args[0], "-test.run=TestVaultFlockHelperProcess")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		"MCPHUB_TEST_HOLD_VAULT_LOCK=1",
 		"MCPHUB_TEST_VAULT_PATH="+vaultPath,
@@ -1025,23 +1023,34 @@ func startVaultFlockHolder(t *testing.T, vaultPath string) func() {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start vault flock helper: %v", err)
 	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
 	released := false
 	release := func() {
 		if released {
 			return
 		}
 		released = true
-		_ = os.WriteFile(releasePath, []byte("release"), 0o600)
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		if err := os.WriteFile(releasePath, []byte("release"), 0o600); err != nil {
+			t.Errorf("release vault flock helper: %v", err)
+		}
 		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("vault flock helper exited: %v; stderr: %s", err, stderr.String())
+		case <-done:
+			if waitErr != nil {
+				t.Errorf("vault flock helper exited: %v; stderr: %s", waitErr, stderr.String())
 			}
 		case <-time.After(5 * time.Second):
-			_ = cmd.Process.Kill()
-			t.Fatalf("vault flock helper did not exit after release; stderr: %s", stderr.String())
+			killErr := cmd.Process.Kill()
+			select {
+			case <-done:
+				t.Errorf("vault flock helper required forced cleanup: kill=%v wait=%v; stderr: %s", killErr, waitErr, stderr.String())
+			case <-time.After(5 * time.Second):
+				t.Errorf("vault flock helper did not settle after kill: %v", killErr)
+			}
 		}
 	}
 	t.Cleanup(release)
@@ -1054,8 +1063,7 @@ func startVaultFlockHolder(t *testing.T, vaultPath string) func() {
 			t.Fatalf("stat helper ready file: %v", err)
 		}
 		if time.Now().After(deadline) {
-			_ = cmd.Process.Kill()
-			t.Fatalf("vault flock helper did not acquire lock; stderr: %s", stderr.String())
+			t.Fatal("vault flock helper did not acquire lock before readiness deadline")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

@@ -214,11 +214,26 @@ func withConfigLockExecutionContextPolicy(configPath string, ctx context.Context
 		return execution, fmt.Errorf("config lock %s: %w", lockPath, ghost)
 	}
 	fl := flock.New(lockPath)
+	// An observation must not create a lock leaf merely because the parent
+	// exists. Reuse an existing leaf read-only and share-lock it against writers.
+	// Required policy exclusion and mutations retain their creating lock owner.
+	readOnly := !createParent && !requireFlock
+	if readOnly {
+		fl = flock.New(lockPath, flock.SetFlag(os.O_RDONLY))
+	}
 	if ctx == nil {
-		err = fl.Lock()
+		if readOnly {
+			err = fl.RLock()
+		} else {
+			err = fl.Lock()
+		}
 	} else {
 		var acquired bool
-		acquired, err = fl.TryLockContext(ctx, 10*time.Millisecond)
+		if readOnly {
+			acquired, err = fl.TryRLockContext(ctx, 10*time.Millisecond)
+		} else {
+			acquired, err = fl.TryLockContext(ctx, 10*time.Millisecond)
+		}
 		if err == nil && !acquired {
 			err = ctx.Err()
 			if err == nil {
@@ -227,6 +242,19 @@ func withConfigLockExecutionContextPolicy(configPath string, ctx context.Context
 		}
 	}
 	if err != nil {
+		if readOnly && os.IsNotExist(err) {
+			// No lock existed when opened. As with an absent parent, this is
+			// only a point-in-time observation under the process mutex: a
+			// first writer can race from another process. Removal validates
+			// its source token again under the creating mutation lock.
+			if ctx != nil && ctx.Err() != nil {
+				return execution, ctx.Err()
+			}
+			execution.bodyEntered = true
+			execution.bodyErr = fn()
+			execution.releaseConfirmed = true
+			return execution, execution.bodyErr
+		}
 		return execution, fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
 	release := newConfigLockRelease(fl, lockPath)

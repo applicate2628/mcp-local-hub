@@ -89,24 +89,46 @@ func TestWindowsConsolePolicyApplication(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer stdin.Close()
-		originalIn, originalOut, originalErr := stdin, stdout, stderr
-		reopenIfInvalid("CONIN$", os.O_RDONLY, &stdin)
+		fileInput, err := os.Open(stdout.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fileInput.Close()
+		pipeInput, pipeWriter, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pipeInput.Close()
+		defer pipeWriter.Close()
+		for _, input := range []*os.File{stdin, fileInput, pipeInput} {
+			if !windowsFileHandleValid(input) {
+				t.Fatalf("redirected input %q failed the ordinary CLI handle probe", input.Name())
+			}
+			prepared := input
+			reopenIfInvalid("CONIN$", os.O_RDONLY, &prepared)
+			if prepared != input {
+				t.Fatalf("valid redirected input %q was reopened", input.Name())
+			}
+		}
+		originalOut, originalErr := stdout, stderr
 		reopenIfInvalid("CONOUT$", os.O_WRONLY, &stdout)
 		reopenIfInvalid("CONOUT$", os.O_WRONLY, &stderr)
-		if stdin != originalIn || stdout != originalOut || stderr != originalErr {
-			t.Fatal("valid redirected standard handle was reopened")
+		if stdout != originalOut || stderr != originalErr {
+			t.Fatal("valid redirected output handle was reopened")
 		}
 	})
 }
 
 func TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs(t *testing.T) {
-	t.Run("valid inherited outputs need no console API", func(t *testing.T) {
+	t.Run("valid inherited standard handles need no console API", func(t *testing.T) {
 		attachCalls, allocateCalls, prepareCalls, inspections := 0, 0, 0, 0
 		api := windowsConsoleAPI{
-			attachParent: func() error { attachCalls++; return nil },
-			allocate:     func() error { allocateCalls++; return nil },
-			prepareCLI:   func() { prepareCalls++ },
-			outputsValid: func() (bool, bool) { inspections++; return true, true },
+			attachParent:    func() error { attachCalls++; return nil },
+			allocate:        func() error { allocateCalls++; return nil },
+			prepareCLI:      func() { prepareCalls++ },
+			prepareCLIInput: func() { t.Error("valid input was sent to console repair") },
+			inputValid:      func() bool { return true },
+			outputsValid:    func() (bool, bool) { inspections++; return true, true },
 		}
 		acquired, err := applyWindowsConsolePolicyWithAPI(windowsEntrypointCLI, cli.WindowsConsoleDisabled, api)
 		if err != nil || acquired || attachCalls != 0 || allocateCalls != 0 || prepareCalls != 0 || inspections != 1 {
@@ -117,9 +139,11 @@ func TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs(t *testing.T
 	t.Run("invalid output attaches once and never allocates", func(t *testing.T) {
 		attachCalls, allocateCalls, prepareCalls, inspections := 0, 0, 0, 0
 		api := windowsConsoleAPI{
-			attachParent: func() error { attachCalls++; return nil },
-			allocate:     func() error { allocateCalls++; return nil },
-			prepareCLI:   func() { prepareCalls++ },
+			attachParent:    func() error { attachCalls++; return nil },
+			allocate:        func() error { allocateCalls++; return nil },
+			prepareCLI:      func() { prepareCalls++ },
+			prepareCLIInput: func() { t.Error("valid input was sent to console repair") },
+			inputValid:      func() bool { return true },
 			outputsValid: func() (bool, bool) {
 				inspections++
 				return inspections > 1, true
@@ -151,8 +175,10 @@ func TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs(t *testing.T
 					}
 					return errors.New("no parent console")
 				},
-				allocate:   func() error { allocateCalls++; return nil },
-				prepareCLI: func() { prepareCalls++ },
+				allocate:        func() error { allocateCalls++; return nil },
+				prepareCLI:      func() { prepareCalls++ },
+				prepareCLIInput: func() { t.Error("valid input was sent to console repair") },
+				inputValid:      func() bool { return true },
 				outputsValid: func() (bool, bool) {
 					inspections++
 					if inspections == 1 {
@@ -170,14 +196,60 @@ func TestWindowsEntrypointConsolePolicyRepairsOnlyInvalidCLIOutputs(t *testing.T
 	}
 }
 
+func TestWindowsEntrypointConsolePolicyRepairsInvalidCLIInput(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		attachErr   error
+		repairWorks bool
+	}{
+		{name: "input alone requires parent attachment", repairWorks: true},
+		{name: "no parent leaves input optional", attachErr: errors.New("no parent console")},
+		{name: "unavailable console input remains optional"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attaches, inputRepairs := 0, 0
+			stdinValid := false
+			api := windowsConsoleAPI{
+				attachParent: func() error {
+					attaches++
+					return tc.attachErr
+				},
+				allocate: func() error {
+					t.Error("ordinary CLI attempted console allocation")
+					return errors.New("unexpected allocation")
+				},
+				prepareDebug: func() { t.Error("ordinary CLI ran debug preparation") },
+				prepareCLI:   func() {},
+				prepareCLIInput: func() {
+					inputRepairs++
+					stdinValid = tc.repairWorks
+				},
+				inputValid:   func() bool { return stdinValid },
+				outputsValid: func() (bool, bool) { return true, true },
+			}
+			acquired, err := applyWindowsConsolePolicyWithAPI(windowsEntrypointCLI, cli.WindowsConsoleDisabled, api)
+			wantInputRepairs := 1
+			if tc.attachErr != nil {
+				wantInputRepairs = 0
+			}
+			if acquired || err != nil || attaches != 1 || inputRepairs != wantInputRepairs || stdinValid != tc.repairWorks {
+				t.Fatalf("ordinary CLI input result acquired=%t err=%v attach=%d repair=%d usable=%t",
+					acquired, err, attaches, inputRepairs, stdinValid)
+			}
+		})
+	}
+}
+
 func TestWindowsOptedOutBareUsesCLIOutputAcquisition(t *testing.T) {
 	t.Setenv(NoAutoGUIEnv, "1")
 	mode := classifyWindowsEntrypointMode([]string{"mcphub"})
 	attachCalls, allocateCalls, prepareCalls, inspections := 0, 0, 0, 0
 	api := windowsConsoleAPI{
-		attachParent: func() error { attachCalls++; return nil },
-		allocate:     func() error { allocateCalls++; return nil },
-		prepareCLI:   func() { prepareCalls++ },
+		attachParent:    func() error { attachCalls++; return nil },
+		allocate:        func() error { allocateCalls++; return nil },
+		prepareCLI:      func() { prepareCalls++ },
+		prepareCLIInput: func() { t.Error("valid input was sent to console repair") },
+		inputValid:      func() bool { return true },
 		outputsValid: func() (bool, bool) {
 			inspections++
 			return inspections > 1, true

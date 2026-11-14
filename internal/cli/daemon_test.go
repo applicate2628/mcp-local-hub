@@ -320,7 +320,7 @@ func TestDaemonEnvWithOverlayResolvesManifestBeforeLiteralOverlay(t *testing.T) 
 		t.Fatalf("seed overlay: %v", err)
 	}
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	keyPath := filepath.Join(dir, ".age-key")
 	vaultPath := filepath.Join(dir, "secrets.age")
 	if err := secrets.InitVault(keyPath, vaultPath); err != nil {

@@ -337,6 +337,7 @@ type windowsProductPreSettlementV3 struct {
 }
 
 type windowsProductRecoveryJournalV3 struct {
+	EntrySet                *windowsCanonicalEntrySetJournalV1       `json:"entry_set,omitempty"`
 	Schema                  string                                   `json:"schema"`
 	TransactionID           string                                   `json:"transaction_id"`
 	Phase                   WindowsProductRecoveryPhase              `json:"phase"`
@@ -386,14 +387,15 @@ type UpgradeReceiptRetiredV3 struct {
 // UpgradeReceiptV3 is the only receipt written by the single-product
 // transaction. V1 and V2 remain read-only compatibility shapes.
 type UpgradeReceiptV3 struct {
-	Schema        string                   `json:"schema"`
-	TransactionID string                   `json:"transaction_id"`
-	Mode          WindowsProductPairMode   `json:"mode"`
-	Admission     string                   `json:"admission"`
-	Artifact      UpgradeReceiptArtifactV3 `json:"artifact"`
-	TaskSetSHA256 string                   `json:"task_set_sha256"`
-	Retired       UpgradeReceiptRetiredV3  `json:"retired"`
-	InstalledAt   string                   `json:"installed_at"`
+	EntrySet      *windowsCanonicalEntrySetReceiptV1 `json:"entry_set,omitempty"`
+	Schema        string                             `json:"schema"`
+	TransactionID string                             `json:"transaction_id"`
+	Mode          WindowsProductPairMode             `json:"mode"`
+	Admission     string                             `json:"admission"`
+	Artifact      UpgradeReceiptArtifactV3           `json:"artifact"`
+	TaskSetSHA256 string                             `json:"task_set_sha256"`
+	Retired       UpgradeReceiptRetiredV3            `json:"retired"`
+	InstalledAt   string                             `json:"installed_at"`
 }
 
 // UpgradeReceipt is a schema-discriminated compatibility result.
@@ -429,6 +431,9 @@ func DecodeUpgradeReceipt(raw []byte) (UpgradeReceipt, error) {
 		}
 		return UpgradeReceipt{V2: &v2}, nil
 	case UpgradeReceiptSchemaV3:
+		if err := validateCanonicalEntryArmJSON(raw); err != nil {
+			return UpgradeReceipt{}, err
+		}
 		var v3 UpgradeReceiptV3
 		if err := json.Unmarshal(raw, &v3); err != nil {
 			return UpgradeReceipt{}, err
@@ -449,7 +454,7 @@ func validateUpgradeReceiptV3(receipt UpgradeReceiptV3) error {
 	if receipt.Mode != WindowsProductPairModeSetup && receipt.Mode != WindowsProductPairModeCanonicalize && receipt.Mode != WindowsProductPairModeUpgrade {
 		return errors.New("decode upgrade-receipt-v3: invalid mode")
 	}
-	if receipt.Admission != UpgradeAdmissionLocalProductV3 ||
+	if (receipt.Admission != UpgradeAdmissionLocalProductV3 && receipt.Admission != UpgradeAdmissionCanonicalEntryProductV1) ||
 		receipt.Artifact.Role != binaryadmission.WindowsArtifactRoleProduct ||
 		receipt.Artifact.Subsystem != binaryadmission.WindowsGUISubsystem ||
 		receipt.Artifact.Machine == 0 ||
@@ -465,6 +470,9 @@ func validateUpgradeReceiptV3(receipt UpgradeReceiptV3) error {
 		!receipt.Retired.RollbackImagesAbsent {
 		return errors.New("decode upgrade-receipt-v3: incomplete cleanup proof")
 	}
+	if err := validateCanonicalEntrySetReceipt(receipt); err != nil {
+		return err
+	}
 	installedAt, err := time.Parse(time.RFC3339Nano, receipt.InstalledAt)
 	if err != nil || installedAt.Location() != time.UTC {
 		return errors.New("decode upgrade-receipt-v3: invalid installed_at")
@@ -478,16 +486,18 @@ var ErrWindowsProductRecoveryIdentity = errors.New("E_WINDOWS_PRODUCT_RECOVERY_I
 type WindowsProductStage string
 
 const (
-	WindowsProductStageProductPromoted   WindowsProductStage = "product-promoted"
-	WindowsProductStageProductReadBack   WindowsProductStage = "product-read-back"
-	WindowsProductStageTasksRewritten    WindowsProductStage = "tasks-rewritten"
-	WindowsProductStageTasksReadBack     WindowsProductStage = "tasks-read-back"
-	WindowsProductStageSupervisorStarted WindowsProductStage = "supervisor-started"
-	WindowsProductStageSupervisorReady   WindowsProductStage = "supervisor-ready"
-	WindowsProductStageLegacyRetired     WindowsProductStage = "legacy-retired"
-	WindowsProductStageCommitDecided     WindowsProductStage = "commit-decided"
-	WindowsProductStageCleanupVerified   WindowsProductStage = "cleanup-verified"
-	WindowsProductStageReceiptWritten    WindowsProductStage = "receipt-written"
+	WindowsProductStageIdentityPromoted       WindowsProductStage = "identity-promoted"
+	WindowsProductStageCanonicalEntryPromoted WindowsProductStage = "canonical-entry-promoted"
+	WindowsProductStageProductPromoted        WindowsProductStage = "product-promoted"
+	WindowsProductStageProductReadBack        WindowsProductStage = "product-read-back"
+	WindowsProductStageTasksRewritten         WindowsProductStage = "tasks-rewritten"
+	WindowsProductStageTasksReadBack          WindowsProductStage = "tasks-read-back"
+	WindowsProductStageSupervisorStarted      WindowsProductStage = "supervisor-started"
+	WindowsProductStageSupervisorReady        WindowsProductStage = "supervisor-ready"
+	WindowsProductStageLegacyRetired          WindowsProductStage = "legacy-retired"
+	WindowsProductStageCommitDecided          WindowsProductStage = "commit-decided"
+	WindowsProductStageCleanupVerified        WindowsProductStage = "cleanup-verified"
+	WindowsProductStageReceiptWritten         WindowsProductStage = "receipt-written"
 )
 
 type WindowsProductTaskTxn interface {
@@ -501,6 +511,7 @@ type WindowsProductTaskTxn interface {
 }
 
 type WindowsProductCommitted struct {
+	EntrySet      *windowsCanonicalEntrySetReceiptV1
 	Schema        string
 	Outcome       WindowsProductPairOutcome
 	Artifact      binaryadmission.WindowsArtifact
@@ -510,6 +521,7 @@ type WindowsProductCommitted struct {
 }
 
 type WindowsProductCommitEvent struct {
+	EntrySet      *windowsCanonicalEntrySetReceiptV1
 	Schema        string
 	TransactionID string
 	Mode          WindowsProductPairMode
@@ -521,6 +533,7 @@ type WindowsProductCommitEvent struct {
 }
 
 type WindowsProductTxnDeps struct {
+	AdmitEntrySet          func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV1, binaryadmission.WindowsCanonicalEntrySetSnapshotV1) (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error)
 	AdmitProduct           func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
 	AdmitLegacyWindowless  func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
 	Promote                func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error)
@@ -547,6 +560,10 @@ type WindowsProductTxnDeps struct {
 }
 
 type WindowsProductTxnOpts struct {
+	Context              context.Context
+	EntrySet             *stagedWindowsCanonicalEntrySetV1
+	CanonicalEntryPath   string
+	IdentityPath         string
 	StateDir             string
 	ProductPath          string
 	LegacyWindowlessPath string
@@ -563,6 +580,7 @@ type WindowsProductTxnOpts struct {
 }
 
 type windowsProductPreparedTxn struct {
+	entrySet              *windowsCanonicalEntrySetPrepared
 	deps                  WindowsProductTxnDeps
 	staged                binaryadmission.WindowsArtifact
 	productPrior          productPairFileSnapshot
@@ -585,6 +603,7 @@ type windowsProductPreparedTxn struct {
 type WindowsProductTxn struct {
 	Opts             WindowsProductTxnOpts
 	prepared         *windowsProductPreparedTxn
+	prepareError     error
 	constructorStore interface{ Close() error }
 }
 
@@ -614,7 +633,18 @@ func inspectWindowsProductRecoveryLeaves(stateDir string) (present bool, err err
 	return present, nil
 }
 
-func (t *WindowsProductTxn) Close() error {
+func (t *WindowsProductTxn) Close() (retErr error) {
+	if t != nil && t.Opts.EntrySet != nil && t.Opts.EntrySet.original != nil {
+		defer func() {
+			if t.Opts.EntrySet.prior != nil {
+				retErr = errors.Join(retErr, t.Opts.EntrySet.prior.Close())
+			}
+			retErr = errors.Join(retErr, t.Opts.EntrySet.original.Close())
+			if t.prepared != nil && t.prepared.entrySet != nil && t.prepared.entrySet.directory != nil {
+				retErr = errors.Join(retErr, t.prepared.entrySet.directory.Close())
+			}
+		}()
+	}
 	if t == nil || t.Opts.Tasks == nil {
 		return nil
 	}
@@ -635,9 +665,12 @@ func (t *WindowsProductTxn) Close() error {
 	return lockErr
 }
 
-func (t *WindowsProductTxn) Prepare() error {
+func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if t == nil {
 		return errors.New("Windows product transaction is required")
+	}
+	if t.prepareError != nil {
+		return t.prepareError
 	}
 	if t.prepared != nil {
 		return nil
@@ -664,13 +697,35 @@ func (t *WindowsProductTxn) Prepare() error {
 	if d.PublishCommitted == nil {
 		return errors.New("Windows product transaction: committed publisher is required")
 	}
-	staged, err := d.AdmitProduct(binaryadmission.WindowsArtifact{Path: o.StagedProduct, Role: binaryadmission.WindowsArtifactRoleProduct})
-	if err != nil {
-		return fmt.Errorf("E_WINDOWS_PRODUCT_ADMISSION: staged product: %w", err)
+	var staged binaryadmission.WindowsArtifact
+	var productPrior productPairFileSnapshot
+	var err error
+	if o.EntrySet != nil {
+		if o.Context == nil || o.EntrySet.original == nil {
+			return errors.New("original complete-set context and stage are required")
+		}
+		snapshot, readErr := o.EntrySet.original.Snapshot()
+		if readErr != nil {
+			return readErr
+		}
+		staged = snapshot.ProductArtifact
+		staged.Path = o.StagedProduct
+		prior, priorErr := o.EntrySet.acquirePrior(o.Context)
+		if priorErr != nil {
+			return priorErr
+		}
+		if prior == nil {
+			return errors.New("original prior-set owner is unavailable")
+		}
+		productPrior, err = canonicalPriorSnapshot(o.EntrySet.prior, "product", o.ProductPath)
+	} else {
+		staged, err = d.AdmitProduct(binaryadmission.WindowsArtifact{Path: o.StagedProduct, Role: binaryadmission.WindowsArtifactRoleProduct})
+		if err == nil {
+			productPrior, err = snapshotProductPairFile(o.ProductPath)
+		}
 	}
-	productPrior, err := snapshotProductPairFile(o.ProductPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("E_WINDOWS_PRODUCT_ADMISSION: original product: %w", err)
 	}
 	legacyPrior, err := snapshotProductPairFile(o.LegacyWindowlessPath)
 	if err != nil {
@@ -699,25 +754,46 @@ func (t *WindowsProductTxn) Prepare() error {
 	if err != nil || !cleanAbsolutePath(tasks.StoreRoot) {
 		return fmt.Errorf("task recovery descriptor unavailable: %w", err)
 	}
-	productAsides, err := snapshotWindowsProductAsides(o.ProductPath, d)
+	id, err := newWindowsProductPairTransactionID()
 	if err != nil {
-		return fmt.Errorf("inventory canonical product asides: %w", err)
+		return err
+	}
+	entryState, entryArm, err := prepareCanonicalEntrySet(o, d, id)
+	if err != nil {
+		return err
+	}
+	productAsides := []windowsProductRecoveryAsideV3{}
+	if entryArm == nil || entryArm.PayloadDirectory.PriorPresent {
+		productAsides, err = snapshotWindowsProductAsides(o.ProductPath, d)
+		if err != nil {
+			return fmt.Errorf("inventory canonical product asides: %w", err)
+		}
 	}
 	legacyAsides, err := snapshotWindowsProductAsides(o.LegacyWindowlessPath, d)
 	if err != nil {
 		return fmt.Errorf("inventory legacy windowless asides: %w", err)
 	}
-	id, err := newWindowsProductPairTransactionID()
-	if err != nil {
-		return err
-	}
 	productDisposition := windowsProductTargetDisposition(productPrior, staged.SHA256)
+	if entryState != nil {
+		productDisposition = windowsCanonicalSetDisposition(productPrior, entryState, staged.SHA256)
+	}
+
 	disposition := windowsProductPairDispositionV1{
 		CLI:        productDisposition,
 		Windowless: windowsProductTargetIdentical,
 	}
+	if entryState != nil && o.Mode != WindowsProductPairModeUpgrade {
+		if windowsProductPairDispositionNeedsReplacement(disposition) {
+			return ErrWindowsProductPairReplacementRequiresUpgrade
+		}
+		o.ReplacementAuthority = windowsProductReplacementAuthority{Disposition: disposition}
+	}
+	if entryArm != nil {
+		entryArm.PayloadDirectory.CreationEntered = true
+	}
 	journal := windowsProductRecoveryJournalV3{
-		Schema: WindowsProductRecoverySchemaV3, TransactionID: id,
+		EntrySet: entryArm,
+		Schema:   WindowsProductRecoverySchemaV3, TransactionID: id,
 		Phase: WindowsProductRecoveryPrepared, Mode: o.Mode,
 		Product: windowsProductRecoveryArtifactV3{
 			Target: o.ProductPath, PriorPresent: productPrior.present,
@@ -751,15 +827,44 @@ func (t *WindowsProductTxn) Prepare() error {
 		journal.Quiescence = &projection
 		journal.QuiescenceReceiptSHA256 = digest
 	}
-	path := filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)
-	if err := persistWindowsProductRecoveryJournalV3(path, journal, d.WriteRecoveryJournal, d.ReadRecoveryJournal); err != nil {
-		return fmt.Errorf("%w: prepare V3 journal: %v", ErrWindowsProductPairRecoveryPrepare, err)
-	}
 	t.Opts = o
 	t.prepared = &windowsProductPreparedTxn{
 		deps: d, staged: staged, productPrior: productPrior, legacyPrior: legacyPrior,
 		receiptV3Prior: v3Prior, receiptV2Prior: v2Prior, journal: journal,
-		disposition: disposition,
+		disposition: disposition, entrySet: entryState,
+	}
+	transferred := false
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if entryState != nil {
+			retErr = errors.Join(retErr, t.settleUnpublishedCanonicalPreparation(transferred))
+		}
+		// A failed preparation keeps its error but never arms GUI stop or
+		// promotion. Native owners were released above; durable recovery inputs
+		// remain available through the journal to a fresh recovery owner.
+		t.prepareError = retErr
+		t.prepared = nil
+	}()
+	if entryState != nil {
+		if err := t.receiveOriginalPayloadDirectory(); err != nil {
+			return err
+		}
+		snapshot, paths, err := o.EntrySet.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		if err != nil {
+			return err
+		}
+		transferred = true
+		if !reflect.DeepEqual(snapshot, entryState.snapshot) || paths != entryState.stages {
+			return errors.New("original canonical stage changed during ownership transfer")
+		}
+	}
+	// The first checkpoint already owns its directory identity. Transfer stage
+	// disposition first so an uncertain write cannot make Close remove bytes
+	// referenced by a journal that reached disk before its writer failed.
+	if err := t.persistProductJournal(); err != nil {
+		return fmt.Errorf("%w: prepare V3 journal: %w", ErrWindowsProductPairRecoveryPrepare, err)
 	}
 	return nil
 }
@@ -802,7 +907,7 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("persist settled quiescence in V3 journal: %w", err))
 		}
 	}
-	if err := validateWindowsSingleProductReplacementAuthority(o, p.disposition, p.productPrior, p.legacyPrior); err != nil {
+	if err := validateWindowsProductTxnReplacementAuthority(o, p); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
 	fault := func(stage WindowsProductStage) error {
@@ -814,29 +919,36 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 		}
 		return nil
 	}
-	if p.disposition.CLI != windowsProductTargetIdentical {
-		promotion, err := p.deps.Promote(o.StagedProduct, o.ProductPath, p.staged.SHA256)
+	if err := t.ensureCanonicalPayloadDirectory(); err != nil {
+		return WindowsProductCommitted{}, t.rollback(err)
+	}
+	if windowsProductTargetDisposition(p.productPrior, p.staged.SHA256) != windowsProductTargetIdentical {
+		promotion, err := t.promoteProductOriginal(ctx)
 		p.productPromotion = rollbackProductPairPromotion(promotion, p.productPrior)
 		if err != nil {
 			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("promote canonical product: %w", err))
 		}
-		if err := verifyProductPairPromotion(promotion, p.productPrior); err != nil {
+		if err := verifyLegacyProductPromotion(p, promotion); err != nil {
 			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("verify retained product prior: %w", err))
 		}
 	}
 	if err := fault(WindowsProductStageProductPromoted); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
-	readBack, err := p.deps.AdmitProduct(binaryadmission.WindowsArtifact{
-		Path: o.ProductPath, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: p.staged.SHA256,
-	})
-	if err != nil || !sameWindowsProductIdentity(p.staged, readBack) {
-		if err == nil {
-			err = errors.New("canonical product identity differs from staged product")
+	readBack := p.staged
+	if p.entrySet == nil {
+		var err error
+		readBack, err = p.deps.AdmitProduct(binaryadmission.WindowsArtifact{Path: o.ProductPath, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: p.staged.SHA256})
+		if err != nil || !sameWindowsProductIdentity(p.staged, readBack) {
+			return WindowsProductCommitted{}, t.rollback(errors.Join(err, errors.New("canonical Product identity differs")))
 		}
-		return WindowsProductCommitted{}, t.rollback(fmt.Errorf("read back canonical product: %w", err))
+	} else {
+		readBack.Path = o.ProductPath
 	}
 	if err := fault(WindowsProductStageProductReadBack); err != nil {
+		return WindowsProductCommitted{}, t.rollback(err)
+	}
+	if err := t.promoteCanonicalEntryCompanions(ctx); err != nil {
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
 	if err := o.Tasks.RewriteCommand(); err != nil {
@@ -947,7 +1059,11 @@ func validateWindowsSingleProductReplacementAuthority(o WindowsProductTxnOpts, a
 			return ErrWindowsProductPairQuiescenceRequired
 		}
 		receipt := authority.Quiescence
-		if receipt.CanonicalCLIPath != o.ProductPath ||
+		replacementPath := o.ProductPath
+		if o.EntrySet != nil {
+			replacementPath = o.CanonicalEntryPath
+		}
+		if receipt.CanonicalCLIPath != replacementPath ||
 			receipt.CanonicalWindowlessPath != o.LegacyWindowlessPath ||
 			receipt.PriorCLI != windowsProductPreimage(productPrior) ||
 			receipt.PriorWindowless != windowsProductPreimage(legacyPrior) {
@@ -965,6 +1081,9 @@ func validateWindowsSingleProductReplacementAuthority(o WindowsProductTxnOpts, a
 }
 
 func withWindowsProductDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
+	if d.AdmitEntrySet == nil {
+		d.AdmitEntrySet = readCanonicalEntrySet
+	}
 	pair := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{
 		Promote: d.Promote, RestorePromotion: d.RestorePromotion,
 		WriteReceipt: d.WriteReceipt, ReadReceipt: d.ReadReceipt,
@@ -987,12 +1106,6 @@ func withWindowsProductDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
 	d.RemoveRecoveryJournal = pair.RemoveRecoveryJournal
 	d.ListGeneratedAsides = pair.ListGeneratedAsides
 	d.Now = pair.Now
-	if d.RetainLegacy == nil {
-		d.RetainLegacy = api.RetainBinaryTargetAside
-	}
-	if d.RestoreNoReplace == nil {
-		d.RestoreNoReplace = moveWindowsFileNoReplace
-	}
 	if d.HashFile == nil {
 		d.HashFile = hashRecoveryFile
 	}
@@ -1002,7 +1115,22 @@ func withWindowsProductDefaults(d WindowsProductTxnDeps) WindowsProductTxnDeps {
 	if d.RemoveReceipt == nil {
 		d.RemoveReceipt = removeRecoveryLeaf
 	}
-	return d
+	return withWindowsProductNativeDefaults(d)
+}
+
+func hashRecoveryFile(path string) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(body)), nil
+}
+
+func removeRecoveryLeaf(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func recoveryReceiptFromSnapshot(snapshot productPairFileSnapshot) windowsProductPairRecoveryReceipt {
@@ -1146,11 +1274,8 @@ func (t *WindowsProductTxn) SettleGUIOwnedStop(receipt windowsProductQuiescenceR
 		return fmt.Errorf("%w: invalid GUI-owned settlement: %v", ErrWindowsProductRecoveryPending, err)
 	}
 	p := t.prepared
-	if !sameWindowsProductPath(receipt.CanonicalCLIPath, p.journal.Product.Target) ||
-		!sameWindowsProductPath(receipt.CanonicalWindowlessPath, p.journal.LegacyWindowless.Target) ||
-		receipt.PriorCLI != (windowsProductPreimageV1{Present: p.journal.Product.PriorPresent, SHA256: p.journal.Product.PriorSHA256}) ||
-		receipt.PriorWindowless != (windowsProductPreimageV1{Present: p.journal.LegacyWindowless.PriorPresent, SHA256: p.journal.LegacyWindowless.PriorSHA256}) {
-		return fmt.Errorf("%w: GUI-owned settlement changed Product preimage", ErrWindowsProductRecoveryPending)
+	if err := validateGUIOwnedStopPreimage(p.journal, receipt); err != nil {
+		return fmt.Errorf("%w: %w", ErrWindowsProductRecoveryPending, err)
 	}
 	previous := p.journal
 	p.journal.Phase = WindowsProductRecoveryPrepared
@@ -1177,9 +1302,21 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 		}
 		p.successorLaunch = nil
 	}
+	if err := t.withdrawCanonicalSuccessorEntry(); err != nil {
+		return errors.Join(trigger, fmt.Errorf("%w: withdraw canonical entry: %w", ErrWindowsProductRecoveryPending, err))
+	}
 	pairDeps := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{RestorePromotion: p.deps.RestorePromotion})
-	if err := restoreProductPairPromotion(pairDeps, p.productPromotion, p.productPrior); err != nil {
+	var productInverseErr error
+	if p.entrySet != nil {
+		productInverseErr = t.restoreCanonicalMember("product", o.ProductPath, p.productPrior)
+	} else {
+		productInverseErr = restoreProductPairPromotion(pairDeps, p.productPromotion, p.productPrior)
+	}
+	if err := productInverseErr; err != nil {
 		restoreErrs = append(restoreErrs, fmt.Errorf("restore canonical product: %w", err))
+	}
+	if err := t.restoreCanonicalIdentity(); err != nil {
+		restoreErrs = append(restoreErrs, err)
 	}
 	if err := o.Tasks.RestoreImport(); err != nil {
 		restoreErrs = append(restoreErrs, fmt.Errorf("restore task XML: %w", err))
@@ -1192,9 +1329,15 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore receipt %s: %w", snapshot.path, err))
 		}
 	}
+	if len(restoreErrs) == 0 {
+		if err := t.restoreCanonicalPublicEntryLast(); err != nil {
+			restoreErrs = append(restoreErrs, err)
+		}
+	}
 	if joined := errors.Join(restoreErrs...); joined != nil {
 		return errors.Join(trigger, fmt.Errorf("%w: exact Windows product rollback failed: %v", ErrWindowsProductPairRecoveryRollback, joined))
 	}
+	priorRuntimePath, priorRuntime := canonicalRollbackRuntime(o, p)
 	if p.journal.PreSettlement != nil && p.journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
 		if p.deps.RecoverPriorSettlement == nil {
 			return errors.Join(trigger, fmt.Errorf("%w: GUI-owned prior settlement owner is unavailable", ErrWindowsProductRecoveryPending))
@@ -1202,21 +1345,32 @@ func (t *WindowsProductTxn) rollback(trigger error) error {
 		if err := p.deps.RecoverPriorSettlement(p.journal); err != nil {
 			return errors.Join(trigger, fmt.Errorf("%w: GUI-owned prior settlement: %v", ErrWindowsProductRecoveryPending, err))
 		}
-	} else if p.journal.PriorFleetReaped && p.productPrior.present && p.deps.RestartPrior != nil {
-		launch, err := p.deps.RestartPrior(o.ProductPath)
+	} else if p.journal.PriorFleetReaped && priorRuntime.present && p.deps.RestartPrior != nil {
+		launch, err := p.deps.RestartPrior(priorRuntimePath)
 		if err != nil {
 			return errors.Join(trigger, fmt.Errorf("%w: restart prior supervisor: %v", ErrWindowsProductPairRecoveryRollback, err), abortStartedSupervisor(launch))
 		}
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), defaultSupervisorLockReleaseTimeout)
 		defer cancel()
-		if err := receiveStartedSupervisor(recoveryCtx, launch, supervisorExpectation(o.StateDir, o.ProductPath, windowsProductPreimage(p.productPrior).SHA256), func() error {
+		if err := receiveStartedSupervisor(recoveryCtx, launch, supervisorExpectation(o.StateDir, priorRuntimePath, windowsProductPreimage(priorRuntime).SHA256), func() error {
 			if p.deps.WaitSupervisorReady != nil {
-				return p.deps.WaitSupervisorReady(recoveryCtx, o.ProductPath, binaryadmission.WindowsArtifact{Path: o.ProductPath, SHA256: windowsProductPreimage(p.productPrior).SHA256})
+				return p.deps.WaitSupervisorReady(recoveryCtx, priorRuntimePath, binaryadmission.WindowsArtifact{Path: priorRuntimePath, SHA256: windowsProductPreimage(priorRuntime).SHA256})
 			}
 			return nil
 		}); err != nil {
 			return errors.Join(trigger, fmt.Errorf("%w: prior supervisor control/readiness: %w", ErrWindowsProductPairRecoveryRollback, err))
 		}
+	}
+	if err := t.cleanupCanonicalOwnedFiles(false); err != nil {
+		return errors.Join(trigger, err)
+	}
+	if o.EntrySet != nil && o.EntrySet.original != nil {
+		if err := closeCanonicalEntryFileOwners(o, p); err != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: entry-set original close: %w", ErrWindowsProductRecoveryPending, err))
+		}
+	}
+	if err := t.removeCreatedPayloadDirectoryAfterInverse(); err != nil {
+		return errors.Join(trigger, err)
 	}
 	p.journal.Phase = WindowsProductRecoverySettledRollback
 	p.journal.TaskSetSHA256 = ""
@@ -1268,6 +1422,28 @@ func verifyBoundWindowsProductFile(path string, prior productPairFileSnapshot, t
 
 func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool) (WindowsProductCommitted, error) {
 	o, p := t.Opts, t.prepared
+	if p.entrySet != nil {
+		if err := t.cleanupCanonicalOwnedFiles(true); err != nil {
+			return WindowsProductCommitted{}, fmt.Errorf("%w: original native cleanup: %w", ErrWindowsProductCleanupPending, err)
+		}
+		if err := closeCanonicalEntryFileOwners(o, p); err != nil {
+			return WindowsProductCommitted{}, fmt.Errorf("%w: original entry-set close: %w", ErrWindowsProductCleanupPending, err)
+		}
+	}
+	if p.entrySet != nil && p.entrySet.directory != nil {
+		if err := p.entrySet.directory.Close(); err != nil {
+			return WindowsProductCommitted{}, fmt.Errorf("%w: original payload directory close: %w", ErrWindowsProductCleanupPending, err)
+		}
+	}
+	if p.journal.EntrySet != nil {
+		targets, err := canonicalEntrySetJournalTargets(p.journal)
+		if err != nil {
+			return WindowsProductCommitted{}, err
+		}
+		if _, err := p.deps.AdmitEntrySet(context.Background(), targets, canonicalEntrySnapshotFromJournal(p.journal)); err != nil {
+			return WindowsProductCommitted{}, fmt.Errorf("%w: final complete-set readback: %w", ErrWindowsProductCleanupPending, err)
+		}
+	}
 	if err := cleanupWindowsProductTransactionFiles(o, p, forwardReplay); err != nil {
 		return WindowsProductCommitted{Artifact: artifact, TaskSetSHA256: p.journal.TaskSetSHA256, Outcome: WindowsProductPairCommittedCleanupFailed},
 			fmt.Errorf("%w: %v", ErrWindowsProductCleanupPending, err)
@@ -1290,6 +1466,10 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 			Machine: artifact.Machine, Commit: artifact.Commit, BuildDate: artifact.BuildDate, SHA256: artifact.SHA256,
 		},
 		TaskSetSHA256: p.journal.TaskSetSHA256, Retired: retired, InstalledAt: now,
+	}
+	if p.journal.EntrySet != nil {
+		receipt.Admission = UpgradeAdmissionCanonicalEntryProductV1
+		receipt.EntrySet = canonicalEntrySetReceipt(p.journal)
 	}
 	raw, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
@@ -1318,7 +1498,8 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 	}
 	receiptDigest := fmt.Sprintf("%x", sha256.Sum256(readBack))
 	event := WindowsProductCommitEvent{
-		Schema: UpgradeReceiptSchemaV3, TransactionID: p.journal.TransactionID,
+		EntrySet: receipt.EntrySet,
+		Schema:   UpgradeReceiptSchemaV3, TransactionID: p.journal.TransactionID,
 		Mode: o.Mode, Artifact: receipt.Artifact, TaskSetSHA256: p.journal.TaskSetSHA256,
 		Retired: retired, ReceiptSHA256: receiptDigest, InstalledAt: now,
 	}
@@ -1349,6 +1530,9 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 }
 
 func cleanupWindowsProductTransactionFiles(o WindowsProductTxnOpts, p *windowsProductPreparedTxn, forwardReplay bool) error {
+	if p.journal.EntrySet != nil {
+		return cleanupCanonicalEntryLegacyFiles(o, p, forwardReplay)
+	}
 	if err := removeBoundWindowsProductFileIfPresent(o.StagedProduct, p.journal.Product.NewSHA256, p.deps); err != nil {
 		return err
 	}
@@ -1521,6 +1705,9 @@ func inspectWindowsProductPreflight(txn *WindowsProductTxn) (windowsProductPairP
 		return windowsProductPairPreflightV1{}, errors.New("Windows product transaction is required")
 	}
 	o := txn.Opts
+	if o.EntrySet != nil {
+		return inspectWindowsCanonicalEntryPreflight(o)
+	}
 	d := withWindowsProductDefaults(o.Deps)
 	staged, err := d.AdmitProduct(binaryadmission.WindowsArtifact{
 		Path: o.StagedProduct, Role: binaryadmission.WindowsArtifactRoleProduct,
@@ -1544,6 +1731,88 @@ func inspectWindowsProductPreflight(txn *WindowsProductTxn) (windowsProductPairP
 		PriorCLI:        windowsProductPreimage(productPrior),
 		PriorWindowless: windowsProductPreimage(legacyPrior),
 	}, nil
+}
+
+func inspectWindowsCanonicalEntryPreflight(o WindowsProductTxnOpts) (windowsProductPairPreflightV1, error) {
+	var result windowsProductPairPreflightV1
+	if o.Context == nil || o.EntrySet == nil || o.EntrySet.original == nil {
+		return result, errors.New("original complete-set context and stage are required")
+	}
+	if err := o.Context.Err(); err != nil {
+		return result, err
+	}
+	if err := o.EntrySet.original.VerifyUnchanged(); err != nil {
+		return result, err
+	}
+	stages, err := o.EntrySet.original.Targets()
+	if err != nil {
+		return result, err
+	}
+	targets, err := o.EntrySet.original.DestinationTargets()
+	if err != nil {
+		return result, err
+	}
+	if !sameWindowsProductPath(targets.CanonicalEntryPath, o.CanonicalEntryPath) || !sameWindowsProductPath(targets.ProductPath, o.ProductPath) || !sameWindowsProductPath(targets.IdentityPath, o.IdentityPath) || !sameWindowsProductPath(stages.ProductPath, o.StagedProduct) {
+		return result, errors.New("staged canonical entry set disagrees with transaction paths")
+	}
+	snapshot, err := o.EntrySet.original.Snapshot()
+	if err != nil {
+		return result, err
+	}
+	prior, err := o.EntrySet.acquirePrior(o.Context)
+	if err != nil {
+		return result, err
+	}
+	productPrior, err := canonicalPriorSnapshot(prior, "product", targets.ProductPath)
+	if err != nil {
+		return result, err
+	}
+	entryPrior, err := canonicalPriorSnapshot(prior, "launcher", targets.CanonicalEntryPath)
+	if err != nil {
+		return result, err
+	}
+	identityPrior, err := canonicalPriorSnapshot(prior, "identity", targets.IdentityPath)
+	if err != nil {
+		return result, err
+	}
+	// The legacy quiescence contract names the stopped runtime as CLI. During
+	// migration it is the root Product; for an existing complete set it is the
+	// payload Product. Receive that projection from the same retained prior.
+	runtime, err := prior.RuntimeProduct(o.Context)
+	if err != nil {
+		return result, err
+	}
+	if runtime != nil {
+		if err := runtime.ValidateOriginal(o.Context); err != nil {
+			return result, err
+		}
+		artifact := runtime.Artifact()
+		var runtimePrior productPairFileSnapshot
+		switch {
+		case sameWindowsProductPath(artifact.Path, targets.ProductPath):
+			runtimePrior = productPrior
+		case sameWindowsProductPath(artifact.Path, targets.CanonicalEntryPath):
+			runtimePrior = entryPrior
+		default:
+			return result, errors.New("prior runtime is outside original complete-set targets")
+		}
+		result.PriorCLI = windowsProductPreimage(runtimePrior)
+		if result.PriorCLI != (windowsProductPreimageV1{Present: true, SHA256: artifact.SHA256}) {
+			return result, errors.New("original prior runtime preimage changed")
+		}
+	}
+	legacyPrior, err := snapshotProductPairFile(o.LegacyWindowlessPath)
+	if err != nil {
+		return result, err
+	}
+	result.PriorWindowless = windowsProductPreimage(legacyPrior)
+	result.Disposition = windowsProductPairDispositionV1{
+		CLI: windowsCanonicalSetDisposition(productPrior, &windowsCanonicalEntrySetPrepared{
+			snapshot: snapshot, entryPrior: entryPrior, identityPrior: identityPrior,
+		}, snapshot.ProductArtifact.SHA256),
+		Windowless: windowsProductTargetIdentical,
+	}
+	return result, o.Context.Err()
 }
 
 func validateWindowsProductQuiescenceReceipt(receipt windowsProductQuiescenceReceiptV1) error {
@@ -1853,6 +2122,9 @@ func decodeWindowsProductPairRecoveryJournalV2(raw []byte) (windowsProductPairRe
 }
 
 func decodeWindowsProductRecoveryJournalV3(raw []byte) (windowsProductRecoveryJournalV3, error) {
+	if err := validateCanonicalEntryArmJSON(raw); err != nil {
+		return windowsProductRecoveryJournalV3{}, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var journal windowsProductRecoveryJournalV3
@@ -1869,6 +2141,9 @@ func decodeWindowsProductRecoveryJournalV3(raw []byte) (windowsProductRecoveryJo
 }
 
 func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) error {
+	if err := validateCanonicalEntrySetJournal(j); err != nil {
+		return err
+	}
 	if j.Schema != WindowsProductRecoverySchemaV3 || !validRecoveryHex(j.TransactionID, 16) {
 		return errors.New("invalid V3 recovery schema or transaction identity")
 	}
@@ -1976,7 +2251,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		legacy := windowsProductPairRecoveryJournal{
 			Schema: WindowsProductPairRecoverySchemaV2,
 			Mode:   j.Mode, PriorFleetReaped: j.PriorFleetReaped,
-			CLI:        windowsProductPairRecoveryArtifact{Target: j.Product.Target, PriorPresent: j.Product.PriorPresent, PriorSHA256: j.Product.PriorSHA256, NewSHA256: j.Product.NewSHA256},
+			CLI:        canonicalRecoveryRuntimeArtifact(j),
 			Windowless: windowsProductPairRecoveryArtifact{Target: j.LegacyWindowless.Target, PriorPresent: j.LegacyWindowless.PriorPresent, PriorSHA256: j.LegacyWindowless.PriorSHA256, NewSHA256: j.LegacyWindowless.PriorSHA256},
 			Quiescence: j.Quiescence, QuiescenceReceiptSHA256: j.QuiescenceReceiptSHA256,
 		}

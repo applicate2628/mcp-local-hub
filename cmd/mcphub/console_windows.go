@@ -25,11 +25,13 @@ const WindowsDebugConsoleUnavailableID = "E_WINDOWS_DEBUG_CONSOLE_UNAVAILABLE"
 const WindowsCLIStdioUnavailableID = "E_WINDOWS_CLI_STDIO_UNAVAILABLE"
 
 type windowsConsoleAPI struct {
-	attachParent func() error
-	allocate     func() error
-	prepareDebug func()
-	prepareCLI   func()
-	outputsValid func() (stdout bool, stderr bool)
+	attachParent    func() error
+	allocate        func() error
+	prepareDebug    func()
+	prepareCLI      func()
+	prepareCLIInput func()
+	inputValid      func() bool
+	outputsValid    func() (stdout bool, stderr bool)
 }
 
 type windowsDebugConsoleUnavailableError struct {
@@ -81,13 +83,18 @@ var productionWindowsConsoleAPI = windowsConsoleAPI{
 	},
 	prepareDebug: prepareDebugConsole,
 	prepareCLI:   prepareCLIConsoleOutputs,
+	prepareCLIInput: func() {
+		reopenIfInvalid("CONIN$", os.O_RDONLY, &os.Stdin)
+	},
+	inputValid:   func() bool { return windowsFileHandleValid(os.Stdin) },
 	outputsValid: windowsCLIOutputsValid,
 }
 
 // applyWindowsConsolePolicy is the sole Windows console-state writer. Ordinary
-// GUI/background/protocol modes are no-ops; CLI mode inspects and repairs only
-// invalid output handles. Explicit debug mode attaches first and may allocate a
-// console for GUI/CLI only. Every failure is returned before Cobra executes.
+// GUI/background/protocol modes are no-ops. Ordinary CLI repairs invalid
+// standard handles using the parent console. Output acquisition is required.
+// Unavailable input is left for the command that reads it to report. Explicit
+// debug mode attaches first and may allocate a console for GUI/CLI only.
 func applyWindowsConsolePolicy(mode windowsEntrypointMode, policy cli.WindowsConsolePolicy) (bool, error) {
 	return applyWindowsConsolePolicyWithAPI(mode, policy, productionWindowsConsoleAPI)
 }
@@ -106,20 +113,28 @@ func applyWindowsConsolePolicyWithAPI(mode windowsEntrypointMode, policy cli.Win
 		if mode == windowsEntrypointGUI {
 			return false, nil
 		}
-		if api.outputsValid == nil || api.attachParent == nil || api.prepareCLI == nil {
+		if api.outputsValid == nil || api.attachParent == nil || api.prepareCLI == nil ||
+			api.inputValid == nil || api.prepareCLIInput == nil {
 			return false, &windowsCLIStdioUnavailableError{attachErr: fmt.Errorf("console composition is incomplete")}
 		}
+		stdinValid := api.inputValid()
 		stdoutValid, stderrValid := api.outputsValid()
-		if stdoutValid && stderrValid {
+		if stdinValid && stdoutValid && stderrValid {
 			return false, nil
 		}
 		if err := api.attachParent(); err != nil {
+			if stdoutValid && stderrValid {
+				return false, nil
+			}
 			return false, &windowsCLIStdioUnavailableError{attachErr: err, stdoutValid: stdoutValid, stderrValid: stderrValid}
 		}
 		api.prepareCLI()
 		stdoutValid, stderrValid = api.outputsValid()
 		if !stdoutValid || !stderrValid {
 			return false, &windowsCLIStdioUnavailableError{stdoutValid: stdoutValid, stderrValid: stderrValid}
+		}
+		if !stdinValid {
+			api.prepareCLIInput()
 		}
 		return false, nil
 	}
