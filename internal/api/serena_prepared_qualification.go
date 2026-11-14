@@ -280,5 +280,8 @@ func ValidateUnpublishedSerenaQualificationRequest(ctx context.Context, r Prepar
 	if err := r.validate(ctx, false); err != nil {
 		return err
 	}
-	return revalidatePreparedSerenaFile(ctx, r.Installation.Entrypoint)
+	if err := validatePreparedSerenaGeneration(ctx, r.Installation.generation, r.Request, r.Roots.Generation); err != nil {
+		return err
+	}
+	return revalidatePreparedSerenaOwnedFile(ctx, r.Installation.generation, r.Installation.Entrypoint)
 }

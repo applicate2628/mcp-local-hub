@@ -12,12 +12,12 @@ import (
 // package effects owner. Original tree capabilities remain retained here;
 // returned path/identity DTOs never become deletion authority.
 type preparedSerenaAcquisition struct {
-	mu                  sync.Mutex
-	inputs              SerenaPreparationInputs
-	qualifier           PreparedSerenaQualificationPort
-	generation, attempt *SerenaOwnedTree
-	roots               PreparedSerenaOwnedRoots
-	started, acquiring  bool
+	mu                                    sync.Mutex
+	inputs                                SerenaPreparationInputs
+	qualifier                             PreparedSerenaQualificationPort
+	generation, attempt                   *SerenaOwnedTree
+	roots                                 PreparedSerenaOwnedRoots
+	started, acquiring                    bool
 	generationAttempted, attemptAttempted bool
 }
 
@@ -48,7 +48,7 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 		a.roots = roots
 		a.mu.Unlock()
 	}()
-	a.generationAttempted=true
+	a.generationAttempted = true
 	a.generation, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "generation", Limits: r.OwnedTreeLimits})
 	if err != nil {
 		return roots, err
@@ -61,7 +61,7 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 	if err != nil {
 		return roots, err
 	}
-	a.attemptAttempted=true
+	a.attemptAttempted = true
 	a.attempt, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "attempt", Limits: r.OwnedTreeLimits, survivors: []*SerenaOwnedTree{a.generation}})
 	if err != nil {
 		return roots, err
@@ -111,7 +111,7 @@ func (a *preparedSerenaAcquisition) install(ctx context.Context, r PreparedSeren
 	}
 	a.started = true
 	a.mu.Unlock()
-	installed, retErr = installPreparedSerena(ctx, a.inputs, roots)
+	installed, retErr = installPreparedSerena(ctx, a.inputs, roots, a.generation)
 	if !installed.Closure.complete(r.OperationID) {
 		return installed, retErr
 	}
