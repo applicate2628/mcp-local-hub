@@ -317,6 +317,12 @@ func (o *Owner) Finish(milliseconds uint32) (Outcome, error) { return o.call(2, 
 func (o *Owner) call(operation int, value uint32) (Outcome, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return o.callLocked(operation, value)
+}
+
+// callLocked requires this owner mutex. Both synchronous calls and the
+// cancelable observer use the same native operation/result mapping.
+func (o *Owner) callLocked(operation int, value uint32) (Outcome, error) {
 	if o.raw == nil {
 		return Outcome{}, errors.New("owner released")
 	}
