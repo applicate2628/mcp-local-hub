@@ -6,6 +6,7 @@ import (
 	"errors"
 	"mcp-local-hub/internal/secrets"
 	"net/url"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -100,6 +101,8 @@ func (p SerenaBuildEnvironmentProjectionV1) SHA256() (string, error) {
 }
 
 const serenaUVNetworkOmissionRule = "serena-uv-tool-network-rule-v1:package-network-default:offline=false"
+const serenaWindowsExecutableRule = "serena-windows-executable-rule-v1:pathext=.EXE"
+const serenaWindowsGitLongPathsRule = "serena-windows-git-longpaths-rule-v1:core.longpaths=true"
 
 func BuildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPreparationEnvironmentSource, policy SerenaPreparationPolicyV2) (projection SerenaBuildEnvironmentProjectionV1, execution SerenaPreparationEnvironment, retErr error) {
 	policySHA, err := policy.IdentitySHA256()
@@ -212,6 +215,30 @@ func buildSerenaBuildEnvironmentProjection(ctx context.Context, source SerenaPre
 	}
 	values["PYTHONDONTWRITEBYTECODE"] = "1"
 	values["UV_PYTHON_DOWNLOADS"] = "never"
+	if runtime.GOOS == "windows" {
+		// UV's Git lookup needs PATHEXT. Own the executable-only value so host
+		// and runtime declarations cannot broaden package preparation.
+		values["PATHEXT"] = ".EXE"
+		projection.Entries = append(projection.Entries, SerenaBuildEnvironmentEntryV1{
+			Key: "PATHEXT", ValueKind: "policy", SourceKind: "hub-policy",
+			SourceRefSHA256: preparedSerenaHash([]byte(serenaWindowsExecutableRule)),
+			ValueSHA256:     preparedSerenaHash([]byte(values["PATHEXT"])),
+		})
+		// Git object paths in the owned cache can exceed MAX_PATH. Configure
+		// these subprocesses without modifying persistent Git configuration.
+		gitRuleSHA := preparedSerenaHash([]byte(serenaWindowsGitLongPathsRule))
+		for key, value := range map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "core.longpaths",
+			"GIT_CONFIG_VALUE_0": "true",
+		} {
+			values[key] = value
+			projection.Entries = append(projection.Entries, SerenaBuildEnvironmentEntryV1{
+				Key: key, ValueKind: "policy", SourceKind: "hub-policy",
+				SourceRefSHA256: gitRuleSHA, ValueSHA256: preparedSerenaHash([]byte(value)),
+			})
+		}
+	}
 	if network.decisionSource == "uv-default" {
 		network.entry = SerenaBuildEnvironmentEntryV1{Key: "UV_OFFLINE", ValueKind: "boolean", SourceKind: "uv-default", SourceRefSHA256: preparedSerenaHash([]byte(omissionRule)), ValueSHA256: preparedSerenaHash([]byte("false"))}
 		projection.Entries = append(projection.Entries, network.entry)
