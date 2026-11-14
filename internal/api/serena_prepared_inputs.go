@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -136,21 +138,10 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	if metadataErr = preflightSerenaPreparationIntentMetadata(work, namespace, admission.OperationID, preparedSerenaHash(metadataRequestRaw), publisherSource.Epoch()); metadataErr != nil {
 		return result, metadataErr
 	}
-	// Reuse the actual discovery order, then the existing exec.LookPath native
-	// command resolver. Presence is only a candidate, followed by anchored hash
-	// identity and original-owner version receiving below.
-	discovered, err := binary_discovery.Discover(work, []string{"uv"}, binary_discovery.DefaultHints())
-	if err != nil {
-		return result, err
-	}
-	uvPath := discovered["uv"]
-	if uvPath == "" {
-		uvPath, err = exec.LookPath("uv")
-		if err != nil {
-			return result, errors.Join(err, errors.New("SERENA_RUNTIME_INSTALL_NEEDED"))
-		}
-	}
-	uvPath, err = filepath.Abs(uvPath)
+	// Search the qualified build PATH before installation hints. Presence is
+	// only a candidate, followed by anchored hash identity and original-owner
+	// version receiving below.
+	uvPath, err := discoverPreparedSerenaUV(work, execution, binary_discovery.DefaultHints())
 	if err != nil {
 		return result, err
 	}
@@ -267,6 +258,39 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	}
 	return result, nil
 }
+
+// execution is issued by BuildSerenaBuildEnvironmentProjection after bootstrap
+// qualification. Its PATH owns discovery; the ambient PATH is not a fallback.
+func discoverPreparedSerenaUV(ctx context.Context, execution SerenaPreparationEnvironment, fallbackHints []string) (string, error) {
+	path := preparedSerenaEnvironmentMap(execution.values)["PATH"]
+	names := []string{"uv"}
+	if runtime.GOOS == "windows" {
+		names = []string{"uv.exe", "uv"}
+	}
+	for _, directory := range filepath.SplitList(path) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		// Qualified PATH entries are literal directories. Discover expands
+		// environment references in hints, which would change a literal '$'.
+		for _, name := range names {
+			candidate := filepath.Join(directory, name)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate, nil
+			}
+		}
+	}
+	discovered, err := binary_discovery.Discover(ctx, []string{"uv"}, fallbackHints)
+	if err != nil {
+		return "", err
+	}
+	uvPath := discovered["uv"]
+	if uvPath == "" {
+		return "", errors.Join(&exec.Error{Name: "uv", Err: exec.ErrNotFound}, errors.New("SERENA_RUNTIME_INSTALL_NEEDED"))
+	}
+	return filepath.Abs(uvPath)
+}
+
 func preparedSerenaInstallSettings(settings []string, network *serenaPackageNetworkPolicy) ([]string, error) {
 	if network == nil || network.source == nil || network.source.issuer == nil || !network.decisionDefined {
 		return nil, errors.New("SERENA_PACKAGE_NETWORK_POLICY_UNAVAILABLE")
