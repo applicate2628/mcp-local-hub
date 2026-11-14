@@ -1,0 +1,22 @@
+Source: 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa + described controlled mutation
+Command: go test . -run '^TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried$' -count=1 -timeout=30s
+Expected exit: 1
+Actual exit: 1
+--- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried (0.01s)
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/1 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/2 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/3 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/4 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/5 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/6 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+    --- FAIL: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/7 (0.00s)
+        stdio_windows_test.go:413: protected close failure hidden
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.026s
+FAIL

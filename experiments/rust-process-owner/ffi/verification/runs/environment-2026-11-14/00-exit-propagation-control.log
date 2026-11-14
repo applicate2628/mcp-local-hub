@@ -1,0 +1,1 @@
+Command: C:\windows\system32\cmd.exe /d /c exit 7 UTC: 2026-11-14T01:01:04.7370354Z Expected exit: 7 Actual exit: 7

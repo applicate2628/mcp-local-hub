@@ -1,0 +1,30 @@
+Command: git diff --cached --check
+Actual exit: 2
+Cause: PowerShell ConvertTo-Json emitted CRLF in the new normalization manifest
+
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:1: trailing whitespace.
++[
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:2: trailing whitespace.
++    {
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:3: trailing whitespace.
++        "path":  "artifact-hashes.txt",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:4: trailing whitespace.
++        "original_sha256":  "ddc8da757b68469ec74308b0db0595d87e222e641025a79d27cca4af1637e8fd",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:5: trailing whitespace.
++        "normalized_sha256":  "9b7460fadea3bab1b341fcc3c5ca6f55eedfde3c190386248026b4342141c95f",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:6: trailing whitespace.
++        "change":  "CRLF -\u003e LF and trailing whitespace only; log values and conclusions unchanged"
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:7: trailing whitespace.
++    },
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:8: trailing whitespace.
++    {
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:9: trailing whitespace.
++        "path":  "baseline.log",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:10: trailing whitespace.
++        "original_sha256":  "68a0eaa26b4c2a3db9e07820b659cb2fa938860f51042679e77f26633f14d2f6",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:11: trailing whitespace.
++        "normalized_sha256":  "85eb25523610310baadf5899f779d40143b601355cb453cd65abcdabddc57b2d",
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:12: trailing whitespace.
++        "change":  "CRLF -\u003e LF and trailing whitespace only; log values and conclusions unchanged"
+experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/publication-normalization.json:13: trailing whitespace.
++    }

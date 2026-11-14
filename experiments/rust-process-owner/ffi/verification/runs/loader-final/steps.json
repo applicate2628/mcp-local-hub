@@ -1,0 +1,194 @@
+[
+    {
+        "name":  "exit-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "compiler-version",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe --version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-valid",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\valid.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-0",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=0 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-0.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-1",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=1 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-1.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-2",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=2 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-2.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-3",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=3 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-3.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-4",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=4 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-4.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-5",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=5 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-5.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-6",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=6 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-6.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-7",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=7 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-7.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-missing-8",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DOMIT_EXPORT=8 D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-8.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-version-0",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DFIXTURE_VERSION=0u D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\version-0.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-version-2",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DFIXTURE_VERSION=2u D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\version-2.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-version-max",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DFIXTURE_VERSION=4294967295u D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\version-max.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-init-refused",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DREFUSE_INITIALIZATION D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\init-refused.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-dependency",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\dependency.c -Wl,--out-implib,D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\lib-owned-dependency.a -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\dependency-only\\mcphub_owned_loader_dependency.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-needs-dependency",
+        "command":  "C:\\msys64\\ucrt64\\bin\\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\include -DREQUIRE_DEPENDENCY D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner\\ffi\\verification\\loader-2026-11-14\\fixture.c D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\lib-owned-dependency.a -o D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-loader-final\\fixtures\\missing-dependency\\needs-dependency.dll",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "loader-race",
+        "command":  "go test -tags ffi_loader_faults . -run ^TestLoader -count=3 -race -timeout=90s -v",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "loader-vet",
+        "command":  "go vet -tags ffi_loader_faults .",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "loader-cgocheck2",
+        "command":  "go test -tags ffi_loader_faults . -run ^TestLoader -count=1 -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "loader-counts",
+        "command":  "go test -tags ffi_loader_faults . -run ^TestLoader -count=1 -json -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    }
+]

@@ -1,0 +1,930 @@
+# Historical verification bundle: go-ffi
+Associated completed source: e0a05e3a6ec3b5ff14f3d70e935eabfda44ba445
+Imported existing evidence; NOT a new execution. Individual RED/mutation logs may precede this commit.
+
+===== BEGIN abi-clippy.txt =====
+Original-SHA256: 40bcbfe0bd9e67d4ea9da96f8c93d707401992c09ee75864d28629f709eedc99
+Sanitized-content-SHA256: 7a50d7ef507d5b8d74e50bd0b5a95b0021c5935d4d42acd725e7d7cfdf7f03ff
+
+    Checking windows-link v0.2.1
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Checking windows-sys v0.61.2
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.56s
+===== END abi-clippy.txt =====
+
+===== BEGIN abi-unit.txt =====
+Original-SHA256: 6ad7aac09046cc61d03c716211a69e2db3d8d68204cba9b7c132c50f7a048f9d
+Sanitized-content-SHA256: 6fbd08e077f2739ec96ef46b6c46aa14da81686914ce36f192401a00ea589eb7
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.14s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_owner_ffi_spike-54361ecab3c15622.exe)
+
+running 6 tests
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+===== END abi-unit.txt =====
+
+===== BEGIN baseline.txt =====
+Original-SHA256: 20759c1e2424d57da0ff36ae2f1c82f1ab6814976e808680347702ed8d1fa506
+Sanitized-content-SHA256: 611cd3685fb0271d213b3af926868f2f7b8a5eff012e2c9015546987e13e4257
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END baseline.txt =====
+
+===== BEGIN corrupt_create_test.formatted.go =====
+Original-SHA256: c663d52a33ccc7a053e9005fb678b837aa713fb0399ce7e05b38b023041b1372
+Sanitized-content-SHA256: c663d52a33ccc7a053e9005fb678b837aa713fb0399ce7e05b38b023041b1372
+
+//go:build windows && amd64 && cgo
+
+package caller
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+// Scratch-only regression, run against an owned DLL with exactly one corrupted
+// create-result size field. No runtime hooks are added to the committed code.
+func TestCorruptCreateRetainsTransferredOwner(t *testing.T) {
+	l, child, dir := setup(t)
+	o, _, err := l.New(child, dir, []string{"exit", filepath.Join(dir, "never-admitted"), "0", "x"})
+	if o == nil {
+		t.Fatal("transferred native owner discarded after metadata validation failure")
+	}
+	own(t, o)
+	if err == nil {
+		t.Fatal("negative DLL did not corrupt metadata")
+	}
+	if e := l.Close(); e == nil {
+		t.Fatal("unload allowed while transferred owner remains live")
+	}
+}
+===== END corrupt_create_test.formatted.go =====
+
+===== BEGIN corrupt_create_test.go =====
+Original-SHA256: 86e14a1ff4dd6eb9b344edba027dd93d4d0938589219b6ccf51aa11e09879681
+Sanitized-content-SHA256: 86e14a1ff4dd6eb9b344edba027dd93d4d0938589219b6ccf51aa11e09879681
+
+//go:build windows && amd64 && cgo
+package caller
+import("testing";"path/filepath")
+// Scratch-only regression, run against an owned DLL with exactly one corrupted
+// create-result size field. No runtime hooks are added to the committed code.
+func TestCorruptCreateRetainsTransferredOwner(t *testing.T){
+ l,child,dir:=setup(t)
+ o,_,err:=l.New(child,dir,[]string{"exit",filepath.Join(dir,"never-admitted"),"0","x"})
+ if o==nil { t.Fatal("transferred native owner discarded after metadata validation failure") }
+ own(t,o)
+ if err==nil { t.Fatal("negative DLL did not corrupt metadata") }
+ if e:=l.Close();e==nil { t.Fatal("unload allowed while transferred owner remains live") }
+}
+===== END corrupt_create_test.go =====
+
+===== BEGIN corrupt_release_test.go =====
+Original-SHA256: 926bc14f26a51ec2f3a7f9d88d780e99c5f2f434a2ee560f7e9d072657d8f20c
+Sanitized-content-SHA256: 926bc14f26a51ec2f3a7f9d88d780e99c5f2f434a2ee560f7e9d072657d8f20c
+
+//go:build windows && amd64 && cgo
+package caller
+import("testing";"path/filepath")
+func TestCorruptReleasePreservesDeallocationFact(t *testing.T){
+ l,child,dir:=setup(t)
+ o,_,err:=l.New(child,dir,[]string{"exit",filepath.Join(dir,"released"),"0","x"})
+ if err!=nil{t.Fatal(err)};own(t,o)
+ if _,err=o.Admit(true);err!=nil{t.Fatal(err)}
+ out,err:=o.Finish(3000);if err!=nil||out.State!=complete{t.Fatalf("finish: %+v %v",out,err)}
+ if err=o.Release();err==nil{t.Fatal("negative DLL did not corrupt release metadata")}
+ if err=o.Release();err!=nil{t.Fatal("cleared native pointer was reused")}
+ if err=l.Close();err!=nil{t.Fatalf("completed deallocation lost when response failed: %v",err)}
+}
+===== END corrupt_release_test.go =====
+
+===== BEGIN create-classification-green.txt =====
+Original-SHA256: 559a91b395914a483e94ef8a23b0445613d4b2c4259fd3351a4482a33e63e369
+Sanitized-content-SHA256: 337f754a9574b306e79db4bb56630641101e6ec237de88d106ff48d4b8c4d7e5
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_owner_ffi_spike-54361ecab3c15622.exe)
+
+running 7 tests
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::native_invalid_parameter_code_survives_create_classification ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+===== END create-classification-green.txt =====
+
+===== BEGIN create-classification-red.txt =====
+Original-SHA256: 4311faa5e145ada316f1d3be019b3e3c91c749ca4c396e10c5170bbd140e2f0e
+Sanitized-content-SHA256: fb60b1773deb43017a26bee11bb59a8ea6d6c681543e4c02e9cf6c52e4892741
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.86s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_owner_ffi_spike-54361ecab3c15622.exe)
+
+running 1 test
+test tests::native_invalid_parameter_code_survives_create_classification ... FAILED
+
+failures:
+
+---- tests::native_invalid_parameter_code_survives_create_classification stdout ----
+
+thread 'tests::native_invalid_parameter_code_survives_create_classification' (84028) panicked at src\tests.rs:166:5:
+assertion `left == right` failed
+  left: 1
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::native_invalid_parameter_code_survives_create_classification
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+===== END create-classification-red.txt =====
+
+===== BEGIN early-release-negative.txt =====
+Original-SHA256: a83e8dc8ef096c5e5800a63a89d678aac961ed8b3238884372437df47f2c1360
+Sanitized-content-SHA256: 1bc92a49fc25a51392da5ef72e27c9486541c1cb87e8d15bcd3710e35a8cc6bb
+
+--- FAIL: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.01s)
+    bridge_windows_test.go:99: got <nil>; want status 6
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.028s
+FAIL
+===== END early-release-negative.txt =====
+
+===== BEGIN env-go.ps1 =====
+Original-SHA256: 5efcd4357673138813d9a7d2d21e2674fa7c9f309cc15ee3f0a87b405bb0fe13
+Sanitized-content-SHA256: ae9b53b06c93e8896d0bd142edac1c38422154c6ab437bbfdcf983c006219f2a
+
+. '<LAB>\env.ps1'
+$env:GOTOOLCHAIN='local'
+$env:GOPROXY='off'
+$env:GOSUMDB='off'
+$env:GOTELEMETRY='off'
+$env:GOCACHE='D:\dev\ChatGPT\go-build-cache'
+$env:GOTMPDIR=$env:TEMP
+$env:CGO_ENABLED='1'
+$env:CC='C:\msys64\ucrt64\bin\gcc.exe'
+$env:GOMAXPROCS='4'
+===== END env-go.ps1 =====
+
+===== BEGIN final-artifact-hashes.txt =====
+Original-SHA256: 7eb170e24204b52d88989113a51c3a34803af1f8db51d91693b69d3a20b27bfe
+Sanitized-content-SHA256: 72d4ae8386d165f8a969901ea24415855e29909585e47d5c4f484a3260656545
+
+339a276e06acd632c168342c763b1690b03a92ebcf7508494280b299d937ac55  <LAB>\target\debug\mcphub_owner_ffi_spike.dll
+cc3b37d746de2082c7ff2245c79c1d7fc4cde094e454df973f44d47390036db7  <LAB>\target\release\mcphub_owner_ffi_spike.dll
+d5fd79ffd569671ae80c88127b5ffb05ccefdb0759ba43d4b2f307f7fc999ded  <LAB>\target\debug\owner_child.exe
+===== END final-artifact-hashes.txt =====
+
+===== BEGIN final-debug-dll.txt =====
+Original-SHA256: f62137b2819bd252caa5d0d64e56a23f723dd140a49bd2b98351a8cc9edaf5b8
+Sanitized-content-SHA256: 3135d239466a251ca2c498afb3557f1b02a48aceb311476b76383d67703521b7
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+===== END final-debug-dll.txt =====
+
+===== BEGIN final-debug-go-race.txt =====
+Original-SHA256: fefab8e11cf42ba7a67fb092b0aff7bfe81616aaf21c85435fb75f32251a85e0
+Sanitized-content-SHA256: dcbf99edb2c491c571d483f881385572e8c0d61e2202cd1c9ad1afec28078f9f
+
+ok  	mcphub-owner-ffi-caller	1.534s
+===== END final-debug-go-race.txt =====
+
+===== BEGIN final-ffi-clippy.txt =====
+Original-SHA256: 256649e415ce1424453ec1edfd47b447062878d0bd1d5a86078e8d6244f5d96f
+Sanitized-content-SHA256: 9ef2f81a4fc596e536da9c4b42d5fd4f0d788cffaede82a614aeb217f2b2196a
+
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+===== END final-ffi-clippy.txt =====
+
+===== BEGIN final-ffi-debug.txt =====
+Original-SHA256: ee3e7382ddcdad53960ba77a39d77940bba841660dfc6a980c9a2edbc43e8551
+Sanitized-content-SHA256: 07b3b71ebf49113e40f53d106089a0a0984efc9c713cc83b27a66fd0f41c9c49
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_owner_ffi_spike-54361ecab3c15622.exe)
+
+running 7 tests
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::native_invalid_parameter_code_survives_create_classification ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+===== END final-ffi-debug.txt =====
+
+===== BEGIN final-ffi-release.txt =====
+Original-SHA256: 368757c55c7356bf3f4081c3f4b88168db94860c4eb5ab4d9eb9054cb52e1ee1
+Sanitized-content-SHA256: 8b9f33094d8ffd96d45b634041f23bf58987ac209ae72736133b261bec40b611
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `release` profile [optimized] target(s) in 0.86s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_owner_ffi_spike-cab611b4b71b35cc.exe)
+
+running 7 tests
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+test tests::native_invalid_parameter_code_survives_create_classification ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+===== END final-ffi-release.txt =====
+
+===== BEGIN final-go-cgocheck2.txt =====
+Original-SHA256: bf6d79717eea4eb8ff91b8a15f7ed57f04b8b6a8fd41d392f10526ec3d5a969f
+Sanitized-content-SHA256: e53b203ccd885f6e41df20bf32a2c69e41d7367343cd842958fead35a28141e6
+
+ok  	mcphub-owner-ffi-caller	0.165s
+===== END final-go-cgocheck2.txt =====
+
+===== BEGIN final-normal-go-count.txt =====
+Original-SHA256: 6c651fa71fe207561bd65fdc0f50506f2f944be016ac478f54d07df9ad6eab1a
+Sanitized-content-SHA256: 3727d32273f411b39f410f3d44513bcd4116a9c4b2b37ff070ac6369aa2071fe
+
+{"Time":"2026-11-13T23:27:58.1083077+03:00","Action":"start","Package":"mcphub-owner-ffi-caller"}
+{"Time":"2026-11-13T23:27:58.1193526+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignLifecycleRetainsOwnerAndCopiesInput"}
+{"Time":"2026-11-13T23:27:58.1209274+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignLifecycleRetainsOwnerAndCopiesInput","Output":"=== RUN   TestForeignLifecycleRetainsOwnerAndCopiesInput\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1411308+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignLifecycleRetainsOwnerAndCopiesInput","Output":"--- PASS: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.02s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1411308+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignLifecycleRetainsOwnerAndCopiesInput","Elapsed":0.02}
+{"Time":"2026-11-13T23:27:58.1411308+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignDeniedAdmissionHasNoEffect"}
+{"Time":"2026-11-13T23:27:58.1411308+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignDeniedAdmissionHasNoEffect","Output":"=== RUN   TestForeignDeniedAdmissionHasNoEffect\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1457961+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignDeniedAdmissionHasNoEffect","Output":"--- PASS: TestForeignDeniedAdmissionHasNoEffect (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1457961+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignDeniedAdmissionHasNoEffect","Elapsed":0}
+{"Time":"2026-11-13T23:27:58.1457961+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignErrorsAreTypedAndNoOwnerEscapes"}
+{"Time":"2026-11-13T23:27:58.1457961+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignErrorsAreTypedAndNoOwnerEscapes","Output":"=== RUN   TestForeignErrorsAreTypedAndNoOwnerEscapes\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1463129+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignErrorsAreTypedAndNoOwnerEscapes","Output":"--- PASS: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1463129+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignErrorsAreTypedAndNoOwnerEscapes","Elapsed":0}
+{"Time":"2026-11-13T23:27:58.1463129+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignReleaseClearsHandleAndDisallowsUse"}
+{"Time":"2026-11-13T23:27:58.1463129+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignReleaseClearsHandleAndDisallowsUse","Output":"=== RUN   TestForeignReleaseClearsHandleAndDisallowsUse\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1674752+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignReleaseClearsHandleAndDisallowsUse","Output":"--- PASS: TestForeignReleaseClearsHandleAndDisallowsUse (0.02s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1674752+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignReleaseClearsHandleAndDisallowsUse","Elapsed":0.02}
+{"Time":"2026-11-13T23:27:58.1674752+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignCallerSerializesConcurrentUse"}
+{"Time":"2026-11-13T23:27:58.1674752+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignCallerSerializesConcurrentUse","Output":"=== RUN   TestForeignCallerSerializesConcurrentUse\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1738233+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignCallerSerializesConcurrentUse","Output":"--- PASS: TestForeignCallerSerializesConcurrentUse (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.1738233+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignCallerSerializesConcurrentUse","Elapsed":0.01}
+{"Time":"2026-11-13T23:27:58.1738233+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignRootExitDoesNotReleaseLiveDescendant"}
+{"Time":"2026-11-13T23:27:58.1738233+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignRootExitDoesNotReleaseLiveDescendant","Output":"=== RUN   TestForeignRootExitDoesNotReleaseLiveDescendant\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2063059+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignRootExitDoesNotReleaseLiveDescendant","Output":"--- PASS: TestForeignRootExitDoesNotReleaseLiveDescendant (0.03s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2063059+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignRootExitDoesNotReleaseLiveDescendant","Elapsed":0.03}
+{"Time":"2026-11-13T23:27:58.2063059+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignExplicitContextDoesNotInheritOrMutateParent"}
+{"Time":"2026-11-13T23:27:58.2063059+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignExplicitContextDoesNotInheritOrMutateParent","Output":"=== RUN   TestForeignExplicitContextDoesNotInheritOrMutateParent\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2281624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignExplicitContextDoesNotInheritOrMutateParent","Output":"--- PASS: TestForeignExplicitContextDoesNotInheritOrMutateParent (0.02s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2281624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignExplicitContextDoesNotInheritOrMutateParent","Elapsed":0.02}
+{"Time":"2026-11-13T23:27:58.2281624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestForeignBudgetsDoNotConsumeAdmission"}
+{"Time":"2026-11-13T23:27:58.2281624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignBudgetsDoNotConsumeAdmission","Output":"=== RUN   TestForeignBudgetsDoNotConsumeAdmission\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2532224+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestForeignBudgetsDoNotConsumeAdmission","Output":"--- PASS: TestForeignBudgetsDoNotConsumeAdmission (0.02s)\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2532224+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestForeignBudgetsDoNotConsumeAdmission","Elapsed":0.02}
+{"Time":"2026-11-13T23:27:58.2532224+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-13T23:27:58.2582949+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Output":"ok  \tmcphub-owner-ffi-caller\t0.150s\n"}
+{"Time":"2026-11-13T23:27:58.2582949+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Elapsed":0.151}
+===== END final-normal-go-count.txt =====
+
+===== BEGIN final-parent-clippy.txt =====
+Original-SHA256: 4d716bc8bc2a44beb81919bdc29bb82837156ec603cdfb596dd42c561b1b0397
+Sanitized-content-SHA256: a5f4c585ee974ca44916ac30a98bbc189e067a7e0a6bc6d2e8d6bc525be724af
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+===== END final-parent-clippy.txt =====
+
+===== BEGIN final-parent-debug.txt =====
+Original-SHA256: 8954d9ca6a0a9fc96446e38436e1e555fa3b6fa74a6f321845d1b8d2ad9c2953
+Sanitized-content-SHA256: f28159fae9e501524936106d74983b467c7881d7729b608739c0d6e5c54c63b6
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\debug\deps\owner_crash_fixture-5c6e5e6c2fe4edba.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-6a9abeec6d6cd526.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-76a6271dd54d96d6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+     Running tests\owner_crash.rs (<LAB>\target\debug\deps\owner_crash-433ae88f9066c526.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-3b3998c010a75080.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-parent-debug.txt =====
+
+===== BEGIN final-parent-release.txt =====
+Original-SHA256: eb522449ebea7828736edb96a3244f4ea182d44aec55939dfbf4f6f92071a3e3
+Sanitized-content-SHA256: 979903262f64a9969a4b66bd59da791958a2b93dc654122b7ab87cc11914d07f
+
+    Finished `release` profile [optimized] target(s) in 0.03s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_process_owner_spike-b478d0084b4e3761.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\release\deps\owner_child-744f801171fca2c6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\release\deps\owner_crash_fixture-76f284dbb358a7ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\release\deps\launch_context-961cf2dda6b5df70.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests\lifecycle.rs (<LAB>\target\release\deps\lifecycle-ca7795dbe300e93c.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+     Running tests\owner_crash.rs (<LAB>\target\release\deps\owner_crash-b954f4d41e4aa395.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests\stdio.rs (<LAB>\target\release\deps\stdio-2425427e316e40c1.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+===== END final-parent-release.txt =====
+
+===== BEGIN final-release-dll.txt =====
+Original-SHA256: 2370b05a164edcf7f1bc7e7094a14b5d694cdcb7e41ff5b7735191b35e2a0fa9
+Sanitized-content-SHA256: 8464132543ea84a54607f0dc61084a72befbd3740d584a0c440e3a4660dcc51b
+
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `release` profile [optimized] target(s) in 1.76s
+===== END final-release-dll.txt =====
+
+===== BEGIN final-release-go-race.txt =====
+Original-SHA256: f88757ed2932b63f0186ba5c5dd9884f51eab1f413dac170d74c95b6532b13d3
+Sanitized-content-SHA256: 5194a4a95ab7e6941ceab453ebc7ce381e41de931a9a8c6e4b2ce820a5abaedc
+
+ok  	mcphub-owner-ffi-caller	1.497s
+===== END final-release-go-race.txt =====
+
+===== BEGIN foreign-green.txt =====
+Original-SHA256: 6cd0e122404aea7685b761d37a9d14f2a4bf3e5adaad4efba15730660493f225
+Sanitized-content-SHA256: 136673ae419d2db27456ad7a25677c25931529ca795e209b523d18dbfcdd2ea8
+
+=== RUN   TestForeignLifecycleRetainsOwnerAndCopiesInput
+--- PASS: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.03s)
+=== RUN   TestForeignDeniedAdmissionHasNoEffect
+--- PASS: TestForeignDeniedAdmissionHasNoEffect (0.01s)
+=== RUN   TestForeignErrorsAreTypedAndNoOwnerEscapes
+--- PASS: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)
+=== RUN   TestForeignReleaseClearsHandleAndDisallowsUse
+--- PASS: TestForeignReleaseClearsHandleAndDisallowsUse (0.03s)
+=== RUN   TestForeignCallerSerializesConcurrentUse
+--- PASS: TestForeignCallerSerializesConcurrentUse (0.01s)
+PASS
+ok  	mcphub-owner-ffi-caller	0.088s
+===== END foreign-green.txt =====
+
+===== BEGIN foreign-race.txt =====
+Original-SHA256: 5ba2e6e95520546e5d6e7d08d63e2d9f819dbec35c78141aadd653cbd48c4937
+Sanitized-content-SHA256: b521961496e0a4a1f6335f68a62164a7592e015f510572106e661274d425f0eb
+
+ok  	mcphub-owner-ffi-caller	1.751s
+===== END foreign-race.txt =====
+
+===== BEGIN foreign-red.txt =====
+Original-SHA256: 69e5a96a14a65470531c98cee282bedc499f6b9b0189d6c5a1b69930622e5131
+Sanitized-content-SHA256: 14d43d59a7d250e64f86a34540e718015cbc53355f1c5d347887c378701df74e
+
+--- FAIL: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.00s)
+    bridge_windows_test.go:70: owner ABI status=1 native=0
+--- FAIL: TestForeignDeniedAdmissionHasNoEffect (0.00s)
+    bridge_windows_test.go:117: owner ABI status=1 native=0
+--- FAIL: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)
+    bridge_windows_test.go:141: got owner ABI status=1 native=0; want status 2
+--- FAIL: TestForeignReleaseClearsHandleAndDisallowsUse (0.00s)
+    bridge_windows_test.go:166: owner ABI status=1 native=0
+--- FAIL: TestForeignCallerSerializesConcurrentUse (0.00s)
+    bridge_windows_test.go:194: owner ABI status=1 native=0
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.022s
+FAIL
+===== END foreign-red.txt =====
+
+===== BEGIN implemented-build.txt =====
+Original-SHA256: f6dc46b0a2aa9b6bad5fec153f935bc243e23d2b467c843c3cea969c751e838b
+Sanitized-content-SHA256: 82c107e15c911ae314fad1d38f8e30ab2362458834469867d3a68412f45400ad
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.63s
+===== END implemented-build.txt =====
+
+===== BEGIN malformed-create-green.txt =====
+Original-SHA256: 6747565dbac0510f668c1a427586a2636f41db58a9150737247550a3e6720154
+Sanitized-content-SHA256: e09bbe2911e69d118e0f197a8ff9e8267e8d5330ed5da04559e09ea26bda656f
+
+ok  	mcphub-owner-ffi-caller	0.031s
+===== END malformed-create-green.txt =====
+
+===== BEGIN malformed-create-red.txt =====
+Original-SHA256: bc67052c7a14ae4df6958c6a33e0fdeb5eaa5b6d2e382b71287c7ae4141c2565
+Sanitized-content-SHA256: 20aefb5dfc5d40fccf2c1c8c76c02f0f9402c9d2156b82e77f71abca1414bcf2
+
+--- FAIL: TestCorruptCreateRetainsTransferredOwner (0.01s)
+    corrupt_create_test.go:9: transferred native owner discarded after metadata validation failure
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.024s
+FAIL
+===== END malformed-create-red.txt =====
+
+===== BEGIN malformed-release-green.txt =====
+Original-SHA256: db79cd34607dfb489db246456dbffb308dcf479957723464801d01710abc94b3
+Sanitized-content-SHA256: 1cd086e27bcf5ce4f59986f3dd107c4af59389dd5d660792cae25a0cea637c51
+
+ok  	mcphub-owner-ffi-caller	0.080s
+===== END malformed-release-green.txt =====
+
+===== BEGIN malformed-release-red.txt =====
+Original-SHA256: 98a19319cac40a39889281d07ef9788ef87e88de5c9e10731ae1693715caea2c
+Sanitized-content-SHA256: 579f11d165f87712bc34b9bac0b5b6a67c8f39c925fd1c142c2e6dad6f9dd4a9
+
+--- FAIL: TestCorruptReleasePreservesDeallocationFact (0.12s)
+    corrupt_release_test.go:12: completed deallocation lost when response failed: cannot unload library with live owners
+    bridge_windows_test.go:31: cannot unload library with live owners
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.142s
+FAIL
+===== END malformed-release-red.txt =====
+
+===== BEGIN native-code-loss-negative.txt =====
+Original-SHA256: 9d9934bc5367906dce6b78434b632ec5658651448e8096d483ab111c053e3e49
+Sanitized-content-SHA256: 50850bad950435332fe9163c95185bb9ccda73ced67a87e4858b42f14176ca0e
+
+--- FAIL: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)
+    bridge_windows_test.go:159: OS error code discarded
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.023s
+FAIL
+===== END native-code-loss-negative.txt =====
+
+===== BEGIN push.txt =====
+Original-SHA256: 2b05d03bf421ca9dcd806d123b5da54f05e5759a5d42df69d1e639cbf3dbd499
+Sanitized-content-SHA256: 156f58bf14e59a2e90529072d7dcbe6364156008e89be070098358caf79cf058
+
+remote:
+remote: Create a pull request for 'spike/rx02-go-rust-boundary-20261113' on GitHub by visiting:
+remote:      https://github.com/applicate2628/mcp-local-hub/pull/new/spike/rx02-go-rust-boundary-20261113
+remote:
+To https://github.com/applicate2628/mcp-local-hub.git
+ * [new branch]      HEAD -> spike/rx02-go-rust-boundary-20261113
+branch 'spike/rx02-go-rust-boundary-20261113' set up to track 'origin/spike/rx02-go-rust-boundary-20261113'.
+===== END push.txt =====
+
+===== BEGIN restored-boundary-race.txt =====
+Original-SHA256: b844e31459d7f63713406eb31e3fb9a62c35b5e8b16901f1d70f13823ff30186
+Sanitized-content-SHA256: 6fd7eadbce54007028696014da3c31f8ca32d4843f922fd19380a57242a962c0
+
+ok  	mcphub-owner-ffi-caller	1.496s
+===== END restored-boundary-race.txt =====
+
+===== BEGIN RESULTS.md =====
+Original-SHA256: 08015ca76a11c471f44c4da4f76e73687825936c7190365b0547a71404f76e2c
+Sanitized-content-SHA256: 9a73a7e6337e8e97857aed66fc3c4efe8fb5de840ac3a52b939ee4cce8a15aed
+
+# RX-02 Go/Rust foreign boundary result
+PR: https://github.com/applicate2628/mcp-local-hub/pull/631
+Head:
+e0a05e3a6ec3b5ff14f3d70e935eabfda44ba445
+Dependent base: #625
+7ce04f7ef2f96680ed94db1edaf77cf0358421c4
+Branch: spike/rx02-go-rust-boundary-20261113
+
+Scope:10 new files only in experiments/rust-process-owner/ffi. Core/API/parent manifests/lock unchanged. Real Go/cgo/C-shim/MSVC-Rust-DLL calls into existing NativeOwner, not another process engine.
+Scenario: suspended create with absolute image/cwd, EMPTY environment, no redirected stdio; one-shot allow/deny, pending/terminal finish, Job stop, terminal release. The bool decision does not implement full original-process admission evidence.
+
+Fresh verification:8 normal Go functions zero skips; debug DLL race x3, release DLL race x3, cgocheck2, vet. Rust ABI7 unit tests debug/release, Clippy/fmt. Two explicitly tagged malformed-response checks with separate owned mutated DLLs passed; original source restored and normal DLLs rebuilt. All53 unchanged parent checks rerun debug/release plus Clippy/fmt.
+TDD: no-create compiled stub failed real Go callers. New owner-transfer and release-bookkeeping defects RED/GREEN; local/native error classification RED/GREEN. Early-release and native-code-loss negative mutations detected.
+General-case fixes: nonnull pointer transfer is not erased by validation error; cleared slot counts deallocation even if response metadata fails; native error code outranks broad io category; initialize output before references. No retained Go pointers/callbacks, no implicit GC cleanup/replay.
+
+Limits: real foreign native-cleanup kernel failure not induced; mapping only ABI unit coverage plus separate parent kernel tests. No panic/allocator/loader fault isolation proof, arbitrary foreign-pointer safety or Rust/C race proof. No Unix runtime/cross-build, complete Go launch-policy parity, performance claim or product integration.
+Remaining: original-process observation policy, custom env/stdio/noninheritable marshalling, cancellable blocking I/O, Unix, comparison and independent review/installation gates.
+No new dependencies downloaded/installed, models/vendors/GUI invoked, merges/releases or explicit CI/bot dispatch. All new source/cache/temp/evidence D:\dev\ChatGPT.
+Remote/readback and10 tested source hashes matched; own clone clean, currently on FFI branch not625. Parent commit remains unchanged.
+First final core-comparison command used a malformed PowerShell range argument and printed git usage; repeated with explicit base/head arguments succeeded. This was a command error, not a source delta.
+Evidence and active source retained outside trash. No confirmed unused redundant files requiring removal this increment; keep caches/targets required for continued tests.
+===== END RESULTS.md =====
+
+===== BEGIN SHA256SUMS.txt =====
+Original-SHA256: d420063f150fec09cc0fe7c689fbbda1334e580e5aad05fbdc115de4b6167a33
+Sanitized-content-SHA256: 78aa4a9559c1567cac9238183e990793a18e238d025a7d62599cc21146ae5cdb
+
+40bcbfe0bd9e67d4ea9da96f8c93d707401992c09ee75864d28629f709eedc99  abi-clippy.txt
+6ad7aac09046cc61d03c716211a69e2db3d8d68204cba9b7c132c50f7a048f9d  abi-unit.txt
+20759c1e2424d57da0ff36ae2f1c82f1ab6814976e808680347702ed8d1fa506  baseline.txt
+c663d52a33ccc7a053e9005fb678b837aa713fb0399ce7e05b38b023041b1372  corrupt_create_test.formatted.go
+86e14a1ff4dd6eb9b344edba027dd93d4d0938589219b6ccf51aa11e09879681  corrupt_create_test.go
+926bc14f26a51ec2f3a7f9d88d780e99c5f2f434a2ee560f7e9d072657d8f20c  corrupt_release_test.go
+559a91b395914a483e94ef8a23b0445613d4b2c4259fd3351a4482a33e63e369  create-classification-green.txt
+4311faa5e145ada316f1d3be019b3e3c91c749ca4c396e10c5170bbd140e2f0e  create-classification-red.txt
+a83e8dc8ef096c5e5800a63a89d678aac961ed8b3238884372437df47f2c1360  early-release-negative.txt
+5efcd4357673138813d9a7d2d21e2674fa7c9f309cc15ee3f0a87b405bb0fe13  env-go.ps1
+7eb170e24204b52d88989113a51c3a34803af1f8db51d91693b69d3a20b27bfe  final-artifact-hashes.txt
+f62137b2819bd252caa5d0d64e56a23f723dd140a49bd2b98351a8cc9edaf5b8  final-debug-dll.txt
+fefab8e11cf42ba7a67fb092b0aff7bfe81616aaf21c85435fb75f32251a85e0  final-debug-go-race.txt
+256649e415ce1424453ec1edfd47b447062878d0bd1d5a86078e8d6244f5d96f  final-ffi-clippy.txt
+ee3e7382ddcdad53960ba77a39d77940bba841660dfc6a980c9a2edbc43e8551  final-ffi-debug.txt
+368757c55c7356bf3f4081c3f4b88168db94860c4eb5ab4d9eb9054cb52e1ee1  final-ffi-release.txt
+bf6d79717eea4eb8ff91b8a15f7ed57f04b8b6a8fd41d392f10526ec3d5a969f  final-go-cgocheck2.txt
+6c651fa71fe207561bd65fdc0f50506f2f944be016ac478f54d07df9ad6eab1a  final-normal-go-count.txt
+4d716bc8bc2a44beb81919bdc29bb82837156ec603cdfb596dd42c561b1b0397  final-parent-clippy.txt
+8954d9ca6a0a9fc96446e38436e1e555fa3b6fa74a6f321845d1b8d2ad9c2953  final-parent-debug.txt
+eb522449ebea7828736edb96a3244f4ea182d44aec55939dfbf4f6f92071a3e3  final-parent-release.txt
+2370b05a164edcf7f1bc7e7094a14b5d694cdcb7e41ff5b7735191b35e2a0fa9  final-release-dll.txt
+f88757ed2932b63f0186ba5c5dd9884f51eab1f413dac170d74c95b6532b13d3  final-release-go-race.txt
+6cd0e122404aea7685b761d37a9d14f2a4bf3e5adaad4efba15730660493f225  foreign-green.txt
+5ba2e6e95520546e5d6e7d08d63e2d9f819dbec35c78141aadd653cbd48c4937  foreign-race.txt
+69e5a96a14a65470531c98cee282bedc499f6b9b0189d6c5a1b69930622e5131  foreign-red.txt
+f6dc46b0a2aa9b6bad5fec153f935bc243e23d2b467c843c3cea969c751e838b  implemented-build.txt
+6747565dbac0510f668c1a427586a2636f41db58a9150737247550a3e6720154  malformed-create-green.txt
+bc67052c7a14ae4df6958c6a33e0fdeb5eaa5b6d2e382b71287c7ae4141c2565  malformed-create-red.txt
+db79cd34607dfb489db246456dbffb308dcf479957723464801d01710abc94b3  malformed-release-green.txt
+98a19319cac40a39889281d07ef9788ef87e88de5c9e10731ae1693715caea2c  malformed-release-red.txt
+9d9934bc5367906dce6b78434b632ec5658651448e8096d483ab111c053e3e49  native-code-loss-negative.txt
+2b05d03bf421ca9dcd806d123b5da54f05e5759a5d42df69d1e639cbf3dbd499  push.txt
+b844e31459d7f63713406eb31e3fb9a62c35b5e8b16901f1d70f13823ff30186  restored-boundary-race.txt
+08015ca76a11c471f44c4da4f76e73687825936c7190365b0547a71404f76e2c  RESULTS.md
+867b1ff6ba5487437b413152ea77e74ee00b5b72a2871c2390065e7b6d852c4e  stub-build.txt
+dfc0e6f6811c3745933d1771dd131aab438cdc2948e3c69c1cb8b0b81eeb97cf  tagged-create-metadata-build.txt
+b1b75f075bda83a685cb1abc4c3890562c3b1eb855b36e1cb5d80ec9edf7add0  tagged-create-metadata.txt
+f62137b2819bd252caa5d0d64e56a23f723dd140a49bd2b98351a8cc9edaf5b8  tagged-release-metadata-build.txt
+9caa47c7c59b0179ecc7f182bf52e4f0b75b5257adfd86af8d8ec375f7d9ea57  tagged-release-metadata.txt
+ba41f12d65f56354fc55a1571a8e87b611a77ad3a4086b4abc5cb1b0983b83bc  verified-source-hashes.txt
+===== END SHA256SUMS.txt =====
+
+===== BEGIN stub-build.txt =====
+Original-SHA256: 867b1ff6ba5487437b413152ea77e74ee00b5b72a2871c2390065e7b6d852c4e
+Sanitized-content-SHA256: 82d2c776b4bf1833c7ee8f1a2f3d6a0164d2be546d16bbd49e7a53f236f59eee
+
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.24s
+===== END stub-build.txt =====
+
+===== BEGIN tagged-create-metadata.txt =====
+Original-SHA256: b1b75f075bda83a685cb1abc4c3890562c3b1eb855b36e1cb5d80ec9edf7add0
+Sanitized-content-SHA256: 8ccefd2defb680d86b9801cc6ca066232c120a834be23f6ba282db79412b8bb9
+
+ok  	mcphub-owner-ffi-caller	0.034s
+===== END tagged-create-metadata.txt =====
+
+===== BEGIN tagged-create-metadata-build.txt =====
+Original-SHA256: dfc0e6f6811c3745933d1771dd131aab438cdc2948e3c69c1cb8b0b81eeb97cf
+Sanitized-content-SHA256: 124a2a939da7273bfedb055af0b089ae38a5f297aa0606f10e506b7087d3b0ee
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+===== END tagged-create-metadata-build.txt =====
+
+===== BEGIN tagged-release-metadata.txt =====
+Original-SHA256: 9caa47c7c59b0179ecc7f182bf52e4f0b75b5257adfd86af8d8ec375f7d9ea57
+Sanitized-content-SHA256: e5d6583c798d57df410684fc0e71744cef84de65ebaf0bbe9227a7d24e53481b
+
+ok  	mcphub-owner-ffi-caller	0.051s
+===== END tagged-release-metadata.txt =====
+
+===== BEGIN tagged-release-metadata-build.txt =====
+Original-SHA256: f62137b2819bd252caa5d0d64e56a23f723dd140a49bd2b98351a8cc9edaf5b8
+Sanitized-content-SHA256: 3135d239466a251ca2c498afb3557f1b02a48aceb311476b76383d67703521b7
+
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+===== END tagged-release-metadata-build.txt =====
+
+===== BEGIN verified-source-hashes.txt =====
+Original-SHA256: ba41f12d65f56354fc55a1571a8e87b611a77ad3a4086b4abc5cb1b0983b83bc
+Sanitized-content-SHA256: 5f800ad898a18360d0cb9c069e5a811ce4a92ddffce9bdb1d0963e16821f5cb6
+
+Cargo.toml git=cb452856cec0251dcb08f77940cfe841b7bc4159 sha256=2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659
+Cargo.lock git=f81b4c8ac7de43021692d5072fb3f0b143dfc85f sha256=76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d
+README.md git=73ca30adc0ac1253d163cd5ff11b8b99ad0cc7cd sha256=e1d701ede1cec7574f42b9fefb03fe0bbbf4f3fb874e35c243744a3044043da4
+include/owner_v1.h git=a4964294911d2409276eb1cb357be6c6d173d2e4 sha256=7070b2c35c25e3a782a1c01e6a6170428bbcd760962da184bd1d511d1cc8fa82
+src/lib.rs git=5405cddc5cab9f249ed01faf78dca0fb1509f74b sha256=984519c64d948d1c90c24bf5d4642ca87ae84bc9b6ccbfaf5d468bc55223b30d
+src/tests.rs git=a8d8f21203990235f735a8f9e623c2b0acaae70e sha256=65698917dccf2a6465f187ad1229660c1fa8205b7d7c52760049997602070fb9
+go/go.mod git=199b42593568e3b007d0f3f413c3d27f4d501d2f sha256=99502c9ced07df2ba8052a397081e34f6254cd91c7f0d3d47388a060538bef93
+go/bridge_windows.go git=e455876cd0443831aaa6c79e5a70ed5ac5dcb762 sha256=648c952dbe8ff0186a7cb2001523af5faa76166fbddef3d15d11a38c3fdef0b3
+go/bridge_windows_test.go git=084b46d6ebc67581ca787f5bc2b257b726f27d34 sha256=6dff0a3d8d8bbdd8e7e61e827347dc9ffbcb256c15aa4c6ddf32761532c59bef
+go/faults_windows_test.go git=071892e5f75b74f24b68aa47f7bb957a8a2f0af3 sha256=83273c80df438f577c296717d028d65a478e0f6791d3ab82a0be3dc0c65552c3
+===== END verified-source-hashes.txt =====

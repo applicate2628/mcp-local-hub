@@ -1,0 +1,916 @@
+# Historical verification bundle: launch-context
+Associated completed source: bfff5699d893199f4c18d15add2a39e801e94a78
+Imported existing evidence; NOT a new execution. Individual RED/mutation logs may precede this commit.
+
+===== BEGIN baseline.txt =====
+Original-SHA256: 94f07b04dcd815e75c1901a22b3100cff7d738d76d6de6e3ddcfebbb5809c929
+Sanitized-content-SHA256: 8e9549eece24c861974a2b839adb3743cd7e9040008b295571a8d0167050d9b7
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-f3bd7e9651220f90.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-5e695552d62018bf.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-af0c7be326d891c1.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-9d77e023ecebb74b.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END baseline.txt =====
+
+===== BEGIN clippy.txt =====
+Original-SHA256: 5cd4ea868b31b7c5e190c71a01ec57b0b2f28a9e2388d1af6df5442c4a7aed66
+Sanitized-content-SHA256: 3c7f3fe44e42ecff2c15acc2936113ba66c1955d4326e976b29160085034340a
+
+    Checking windows-sys v0.61.2
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+error: using `chunks_exact` with a constant chunk size
+  --> tests\launch_context.rs:68:18
+   |
+68 |                 .chunks_exact(2)
+   |                  ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<2>().0.iter()`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#chunks_exact_to_as_chunks
+   = note: `-D clippy::chunks-exact-to-as-chunks` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::chunks_exact_to_as_chunks)]`
+System.Management.Automation.RemoteException
+error: could not compile `mcphub-process-owner-spike` (test "launch_context") due to 1 previous error
+===== END clippy.txt =====
+
+===== BEGIN clippy-fixed.txt =====
+Original-SHA256: 3e5feefec9a130ed1309be3df96d7f4010778e638aa22d34f4c84ac41fbae536
+Sanitized-content-SHA256: f75ff843ac6111c7ae913b480af178f197932102229bfe5909dfd95ecdafc3f2
+
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+===== END clippy-fixed.txt =====
+
+===== BEGIN cwd-null-mutation.txt =====
+Original-SHA256: 23d76a353e57ebfdd0a2b47b7f7daab3da44f8cd9ad0fdb5496d2ae3ec1b2fe8
+Sanitized-content-SHA256: 2eb47353c322b343e1a6c47157f2bd1916055ca8b0b15d08d6f683dc86b94007
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+warning: field `directory` is never read
+  --> src\launch_context.rs:28:16
+   |
+27 | pub(crate) struct PreparedContext {
+   |                   --------------- field in this struct
+28 |     pub(crate) directory: Vec<u16>,
+   |                ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 1 test
+test two_live_children_have_separate_contexts_without_parent_switches ... FAILED
+
+failures:
+
+---- two_live_children_have_separate_contexts_without_parent_switches stdout ----
+
+thread 'two_live_children_have_separate_contexts_without_parent_switches' (105432) panicked at tests\launch_context.rs:96:5:
+assertion `left == right` failed
+  left: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner"
+ right: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\fixtures-context-mutation-cwd-null-47bb254a\\launch-context-112928-1\\working folder ╬╗"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    two_live_children_have_separate_contexts_without_parent_switches
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--test launch_context`
+===== END cwd-null-mutation.txt =====
+
+===== BEGIN edge-suite.txt =====
+Original-SHA256: e3aa2f391b27aa39d0ebb6c32fe6f7f6977849c4eea528382ca73e0ddf54decd
+Sanitized-content-SHA256: 4c9c4b8d1c8266a4e8bd33216cc10d37e3e0f4be30eecfb298c73ec1f2196371
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.65s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+===== END edge-suite.txt =====
+
+===== BEGIN environment-null-mutation.txt =====
+Original-SHA256: 8ca2fb2bf29fc6f348ace4e2c90079b9476c7bb62e22702d81d5a5c842abec7f
+Sanitized-content-SHA256: 30a111cd507413e5405d125cb3d02768a85eb7068c143853006bf550ccfd4f34
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+warning: field `environment` is never read
+  --> src\launch_context.rs:29:16
+   |
+27 | pub(crate) struct PreparedContext {
+   |                   --------------- field in this struct
+28 |     pub(crate) directory: Vec<u16>,
+29 |     pub(crate) environment: Vec<u16>,
+   |                ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-process-owner-spike` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.78s
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 1 test
+test empty_explicit_environment_is_not_inherit ... FAILED
+
+failures:
+
+---- empty_explicit_environment_is_not_inherit stdout ----
+
+thread 'empty_explicit_environment_is_not_inherit' (19392) panicked at tests\launch_context.rs:170:5:
+assertion `left == right` failed
+  left: Some("owned-test-parent-only-20261113")
+ right: None
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    empty_explicit_environment_is_not_inherit
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test launch_context`
+===== END environment-null-mutation.txt =====
+
+===== BEGIN final-clippy.txt =====
+Original-SHA256: ace664806dbeb7be19283716d8fa417775915f5542d9155cce28798de198b9c4
+Sanitized-content-SHA256: 59639588a6f1826f129cbcd121edc07279dab94786f5fa5bde6b3439b2e845cc
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+===== END final-clippy.txt =====
+
+===== BEGIN final-debug-1.txt =====
+Original-SHA256: 66508e890990f8a881b0308b9ebac718b03e952fa4900594ec75cf2d1292d7d3
+Sanitized-content-SHA256: 593f9443570b6bda32356aac8364e80440e88ae6acfd3e5bb8860d5a31d001b7
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END final-debug-1.txt =====
+
+===== BEGIN final-debug-2.txt =====
+Original-SHA256: eb451671ecadc17bc3cc71ab324b46b7d16981b6107ffd0d2b8a2e1f2abc6edb
+Sanitized-content-SHA256: 28ff1caceab33b3d6a2df34f4b64697924523ee82a10ce11ef6bee33ba668d2e
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END final-debug-2.txt =====
+
+===== BEGIN final-debug-3.txt =====
+Original-SHA256: 4743fe069d57f853cc53cc34b5ecbb68802f61955e27260509286a2d0298607a
+Sanitized-content-SHA256: 4a73bcc9f34e47e78103fc2c06de08a4bb1061e8652e37a99343c9291a59c998
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END final-debug-3.txt =====
+
+===== BEGIN final-release.txt =====
+Original-SHA256: 11483eccf9f9d5c3929e712ef6b7ab5466c4ba0cbc33f1310f8067fc1655a9df
+Sanitized-content-SHA256: c6d6b3775bac66434efc0485a5c203b562322757d12186df3162889454971f0d
+
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `release` profile [optimized] target(s) in 1.73s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_process_owner_spike-b478d0084b4e3761.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\release\deps\owner_child-744f801171fca2c6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\release\deps\launch_context-2307ca89dcf6a088.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests\lifecycle.rs (<LAB>\target\release\deps\lifecycle-a2865769811a27a6.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.86s
+
+     Running tests\stdio.rs (<LAB>\target\release\deps\stdio-f9f036146287f195.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END final-release.txt =====
+
+===== BEGIN green.txt =====
+Original-SHA256: 00b23ff9db4df04fe807ab23178b2125ea75553cb503f0690c19f01fbfdefdcb
+Sanitized-content-SHA256: 6b20caa0db315900a6d52b9742f92bcabf5c07959480bc860f6e6f69e146b735
+
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.06s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 10 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+===== END green.txt =====
+
+===== BEGIN push.txt =====
+Original-SHA256: 4cb5568bf6e478bdb9a969745e3f7f01a7bcbe83aa2b8cbf14b348b7f6f1a2f9
+Sanitized-content-SHA256: b7a28a3112ac7ba1ac0bbd31635f2f4e6b24d28d815737976b1ee587a8124480
+
+To https://github.com/applicate2628/mcp-local-hub.git
+   7257b97..bfff569  HEAD -> spike/rx02-native-process-owner-20261112
+===== END push.txt =====
+
+===== BEGIN restored-tests.txt =====
+Original-SHA256: 8dee2e4f14d55352e53aada0be520a94bec61f00ec5eb07748729226faa90cb4
+Sanitized-content-SHA256: fdc8f34a30a53102f5cb2b366516951edc9d523b43ed6b96e2543246b01d4fa9
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.70s
+     Running unittests src\lib.rs (<LAB>\target\debug\deps\mcphub_process_owner_spike-d9e2f82c86773593.exe)
+
+running 3 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\debug\deps\owner_child-38ae25893c615d6b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-a333e1b741dcde46.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests\lifecycle.rs (<LAB>\target\debug\deps\lifecycle-7b05057d0d00f683.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+
+     Running tests\stdio.rs (<LAB>\target\debug\deps\stdio-54ec5cba59fa0236.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 164) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 98) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+===== END restored-tests.txt =====
+
+===== BEGIN RESULTS.md =====
+Original-SHA256: fccca03c1d8dc3b098ec0b71c3c22d5cc5310ea4e30fa5e484711afe167aacb0
+Sanitized-content-SHA256: 6d9371f6260786a20898c6bfedc1dec17422b81ea48bc40f3cd907a2ab2c1bb8
+
+# RX-02 explicit launch context — completed experimental increment
+PR: https://github.com/applicate2628/mcp-local-hub/pull/625
+Commit:
+bfff5699d893199f4c18d15add2a39e801e94a78
+Base: 7257b97b19f06ab50402c620ec75b13fc53b1836
+
+Implementation: complete explicit child environment and absolute cwd through existing NativeOwner creation core, optional BorrowedStdio unchanged. No parent environment/cwd mutation. Legacy APIs retain inheritance.
+Contract: caller-sorted unique Windows ordinal names; full block including explicit empty; bounded UTF-16; no hidden fallback/parent merge; validation before native owner acquisition.
+
+Verification: native Windows x86_64, Rust 1.99.1. Full experimental crate:34 native integration tests +3 unit tests +2 compile-fail docs, 3debug runs and1release run, all passed. Clippy -Dwarnings, fmt and diff-check passed.
+Negative controls: compiled ignore-context stub failed8 cases; null environment exposed fake parent sentinel; null cwd exposed parent cwd. Both mutations restored and full tests rerun.
+One test-only Clippy constant-chunk warning fixed through std as_chunks, not suppressed.
+Cargo.lock/dependency versions unchanged; Globalization feature enabled in existing cached windows-sys. No installation or network dependency fetching.
+
+Limits: Windows-only APIs; no Unix runtime/cross-build this iteration; caller env overlay/SDK-required keys/hidden drive entries not implemented. Cwd is pathname, not anchored security identity. OS/runtime may synthesize environment entries; plaintext erasure not claimed. No FFI, product integration, speedup claim or independent review.
+Source/evidence/cache/temp are inside D:\dev\ChatGPT. Only confirmed unnecessary RED-owned relative marker moved to trash; unique evidence and active workspace retained.
+Readback: remote branch equals exact checked local head; worktree clean; all eight published source blobs match tested manifest.
+Next gates: native acquisition/resume/cleanup fault cases and calling-side/FFI contracts; maintain independent work on other planned candidates without changing working Hub.
+===== END RESULTS.md =====
+
+===== BEGIN SHA256SUMS.txt =====
+Original-SHA256: fb5f47fa9335d76a0a1451624a5368ec995ca504a8e03fd097bc34a9d4cc428e
+Sanitized-content-SHA256: 2728cb8d1f30fc4888c565fb8ae278a05eb006baa609486bce4e06fc360d0768
+
+94f07b04dcd815e75c1901a22b3100cff7d738d76d6de6e3ddcfebbb5809c929  baseline.txt
+3e5feefec9a130ed1309be3df96d7f4010778e638aa22d34f4c84ac41fbae536  clippy-fixed.txt
+5cd4ea868b31b7c5e190c71a01ec57b0b2f28a9e2388d1af6df5442c4a7aed66  clippy.txt
+23d76a353e57ebfdd0a2b47b7f7daab3da44f8cd9ad0fdb5496d2ae3ec1b2fe8  cwd-null-mutation.txt
+e3aa2f391b27aa39d0ebb6c32fe6f7f6977849c4eea528382ca73e0ddf54decd  edge-suite.txt
+8ca2fb2bf29fc6f348ace4e2c90079b9476c7bb62e22702d81d5a5c842abec7f  environment-null-mutation.txt
+ace664806dbeb7be19283716d8fa417775915f5542d9155cce28798de198b9c4  final-clippy.txt
+66508e890990f8a881b0308b9ebac718b03e952fa4900594ec75cf2d1292d7d3  final-debug-1.txt
+eb451671ecadc17bc3cc71ab324b46b7d16981b6107ffd0d2b8a2e1f2abc6edb  final-debug-2.txt
+4743fe069d57f853cc53cc34b5ecbb68802f61955e27260509286a2d0298607a  final-debug-3.txt
+11483eccf9f9d5c3929e712ef6b7ab5466c4ba0cbc33f1310f8067fc1655a9df  final-release.txt
+00b23ff9db4df04fe807ab23178b2125ea75553cb503f0690c19f01fbfdefdcb  green.txt
+4cb5568bf6e478bdb9a969745e3f7f01a7bcbe83aa2b8cbf14b348b7f6f1a2f9  push.txt
+8dee2e4f14d55352e53aada0be520a94bec61f00ec5eb07748729226faa90cb4  restored-tests.txt
+fccca03c1d8dc3b098ec0b71c3c22d5cc5310ea4e30fa5e484711afe167aacb0  RESULTS.md
+4e152030c81757e695366bd2bbbcbecbd3d606693fb9b1cac940c53817bbff04  stub-red.txt
+93797eace5952266bf8da113b7d5cb3cbc1cacaae41d2d451d5a856af7beaecb  verified-source-hashes.txt
+===== END SHA256SUMS.txt =====
+
+===== BEGIN stub-red.txt =====
+Original-SHA256: 4e152030c81757e695366bd2bbbcbecbd3d606693fb9b1cac940c53817bbff04
+Sanitized-content-SHA256: 4ed2b515a55954707ce437f2268fdde042818202d99772dd10475de366fc5066
+
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.83s
+     Running tests\launch_context.rs (<LAB>\target\debug\deps\launch_context-29040d3cc3957b4f.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... FAILED
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... FAILED
+test encoded_context_outlives_source_strings_until_child_runs ... FAILED
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... FAILED
+test invalid_environment_is_rejected_before_process_creation ... FAILED
+test native_missing_directory_error_is_not_success_or_parent_change ... FAILED
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... FAILED
+test two_live_children_have_separate_contexts_without_parent_switches ... FAILED
+
+failures:
+
+---- context_value_round_trips_non_unicode_windows_units stdout ----
+
+thread 'context_value_round_trips_non_unicode_windows_units' (100324) panicked at tests\launch_context.rs:325:5:
+assertion `left == right` failed
+  left: None
+ right: Some("x\u{d800}y")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- empty_explicit_environment_is_not_inherit stdout ----
+
+thread 'empty_explicit_environment_is_not_inherit' (116160) panicked at tests\launch_context.rs:94:5:
+assertion `left == right` failed
+  left: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner"
+ right: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\fixtures-context-red-9644d23c\\launch-context-79132-3\\working folder ╬╗"
+
+---- encoded_context_outlives_source_strings_until_child_runs stdout ----
+
+thread 'encoded_context_outlives_source_strings_until_child_runs' (92440) panicked at tests\launch_context.rs:195:5:
+assertion `left == right` failed
+  left: None
+ right: Some("before")
+
+---- explicit_context_preserves_unicode_empty_values_and_excludes_parent stdout ----
+
+thread 'explicit_context_preserves_unicode_empty_values_and_excludes_parent' (26664) panicked at tests\launch_context.rs:94:5:
+assertion `left == right` failed
+  left: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner"
+ right: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\fixtures-context-red-9644d23c\\launch-context-79132-5\\working folder ╬╗"
+
+---- invalid_environment_is_rejected_before_process_creation stdout ----
+
+thread 'invalid_environment_is_rejected_before_process_creation' (106452) panicked at tests\launch_context.rs:250:13:
+invalid context was accepted
+
+---- native_missing_directory_error_is_not_success_or_parent_change stdout ----
+
+thread 'native_missing_directory_error_is_not_success_or_parent_change' (108712) panicked at tests\launch_context.rs:310:9:
+missing cwd accepted
+
+---- relative_empty_and_nul_directory_are_rejected_without_parent_mutation stdout ----
+
+thread 'relative_empty_and_nul_directory_are_rejected_without_parent_mutation' (32748) panicked at tests\launch_context.rs:285:13:
+invalid cwd accepted
+
+---- two_live_children_have_separate_contexts_without_parent_switches stdout ----
+
+thread 'two_live_children_have_separate_contexts_without_parent_switches' (49560) panicked at tests\launch_context.rs:94:5:
+assertion `left == right` failed
+  left: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source\\experiments\\rust-process-owner"
+ right: "\\\\?\\D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\fixtures-context-red-9644d23c\\launch-context-79132-10\\working folder ╬╗"
+
+
+failures:
+    context_value_round_trips_non_unicode_windows_units
+    empty_explicit_environment_is_not_inherit
+    encoded_context_outlives_source_strings_until_child_runs
+    explicit_context_preserves_unicode_empty_values_and_excludes_parent
+    invalid_environment_is_rejected_before_process_creation
+    native_missing_directory_error_is_not_success_or_parent_change
+    relative_empty_and_nul_directory_are_rejected_without_parent_mutation
+    two_live_children_have_separate_contexts_without_parent_switches
+
+test result: FAILED. 2 passed; 8 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+error: test failed, to rerun pass `--test launch_context`
+===== END stub-red.txt =====
+
+===== BEGIN verified-source-hashes.txt =====
+Original-SHA256: 93797eace5952266bf8da113b7d5cb3cbc1cacaae41d2d451d5a856af7beaecb
+Sanitized-content-SHA256: 8facd84478522acec607c233cda30abdb5f20c9e1e81c0029b0a99f996833abd
+
+Cargo.toml git=fb663d6a48cb5817135b863dbef93fb59c5176f2 sha256=24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b
+README.md git=c478ded152b8552a672b173c4d9b64ecf52f1e91 sha256=5ec26fb967827d611e95cde5ca563e70c282fc1bba0288b4f45e297deaae12a8
+src/bin/owner_child.rs git=ca67b8f38d8175bb82cdedcf62a8963fdef7894f sha256=31da2f8924d6b967b568a41771036e7d2719d71302011885a85b45c5077c9959
+src/lib.rs git=98f320189edfe4dae3f23b03060aa71376d2aeaf sha256=f79b350cfef5744e89cff3f96dd592e732a2fffd1fde412db14a436deff9252e
+src/windows.rs git=3cff328dfbe040c0571cb76d67452e7b461d7b15 sha256=063194bf7ba3135818c569a6fa8b52c1c32a646eeaf1ad90f70657cb112b891a
+src/launch_context.rs git=00f8b3c852cd3a472479384cb7e8e7b940605f9a sha256=be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207
+tests/launch_context.rs git=aa406a170f3e86284e4f8de7c592c40f49f4170f sha256=c612f64485f5d40aedc89bd08c2fc562d0d038e4efd50d8241178db68ec1e1f0
+tests/stdio.rs git=91a9da042aa348ad4306e9f783e5c38794327a4a sha256=7470d645cb058d84103ae1131c63557e89f17a13a9a58f166cbb75ef7b7c636d
+===== END verified-source-hashes.txt =====

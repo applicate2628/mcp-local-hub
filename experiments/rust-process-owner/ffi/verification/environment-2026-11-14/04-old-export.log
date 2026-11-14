@@ -1,0 +1,2 @@
+Command: go test -tags ffi_faults . -run ^TestEnvironmentMissingExportDoesNotFallBackToEmpty$ -count=1 -timeout=30s Expected: PASS: old artifact is refused with native missing-symbol127 Exit: 0
+ok  	mcphub-owner-ffi-caller	0.025s

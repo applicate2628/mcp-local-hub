@@ -1,0 +1,7 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T08:35:49.8706787Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/README.md
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+ M experiments/rust-process-owner/ffi/verification/README.md
+?? experiments/rust-process-owner/ffi/verification/cancellation-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/cancellation-2026-11-14-final/
+?? experiments/rust-process-owner/ffi/verification/runs/cancellation-2026-11-14-implementation/

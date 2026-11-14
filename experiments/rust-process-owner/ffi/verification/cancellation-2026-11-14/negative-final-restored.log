@@ -1,0 +1,29 @@
+Command: go test . -run ^Test(FinishContext|IO) -count=1 -timeout=45s -v -race Source base: e973ee2eabb638b6a0372066b6381484ce015dc9 UTC: 2026-11-14T08:38:18.1072514Z Expected exit: 0 Actual exit: 0 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextCanceledBeforeObservationHasNoEffect
+--- PASS: TestFinishContextCanceledBeforeObservationHasNoEffect (0.04s)
+=== RUN   TestFinishContextNilRejectedWithoutNativeEffect
+--- PASS: TestFinishContextNilRejectedWithoutNativeEffect (0.04s)
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+--- PASS: TestFinishContextDeadlineRetainsSuspendedOwner (0.06s)
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+--- PASS: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (0.01s)
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+--- PASS: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.10s)
+=== RUN   TestFinishContextOneObserverCancelDoesNotCancelAnother
+--- PASS: TestFinishContextOneObserverCancelDoesNotCancelAnother (0.06s)
+=== RUN   TestFinishContextCanceledWaitDoesNotConsumeTerminalResult
+--- PASS: TestFinishContextCanceledWaitDoesNotConsumeTerminalResult (0.03s)
+=== RUN   TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock
+--- PASS: TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock (0.08s)
+=== RUN   TestIOCancelWaitDoesNotCloseBlockedWriter
+--- PASS: TestIOCancelWaitDoesNotCloseBlockedWriter (0.06s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+--- PASS: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.10s)
+=== RUN   TestIORootExitIsNotOutputEOFWhileDescendantLives
+--- PASS: TestIORootExitIsNotOutputEOFWhileDescendantLives (0.07s)
+=== RUN   TestIONativeSettlementDoesNotDiscardUnreadFinalBytes
+--- PASS: TestIONativeSettlementDoesNotDiscardUnreadFinalBytes (0.04s)
+=== RUN   TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild
+--- PASS: TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild (0.06s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.761s

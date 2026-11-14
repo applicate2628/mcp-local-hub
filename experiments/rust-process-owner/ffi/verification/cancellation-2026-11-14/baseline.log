@@ -1,0 +1,7 @@
+Command: go test -race . -count=1 -timeout=90s
+Base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7
+GOMAXPROCS=4; offline cached DLL/toolchain; Windows amd64
+Actual exit:
+0
+
+ok  	mcphub-owner-ffi-caller	1.721s

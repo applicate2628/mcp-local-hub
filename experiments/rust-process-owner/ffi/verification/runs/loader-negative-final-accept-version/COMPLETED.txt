@@ -1,0 +1,1 @@
+All expected loader outcomes matched. Mutation=accept-version. Ordinary source and Rust DLLs unchanged; no product admission/trust, universal DLL unload, heap-leak or cross-platform claim.

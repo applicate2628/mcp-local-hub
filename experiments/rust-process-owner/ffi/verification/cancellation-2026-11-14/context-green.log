@@ -1,0 +1,17 @@
+Command: go test . -run ^TestFinishContext -count=1 -timeout=45s -v -race Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:13:51.2466049Z Expected exit: 0 Actual exit: 0 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextCanceledBeforeObservationHasNoEffect
+--- PASS: TestFinishContextCanceledBeforeObservationHasNoEffect (0.13s)
+=== RUN   TestFinishContextNilRejectedWithoutNativeEffect
+--- PASS: TestFinishContextNilRejectedWithoutNativeEffect (0.10s)
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+--- PASS: TestFinishContextDeadlineRetainsSuspendedOwner (0.10s)
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+--- PASS: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (0.04s)
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+--- PASS: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.15s)
+=== RUN   TestFinishContextOneObserverCancelDoesNotCancelAnother
+--- PASS: TestFinishContextOneObserverCancelDoesNotCancelAnother (0.09s)
+=== RUN   TestFinishContextCanceledWaitDoesNotConsumeTerminalResult
+--- PASS: TestFinishContextCanceledWaitDoesNotConsumeTerminalResult (0.12s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.797s

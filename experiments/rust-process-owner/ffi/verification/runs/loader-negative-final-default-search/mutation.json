@@ -1,0 +1,6 @@
+{
+    "name":  "default-search",
+    "before":  "LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);",
+    "after":  "0); // deliberate default dependency lookup",
+    "mutated_sha256":  "f2a64a64e4173a76c741cdcbf7d090e1bd34737a22acaec689545b8e35f03c44"
+}

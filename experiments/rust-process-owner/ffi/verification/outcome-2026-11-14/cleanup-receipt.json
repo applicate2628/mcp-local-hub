@@ -1,0 +1,13 @@
+{
+    "verified_moved":  [
+                           "qualification-outcome-red",
+                           "qualification-outcome-green-initial",
+                           "qualification-outcome-red-reproducible",
+                           "qualification-outcome-final",
+                           "qualification-native-cleanup-outcome-regression"
+                       ],
+    "destination":  "\u003cAPPROVED_TRASH\u003e/outcome-qualification-20261114",
+    "deleted":  false,
+    "trash_emptied":  false,
+    "active_source_cache_ordinary_targets_retained":  true
+}

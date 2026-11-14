@@ -1,0 +1,27 @@
+[
+    {
+        "source":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-native-cleanup-positive-1",
+        "destination":  "D:\\dev\\ChatGPT\\trash\\native-cleanup-qualification-20261114\\source-positive-1",
+        "reason":  "Verified reproducible copy; source inputs/helpers and hashes preserved in Git"
+    },
+    {
+        "source":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-native-cleanup-negative-failure",
+        "destination":  "D:\\dev\\ChatGPT\\trash\\native-cleanup-qualification-20261114\\source-negative-failure",
+        "reason":  "Verified reproducible copy; source inputs/helpers and hashes preserved in Git"
+    },
+    {
+        "source":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-native-cleanup-negative-mask",
+        "destination":  "D:\\dev\\ChatGPT\\trash\\native-cleanup-qualification-20261114\\source-negative-mask",
+        "reason":  "Verified reproducible copy; source inputs/helpers and hashes preserved in Git"
+    },
+    {
+        "source":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-native-cleanup-final",
+        "destination":  "D:\\dev\\ChatGPT\\trash\\native-cleanup-qualification-20261114\\source-final",
+        "reason":  "Verified reproducible copy; source inputs/helpers and hashes preserved in Git"
+    },
+    {
+        "source":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\target-native-cleanup",
+        "destination":  "D:\\dev\\ChatGPT\\trash\\native-cleanup-qualification-20261114\\instrumented-target",
+        "reason":  "Completed test-only artifacts/cache; ordinary target and Cargo cache remain outside trash"
+    }
+]

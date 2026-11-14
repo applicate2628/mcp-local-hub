@@ -1,0 +1,50 @@
+[
+    {
+        "path":  "native/Cargo.lock",
+        "sha256":  "4198fa4fdbc041142493b86b1183f3446b1e5c24236cfab1020a888bbb46c63c"
+    },
+    {
+        "path":  "native/Cargo.toml",
+        "sha256":  "24fab44254b52380042697c7050aa24905d1d1e7ea3f8bcbeef49bd81637169b"
+    },
+    {
+        "path":  "native/ffi/Cargo.lock",
+        "sha256":  "76b59b101ff09d63eca5fe56751167ef2dab1cbf1dfded80c771e0f7c475e30d"
+    },
+    {
+        "path":  "native/ffi/Cargo.toml",
+        "sha256":  "2fde14f2248eeed1aaebe61bceabe9324bbc53ed63bcc887496e4b849f7e8659"
+    },
+    {
+        "path":  "native/ffi/src/lib.rs",
+        "sha256":  "cc7ed85dc7001c1fc8f8826734ddf586880a3e94dbbf696f589085bf35b02efe"
+    },
+    {
+        "path":  "native/ffi/src/tests.rs",
+        "sha256":  "ef9429d63295c50f93b44cc11c3be2b7350df3c0d7d69b646cd36ddca9c355bd"
+    },
+    {
+        "path":  "native/src/launch_context.rs",
+        "sha256":  "be4874f76d694b9cada9aceb31c3e77954cdbff4b1af408b30cce60f5fe4c207"
+    },
+    {
+        "path":  "native/src/lib.rs",
+        "sha256":  "f79b350cfef5744e89cff3f96dd592e732a2fffd1fde412db14a436deff9252e"
+    },
+    {
+        "path":  "native/src/native_failure_tests.rs",
+        "sha256":  "d8003ca327e2a6a970ea349fff0d375214c95ea9e0129602e6d43a9c038cac04"
+    },
+    {
+        "path":  "native/src/windows.rs",
+        "sha256":  "d438144038bd931874e1c17b7b4bad3049dac657c4b6d68caa2591798993f03f"
+    },
+    {
+        "path":  "native/src/bin/owner_child.rs",
+        "sha256":  "31da2f8924d6b967b568a41771036e7d2719d71302011885a85b45c5077c9959"
+    },
+    {
+        "path":  "native/src/bin/owner_crash_fixture.rs",
+        "sha256":  "12b12ec814778c6de86eb7cf959c4d5f24f94bad785437f878862e4bb073323e"
+    }
+]

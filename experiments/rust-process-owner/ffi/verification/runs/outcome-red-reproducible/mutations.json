@@ -1,0 +1,20 @@
+[
+    {
+        "case":  "unknown-flags",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.flags |= 4; return status; }\n    status\n}",
+        "mutated_sha256":  "e58e5a52ee2a88edfafd9c190eff26aacf4a1f83981252e097944064c0770f1d"
+    },
+    {
+        "case":  "cleanup-on-complete",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.cleanup_mask = 1; out.cleanup_codes[0] = 5; return status; }\n    status\n}",
+        "mutated_sha256":  "13253bf53536e1596bd04f0ad7c53e4994cef318ad3066698e7c4797fb4b375e"
+    },
+    {
+        "case":  "bad-layout-native",
+        "before":  "    snapshot(owner, out);\n    status\n}",
+        "after":  "    snapshot(owner, out);\n    if out.state == COMPLETE || out.state == CLEANUP_FAILED { out.version = 2; out.native_error = 87; return NATIVE;  }\n    status\n}",
+        "mutated_sha256":  "400ff73746aeb451bcc134b09ecb826896e3a9893a1090e577fb6166d165a0dd"
+    }
+]

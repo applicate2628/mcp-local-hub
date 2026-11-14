@@ -1,0 +1,66 @@
+Actual exit: 1
+# mcphub-owner-ffi-caller
+# [mcphub-owner-ffi-caller]
+In file included from .\bridge_windows.go:11:
+./../include/owner_v1.h:54:74: error: storage class specified for parameter 'mh_stdio'
+   54 | typedef struct { uintptr_t stdin_handle, stdout_handle, stderr_handle; } mh_stdio;
+      |                                                                          ^~~~~~~~
+./../include/owner_v1.h:55:46: error: expected specifier-qualifier-list before 'mh_stdio'
+   55 | typedef struct { mh_environment environment; mh_stdio streams; } mh_io_context;
+      |                                              ^~~~~~~~
+./../include/owner_v1.h:55:66: error: storage class specified for parameter 'mh_io_context'
+   55 | typedef struct { mh_environment environment; mh_stdio streams; } mh_io_context;
+      |                                                                  ^~~~~~~~~~~~~
+./../include/owner_v1.h:56:69: error: type defaults to 'int' in declaration of 'mh_io_context' [-Wimplicit-int]
+   56 | typedef uint32_t (*mh_create_io_fn)(const mh_create*,uint32_t,const mh_io_context*,uint32_t,mh_owner**,mh_out*,uint32_t);
+      |                                                                     ^~~~~~~~~~~~~
+./../include/owner_v1.h:56:82: error: expected ';', ',' or ')' before '*' token
+   56 | typedef uint32_t (*mh_create_io_fn)(const mh_create*,uint32_t,const mh_io_context*,uint32_t,mh_owner**,mh_out*,uint32_t);
+      |                                                                                  ^
+./../include/owner_v1.h:61:28: error: expected ';', ',' or ')' before 'uint32_t'
+   61 |     const mh_environment*, uint32_t, mh_owner**, mh_out*, uint32_t);
+      |                            ^~~~~~~~
+.\bridge_windows.go:15:5: error: unknown type name 'mh_create_env_fn'; did you mean 'mh_create_fn'?
+   15 |     mh_create_env_fn create_env;
+      |     ^~~~~~~~~~~~~~~~
+      |     mh_create_fn
+.\bridge_windows.go:16:5: error: unknown type name 'mh_create_io_fn'; did you mean 'mh_create_fn'?
+   16 |     mh_create_io_fn create_io;
+      |     ^~~~~~~~~~~~~~~
+      |     mh_create_fn
+.\bridge_windows.go: In function 'bridge_open':
+.\bridge_windows.go:34:5: error: static assertion failed: "function pointer size"
+   34 |     _Static_assert(sizeof(target)==sizeof(p), "function pointer size"); \
+      |     ^~~~~~~~~~~~~~
+.\bridge_windows.go:41:5: note: in expansion of macro 'RESOLVE'
+   41 |     RESOLVE(b->create_env,"mh_create_env1");
+      |     ^~~~~~~
+.\bridge_windows.go:34:5: error: static assertion failed: "function pointer size"
+   34 |     _Static_assert(sizeof(target)==sizeof(p), "function pointer size"); \
+      |     ^~~~~~~~~~~~~~
+.\bridge_windows.go:42:5: note: in expansion of macro 'RESOLVE'
+   42 |     RESOLVE(b->create_io,"mh_create_io1");
+      |     ^~~~~~~
+.\bridge_windows.go: In function 'bridge_create_io':
+.\bridge_windows.go:58:5: error: unknown type name 'mh_io_context'
+   58 |     mh_io_context context={{entries,count},{in,out,err}};
+      |     ^~~~~~~~~~~~~
+.\bridge_windows.go:58:5: error: braces around scalar initializer
+.\bridge_windows.go:58:5: note: (near initialization for 'context')
+.\bridge_windows.go:58:29: error: initialization of 'int' from 'const mh_env_entry *' makes integer from pointer without a cast [-Wint-conversion]
+   58 |     mh_io_context context={{entries,count},{in,out,err}};
+      |                             ^~~~~~~
+.\bridge_windows.go:58:29: note: (near initialization for 'context')
+.\bridge_windows.go:58:5: error: braces around scalar initializer
+   58 |     mh_io_context context={{entries,count},{in,out,err}};
+      |     ^~~~~~~~~~~~~
+.\bridge_windows.go:58:5: note: (near initialization for 'context')
+.\bridge_windows.go:59:12: error: called object is not a function or function pointer
+   59 |     return b->create_io(c,sizeof(*c),&context,sizeof(context),p,o,sizeof(*o));
+      |            ^
+.\bridge_windows.go: In function 'bridge_create_env':
+.\bridge_windows.go:63:12: error: called object is not a function or function pointer
+   63 |     return b->create_env(c,sizeof(*c),&env,sizeof(env),p,o,sizeof(*o));
+      |            ^
+FAIL	mcphub-owner-ffi-caller [build failed]
+FAIL

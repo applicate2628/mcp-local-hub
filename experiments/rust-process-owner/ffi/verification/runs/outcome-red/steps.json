@@ -1,0 +1,82 @@
+[
+    {
+        "name":  "exit-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "rust-version",
+        "command":  "rustc --version",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "build-unknown-flags",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-red\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-unknown-flags",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  1,
+        "actual":  1,
+        "required_marker":  "contradictory outcome accepted without protocol rejection",
+        "matched":  true
+    },
+    {
+        "name":  "build-cleanup-on-complete",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-red\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-cleanup-on-complete",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  1,
+        "actual":  1,
+        "required_marker":  "contradictory outcome accepted without protocol rejection",
+        "matched":  true
+    },
+    {
+        "name":  "build-bad-layout-native",
+        "command":  "cargo build --manifest-path D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\qualification-outcome-red\\native\\ffi\\Cargo.toml --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "required_marker":  "",
+        "matched":  true
+    },
+    {
+        "name":  "test-bad-layout-native",
+        "command":  "go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v",
+        "expected":  1,
+        "actual":  1,
+        "required_marker":  "contradictory outcome accepted without protocol rejection",
+        "matched":  true
+    }
+]

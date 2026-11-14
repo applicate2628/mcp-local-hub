@@ -1,0 +1,3 @@
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+Expected exit: 7
+Actual exit: 7

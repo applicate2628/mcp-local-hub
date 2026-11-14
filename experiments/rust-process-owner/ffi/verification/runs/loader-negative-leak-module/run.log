@@ -1,0 +1,141 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T17:57:04.6404521Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T17:57:04.6992304Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+65f513d24b39d8ed83dbe80dd15e1c377fc0f76e
+Step: go-version
+Command: go version
+UTC: 2026-11-14T17:57:04.7403753Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: compiler-version
+Command: C:\msys64\ucrt64\bin\gcc.exe --version
+UTC: 2026-11-14T17:57:04.7589998Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+gcc.exe (Rev6, Built by MSYS2 project) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Step: build-valid
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\valid.dll
+UTC: 2026-11-14T17:57:06.0614651Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=0 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-0.dll
+UTC: 2026-11-14T17:57:06.6244928Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-1
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=1 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-1.dll
+UTC: 2026-11-14T17:57:07.1643269Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=2 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-2.dll
+UTC: 2026-11-14T17:57:07.6758382Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-3
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=3 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-3.dll
+UTC: 2026-11-14T17:57:08.2243897Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-4
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=4 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-4.dll
+UTC: 2026-11-14T17:57:08.7637696Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-5
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=5 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-5.dll
+UTC: 2026-11-14T17:57:09.2979949Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-6
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=6 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-6.dll
+UTC: 2026-11-14T17:57:09.8490227Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-7
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=7 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-7.dll
+UTC: 2026-11-14T17:57:10.3858104Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-8
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=8 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-8.dll
+UTC: 2026-11-14T17:57:10.9216705Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=0u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\version-0.dll
+UTC: 2026-11-14T17:57:11.4710157Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=2u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\version-2.dll
+UTC: 2026-11-14T17:57:12.0286111Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-max
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=4294967295u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\version-max.dll
+UTC: 2026-11-14T17:57:12.6061164Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-init-refused
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREFUSE_INITIALIZATION <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-leak-module\fixtures\init-refused.dll
+UTC: 2026-11-14T17:57:13.1732188Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\dependency.c -Wl,--out-implib,<LAB>\qualification-loader-negative-leak-module\lib-owned-dependency.a -o <LAB>\qualification-loader-negative-leak-module\fixtures\dependency-only\mcphub_owned_loader_dependency.dll
+UTC: 2026-11-14T17:57:13.7372511Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-needs-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREQUIRE_DEPENDENCY <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c <LAB>\qualification-loader-negative-leak-module\lib-owned-dependency.a -o <LAB>\qualification-loader-negative-leak-module\fixtures\missing-dependency\needs-dependency.dll
+UTC: 2026-11-14T17:57:14.2786823Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: negative-loader
+Command: go test -tags ffi_loader_faults . -run ^TestLoaderRejectsEveryMissingExport/stdio$ -count=1 -timeout=30s -v
+UTC: 2026-11-14T17:57:15.0926159Z
+Expected exit: 1
+Actual exit: 1
+Matched: False
+FAIL	mcphub-owner-ffi-caller [build failed]
+# mcphub-owner-ffi-caller [mcphub-owner-ffi-caller.test]
+.\bridge_windows.go:47:46: syntax error: non-declaration statement outside function body
+.\bridge_windows.go:53:60: syntax error: unexpected comma after top level declaration
+.\bridge_windows.go:56:62: syntax error: unexpected comma after top level declaration
+.\bridge_windows.go:61:63: syntax error: unexpected comma after top level declaration
+.\bridge_windows.go:69:65: syntax error: unexpected comma after top level declaration
+.\bridge_windows.go:78:1: syntax error: imports must appear before other declarations
+FAIL

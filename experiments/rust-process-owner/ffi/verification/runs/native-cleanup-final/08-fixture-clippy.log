@@ -1,0 +1,7 @@
+Command: cargo clippy --offline --locked --all-targets -- -D warnings
+Expected exit: 0
+Actual exit: 0
+
+    Checking mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-native-cleanup-final\native)
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-native-cleanup-final\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s

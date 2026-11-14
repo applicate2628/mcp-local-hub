@@ -1,0 +1,102 @@
+Command: cargo test --offline --locked --release -- --test-threads=1 UTC: 2026-11-14T01:08:01.5689971Z Expected exit: 0 Actual exit: 0
+    Finished `release` profile [optimized] target(s) in 0.02s
+     Running unittests src\lib.rs (<LAB>\target\release\deps\mcphub_process_owner_spike-b478d0084b4e3761.exe)
+
+running 12 tests
+test launch_context::tests::block_has_exact_utf16_entries_and_double_terminator ... ok
+test launch_context::tests::directory_budget_and_errors_do_not_echo_values ... ok
+test launch_context::tests::full_block_budget_counts_separators_and_terminators ... ok
+test windows::native_failure_tests::attribute_query_failure_preserves_native_error_code ... ok
+test windows::native_failure_tests::exit_code_query_failure_does_not_fabricate_root_exit ... ok
+test windows::native_failure_tests::failed_termination_is_not_reissued_after_rights_are_restored ... ok
+test windows::native_failure_tests::job_query_failure_keeps_observed_root_and_live_owner_slots ... ok
+test windows::native_failure_tests::native_create_failure_preserves_error_without_repeated_handle_growth ... ok
+test windows::native_failure_tests::protected_close_failures_preserve_each_error_and_original_root_result ... ok
+test windows::native_failure_tests::resume_access_denied_retains_original_suspended_owner_and_consumes_admission ... ok
+test windows::native_failure_tests::unexpected_suspend_count_keeps_owner_without_claiming_execution ... ok
+test windows::native_failure_tests::wait_access_denied_is_not_timeout_or_terminal_completion ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running unittests src\bin\owner_child.rs (<LAB>\target\release\deps\owner_child-744f801171fca2c6.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\owner_crash_fixture.rs (<LAB>\target\release\deps\owner_crash_fixture-76f284dbb358a7ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\launch_context.rs (<LAB>\target\release\deps\launch_context-961cf2dda6b5df70.exe)
+
+running 10 tests
+test context_value_round_trips_non_unicode_windows_units ... ok
+test denied_admission_keeps_context_unexecuted_and_parent_unchanged ... ok
+test empty_explicit_environment_is_not_inherit ... ok
+test encoded_context_outlives_source_strings_until_child_runs ... ok
+test explicit_context_preserves_unicode_empty_values_and_excludes_parent ... ok
+test invalid_environment_is_rejected_before_process_creation ... ok
+test native_missing_directory_error_is_not_success_or_parent_change ... ok
+test old_create_still_inherits_parent_context ... ok
+test relative_empty_and_nul_directory_are_rejected_without_parent_mutation ... ok
+test two_live_children_have_separate_contexts_without_parent_switches ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests\lifecycle.rs (<LAB>\target\release\deps\lifecycle-ca7795dbe300e93c.exe)
+
+running 13 tests
+test completed_root_does_not_mean_completed_tree ... ok
+test denied_admission_cannot_be_retried_as_approval ... ok
+test exit_code_still_active_is_not_mistaken_for_running ... ok
+test invalid_argument_fails_before_creation ... ok
+test missing_image_returns_error_without_started_owner ... ok
+test one_owner_settles_root_and_descendant ... ok
+test original_process_is_suspended_and_job_member_before_admission ... ok
+test rejected_admission_retains_original_owner_without_execution ... ok
+test repeated_create_settle_does_not_grow_handle_count ... ok
+test repeated_resume_is_rejected ... ok
+test root_result_survives_late_stop_request ... ok
+test running_timeout_keeps_owner_and_can_be_settled ... ok
+test wide_argv_preserves_unicode_quotes_backslashes_and_empty ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+
+     Running tests\owner_crash.rs (<LAB>\target\release\deps\owner_crash-b954f4d41e4aa395.exe)
+
+running 5 tests
+test creator_death_after_root_exit_stops_remaining_descendant ... ok
+test creator_death_before_admission_stops_suspended_child ... ok
+test creator_death_stops_live_root_and_descendant_only ... ok
+test creator_death_with_explicit_context_and_stdio_stops_descendants ... ok
+test ordinary_finish_is_distinct_from_creator_crash ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests\stdio.rs (<LAB>\target\release\deps\stdio-2425427e316e40c1.exe)
+
+running 11 tests
+test child_keeps_os_copies_after_parent_releases_its_files ... ok
+test denied_admission_does_not_consume_or_close_borrowed_streams ... ok
+test exact_stdio_bytes_and_parent_ownership_survive_settlement ... ok
+test explicit_context_composes_with_borrowed_stdio_owner ... ok
+test missing_image_preserves_borrowed_handles ... ok
+test noninheritable_stdio_is_rejected_without_changing_flags ... ok
+test pipe_eof_and_remaining_bytes_are_not_held_by_parent_owner ... ok
+test pseudo_null_and_nonfile_sources_are_rejected_before_create ... ok
+test repeated_stdio_lifetimes_do_not_accumulate_handles ... ok
+test stdout_and_stderr_may_share_one_borrowed_handle ... ok
+test unrelated_inheritable_event_does_not_cross_create_boundary ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+   Doc-tests mcphub_process_owner_spike
+
+running 2 tests
+test src\windows.rs - windows::BorrowedStdio (line 171) - compile fail ... ok
+test src\windows.rs - windows::ProcessView (line 105) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s

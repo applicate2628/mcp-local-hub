@@ -1,0 +1,15 @@
+Source: 4fbbea19e9db7dacc0daef9448cd4c05f2e0c2fa + described controlled mutation
+Command: cargo build --offline --locked
+Expected exit: 0
+Actual exit: 0
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+warning: unused variable: `stdio`
+   --> src\lib.rs:443:9
+    |
+443 |     let stdio = match streams {
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_stdio`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-owner-ffi-spike` (lib) generated 1 warning (run `cargo fix --lib -p mcphub-owner-ffi-spike` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s

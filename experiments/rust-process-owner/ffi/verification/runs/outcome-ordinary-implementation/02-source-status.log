@@ -1,0 +1,11 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T19:13:49.3479738Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/go/bridge_windows.go
+ M experiments/rust-process-owner/ffi/include/owner_v1.h
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go
+?? experiments/rust-process-owner/ffi/go/outcome_windows.go
+?? experiments/rust-process-owner/ffi/go/outcome_windows_test.go
+?? experiments/rust-process-owner/ffi/verification/outcome-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-green-initial/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-ordinary-implementation/
+?? experiments/rust-process-owner/ffi/verification/runs/outcome-red/

@@ -1,0 +1,99 @@
+Command: go test -race -tags ffi_native_faults . -run ^TestNativeCleanup(RealFailures|FailureRemains) -count=3 -timeout=90s -v Expected exit: 0 Actual exit: 0
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.48s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.04s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.49s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.05s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6
+=== RUN   TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7
+--- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths (0.53s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-1 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-2 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-3 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-5 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-6 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-false/mask-7 (0.03s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-1 (0.06s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-2 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-3 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-4 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-5 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-6 (0.04s)
+    --- PASS: TestNativeCleanupRealFailuresCrossBothFinishPaths/context-true/mask-7 (0.04s)
+=== RUN   TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery
+--- PASS: TestNativeCleanupFailureRemainsCachedAfterAuthorizedRecovery (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	2.637s

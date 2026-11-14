@@ -1,0 +1,309 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T17:56:01.3955999Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T17:56:01.4529912Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+65f513d24b39d8ed83dbe80dd15e1c377fc0f76e
+Step: go-version
+Command: go version
+UTC: 2026-11-14T17:56:01.4895719Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: compiler-version
+Command: C:\msys64\ucrt64\bin\gcc.exe --version
+UTC: 2026-11-14T17:56:01.5061710Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+gcc.exe (Rev6, Built by MSYS2 project) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Step: build-valid
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\valid.dll
+UTC: 2026-11-14T17:56:02.8365561Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=0 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-0.dll
+UTC: 2026-11-14T17:56:03.3742869Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-1
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=1 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-1.dll
+UTC: 2026-11-14T17:56:03.8969970Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=2 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-2.dll
+UTC: 2026-11-14T17:56:04.3958822Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-3
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=3 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-3.dll
+UTC: 2026-11-14T17:56:04.9281610Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-4
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=4 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-4.dll
+UTC: 2026-11-14T17:56:05.4339663Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-5
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=5 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-5.dll
+UTC: 2026-11-14T17:56:05.9459973Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-6
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=6 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-6.dll
+UTC: 2026-11-14T17:56:06.4931491Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-7
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=7 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-7.dll
+UTC: 2026-11-14T17:56:07.0094999Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-8
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=8 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-8.dll
+UTC: 2026-11-14T17:56:07.4978540Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=0u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\version-0.dll
+UTC: 2026-11-14T17:56:08.0124780Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=2u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\version-2.dll
+UTC: 2026-11-14T17:56:08.6049297Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-max
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=4294967295u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\version-max.dll
+UTC: 2026-11-14T17:56:09.2550463Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-init-refused
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREFUSE_INITIALIZATION <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-positive-corrected\fixtures\init-refused.dll
+UTC: 2026-11-14T17:56:09.8792903Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\dependency.c -Wl,--out-implib,<LAB>\qualification-loader-positive-corrected\lib-owned-dependency.a -o <LAB>\qualification-loader-positive-corrected\fixtures\dependency-only\mcphub_owned_loader_dependency.dll
+UTC: 2026-11-14T17:56:10.4667496Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-needs-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREQUIRE_DEPENDENCY <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c <LAB>\qualification-loader-positive-corrected\lib-owned-dependency.a -o <LAB>\qualification-loader-positive-corrected\fixtures\missing-dependency\needs-dependency.dll
+UTC: 2026-11-14T17:56:11.0034996Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: loader-race
+Command: go test -tags ffi_loader_faults . -run ^TestLoader -count=3 -race -timeout=90s -v
+UTC: 2026-11-14T17:56:20.6076982Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.01s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.04s)
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.05s)
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	4.183s
+Step: loader-vet
+Command: go vet -tags ffi_loader_faults .
+UTC: 2026-11-14T17:56:26.1540650Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: loader-cgocheck2
+Command: go test -tags ffi_loader_faults . -run ^TestLoader -count=1 -timeout=90s
+UTC: 2026-11-14T17:56:31.2317668Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+ok  	mcphub-owner-ffi-caller	0.062s

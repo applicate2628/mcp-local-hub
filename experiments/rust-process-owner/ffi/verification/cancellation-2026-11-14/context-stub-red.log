@@ -1,0 +1,26 @@
+Command: go test . -run ^TestFinishContext -count=1 -timeout=45s -v Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:11:49.6892229Z Expected exit: 1 Actual exit: 1 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestFinishContextCanceledBeforeObservationHasNoEffect
+    finish_context_windows_test.go:65: cancellation causes lost: {State:1 Flags:0 PID:62556 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestFinishContextCanceledBeforeObservationHasNoEffect (0.01s)
+=== RUN   TestFinishContextNilRejectedWithoutNativeEffect
+    finish_context_windows_test.go:83: got <nil>; want status 1
+--- FAIL: TestFinishContextNilRejectedWithoutNativeEffect (0.01s)
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+    finish_context_windows_test.go:102: deadline/outcome collapsed: {State:1 Flags:0 PID:111476 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestFinishContextDeadlineRetainsSuspendedOwner (0.00s)
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+    finish_context_windows_test.go:135: context was not consulted while owner was busy
+--- FAIL: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (1.01s)
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+    finish_context_windows_test.go:184: known root/remaining child lost: {State:1 Flags:3 PID:74668 RootExit:7 Active:2 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.03s)
+=== RUN   TestFinishContextOneObserverCancelDoesNotCancelAnother
+    finish_context_windows_test.go:208: observer cancellation: {State:1 Flags:0 PID:35584 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+    finish_context_windows_test.go:215: second observer lost original ownership: {State:1 Flags:0 PID:35584 RootExit:0 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestFinishContextOneObserverCancelDoesNotCancelAnother (0.01s)
+=== RUN   TestFinishContextCanceledWaitDoesNotConsumeTerminalResult
+    finish_context_windows_test.go:231: pre-canceled terminal call did native work: {State:2 Flags:1 PID:76112 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+--- FAIL: TestFinishContextCanceledWaitDoesNotConsumeTerminalResult (0.02s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	1.109s
+FAIL

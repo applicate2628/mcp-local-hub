@@ -1,0 +1,7 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T02:31:25.3505422Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/go/faults_windows_test.go
+ M experiments/rust-process-owner/ffi/go/stdio_windows_test.go
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/verification/runs/stdio-2026-11-14-final/
+?? experiments/rust-process-owner/ffi/verification/runs/stdio-2026-11-14-implementation/
+?? experiments/rust-process-owner/ffi/verification/stdio-2026-11-14/

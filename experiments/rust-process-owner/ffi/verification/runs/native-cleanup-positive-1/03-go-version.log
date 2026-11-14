@@ -1,0 +1,2 @@
+Command: go version Expected exit: 0 Actual exit: 0
+go version go1.27.4 windows/amd64

@@ -1,0 +1,6 @@
+{
+    "name":  "leak-module",
+    "before":  "FreeLibrary(b-\u003emodule); free(b); return NULL;",
+    "after":  "free(b); return NULL; // deliberate leaked module reference",
+    "mutated_sha256":  "319cf66c8c1397968213f6ee2247a6c9157a714424d1b1b1bec5e22ddd00e581"
+}

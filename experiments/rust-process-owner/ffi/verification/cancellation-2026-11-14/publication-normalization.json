@@ -1,0 +1,14 @@
+[
+    {
+        "path":  "artifact-hashes.txt",
+        "original_sha256":  "ddc8da757b68469ec74308b0db0595d87e222e641025a79d27cca4af1637e8fd",
+        "normalized_sha256":  "9b7460fadea3bab1b341fcc3c5ca6f55eedfde3c190386248026b4342141c95f",
+        "change":  "CRLF -\u003e LF and trailing whitespace only; log values and conclusions unchanged"
+    },
+    {
+        "path":  "baseline.log",
+        "original_sha256":  "68a0eaa26b4c2a3db9e07820b659cb2fa938860f51042679e77f26633f14d2f6",
+        "normalized_sha256":  "85eb25523610310baadf5899f779d40143b601355cb453cd65abcdabddc57b2d",
+        "change":  "CRLF -\u003e LF and trailing whitespace only; log values and conclusions unchanged"
+    }
+]

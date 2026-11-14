@@ -1,0 +1,113 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T19:16:04.4435606Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T19:16:04.4914747Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+4ebca16f53c4fc3ad4b07c47455745ff5fb58951
+Step: go-version
+Command: go version
+UTC: 2026-11-14T19:16:04.5508601Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: rust-version
+Command: rustc --version
+UTC: 2026-11-14T19:16:04.6110620Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+Step: build-unknown-flags
+Command: cargo build --manifest-path <LAB>\qualification-outcome-red-reproducible\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:16:05.9161025Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<LAB>\qualification-outcome-red-reproducible\native)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-red-reproducible\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.25s
+Step: test-unknown-flags
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:16:11.1896095Z
+Expected exit: 1
+Actual exit: 1
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:5 PID:46364 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:5 PID:46364 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]}
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:5 PID:129400 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]} <nil>
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:5 PID:129400 RootExit:259 Active:0 NativeError:0 CleanupMask:0 CleanupCodes:[0 0 0]}
+--- FAIL: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/context (0.02s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.077s
+FAIL
+Step: build-cleanup-on-complete
+Command: cargo build --manifest-path <LAB>\qualification-outcome-red-reproducible\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:16:11.5256128Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-red-reproducible\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
+Step: test-cleanup-on-complete
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:16:12.6588639Z
+Expected exit: 1
+Actual exit: 1
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:1 PID:136792 RootExit:259 Active:0 NativeError:0 CleanupMask:1 CleanupCodes:[5 0 0]} <nil>
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:1 PID:136792 RootExit:259 Active:0 NativeError:0 CleanupMask:1 CleanupCodes:[5 0 0]}
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:1 PID:127560 RootExit:259 Active:0 NativeError:0 CleanupMask:1 CleanupCodes:[5 0 0]} <nil>
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:1 PID:127560 RootExit:259 Active:0 NativeError:0 CleanupMask:1 CleanupCodes:[5 0 0]}
+--- FAIL: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/finite (0.02s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/context (0.03s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.078s
+FAIL
+Step: build-bad-layout-native
+Command: cargo build --manifest-path <LAB>\qualification-outcome-red-reproducible\native\ffi\Cargo.toml --offline --locked
+UTC: 2026-11-14T19:16:12.9666153Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\qualification-outcome-red-reproducible\native\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+Step: test-bad-layout-native
+Command: go test -tags ffi_outcome_faults . -run ^TestOutcomeRejectsContradictoryMetadata$ -race -count=1 -timeout=30s -v
+UTC: 2026-11-14T19:16:14.1021873Z
+Expected exit: 1
+Actual exit: 1
+Matched: True
+=== RUN   TestOutcomeRejectsContradictoryMetadata
+=== RUN   TestOutcomeRejectsContradictoryMetadata/finite
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:1 PID:81200 RootExit:259 Active:0 NativeError:87 CleanupMask:0 CleanupCodes:[0 0 0]} owner ABI status=3 native=87
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:1 PID:81200 RootExit:259 Active:0 NativeError:87 CleanupMask:0 CleanupCodes:[0 0 0]}
+    outcome_faults_windows_test.go:111: independent call cause lost/misread: owner ABI status=3 native=87
+=== RUN   TestOutcomeRejectsContradictoryMetadata/context
+    outcome_faults_windows_test.go:103: contradictory outcome accepted without protocol rejection: {State:2 Flags:1 PID:44124 RootExit:259 Active:0 NativeError:87 CleanupMask:0 CleanupCodes:[0 0 0]} owner ABI status=3 native=87
+    outcome_faults_windows_test.go:106: invalid outcome exposed as trusted observation: {State:2 Flags:1 PID:44124 RootExit:259 Active:0 NativeError:87 CleanupMask:0 CleanupCodes:[0 0 0]}
+    outcome_faults_windows_test.go:111: independent call cause lost/misread: owner ABI status=3 native=87
+--- FAIL: TestOutcomeRejectsContradictoryMetadata (0.05s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/finite (0.03s)
+    --- FAIL: TestOutcomeRejectsContradictoryMetadata/context (0.02s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.079s
+FAIL

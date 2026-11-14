@@ -1,0 +1,11 @@
+Command: go test . -run ^TestIO -count=1 -timeout=45s -v -race Source base: 0bcb5f0a1044f81dc3d28019ebfc353cc0ef10c7 UTC: 2026-11-14T08:20:25.0626574Z Expected exit: 0 Actual exit: 0 Mode=debug; GOMAXPROCS=4; cache-only; fault=
+=== RUN   TestIOCancelWaitDoesNotCloseBlockedWriter
+--- PASS: TestIOCancelWaitDoesNotCloseBlockedWriter (0.06s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+--- PASS: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.06s)
+=== RUN   TestIORootExitIsNotOutputEOFWhileDescendantLives
+--- PASS: TestIORootExitIsNotOutputEOFWhileDescendantLives (0.10s)
+=== RUN   TestIONativeSettlementDoesNotDiscardUnreadFinalBytes
+--- PASS: TestIONativeSettlementDoesNotDiscardUnreadFinalBytes (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	1.283s

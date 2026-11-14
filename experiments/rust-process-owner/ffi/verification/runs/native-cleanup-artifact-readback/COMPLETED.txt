@@ -1,0 +1,1 @@
+Both existing ordinary DLLs passed absence controls and full normal Go tests under race; artifact hashes stable through each run. No native or DLL build occurred in this verification.

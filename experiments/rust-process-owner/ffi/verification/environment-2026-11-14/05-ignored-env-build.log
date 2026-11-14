@@ -1,0 +1,12 @@
+Command: cargo build --offline --locked [temporary native environment=&[]] Expected: build PASS Exit: 0
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+warning: unused variable: `environment`
+   --> src\lib.rs:338:9
+    |
+338 |     let environment = match environment {
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_environment`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+System.Management.Automation.RemoteException
+warning: `mcphub-owner-ffi-spike` (lib) generated 1 warning (run `cargo fix --lib -p mcphub-owner-ffi-spike` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.58s

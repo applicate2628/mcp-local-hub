@@ -1,0 +1,3 @@
+Command: go vet -tags ffi_native_faults .
+Expected exit: 0
+Actual exit: 0

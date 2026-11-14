@@ -1,0 +1,178 @@
+[
+    {
+        "name":  "00-exit-propagation-control",
+        "command":  "C:\\windows\\system32\\cmd.exe /d /c exit 7",
+        "expected":  7,
+        "actual":  7,
+        "utc":  "2026-11-14T02:31:25.2412736Z",
+        "matched":  true
+    },
+    {
+        "name":  "01-source-head",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source rev-parse HEAD",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.2981699Z",
+        "matched":  true
+    },
+    {
+        "name":  "02-source-status",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source status --short",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.3505422Z",
+        "matched":  true
+    },
+    {
+        "name":  "03-go-version",
+        "command":  "go version",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.4178759Z",
+        "matched":  true
+    },
+    {
+        "name":  "04-rust-version",
+        "command":  "rustc --version --verbose",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.4729826Z",
+        "matched":  true
+    },
+    {
+        "name":  "05-build-child",
+        "command":  "cargo build --manifest-path ../Cargo.toml --offline --locked --bin owner_child",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.5575891Z",
+        "matched":  true
+    },
+    {
+        "name":  "06-abi-debug",
+        "command":  "cargo test --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:25.6440935Z",
+        "matched":  true
+    },
+    {
+        "name":  "07-abi-release",
+        "command":  "cargo test --release --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:26.1298914Z",
+        "matched":  true
+    },
+    {
+        "name":  "08-abi-clippy",
+        "command":  "cargo clippy --offline --locked --all-targets -- -D warnings",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:26.7487129Z",
+        "matched":  true
+    },
+    {
+        "name":  "09-abi-format",
+        "command":  "cargo fmt --all -- --check",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:27.0866094Z",
+        "matched":  true
+    },
+    {
+        "name":  "10-debug-dll",
+        "command":  "cargo build --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:27.2936138Z",
+        "matched":  true
+    },
+    {
+        "name":  "11-release-dll",
+        "command":  "cargo build --release --offline --locked",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:27.7830336Z",
+        "matched":  true
+    },
+    {
+        "name":  "12-go-debug-race",
+        "command":  "go test -race . -count=3 -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:28.3226927Z",
+        "matched":  true
+    },
+    {
+        "name":  "13-go-vet",
+        "command":  "go vet .",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:40.4896190Z",
+        "matched":  true
+    },
+    {
+        "name":  "14-cgocheck2",
+        "command":  "go test . -count=1 -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:46.4320844Z",
+        "matched":  true
+    },
+    {
+        "name":  "15-go-release-race",
+        "command":  "go test -race . -count=3 -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:54.0043158Z",
+        "matched":  true
+    },
+    {
+        "name":  "16-go-counts",
+        "command":  "go test . -count=1 -json -timeout=90s",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:31:59.0325590Z",
+        "matched":  true
+    },
+    {
+        "name":  "17-parent-debug",
+        "command":  "cargo test --offline --locked -- --test-threads=1",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:32:08.0565132Z",
+        "matched":  true
+    },
+    {
+        "name":  "17-parent-release",
+        "command":  "cargo test --offline --locked --release -- --test-threads=1",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:32:11.2424551Z",
+        "matched":  true
+    },
+    {
+        "name":  "18-parent-clippy",
+        "command":  "cargo clippy --offline --locked --all-targets -- -D warnings",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:32:15.5697371Z",
+        "matched":  true
+    },
+    {
+        "name":  "19-parent-format",
+        "command":  "cargo fmt --all -- --check",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:32:15.9111885Z",
+        "matched":  true
+    },
+    {
+        "name":  "20-diff-check",
+        "command":  "git -C D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\source diff --check",
+        "expected":  0,
+        "actual":  0,
+        "utc":  "2026-11-14T02:32:16.1843570Z",
+        "matched":  true
+    }
+]

@@ -1,0 +1,5 @@
+Command: git -C <LAB>\source rev-parse HEAD
+Expected exit: 0
+Actual exit: 0
+
+a59a867d0d8a44d156ab783c78f91a02fe4d83e5

@@ -1,0 +1,4 @@
+Command: cargo clippy --offline --locked --all-targets -- -D warnings
+Actual exit: 0
+    Checking mcphub-owner-ffi-spike v0.0.0 (<LAB>\source\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.64s

@@ -1,0 +1,12 @@
+Command: git -C <LAB>\source status --short UTC: 2026-11-14T18:03:47.0472581Z Expected exit: 0 Actual exit: 0
+ M experiments/rust-process-owner/ffi/verification/PROGRESS.md
+?? experiments/rust-process-owner/ffi/go/loader_windows_test.go
+?? experiments/rust-process-owner/ffi/verification/loader-2026-11-14/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-final/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-negative-final-accept-version/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-negative-final-default-search/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-negative-final-leak-module/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-negative-leak-module/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-ordinary-final/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-positive-corrected/
+?? experiments/rust-process-owner/ffi/verification/runs/loader-positive-initial/
