@@ -7,73 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
-
-	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/scheduler"
 )
 
-func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error) {
-	legacyWindowlessTarget := scheduler.WindowsLegacyEntrypointPath(target)
-	stateDir, err := api.DaemonStateDir()
-	if err != nil {
-		return fmt.Errorf("resolve state-dir for Windows setup product pair: %w", err)
-	}
-	fence, acquired, err := api.TryAcquireUpgradeFence(context.Background(), stateDir)
-	if err != nil {
-		return fmt.Errorf("acquire Windows setup product-pair fence: %w", err)
-	}
-	if !acquired {
-		return errors.New("acquire Windows setup product-pair fence: another product-pair transaction is active")
-	}
-	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows setup product-pair fence")
-	settled, err := reconcileWiredWindowsProductRecovery(windowsProductRecoveryRuntimeRequest(context.Background(), stateDir, target, legacyWindowlessTarget))
-	if err != nil {
-		return fmt.Errorf("recover Windows setup product pair: %w", err)
-	}
-	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
-		fmt.Fprintf(w, "\u2713 mcphub Windows product crash recovery kept committed product at %s\n", filepath.Dir(target))
-		return nil
-	}
-	if reconciled, err := reconcileWindowsProductReceipt(stateDir, curExe, target, WindowsProductPairModeSetup); err != nil {
-		return err
-	} else if reconciled {
-		fmt.Fprintf(w, "\u2713 mcphub Windows product already committed at %s; committed event reconciled\n", filepath.Dir(target))
-		return nil
-	}
-	stagedCLI, err := stageWindowsProductCandidate(curExe, target)
-	if err != nil {
-		return fmt.Errorf("stage setup canonical CLI: %w", err)
-	}
-	defer os.Remove(stagedCLI)
-	authority, err := windowsSingleProductNonUpgradeReplacementAuthority(stagedCLI, target)
-	if err != nil {
-		return fmt.Errorf("preflight Windows setup product pair: %w", err)
-	}
-	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
-		Context: context.Background(), StateDir: stateDir, ProductPath: target,
-		LegacyWindowlessPath: legacyWindowlessTarget, StagedProduct: stagedCLI, Mode: WindowsProductPairModeSetup,
-		ReplacementAuthority: authority,
-	})
-	if err != nil {
-		return fmt.Errorf("construct Windows setup product transaction: %w", err)
-	}
-	result, err := txn.Run(context.Background())
-	if err != nil {
-		return fmt.Errorf("install Windows setup product: %w", err)
-	}
-	if result.Outcome != WindowsProductPairCommittedOutcome {
-		return fmt.Errorf("install Windows setup product: unexpected terminal outcome %q", result.Outcome)
-	}
-	fmt.Fprintf(w, "\u2713 mcphub Windows product installed at %s\n", filepath.Dir(target))
-	return nil
+func bootstrapProductToTarget(w io.Writer, curExe, target string) error {
+	return bootstrapProductToTargetWithWindowsCanonicalEntryInput(context.Background(), w, curExe, target, windowsCanonicalEntryCommandInput{})
+}
+
+func bootstrapProductToTargetWithWindowsCanonicalEntryInput(ctx context.Context, w io.Writer, _ string, target string, input windowsCanonicalEntryCommandInput) error {
+	return installWindowsCanonicalEntrySet(ctx, w, target, WindowsProductPairModeSetup, input)
 }
 
 // Windows SendMessageTimeout constants. Kept local so we don't pull in the

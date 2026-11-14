@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 
 	"github.com/spf13/cobra"
 )
@@ -332,7 +333,7 @@ func TestRecoverMCPFrontRouteActivation_EmitsStableFailureAndRetainsPhase(t *tes
 }
 
 func TestRecoverMCPFrontRouteActivation_WaitsForCLITransactionLock(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedTempDir(t)
 	lockPath := filepath.Join(stateDir, mcpFrontReconcileLockLeaf)
 	holder, err := api.AcquireSupervisorLock(lockPath)
 	if err != nil {
@@ -382,7 +383,7 @@ func TestRecoverMCPFrontRouteActivation_WaitsForCLITransactionLock(t *testing.T)
 }
 
 func TestRunRollbackMCPFront_V5RecoversRouteActivationBeforeRows(t *testing.T) {
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(apitest.HardenedTempDir(t), "report.json")
 	if err := writeMCPFrontReconcileReport(reportPath, validMCPFrontRouteActivationReport()); err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +575,7 @@ func TestMCPFrontGenerationAdmission_CrashWindowsFinalizeBeforeCompositionRootCa
 		{name: "epoch-before-finalize", routing: to},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reportPath := filepath.Join(t.TempDir(), "record.json")
+			reportPath := filepath.Join(apitest.HardenedTempDir(t), "record.json")
 			// Retain one valid generation-1 Serena row so the composition root
 			// reaches BOTH injected client owners after the admission is clear.
 			report := newV3RollbackRecord(t, reportPath, from.Port, "claude-code")
@@ -689,7 +690,7 @@ func TestMCPFrontGenerationAdmission_SamePortNPlusOnePersistedDestinationFailsCl
 	report.GenerationAdmission = &mcpFrontGenerationAdmission{Phase: mcpFrontGenerationAdmissionPrepared,
 		FromEpoch: api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFront, Generation: 1, Port: 9137},
 		ToEpoch:   api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: 2, Port: 9137}}
-	reportPath := filepath.Join(t.TempDir(), "record.json")
+	reportPath := filepath.Join(apitest.HardenedTempDir(t), "record.json")
 	if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
 		t.Fatal(err)
 	}

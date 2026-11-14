@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/cbuild"
 	"mcp-local-hub/internal/drmemory"
@@ -53,6 +54,22 @@ func RouteInvocationArgs(args []string) []string {
 }
 
 func NewRootCmd() *cobra.Command {
+	return newRootCmdWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+// NewRootCmdWithWindowsCanonicalEntryBinding captures immutable build inputs
+// only in the commands that can publish a Windows canonical entry set. A
+// constructor error is retained until one of those operations is requested.
+func NewRootCmdWithWindowsCanonicalEntryBinding(binding binaryadmission.WindowsCanonicalEntryBuildBindingV1, bindingErr error) *cobra.Command {
+	return newRootCmdWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{binding: binding, bindingErr: bindingErr})
+}
+
+type windowsCanonicalEntryCommandInput struct {
+	binding    binaryadmission.WindowsCanonicalEntryBuildBindingV1
+	bindingErr error
+}
+
+func newRootCmdWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	version, _, _ := buildinfo.Get()
 	root := &cobra.Command{
 		Use:   "mcphub",
@@ -79,10 +96,10 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	)
 
 	addGrouped(root, groupSetup,
-		newSetupCmd(),
-		newInstallCmd(),
+		newSetupCmdRealWithWindowsCanonicalEntryInput(input),
+		newInstallCmdRealWithWindowsCanonicalEntryInput(input),
 		newUninstallCmd(),
-		newUpgradeCmd(),
+		newUpgradeCmdRealWithWindowsCanonicalEntryInput(input),
 		newAutostartCmd(),
 		newImportCmd(),
 	)
@@ -161,7 +178,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 		// hook (npm/scripts/postinstall.js) on the freshly installed platform
 		// binary. Hidden: machine-invoked, and the documented operator-facing
 		// equivalent is `mcphub setup`.
-		newCanonicalizeCmdReal(),
+		newCanonicalizeCmdRealWithWindowsCanonicalEntryInput(input),
 		newAuditLockTerminalWorkerCmd(),
 		newDaemonRecoveryAuditHandoffWorkerCmd(),
 		newGUIOwnerUnknownConfirmationMarkerWorkerCmd(),

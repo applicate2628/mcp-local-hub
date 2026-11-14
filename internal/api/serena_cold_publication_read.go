@@ -10,7 +10,7 @@ import (
 
 // All namespaces/read views are acquired before either exclusion. The returned
 // observation is useful only after every locally acquired original slot closes.
-func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context, record PreparedSerenaRuntimeRecord, limits SerenaTreeLimits) (r *PreparedSerenaColdPublicationReadObservation, retErr error) {
+func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context, record PreparedSerenaRuntimeRecord, environment *SerenaConsumerEnvironmentObservation) (r *PreparedSerenaColdPublicationReadObservation, retErr error) {
 	r = &PreparedSerenaColdPublicationReadObservation{record: record, io: io}
 	var readyAttempted, operationAttempted, intentAttempted, publishedAttempted, intentLeaseAttempted, packageLeaseAttempted bool
 	var originalDeadline time.Time
@@ -80,7 +80,7 @@ func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context
 			r.closedInBound = retErr == nil
 		}
 	}()
-	if ctx == nil || !limits.valid() {
+	if ctx == nil || environment == nil {
 		return r, errors.New("SERENA_COLD_READ_INPUT_MISSING")
 	}
 	var finite bool
@@ -115,6 +115,42 @@ func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context
 	if err != nil {
 		return r, err
 	}
+	operationRaw, reader, err := ReadStateFileInodeAnchoredObserved(ctx, r.operationNamespace.path, 64<<20)
+	r.readers = append(r.readers, reader)
+	if err != nil {
+		return r, err
+	}
+	if reader == nil {
+		return r, errors.New("SERENA_COLD_OPERATION_READER_MISSING")
+	}
+	if err = reader.Validate(ctx, r.operationNamespace.path, 64<<20, operationRaw, preparedSerenaHash(operationRaw)); err != nil {
+		return r, err
+	}
+	operation, err := decodePreparedSerenaOperation(operationRaw)
+	if err != nil {
+		return r, err
+	}
+	readyRaw, exists, readyReader, err := r.io.readReadyObserved(ctx, record.RequestIdentitySHA256)
+	r.readers = append(r.readers, readyReader)
+	if err != nil || !exists {
+		return r, errors.Join(err, errors.New("SERENA_COLD_READY_UNAVAILABLE"))
+	}
+	actual, err := decodePreparedSerenaRecord(readyRaw)
+	if err != nil || !reflect.DeepEqual(actual, record) {
+		return r, errors.Join(err, errors.New("SERENA_COLD_CURRENT_READY_DRIFT"))
+	}
+	if err = validateColdPublicationData(record, operation, preparedSerenaHash(readyRaw)); err != nil {
+		return r, err
+	}
+	leaf, err := r.operationNamespace.LeafParentSHA256(ctx)
+	if err != nil || leaf != operation.LeafParentSHA256 {
+		return r, errors.Join(err, errors.New("SERENA_COLD_OPERATION_LEAF_DRIFT"))
+	}
+	selected, err := receiveSerenaSelectedContext(ctx, record, operation, environment, nil, nil)
+	if err != nil {
+		return r, err
+	}
+	r.selectedContext = &selected
 	requestSHA := preparedSerenaHash([]byte("serena-cold-publication-v1\n" + record.OperationID + "\n" + record.RequestIdentitySHA256))
 	intentAttempted = true
 	r.intentNamespace, err = AcquireSupervisorStateNamespaceObserved(ctx, SupervisorStateNamespaceRequest{SourceOperationID: record.OperationID, RequestSHA256: requestSHA, SourceEpoch: io.sourceSHA256, LeafRoles: []SupervisorStateLeafRole{SupervisorIntentLeaf}, CreateMissing: false})
@@ -122,7 +158,7 @@ func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context
 		return r, err
 	}
 	publishedAttempted = true
-	r.published, err = AcquireSerenaPublishedGenerationObserved(ctx, record, limits)
+	r.published, err = AcquireSerenaPublishedGenerationObserved(ctx, record, r.selectedContext.limits)
 	if err != nil {
 		return r, err
 	}
@@ -175,6 +211,13 @@ func (io PreparedSerenaRecordIO) observeColdPublicationReads(ctx context.Context
 			}
 			if err := validateColdPublicationData(record, operation, preparedSerenaHash(raw)); err != nil {
 				return err
+			}
+			selected, err := receiveSerenaSelectedContext(ctx, record, operation, environment, nil, r.selectedContext)
+			if err != nil {
+				return err
+			}
+			if r.selectedContext == nil || *r.selectedContext != selected {
+				return errors.New("SERENA_SELECTED_CONTEXT_DRIFT")
 			}
 			if err := r.published.ValidatePublished(ctx, record); err != nil {
 				return err

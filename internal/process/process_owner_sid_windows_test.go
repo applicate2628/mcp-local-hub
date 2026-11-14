@@ -139,26 +139,27 @@ func TestOpenProcessErrIsProcessGone(t *testing.T) {
 func TestProcessOwnerSIDMatchesCurrent_VanishedPID_IsAlreadyExited(t *testing.T) {
 	// A short-lived child whose PID we capture, then reap to a deterministic
 	// dead state before probing. `cmd /c exit 0` is always present on Windows.
-	cmd := exec.Command("cmd", "/c", "exit", "0")
+	cmd := exec.Command("cmd", "/d", "/c", "exit", "0")
+	NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("spawn throwaway child: %v", err)
 	}
 	deadPID := cmd.Process.Pid
-	// Wait() reaps the child and guarantees it has fully exited; after this the
-	// PID no longer refers to a live process (modulo an astronomically unlikely
-	// immediate reuse, which the (false, nil) branch below detects and skips on).
-	_ = cmd.Wait()
+	// Keep this exact kernel object addressable after Wait. Its PID cannot be
+	// reused while held, and OpenProcess may still succeed after it has exited.
+	held, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(deadPID))
+	if err != nil {
+		_ = cmd.Wait()
+		t.Fatalf("retain original throwaway process: %v", err)
+	}
+	defer windows.CloseHandle(held)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait throwaway process: %v", err)
+	}
 
 	match, err := ProcessOwnerSIDMatchesCurrent(deadPID)
 	if match {
 		t.Fatalf("a dead PID %d must not report an owner MATCH; got (true, %v)", deadPID, err)
-	}
-	if err == nil {
-		// (false, nil) is the PROVEN-different-owner verdict, which a dead PID is
-		// NOT. A genuinely reused-to-our-own-SID PID is the only benign way this
-		// could happen; treat it as an environment artifact, not a fix regression.
-		t.Skipf("dead PID %d returned (false, nil) — likely an immediate PID reuse; "+
-			"cannot assert the already-exited sentinel this run", deadPID)
 	}
 	if !errors.Is(err, ErrProcessAlreadyExited) {
 		t.Fatalf("pr301 r4 Finding 2 regression: a VANISHED PID %d must surface "+

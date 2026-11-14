@@ -45,7 +45,7 @@ type jobFixtureCommandWait struct {
 }
 type jobFixtureCommandOps struct {
 	pin     func(func(uintptr)) error
-	observe func(uintptr) (uint32, error)
+	observe func(uintptr, uint32) (uint32, error)
 	kill    func() error
 	wait    func() jobFixtureCommandWait
 }
@@ -76,7 +76,7 @@ func (c *jobFixtureCommand) operations() (jobFixtureCommandOps, error) {
 	}
 	return jobFixtureCommandOps{
 		pin:     c.process.WithHandle,
-		observe: func(h uintptr) (uint32, error) { return windows.WaitForSingleObject(windows.Handle(h), 0) },
+		observe: func(h uintptr, ms uint32) (uint32, error) { return windows.WaitForSingleObject(windows.Handle(h), ms) },
 		kill:    c.process.Kill,
 		wait: func() jobFixtureCommandWait {
 			err := c.cmd.Wait()
@@ -182,7 +182,7 @@ func (c *jobFixtureCommand) cleanupBy(deadline time.Time) error {
 		callbackRan := false
 		pinErr := ops.pin(func(h uintptr) {
 			callbackRan = true
-			status, err := ops.observe(h)
+			status, err := ops.observe(h, 0)
 			if observationErr = jobFixtureObservation(status, err); observationErr != nil {
 				return
 			}
@@ -191,7 +191,15 @@ func (c *jobFixtureCommand) cleanupBy(deadline time.Time) error {
 			}
 			killErr = ops.kill()
 			if killErr != nil {
-				post, err := ops.observe(h)
+				// TerminateJobObject is asynchronous. A concurrent original Kill
+				// can report ACCESS_DENIED before its handle becomes signaled.
+				// Keep this exact handle pinned for the remaining cleanup budget;
+				// only a positive exit observation may discharge that race.
+				var waitMs uint32
+				if remaining := time.Until(deadline); jobFixtureExitRace(killErr) && remaining > 0 {
+					waitMs = uint32(min((remaining+time.Millisecond-1)/time.Millisecond, time.Duration(^uint32(0)-1)))
+				}
+				post, err := ops.observe(h, waitMs)
 				observationErr = jobFixtureObservation(post, err)
 				postExited = observationErr == nil && post == uint32(windows.WAIT_OBJECT_0)
 			}
@@ -235,6 +243,10 @@ type jobFixtureCommandGuardState struct {
 
 func (s jobFixtureCommandGuardState) Pid() int     { return s.pid }
 func (s jobFixtureCommandGuardState) Exited() bool { return s.exited }
+
+func TestJobFixtureCommandCleanup(t *testing.T) {
+	checkJobFixtureCommandCleanup(t)
+}
 
 func checkJobFixtureCommandCleanup(t *testing.T) {
 	t.Helper()
@@ -298,7 +310,7 @@ func checkJobFixtureCommandCleanup(t *testing.T) {
 				callback(7)
 				return nil
 			},
-			observe: func(uintptr) (uint32, error) {
+			observe: func(_ uintptr, waitMs uint32) (uint32, error) {
 				observations++
 				if label == "unknown-observation" {
 					return uint32(windows.WAIT_FAILED), observationCause
@@ -310,6 +322,9 @@ func checkJobFixtureCommandCleanup(t *testing.T) {
 					return uint32(windows.WAIT_OBJECT_0), nil
 				}
 				if observations > 1 {
+					if label == "exit-race" && waitMs == 0 {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
 					if label == "live-denial" {
 						close(waitRelease)
 						return uint32(windows.WAIT_TIMEOUT), nil
@@ -1977,7 +1992,7 @@ func TestJobInformationTransportSourceContract(t *testing.T) {
 	fixtureNativeSites := 0
 	seams := 0
 	procedures := 0
-	for _, name := range []string{"jobobject_windows.go", "current_job_windows.go", "jobobject_windows_test.go", "job_options_windows_test.go"} {
+	for _, name := range []string{"jobobject_windows.go", "job_acquisition_windows.go", "current_job_windows.go", "jobobject_windows_test.go", "job_options_windows_test.go"} {
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(source), name), nil, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -2254,14 +2269,7 @@ func runJobFixtureTypedGCAndCreator(t *testing.T) {
 	p, startErr := StartProvisional(cmd)
 	// Keep even a returned post-create failure owner; failure cleanup is
 	// separate and cannot mint the genuine natural closure criterion.
-	proved := false
-	defer func() {
-		if p != nil && !proved {
-			if err := p.TerminateAndWait(5 * time.Second); err != nil {
-				t.Errorf("separate retained Provisional failure cleanup: %v", err)
-			}
-		}
-	}()
+	defer cleanupProvisionalLifetimeFixture(t, p)
 	if startErr != nil || p == nil {
 		t.Fatalf("real Provisional start: %v", startErr)
 	}
@@ -2358,15 +2366,9 @@ func runJobFixtureTypedGCAndCreator(t *testing.T) {
 	if err := verifyJobFixtureOutput(filepath.Join(root, "root.out"), "ROOT_READY\nROOT_CLOSED\n"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	proof, blockedErr := p.WaitCreatorClosure(ctx)
-	cancel()
-	if proof != nil || !errors.Is(blockedErr, context.DeadlineExceeded) || p.closeAttempted {
-		t.Fatalf("held descendant falsely yielded creator closure: proof=%v error=%v", proof, blockedErr)
-	}
 	afterBinding, err := observer.creatorBinding()
 	if err != nil || afterBinding != binding {
-		t.Fatalf("canceled observation lost original custody: %v", err)
+		t.Fatalf("held descendant lost original custody: %v", err)
 	}
 	accounting, err := p.job.queryAccounting()
 	if err != nil || accounting.TotalProcesses != 2 || accounting.ActiveProcesses != 1 {
@@ -2378,6 +2380,59 @@ func runJobFixtureTypedGCAndCreator(t *testing.T) {
 	}
 	if err := validateJobFixtureObject(childHandle, childReady.Process, exe, true); err != nil {
 		t.Fatal(err)
+	}
+	// One terminal observation owns one finite deadline. A timed-out native
+	// observation is immutable; it cannot be retried after releasing the child.
+	// Keep this same call pending while the actual descendant is held, then let
+	// that call observe its natural exit and close the original creator owners.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	deadline, _ := ctx.Deadline()
+	var proof *CreatorSettlement
+	var closureErr error
+	closureDone := make(chan struct{})
+	go func() {
+		proof, closureErr = p.WaitCreatorClosure(ctx)
+		close(closureDone)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-closureDone:
+		case <-time.After(5 * time.Second):
+			t.Error("original creator observation did not return after cancellation")
+		}
+	}()
+	// Observe actual terminal admission before measuring the held interval;
+	// an unscheduled goroutine alone is not evidence of a blocked observation.
+	for {
+		gate := p.job.memberCustody
+		gate.mu.Lock()
+		entered, bound, originalDeadline := gate.terminalActive, gate.terminalBound, gate.terminalDeadline
+		gate.mu.Unlock()
+		if entered {
+			if !bound || !originalDeadline.Equal(deadline) {
+				t.Fatal("creator observation did not retain its original deadline")
+			}
+			break
+		}
+		select {
+		case <-closureDone:
+			t.Fatalf("held descendant ended creator observation: proof=%v error=%v", proof, closureErr)
+		case <-ctx.Done():
+			t.Fatalf("creator observation admission: %v", ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	select {
+	case <-closureDone:
+		t.Fatalf("held descendant falsely yielded creator closure: proof=%v error=%v", proof, closureErr)
+	case <-time.After(50 * time.Millisecond):
+	}
+	p.mu.Lock()
+	closedEarly := p.closeAttempted || p.creatorSettlement != nil
+	p.mu.Unlock()
+	if closedEarly {
+		t.Fatal("held descendant released original creator custody")
 	}
 	if err := publishJobFixtureJSON(filepath.Join(root, "descendant-release.json"), jobFixtureControl{1, config.Nonce, "release"}, false); err != nil {
 		t.Fatal(err)
@@ -2395,7 +2450,7 @@ func runJobFixtureTypedGCAndCreator(t *testing.T) {
 	}
 	childClosed = true
 	var closed jobFixtureNativeFrame
-	closedRaw, err := awaitJobFixtureJSON(filepath.Join(root, "descendant-closed.json"), &closed, time.Now().Add(5*time.Second))
+	closedRaw, err := awaitJobFixtureJSON(filepath.Join(root, "descendant-closed.json"), &closed, deadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2406,19 +2461,20 @@ func runJobFixtureTypedGCAndCreator(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("JOB_FIXTURE_NATIVE_DESCENDANT_CLOSED json=%s sha256=%s native_exit=0 output_exclusive_closed=true", closedRaw, jobFixtureDigest(closedRaw))
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	proof, err = p.WaitCreatorClosure(ctx)
-	if err != nil || proof == nil {
-		t.Fatalf("actual creator closure: %v", err)
+	select {
+	case <-closureDone:
+	case <-ctx.Done():
+		t.Fatalf("actual creator closure deadline: %v", ctx.Err())
+	}
+	if closureErr != nil || proof == nil {
+		t.Fatalf("actual creator closure: %v", closureErr)
 	}
 	snapshot := proof.Snapshot()
 	if proof.owner != p || snapshot.OriginalPID != binding.pid || snapshot.OriginalStartedAt != binding.startedAt || !snapshot.DirectWaitComplete || !snapshot.CurrentMembersExited || !snapshot.HandlesClosed || !snapshot.OriginalExitCodeKnown || snapshot.OriginalExitCode != 17 || snapshot.RawExitError == nil || snapshot.RawExitError.ProcessState != cmd.ProcessState || snapshot.RawExitError.ProcessState.ExitCode() != 17 || !jobFixtureHex(snapshot.EvidenceSHA256, 64) || !p.settled {
 		t.Fatalf("genuine snapshot omitted original17/Wait/current closure: %+v", snapshot)
 	}
-	proved = true
 	t.Logf("JOB_FIXTURE_NATIVE_ORIGINAL_SNAPSHOT pid=%d startedAt=%q evidenceSha256=%s exit=17 wait=1 current_members_exited=true handles_closed=true forced=false", snapshot.OriginalPID, snapshot.OriginalStartedAt, snapshot.EvidenceSHA256)
-	t.Log("NATIVE_TYPED_CREATOR root=1 descendant=1 exit=17 wait=1 held_observation=no_proof released_observation=genuine current_members_exited=true original_handles_closed=true output_exclusive_closed=true forced=false")
+	t.Log("NATIVE_TYPED_CREATOR root=1 descendant=1 exit=17 wait=1 held_observation=no_proof released_observation=genuine terminal_calls=1 deadline_renewed=false current_members_exited=true original_handles_closed=true output_exclusive_closed=true forced=false")
 }
 
 func checkJobFixtureEntryCodec(t *testing.T) {

@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/api/binary_discovery"
 	"mcp-local-hub/internal/buildinfo"
@@ -26,13 +29,16 @@ type SerenaPreparationAdmission struct {
 	InstallSettings           []string
 }
 type SerenaPreparationInputs struct {
-	Request                     PreparedSerenaRequest
-	Environment                 []string `json:"-"`
-	InstallArgs                 []string
-	CleanupDeadline             time.Time
-	Policy                      SerenaPreparationPolicyV1
-	EnvironmentProjectionSHA256 string
-	execution                   SerenaPreparationEnvironment
+	Request                                           PreparedSerenaRequest
+	Environment                                       []string `json:"-"`
+	InstallArgs                                       []string
+	CleanupDeadline                                   time.Time
+	Policy                                            SerenaPreparationPolicyV2
+	EnvironmentProjectionSHA256                       string
+	execution                                         SerenaPreparationEnvironment
+	uvVersionProbe, pythonFindProbe, interpreterProbe *preparedSerenaCommandResult
+	qualifiedUV, qualifiedInterpreter                 PreparedSerenaFile
+	source                                            SerenaPreparationEnvironmentSource
 }
 
 func preparedSerenaEnvironmentMap(values []string) map[string]string {
@@ -62,8 +68,13 @@ func preparedSerenaEnvironmentWith(values []string, overrides map[string]string)
 	return result
 }
 
-func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerManifest, rawManifestSHA string, admission SerenaPreparationAdmission, override *SerenaPreparationPolicyV1) (result SerenaPreparationInputs, err error) {
-	policy, err := resolveSerenaPreparationPolicy(override)
+func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerManifest, rawManifestSHA string, admission SerenaPreparationAdmission, override *SerenaPreparationPolicyV2) (result SerenaPreparationInputs, err error) {
+	defer func() {
+		if err != nil {
+			err = &serenaPreparationInputsError{cause: err, inputs: result}
+		}
+	}()
+	policy, err := ResolveSerenaPreparationPolicy(override)
 	if err != nil {
 		return result, err
 	}
@@ -110,7 +121,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	if err != nil {
 		return result, err
 	}
-	result = SerenaPreparationInputs{Policy: policy, CleanupDeadline: end.Add(policy.CleanupLimit), Environment: append([]string(nil), admission.Environment...), EnvironmentProjectionSHA256: projectionSHA, execution: execution}
+	result = SerenaPreparationInputs{Policy: policy, CleanupDeadline: end.Add(policy.CleanupLimit), Environment: append([]string(nil), admission.Environment...), EnvironmentProjectionSHA256: projectionSHA, execution: execution, source: admission.EnvironmentSource}
 	publisherSource, sourceErr := buildinfo.CurrentPublisherSource()
 	if sourceErr != nil {
 		return result, sourceErr
@@ -147,6 +158,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	if err != nil {
 		return result, err
 	}
+	result.qualifiedUV = uv
 	// Probe stores are an acquired attempt capability, not ambient UV cache.
 	probeKey := preparedSerenaHash([]byte(rawManifestSHA + policySHA))
 	probe, acquireErr := AcquireSerenaOwnedTree(work, SerenaOwnedTreeRequest{Namespace: namespace, PackageIdentitySHA256: probeKey, OperationID: admission.OperationID, GenerationID: admission.GenerationID, Kind: "attempt", Limits: policy.OwnedTreeLimits})
@@ -185,10 +197,12 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 		return v, e
 	}
 	version, err := run([]string{"--version"})
-	if err != nil || !version.Closure.complete(admission.OperationID) || !version.Closure.RootExitKnown || version.Closure.RootExitCode != 0 || strings.TrimSpace(string(version.Stdout)) != "uv "+policy.UVVersion {
-		return result, errors.Join(err, errors.New("SERENA_PREPARATION_UV_VERSION_MISMATCH"))
+	result.uvVersionProbe = &version
+	if versionErr := validateSerenaUVProbe(version, admission.OperationID, policy, err); versionErr != nil {
+		return result, versionErr
 	}
-	found, err := run([]string{"python", "find", "--no-project", "--system", "--no-config", "--no-python-downloads", "--offline", policy.InterpreterSelector})
+	found, err := run(policy.pythonFindArgs())
+	result.pythonFindProbe = &found
 	if err != nil || !found.Closure.complete(admission.OperationID) || !found.Closure.RootExitKnown || found.Closure.RootExitCode != 0 {
 		return result, errors.Join(err, errors.New("SERENA_RUNTIME_INSTALL_NEEDED"))
 	}
@@ -200,17 +214,16 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	if err != nil {
 		return result, err
 	}
-	qualified, err := runPreparedSerenaInvocation(work, preparedSerenaInvocation{OperationID: admission.OperationID, Executable: interpreter, Args: []string{"-I", "-B", "-c", `import json,platform,sys,sysconfig;print(json.dumps({'version':platform.python_version(),'platform':sys.platform,'machine':platform.machine(),'soabi':sysconfig.get_config_var('SOABI') or '', 'stdlib':sysconfig.get_path('stdlib')},sort_keys=True,separators=(',',':')))`}, Environment: env, WorkingDir: probePath, PolicySHA256: policySHA, CleanupLimit: policy.CleanupLimit, AbsoluteCleanupDeadline: result.CleanupDeadline, StdoutLimit: 1 << 20, StderrLimit: 1 << 20})
+	result.qualifiedInterpreter = interpreter
+	qualified, err := runPreparedSerenaInvocation(work, preparedSerenaInvocation{OperationID: admission.OperationID, Executable: interpreter, Args: []string{"-I", "-B", "-c", `import json,platform,sys,sysconfig;print(json.dumps({'version':platform.python_version(),'version_info':list(sys.version_info[:3]),'platform':sys.platform,'machine':platform.machine(),'soabi':sysconfig.get_config_var('SOABI') or '', 'stdlib':sysconfig.get_path('stdlib')},sort_keys=True,separators=(',',':')))`}, Environment: env, WorkingDir: probePath, PolicySHA256: policySHA, CleanupLimit: policy.CleanupLimit, AbsoluteCleanupDeadline: result.CleanupDeadline, StdoutLimit: 1 << 20, StderrLimit: 1 << 20})
 	lastClosure = qualified.Closure
-	var abi struct {
-		Version  string `json:"version"`
-		Platform string `json:"platform"`
-		Machine  string `json:"machine"`
-		SOABI    string `json:"soabi"`
-		Stdlib   string `json:"stdlib"`
+	result.interpreterProbe = &qualified
+	abi, abiErr := decodeSerenaInterpreterABI(qualified.Stdout)
+	if err != nil || !lastClosure.complete(admission.OperationID) || !lastClosure.RootExitKnown || lastClosure.RootExitCode != 0 || abiErr != nil {
+		return result, errors.Join(err, abiErr, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_INVALID"))
 	}
-	if err != nil || !lastClosure.complete(admission.OperationID) || !lastClosure.RootExitKnown || lastClosure.RootExitCode != 0 || json.Unmarshal(qualified.Stdout, &abi) != nil || abi.Platform != "win32" || abi.Machine == "" || abi.SOABI == "" || (abi.Version != policy.InterpreterSelector && !strings.HasPrefix(abi.Version, policy.InterpreterSelector+".")) {
-		return result, errors.Join(err, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_INVALID"))
+	if err = policy.validatePythonVersion(abi.VersionInfo); err != nil {
+		return result, err
 	}
 	if !filepath.IsAbs(abi.Stdlib) || filepath.Clean(abi.Stdlib) != abi.Stdlib {
 		return result, errors.New("SERENA_PREPARATION_STDLIB_LOCATOR_INVALID")
@@ -242,6 +255,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	result.Request.BuildEnvironmentSHA256 = projectionSHA
 	result.Request.Launcher = launcher
 	result.Request.AbsoluteCleanupDeadline = result.CleanupDeadline
+	result.Request.preparationContext = &serenaPreparationContext{policy: policy, source: result.source, request: result.Request, uvProbe: result.uvVersionProbe, abiProbe: result.interpreterProbe}
 	if _, err = result.Request.Identity(); err != nil {
 		return result, err
 	}
@@ -249,7 +263,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	result.InstallArgs = append(result.InstallArgs, result.Request.Package)
 	result.Environment = preparedSerenaEnvironmentWith(admission.Environment, map[string]string{"PYTHONDONTWRITEBYTECODE": "1", "UV_PYTHON_DOWNLOADS": "never"})
 	if err = execution.networkPolicy.validateExecution(result.Environment, result.InstallArgs); err != nil {
-		return SerenaPreparationInputs{}, err
+		return result, err
 	}
 	return result, nil
 }
@@ -287,4 +301,74 @@ func preparedSerenaInstallSettings(settings []string, network *serenaPackageNetw
 		result = append(result, "--offline")
 	}
 	return result, nil
+}
+
+// Original partial execution results remain private data and preserve joined causes.
+type serenaPreparationInputsError struct {
+	cause  error
+	inputs SerenaPreparationInputs
+}
+
+func (e *serenaPreparationInputsError) Error() string { return e.cause.Error() }
+func (e *serenaPreparationInputsError) Unwrap() error { return e.cause }
+
+func validateSerenaUVProbe(v preparedSerenaCommandResult, id string, p SerenaPreparationPolicyV2, runErr error) error {
+	if runErr != nil || !v.Closure.complete(id) || !v.Closure.RootExitKnown || v.Closure.RootExitCode != 0 {
+		return errors.Join(runErr, errors.New("SERENA_PREPARATION_UV_VERSION_MISMATCH"))
+	}
+	if e := p.validateUVVersion(v.Stdout); e != nil {
+		return errors.Join(e, errors.New("SERENA_PREPARATION_UV_VERSION_MISMATCH"))
+	}
+	return nil
+}
+
+type serenaInterpreterABI struct {
+	Version     string `json:"version"`
+	VersionInfo []int  `json:"version_info"`
+	Platform    string `json:"platform"`
+	Machine     string `json:"machine"`
+	SOABI       string `json:"soabi"`
+	Stdlib      string `json:"stdlib"`
+}
+
+var serenaPythonVersion = regexp.MustCompile(`^([0-9]+\.[0-9]+\.[0-9]+)(?:(?:a|b|rc)[0-9]+)?(?:\+[A-Za-z0-9.-]+)?$`)
+
+func decodeSerenaInterpreterABI(raw []byte) (serenaInterpreterABI, error) {
+	var abi serenaInterpreterABI
+	if !utf8.Valid(raw) {
+		return abi, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_ENCODING_INVALID")
+	}
+	if e := rejectSerenaJSONDuplicates(raw); e != nil {
+		return abi, e
+	}
+	if e := requireSerenaOperationFields(raw, []string{"version", "version_info", "platform", "machine", "soabi", "stdlib"}); e != nil {
+		return abi, e
+	}
+	// JSON null leaves a primitive integer at zero. Preserve element presence
+	// at this boundary before decoding the original numeric ABI representation.
+	var tuple struct {
+		VersionInfo []*int `json:"version_info"`
+	}
+	if err := json.Unmarshal(raw, &tuple); err != nil {
+		return abi, err
+	}
+	for _, component := range tuple.VersionInfo {
+		if component == nil {
+			return abi, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_INVALID")
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if e := decoder.Decode(&abi); e != nil {
+		return abi, e
+	}
+	match := serenaPythonVersion.FindStringSubmatch(abi.Version)
+	if match == nil || len(abi.VersionInfo) != 3 || abi.Platform != "win32" || abi.Machine == "" || abi.SOABI == "" || !filepath.IsAbs(abi.Stdlib) || filepath.Clean(abi.Stdlib) != abi.Stdlib {
+		return abi, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_INVALID")
+	}
+	numeric, e := serenaNumericVersion(match[1], 3)
+	if e != nil || numeric != [3]int{abi.VersionInfo[0], abi.VersionInfo[1], abi.VersionInfo[2]} {
+		return abi, errors.Join(e, errors.New("SERENA_PREPARATION_INTERPRETER_ABI_VERSION_CONTRADICTORY"))
+	}
+	return abi, nil
 }

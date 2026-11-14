@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -18,7 +19,27 @@ func StartWithJobFilesOriginal(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	return startWithJobFilesOriginalWithOptions(job, cmd, stdin, stdout, stderr, nil)
 }
 
+// StartWithJobFilesOriginalAdmitted retains the original suspended process and
+// atomically assigned Job before admission. On failure the returned partial
+// owner still owns every acquired native resource; this function does not reap.
+// This direct starter is explicitly contextless; foreground composition passes
+// its invocation context through the private admitted path below.
+func StartWithJobFilesOriginalAdmitted(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, admission ForegroundCreateAdmission) (*AtCreateJobProcess, error) {
+	return startWithJobFilesOriginalAdmittedContext(nil, job, cmd, stdin, stdout, stderr, admission)
+}
+
+func startWithJobFilesOriginalAdmittedContext(ctx context.Context, job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, admission ForegroundCreateAdmission) (*AtCreateJobProcess, error) {
+	if admission == nil {
+		return nil, startWithJobError(StartWithJobInvalid, errors.New("foreground creation admission required"))
+	}
+	return startWithJobFilesOriginalCore(job, cmd, stdin, stdout, stderr, nil, admission, ctx)
+}
+
 func startWithJobFilesOriginalWithOptions(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, testOptions *startWithJobObserverOptions) (*AtCreateJobProcess, error) {
+	return startWithJobFilesOriginalCore(job, cmd, stdin, stdout, stderr, testOptions, nil, nil)
+}
+
+func startWithJobFilesOriginalCore(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, testOptions *startWithJobObserverOptions, admission ForegroundCreateAdmission, admissionContext context.Context) (*AtCreateJobProcess, error) {
 	if job == nil || cmd == nil || stdin == nil || stdout == nil || stderr == nil {
 		return nil, startWithJobError(StartWithJobInvalid, errors.New("original standard files required"))
 	}
@@ -48,11 +69,21 @@ func startWithJobFilesOriginalWithOptions(job *Job, cmd *exec.Cmd, stdin, stdout
 			}
 		}
 	}}
+	if admission != nil {
+		options.resumeContext = admissionContext
+		options.beforeResume = func() error {
+			if child.creationError != nil {
+				return child.creationError
+			}
+			return admission.AfterCreateBeforeResume(owner)
+		}
+	}
 	if testOptions != nil {
 		options.duplicateHandle = testOptions.duplicateHandle
 		options.closeChildHandle = testOptions.closeChildHandle
 		options.findProcess = testOptions.findProcess
 		options.newAttributeList = testOptions.newAttributeList
+		options.resumeThread = testOptions.resumeThread
 	}
 	_, err = startWithJobFilesObserved(job, cmd, stdin, stdout, stderr, &options)
 	if child.thread != 0 {

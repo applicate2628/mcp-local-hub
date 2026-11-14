@@ -54,9 +54,10 @@ func currentProcessUserSID() (*windows.SID, error) {
 }
 
 // processOwnerUserSID resolves the owner (token-user) SID of an arbitrary PID.
-// Opens the target with PROCESS_QUERY_LIMITED_INFORMATION (the least-privilege
-// access that still permits OpenProcessToken; works without admin in the common
-// same-user case), opens its token with TOKEN_QUERY, and reads TokenUser.
+// Opens the target with PROCESS_QUERY_LIMITED_INFORMATION and SYNCHRONIZE,
+// checks the same process object's exit state, opens its token with TOKEN_QUERY,
+// and reads TokenUser. A terminated object can remain open while another owner
+// retains a handle, so successful OpenProcess alone does not prove liveness.
 //
 // pr301 r4 Finding 2 (TOCTOU): the operator-facing kill gates verify a target's
 // image/argv/start-time identity FIRST, then call this gate. A process that
@@ -75,7 +76,7 @@ func processOwnerUserSID(pid int) (sid *windows.SID, retErr error) {
 	if pid <= 0 {
 		return nil, fmt.Errorf("process: invalid PID %d", pid)
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		if openProcessErrIsProcessGone(err) {
 			return nil, fmt.Errorf("process: OpenProcess(PID %d): %w", pid, ErrProcessAlreadyExited)
@@ -88,7 +89,18 @@ func processOwnerUserSID(pid int) (sid *windows.SID, retErr error) {
 			retErr = errors.Join(retErr, fmt.Errorf("process: close owner query: %w", err))
 		}
 	}()
-	return processHandleOwnerUserSID(h)
+	status, err := windows.WaitForSingleObject(h, 0)
+	if err != nil {
+		return nil, fmt.Errorf("process: owner query exit observation: %w", err)
+	}
+	switch status {
+	case windows.WAIT_OBJECT_0:
+		return nil, ErrProcessAlreadyExited
+	case uint32(windows.WAIT_TIMEOUT):
+		return processHandleOwnerUserSID(h)
+	default:
+		return nil, fmt.Errorf("process: owner query exit observation returned %d", status)
+	}
 }
 
 // processHandleOwnerUserSID reads/copies the token of the retained generation;
