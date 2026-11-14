@@ -32,7 +32,7 @@ func (c *preparedSerenaCombinedClosure) Complete() bool {
 // Installation is one effect of the package owner. uv receives exclusively
 // this generation/attempt's directories; stdout/stderr remain bounded private
 // receipt input. This function neither publishes nor mutates an intent.
-func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, roots PreparedSerenaOwnedRoots) (installed PreparedSerenaInstallation, err error) {
+func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, roots PreparedSerenaOwnedRoots, generation *SerenaOwnedTree) (installed PreparedSerenaInstallation, err error) {
 	if err = inputs.execution.networkPolicy.validateExecution(inputs.Environment, inputs.InstallArgs); err != nil {
 		return installed, err
 	}
@@ -49,10 +49,14 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	env := preparedSerenaEnvironmentWith(inputs.Environment, map[string]string{"UV_TOOL_DIR": filepath.Join(roots.Generation.Path, "tools"), "UV_TOOL_BIN_DIR": filepath.Join(roots.Generation.Path, "bin"), "UV_CACHE_DIR": filepath.Join(roots.Attempt.Path, "cache"), "TMP": roots.Attempt.Path, "TEMP": roots.Attempt.Path, "PYTHONDONTWRITEBYTECODE": "1", "UV_PYTHON_DOWNLOADS": "never"})
 	work, cancel := context.WithDeadline(ctx, r.WorkDeadline)
 	defer cancel()
-	invoke := func(file PreparedSerenaFile, args []string) (preparedSerenaCommandResult, error) {
-		return runPreparedSerenaInvocation(work, preparedSerenaInvocation{OperationID: r.OperationID, Executable: file, Args: args, Environment: env, WorkingDir: roots.Generation.Path, PolicySHA256: r.PolicySHA256, CleanupLimit: r.CleanupLimit, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, StdoutLimit: 64 << 20, StderrLimit: 8 << 20})
+	if err = validatePreparedSerenaGeneration(work, generation, r, roots.Generation); err != nil {
+		return installed, err
 	}
-	uv, installErr := invoke(r.UV, inputs.InstallArgs)
+	installed.generation = generation
+	invoke := func(file PreparedSerenaFile, args []string, executableTree *SerenaOwnedTree) (preparedSerenaCommandResult, error) {
+		return runPreparedSerenaInvocation(work, preparedSerenaInvocation{executableTree: executableTree, OperationID: r.OperationID, Executable: file, Args: args, Environment: env, WorkingDir: roots.Generation.Path, PolicySHA256: r.PolicySHA256, CleanupLimit: r.CleanupLimit, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, StdoutLimit: 64 << 20, StderrLimit: 8 << 20})
+	}
+	uv, installErr := invoke(r.UV, inputs.InstallArgs, nil)
 	installed.Closure = uv.Closure
 	combined := &preparedSerenaCombinedClosure{receipts: []process.ContainedStreamReceiptV1{uv.Receipt}, commands: []preparedSerenaCommandResult{uv}, commandErrors: []error{installErr}}
 	installed.Closure.nativeEvidence = combined
@@ -64,7 +68,7 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	// distribution selected by the pinned source requirement.
 	toolRoot := filepath.Join(roots.Generation.Path, "tools", r.Package)
 	receiptPath := filepath.Join(toolRoot, "uv-receipt.toml")
-	_, receiptRaw, readErr := qualifyPreparedSerenaFile(work, receiptPath, 1<<20)
+	_, receiptRaw, readErr := qualifyPreparedSerenaOwnedFile(work, generation, receiptPath, 1<<20)
 	combined.receiptRaw = append([]byte(nil), receiptRaw...)
 	if len(receiptRaw) != 0 {
 		installed.UVReceiptSHA256 = preparedSerenaHash(receiptRaw)
@@ -76,7 +80,7 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	if parseErr != nil {
 		return installed, parseErr
 	}
-	environmentPython, _, err := qualifyPreparedSerenaFile(work, filepath.Join(toolRoot, "Scripts", "python.exe"), 64<<20)
+	environmentPython, _, err := qualifyPreparedSerenaOwnedFile(work, generation, filepath.Join(toolRoot, "Scripts", "python.exe"), 64<<20)
 	if err != nil {
 		return installed, err
 	}
@@ -86,7 +90,7 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	if environmentPython.SHA256 != r.Launcher.SHA256 {
 		return installed, errors.New("SERENA_PREPARED_LAUNCHER_PROVENANCE_MISMATCH")
 	}
-	metadataCommand, metadataErr := invoke(environmentPython, []string{"-I", "-B", "-c", preparedSerenaMetadataCollector})
+	metadataCommand, metadataErr := invoke(environmentPython, []string{"-I", "-B", "-c", preparedSerenaMetadataCollector}, generation)
 	combined.receipts = append(combined.receipts, metadataCommand.Receipt)
 	combined.commands = append(combined.commands, metadataCommand)
 	combined.commandErrors = append(combined.commandErrors, metadataErr)
@@ -112,7 +116,7 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	qualifiedMembers := map[string]PreparedSerenaFile{}
 	for _, distribution := range metadata.Distributions {
 		for _, file := range distribution.Files {
-			actual, _, fileErr := qualifyPreparedSerenaFile(work, file.Path, 64<<20)
+			actual, _, fileErr := qualifyPreparedSerenaOwnedFile(work, generation, file.Path, 64<<20)
 			if fileErr != nil || actual.SHA256 != file.SHA256 {
 				return installed, errors.Join(fileErr, errors.New("SERENA_PREPARED_METADATA_FILE_DRIFT"))
 			}
@@ -127,7 +131,7 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	var selected PreparedSerenaFile
 	for _, association := range associations {
 		path := filepath.FromSlash(association.Receipt.InstallPath)
-		exported, _, exportErr := qualifyPreparedSerenaFile(work, path, 64<<20)
+		exported, _, exportErr := qualifyPreparedSerenaOwnedFile(work, generation, path, 64<<20)
 		if exportErr != nil {
 			return installed, exportErr
 		}
