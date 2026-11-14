@@ -279,6 +279,9 @@ func normalizeSerenaBuildValue(key, value string) (string, string, error) {
 		return "ordered-index-list", strings.Join(entries, " "), nil
 	case "UV_FIND_LINKS", "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE":
 		return "", "", errors.New("SERENA_BUILD_ARTIFACT_SOURCE_UNQUALIFIED")
+	case "PYTHONUNBUFFERED":
+		// Runtime stdout/stderr buffering is not a package preparation input.
+		return "runtime-only", "", nil
 	case "PYTHONDONTWRITEBYTECODE":
 		if value != "1" {
 			return "", "", errors.New("SERENA_BUILD_BYTECODE_POLICY_CONFLICT")
