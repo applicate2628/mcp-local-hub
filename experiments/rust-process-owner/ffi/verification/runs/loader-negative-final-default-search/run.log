@@ -1,0 +1,140 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T17:59:06.1842878Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T17:59:06.2311960Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+65f513d24b39d8ed83dbe80dd15e1c377fc0f76e
+Step: go-version
+Command: go version
+UTC: 2026-11-14T17:59:06.2714748Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: compiler-version
+Command: C:\msys64\ucrt64\bin\gcc.exe --version
+UTC: 2026-11-14T17:59:06.2880822Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+gcc.exe (Rev6, Built by MSYS2 project) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Step: build-valid
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\valid.dll
+UTC: 2026-11-14T17:59:07.1047856Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=0 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-0.dll
+UTC: 2026-11-14T17:59:07.6514193Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-1
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=1 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-1.dll
+UTC: 2026-11-14T17:59:08.1757606Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=2 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-2.dll
+UTC: 2026-11-14T17:59:08.7073723Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-3
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=3 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-3.dll
+UTC: 2026-11-14T17:59:09.2510057Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-4
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=4 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-4.dll
+UTC: 2026-11-14T17:59:09.8420857Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-5
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=5 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-5.dll
+UTC: 2026-11-14T17:59:10.4136302Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-6
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=6 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-6.dll
+UTC: 2026-11-14T17:59:11.0023607Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-7
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=7 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-7.dll
+UTC: 2026-11-14T17:59:12.1441181Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-8
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=8 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-8.dll
+UTC: 2026-11-14T17:59:14.3025710Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=0u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\version-0.dll
+UTC: 2026-11-14T17:59:15.9604276Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=2u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\version-2.dll
+UTC: 2026-11-14T17:59:18.9770073Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-max
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=4294967295u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\version-max.dll
+UTC: 2026-11-14T17:59:24.9749566Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-init-refused
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREFUSE_INITIALIZATION <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-negative-final-default-search\fixtures\init-refused.dll
+UTC: 2026-11-14T17:59:27.6322036Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\dependency.c -Wl,--out-implib,<LAB>\qualification-loader-negative-final-default-search\lib-owned-dependency.a -o <LAB>\qualification-loader-negative-final-default-search\fixtures\dependency-only\mcphub_owned_loader_dependency.dll
+UTC: 2026-11-14T17:59:29.9334985Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-needs-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREQUIRE_DEPENDENCY <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c <LAB>\qualification-loader-negative-final-default-search\lib-owned-dependency.a -o <LAB>\qualification-loader-negative-final-default-search\fixtures\missing-dependency\needs-dependency.dll
+UTC: 2026-11-14T17:59:31.9614889Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: negative-loader
+Command: go test -tags ffi_loader_faults . -run ^TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath$ -count=1 -timeout=30s -v
+UTC: 2026-11-14T17:59:56.0601135Z
+Expected exit: 1
+Actual exit: 1
+Matched: True
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+    loader_windows_test.go:268: isolated search check failed: exit status 1; --- FAIL: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (0.00s)
+            loader_windows_test.go:242: incompatible fixture accepted: needs-dependency.dll
+        FAIL
+--- FAIL: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (0.08s)
+FAIL
+FAIL	mcphub-owner-ffi-caller	0.124s
+FAIL

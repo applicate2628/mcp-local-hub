@@ -1,0 +1,1 @@
+Command: git -C <LAB>\source diff --check UTC: 2026-11-14T18:04:31.4936892Z Expected exit: 0 Actual exit: 0

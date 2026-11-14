@@ -86,3 +86,13 @@ The [post-rebuild artifact readback](native-cleanup-2026-11-14/ARTIFACT_READBACK
 keeps per-run DLL identities distinct across the later ordinary rebuild and
 records fresh checks of the current binaries. Old hashes are not overwritten
 and binary-reproducible builds are not implied.
+
+## Native loader refusal and module-reference qualification
+
+[Loader report/reproduction](loader-2026-11-14/RESULTS.md),
+[copy-only negative runner](loader-2026-11-14/run.ps1),
+[final loader steps](runs/loader-final/steps.json), and
+[ordinary regression steps](runs/loader-ordinary-final/steps.json) are retained.
+The runtime needed no change. Initial oracle/mutation-construction failures,
+three semantically failing negative controls, input hashes and grouped raw logs
+remain visible. Per-run binary identity is not confused with a later rebuild.

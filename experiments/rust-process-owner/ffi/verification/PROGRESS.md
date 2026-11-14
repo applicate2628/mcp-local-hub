@@ -275,3 +275,67 @@ remain intact. ARTIFACT_READBACK records both build epochs without claiming
 binary reproducibility. verify-artifacts.ps1 tested the current DLLs without
 rebuilding: debug/release export-absence controls and full normal Go race x1
 passed, each hash unchanged through the check. Extra evidence-only commit follows.
+
+## Loader failure/lifetime qualification - 2026-11-14
+
+Base65f513d24b39d8ed83dbe80dd15e1c377fc0f76e recovered after interrupted response:
+remote and private-clone heads match; clone clean; parent625 still7ce04f7.
+Artifact-readback65f513d was already pushed; no historical hashes rewritten.
+GitHub temporarily reported mergeable=false although the exact base is an
+ancestor of this branch; no merge/rebase attempted or merge-readiness inferred.
+
+Ruling: qualify actual library-load failures and reference ownership next, not
+reimplement completed process/stdio cleanup. Use tiny locally built benign C
+DLLs with declared ABI, no child creation/IO/threads in DllMain. Normal Rust DLL,
+public ABI and production loader remain unchanged unless a distinct defect is
+reproduced. No new dependency, install, remote model or workflow dispatch.
+Expected cases: missing/bad image, missing mandatory exports, unsupported ABI,
+initialization refusal, absent dependency, isolated dependency search and owned
+module references on success/failure. Absolute path is not authentication, and
+LoadLibrary executes image initialization before ABI checks: no untrusted-DLL
+sandbox/trust claim. Module observations never become an owned FreeLibrary call.
+
+Tests are opt-in ffi_loader_faults; fixture DLLs and optional mutated Go copies
+live only under D:\dev\ChatGPT. Thread-local error-dialog suppression is scoped
+and restored; no global loader search/error configuration is changed. Necessary
+sources, commands, failures, hashes, conclusions and limitations go into PR631.
+Run logs are grouped per qualification run instead of one file per compiler step.
+Loader initial run: all tested load refusals returned the expected native code.
+One TEST oracle then failed: GetModuleHandleEx(full malformed-image path) reported
+bad-image193 rather than the assumed module-not-found126. This was not a dropped
+LoadLibrary error or an accepted library. Split load-error preservation from
+module-reference assertions. The latter remain explicit for valid loaded DLLs
+rejected by symbols/version and for success/independent ownership paths; no
+claim about mapping absence is inferred from a failed malformed-image lookup.
+Initial failure log/source hashes retained. Scoped thread-error suppression is
+also placed on each actual subtest thread instead of its waiting parent.
+First loader negative-control attempt was correctly REJECTED by the runner:
+exit1 came from compilation, not the required semantic assertion. A block comment
+inserted inside the Go cgo block prematurely closed that block. Change only the
+copy-mutation annotation to a C line comment; normal source remains unchanged.
+Failed log/mutation hash are retained, not counted as a working negative control.
+All three valid loader negative controls now compiled and failed their exact
+semantic assertions: a retained module reference, accepting unsupported version,
+and falling back to CWD/PATH for a missing dependency. The wrapper's normal
+implementation remained unchanged throughout; no observed runtime defect.
+Self-review placed quiet error handling on actual Unicode/dependency subtest
+threads and added local-dependency load/unload observations. The final positive
+run records distinct top-level/nested counts, not repetitions as new tests.
+
+Loader qualification code committed: f2645b1fa994e8fdde0b5d4327f0220ba38cd742
+Fresh native loader7 top-level/20 nested/0 skipped passed race x3, vet and cgocheck2. Complete ordinary module47/31/0, ABI14 and parent53 debug/release gates passed; source hashes match. No normal runtime change. Documentation/evidence commit follows.
+
+Final loader qualification passed:7 top-level/20 nested/0 skipped, race x3,
+vet/cgocheck2; all24 expected loader steps matched. Full ordinary22-step run
+passed47/31/0 Go cases, both DLL profiles race x3, ABI14 and parent53 tests,
+Clippy and format checks. All tested qualification source hashes matched commit
+f2645b1. No runtime/ABI/dependency or product installation changed.
+Eleven selected/read skills and their application are recorded in RESULTS.
+This is author review and selected native Windows evidence, not independent
+acceptance, a safe-untrusted-DLL guarantee, performance or Unix coverage.
+
+Trash preflight initially rejected a Unicode manifest name decoded using the
+PowerShell default encoding. Explicit UTF-8 matched its name and unchanged hash;
+no movement preceded that correction. Diagnostic record preserved. Seven
+verified completed fixture/source copies then moved directly to approved trash;
+normal targets/cache/source/results retained, no deletion or trash emptying.

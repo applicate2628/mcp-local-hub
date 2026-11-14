@@ -1,0 +1,82 @@
+[
+    {
+        "path":  "init-refused.dll",
+        "sha256":  "7ccf43f4f115aac020f5110db81b59847a8794663f3b3a82f1aab6b910ec2e88"
+    },
+    {
+        "path":  "missing-0.dll",
+        "sha256":  "a1e05167384d615d184e0d468c8ae72a4888e63fa37ff256f25fde21a02ab44f"
+    },
+    {
+        "path":  "missing-1.dll",
+        "sha256":  "86b2e6ab29a9a8f4c9dbbc60e6755a1f9f1e073c19a515277b77573ff215902e"
+    },
+    {
+        "path":  "missing-2.dll",
+        "sha256":  "9aaa6950ca565ae2489756fd91bebe95eb6eb3a9f8a92f70d17ec72c227e3374"
+    },
+    {
+        "path":  "missing-3.dll",
+        "sha256":  "9caab128017b10d3bc1abfe29396181a4f5b6bfe7d498bb27b2108a85ffa1c1f"
+    },
+    {
+        "path":  "missing-4.dll",
+        "sha256":  "0c4d85b8558666390f4532397cb2ff9c1e3a74350a59622ac244e734abb51fbc"
+    },
+    {
+        "path":  "missing-5.dll",
+        "sha256":  "c0f9aec4f1be9dd3ce9c93ff62fbdd48fc39d68a14160f54c363e1f6fab2acc9"
+    },
+    {
+        "path":  "missing-6.dll",
+        "sha256":  "ec6354969247afdf917b68562b3eb62e3cf7120fc1f6fda22d3b174ca9ff8bba"
+    },
+    {
+        "path":  "missing-7.dll",
+        "sha256":  "fcb8d6ea2c5982cea40d6e8395f520d7c9a62574d8d4c4823f386f9bcc666125"
+    },
+    {
+        "path":  "missing-8.dll",
+        "sha256":  "6ca4949f5c7da518922a5e8b377e1b5ca7f4dc1a1f717436eea98a2589fa62fd"
+    },
+    {
+        "path":  "not-a-library.dll",
+        "sha256":  "1caab354b12f4b956577ef334cc96992982c6b6a23d82a7c483e0d138c085007"
+    },
+    {
+        "path":  "valid.dll",
+        "sha256":  "b8019afb195e681ed9a8bc3843e4b9ad271397c35823ca2ec3a17c0f96240dbe"
+    },
+    {
+        "path":  "version-0.dll",
+        "sha256":  "bb492caa500bbda47e0b1659c22fe4e5ca56f0578e860b9cc59dbeb08cb5c929"
+    },
+    {
+        "path":  "version-2.dll",
+        "sha256":  "b8fe9b8b89d55e31e12616fa9f30700ad3bf0525eee66b2416da3f8158975693"
+    },
+    {
+        "path":  "version-max.dll",
+        "sha256":  "18e6af552efa43b1a17823c2b41a3b830ef12c32655cfffae8d6d4d987ed4668"
+    },
+    {
+        "path":  "dependency-only/mcphub_owned_loader_dependency.dll",
+        "sha256":  "21e0aba14c5dec315cb47861089218694c38ebce5dabee74c18895a8d88bc7dc"
+    },
+    {
+        "path":  "missing-dependency/needs-dependency.dll",
+        "sha256":  "177e2384bc58a01b4be8addfe2f3237339b7ca59f035a4d826ec42790df8c18c"
+    },
+    {
+        "path":  "unicode-λ-🦀/valid.dll",
+        "sha256":  "b8019afb195e681ed9a8bc3843e4b9ad271397c35823ca2ec3a17c0f96240dbe"
+    },
+    {
+        "path":  "with-dependency/mcphub_owned_loader_dependency.dll",
+        "sha256":  "21e0aba14c5dec315cb47861089218694c38ebce5dabee74c18895a8d88bc7dc"
+    },
+    {
+        "path":  "with-dependency/needs-dependency.dll",
+        "sha256":  "177e2384bc58a01b4be8addfe2f3237339b7ca59f035a4d826ec42790df8c18c"
+    }
+]

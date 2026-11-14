@@ -1,0 +1,51 @@
+[
+    {
+        "run":  "positive-initial",
+        "source":  "\u003cLAB\u003e/qualification-loader-positive-initial",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/positive-initial",
+        "verified_files":  21,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "positive-corrected",
+        "source":  "\u003cLAB\u003e/qualification-loader-positive-corrected",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/positive-corrected",
+        "verified_files":  21,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "negative-leak-module",
+        "source":  "\u003cLAB\u003e/qualification-loader-negative-leak-module",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/negative-leak-module",
+        "verified_files":  37,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "negative-final-leak-module",
+        "source":  "\u003cLAB\u003e/qualification-loader-negative-final-leak-module",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/negative-final-leak-module",
+        "verified_files":  37,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "negative-final-accept-version",
+        "source":  "\u003cLAB\u003e/qualification-loader-negative-final-accept-version",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/negative-final-accept-version",
+        "verified_files":  37,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "negative-final-default-search",
+        "source":  "\u003cLAB\u003e/qualification-loader-negative-final-default-search",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/negative-final-default-search",
+        "verified_files":  37,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    },
+    {
+        "run":  "final",
+        "source":  "\u003cLAB\u003e/qualification-loader-final",
+        "destination":  "\u003cAPPROVED-TRASH\u003e/loader-qualification-20261114/final",
+        "verified_files":  21,
+        "reason":  "Completed reproducible fixture and optional Go copy; source, mutation and binary hashes preserved"
+    }
+]

@@ -1,0 +1,6 @@
+{
+    "name":  "accept-version",
+    "before":  "if (version()!=1)",
+    "after":  "if (version()!=version())",
+    "mutated_sha256":  "aca23b010c63e5c27f7ba71fe49abf4cfe0175cd71e7a73d885593ba1c08ed2f"
+}

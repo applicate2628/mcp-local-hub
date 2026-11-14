@@ -1,0 +1,4 @@
+Initial trash preflight stopped before moving anything: fixture path did not match a JSON entry decoded with PowerShell's default Get-Content encoding.
+Confirmed: default decoding matches=0; explicit UTF-8 matches=1; recorded/current SHA256 equal.
+Correction: use IO.File.ReadAllText (UTF-8) for all manifest JSON reads. Fixture content and historical manifests unchanged.
+This is an evidence-reader error, not a loader failure or artifact mismatch.

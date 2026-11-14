@@ -1,0 +1,427 @@
+Step: exit-control
+Command: C:\windows\system32\cmd.exe /d /c exit 7
+UTC: 2026-11-14T18:01:04.5755098Z
+Expected exit: 7
+Actual exit: 7
+Matched: True
+Step: source-head
+Command: git -C <LAB>\source rev-parse HEAD
+UTC: 2026-11-14T18:01:04.7330987Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+65f513d24b39d8ed83dbe80dd15e1c377fc0f76e
+Step: go-version
+Command: go version
+UTC: 2026-11-14T18:01:05.1818752Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+go version go1.27.4 windows/amd64
+Step: compiler-version
+Command: C:\msys64\ucrt64\bin\gcc.exe --version
+UTC: 2026-11-14T18:01:05.4584419Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+gcc.exe (Rev6, Built by MSYS2 project) 16.2.0
+Copyright (C) 2026 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Step: build-valid
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\valid.dll
+UTC: 2026-11-14T18:01:08.9183402Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=0 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-0.dll
+UTC: 2026-11-14T18:01:10.8757211Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-1
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=1 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-1.dll
+UTC: 2026-11-14T18:01:12.6001630Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=2 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-2.dll
+UTC: 2026-11-14T18:01:14.0654956Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-3
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=3 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-3.dll
+UTC: 2026-11-14T18:01:15.2220475Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-4
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=4 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-4.dll
+UTC: 2026-11-14T18:01:16.0896516Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-5
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=5 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-5.dll
+UTC: 2026-11-14T18:01:17.0486328Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-6
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=6 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-6.dll
+UTC: 2026-11-14T18:01:17.9139541Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-7
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=7 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-7.dll
+UTC: 2026-11-14T18:01:18.8700914Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-missing-8
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DOMIT_EXPORT=8 <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\missing-8.dll
+UTC: 2026-11-14T18:01:19.8414069Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-0
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=0u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\version-0.dll
+UTC: 2026-11-14T18:01:20.6969490Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-2
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=2u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\version-2.dll
+UTC: 2026-11-14T18:01:21.6514540Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-version-max
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DFIXTURE_VERSION=4294967295u <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\version-max.dll
+UTC: 2026-11-14T18:01:22.6163191Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-init-refused
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREFUSE_INITIALIZATION <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c -o <LAB>\qualification-loader-final\fixtures\init-refused.dll
+UTC: 2026-11-14T18:01:23.5450472Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\dependency.c -Wl,--out-implib,<LAB>\qualification-loader-final\lib-owned-dependency.a -o <LAB>\qualification-loader-final\fixtures\dependency-only\mcphub_owned_loader_dependency.dll
+UTC: 2026-11-14T18:01:24.4208205Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: build-needs-dependency
+Command: C:\msys64\ucrt64\bin\gcc.exe -std=c11 -Wall -Wextra -Werror -O2 -shared -nostdlib -Wl,--entry,DllMain -I <LAB>\source\experiments\rust-process-owner\ffi\include -DREQUIRE_DEPENDENCY <LAB>\source\experiments\rust-process-owner\ffi\verification\loader-2026-11-14\fixture.c <LAB>\qualification-loader-final\lib-owned-dependency.a -o <LAB>\qualification-loader-final\fixtures\missing-dependency\needs-dependency.dll
+UTC: 2026-11-14T18:01:25.1986922Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: loader-race
+Command: go test -tags ffi_loader_faults . -run ^TestLoader -count=3 -race -timeout=90s -v
+UTC: 2026-11-14T18:01:35.1062878Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.01s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.04s)
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.01s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.04s)
+=== RUN   TestLoaderRejectsEveryMissingExport
+=== RUN   TestLoaderRejectsEveryMissingExport/version
+=== RUN   TestLoaderRejectsEveryMissingExport/create
+=== RUN   TestLoaderRejectsEveryMissingExport/admit
+=== RUN   TestLoaderRejectsEveryMissingExport/stop
+=== RUN   TestLoaderRejectsEveryMissingExport/finish
+=== RUN   TestLoaderRejectsEveryMissingExport/release
+=== RUN   TestLoaderRejectsEveryMissingExport/checked
+=== RUN   TestLoaderRejectsEveryMissingExport/environment
+=== RUN   TestLoaderRejectsEveryMissingExport/stdio
+--- PASS: TestLoaderRejectsEveryMissingExport (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/version (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)
+    --- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll
+=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll
+--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)
+    --- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll
+=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll
+--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)
+    --- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll
+=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll
+--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)
+    --- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)
+=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences
+--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll
+=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll
+--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\valid.dll (0.00s)
+    --- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\needs-dependency.dll (0.00s)
+=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath
+--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (1.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	4.183s
+Step: loader-vet
+Command: go vet -tags ffi_loader_faults .
+UTC: 2026-11-14T18:01:43.3159498Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+Step: loader-cgocheck2
+Command: go test -tags ffi_loader_faults . -run ^TestLoader -count=1 -timeout=90s
+UTC: 2026-11-14T18:02:21.7690961Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+ok  	mcphub-owner-ffi-caller	0.117s
+Step: loader-counts
+Command: go test -tags ffi_loader_faults . -run ^TestLoader -count=1 -json -timeout=90s
+UTC: 2026-11-14T18:03:21.6130480Z
+Expected exit: 0
+Actual exit: 0
+Matched: True
+{"Time":"2026-11-14T21:03:21.3487309+03:00","Action":"start","Package":"mcphub-owner-ffi-caller"}
+{"Time":"2026-11-14T21:03:21.4757365+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport","Output":"=== RUN   TestLoaderRejectsEveryMissingExport\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/version"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/version","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/version\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/version","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/version (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/version","Elapsed":0.01}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/create"}
+{"Time":"2026-11-14T21:03:21.4772799+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/create","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/create\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/create","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/create (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/create","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/admit"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/admit","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/admit\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/admit","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/admit (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/admit","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stop"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stop","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/stop\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stop","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/stop (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stop","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/finish"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/finish","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/finish\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/finish","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/finish (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/finish","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/release"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/release","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/release\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/release","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/release (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/release","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/checked"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/checked","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/checked\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/checked","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/checked (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/checked","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/environment"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/environment","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/environment\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/environment","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/environment (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/environment","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stdio"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stdio","Output":"=== RUN   TestLoaderRejectsEveryMissingExport/stdio\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stdio","Output":"--- PASS: TestLoaderRejectsEveryMissingExport/stdio (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport/stdio","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport","Output":"--- PASS: TestLoaderRejectsEveryMissingExport (0.02s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsEveryMissingExport","Elapsed":0.02}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule","Output":"=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll","Output":"=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll","Output":"--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-0.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll","Output":"=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll","Output":"--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-2.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll","Output":"=== RUN   TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll","Output":"--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule/version-max.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule","Output":"--- PASS: TestLoaderRejectsVersionAndDoesNotRetainModule (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRejectsVersionAndDoesNotRetainModule","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors","Output":"=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll","Output":"=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll","Output":"--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/absent.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll","Output":"=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll","Output":"--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/not-a-library.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll","Output":"=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll","Output":"--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/init-refused.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll","Output":"=== RUN   TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll","Output":"--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4778323+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors/missing-dependency\\needs-dependency.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors","Output":"--- PASS: TestLoaderPreservesNativeImageAndInitializationErrors (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderPreservesNativeImageAndInitializationErrors","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference","Output":"=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll","Output":"=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll","Output":"--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/missing-8.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll","Output":"=== RUN   TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll","Output":"--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference/version-2.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference","Output":"--- PASS: TestLoaderRefusalDoesNotReleaseAnotherOwnersReference (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderRefusalDoesNotReleaseAnotherOwnersReference","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSeparateLibrariesKeepIndependentReferences"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSeparateLibrariesKeepIndependentReferences","Output":"=== RUN   TestLoaderSeparateLibrariesKeepIndependentReferences\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSeparateLibrariesKeepIndependentReferences","Output":"--- PASS: TestLoaderSeparateLibrariesKeepIndependentReferences (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSeparateLibrariesKeepIndependentReferences","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency","Output":"=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll"}
+{"Time":"2026-11-14T21:03:21.4783624+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll","Output":"=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll","Output":"--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/unicode-╬╗-ЁЯжА\\valid.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll","Output":"=== RUN   TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll","Output":"--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency/with-dependency\\needs-dependency.dll","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency","Output":"--- PASS: TestLoaderUnicodePathAndDllDirectoryDependency (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderUnicodePathAndDllDirectoryDependency","Elapsed":0}
+{"Time":"2026-11-14T21:03:21.4847249+03:00","Action":"run","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath"}
+{"Time":"2026-11-14T21:03:21.4879481+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath","Output":"=== RUN   TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.5461243+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath","Output":"--- PASS: TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath (0.07s)\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.5461243+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Test":"TestLoaderSearchDoesNotFallBackToWorkingDirectoryOrPath","Elapsed":0.07}
+{"Time":"2026-11-14T21:03:21.5461243+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-14T21:03:21.5571475+03:00","Action":"output","Package":"mcphub-owner-ffi-caller","Output":"ok  \tmcphub-owner-ffi-caller\t0.208s\n"}
+{"Time":"2026-11-14T21:03:21.5571475+03:00","Action":"pass","Package":"mcphub-owner-ffi-caller","Elapsed":0.208}

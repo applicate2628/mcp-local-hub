@@ -12,9 +12,10 @@
 6. [Memory, concurrency and failures](#memory-concurrency-and-failures)
 7. [Cancelable observation and pipe settlement](#cancelable-observation-and-pipe-settlement)
 8. [Native cleanup across the DLL boundary](#native-cleanup-across-the-dll-boundary)
-9. [Evidence](#evidence)
-10. [Reproduction](#reproduction)
-11. [Remaining gates and references](#remaining-gates-and-references)
+9. [Loader refusals and module ownership](#loader-refusals-and-module-ownership)
+10. [Evidence](#evidence)
+11. [Reproduction](#reproduction)
+12. [Remaining gates and references](#remaining-gates-and-references)
 
 ## Scope and ownership
 
@@ -250,6 +251,21 @@ executed explicitly, not added to normal test counts or silently skipped. Other
 kernel failure classes, loader/allocator/panic paths, Unix and product policy
 remain separate gates.
 
+## Loader refusals and module ownership
+
+[Native loader qualification](verification/loader-2026-11-14/RESULTS.md) now
+covers individually missing required exports, unsupported ABI versions, native
+image/initialization/dependency failures, independent module references, Unicode
+paths and the explicit dependency-search policy. Seven opt-in functions with20
+subcases run against benign owned DLLs; the ordinary loader was not changed.
+
+Three deliberately wrong bridge copies are rejected: a retained reference after
+refusal, acceptance of a wrong version, and unintended CWD/PATH dependency
+fallback. This is not a trust or sandbox guarantee: DLL initialization can run
+before version/export checks. Binary authenticity and other loader/unload races
+remain separate product gates. See the linked report for the corrected initial
+test assumption and invalid first mutation attempt, both preserved as failures.
+
 ## Evidence
 
 **Table 6. Independent verification layers.**
@@ -357,7 +373,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 ## Remaining gates and references
 
-Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus DLL/allocator/panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
+Before any product use: extend the checked observation to all fields and policy required by the actual product admission contract (for example token/creation-time/image validation where required); extend the now-qualified explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus loader/unload failures beyond the selected fixture profiles, allocator and panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
 The independent PR contains only this boundary; the native-owner parent PR remains unchanged. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. This is a checked first calling-side slice, not a complete Rust migration.
 

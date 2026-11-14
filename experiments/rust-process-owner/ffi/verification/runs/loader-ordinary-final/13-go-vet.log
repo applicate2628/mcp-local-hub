@@ -1,0 +1,1 @@
+Command: go vet . UTC: 2026-11-14T18:04:09.0941509Z Expected exit: 0 Actual exit: 0
