@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 )
@@ -15,30 +16,38 @@ import (
 // would conflict with its retained DELETE handle; sharing delete globally
 // would weaken the independent reader's ancestor protection.
 func preparedSerenaOwnedGeneration(ctx context.Context, tree *SerenaOwnedTree) (*windowsSerenaOwnedTree, string, error) {
-	if ctx == nil {
-		return nil, "", errors.New("SERENA_PREPARED_OWNED_FILE_CONTEXT_REQUIRED")
-	}
-	if err := ctx.Err(); err != nil {
+	owner, err := preparedSerenaOwnedGenerationOwner(ctx, tree)
+	if err != nil {
 		return nil, "", err
-	}
-	if tree == nil || tree.request.Kind != "generation" {
-		return nil, "", errors.New("SERENA_PREPARED_GENERATION_UNQUALIFIED")
-	}
-	owner, ok := tree.platform.(*windowsSerenaOwnedTree)
-	if !ok || owner == nil || owner.readExisting {
-		return nil, "", errors.New("SERENA_PREPARED_ORIGINAL_GENERATION_REQUIRED")
-	}
-	if owner.request.Namespace != tree.request.Namespace || owner.request.PackageIdentitySHA256 != tree.request.PackageIdentitySHA256 || owner.request.OperationID != tree.request.OperationID || owner.request.GenerationID != tree.request.GenerationID || owner.request.Kind != tree.request.Kind || owner.request.Limits != tree.request.Limits {
-		return nil, "", errors.New("SERENA_PREPARED_GENERATION_BINDING_DRIFT")
-	}
-	if owner.closeResult.Attempted || owner.removeAttempted || owner.root == nil || owner.parent == nil || owner.root.close.Attempted || owner.parent.close.Attempted {
-		return nil, "", errors.New("SERENA_TREE_ROOT_UNAVAILABLE")
-	}
-	if owner.inventoryCloseError != nil {
-		return nil, "", owner.inventoryCloseError
 	}
 	root, err := tree.WorkingDirectory(ctx)
 	return owner, root, err
+}
+
+func preparedSerenaOwnedGenerationOwner(ctx context.Context, tree *SerenaOwnedTree) (*windowsSerenaOwnedTree, error) {
+	if ctx == nil {
+		return nil, errors.New("SERENA_PREPARED_OWNED_FILE_CONTEXT_REQUIRED")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tree == nil || tree.request.Kind != "generation" {
+		return nil, errors.New("SERENA_PREPARED_GENERATION_UNQUALIFIED")
+	}
+	owner, ok := tree.platform.(*windowsSerenaOwnedTree)
+	if !ok || owner == nil || owner.readExisting {
+		return nil, errors.New("SERENA_PREPARED_ORIGINAL_GENERATION_REQUIRED")
+	}
+	if owner.request.Namespace != tree.request.Namespace || owner.request.PackageIdentitySHA256 != tree.request.PackageIdentitySHA256 || owner.request.OperationID != tree.request.OperationID || owner.request.GenerationID != tree.request.GenerationID || owner.request.Kind != tree.request.Kind || owner.request.Limits != tree.request.Limits {
+		return nil, errors.New("SERENA_PREPARED_GENERATION_BINDING_DRIFT")
+	}
+	if owner.closeResult.Attempted || owner.removeAttempted || owner.root == nil || owner.parent == nil || owner.root.close.Attempted || owner.parent.close.Attempted {
+		return nil, errors.New("SERENA_TREE_ROOT_UNAVAILABLE")
+	}
+	if owner.inventoryCloseError != nil {
+		return nil, owner.inventoryCloseError
+	}
+	return owner, nil
 }
 
 func validatePreparedSerenaGeneration(ctx context.Context, tree *SerenaOwnedTree, request PreparedSerenaRequest, root PreparedSerenaFile) error {
@@ -81,6 +90,115 @@ func qualifyPreparedSerenaOwnedFile(ctx context.Context, tree *SerenaOwnedTree, 
 		owner.inventoryCloseError = errors.Join(owner.inventoryCloseError, err)
 	}
 	return file, raw, err
+}
+
+// One bounded read transaction retains the original generation and policy.
+// Results stay private until the same full namespace/source validation succeeds
+// again. Rehashing the publisher image per member would consume the work bound.
+func qualifyPreparedSerenaOwnedFiles(ctx context.Context, tree *SerenaOwnedTree, paths []string, capBytes int64) (map[string]PreparedSerenaFile, error) {
+	owner, root, err := preparedSerenaOwnedGeneration(ctx, tree)
+	if err != nil {
+		return nil, err
+	}
+	policy, creation, parent, retained := owner.parentPolicy, owner.creation, owner.parent, owner.root
+	request := owner.request
+	files, err := readPreparedSerenaOwnedFiles(ctx, tree, owner, root, paths, capBytes)
+	if err != nil {
+		return nil, err
+	}
+	current, path, err := preparedSerenaOwnedGeneration(ctx, tree)
+	if err != nil {
+		return nil, err
+	}
+	if current != owner || path != root || owner.parentPolicy != policy || owner.creation != creation || owner.parent != parent || owner.root != retained || owner.request.Namespace != request.Namespace || owner.request.PackageIdentitySHA256 != request.PackageIdentitySHA256 || owner.request.OperationID != request.OperationID || owner.request.GenerationID != request.GenerationID || owner.request.Limits != request.Limits {
+		return nil, errors.New("SERENA_PREPARED_GENERATION_BINDING_DRIFT")
+	}
+	return files, nil
+}
+
+// Native traversal only, not namespace admission. The caller fully validates
+// the original owner before and after this body; no capability escapes it.
+func readPreparedSerenaOwnedFiles(ctx context.Context, tree *SerenaOwnedTree, owner *windowsSerenaOwnedTree, root string, paths []string, capBytes int64) (map[string]PreparedSerenaFile, error) {
+	current, err := preparedSerenaOwnedGenerationOwner(ctx, tree)
+	if err != nil {
+		return nil, err
+	}
+	if current != owner || owner.parentPolicy == nil || owner.parentPolicy.policy == nil || !owner.request.Limits.valid() || len(paths) == 0 || capBytes <= 0 {
+		return nil, errors.New("SERENA_PREPARED_OWNED_FILE_BATCH_INPUT_INVALID")
+	}
+	if _, finite := ctx.Deadline(); !finite {
+		return nil, errors.New("SERENA_PREPARED_GENERATION_WORK_DEADLINE_INVALID")
+	}
+	policy, creation, parent, retained := owner.parentPolicy, owner.creation, owner.parent, owner.root
+	parentIdentity, rootIdentity := owner.parentIdentity, owner.rootIdentity
+	request := owner.request
+	if root != filepath.Join(request.Namespace, request.PackageIdentitySHA256, "generations", owner.rootName) {
+		return nil, errors.New("SERENA_PREPARED_GENERATION_BINDING_DRIFT")
+	}
+	files := make(map[string]PreparedSerenaFile)
+	var pathBytes, logicalBytes int64
+	for _, path := range paths {
+		current, err = preparedSerenaOwnedGenerationOwner(ctx, tree)
+		if err != nil {
+			return nil, err
+		}
+		if current != owner || owner.parentPolicy != policy || owner.creation != creation || owner.parent != parent || owner.root != retained || owner.request.Namespace != request.Namespace || owner.request.PackageIdentitySHA256 != request.PackageIdentitySHA256 || owner.request.OperationID != request.OperationID || owner.request.GenerationID != request.GenerationID || owner.request.Limits != request.Limits {
+			return nil, errors.New("SERENA_PREPARED_GENERATION_BINDING_DRIFT")
+		}
+		if policy.policy.view.EnvIdentitySHA256 != StateReadPolicyEnvironmentIdentity() {
+			return nil, errors.New("SERENA_PREPARED_GENERATION_POLICY_DRIFT")
+		}
+		p, identityErr := serenaTreeHandleIdentity(parent.handle, nil)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if !p.Directory || p.Device != parentIdentity.Device || p.FileID != parentIdentity.FileID {
+			return nil, errors.New("SERENA_TREE_PARENT_DRIFT")
+		}
+		r, identityErr := serenaTreeHandleIdentity(retained.handle, nil)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if !r.Directory || r.Device != rootIdentity.Device || r.FileID != rootIdentity.FileID {
+			return nil, errors.New("SERENA_TREE_ROOT_DRIFT")
+		}
+		if _, alreadyRead := files[path]; alreadyRead {
+			continue
+		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil || !filepath.IsAbs(path) || filepath.Clean(path) != path || relative == "." || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return nil, errors.New("SERENA_PREPARED_FILE_OUTSIDE_GENERATION")
+		}
+		var encodedBytes int64
+		for _, part := range strings.Split(relative, string(filepath.Separator)) {
+			if !serenaTreeName(part) {
+				return nil, errors.New("SERENA_PREPARED_FILE_COMPONENT_INVALID")
+			}
+			encodedBytes += int64(len(utf16.Encode([]rune(part)))) * 2
+		}
+		// Match inventory's unique-entry and relative UTF-16 component budget.
+		if len(files) >= request.Limits.Entries || encodedBytes > request.Limits.EncodedPathBytes-pathBytes {
+			return nil, errors.New("SERENA_PREPARED_FILE_BATCH_LIMIT")
+		}
+		actual, raw, readErr := qualifyPreparedSerenaFileBeneath(ctx, root, retained.handle, path, capBytes, request.Limits)
+		var closeErr *preparedSerenaFileCloseError
+		if errors.As(readErr, &closeErr) {
+			owner.inventoryCloseError = errors.Join(owner.inventoryCloseError, readErr)
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+		if int64(len(raw)) > request.Limits.LogicalBytes-logicalBytes {
+			return nil, errors.New("SERENA_PREPARED_FILE_BATCH_LIMIT")
+		}
+		pathBytes += encodedBytes
+		logicalBytes += int64(len(raw))
+		files[path] = actual
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 func revalidatePreparedSerenaOwnedFile(ctx context.Context, tree *SerenaOwnedTree, expected PreparedSerenaFile) error {
