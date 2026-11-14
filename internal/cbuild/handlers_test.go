@@ -17,6 +17,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("MCP_CBUILD_FAKE_CTEST") != "" {
+		fmt.Println("1/2 Test #1: first .................. Passed 0.01 sec")
+		if os.Getenv("MCP_CBUILD_FAKE_CTEST") == "large" {
+			fmt.Println(strings.Repeat("x", maxCapturedOutput+1))
+		}
+		fmt.Println("2/2 Test #2: last ................... Passed 0.01 sec")
+		fmt.Println("100% tests passed, 0 tests failed out of 2")
+		os.Exit(0)
+	}
 	if os.Getenv("MCP_CBUILD_PROTOCOL_FAKE_CMAKE") == "1" {
 		for _, arg := range os.Args[1:] {
 			switch arg {
@@ -175,14 +184,13 @@ func TestSettleConfiguredCacheFailureClearsPriorMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &builder{configured: map[configuredCacheKey]string{
-		{sourceDir: sourceKey, preset: "dev"}: filepath.Join(source, "old-build"),
-	}}
+	key := configuredCacheKey{sourceDir: projectPathKey(sourceKey), preset: "dev"}
+	b := &builder{configured: map[configuredCacheKey]string{key: filepath.Join(source, "old-build")}}
 	if _, err := b.settleConfiguredCache(source, "dev", "CMake completed without a locator"); err == nil {
 		t.Fatal("settlement accepted output without CMake's completion line")
 	}
 	b.configuredMu.Lock()
-	_, retained := b.configured[configuredCacheKey{sourceDir: sourceKey, preset: "dev"}]
+	_, retained := b.configured[key]
 	b.configuredMu.Unlock()
 	if retained {
 		t.Fatal("failed configure settlement retained a stale cache mapping")
@@ -241,7 +249,12 @@ func TestPresetArgvWiring(t *testing.T) {
 			t.Errorf("%s argv = %q, want exactly --preset=-weird", tc.tool, tail)
 		}
 	}
-	tail := rawTailOf(t, toolNamed(t, "cmake_clean"), map[string]any{"preset": "-weird", "working_dir": dir})
+	// Clean requires a preset-specific settlement, not discovery of any cache.
+	b := &builder{configured: make(map[configuredCacheKey]string)}
+	if _, err := b.settleConfiguredCache(dir, "-weird", "-- Build files have been written to: "+buildDir); err != nil {
+		t.Fatal(err)
+	}
+	tail := rawTailOf(t, b.cmakeClean(), map[string]any{"preset": "-weird", "working_dir": dir})
 	canonicalBuildDir, err := canonicalExistingDir(buildDir)
 	if err != nil {
 		t.Fatalf("canonical build directory: %v", err)
@@ -272,7 +285,7 @@ func TestExecutionResultsRetainRawTailInMCPChannels(t *testing.T) {
 	}{
 		{"configure", configureResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
 		{"build", buildResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
-		{"test", testResult{}, `{"success":false,"exit_code":0,"total":0,"passed":0,"failed":0,"tests":null,"wall_ms":0,"raw_tail":""}`},
+		{"test", testResult{}, `{"results_partial":false,"output_truncated":false,"success":false,"exit_code":0,"total":0,"passed":0,"failed":0,"tests":null,"wall_ms":0,"raw_tail":""}`},
 		{"workflow", workflowResult{}, `{"success":false,"exit_code":0,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},
 		{"clean", cleanResult{}, `{"success":false,"purged":false,"raw_tail":""}`},
 		{"vcpkg_install", vcpkgInstallResult{}, `{"success":false,"exit_code":0,"installed":null,"diagnostics":null,"wall_ms":0,"raw_tail":""}`},

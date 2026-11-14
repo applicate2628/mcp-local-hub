@@ -131,11 +131,11 @@ func TestReadAdoptProvenanceLeavesAbsentStateRootAbsent(t *testing.T) {
 	}
 }
 
-// A3 — schema-version reject (version ∉ {0,1}) and version-0 normalization.
+// A3 — reject unsupported schema versions and normalize version 0.
 func TestAdoptedEntriesSchemaVersionReject(t *testing.T) {
 	isolateStateDir(t)
 
-	unsupportedVersion := adoptedEntriesSchemaV3 + 1
+	unsupportedVersion := adoptedEntriesSchemaV4 + 1
 	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, []byte(fmt.Sprintf(`{"version":%d,"records":[]}`, unsupportedVersion))); err != nil {
 		t.Fatalf("seed unsupported-version store: %v", err)
 	}

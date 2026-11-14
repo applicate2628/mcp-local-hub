@@ -59,6 +59,10 @@ func renderClientConfigSettlementRows(w io.Writer, rows []api.ClientConfigSettle
 // newInstallCmd. It is a thin wrapper over api.Install — all behavior lives
 // in internal/api so CLI and future GUI share one code path.
 func newInstallCmdReal() *cobra.Command {
+	return newInstallCmdRealWithWindowsCanonicalEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+func newInstallCmdRealWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	var server string
 	var daemonFilter string
 	var clientsFlag string
@@ -195,7 +199,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				}
 				// dispatchUpgrade admits exactly the managed supervisor transaction;
 				// fresh, legacy-scheduler, and unsupported-platform states fail closed.
-				return dispatchUpgrade(cmd)
+				return dispatchUpgradeWithWindowsCanonicalEntryInput(cmd, input)
 			}
 			if noClientConfig {
 				if server == "" {
@@ -304,11 +308,11 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if _, err := exec.LookPath(mcphubShortName); err != nil {
 					switch {
 					case targetDirOnPath():
-						if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+						if err := bootstrapWithWindowsCanonicalEntryInput(cmd.Context(), cmd.OutOrStdout(), input); err != nil {
 							return err
 						}
 					default:
-						if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
+						if err := maybeBootstrapInteractivelyWithWindowsCanonicalEntryInput(cmd.Context(), cmd.OutOrStdout(), os.Stdin, input); err != nil {
 							return err
 						}
 					}
@@ -889,6 +893,10 @@ func parseInstallClientsFlag(clientsFlag string, allClients bool) ([]string, err
 // preflight check will then surface the "not on PATH" error with the same
 // guidance, so automation never has its PATH mutated out from under it.
 func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
+	return maybeBootstrapInteractivelyWithWindowsCanonicalEntryInput(context.Background(), w, in, windowsCanonicalEntryCommandInput{})
+}
+
+func maybeBootstrapInteractivelyWithWindowsCanonicalEntryInput(ctx context.Context, w io.Writer, in *os.File, input windowsCanonicalEntryCommandInput) error {
 	if !term.IsTerminal(int(in.Fd())) {
 		return nil
 	}
@@ -899,7 +907,7 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 	}
 	answer := strings.TrimSpace(line)
 	if answer == "" || strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes") {
-		return Bootstrap(w)
+		return bootstrapWithWindowsCanonicalEntryInput(ctx, w, input)
 	}
 	return fmt.Errorf("%s not found on PATH — run `mcphub setup` once to install to ~/.local/bin and register in PATH", mcphubShortName)
 }
@@ -1351,6 +1359,16 @@ func dispatchUpgrade(cmd *cobra.Command) error {
 	return dispatchUpgradeReal(cmd)
 }
 
+func dispatchUpgradeWithWindowsCanonicalEntryInput(cmd *cobra.Command, input windowsCanonicalEntryCommandInput) error {
+	if runtime.GOOS == "windows" && input.bindingErr != nil {
+		return input.bindingErr
+	}
+	if upgradeDispatcher != nil {
+		return upgradeDispatcher(cmd)
+	}
+	return dispatchUpgradeRealWithRunner(cmd, func(cmd *cobra.Command) error { return runV5UpgradeRealWithWindowsCanonicalEntryInput(cmd, input) })
+}
+
 // hasSupervisorIntent reports whether the state-dir's supervisor-intent.json
 // names an actual v0.5.x supervisor — i.e. carries at least one
 // supervisor-owned DAEMON DESCRIPTOR row (len(intent.Daemons) > 0 after the
@@ -1423,12 +1441,16 @@ func hasSupervisorIntent() (bool, error) {
 // Any state-probe failure short-circuits with the wrapped error so the
 // operator sees the real cause instead of a confused fallback.
 func dispatchUpgradeReal(cmd *cobra.Command) error {
+	return dispatchUpgradeRealWithRunner(cmd, runV5UpgradeReal)
+}
+
+func dispatchUpgradeRealWithRunner(cmd *cobra.Command, run func(*cobra.Command) error) error {
 	supervisorPresent, err := hasSupervisorIntent()
 	if err != nil {
 		return fmt.Errorf("upgrade routing: probe supervisor-intent.json: %w", err)
 	}
 	if supervisorPresent {
-		return runV5UpgradeReal(cmd)
+		return run(cmd)
 	}
 	legacyProbe, err := probeLegacySchedulerUpgradeTasks(api.NewAPI())
 	if err != nil {
@@ -1509,3 +1531,17 @@ func runV5UpgradeReal(cmd *cobra.Command) error {
 // install_migration_wiring_windows.go (Windows) or left nil on POSIX. Tests
 // override the higher-level upgradeDispatcher seam instead.
 var v5UpgradeFn func(cmd *cobra.Command) error
+
+// The function selects the platform adapter; the build tuple stays captured in
+// the command and is passed per invocation, never stored in a mutable global.
+var v5UpgradeWithWindowsCanonicalEntryInputFn func(*cobra.Command, windowsCanonicalEntryCommandInput) error
+
+func runV5UpgradeRealWithWindowsCanonicalEntryInput(cmd *cobra.Command, input windowsCanonicalEntryCommandInput) error {
+	if v5UpgradeWithWindowsCanonicalEntryInputFn == nil {
+		return runV5UpgradeReal(cmd)
+	}
+	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
+		return err
+	}
+	return v5UpgradeWithWindowsCanonicalEntryInputFn(cmd, input)
+}

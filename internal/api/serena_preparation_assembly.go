@@ -8,12 +8,12 @@ import (
 )
 
 type SerenaPreparationAssembly interface {
-	PrepareInputs(context.Context, *config.ServerManifest, string, []string, *SerenaPreparationPolicyV1) (SerenaPreparationInputs, error)
+	PrepareInputs(context.Context, *config.ServerManifest, string, []string, *SerenaPreparationPolicyV2) (SerenaPreparationInputs, error)
 	QualificationPort() PreparedSerenaQualificationPort
 }
 
 type SerenaConsumerEnvironmentAssembly interface {
-	ObserveConsumerEnvironment(context.Context, *config.ServerManifest, string, string, *SerenaPreparationPolicyV1) (*SerenaConsumerEnvironmentObservation, error)
+	ObserveConsumerEnvironment(context.Context, *config.ServerManifest, string, string, *SerenaPreparationPolicyV2) (*SerenaConsumerEnvironmentObservation, error)
 }
 
 func (a *API) prepareSerenaInstallPlan(ctx context.Context, m *config.ServerManifest, plan *Plan, dryRun bool) error {
@@ -66,7 +66,7 @@ func (a *API) prepareSerenaInstallPlan(ctx context.Context, m *config.ServerMani
 	}
 	bounded, cancel := context.WithDeadline(ctx, request.WorkDeadline)
 	defer cancel()
-	invocation, invocationErr := owner.AcquireConsumerInvocation(bounded, PreparedSerenaConsumerInvocationRequest{OperationID: consumerID, Binding: binding, ExpectedDescriptors: descriptors})
+	invocation, invocationErr := owner.AcquireConsumerInvocation(bounded, PreparedSerenaConsumerInvocationRequest{OperationID: consumerID, Binding: binding, ExpectedDescriptors: descriptors, preparation: request.preparationContext})
 	if invocationErr != nil {
 		if invocation != nil {
 			proof, closeErr := invocation.CloseObserved()
@@ -88,7 +88,7 @@ func NewAPIWithSerenaPreparation(assembly SerenaPreparationAssembly) *API {
 // Normal install calls this unlocked, with its actual frozen task set.
 // Parsed callers already holding exclusion must supply a previously qualified
 // binding instead. No API-to-daemon import or default global provider exists.
-func (a *API) prepareSerenaInstall(ctx context.Context, m *config.ServerManifest, rawSHA string, tasks []string, policy *SerenaPreparationPolicyV1) (PreparedSerenaRuntimeBinding, PreparedSerenaRuntimeRecord, PreparedSerenaRequest, error) {
+func (a *API) prepareSerenaInstall(ctx context.Context, m *config.ServerManifest, rawSHA string, tasks []string, policy *SerenaPreparationPolicyV2) (PreparedSerenaRuntimeBinding, PreparedSerenaRuntimeRecord, PreparedSerenaRequest, error) {
 	if a == nil || a.serenaPreparationAssembly == nil {
 		return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, errors.New("SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE")
 	}

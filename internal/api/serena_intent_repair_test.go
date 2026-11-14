@@ -1283,7 +1283,7 @@ func (f *failingTargetedSerenaAssembly) QualificationPort() PreparedSerenaQualif
 	f.t.Fatal("failed input acquisition reached package qualification")
 	return nil
 }
-func (f *failingTargetedSerenaAssembly) PrepareInputs(ctx context.Context, manifest *config.ServerManifest, rawSHA string, tasks []string, _ *SerenaPreparationPolicyV1) (SerenaPreparationInputs, error) {
+func (f *failingTargetedSerenaAssembly) PrepareInputs(ctx context.Context, manifest *config.ServerManifest, rawSHA string, tasks []string, _ *SerenaPreparationPolicyV2) (SerenaPreparationInputs, error) {
 	f.calls++
 	if manifest == nil || manifest.DaemonTemplate == nil || !preparedSerenaDigest(rawSHA) || len(tasks) != 1 || tasks[0] != canonicalIntentTaskKey(f.target.TaskName) {
 		f.t.Fatal("producer lost selected source/task")

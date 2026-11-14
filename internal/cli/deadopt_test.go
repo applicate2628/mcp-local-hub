@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 type fakeDeAdoptCLIAPI struct {
@@ -59,7 +60,7 @@ func TestDeAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) 
 	secret := "fixture-only-canary:deadopt-cli:" + t.Name()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	stateRoot := filepath.Join(root, "state")
+	stateRoot := apitest.HardenedDir(t, filepath.Join(root, "state"))
 	manifestRoot := filepath.Join(root, "manifests")
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

@@ -7,9 +7,32 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestRunStrictlyContained_GitVersionDrainsAddressableCapture(t *testing.T) {
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("Git executable is required for the native publisher capture regression")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.Command(git, "--version")
+	NoConsole(cmd)
+	maxBytes := int(^uint(0) >> 1)
+	result, err := RunStrictlyContained(ctx, StrictRunInvocation{
+		Command: cmd, InputLimit: 1, StdoutLimit: maxBytes, StderrLimit: maxBytes,
+	})
+	if err != nil {
+		t.Fatalf("bounded local Git version capture: %v", err)
+	}
+	if result.SettledExit == nil || result.SettledExit.ExitCode != 0 || result.SettledExit.TimedOut ||
+		result.Stdout.Truncated || result.Stderr.Truncated || !strings.HasPrefix(string(result.Stdout.Prefix), "git version ") {
+		t.Fatalf("local Git capture did not settle: stdout_bytes=%d stderr_bytes=%d settled=%+v", result.Stdout.Bytes, result.Stderr.Bytes, result.SettledExit)
+	}
+}
 
 func TestRunStrictlyContained_FastExitDrainsBeforeReadEndsClose(t *testing.T) {
 	if os.Getenv("MCPHUB_STRICT_FAST_EXIT_HELPER") == "1" {

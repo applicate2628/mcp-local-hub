@@ -492,13 +492,126 @@ func awaitJobFixtureJSON(path string, target any, deadline time.Time) ([]byte, e
 			}
 			return raw, nil
 		}
-		if !errors.Is(err, os.ErrNotExist) {
+		// A published Windows leaf may still be temporarily unavailable for
+		// reading. Retry only sharing conflicts and absence, within the
+		// original absolute deadline.
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
 			return nil, err
 		}
-		time.Sleep(10 * time.Millisecond)
+		if delay := min(10*time.Millisecond, time.Until(deadline)); delay > 0 {
+			time.Sleep(delay)
+		}
 	}
 	return nil, fmt.Errorf("control publication %s: %w", filepath.Base(path), context.DeadlineExceeded)
 }
+
+func TestAwaitJobFixtureJSONSharingViolation(t *testing.T) {
+	want := jobFixtureControl{V: 1, Nonce: strings.Repeat("1", 32), Action: "ready"}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []bool{true, false} {
+		name := "held-through-deadline"
+		if release {
+			name = "released-before-deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ready.json")
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			wide, err := windows.UTF16PtrFromString(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle, err := windows.CreateFile(wide, windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closed := false
+			closeHeld := func() error {
+				if closed {
+					return nil
+				}
+				closed = true
+				return windows.CloseHandle(handle)
+			}
+			t.Cleanup(func() {
+				if err := closeHeld(); err != nil {
+					t.Errorf("close held fixture: %v", err)
+				}
+			})
+			if _, err := jobFixtureReadFile(path); !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+				t.Fatalf("fixture did not produce native sharing violation: %v", err)
+			}
+			deadline := time.Now().Add(100 * time.Millisecond)
+			if release {
+				deadline = time.Now().Add(5 * time.Second)
+			}
+			type result struct {
+				raw   []byte
+				value jobFixtureControl
+				err   error
+			}
+			done := make(chan result, 1)
+			joined := false
+			t.Cleanup(func() {
+				if err := closeHeld(); err != nil {
+					t.Errorf("release fixture before waiter join: %v", err)
+				}
+				if !joined {
+					select {
+					case <-done:
+					case <-time.After(time.Second):
+						t.Error("fixture waiter did not finish after release")
+					}
+				}
+			})
+			go func() {
+				var got result
+				got.raw, got.err = awaitJobFixtureJSON(path, &got.value, deadline)
+				done <- got
+			}()
+			if release {
+				select {
+				case got := <-done:
+					joined = true
+					t.Fatalf("sharing violation returned before release: %v", got.err)
+				case <-time.After(30 * time.Millisecond):
+				}
+				if err := closeHeld(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case got := <-done:
+				joined = true
+				if release {
+					if got.err != nil || got.value != want || !bytes.Equal(got.raw, raw) {
+						t.Fatalf("released publication: value=%+v err=%v", got.value, got.err)
+					}
+				} else if !errors.Is(got.err, context.DeadlineExceeded) || got.raw != nil || got.value != (jobFixtureControl{}) || time.Now().Before(deadline) {
+					t.Fatalf("held publication did not retain its deadline: value=%+v err=%v", got.value, got.err)
+				}
+			case <-time.After(max(time.Until(deadline), 0) + time.Second):
+				t.Fatal("publication wait exceeded its original deadline")
+			}
+		})
+	}
+	t.Run("malformed-is-not-retried", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ready.json")
+		if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var got jobFixtureControl
+		read, err := awaitJobFixtureJSON(path, &got, time.Now().Add(time.Second))
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || string(read) != "{" {
+			t.Fatalf("malformed publication was retried: raw=%q err=%v", read, err)
+		}
+	})
+}
+
 func awaitJobFixtureControl(path, nonce, action string, deadline time.Time) error {
 	var c jobFixtureControl
 	if _, err := awaitJobFixtureJSON(path, &c, deadline); err != nil {

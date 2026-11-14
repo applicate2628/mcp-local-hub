@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -68,7 +69,7 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
@@ -129,7 +130,7 @@ func TestDispatchUpgradeReal_SupervisorPathRunsUpgradeGuardsBeforeV5(t *testing.
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
@@ -168,7 +169,7 @@ func TestDispatchUpgradeReal_FreshInstallFailsClosedBeforeMutation(t *testing.T)
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
 		return &upgradeRoutingFakeScheduler{}, nil
@@ -207,7 +208,7 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksFailClosedBeforeMutatio
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 	fakeScheduler := &upgradeRoutingFakeScheduler{
 		tasks: []scheduler.TaskStatus{{Name: `\mcp-local-hub-memory-default`, State: "Running"}},
@@ -233,7 +234,7 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksFailClosedBeforeMutatio
 }
 
 func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	got, err := hasSupervisorIntent()
@@ -250,7 +251,7 @@ func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {
 // descriptor row → (true, nil). Mere file presence is no longer sufficient;
 // the file must name an actual supervisor-owned daemon.
 func TestHasSupervisorIntent_DaemonBearingReturnsTrue(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	stateDir, err := api.DaemonStateDir()
@@ -271,7 +272,7 @@ func TestHasSupervisorIntent_DaemonBearingReturnsTrue(t *testing.T) {
 // A stops-only intent has no managed daemon fleet and therefore cannot enter
 // the admitted upgrade transaction; the dispatcher must fail closed upstream.
 func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	stateDir, err := api.DaemonStateDir()
@@ -302,10 +303,10 @@ func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestHasSupervisorIntent_EmptyObjectReturnsFalse pins that a bare `{}`
-// (zero daemons, zero stops) also routes as "no v0.5 supervisor".
-func TestHasSupervisorIntent_EmptyObjectReturnsFalse(t *testing.T) {
-	root := t.TempDir()
+// A bare object lacks the required intent version. Corrupt input must refuse
+// routing, even though it also contains no daemon rows.
+func TestHasSupervisorIntent_EmptyObjectRefusesUnsupportedVersion(t *testing.T) {
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	stateDir, err := api.DaemonStateDir()
@@ -318,11 +319,11 @@ func TestHasSupervisorIntent_EmptyObjectReturnsFalse(t *testing.T) {
 	}
 
 	got, err := hasSupervisorIntent()
-	if err != nil {
-		t.Fatalf("hasSupervisorIntent err = %v, want nil", err)
+	if err == nil || !strings.Contains(err.Error(), "SERENA_PREPARED_INTENT_VERSION_UNSUPPORTED") {
+		t.Fatalf("hasSupervisorIntent err = %v, want unsupported-version refusal", err)
 	}
 	if got {
-		t.Fatalf("hasSupervisorIntent = true on `{}`; want false (zero daemon rows)")
+		t.Fatal("hasSupervisorIntent accepted an intent without a supported version")
 	}
 }
 
@@ -331,7 +332,7 @@ func TestHasSupervisorIntent_EmptyObjectReturnsFalse(t *testing.T) {
 // error, NOT a silent false — the routing dispatcher then fails closed instead
 // of mis-routing on a file it could not read.
 func TestHasSupervisorIntent_UnreadableReturnsError(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	stateDir, err := api.DaemonStateDir()
@@ -385,7 +386,7 @@ func (f *upgradeRoutingFakeScheduler) ImportXML(string, []byte) error { f.mutati
 // A directory named supervisor-intent.json is corrupt state and must fail
 // before the dispatcher can enter the sole managed upgrade transaction.
 func TestHasSupervisorIntent_DirectoryReturnsError(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 
 	stateDir, err := api.DaemonStateDir()

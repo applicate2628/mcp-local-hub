@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,10 @@ func bootstrapProductToTarget(w io.Writer, curExe, target string) error {
 	}
 	fmt.Fprintf(w, "\u2713 mcphub installed at %s\n", target)
 	return nil
+}
+
+func bootstrapProductToTargetWithWindowsCanonicalEntryInput(_ context.Context, w io.Writer, curExe, target string, _ windowsCanonicalEntryCommandInput) error {
+	return bootstrapProductToTarget(w, curExe, target)
 }
 
 // ensureOnPath on non-Windows prints a one-liner the user can paste into

@@ -32,9 +32,13 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/gui"
 )
 
 // neutralizeClientConfigPathEnv points every client-config path environment
@@ -46,9 +50,24 @@ import (
 // single-layer shape sets it explicitly after calling this helper.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
+	// Set the root DACL before creating descendants whose inherited access
+	// would otherwise be removed when the root is protected afterward.
+	apitest.HardenedDir(t, sandboxHome)
 	restore, err := clients.ApplyClientConfigSandboxEnvironment(sandboxHome)
 	if err != nil {
 		t.Fatalf("prepare client config sandbox: %v", err)
 	}
 	t.Cleanup(restore)
+	// These fixtures also exercise state/config writes. Protect their exact
+	// parents: Windows does not inherit the helper's owner-only DACL into
+	// newly created child directories.
+	settingsDir := filepath.Dir(api.SettingsPath())
+	apitest.HardenedDir(t, settingsDir)
+	pidportPath, err := gui.PidportPathNoCreate()
+	if err != nil {
+		t.Fatalf("resolve sandbox GUI state: %v", err)
+	}
+	if dir := filepath.Dir(pidportPath); dir != settingsDir {
+		apitest.HardenedDir(t, dir)
+	}
 }

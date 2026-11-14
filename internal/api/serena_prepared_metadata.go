@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -85,8 +86,8 @@ type preparedSerenaUVReceipt struct {
 	} `toml:"tool"`
 }
 
-// ToolWire uses flattened structured requirements. The git serializer carries
-// the exact commit in a URL fragment, never the input git+URL@commit spelling.
+// ToolWire carries the exact Git revision in a rev query, a fragment, or
+// agreeing carriers. Preserve the original receipt rather than remarshal it.
 func parsePreparedSerenaUVReceipt(raw []byte, request PreparedSerenaRequest, generation string) (preparedSerenaUVReceipt, string, error) {
 	var receipt preparedSerenaUVReceipt
 	if len(raw) == 0 || len(raw) > 1<<20 {
@@ -103,25 +104,53 @@ func parsePreparedSerenaUVReceipt(raw []byte, request PreparedSerenaRequest, gen
 	git, gitOK := requirement["git"].(string)
 	u, err := url.Parse(git)
 	expected, expectedErr := url.Parse(strings.TrimSuffix(strings.TrimPrefix(request.SourceRequirement, "git+"), "@"+request.SourceCommit))
-	if !nameOK || name != request.Package || !gitOK || err != nil || expectedErr != nil || u.User != nil || u.Scheme != "https" || u.Fragment != request.SourceCommit || u.Scheme != expected.Scheme || u.Host != expected.Host || u.Path != expected.Path {
+	if !nameOK || name != request.Package || !gitOK || err != nil || expectedErr != nil || u.User != nil || u.Scheme != "https" || u.Opaque != "" || u.Host != expected.Host || u.Path != expected.Path || u.RawPath != "" || expected.Scheme != "https" || expected.User != nil || expected.RawQuery != "" || expected.Fragment != "" {
 		return receipt, "", errors.New("SERENA_PREPARED_UV_SOURCE_MISMATCH")
 	}
-	for key, value := range u.Query() {
-		if key != "rev" || len(value) != 1 || value[0] != request.SourceCommit {
+	query, queryErr := url.ParseQuery(u.RawQuery)
+	if queryErr != nil || (u.ForceQuery && u.RawQuery == "") {
+		return receipt, "", errors.New("SERENA_PREPARED_UV_SOURCE_POLICY_MISMATCH")
+	}
+	for key, values := range query {
+		if key != "rev" || len(values) != 1 || values[0] != request.SourceCommit {
 			return receipt, "", errors.New("SERENA_PREPARED_UV_SOURCE_POLICY_MISMATCH")
 		}
+	}
+	// A syntactically present empty fragment is not a missing carrier.
+	fragmentPresent := strings.Contains(git, "#")
+	if (fragmentPresent && u.Fragment != request.SourceCommit) || (!fragmentPresent && len(query["rev"]) == 0) {
+		return receipt, "", errors.New("SERENA_PREPARED_UV_SOURCE_MISMATCH")
 	}
 	if len(requirement) != 2 {
 		return receipt, "", errors.New("SERENA_PREPARED_UV_SOURCE_POLICY_MISMATCH")
 	}
-	if len(receipt.Tool.Entrypoints) != 1 || receipt.Tool.Entrypoints[0].Name != "serena" || (receipt.Tool.Entrypoints[0].From != "" && receipt.Tool.Entrypoints[0].From != request.Package) {
+	if len(receipt.Tool.Entrypoints) == 0 {
 		return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_MISMATCH")
 	}
-	path := filepath.Clean(filepath.FromSlash(receipt.Tool.Entrypoints[0].InstallPath))
-	if !filepath.IsAbs(path) || !preparedSerenaPathInside(generation, path) {
-		return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_OUTSIDE_GENERATION")
+	names, paths := map[string]bool{}, map[string]bool{}
+	selectedPath := ""
+	for _, entry := range receipt.Tool.Entrypoints {
+		nameKey := preparedMetadataIdentityKey(entry.Name)
+		path := filepath.FromSlash(entry.InstallPath)
+		pathKey := preparedMetadataIdentityKey(path)
+		if entry.Name == "" || strings.ContainsAny(entry.Name, `\/:`+"\x00") || names[nameKey] || paths[pathKey] || (entry.From != "" && entry.From != request.Package) {
+			return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_MISMATCH")
+		}
+		names[nameKey], paths[pathKey] = true, true
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || !preparedSerenaPathInside(generation, path) {
+			return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_OUTSIDE_GENERATION")
+		}
+		if path != filepath.Join(generation, "bin", entry.Name+".exe") {
+			return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_TOOL_BIN_MISMATCH")
+		}
+		if entry.Name == "serena" {
+			selectedPath = path
+		}
 	}
-	return receipt, path, nil
+	if selectedPath == "" {
+		return receipt, "", errors.New("SERENA_PREPARED_UV_ENTRYPOINT_MISMATCH")
+	}
+	return receipt, selectedPath, nil
 }
 
 func preparedSerenaPathInside(root, path string) bool {
@@ -194,4 +223,110 @@ func parsePreparedSerenaMetadata(raw []byte, request PreparedSerenaRequest, envi
 		return result, "", err
 	}
 	return result, preparedSerenaHash(encoded), nil
+}
+
+// The same Unicode simple-fold equivalence used by strings.EqualFold. This
+// alias veto never replaces the original spelling or native file qualification.
+func preparedMetadataIdentityKey(value string) string {
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < smallest {
+				smallest = next
+			}
+		}
+		return smallest
+	}, value)
+}
+
+type preparedSerenaExportAssociation struct {
+	Receipt preparedSerenaUVEntrypoint
+	Member  preparedSerenaMetadataFile
+}
+
+// Associate the complete root console/gui declaration set before selecting
+// the manifest's console launcher. Legacy missing-From needs unique ownership
+// in the collected distributions, not an executable basename inference.
+func bindPreparedSerenaReceiptAssociations(receipt preparedSerenaUVReceipt, metadata preparedSerenaMetadata, request PreparedSerenaRequest, environment, selected string) ([]preparedSerenaExportAssociation, error) {
+	var root *preparedSerenaDistribution
+	owners := map[string]int{}
+	declarationOwners := map[string]int{}
+	for i := range metadata.Distributions {
+		d := &metadata.Distributions[i]
+		if strings.ToLower(strings.ReplaceAll(d.Name, "_", "-")) == request.Package {
+			if root != nil {
+				return nil, errors.New("SERENA_PREPARED_EXPORT_ROOT_DUPLICATE")
+			}
+			root = d
+		}
+		for _, f := range d.Files {
+			owners[preparedMetadataIdentityKey(f.Path)]++
+		}
+		for _, e := range d.Entrypoints {
+			if e.Group == "console_scripts" || e.Group == "gui_scripts" {
+				declarationOwners[preparedMetadataIdentityKey(e.Name)]++
+			}
+		}
+	}
+	if root == nil {
+		return nil, errors.New("SERENA_PREPARED_EXPORT_ROOT_MISSING")
+	}
+	declarations := map[string]preparedSerenaMetadataEntrypoint{}
+	selectedCount := 0
+	for _, e := range root.Entrypoints {
+		if e.Group != "console_scripts" && e.Group != "gui_scripts" {
+			continue
+		}
+		key := preparedMetadataIdentityKey(e.Name)
+		if e.Name == "" || e.Value == "" || declarations[key].Name != "" {
+			return nil, errors.New("SERENA_PREPARED_EXPORT_DECLARATION_DUPLICATE")
+		}
+		declarations[key] = e
+		if e.Name == selected && e.Group == "console_scripts" {
+			selectedCount++
+		}
+	}
+	if selected == "" || selectedCount != 1 || len(declarations) != len(receipt.Tool.Entrypoints) {
+		return nil, errors.New("SERENA_PREPARED_EXPORT_SET_MISMATCH")
+	}
+	members := map[string][]preparedSerenaMetadataFile{}
+	for _, f := range root.Files {
+		key := preparedMetadataIdentityKey(f.Path)
+		members[key] = append(members[key], f)
+	}
+	result := make([]preparedSerenaExportAssociation, 0, len(declarations))
+	used := map[string]bool{}
+	for _, e := range receipt.Tool.Entrypoints {
+		key := preparedMetadataIdentityKey(e.Name)
+		d, ok := declarations[key]
+		if !ok || d.Name != e.Name || used[key] || (e.From != "" && e.From != request.Package) || (e.From == "" && declarationOwners[key] != 1) {
+			return nil, errors.New("SERENA_PREPARED_EXPORT_OWNER_MISMATCH")
+		}
+		used[key] = true
+		memberPath := filepath.Join(environment, "Scripts", d.Name+".exe")
+		memberKey := preparedMetadataIdentityKey(memberPath)
+		m := members[memberKey]
+		if len(m) != 1 || owners[memberKey] != 1 || m[0].Path != memberPath {
+			return nil, errors.New("SERENA_PREPARED_EXPORT_ROOT_MEMBER_UNQUALIFIED")
+		}
+		result = append(result, preparedSerenaExportAssociation{Receipt: e, Member: m[0]})
+	}
+	return result, nil
+}
+
+// Native identities are supplied only by the original no-follow file owner.
+// One member may be a regular copy or the same object as its own tool export;
+// distinct declared exports may never alias the same native object.
+func bindPreparedSerenaExportIdentity(used map[string]string, name string, member, exported PreparedSerenaFile) error {
+	if !preparedSerenaFile(member) || !preparedSerenaFile(exported) || member.SHA256 != exported.SHA256 {
+		return errors.New("SERENA_PREPARED_EXPORT_FILE_MISMATCH")
+	}
+	for _, f := range []PreparedSerenaFile{member, exported} {
+		key := f.Device + "\x00" + f.FileID
+		if owner, ok := used[key]; ok && owner != name {
+			return errors.New("SERENA_PREPARED_EXPORT_NATIVE_ALIAS")
+		}
+		used[key] = name
+	}
+	return nil
 }

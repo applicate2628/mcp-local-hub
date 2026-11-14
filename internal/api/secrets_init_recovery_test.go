@@ -14,13 +14,16 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func recoveryFixture(t *testing.T) (*secretsInitRecoveryOwner, recoveryCapture) {
 	t.Helper()
 	key, vault := secretsTestEnv(t)
 	guardSecretsInitFixture(t)
-	root := t.TempDir()
+	root := hardenedTempDir(t)
 	o := &secretsInitRecoveryOwner{root: root, write: SecureWriteClientConfig}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -574,7 +577,9 @@ func recoveryNamespaceFixtureCommand(t *testing.T, action, path string, extra ..
 		args = append(args, "-Path", path)
 	}
 	args = append(args, extra...)
-	output, err := exec.Command(program, args...).CombinedOutput()
+	cmd := exec.Command(program, args...)
+	process.NoConsole(cmd)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("private namespace fixture %s failed: %v %s", action, err, output)
 	}
@@ -596,6 +601,9 @@ func TestSecretsInit_RecoveryNamespaceBoundary(t *testing.T) {
 				if err := os.Mkdir(root, 0700); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if name == "protected_empty" {
+				apitest.HardenedDir(t, root)
 			}
 			if name == "broadened_ignored" {
 				if err := os.WriteFile(filepath.Join(root, "unrelated.marker"), []byte("SYNTHETIC-IGNORED"), 0600); err != nil {
@@ -650,8 +658,12 @@ func TestSecretsInit_RecoveryNamespaceBoundary(t *testing.T) {
 		})
 	}
 	if runtime.GOOS == "windows" {
-		root := filepath.Join(os.Getenv("MCPHUB_RECOVERY_NAMESPACE_ROOT"), "temp", "wrong-owner-fixture")
-		proof := filepath.Join(os.Getenv("MCPHUB_RECOVERY_NAMESPACE_ROOT"), "proof", "wrong-owner-attempt.json")
+		fixtureRoot := os.Getenv("MCPHUB_RECOVERY_NAMESPACE_ROOT")
+		if !filepath.IsAbs(fixtureRoot) {
+			t.Fatal("private namespace fixture binding missing")
+		}
+		root := filepath.Join(fixtureRoot, "temp", "wrong-owner-fixture")
+		proof := filepath.Join(fixtureRoot, "proof", "wrong-owner-attempt.json")
 		if _, err := os.Stat(proof); os.IsNotExist(err) {
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
@@ -699,9 +711,7 @@ func recoveryNamespaceHandleCount(t *testing.T) int {
 func TestSecretsInit_RecoveryNamespaceRetainedDirectory(t *testing.T) {
 	base := t.TempDir()
 	root, moved := filepath.Join(base, "namespace"), filepath.Join(base, "validated-object")
-	if err := os.Mkdir(root, 0700); err != nil {
-		t.Fatal(err)
-	}
+	apitest.HardenedDir(t, root)
 	if err := os.WriteFile(filepath.Join(root, "original.marker"), []byte("SYNTHETIC-ORIGINAL"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +757,7 @@ func TestSecretsInit_RecoveryNamespaceRetainedDirectory(t *testing.T) {
 }
 
 func TestSecretsInit_RecoveryNamespaceFailurePaths(t *testing.T) {
-	root := t.TempDir()
+	root := hardenedTempDir(t)
 	beforeHandles := 0
 	if runtime.GOOS == "windows" {
 		beforeHandles = recoveryNamespaceHandleCount(t)

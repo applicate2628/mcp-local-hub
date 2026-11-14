@@ -121,7 +121,7 @@ func TestRunKimiInputSchemaIsClosed(t *testing.T) {
 
 func TestRunKimiCleanupFailureRoundTripsAcquiredReceiptAndCleanShape(t *testing.T) {
 	record := ownerReceiptRecord(t, "high", "synthetic full owner result")
-	receipt, err := parseProviderReceipt([]byte(record), "high", CapabilityChoice{Kind: "none"})
+	receipt, err := parseProviderReceipt([]byte(record), "high", "external-reviewer", CapabilityChoice{Kind: "none"})
 	if err != nil {
 		t.Fatalf("parse synthetic receipt: %v", err)
 	}

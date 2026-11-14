@@ -260,8 +260,8 @@ func (e *fakeEndpoint) Close() error { e.closed.Store(true); return nil }
 //  4. Client posts tools/call — triggers materialization; registry shows
 //     LifecycleActive.
 //  5. Status reflects the 5-state lifecycle on the row.
-//  6. api.Unregister(workspace, nil) — scheduler task deleted, client
-//     entries removed, registry empty.
+//  6. api.Unregister(workspace, nil) — scheduler task deleted, unproven
+//     client entries preserved with a typed warning, registry empty.
 func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		// api.Status calls scheduler.New() directly (no test seam), and
@@ -374,6 +374,10 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	if n := countEntries(fc); n != 1 {
 		t.Errorf("client entries after Register = %d, want 1", n)
 	}
+	clientBefore, err := json.Marshal(fc.entries)
+	if err != nil {
+		t.Fatalf("snapshot client entries after Register: %v", err)
+	}
 
 	// --- Step 2: Spin up the lazy proxy wrapped in httptest.Server --------
 	fake := &fakeLifecycle{kind: "mcp-language-server"}
@@ -446,7 +450,8 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	}
 
 	// --- Step 6: Unregister ----------------------------------------------
-	if _, err := a.Unregister(ws, nil); err != nil {
+	unregisterReport, err := a.Unregister(ws, nil)
+	if err != nil {
 		t.Fatalf("Unregister: %v", err)
 	}
 	if err := reg.Load(); err != nil {
@@ -455,8 +460,23 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	if len(reg.Workspaces) != 0 {
 		t.Errorf("registry len after Unregister = %d, want 0", len(reg.Workspaces))
 	}
-	if n := countEntries(fc); n != 0 {
-		t.Errorf("client entries after Unregister = %d, want 0", n)
+	clientAfter, err := json.Marshal(fc.entries)
+	if err != nil {
+		t.Fatalf("snapshot client entries after Unregister: %v", err)
+	}
+	if !bytes.Equal(clientAfter, clientBefore) {
+		t.Errorf("unproven client entries changed after Unregister: before=%s after=%s", clientBefore, clientAfter)
+	}
+	preserved := false
+	for _, diagnostic := range unregisterReport.Diagnostics() {
+		if diagnostic.Code() == api.RegistrationCodeUnregisterClientPreserved &&
+			diagnostic.Severity() == api.RegistrationSeverityWarning &&
+			diagnostic.Participant() == "codex-cli" && diagnostic.PlanIdentity() == entry.ClientEntries["codex-cli"] {
+			preserved = true
+		}
+	}
+	if !preserved || len(unregisterReport.Warnings) == 0 {
+		t.Errorf("Unregister diagnostics=%+v warnings=%v, want client preservation warning for codex-cli/%s", unregisterReport.Diagnostics(), unregisterReport.Warnings, entry.ClientEntries["codex-cli"])
 	}
 	if sch.tasks[entry.TaskName] {
 		t.Errorf("scheduler still has task %q after Unregister", entry.TaskName)
