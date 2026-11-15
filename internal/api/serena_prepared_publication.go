@@ -84,7 +84,9 @@ func (p *PreparedSerenaPublicationOwner) ReceivePreparationClose(ctx context.Con
 	return nil
 }
 func (p *PreparedSerenaPublicationOwner) readyWritten(ctx context.Context, operation string, writer *StateFilePublicationObservation, reader *StateFileReadObservation, raw []byte) error {
-	if p == nil || !writer.Complete() || reader == nil || writer.SHA256() != preparedSerenaHash(raw) || reader.Validate(ctx, writer.path, 1048576, raw, writer.SHA256()) != nil {
+	// The original writer readback used its content length as the read bound.
+	// The ready record ceiling remains a separate receiving constraint.
+	if p == nil || len(raw) == 0 || len(raw) > 1048576 || !writer.Complete() || reader == nil || writer.SHA256() != preparedSerenaHash(raw) || reader.Validate(ctx, writer.path, int64(len(raw)), raw, writer.SHA256()) != nil {
 		return errors.New("SERENA_PREPARED_PUBLICATION_WRITER_UNSETTLED")
 	}
 	p.mu.Lock()
