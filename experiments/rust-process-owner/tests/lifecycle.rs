@@ -54,6 +54,97 @@ fn wait_marker(path: &Path) {
 }
 
 #[test]
+fn process_view_repeats_without_consuming_admission_and_reads_running_owner() {
+    let f = Fixture::new();
+    let mut owner = f.launch("block", 0, "");
+    let pid = owner.root_pid();
+    let birth = owner.process_view().unwrap().creation_time_100ns().unwrap();
+    let sid = owner.process_view().unwrap().token_user_sid().unwrap();
+    for _ in 0..3 {
+        let view = owner.process_view().unwrap();
+        assert_eq!(view.process_id().unwrap(), pid);
+        assert_eq!(view.creation_time_100ns().unwrap(), birth);
+        assert!(view.is_in_original_job().unwrap());
+        assert_eq!(view.wait_state().unwrap(), RootWait::NotSignaled);
+        assert!(
+            !f.marker().exists(),
+            "read-only observation resumed the child"
+        );
+    }
+    assert_eq!(owner.root_exit(), None);
+    owner.admit_and_resume(|_| Ok(())).unwrap();
+    wait_marker(&f.marker());
+    {
+        let view = owner.process_view().unwrap();
+        assert_eq!(view.process_id().unwrap(), pid);
+        assert_eq!(view.creation_time_100ns().unwrap(), birth);
+        assert!(view.is_in_original_job().unwrap());
+        assert_eq!(view.wait_state().unwrap(), RootWait::NotSignaled);
+        assert!(
+            view.token_user_sid().unwrap() == sid,
+            "retained process SID changed"
+        );
+    }
+    assert_eq!(owner.root_exit(), None);
+    assert!(matches!(
+        owner.finish(Duration::ZERO).unwrap(),
+        Settlement::Pending {
+            root_exit: None,
+            ..
+        }
+    ));
+    assert_eq!(owner.process_view().unwrap().process_id().unwrap(), pid);
+    owner.terminate(81).unwrap();
+    assert!(matches!(
+        owner.process_view(),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput
+    ));
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 81 }
+    );
+    assert!(matches!(
+        owner.process_view(),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput
+    ));
+}
+
+#[test]
+fn process_view_after_denial_does_not_reopen_admission_or_resume() {
+    let f = Fixture::new();
+    let mut owner = f.launch("exit", 0, "must not appear");
+    let pid = owner.root_pid();
+    let birth = owner.process_view().unwrap().creation_time_100ns().unwrap();
+    assert_eq!(
+        owner
+            .admit_and_resume(|_| Err(io::ErrorKind::PermissionDenied.into()))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    for _ in 0..3 {
+        let view = owner.process_view().unwrap();
+        assert_eq!(view.process_id().unwrap(), pid);
+        assert_eq!(view.creation_time_100ns().unwrap(), birth);
+        assert!(view.is_in_original_job().unwrap());
+        assert_eq!(view.wait_state().unwrap(), RootWait::NotSignaled);
+    }
+    assert_eq!(
+        owner.admit_and_resume(|_| Ok(())).unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
+    owner.terminate(82).unwrap();
+    assert_eq!(
+        owner.finish(DEADLINE).unwrap(),
+        Settlement::Complete { root_exit: 82 }
+    );
+    assert!(
+        !f.marker().exists(),
+        "observation after denial resumed the child"
+    );
+}
+
+#[test]
 fn token_user_observation_matches_child_and_survives_settlement() {
     let f = Fixture::new();
     let mut owner = f.launch("token-user", 0, "");

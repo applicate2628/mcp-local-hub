@@ -101,7 +101,8 @@ impl Drop for AttributeList {
 }
 
 /// Observation only: no public raw handle, closing operation, or ownership grant.
-/// Its borrow cannot outlive the admission invocation.
+/// It borrows the original owner. An admission callback's view additionally
+/// cannot outlive that invocation.
 ///
 /// ```compile_fail,E0521
 /// use mcphub_process_owner_spike::NativeOwner;
@@ -477,6 +478,36 @@ impl NativeOwner {
         self.root_exit
     }
 
+    /// Borrow the original process and Job without consuming admission or
+    /// changing lifecycle state. Available before and after admission (including
+    /// denial), and after root exit, until stop or terminal settlement is entered.
+    /// A pending finish alone does not seal observation. A recorded stop attempt
+    /// does, including a failed one. Individual observations remain non-atomic.
+    ///
+    /// The borrow excludes mutable owner actions while the view is still used.
+    ///
+    /// ```compile_fail,E0502
+    /// use mcphub_process_owner_spike::NativeOwner;
+    /// use std::time::Duration;
+    /// fn settle_borrowed(owner: &mut NativeOwner) {
+    ///     let view = owner.process_view().unwrap();
+    ///     let _ = owner.finish(Duration::ZERO);
+    ///     let _ = view.process_id();
+    /// }
+    /// ```
+    pub fn process_view(&self) -> io::Result<ProcessView<'_>> {
+        if self.termination.is_some() || self.terminal.is_some() {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
+        let process = self.process.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
+        let job = self.job.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(ProcessView {
+            handle: process.as_handle(),
+            job: job.as_handle(),
+            original_creation: &self.original_creation,
+        })
+    }
+
     pub fn active_processes(&self) -> io::Result<u32> {
         let job = self.job.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
         // SAFETY: exact POD buffer/class; job borrowed while self stays alive.
@@ -509,13 +540,7 @@ impl NativeOwner {
             ));
         }
         self.admission_attempted = true;
-        let process = self.process.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
-        let job = self.job.as_ref().ok_or(io::ErrorKind::InvalidInput)?;
-        check(ProcessView {
-            handle: process.as_handle(),
-            job: job.as_handle(),
-            original_creation: &self.original_creation,
-        })?;
+        check(self.process_view()?)?;
         if self.wait_root(Duration::ZERO)?.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
