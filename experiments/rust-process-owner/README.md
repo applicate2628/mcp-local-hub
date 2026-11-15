@@ -121,6 +121,8 @@ Negative controls deliberately changed `WAIT_FAILED` into timeout and changed fa
 
 ## Original-process observations
 
+`NativeOwner::process_view()` borrows the retained original process and Job without consuming admission, resuming the child or changing lifecycle state. Repeated observations are allowed before admission, after successful or denied admission, and after root exit. A pending `finish` alone keeps this access available. A recorded stop attempt (including a failed stop) or terminal settlement rejects new views; neither a cached PID nor a surviving numeric handle recreates access. The Rust borrow prevents mutation, settlement or dropping the owner while the view is still used. Admission uses the same view construction after consuming its single attempt, preserving its existing failure semantics.
+
 The same borrowed `ProcessView` exposes the original creation-time binding, exact Job membership, zero-time process wait state and a copied binary TokenUser SID. No raw handle or new close/termination authority is exported. These are individual observations, not an atomic snapshot or a complete product admission decision.
 
 **Table 5. Additive Windows observations.**

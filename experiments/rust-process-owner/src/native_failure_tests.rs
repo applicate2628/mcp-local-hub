@@ -244,6 +244,72 @@ fn token_user_repeated_observation_closes_handles_and_copy_survives() {
 }
 
 #[test]
+fn process_view_missing_handle_preserves_admission_until_an_actual_attempt() {
+    for missing_process in [false, true] {
+        let mut owner = suspended();
+        let retained = if missing_process {
+            owner.process.take()
+        } else {
+            owner.job.take()
+        };
+        assert!(matches!(
+            owner.process_view(),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
+        assert!(!owner.admission_attempted);
+        let mut called = false;
+        assert_eq!(
+            owner
+                .admit_and_resume(|_| {
+                    called = true;
+                    Ok(())
+                })
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(!called, "admission exposed an incomplete owner");
+        assert!(
+            owner.admission_attempted,
+            "failed admission became retryable"
+        );
+        if missing_process {
+            owner.process = retained;
+        } else {
+            owner.job = retained;
+        }
+        assert_eq!(
+            owner.process_view().unwrap().process_id().unwrap(),
+            owner.root_pid()
+        );
+        assert!(owner.admit_and_resume(|_| Ok(())).is_err());
+        stop_and_finish(&mut owner);
+    }
+}
+
+#[test]
+fn process_view_after_root_exit_does_not_settle_or_close_the_owner() {
+    let mut owner = exited_owner();
+    let pid = owner.root_pid();
+    for _ in 0..3 {
+        let view = owner.process_view().unwrap();
+        assert_eq!(view.process_id().unwrap(), pid);
+        assert_eq!(view.wait_state().unwrap(), RootWait::Signaled);
+        assert_ne!(view.creation_time_100ns().unwrap(), 0);
+    }
+    assert_eq!(owner.root_exit(), Some(0));
+    assert!(owner.terminal.is_none());
+    assert_eq!(
+        owner.finish(WAIT).unwrap(),
+        Settlement::Complete { root_exit: 0 }
+    );
+    assert!(matches!(
+        owner.process_view(),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput
+    ));
+}
+
+#[test]
 fn identity_initial_capture_error_is_not_repaired_by_later_success() {
     let mut owner = suspended();
     let restricted = duplicate_with_access(owner.process.as_ref().unwrap(), PROCESS_SYNCHRONIZE);
@@ -614,6 +680,10 @@ fn failed_termination_is_not_reissued_after_rights_are_restored() {
     let original = restrict(&mut owner.job, JOB_QUERY);
     denied(&owner.terminate(83).unwrap_err());
     drop(owner.job.replace(original));
+    assert!(matches!(
+        owner.process_view(),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput
+    ));
     denied(&owner.terminate(83).unwrap_err()); // still the original failed attempt
     assert!(owner.terminate(84).is_err());
     assert_eq!(owner.wait_root(Duration::ZERO).unwrap(), None);
@@ -735,6 +805,10 @@ fn protected_close_failures_preserve_each_error_and_original_root_result() {
                 && fixture.owner.job.is_none()
         );
         assert_eq!(fixture.owner.finish(Duration::ZERO).unwrap(), first);
+        assert!(matches!(
+            fixture.owner.process_view(),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
         for &raw in &fixture.handles {
             let mut flags = 0;
             // SAFETY: this fixture still guards the protected native handle.
