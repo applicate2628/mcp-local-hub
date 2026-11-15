@@ -37,7 +37,7 @@ func ObserveOriginalLoopbackTCPRowsObserved(ctx context.Context) (o *LoopbackTCP
 	cmd := &exec.Cmd{Path: file.Path, Args: []string{file.Path, "-ano"}}
 	var stdout, stderr bytes.Buffer
 	o = &LoopbackTCPRowsObservation{issuer: &struct{ marker byte }{1}, sourceSHA256: file.SHA256}
-	remaining := time.Until(end)
+	remaining := time.Until(end).Truncate(time.Millisecond)
 	if remaining <= 0 {
 		return o, context.DeadlineExceeded
 	}
