@@ -1,6 +1,6 @@
 # Versioned foreign identity observation — 15 November 2026
 
-**Result:** the additive identity boundary is implemented and its scoped qualification passes. Both required full-repository test suites fail; publication remains blocked by the explicit pre-push rule in CLAUDE.md. No production owner or installed runtime is switched.
+**Result:** the additive identity boundary is implemented and its recorded scoped qualification passes. Both required full-repository test suites failed on the recorded source. A subsequent [fresh audit](AUDIT.md) fixed the reproduction runner's evidence-overwrite risk; the user authorized continuation of draft publication after that audit. No production owner or installed runtime is switched.
 
 ## Contents
 
@@ -20,7 +20,7 @@
 
 | Input | Exact identity |
 |---|---|
-| Accepted master after #616 | `17bc78fc602efa204a74596409c939a3bf1ddc42` |
+| Accepted master used for the recorded qualification after #616 | `17bc78fc602efa204a74596409c939a3bf1ddc42` |
 | Native-owner parent #625 | `c5672f49f65713c7555e8841e46de75b045da5f8` |
 | Qualified native identity #644 | `84119b51e089cce9ca42da2fce35a012eb86cb7c`; SID implementation `3ef24b3473900384d8fc34204d4555a9bb30a5db` |
 | Frozen previous #631 | `eb4ca1d40244ba1915638b76c3e30b2a684d9b07` |
@@ -31,7 +31,7 @@ The qualification actually ran on the local merge plus an explicitly recorded wo
 
 Native manifests, lockfile, source and tests match #644. Its earlier **71 native checks per debug/release profile**, including real token acquisition/query/protected-close cases, remain [separate native evidence](https://github.com/applicate2628/mcp-local-hub/blob/84119b51e089cce9ca42da2fce35a012eb86cb7c/experiments/rust-process-owner/verification/sid-2026-11-14/RESULTS.md); they were not rerun or relabelled here.
 
-Only `experiments/rust-process-owner/ffi/` changes in this increment. The prepared review chain is **#625 → #644 → #631**; the ordinary local merge changes neither parent and does not accept #644 into master. Remote #631 remains at its frozen head until the publication gate is resolved.
+Only `experiments/rust-process-owner/ffi/` changes in this increment. The prepared review chain is **#625 → #644 → #631**; the ordinary local merge changes neither parent and does not accept #644 into master. The frozen remote head above identifies the earlier baseline; current draft publication and the fresh master comparison are recorded in [AUDIT.md](AUDIT.md) and the PR metadata.
 
 ## Contract and decisions
 
@@ -115,11 +115,11 @@ Four weakened Go copies remove observation metadata validation, remove report me
 
 [repository-gates.json](repository-gates.json) records every named failed test, package result, command and original log hash. The collection script's own exit 0 means it finished recording these failures; it is not a passing gate.
 
-Product sources and root Go dependency files match accepted master. This experiment neither changes those packages nor establishes the root cause of each failure. It does not silently incorporate the active parallel fixes.
+Product sources and root Go dependency files in this run match historical accepted master `17bc78fc602efa204a74596409c939a3bf1ddc42`. This experiment neither changes those packages nor establishes the root cause of each failure. It does not silently incorporate the active parallel fixes.
 
 The first attempt encountered an empty task-local module cache with `GOPROXY=off`. The corrected run read an already existing local module cache through a **file-only proxy**, materializing locked dependencies into D:; no network package proxy or toolchain installation was used. Both attempts are retained.
 
-**Publication remains blocked:** CLAUDE.md, “Step 1 — Pre-push local verification”, explicitly requires both full suites to be clean before `git push`. The prepared local commits require either satisfied gates or an explicit user exception for draft publication. No exception, merge approval, installed acceptance or bot PASS is inferred. Internal independent review does not substitute for the required formal review.
+**Historical publication gate:** CLAUDE.md, “Step 1 — Pre-push local verification”, requires both full suites to be clean before `git push`, so the initial prepared checkpoint was not pushed. In response to the draft-only publication proposal, the user then instructed continuation after a fresh audit. [AUDIT.md](AUDIT.md) records that review, its runner correction and the limited draft-publication scope. The recorded test failures remain merge/acceptance blockers; no bot PASS, merge or installed acceptance is inferred. Internal independent review does not substitute for required formal review.
 
 ## PR audit and compaction
 
@@ -146,7 +146,7 @@ Applied skills: Architecture Review and API/Interface Design for contracts; Sour
 Use a **new owned** task root under D:\dev\ChatGPT with this repository in its `source` child. Frozen commits in Table 1 and already installed tools/cache must be available.
 
 1. Build `owner_child` with the native manifest, `--offline --locked --bin owner_child`, `CARGO_TARGET_DIR=<task root>\target`, and all temporary/cache paths on D:. The preserved focused script records the actual command/environment.
-2. Execute [run.ps1](run.ps1) with `-TaskRoot <new root>`. It runs affected checks and assembles exact old-FFI source/DLL for compatibility; its compatibility directory must be new.
+2. Execute [run.ps1](run.ps1) with mandatory `-TaskRoot <new root>`. The corrected reproduction runner rejects existing qualification or compatibility output before any writes. It runs affected checks and assembles exact old-FFI source/DLL for compatibility. The original executed runner remains unchanged in logs.zip; the correction and its six guard controls are recorded in [AUDIT.md](AUDIT.md).
 3. Execute [controls.ps1](controls.ps1) with explicit repository `-SourceRoot`, new debug `-NewDll`, child `-Child` and built old `-OldDll`. It never edits original sources.
 4. Run [repository-gates.ps1](repository-gates.ps1) for the separate complete gates, adapting only owned paths and existing local cache location.
 5. Verify [SHA256SUMS](SHA256SUMS), [log-manifest.json](log-manifest.json), source and artifact hashes.

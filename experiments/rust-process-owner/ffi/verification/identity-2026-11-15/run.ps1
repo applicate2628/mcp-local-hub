@@ -1,9 +1,28 @@
-param([string]$TaskRoot='D:\dev\ChatGPT\mcphub-ffi-identity-20261115')
+[CmdletBinding()]
+param(
+ [Parameter(Mandatory=$true)]
+ [ValidateNotNullOrEmpty()]
+ [string]$TaskRoot
+)
 $ErrorActionPreference='Stop'
+if($TaskRoot -notmatch '^[A-Za-z]:[\\/]'){throw 'TaskRoot must be an explicit absolute path under D:\dev\ChatGPT'}
+$TaskRoot=[IO.Path]::GetFullPath($TaskRoot).TrimEnd([char]92)
+if(-not $TaskRoot.StartsWith('D:\dev\ChatGPT\',[StringComparison]::OrdinalIgnoreCase)){
+ throw 'TaskRoot must be an owned subdirectory of D:\dev\ChatGPT'
+}
 $sourceRoot=Join-Path $TaskRoot 'source'
 $native=Join-Path $sourceRoot 'experiments\rust-process-owner'
 $ffi=Join-Path $native 'ffi'
 $logRoot=Join-Path $TaskRoot 'evidence\qualification'
+$compat=Join-Path $TaskRoot 'compatibility'
+$oldSource=Join-Path $compat 'source'
+# Refuse reuse before creating directories, changing the environment or writing
+# evidence. Existing source and the prebuilt child target are required inputs.
+foreach($path in @($logRoot,$compat)){
+ if(Test-Path -LiteralPath $path){
+  throw "Qualification output already exists; preserve it and choose a new task root: $path"
+ }
+}
 @('tmp','target','go-cache','go-mod-cache','go-path','tmp\identity-qualified','evidence\qualification','compatibility') | ForEach-Object { [IO.Directory]::CreateDirectory((Join-Path $TaskRoot $_)) | Out-Null }
 $env:TEMP=Join-Path $TaskRoot 'tmp'; $env:TMP=$env:TEMP; $env:GOTMPDIR=$env:TEMP
 $env:CARGO_HOME='D:\dev\ChatGPT\mcphub-rx02-stdio-20261113\cargo-home'
@@ -82,9 +101,6 @@ foreach($profile in @('debug','release')){
 }
 Step 'go-vet' 'go' @('vet','.')
 # Assemble only pinned source files, never the earlier 624 evidence files.
-$compat=Join-Path $TaskRoot 'compatibility'
-$oldSource=Join-Path $compat 'source'
-if(Test-Path $oldSource){throw 'Compatibility source already exists; preserve and choose a new task root'}
 Set-Location $sourceRoot
 Step 'archive-native-parent' 'git' @('archive','--format=zip',('--output='+(Join-Path $compat 'native.zip')),$parent,'--','experiments/rust-process-owner/Cargo.toml','experiments/rust-process-owner/Cargo.lock','experiments/rust-process-owner/src')
 Step 'archive-old-foreign' 'git' @('archive','--format=zip',('--output='+(Join-Path $compat 'foreign.zip')),$oldForeign,'--','experiments/rust-process-owner/ffi/Cargo.toml','experiments/rust-process-owner/ffi/Cargo.lock','experiments/rust-process-owner/ffi/src','experiments/rust-process-owner/ffi/include','experiments/rust-process-owner/ffi/go')

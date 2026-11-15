@@ -1,6 +1,6 @@
 # Go ↔ Rust owner: experimental C ABI
 
-**Status:** isolated Windows x86_64 calling-side experiment. This is not a Hub backend, a stable product SDK, a sandbox, or an automatic replacement for Go process ownership. Its current [native dependency](../README.md) is [identity PR #644](https://github.com/applicate2628/mcp-local-hub/pull/644), based on [native-owner PR #625](https://github.com/applicate2628/mcp-local-hub/pull/625). The intended review base of existing [foreign-boundary PR #631](https://github.com/applicate2628/mcp-local-hub/pull/631) is #644, keeping native observations and their evidence outside this boundary's own review diff.
+**Status:** isolated Windows x86_64 calling-side experiment. This is not a Hub backend, a stable product SDK, a sandbox, or an automatic replacement for Go process ownership. Its current [native dependency](../README.md) is [identity PR #644](https://github.com/applicate2628/mcp-local-hub/pull/644), based on [native-owner PR #625](https://github.com/applicate2628/mcp-local-hub/pull/625). The review base of existing [foreign-boundary PR #631](https://github.com/applicate2628/mcp-local-hub/pull/631) is #644, keeping native observations and their evidence outside this boundary's own review diff.
 
 ## Contents
 
@@ -456,7 +456,7 @@ The C compiler checks the shared header; Rust checks its declared layouts. Go ra
 
 Before any product use: integrate the native identity observations with the actual Go creator capability, validated SID-formatting/resource receipt and required context/custody/retirement rules; qualify executable-file identity and the actual admission policy; extend the existing explicit-stream slice to product I/O/cancellation and any remaining descriptor profiles; qualify product-specific required-environment/overlay policy and coordinated inheritance across other launchers; reconcile current Go/selected-activation contracts; native Unix backends; full product I/O policy/cancel/drain/join beyond the finite owned-pipe qualification; other foreign kernel failures beyond protected-close, plus loader/unload failures beyond the selected fixture profiles, allocator and panic fault tests; real workload comparison; independent lifecycle/security review; packaging, binary admission and installed acceptance. No second supervisor, C++ GUI or vendor SDK rewrite is introduced.
 
-This PR owns the foreign boundary; its required native observations are supplied by #644 on top of #625. Keeping #644 as the intended review base preserves that responsibility split. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. Windows experimental observations and compatibility evidence do not complete the product migration.
+This PR owns the foreign boundary; its required native observations are supplied by #644 on top of #625. Using #644 as the review base preserves that responsibility split. A small raw ABI does not transfer Rust's borrow checker guarantees to Go or C automatically. Windows experimental observations and compatibility evidence do not complete the product migration.
 
 References:
 
