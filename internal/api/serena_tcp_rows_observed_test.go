@@ -116,3 +116,132 @@ func TestOriginalTCPRowsRecognizedHeaderFrames(t *testing.T) {
 		})
 	}
 }
+
+// These independent numeric-address fixtures establish parser semantics.
+// They do not reconstruct the missing frame from the failed Serena run.
+func TestOriginalTCPEndpointScopedIPv6Grammar(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, host string
+		port              uint16
+	}{
+		{"ipv4-control", "127.0.0.1:1234", "127.0.0.1", 1234},
+		{"scope-zero", "[fe80::1%0]:0", "fe80::1%0", 0},
+		{"scope-one-expanded", "[FE80:0:0:0:0:0:0:1%1]:65535", "FE80:0:0:0:0:0:0:1%1", 65535},
+		{"scope-max", "[fe80::1%4294967295]:1234", "fe80::1%4294967295", 1234},
+		{"scope-leading-zero", "[fe80::1%0000000001]:1234", "fe80::1%0000000001", 1234},
+		{"ipv6-loopback-zone", "[::1%1]:1234", "::1%1", 1234},
+		{"mapped-dotted", "[::ffff:127.0.0.1]:1234", "::ffff:127.0.0.1", 1234},
+		{"mapped-hex", "[::ffff:7f00:1]:1234", "::ffff:7f00:1", 1234},
+		{"mapped-dotted-zone", "[::ffff:127.0.0.1%1]:1234", "::ffff:127.0.0.1%1", 1234},
+		{"mapped-hex-zone", "[::ffff:7f00:1%1]:1234", "::ffff:7f00:1%1", 1234},
+		{"unspecified-expanded", "[0:0:0:0:0:0:0:0]:1234", "::", 1234},
+		{"unspecified-zone-zero", "[::%0]:1234", "::", 1234},
+		{"unspecified-expanded-zone-max", "[0:0:0:0:0:0:0:0%4294967295]:1234", "::", 1234},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, port, err := parseOriginalTCPEndpoint(tc.input)
+			if err != nil || host != tc.host || port != tc.port {
+				t.Fatalf("endpoint=%q: host=%q port=%d err=%v; want host=%q port=%d", tc.input, host, port, err, tc.host, tc.port)
+			}
+		})
+	}
+	const addressError = "ORIGINAL_TCP_ROW_ADDRESS_INVALID"
+	const portError = "ORIGINAL_TCP_ROW_PORT_INVALID"
+	for _, tc := range []struct{ name, input, category string }{
+		{"empty-zone", "[fe80::1%]:1234", addressError},
+		{"repeated-zone", "[fe80::1%1%2]:1234", addressError},
+		{"plus-zone", "[fe80::1%+1]:1234", addressError},
+		{"minus-zone", "[fe80::1%-1]:1234", addressError},
+		{"named-zone", "[fe80::1%eth0]:1234", addressError},
+		{"unicode-zone", "[fe80::1%\u0661]:1234", addressError},
+		{"overlong-zero-zone", "[fe80::1%00000000000]:1234", addressError},
+		{"overflow-zone", "[fe80::1%4294967296]:1234", addressError},
+		{"ipv4-zone", "127.0.0.1%1:1234", addressError},
+		{"invalid-ipv6", "[fe80:::1%1]:1234", addressError},
+		{"missing-bracket", "[fe80::1%1:1234", addressError},
+		{"unbracketed-ipv6", "fe80::1%1:1234", addressError},
+		{"double-bracket", "[[fe80::1%1]]:1234", addressError},
+		{"port-overflow", "[fe80::1%1]:65536", portError},
+		{"port-negative", "[fe80::1%1]:-1", portError},
+		{"port-text", "[fe80::1%1]:bad", portError},
+		{"port-empty", "[fe80::1%1]:", portError},
+		{"port-underscore", "[fe80::1%1]:1_2", portError},
+		{"zone-error-precedes-port-error", "[fe80::1%eth0]:bad", addressError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host, port, err := parseOriginalTCPEndpoint(tc.input)
+			if err == nil || err.Error() != tc.category || host != "" || port != 0 {
+				t.Fatalf("invalid endpoint=%q: host=%q port=%d err=%v; want %s", tc.input, host, port, err, tc.category)
+			}
+		})
+	}
+}
+
+func TestOriginalTCPRowsScopedIPv6OwnershipBoundary(t *testing.T) {
+	const prefix = "Active Connections\nProto Local Address Foreign Address State PID\n" +
+		"TCP 127.0.0.1:1234 0.0.0.0:0 LISTENING 7\n"
+	for _, tc := range []struct {
+		name, line string
+		extra      *OriginalLoopbackTCPRowV1
+	}{
+		{"local-zone", "TCP [fe80::1%0]:1234 [fe80::2]:5678 ESTABLISHED 8", nil},
+		{"remote-zone", "TCP [fe80::1]:1234 [fe80::2%4294967295]:5678 ESTABLISHED 8", nil},
+		{"both-zones", "TCP [fe80::1%1]:1234 [fe80::2%1]:5678 ESTABLISHED 8", nil},
+		{"ipv6-loopback-zone", "TCP [::1%1]:1234 [::1%1]:5678 ESTABLISHED 8", nil},
+		{"mapped-dotted-zone", "TCP [::ffff:127.0.0.1%1]:1234 [::]:0 LISTENING 8", nil},
+		{"mapped-hex-zone", "TCP [::ffff:7f00:1%1]:1234 [::]:0 LISTENING 8", nil},
+		{"mapped-zero-zone", "TCP [::ffff:0.0.0.0%1]:1234 [::]:0 LISTENING 8", nil},
+		{"expanded-wildcard", "TCP [0:0:0:0:0:0:0:0]:1234 [::]:0 LISTENING 8",
+			&OriginalLoopbackTCPRowV1{"LISTENING", "::", 1234, "::", 0, 8}},
+		{"scoped-wildcard", "TCP [::%0]:1234 [::%4294967295]:0 LISTENING 8",
+			&OriginalLoopbackTCPRowV1{"LISTENING", "::", 1234, "::", 0, 8}},
+		{"expanded-scoped-wildcard", "TCP [0:0:0:0:0:0:0:0%1]:1234 [::]:0 LISTENING 8",
+			&OriginalLoopbackTCPRowV1{"LISTENING", "::", 1234, "::", 0, 8}},
+		// Parsing retains the full peer; it does not supply native ownership.
+		{"scoped-peer-on-ipv4-row", "TCP 127.0.0.1:1234 [FE80:0:0:0:0:0:0:2%1]:5678 ESTABLISHED 7",
+			&OriginalLoopbackTCPRowV1{"ESTABLISHED", "127.0.0.1", 1234, "FE80:0:0:0:0:0:0:2%1", 5678, 7}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := parseOriginalLoopbackTCPRows([]byte(prefix + tc.line + "\n"))
+			want := []OriginalLoopbackTCPRowV1{{"LISTENING", "127.0.0.1", 1234, "0.0.0.0", 0, 7}}
+			if tc.extra != nil {
+				want = append(want, *tc.extra)
+			}
+			if err != nil || rows == nil || len(rows) != len(want) {
+				t.Fatalf("rows=%+v err=%v; want %+v", rows, err, want)
+			}
+			for i := range want {
+				if rows[i] != want[i] {
+					t.Fatalf("row[%d]=%+v, want %+v", i, rows[i], want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestOriginalTCPRowsScopedIPv6RejectsDegradation(t *testing.T) {
+	const prefix = "Active Connections\nProto Local Address Foreign Address State PID\n" +
+		"TCP 127.0.0.1:1234 0.0.0.0:0 LISTENING 7\n"
+	const scopedWildcard = "TCP [::%1]:1234 [::%1]:0 LISTENING 8\n"
+	for _, tc := range []struct{ name, lines, category string }{
+		{"local-zone-before-ignored-state", "TCP [fe80::1%]:1234 [fe80::2]:5678 TIME_WAIT 8\n", "ORIGINAL_TCP_ROW_ADDRESS_INVALID"},
+		{"remote-zone-before-ignored-state", "TCP [fe80::1]:1234 [fe80::2%]:5678 TIME_WAIT 8\n", "ORIGINAL_TCP_ROW_ADDRESS_INVALID"},
+		{"invalid-remote-address", "TCP [fe80::1%1]:1234 [fe80:::2%1]:5678 TIME_WAIT 8\n", "ORIGINAL_TCP_ROW_ADDRESS_INVALID"},
+		{"port-before-ignored-state", "TCP [fe80::1%1]:65536 [fe80::2%1]:5678 TIME_WAIT 8\n", "ORIGINAL_TCP_ROW_PORT_INVALID"},
+		{"unsupported-state", "TCP [fe80::1%1]:1234 [fe80::2%1]:5678 UNKNOWN 8\n", "ORIGINAL_TCP_ROW_STATE_UNSUPPORTED"},
+		{"invalid-pid", "TCP [fe80::1%1]:1234 [fe80::2%1]:5678 ESTABLISHED x\n", "ORIGINAL_TCP_ROW_PID_INVALID"},
+		{"overflow-pid", "TCP [fe80::1%1]:1234 [fe80::2%1]:5678 ESTABLISHED 4294967296\n", "ORIGINAL_TCP_ROW_PID_INVALID"},
+		{"wildcard-zero-pid", "TCP [::%1]:1234 [::]:0 LISTENING 0\n", "ORIGINAL_TCP_ROW_ENDPOINT_INVALID"},
+		{"wildcard-zero-port", "TCP [::%1]:0 [::]:0 LISTENING 8\n", "ORIGINAL_TCP_ROW_ENDPOINT_INVALID"},
+		{"ipv4-row-zero-peer-port", "TCP 127.0.0.1:1234 [fe80::2%1]:0 ESTABLISHED 7\n", "ORIGINAL_TCP_ROW_ENDPOINT_INVALID"},
+		{"duplicate-wildcard", scopedWildcard + scopedWildcard, "ORIGINAL_TCP_ROW_DUPLICATE_OR_CONFLICT"},
+		{"conflicting-wildcard-owner", scopedWildcard + "TCP [::%1]:1234 [::%1]:0 LISTENING 9\n", "ORIGINAL_TCP_ROW_DUPLICATE_OR_CONFLICT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := parseOriginalLoopbackTCPRows([]byte(prefix + tc.lines))
+			if rows != nil || err == nil || !strings.Contains(err.Error(), tc.category) {
+				t.Fatalf("partial or degraded frame admitted: rows=%+v err=%v; want %s", rows, err, tc.category)
+			}
+		})
+	}
+}

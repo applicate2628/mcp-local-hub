@@ -6,6 +6,7 @@ import (
 	"errors"
 	"mcp-local-hub/internal/process"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -140,17 +141,34 @@ func parseOriginalTCPEndpoint(value string) (string, uint16, error) {
 	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
 	}
-	address := net.ParseIP(host)
-	if address == nil {
+	if zoneStart := strings.IndexByte(host, '%'); zoneStart >= 0 {
+		zone := host[zoneStart+1:]
+		if len(zone) == 0 || len(zone) > 10 {
+			return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+		}
+		for i := 0; i < len(zone); i++ {
+			if zone[i] < '0' || zone[i] > '9' {
+				return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+			}
+		}
+		if _, err := strconv.ParseUint(zone, 10, 32); err != nil {
+			return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
+		}
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_ADDRESS_INVALID")
 	}
 	number, err := strconv.ParseUint(portText, 10, 16)
 	if err != nil {
 		return "", 0, errors.New("ORIGINAL_TCP_ROW_PORT_INVALID")
 	}
-	// IPv6/non-loopback rows are parsed but cannot enter this explicitly IPv4
-	// original-endpoint evidence. They are not converted to a wildcard owner.
+	// Keep IPv6 spelling (including mapped IPv4) out of positive IPv4
+	// ownership. Normalize only unspecified IPv6 for wildcard refusal.
 	if strings.Contains(host, ":") {
+		if address.WithZone("").IsUnspecified() {
+			return "::", uint16(number), nil
+		}
 		return host, uint16(number), nil
 	}
 	return address.String(), uint16(number), nil
