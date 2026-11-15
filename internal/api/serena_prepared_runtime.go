@@ -318,6 +318,14 @@ func (o *PreparedSerenaRuntimeOwner) Prepare(ctx context.Context, r PreparedSere
 	}
 	cleanup, cleanupCancel := context.WithDeadline(cleanupParent, cleanupEnd)
 	defer cleanupCancel()
+	// Original writers receive their final resource closes before local work
+	// cancellation. The original deadline and parent cancellation still apply.
+	var workCancel context.CancelFunc
+	defer func() {
+		if workCancel != nil {
+			workCancel()
+		}
+	}()
 	var lastOutcome *StateFilePublicationObservation
 	var candidate PreparedSerenaRuntimeBinding
 	var candidateRecord PreparedSerenaRuntimeRecord
@@ -358,7 +366,7 @@ func (o *PreparedSerenaRuntimeOwner) Prepare(ctx context.Context, r PreparedSere
 		end = d
 	}
 	work, cancel := context.WithDeadline(ctx, end)
-	defer cancel()
+	workCancel = cancel
 	if err = work.Err(); err != nil {
 		return binding, err
 	}
