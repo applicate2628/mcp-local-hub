@@ -579,7 +579,7 @@ type mcpObservedConnection struct {
 	net.Conn
 	mu                         sync.Mutex
 	active                     int
-	idle                       chan struct{}
+	idle, closeDone            chan struct{}
 	closing, attempted, closed bool
 	closeErr                   error
 }
@@ -630,24 +630,40 @@ func (c *mcpObservedConnection) Close() error {
 	}
 	c.attempted = true
 	c.closing = true
+	c.closeDone = make(chan struct{})
 	c.mu.Unlock()
 	e := c.Conn.Close()
 	c.mu.Lock()
 	c.closeErr = e
 	c.closed = e == nil
+	close(c.closeDone)
 	c.mu.Unlock()
 	return e
 }
 func (c *mcpObservedConnection) closeObserved(ctx context.Context) (MCPHTTPConnectionObservation, error) {
 	e := c.Close()
 	c.mu.Lock()
-	idle := c.idle
+	idle, closeDone := c.idle, c.closeDone
 	c.mu.Unlock()
-	select {
-	case <-idle:
-	case <-ctx.Done():
-		e = errors.Join(e, ctx.Err())
+	if _, finite := ctx.Deadline(); !finite {
+		e = errors.Join(e, errors.New("MCP_QUALIFICATION_CLEANUP_DEADLINE_REQUIRED"))
+	} else {
+		// The transport may already own Close. Receive that same call's
+		// terminal result before treating idle Read/Write activity as closure.
+		select {
+		case <-closeDone:
+			c.mu.Lock()
+			e = c.closeErr
+			c.mu.Unlock()
+		case <-ctx.Done():
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+		}
 	}
+	// A ready close/idle channel must not bypass canceled or expired receiving.
+	e = errors.Join(e, ctx.Err())
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	v := MCPHTTPConnectionObservation{CloseAttempted: c.attempted, Closed: c.closed, IOComplete: c.active == 0}
