@@ -16,8 +16,9 @@ import (
 )
 
 // IdentityObservation owns its image/SID copies. All fields were queried through
-// the retained at-create Job-bound process before resume; they are not an atomic
-// snapshot, a formatted SID receipt or the product's CreatorIdentity capability.
+// the retained at-create Job-bound process; they are separate observations, not
+// an atomic snapshot, formatted SID receipt or product CreatorIdentity capability.
+// Only AdmitIdentity guarantees collection before its own resume operation.
 type IdentityObservation struct {
 	PID                   uint32
 	CreationTime100ns     uint64
@@ -58,6 +59,7 @@ const (
 )
 
 var ErrIdentityUnsupported = errors.New("native library does not support identity observation")
+var ErrIdentityQueryUnsupported = errors.New("native library does not support read-only identity query")
 
 // IdentityError preserves a query failure and token-close failure independently.
 // NativeError is valid only for IdentityNativeError. A close-only error has
@@ -207,4 +209,37 @@ func mh_go_identity(raw *C.mh_identity, bytes C.uint32_t, token C.uintptr_t) (de
 		return 0
 	}
 	return 1
+}
+
+type identityQueryCall struct {
+	value IdentityObservation
+	calls int
+	err   error
+}
+
+//export mh_go_identity_query
+func mh_go_identity_query(raw *C.mh_identity, bytes C.uint32_t, token C.uintptr_t) {
+	var state *identityQueryCall
+	returned := false
+	defer func() {
+		if !returned {
+			_ = recover()
+			if state != nil {
+				state.value = IdentityObservation{}
+				state.err = errors.Join(state.err, invalidIdentity("query receiver panicked"))
+			}
+		}
+	}()
+	// The call-scoped integer is the only Go reference crossing the C boundary.
+	// The receiver has no user callback and no admission decision.
+	state = cgo.Handle(token).Value().(*identityQueryCall)
+	state.calls++
+	if state.calls != 1 {
+		state.value = IdentityObservation{}
+		state.err = errors.Join(state.err, invalidIdentity("repeated identity query receiver"))
+		returned = true
+		return
+	}
+	state.value, state.err = copyIdentity(raw, bytes)
+	returned = true
 }

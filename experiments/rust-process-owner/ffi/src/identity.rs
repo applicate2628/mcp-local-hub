@@ -1,4 +1,4 @@
-//! Versioned identity observations over the existing one-shot owner admission.
+//! Versioned identity queries and one-shot admission over the same retained owner.
 use super::{call, failure, Outcome, Owner, ABI, ARGUMENT, OK, STATE, U16};
 use mcphub_process_owner_spike::{ProcessView, RootWait, TokenUserError};
 use std::{io, mem::size_of, os::windows::ffi::OsStrExt};
@@ -49,6 +49,7 @@ pub struct IdentityReport {
 }
 
 pub type IdentityCheck = unsafe extern "C" fn(*const Identity, u32, usize) -> u32;
+pub type IdentityReceiver = unsafe extern "C" fn(*const Identity, u32, usize);
 
 // Keep the image allocation alive alongside the raw view throughout the callback.
 struct OwnedObservation {
@@ -245,6 +246,57 @@ pub unsafe extern "C" fn mh_admit_identity1(
                 Ok(()) => OK,
                 Err(error) => failure(out, error),
             }
+        })
+    }
+}
+
+/// Read identity without consuming admission or changing the owner lifecycle.
+/// The receiver only copies; it makes no admission decision. A successful query
+/// does not settle the owner or publish a newly observed root exit code.
+/// # Safety
+/// Follow include/identity_v1.h: the owner is live/exclusive and both outputs
+/// are valid, aligned and mutually disjoint. The receiver uses this exact C ABI,
+/// returns normally, contains foreign panics/exceptions, does not retain/mutate
+/// native views or reenter the owner. Its opaque token stays live until return.
+#[no_mangle]
+pub unsafe extern "C" fn mh_query_identity1(
+    raw: *mut Owner,
+    version: u32,
+    receive: Option<IdentityReceiver>,
+    token: usize,
+    report: *mut IdentityReport,
+    report_bytes: u32,
+    out: *mut Outcome,
+    out_bytes: u32,
+) -> u32 {
+    // SAFETY: same disjoint caller-owned report storage as identity admission.
+    let report = unsafe { report_output(report, report_bytes) };
+    // SAFETY: shared owner/output validation; this action only borrows the
+    // original process view and never invokes an owner lifecycle operation.
+    unsafe {
+        call(raw, out, out_bytes, |owner, out| {
+            let report = match report {
+                Ok(report) => report,
+                Err(status) => return status,
+            };
+            if version != VERSION {
+                return ABI;
+            }
+            let Some(receive) = receive else {
+                return ARGUMENT;
+            };
+            let view = match owner.inner.process_view() {
+                Ok(view) => view,
+                Err(error) => return failure(out, error),
+            };
+            let observation = match observe(view, report) {
+                Ok(observation) => observation,
+                Err(()) => return STATE,
+            };
+            // SAFETY: the complete immutable view and owned image live through
+            // this synchronous receiver. Nothing is resumed after it returns.
+            receive(&observation.value, size_of::<Identity>() as u32, token);
+            OK
         })
     }
 }
@@ -492,5 +544,145 @@ mod tests {
             Settlement::Complete { root_exit: 81 }
         );
         drop(owner);
+    }
+    #[test]
+    fn read_only_query_preflight_repetition_and_state_do_not_consume_admission() {
+        unsafe extern "C" fn receive(identity: *const Identity, bytes: u32, token: usize) {
+            assert_eq!(bytes as usize, size_of::<Identity>());
+            // SAFETY: producer supplies the live complete immutable identity;
+            // this test supplies a live exclusive synchronous call counter.
+            unsafe {
+                assert_ne!((*identity).pid, 0);
+                assert_eq!((*identity).wait_state, WAIT_NOT_SIGNALED);
+                *(token as *mut usize) += 1;
+            }
+        }
+        let executable = std::env::current_exe().unwrap();
+        let inner = NativeOwner::create_suspended(&executable, &["--list".into()]).unwrap();
+        let mut owner = Box::new(Owner {
+            inner,
+            terminal: false,
+        });
+        let raw = &mut *owner as *mut Owner;
+        let mut calls = 0usize;
+        let token = &mut calls as *mut usize as usize;
+        let receive: Option<IdentityReceiver> = Some(receive);
+        let report_bytes = size_of::<IdentityReport>() as u32;
+        let out_bytes = size_of::<Outcome>() as u32;
+        let mut report = IdentityReport::default();
+        let mut out = Outcome::default();
+        for (version, receiver, report_size, out_size, expected) in [
+            (2, receive, report_bytes, out_bytes, ABI),
+            (1, None, report_bytes, out_bytes, ARGUMENT),
+            (1, receive, report_bytes - 1, out_bytes, ARGUMENT),
+            (1, receive, report_bytes, out_bytes - 1, ARGUMENT),
+        ] {
+            // SAFETY: live caller-owned owner and disjoint complete outputs;
+            // malformed metadata must reject before the receiver is invoked.
+            let status = unsafe {
+                mh_query_identity1(
+                    raw,
+                    version,
+                    receiver,
+                    token,
+                    &mut report,
+                    report_size,
+                    &mut out,
+                    out_size,
+                )
+            };
+            assert_eq!(status, expected);
+            assert_eq!(calls, 0);
+        }
+        for expected in 1..=2 {
+            // SAFETY: the same owner, counter and output buffers stay exclusive.
+            let status = unsafe {
+                mh_query_identity1(
+                    raw,
+                    VERSION,
+                    receive,
+                    token,
+                    &mut report,
+                    report_bytes,
+                    &mut out,
+                    out_bytes,
+                )
+            };
+            assert_eq!(status, OK);
+            assert_eq!(report.stage, STAGE_COMPLETE);
+            assert_eq!(calls, expected);
+            assert_eq!(out.pid, owner.inner.root_pid());
+            assert_eq!(out.state, 0);
+            assert_eq!(out.flags, 0);
+            assert_eq!(owner.inner.root_exit(), None);
+        }
+        // A policy refusal proves the original admission is still available.
+        // It does not resume the child and must not prohibit subsequent query.
+        let error = owner
+            .inner
+            .admit_and_resume(|_| Err(io::ErrorKind::PermissionDenied.into()))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        // SAFETY: same live owner; query is independent of consumed admission.
+        assert_eq!(
+            unsafe {
+                mh_query_identity1(
+                    raw,
+                    VERSION,
+                    receive,
+                    token,
+                    &mut report,
+                    report_bytes,
+                    &mut out,
+                    out_bytes,
+                )
+            },
+            OK
+        );
+        assert_eq!(calls, 3);
+        assert!(owner.inner.admit_and_resume(|_| Ok(())).is_err());
+        owner.inner.terminate(87).unwrap();
+        // SAFETY: the retained owner is live; stop forbids new observations.
+        assert_eq!(
+            unsafe {
+                mh_query_identity1(
+                    raw,
+                    VERSION,
+                    receive,
+                    token,
+                    &mut report,
+                    report_bytes,
+                    &mut out,
+                    out_bytes,
+                )
+            },
+            STATE
+        );
+        assert_eq!(report.stage, STAGE_NONE);
+        assert_eq!(calls, 3);
+        assert_eq!(
+            owner.inner.finish(Duration::from_secs(3)).unwrap(),
+            Settlement::Complete { root_exit: 87 }
+        );
+        // SAFETY: terminal Owner allocation remains live, although handles closed.
+        assert_eq!(
+            unsafe {
+                mh_query_identity1(
+                    raw,
+                    VERSION,
+                    receive,
+                    token,
+                    &mut report,
+                    report_bytes,
+                    &mut out,
+                    out_bytes,
+                )
+            },
+            STATE
+        );
+        assert_eq!(report.stage, STAGE_NONE);
+        assert_eq!(calls, 3);
+        assert_eq!(out.state, 0);
+        assert_eq!(out.root_exit, 87);
     }
 }

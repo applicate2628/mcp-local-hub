@@ -20,6 +20,7 @@ typedef struct {
     mh_release_fn release;
     mh_admit_checked_fn admit_checked;
     mh_admit_identity_fn admit_identity;
+    mh_query_identity_fn query_identity;
 } bridge;
 static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     bridge *b = (bridge*)calloc(1, sizeof(*b));
@@ -49,6 +50,12 @@ static bridge *bridge_open(const uint16_t *path, uint32_t *error) {
     if (p) {
         _Static_assert(sizeof(b->admit_identity)==sizeof(p), "identity function pointer size");
         memcpy(&b->admit_identity,&p,sizeof(b->admit_identity));
+    }
+    // Query support is independent of identity admission support.
+    p=GetProcAddress(b->module,"mh_query_identity1");
+    if (p) {
+        _Static_assert(sizeof(b->query_identity)==sizeof(p), "query function pointer size");
+        memcpy(&b->query_identity,&p,sizeof(b->query_identity));
     }
     return b;
 fail:
@@ -90,6 +97,15 @@ static uint32_t bridge_identity_check(const mh_identity *v, uint32_t bytes, uint
 static int bridge_has_identity(bridge *b) { return b->admit_identity != NULL; }
 static uint32_t bridge_identity(bridge *b,mh_owner *p,uintptr_t token,mh_identity_report *r,mh_out *o) {
     return b->admit_identity(p,MH_ID_VERSION,bridge_identity_check,token,r,sizeof(*r),o,sizeof(*o));
+}
+extern void mh_go_identity_query(mh_identity*, uint32_t, uintptr_t);
+static void bridge_identity_receive(const mh_identity *v, uint32_t bytes, uintptr_t token) {
+    // This distinct callback only copies; its signature carries no decision.
+    mh_go_identity_query((mh_identity*)v,bytes,token);
+}
+static int bridge_has_identity_query(bridge *b) { return b->query_identity != NULL; }
+static uint32_t bridge_identity_query(bridge *b,mh_owner *p,uintptr_t token,mh_identity_report *r,mh_out *o) {
+    return b->query_identity(p,MH_ID_VERSION,bridge_identity_receive,token,r,sizeof(*r),o,sizeof(*o));
 }
 */
 import "C"
@@ -421,7 +437,7 @@ func (o *Owner) AdmitChecked(check func(ProcessObservation) error) (Outcome, err
 
 // AdmitIdentity requires the optional identity protocol. Unsupported libraries,
 // a nil policy and a released owner are rejected before native admission.
-// Policy runs under the same owner mutex and receives only Go-owned values.
+// Policy runs before resume under the same owner mutex and receives only Go-owned values.
 // It must return normally and must not reenter this owner; panics become denial.
 func (o *Owner) AdmitIdentity(check func(IdentityObservation) error) (Outcome, error) {
 	o.mu.Lock()
@@ -458,4 +474,56 @@ func (o *Owner) AdmitIdentity(check func(IdentityObservation) error) (Outcome, e
 		}
 	}
 	return observed, errors.Join(err, reportErr, state.err)
+}
+
+// QueryIdentity copies facts from the same retained process and original Job.
+// It never consumes admission or changes the owner lifecycle. Queries may be
+// repeated until Stop is attempted or Finish closes the resources. Windows
+// query/temporary-token-close failures are preserved; no partial value escapes.
+// The call is synchronous under the owner mutex and has no cancellation deadline.
+// These separate observations are not a product identity/custody capability.
+func (o *Owner) QueryIdentity() (IdentityObservation, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.raw == nil {
+		return IdentityObservation{}, errors.New("owner released")
+	}
+	if C.bridge_has_identity_query(o.lib.raw) == 0 {
+		return IdentityObservation{}, ErrIdentityQueryUnsupported
+	}
+	state := &identityQueryCall{}
+	token := cgo.NewHandle(state)
+	defer token.Delete()
+	var report C.mh_identity_report
+	var out C.mh_out
+	status := C.bridge_identity_query(o.lib.raw, o.raw, C.uintptr_t(token), &report, &out)
+	observed, err := result(status, out)
+	stage, reportErr := identityReportResult(report)
+	switch stage {
+	case IdentityStageNone:
+		if (uint32(status) != argument && uint32(status) != abiMismatch && uint32(status) != invalidState) || state.calls != 0 {
+			reportErr = errors.Join(reportErr, invalidIdentity("query preflight contradicts outcome"))
+		}
+	case IdentityStageComplete:
+		if status != 0 || state.calls != 1 {
+			reportErr = errors.Join(reportErr, invalidIdentity("completed query without one successful receiver"))
+		}
+		if observed.PID != state.value.PID {
+			reportErr = errors.Join(reportErr, invalidIdentity("query owner PID contradicts identity"))
+		}
+		if observed.Flags&1 != 0 && state.value.WaitState != IdentitySignaled {
+			reportErr = errors.Join(reportErr, invalidIdentity("query wait contradicts known root exit"))
+		}
+	default:
+		if uint32(status) != invalidState || state.calls != 0 {
+			reportErr = errors.Join(reportErr, invalidIdentity("query failure contradicts receiver outcome"))
+		}
+	}
+	if observed.State != 0 || observed.Flags&2 != 0 {
+		reportErr = errors.Join(reportErr, invalidIdentity("query reported a settlement observation"))
+	}
+	if err = errors.Join(err, reportErr, state.err); err != nil {
+		return IdentityObservation{}, err
+	}
+	return state.value, nil
 }

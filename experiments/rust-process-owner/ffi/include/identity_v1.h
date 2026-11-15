@@ -3,8 +3,9 @@
 #include "owner_v1.h"
 
 /* Additive Windows x64 identity schema. Existing ABI1 exports/layouts and
- * mh_version1() remain unchanged. Absence of mh_admit_identity1 is unsupported,
- * never permission to fall back to PID/image-only admission.
+ * mh_version1() remain unchanged. mh_admit_identity1 and mh_query_identity1 are
+ * independently optional exports. An absent export is unsupported, never
+ * permission to fall back to a different admission or query operation.
  * All pointer validity, exclusive owner, loaded-DLL and callback obligations
  * from owner_v1.h also apply; this is not a hostile-memory sandbox. */
 enum { MH_ID_VERSION=1, MH_ID_SID_CAPACITY=68 };
@@ -29,9 +30,8 @@ typedef struct {
     int32_t query_native_error, token_close_error;
 } mh_identity_report;
 
-/* Successful observations are emitted only inside the original NativeOwner's
- * at-create Job-bound admission, before ResumeThread. Every query uses retained
- * objects; no process is reconstructed by PID. The values are separate
+/* Every observation uses the original NativeOwner's retained process and
+ * at-create Job. No process is reconstructed by PID. The values are separate
  * observations, not an atomic snapshot, ownership or a product capability.
  * pid/creation_time are nonzero; creation_time uses 100 ns since 1601-01-01 UTC.
  * Job/wait values are the known enums above: zero is unknown and is invalid in
@@ -45,9 +45,12 @@ typedef struct {
  * The identity pointer, its inline bytes and image view are read-only and live
  * ONLY until this synchronous callback returns. Copy before retaining. The
  * token is an opaque call-scoped integer, never a dereferenced pointer here.
- * Return exactly 1=allow or 0=deny. Other decisions reject and consume admission.
  * No unwind/longjmp/Goexit, native pointer retention, owner reentry or waiting
  * for another thread to enter the same owner is allowed. */
+typedef void (*mh_identity_receive_fn)(const mh_identity*, uint32_t, uintptr_t);
+
+/* Admission alone collects before ResumeThread, then requests a policy decision.
+ * Return exactly 1=allow or 0=deny. Other decisions reject and consume admission. */
 typedef uint32_t (*mh_identity_check_fn)(const mh_identity*, uint32_t, uintptr_t);
 
 /* Query or token-close failure consumes admission and does not invoke policy.
@@ -69,6 +72,27 @@ typedef uint32_t (*mh_identity_check_fn)(const mh_identity*, uint32_t, uintptr_t
  * through another export. Existing mh_out settlement meanings are unchanged. */
 typedef uint32_t (*mh_admit_identity_fn)(mh_owner*, uint32_t,
     mh_identity_check_fn, uintptr_t, mh_identity_report*, uint32_t,
+    mh_out*, uint32_t);
+
+/* Read-only lifecycle query: never consumes admission, resumes, stops, settles
+ * or publishes root exit. Repeated explicit queries are allowed before/after
+ * admission (including denial), and after a Pending finish with no stop request.
+ * A previous query failure is preserved by its returned report; a later success
+ * does not prove that an earlier ambiguous token close was repaired.
+ * Once stop was attempted or terminal finish closed the resources, return
+ * MH_STATE/NONE without a receiver. All pointer/report invariants above apply.
+ *
+ * The receiver only copies: it has no allow/deny result. Producer success is
+ * MH_OK/COMPLETE with exactly one receiver; foreign copy/validation failures
+ * belong to the receiver and must not yield an observation to its caller.
+ * Preflight yields MH_ARGUMENT or MH_ABI with NONE; a state refusal yields
+ * MH_STATE/NONE. Query/close failure yields MH_STATE/PID..TOKEN and no receiver.
+ * No failure consumes admission. mh_out.state stays UNKNOWN; diagnostic PID
+ * and previously known root exit may be present, without a new root wait.
+ * Collection allocates memory and opens/closes a temporary token; read-only
+ * describes process/owner lifecycle, not absence of temporary resource use. */
+typedef uint32_t (*mh_query_identity_fn)(mh_owner*, uint32_t,
+    mh_identity_receive_fn, uintptr_t, mh_identity_report*, uint32_t,
     mh_out*, uint32_t);
 
 #if UINTPTR_MAX == UINT64_MAX
