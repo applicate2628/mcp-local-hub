@@ -1,0 +1,120 @@
+{
+    "schema":  1,
+    "sourceCommit":  "7f99d4001c43c77c0fab478566e42b8bfb4d12e1",
+    "createdUtc":  "2026-11-15T11:31:02.2090410Z",
+    "normalization":  "UTF-8 without BOM; LF. Original files untouched.",
+    "redaction":  "Textual numeric SID and user-profile name redacted. Embedded runner hashes refer to original execution bytes.",
+    "entries":  [
+                    {
+                        "entry":  "native-runner.ps1",
+                        "originalBytes":  2784,
+                        "originalSHA256":  "b7c56a0dab3c681e723f0d9fe0999bd31b6944814f20d50730d9bd2ff8854a34",
+                        "publishedBytes":  2784,
+                        "publishedSHA256":  "b7c56a0dab3c681e723f0d9fe0999bd31b6944814f20d50730d9bd2ff8854a34",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-completion.json",
+                        "originalBytes":  616,
+                        "originalSHA256":  "e6fe75c5ebf373bcc41fbf99203757e77d0d37f7cf1be30d38e42ecbf52c551a",
+                        "publishedBytes":  598,
+                        "publishedSHA256":  "6b8cae0e4ba77a006e84a3a415af5d093989b1bd36a40b6bd29b2ce8468a642b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "query-first/run.log",
+                        "originalBytes":  608,
+                        "originalSHA256":  "650c89215c96115a2ccce9a86a155de635d73a4a86207e08e6a83023db425f15",
+                        "publishedBytes":  608,
+                        "publishedSHA256":  "650c89215c96115a2ccce9a86a155de635d73a4a86207e08e6a83023db425f15",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "query-first/result.json",
+                        "originalBytes":  2227,
+                        "originalSHA256":  "0e7effe7903f51da38b0b737725ea4732809ae04c40688a8d72d834e2d5e76c9",
+                        "publishedBytes":  2181,
+                        "publishedSHA256":  "10bcd9407fb209053042a52472ef47025de69b21a13b41b17d55b5014dca443a",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-debug/run.log",
+                        "originalBytes":  8270,
+                        "originalSHA256":  "343987f9129565237a78e4c24166dcb8d1610b8fd857b271ed84ef398a25a467",
+                        "publishedBytes":  8270,
+                        "publishedSHA256":  "343987f9129565237a78e4c24166dcb8d1610b8fd857b271ed84ef398a25a467",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-debug/result.json",
+                        "originalBytes":  2125,
+                        "originalSHA256":  "25e7db5000bd715a124f4dc1e49b28ccd8bebd671c03c40d0579671edbbe85d1",
+                        "publishedBytes":  2082,
+                        "publishedSHA256":  "718120ae20fc0d4648c002eabc21a2a8a079ca86808a6f33f8f9234415325806",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-native-debug/run.log",
+                        "originalBytes":  8138,
+                        "originalSHA256":  "63286fa40c954a9c415098d0168769b704aca86d8b013e3c1ed34a9ede24fa10",
+                        "publishedBytes":  8138,
+                        "publishedSHA256":  "63286fa40c954a9c415098d0168769b704aca86d8b013e3c1ed34a9ede24fa10",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "root-native-debug/result.json",
+                        "originalBytes":  2130,
+                        "originalSHA256":  "1dddba5180326ed327f4eea117351b159d8460a1e3f41f0ff8d039347ea2104c",
+                        "publishedBytes":  2087,
+                        "publishedSHA256":  "b1c2444d69d186d06090ab58c5f0a4e178fa870d143b280f2b5e0e57caa921ad",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-fmt/run.log",
+                        "originalBytes":  1,
+                        "originalSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "publishedBytes":  1,
+                        "publishedSHA256":  "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-fmt/result.json",
+                        "originalBytes":  2076,
+                        "originalSHA256":  "08b31bc606bd1a3fe042bc7b4ab1a94fa4c43eccab287a60605535994f24552b",
+                        "publishedBytes":  2034,
+                        "publishedSHA256":  "cbcd8f486d1337b59585de0ad16c7b708ea39044621a97255d754e033ad0ca74",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-clippy/run.log",
+                        "originalBytes":  270,
+                        "originalSHA256":  "9b4b7be08005dc33136b5a3cad0b9b1a245acea6d64bdd5dae185ea3c1ce723f",
+                        "publishedBytes":  270,
+                        "publishedSHA256":  "9b4b7be08005dc33136b5a3cad0b9b1a245acea6d64bdd5dae185ea3c1ce723f",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    },
+                    {
+                        "entry":  "native-clippy/result.json",
+                        "originalBytes":  2185,
+                        "originalSHA256":  "dbbe9400ecb84fe43cd67231087e5aebc20ade1e172739aa621c9c70d36ad3c8",
+                        "publishedBytes":  2140,
+                        "publishedSHA256":  "414bb95d0ffb00145effce3fcba639ea513ae79e39296319816f75c57bb6975e",
+                        "sidRedactions":  0,
+                        "profileRedactions":  0
+                    }
+                ],
+    "verifiedZipEntries":  12,
+    "zipSHA256":  "af25f33ec82c89886d14e1e8fef1ce422432c46b40b9ec061bf37a92350503b5",
+    "excluded":  "Fixtures, binary SID markers, executable files, targets and caches."
+}
