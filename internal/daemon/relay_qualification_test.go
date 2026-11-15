@@ -24,7 +24,8 @@ type qualificationBody struct {
 
 func (b *qualificationBody) Close() error { b.closes++; return b.closeErr }
 func TestQualificationExchangeUsesRealReceiver(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	type workContextKey struct{}
+	ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), workContextKey{}, "work"), time.Second)
 	defer cancel()
 	for _, tc := range []struct {
 		name, wire, media, method, id string
@@ -48,8 +49,10 @@ func TestQualificationExchangeUsesRealReceiver(t *testing.T) {
 			}
 			relay := &HTTPToStdioRelay{URL: "http://127.0.0.1:32123/mcp"}
 			o := &mcpHTTPQualificationOwner{relay: relay, client: &http.Client{Transport: qualificationFakeHTTP(func(r *http.Request) (*http.Response, error) {
-				if r.Context() != ctx {
-					t.Fatal("work context replaced")
+				wantEnd, _ := ctx.Deadline()
+				gotEnd, finite := r.Context().Deadline()
+				if !finite || !gotEnd.Equal(wantEnd) || r.Context().Err() != ctx.Err() || r.Context().Value(workContextKey{}) != "work" {
+					t.Fatal("work context budget or values changed")
 				}
 				return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": []string{tc.media}}, Body: body}, nil
 			})}}
