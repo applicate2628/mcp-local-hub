@@ -271,6 +271,9 @@ func discoverPreparedSerenaUV(ctx context.Context, execution SerenaPreparationEn
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
+		if directory == "" {
+			continue // An empty PATH element must not search the working directory.
+		}
 		// Qualified PATH entries are literal directories. Discover expands
 		// environment references in hints, which would change a literal '$'.
 		for _, name := range names {
