@@ -1,0 +1,503 @@
+## child
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.58s
+## abi
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner\ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running unittests src\lib.rs (<task-root>\target-consumer\debug\deps\mcphub_owner_ffi_spike-8577d77d49e9cc6b.exe)
+
+running 14 tests
+test tests::environment_layout_and_empty_view_match_the_c_contract ... ok
+test tests::environment_bounds_reject_before_dereferencing_entry_strings ... ok
+test tests::bounded_cleanup_encoding_preserves_each_error_and_root_exit ... ok
+test tests::environment_values_are_owned_and_preserve_raw_windows_units ... ok
+test tests::layout_matches_the_compiled_c_header ... ok
+test tests::extended_environment_request_rejects_wrong_size_without_creation ... ok
+test tests::stdio_context_rejects_wrong_size_and_null_before_acquisition ... ok
+test tests::stdio_sentinels_are_rejected_before_forming_native_borrows ... ok
+test tests::pending_and_error_encodings_do_not_fabricate_success ... ok
+test tests::wrong_version_or_reserved_field_cannot_create_an_owner ... ok
+test tests::output_is_initialized_before_exposure_and_short_storage_is_untouched ... ok
+test tests::structural_input_rejection_does_not_dereference_null_or_oversized_views ... ok
+test tests::native_invalid_parameter_code_survives_create_classification ... ok
+test tests::stdio_context_layout_matches_the_c_header ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mcphub_owner_ffi_spike
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+## debug-dll
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner\ffi)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.39s
+## release-dll
+   Compiling windows-link v0.2.1
+   Compiling windows-sys v0.61.2
+   Compiling mcphub-process-owner-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner)
+   Compiling mcphub-owner-ffi-spike v0.0.0 (<task-root>\consumer-frozen-ffi-consumer\experiments\rust-process-owner\ffi)
+    Finished `release` profile [optimized] target(s) in 1.46s
+## go-debug-race
+=== RUN   TestCheckedAdmissionObservesOriginalBeforeChildRuns
+--- PASS: TestCheckedAdmissionObservesOriginalBeforeChildRuns (0.04s)
+=== RUN   TestCheckedAdmissionDenialPreservesPolicyErrorAndOwner
+--- PASS: TestCheckedAdmissionDenialPreservesPolicyErrorAndOwner (0.01s)
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/value
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/nil
+--- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI (0.02s)
+    --- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/value (0.01s)
+    --- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/nil (0.01s)
+=== RUN   TestCheckedAdmissionNilPolicyDoesNotConsumeAdmission
+--- PASS: TestCheckedAdmissionNilPolicyDoesNotConsumeAdmission (0.01s)
+=== RUN   TestCheckedAdmissionCannotObserveStoppedOrReleasedOwner
+--- PASS: TestCheckedAdmissionCannotObserveStoppedOrReleasedOwner (0.01s)
+=== RUN   TestCheckedAdmissionSerializesPolicyWithOtherOwnerCalls
+--- PASS: TestCheckedAdmissionSerializesPolicyWithOtherOwnerCalls (0.01s)
+=== RUN   TestCheckedAdmissionCancellationRejectsBeforeResume
+--- PASS: TestCheckedAdmissionCancellationRejectsBeforeResume (0.01s)
+=== RUN   TestForeignLifecycleRetainsOwnerAndCopiesInput
+--- PASS: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.04s)
+=== RUN   TestForeignDeniedAdmissionHasNoEffect
+--- PASS: TestForeignDeniedAdmissionHasNoEffect (0.01s)
+=== RUN   TestForeignErrorsAreTypedAndNoOwnerEscapes
+--- PASS: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)
+=== RUN   TestForeignReleaseClearsHandleAndDisallowsUse
+--- PASS: TestForeignReleaseClearsHandleAndDisallowsUse (0.03s)
+=== RUN   TestForeignCallerSerializesConcurrentUse
+--- PASS: TestForeignCallerSerializesConcurrentUse (0.01s)
+=== RUN   TestForeignRootExitDoesNotReleaseLiveDescendant
+--- PASS: TestForeignRootExitDoesNotReleaseLiveDescendant (0.06s)
+=== RUN   TestForeignExplicitContextDoesNotInheritOrMutateParent
+--- PASS: TestForeignExplicitContextDoesNotInheritOrMutateParent (0.03s)
+=== RUN   TestForeignBudgetsDoNotConsumeAdmission
+--- PASS: TestForeignBudgetsDoNotConsumeAdmission (0.03s)
+=== RUN   TestExplicitEnvironmentCopiesValuesWithoutParentInheritance
+--- PASS: TestExplicitEnvironmentCopiesValuesWithoutParentInheritance (0.03s)
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/nil
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/empty
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/legacy
+--- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible (0.09s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/nil (0.03s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/empty (0.03s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/legacy (0.03s)
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/key-nul
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-key-utf8
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/entry-count
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/string-budget
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/equals-key
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/value-nul
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-case
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-unicode
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/wrong-order
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-value-utf8
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/block-budget
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/empty-key
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/drive-key
+--- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect (0.02s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/key-nul (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-key-utf8 (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/entry-count (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/string-budget (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/equals-key (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/value-nul (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-case (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-unicode (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/wrong-order (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-value-utf8 (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/block-budget (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/empty-key (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/drive-key (0.00s)
+=== RUN   TestExplicitEnvironmentConcurrentChildrenStaySeparated
+--- PASS: TestExplicitEnvironmentConcurrentChildrenStaySeparated (0.04s)
+=== RUN   TestExplicitEnvironmentDenialRetainsOwnerWithoutEffect
+--- PASS: TestExplicitEnvironmentDenialRetainsOwnerWithoutEffect (0.01s)
+=== RUN   TestExplicitEnvironmentPreservesNativeFailure
+--- PASS: TestExplicitEnvironmentPreservesNativeFailure (0.00s)
+=== RUN   TestExplicitEnvironmentBudgetCountsAllTerminators
+--- PASS: TestExplicitEnvironmentBudgetCountsAllTerminators (0.04s)
+=== RUN   TestTextBoundaryRejectsInvalidUTF8InsteadOfReplacing
+--- PASS: TestTextBoundaryRejectsInvalidUTF8InsteadOfReplacing (0.00s)
+=== RUN   TestFinishContextCanceledBeforeObservationHasNoEffect
+--- PASS: TestFinishContextCanceledBeforeObservationHasNoEffect (0.03s)
+=== RUN   TestFinishContextNilRejectedWithoutNativeEffect
+--- PASS: TestFinishContextNilRejectedWithoutNativeEffect (0.04s)
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+--- PASS: TestFinishContextDeadlineRetainsSuspendedOwner (0.06s)
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+--- PASS: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (0.01s)
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+--- PASS: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.10s)
+=== RUN   TestFinishContextOneObserverCancelDoesNotCancelAnother
+--- PASS: TestFinishContextOneObserverCancelDoesNotCancelAnother (0.06s)
+=== RUN   TestFinishContextCanceledWaitDoesNotConsumeTerminalResult
+--- PASS: TestFinishContextCanceledWaitDoesNotConsumeTerminalResult (0.03s)
+=== RUN   TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock
+--- PASS: TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock (0.08s)
+=== RUN   TestIOCancelWaitDoesNotCloseBlockedWriter
+--- PASS: TestIOCancelWaitDoesNotCloseBlockedWriter (0.06s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+--- PASS: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.06s)
+=== RUN   TestIORootExitIsNotOutputEOFWhileDescendantLives
+--- PASS: TestIORootExitIsNotOutputEOFWhileDescendantLives (0.10s)
+=== RUN   TestIONativeSettlementDoesNotDiscardUnreadFinalBytes
+--- PASS: TestIONativeSettlementDoesNotDiscardUnreadFinalBytes (0.04s)
+=== RUN   TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild
+--- PASS: TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild (0.06s)
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/no-owner-argument-error
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/nil-release
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/created
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/denied
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/native-failure
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-root
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-descendant
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/exit-zero
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/real-exit-259
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/terminal-observed-empty-cohort
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-1
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-2
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-3
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-4
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-5
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-6
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-7
+--- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/no-owner-argument-error (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/nil-release (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/created (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/denied (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/native-failure (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-root (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-descendant (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/exit-zero (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/real-exit-259 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/terminal-observed-empty-cohort (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-1 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-2 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-3 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-4 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-5 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-6 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-7 (0.00s)
+=== RUN   TestOutcomeRejectsIncoherentFields
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-status
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-state
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-flag
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-close-slot
+=== RUN   TestOutcomeRejectsIncoherentFields/native-without-code
+=== RUN   TestOutcomeRejectsIncoherentFields/code-without-status
+=== RUN   TestOutcomeRejectsIncoherentFields/unflagged-root
+=== RUN   TestOutcomeRejectsIncoherentFields/unflagged-active
+=== RUN   TestOutcomeRejectsIncoherentFields/missing-process
+=== RUN   TestOutcomeRejectsIncoherentFields/missing-root
+=== RUN   TestOutcomeRejectsIncoherentFields/live-terminal
+=== RUN   TestOutcomeRejectsIncoherentFields/empty-cleanup-failure
+=== RUN   TestOutcomeRejectsIncoherentFields/complete-with-close-failure
+=== RUN   TestOutcomeRejectsIncoherentFields/close-without-code
+=== RUN   TestOutcomeRejectsIncoherentFields/stray-close-code
+--- PASS: TestOutcomeRejectsIncoherentFields (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-status (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-state (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-flag (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-close-slot (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/native-without-code (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/code-without-status (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unflagged-root (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unflagged-active (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/missing-process (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/missing-root (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/live-terminal (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/empty-cleanup-failure (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/complete-with-close-failure (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/close-without-code (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/stray-close-code (0.00s)
+=== RUN   TestStdioCopiesNonInheritableSourcesAndPreservesOwnership
+--- PASS: TestStdioCopiesNonInheritableSourcesAndPreservesOwnership (0.04s)
+=== RUN   TestStdioCallerMayCloseSourcesAfterCreate
+--- PASS: TestStdioCallerMayCloseSourcesAfterCreate (0.03s)
+=== RUN   TestStdioSharedOutputUsesOneUnderlyingFilePosition
+--- PASS: TestStdioSharedOutputUsesOneUnderlyingFilePosition (0.04s)
+=== RUN   TestStdioPipeEOFHasNoHiddenParentWriter
+--- PASS: TestStdioPipeEOFHasNoHiddenParentWriter (0.04s)
+=== RUN   TestStdioDenialAndNativeFailureKeepSourceFiles
+--- PASS: TestStdioDenialAndNativeFailureKeepSourceFiles (0.01s)
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdin-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdout-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stderr-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdin-closed
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdout-closed
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stderr-closed
+--- PASS: TestStdioMissingOrClosedSourceNeverStartsChild (0.01s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdin-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdout-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stderr-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdin-closed (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdout-closed (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stderr-closed (0.00s)
+=== RUN   TestStdioInheritanceExcludesUnrelatedParentEvent
+--- PASS: TestStdioInheritanceExcludesUnrelatedParentEvent (0.04s)
+=== RUN   TestStdioComposesWithEnvironmentAndCheckedAdmission
+--- PASS: TestStdioComposesWithEnvironmentAndCheckedAdmission (0.04s)
+=== RUN   TestStdioPartialDuplicationReleasesEarlierCopies
+--- PASS: TestStdioPartialDuplicationReleasesEarlierCopies (0.00s)
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/1
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/2
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/3
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/4
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/5
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/6
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/7
+--- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried (0.01s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/1 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/2 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/3 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/4 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/5 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/6 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/7 (0.00s)
+=== RUN   TestStdioGoPipesCarryBinaryInputAndReachEOF
+--- PASS: TestStdioGoPipesCarryBinaryInputAndReachEOF (0.04s)
+PASS
+ok  	mcphub-owner-ffi-caller	2.598s
+## go-release-race
+=== RUN   TestCheckedAdmissionObservesOriginalBeforeChildRuns
+--- PASS: TestCheckedAdmissionObservesOriginalBeforeChildRuns (0.04s)
+=== RUN   TestCheckedAdmissionDenialPreservesPolicyErrorAndOwner
+--- PASS: TestCheckedAdmissionDenialPreservesPolicyErrorAndOwner (0.01s)
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/value
+=== RUN   TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/nil
+--- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI (0.01s)
+    --- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/value (0.01s)
+    --- PASS: TestCheckedAdmissionPolicyPanicDeniesWithoutCrossingFFI/nil (0.01s)
+=== RUN   TestCheckedAdmissionNilPolicyDoesNotConsumeAdmission
+--- PASS: TestCheckedAdmissionNilPolicyDoesNotConsumeAdmission (0.01s)
+=== RUN   TestCheckedAdmissionCannotObserveStoppedOrReleasedOwner
+--- PASS: TestCheckedAdmissionCannotObserveStoppedOrReleasedOwner (0.01s)
+=== RUN   TestCheckedAdmissionSerializesPolicyWithOtherOwnerCalls
+--- PASS: TestCheckedAdmissionSerializesPolicyWithOtherOwnerCalls (0.01s)
+=== RUN   TestCheckedAdmissionCancellationRejectsBeforeResume
+--- PASS: TestCheckedAdmissionCancellationRejectsBeforeResume (0.01s)
+=== RUN   TestForeignLifecycleRetainsOwnerAndCopiesInput
+--- PASS: TestForeignLifecycleRetainsOwnerAndCopiesInput (0.03s)
+=== RUN   TestForeignDeniedAdmissionHasNoEffect
+--- PASS: TestForeignDeniedAdmissionHasNoEffect (0.00s)
+=== RUN   TestForeignErrorsAreTypedAndNoOwnerEscapes
+--- PASS: TestForeignErrorsAreTypedAndNoOwnerEscapes (0.00s)
+=== RUN   TestForeignReleaseClearsHandleAndDisallowsUse
+--- PASS: TestForeignReleaseClearsHandleAndDisallowsUse (0.03s)
+=== RUN   TestForeignCallerSerializesConcurrentUse
+--- PASS: TestForeignCallerSerializesConcurrentUse (0.01s)
+=== RUN   TestForeignRootExitDoesNotReleaseLiveDescendant
+--- PASS: TestForeignRootExitDoesNotReleaseLiveDescendant (0.06s)
+=== RUN   TestForeignExplicitContextDoesNotInheritOrMutateParent
+--- PASS: TestForeignExplicitContextDoesNotInheritOrMutateParent (0.03s)
+=== RUN   TestForeignBudgetsDoNotConsumeAdmission
+--- PASS: TestForeignBudgetsDoNotConsumeAdmission (0.03s)
+=== RUN   TestExplicitEnvironmentCopiesValuesWithoutParentInheritance
+--- PASS: TestExplicitEnvironmentCopiesValuesWithoutParentInheritance (0.03s)
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/nil
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/empty
+=== RUN   TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/legacy
+--- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible (0.09s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/nil (0.03s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/empty (0.03s)
+    --- PASS: TestExplicitEnvironmentEmptyRemainsEmptyAndLegacyCompatible/legacy (0.03s)
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/string-budget
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/empty-key
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/drive-key
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/value-nul
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-key-utf8
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/block-budget
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/equals-key
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/key-nul
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-case
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-unicode
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/wrong-order
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-value-utf8
+=== RUN   TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/entry-count
+--- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect (0.01s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/string-budget (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/empty-key (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/drive-key (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/value-nul (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-key-utf8 (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/block-budget (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/equals-key (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/key-nul (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-case (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/duplicate-unicode (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/wrong-order (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/invalid-value-utf8 (0.00s)
+    --- PASS: TestExplicitEnvironmentRejectsInvalidBeforeNativeEffect/entry-count (0.00s)
+=== RUN   TestExplicitEnvironmentConcurrentChildrenStaySeparated
+--- PASS: TestExplicitEnvironmentConcurrentChildrenStaySeparated (0.03s)
+=== RUN   TestExplicitEnvironmentDenialRetainsOwnerWithoutEffect
+--- PASS: TestExplicitEnvironmentDenialRetainsOwnerWithoutEffect (0.01s)
+=== RUN   TestExplicitEnvironmentPreservesNativeFailure
+--- PASS: TestExplicitEnvironmentPreservesNativeFailure (0.00s)
+=== RUN   TestExplicitEnvironmentBudgetCountsAllTerminators
+--- PASS: TestExplicitEnvironmentBudgetCountsAllTerminators (0.04s)
+=== RUN   TestTextBoundaryRejectsInvalidUTF8InsteadOfReplacing
+--- PASS: TestTextBoundaryRejectsInvalidUTF8InsteadOfReplacing (0.00s)
+=== RUN   TestFinishContextCanceledBeforeObservationHasNoEffect
+--- PASS: TestFinishContextCanceledBeforeObservationHasNoEffect (0.03s)
+=== RUN   TestFinishContextNilRejectedWithoutNativeEffect
+--- PASS: TestFinishContextNilRejectedWithoutNativeEffect (0.04s)
+=== RUN   TestFinishContextDeadlineRetainsSuspendedOwner
+--- PASS: TestFinishContextDeadlineRetainsSuspendedOwner (0.05s)
+=== RUN   TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel
+--- PASS: TestFinishContextDoesNotWaitOnBusyOwnerAfterCancel (0.01s)
+=== RUN   TestFinishContextRootExitDoesNotImplyDescendantSettlement
+--- PASS: TestFinishContextRootExitDoesNotImplyDescendantSettlement (0.10s)
+=== RUN   TestFinishContextOneObserverCancelDoesNotCancelAnother
+--- PASS: TestFinishContextOneObserverCancelDoesNotCancelAnother (0.06s)
+=== RUN   TestFinishContextCanceledWaitDoesNotConsumeTerminalResult
+--- PASS: TestFinishContextCanceledWaitDoesNotConsumeTerminalResult (0.03s)
+=== RUN   TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock
+--- PASS: TestFinishContextCanCancelWhileAdmissionPolicyOwnsLock (0.08s)
+=== RUN   TestIOCancelWaitDoesNotCloseBlockedWriter
+--- PASS: TestIOCancelWaitDoesNotCloseBlockedWriter (0.06s)
+=== RUN   TestIOCanceledObserverCanResumeNormalDrainWithoutStop
+--- PASS: TestIOCanceledObserverCanResumeNormalDrainWithoutStop (0.06s)
+=== RUN   TestIORootExitIsNotOutputEOFWhileDescendantLives
+--- PASS: TestIORootExitIsNotOutputEOFWhileDescendantLives (0.10s)
+=== RUN   TestIONativeSettlementDoesNotDiscardUnreadFinalBytes
+--- PASS: TestIONativeSettlementDoesNotDiscardUnreadFinalBytes (0.04s)
+=== RUN   TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild
+--- PASS: TestIOEndpointOwnerCanInterruptReadWithoutStoppingChild (0.05s)
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/no-owner-argument-error
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/nil-release
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/created
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/denied
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/native-failure
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-root
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-descendant
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/exit-zero
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/real-exit-259
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/terminal-observed-empty-cohort
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-1
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-2
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-3
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-4
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-5
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-6
+=== RUN   TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-7
+--- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/no-owner-argument-error (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/nil-release (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/created (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/denied (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/native-failure (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-root (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/pending-descendant (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/exit-zero (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/real-exit-259 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/terminal-observed-empty-cohort (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-1 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-2 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-3 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-4 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-5 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-6 (0.00s)
+    --- PASS: TestOutcomeAcceptsDefinedStatesWithoutCollapsingCleanup/cleanup-mask-7 (0.00s)
+=== RUN   TestOutcomeRejectsIncoherentFields
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-status
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-state
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-flag
+=== RUN   TestOutcomeRejectsIncoherentFields/unknown-close-slot
+=== RUN   TestOutcomeRejectsIncoherentFields/native-without-code
+=== RUN   TestOutcomeRejectsIncoherentFields/code-without-status
+=== RUN   TestOutcomeRejectsIncoherentFields/unflagged-root
+=== RUN   TestOutcomeRejectsIncoherentFields/unflagged-active
+=== RUN   TestOutcomeRejectsIncoherentFields/missing-process
+=== RUN   TestOutcomeRejectsIncoherentFields/missing-root
+=== RUN   TestOutcomeRejectsIncoherentFields/live-terminal
+=== RUN   TestOutcomeRejectsIncoherentFields/empty-cleanup-failure
+=== RUN   TestOutcomeRejectsIncoherentFields/complete-with-close-failure
+=== RUN   TestOutcomeRejectsIncoherentFields/close-without-code
+=== RUN   TestOutcomeRejectsIncoherentFields/stray-close-code
+--- PASS: TestOutcomeRejectsIncoherentFields (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-status (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-state (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-flag (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unknown-close-slot (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/native-without-code (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/code-without-status (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unflagged-root (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/unflagged-active (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/missing-process (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/missing-root (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/live-terminal (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/empty-cleanup-failure (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/complete-with-close-failure (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/close-without-code (0.00s)
+    --- PASS: TestOutcomeRejectsIncoherentFields/stray-close-code (0.00s)
+=== RUN   TestStdioCopiesNonInheritableSourcesAndPreservesOwnership
+--- PASS: TestStdioCopiesNonInheritableSourcesAndPreservesOwnership (0.03s)
+=== RUN   TestStdioCallerMayCloseSourcesAfterCreate
+--- PASS: TestStdioCallerMayCloseSourcesAfterCreate (0.03s)
+=== RUN   TestStdioSharedOutputUsesOneUnderlyingFilePosition
+--- PASS: TestStdioSharedOutputUsesOneUnderlyingFilePosition (0.03s)
+=== RUN   TestStdioPipeEOFHasNoHiddenParentWriter
+--- PASS: TestStdioPipeEOFHasNoHiddenParentWriter (0.03s)
+=== RUN   TestStdioDenialAndNativeFailureKeepSourceFiles
+--- PASS: TestStdioDenialAndNativeFailureKeepSourceFiles (0.01s)
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdin-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdout-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stderr-nil
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdin-closed
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stdout-closed
+=== RUN   TestStdioMissingOrClosedSourceNeverStartsChild/stderr-closed
+--- PASS: TestStdioMissingOrClosedSourceNeverStartsChild (0.01s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdin-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdout-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stderr-nil (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdin-closed (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stdout-closed (0.00s)
+    --- PASS: TestStdioMissingOrClosedSourceNeverStartsChild/stderr-closed (0.00s)
+=== RUN   TestStdioInheritanceExcludesUnrelatedParentEvent
+--- PASS: TestStdioInheritanceExcludesUnrelatedParentEvent (0.03s)
+=== RUN   TestStdioComposesWithEnvironmentAndCheckedAdmission
+--- PASS: TestStdioComposesWithEnvironmentAndCheckedAdmission (0.03s)
+=== RUN   TestStdioPartialDuplicationReleasesEarlierCopies
+--- PASS: TestStdioPartialDuplicationReleasesEarlierCopies (0.00s)
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/1
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/2
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/3
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/4
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/5
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/6
+=== RUN   TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/7
+--- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried (0.01s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/1 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/2 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/3 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/4 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/5 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/6 (0.00s)
+    --- PASS: TestStdioTemporaryCloseFailuresRemainSeparateAndAreNotRetried/7 (0.00s)
+=== RUN   TestStdioGoPipesCarryBinaryInputAndReachEOF
+--- PASS: TestStdioGoPipesCarryBinaryInputAndReachEOF (0.03s)
+PASS
+ok  	mcphub-owner-ffi-caller	2.472s
+## go-cgocheck2
+ok  	mcphub-owner-ffi-caller	1.324s
+## go-vet
