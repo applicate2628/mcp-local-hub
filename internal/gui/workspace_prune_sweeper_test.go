@@ -705,3 +705,34 @@ func TestSweepPruneWorkspaces_PreservedClientWarningVisible(t *testing.T) {
 		t.Errorf("event row counts=%v/%v, want one LSP and zero Serena rows", event["lsp_removed"], event["serena_removed"])
 	}
 }
+
+func TestSweepPruneWorkspaces_RetainedIsNotRemoval(t *testing.T) {
+	restoreState := api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	t.Cleanup(restoreState)
+	oe, orw, ob, oend, oa, oi, oc := pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn, pruneClearDefaultFn
+	t.Cleanup(func() {
+		pruneEnabledFn, pruneWorkspaceRowsFn, pruneBeginFn, pruneEndFn, pruneActionFn, pruneIdleThresholdFn, pruneClearDefaultFn = oe, orw, ob, oend, oa, oi, oc
+	})
+	path := t.TempDir()
+	now := time.Now()
+	row := mkPruneEntry(path, "key", api.SerenaLanguageSentinel)
+	row.LastToolsCallAt = now.Add(-72 * time.Hour)
+	pruneEnabledFn = func() bool { return true }
+	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry { return []*api.WorkspaceEntry{row} }
+	pruneBeginFn = func(*Server, string) bool { return true }
+	pruneEndFn = func(*Server, string) {}
+	pruneIdleThresholdFn = func() time.Duration { return 48 * time.Hour }
+	cleared := 0
+	pruneClearDefaultFn = func(string) error { cleared++; return nil }
+	pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+		return &api.PruneReport{Workspace: path, PreservedReason: api.PrunePreservedAutomatic}, nil
+	}
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	if got := s.SweepPruneWorkspaces(context.Background(), now); got != 0 || cleared != 0 {
+		t.Fatalf("retained count=%d marker clears=%d", got, cleared)
+	}
+	events, err := api.RecentHubMcpEvents(1)
+	if err != nil || len(events) != 1 || events[0]["event"] != "workspace-prune-retained" || events[0]["preserved_reason"] != string(api.PrunePreservedAutomatic) {
+		t.Fatalf("retained event=%v err=%v", events, err)
+	}
+}

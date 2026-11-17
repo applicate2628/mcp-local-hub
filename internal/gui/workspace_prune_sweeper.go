@@ -9,23 +9,8 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// workspace_prune_sweeper.go — Phase 1 of the workspace-daemon auto-prune
-// feature: an in-GUI sweep that auto-removes daemons whose workspace is
-// STRUCTURALLY dead — an ephemeral `.claude/worktrees/agent-*` worktree, a
-// deleted directory, or a leftover git linked worktree whose admin dir is gone
-// (dead-worktree) — so the per-workspace serena+LSP daemon set stops growing
-// without bound. Mirrors the serena idle sweeper (serena_idle_sweeper.go): a
-// per-tick, error-tolerant, cancellable pass driven by runWorkspacePruneTicker
-// in the gui-command wiring.
-//
-// SAFETY (operator-flagged "don't remove a live one"): a workspace is pruned
-// only after claiming the same per-workspace serena stop gate the idle sweeper
-// uses. The claim atomically observes no in-flight /serena/mcp forward and blocks
-// a new forward from entering until prune teardown has finished mutating the
-// registry/intent state. Prune is non-destructive: a pruned workspace
-// re-registers on its next open (EnsureLSPRegistered / AutoRegisterSerenaWorkspace),
-// so the only residual (an in-flight LSP-only call against a workspace with no
-// serena row) at worst drops one short LSP request the client retries.
+// The sweeper classifies candidates and routes them through the API's
+// automatic preservation purpose. Its stop gate still protects concurrent forwards.
 
 // pruneEnoentEntry is the per-path value of Server.pruneEnoentTicks: the orphan
 // REASON last observed on the path plus the count of CONSECUTIVE ticks that saw
@@ -46,10 +31,9 @@ type pruneEnoentEntry struct {
 // false (never prune when the gate is unreadable). Test seam.
 var pruneEnabledFn = defaultPruneEnabled
 
-// pruneActionFn tears down one workspace's daemon rows (production:
-// (*api.API).PruneWorkspace(path, "all")). Test seam.
+// pruneActionFn evaluates a candidate through the automatic preservation purpose. Test seam.
 var pruneActionFn = func(s *Server, path string) (*api.PruneReport, error) {
-	return s.api.PruneWorkspace(path, "all")
+	return s.api.PruneWorkspace(path, "all", api.PrunePurposeAutomatic)
 }
 
 // pruneClearDefaultFn clears the default-workspace marker when a just-pruned
@@ -150,16 +134,8 @@ func defaultPruneDeadWorktrees() bool {
 	return v == "true"
 }
 
-// SweepPruneWorkspaces auto-prunes structurally-dead workspace daemons:
-// agent-worktree rows immediately; deleted-directory AND dead-git-worktree rows
-// after 2 consecutive SAME-reason ENOENT ticks (the in-memory pruneEnoentTicks
-// grace, keyed by (path, reason) so a reason flip between ticks resets the
-// window — absorbs a transient unmount without letting a deleted-dir tick plus a
-// dead-worktree tick prune across reasons; Finding 2). It skips any workspace
-// with an in-flight serena forward. Returns the number of workspaces pruned this
-// tick; a no-op when the gate is off, deps are unwired, or there are no workspace
-// rows. ctx/now are accepted for symmetry with the idle sweeper and the Phase-3
-// idle predicate.
+// SweepPruneWorkspaces classifies automatic candidates and reports retained
+// configuration. It returns the number of actually pruned workspaces.
 func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 	if s == nil {
 		return 0
@@ -273,7 +249,7 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		// report first so committed work is counted and a removed Serena row clears
 		// its default marker, while the operation remains an error outcome.
 		committed := report != nil && (len(report.LSPRemoved) > 0 || report.SerenaRemoved > 0)
-		if report != nil && report.SerenaRemoved > 0 && pruneClearDefaultFn != nil {
+		if report != nil && report.PreservedReason == "" && report.SerenaRemoved > 0 && pruneClearDefaultFn != nil {
 			markerPath := report.Workspace
 			if markerPath == "" {
 				markerPath = path
@@ -296,6 +272,12 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 			if committed {
 				pruned++
 			}
+			continue
+		}
+		if report != nil && report.PreservedReason != "" {
+			_ = api.LogHubMcpEvent("info", "workspace-prune-retained", map[string]any{
+				"workspace": path, "reason": reason, "preserved_reason": report.PreservedReason,
+			})
 			continue
 		}
 		pruned++
