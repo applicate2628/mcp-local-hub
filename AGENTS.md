@@ -21,18 +21,19 @@ go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
 go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
 ```
 
-- Use the repo's supported toolchain and isolated test-state roots. Perform these gates before publication/merge as required by the repository policy. If they are red or cannot run, report exact command, target commit, failures, and unverified cases; do **not** call a draft or PR ready to merge.
+- Use the repo's supported toolchain and isolated test-state roots. Perform required gates to establish review/readiness evidence and before any separately permitted publication. If they are red or cannot run, report the command, target commit, failures and unverified cases; do **not** claim full acceptance. Agent-side PR merging remains forbidden even if these gates pass.
 - Never treat `go build` as a qualified Windows Product. Windows releases require the documented `build.ps1` artifact and original executable/identity admission; test-only Product and source-issued Serena qualification roles are distinct from installable Products.
 - For a narrowly scoped regression, run the relevant focused unit/native tests first, then the required full checks. Existing native acceptance and source/image identities bind to their exact commits; a changed commit requires fresh qualification where identity matters.
 - Inspect owned resources and process settlement on every exit. A wrapper exit code of 0 does not imply that a nested test passed; read the nested command result and persisted receipt.
 
-## Pull request review and integration (mandatory)
+## Pull request quality, review and count reduction (mandatory)
 
-- Search current PRs for related or superseding work before opening another. Keep one PR per independent, reviewable responsibility and make dependencies explicit. An integration worktree is evidence, not an excuse to open a huge aggregate PR.
+- Search current PRs for related or superseding work before opening another. Improve existing PRs instead of creating duplicates; reduce the open count only by closing demonstrably superseded or wholly redundant PRs with evidence that all unique changes are retained. Keep independent changes reviewable. An integration worktree is evidence, not an excuse to open a huge aggregate PR.
 - After local checks, publish only the reviewed, non-sensitive diff to the intended existing/new branch under the owner's explicit authority. Do not bypass blocked host operations by changing executors.
 - Check Codex review against the **exact current head commit**, including the latest no-major-issues summary (or qualifying thumbs-up/approval), all paginated inline comments anchored by original commit, and absence of newer inline findings. An old PASS is not a new PASS.
-- Perform own full-diff review and the additional independent security reviews required by [the runbook](docs/agent-runbook.md#pr-review--merge-workflow-mandatory). Do not launch quota-consuming reviewers without authorization; keep merge blocked when required review is unavailable.
-- Manual CI workflows require explicit dispatch permission. Do not trigger CI to manufacture a green result. No `--admin` bypass, forced history rewrite, or installed software rollout without explicit approval. Merge only after all current-head gates and accepted reviews pass, then verify the actual merged tree.
+- Perform own full-diff review and the additional independent security reviews required by [the runbook](docs/agent-runbook.md#pr-review--merge-workflow-mandatory). Do not launch quota-consuming reviewers without authorization; classify a PR as not fully reviewed when the required review is unavailable.
+- **No PR merging by the agent, in any repository or branch.** Do not run `gh pr merge`, GitHub merge actions, auto-merge or equivalent branch integration, even when all tests and reviews pass. Merging remains entirely outside the agent's authorized work. Earlier merge instructions in the preserved runbook describe a maintainer workflow, **not permission to execute it**. Work only on PR quality, documented readiness, valid dependency structure and reduction of proven redundant PRs.
+- Manual CI workflows require explicit dispatch permission. Do not trigger CI to manufacture a green result. No `--admin` bypass, forced history rewrite, or installed software rollout without explicit approval.
 - Preserve sources, unique evidence, historical failures, and rollback paths before removing obsolete branches or local worktrees. A PR with overlapping files is not a duplicate unless its unique changes are proven already incorporated.
 
 ## Product and subsystem reference (read when relevant)
@@ -46,7 +47,7 @@ go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./interna
 
 ## Planning, evidence and terminology
 
-- For the current open-PR integration sequence, see the [audited concise work plan](.plans/2026-11/open-pr-integration-20261117.md). That plan is a snapshot of observed GitHub state; query GitHub again before any PR action.
+- For the current open-PR quality and count-reduction work, see the [audited concise work plan](.plans/2026-11/open-pr-integration-20261117.md). That plan is a snapshot of observed GitHub state; query GitHub again before any PR action.
 - At the end of each material implementation or integration step record **what changed, what ran and passed/failed, remaining blockers, and the updated residual plan**. Do not repeat already completed checks on unchanged inputs without a distinct boundary reason.
 - Apply relevant available skills to the actual change: Git worktrees and versioning, architecture and contract review for cross-owner changes, Go testing/concurrency for relevant code, simplicity review to remove duplicate fixes. No fixed count of skills is a correctness gate.
 - Expand new abbreviations on first use in human-facing documentation. Keep formulas, identities, file paths, dates, and claims tied to explicit sources and avoid invented verification receipts.
