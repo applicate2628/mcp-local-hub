@@ -159,7 +159,7 @@ than claiming to enumerate the complete embedded catalog.
 | **godbolt** | 9126 | **embedded Go** | Compiler Explorer — compile/execute/disasm via godbolt.org + optimization remarks, llvm-mca, pahole |
 | **paper-search-mcp** | 9127 | stdio-bridge (uvx) | Requires `unpaywall_email` secret |
 | **time** | 9128 | stdio-bridge (npx) | Trivial stateless |
-| **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
+| **gdb** | 9129 | **embedded Go bridge** | GDB/MI with per-session management; requires GDB |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
 | **vcpkg** | 9138 | **embedded Go** | vcpkg/CMake diagnostics — build-failure triage across nested builds, overlay-port precedence, pin auditing, static patch-apply order, CMake include graph. Read-only: never starts a build. Every tool answers `ok\|failed\|unknown(reason)`; see `servers/vcpkg/README.md` for how to read the verdicts |
