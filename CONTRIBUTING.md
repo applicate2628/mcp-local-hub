@@ -37,9 +37,9 @@
 
 ## Local development
 
-See [README.md](README.md) for the build instructions and [CLAUDE.md](CLAUDE.md) for the GUI frontend dev-loop and E2E test workflow.
+See [README.md](README.md) for build instructions, [AGENTS.md](AGENTS.md) for repository rules and the [operational runbook](docs/agent-runbook.md#gui-frontend-phase-3b-ii-onward) for the GUI frontend and end-to-end test workflow.
 
-`go test ./... -count=1 -timeout 240s` is the canonical full-suite check. On Windows, the `internal/gui/e2e/` Playwright suite is the integration-level gate; it is currently Windows-only because the scheduler backend is Windows-first.
+The mandatory build, static analysis, full-suite and tagged test commands are defined in [AGENTS.md](AGENTS.md#build-and-test-gates); do not substitute a shorter timeout or omit the tagged checks. On Windows, the `internal/gui/e2e/` Playwright suite is a separate integration gate because the scheduler backend is Windows-first.
 
 ## Security-sensitive contributions
 
