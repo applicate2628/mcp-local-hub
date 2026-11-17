@@ -127,7 +127,7 @@ $fakeGoScriptPath = Join-Path $fakeBuildTools "fake-go.ps1"
 [IO.File]::WriteAllText($fakeGoScriptPath, $fakeGoScript, (New-Object Text.UTF8Encoding($false)))
 $fakeGoCommand = @"
 @echo off
-"$pwsh" -NoProfile -ExecutionPolicy Bypass -File "$fakeGoScriptPath" %*
+"$pwsh" -NoProfile -File "$fakeGoScriptPath" %*
 @exit /b %ERRORLEVEL%
 "@
 [IO.File]::WriteAllText((Join-Path $fakeBuildTools "go.cmd"), $fakeGoCommand)
