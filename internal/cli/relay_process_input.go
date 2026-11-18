@@ -1,10 +1,9 @@
 package cli
 
 import (
-	"context"
 	"errors"
+	"io"
 	"os"
-	"sync/atomic"
 
 	"github.com/spf13/cobra"
 )
@@ -30,19 +29,13 @@ func BindProcessRelayInput(root *cobra.Command, input *os.File) error {
 // This private wrapper records a bootstrap grant. Method availability on a
 // generic io.Reader/io.Closer is deliberately not used to infer ownership.
 type relayProcessInput struct {
-	file         *os.File
-	interrupting atomic.Bool
+	file   *os.File
+	reader io.Reader // platform owner, installed before relay starts
 }
 
 func (r *relayProcessInput) Read(p []byte) (int, error) {
-	n, err := r.file.Read(p)
-	if r.interrupting.Load() && errors.Is(err, os.ErrClosed) {
-		err = context.Canceled
+	if r.reader != nil {
+		return r.reader.Read(p)
 	}
-	return n, err
-}
-
-func (r *relayProcessInput) interrupt() error {
-	r.interrupting.Store(true)
-	return r.file.Close()
+	return r.file.Read(p)
 }
