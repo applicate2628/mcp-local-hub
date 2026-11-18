@@ -346,20 +346,47 @@ exits 0. That is the lever for CI and piped callers.
 
 ### Windows console contract
 
-Every distributable, installable and canonical Windows `mcphub.exe` is the
-single GUI-subsystem2 Product. `windows-product-artifacts.json` owns that
-artifact and the generated non-executable `windows-product-identity.json`.
-Normal Windows product payloads come from `pwsh ./build.ps1` or the equivalent
-release workflow, with original Product role, metadata and PE admission.
-Plain `go build` is a compile check, not Product publication.
+#### Canonical entry set in master
 
-The same Product serves GUI, terminal and npm entrypoints. The npm Node shim
-waits for the native child and inherits its standard streams, preserving argv,
-stdout, stderr and exit status. Ordinary CLI composition preserves valid output
-handles; if outputs are invalid it attaches the parent console and repairs only
-those outputs, returning a visible failure before command execution if repair
-fails. Ordinary GUI, background and stdio-protocol modes do not allocate a
-console. This contract does not infer terminal behavior from redirected pipes.
+The verified `master` baseline is
+[`a7d92d2852c4f6eb8afb0569ef76a545e38aacf7`](https://github.com/applicate2628/mcp-local-hub/commit/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7).
+Its [artifact registry](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/windows-product-artifacts.json)
+declares the complete canonical entry set in Table 1. Portable Executable (PE)
+subsystem 3 is the console user interface (CUI); subsystem 2 is the graphical
+user interface (GUI).
+
+**Table 1. Windows canonical entry-set artifacts, relative to the output root.**
+
+| Path | Role and source | PE subsystem / metadata |
+| --- | --- | --- |
+| `mcphub.exe` | Waiting launcher, `./cmd/mcphub-launcher` | CUI, subsystem 3; no Product `VERSIONINFO` resource |
+| `mcphub-product/mcphub.exe` | Product, `./cmd/mcphub` | GUI, subsystem 2; Product `VERSIONINFO` resource |
+| `windows-product-identity.json` | Generated Product identity data | Non-executable file |
+
+Normal Windows payloads come from `pwsh ./build.ps1` or the corresponding
+release workflow. The [builder](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/build.ps1)
+builds the launcher first, binds the Product to its actual hash and shared build
+identifier, and validates the complete set. Plain `go build` establishes a
+compile result; the portable build observation and native launch admission are
+separate checks.
+
+The [launcher](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/cmd/mcphub-launcher/main_windows.go)
+acquires the original entry set, verifies the created Product process before
+resuming it, waits for completion and reports its exit or ownership-settlement
+failure. The [npm Node shim](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/npm/bin/cli.js)
+invokes the root launcher with inherited standard streams, passes arguments
+without shell interpretation, waits and propagates the result.
+
+Within the nested Product, ordinary command-line interface (CLI) mode preserves
+valid standard handles. If a handle is invalid, the
+[console policy](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/cmd/mcphub/console_windows.go)
+tries to attach the parent console and repairs invalid handles. Invalid output
+handles cause failure before command execution if repair fails; unavailable
+input is left for a command that reads it to report. Ordinary Product GUI,
+background and standard-input/output protocol modes do not allocate a console.
+This describes the Product's policy; console-subsystem launcher behavior also
+depends on how Windows starts it. Redirected pipes alone do not establish
+interactive-terminal behavior.
 
 The exact startup prefix `mcphub --debug-console [command ...]` remains accepted
 and is consumed before Cobra parsing. Explicit debug mode may attach or allocate
@@ -367,6 +394,52 @@ a process-local console for GUI/CLI. Background child creation always applies
 the shared Windows no-console attributes; child argv and environment do not
 propagate console intent. Configured GUI editors are admitted as GUI-subsystem
 executables before launch.
+
+#### State-isolated Product and draft command-test Product
+
+At the master baseline above, `build.ps1 -TestStateIsolatedProduct` builds the
+regular `./cmd/mcphub` Product with `test_state_path_env`. It requires an explicit
+absolute `-OutputDirectory` strictly beneath the repository's `.scratch` and
+rejects release metadata and publisher-source input. The initial output-path
+containment check is lexical; it does not establish physical isolation of every
+write before side effects. See the [mode checks](https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/build.ps1#L45-L68).
+
+[Draft PR #657](https://github.com/applicate2628/mcp-local-hub/pull/657), reviewed at
+[`4fa52b60b719664ede441be339e196a8b9766c50`](https://github.com/applicate2628/mcp-local-hub/commit/4fa52b60b719664ede441be339e196a8b9766c50),
+adds `-CanonicalEntryCommandTestProduct` only together with
+`-TestStateIsolatedProduct`. This separate test mode compiles the nested Product
+from `./internal/cli` using `go test -c -trimpath` and `test_state_path_env`, while
+retaining the launcher, GUI Product subsystem, version resource and complete-set
+binding. The three added plan fields (`canonicalEntryCommandTestProduct`,
+`testProductPackage`, `canonicalCommandFixture`) exist only in command-test mode;
+ordinary, release and regular state-isolated plans retain their previous shape.
+These changes belong to [the draft builder](https://github.com/applicate2628/mcp-local-hub/blob/4fa52b60b719664ede441be339e196a8b9766c50/build.ps1),
+not the master baseline above.
+
+The draft builder issues `windows-canonical-command-test-fixture.json` only after
+portable complete-set observation and output checks, including the exact
+`mcphub*.exe` inventory. The fixture records actual launcher, Product and identity
+file hashes. The [native test consumer](https://github.com/applicate2628/mcp-local-hub/blob/4fa52b60b719664ede441be339e196a8b9766c50/internal/cli/upgrade_gui_qualified_fixture_windows_test.go)
+uses an absolute `MCPHUB_CANONICAL_ENTRY_FIXTURE` path, rechecks the build binding
+and hashes, acquires the original native entry set, and verifies that the running
+test executable is the supplied Product. `MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT=1`
+permits the test fixture's absent publisher-source epoch; file and binding
+admission still apply. A build plan, emitted fixture or fake-builder PASS alone
+does not establish that native acquisition or execution.
+
+#### Historical native evidence and its scope
+
+The accepted 2026-11-17 Windows/amd64, Go 1.27.4 result belongs to the exact #657
+commit `4fa52b60b719664ede441be339e196a8b9766c50`: the actual command-test Product
+was built and executed
+`TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade` with exit 0 and empty
+standard error. The [test](https://github.com/applicate2628/mcp-local-hub/blob/4fa52b60b719664ede441be339e196a8b9766c50/internal/cli/install_migration_wiring_windows_test.go#L379-L425)
+checks rejection of corrupt `supervisor-intent.json`, no invocation of the upgrade
+runner, and preservation of the prior Product and intent bytes. It does not
+establish a successful upgrade. The [recorded source review and evidence scope](https://github.com/applicate2628/mcp-local-hub/pull/657#pullrequestreview-5961115872)
+preserve that historical PASS without reporting a new run. Both complete
+mandatory Go commands remain historically FAIL / unqualified; this scoped result
+is not full-repository acceptance.
 
 ## GUI frontend (Phase 3B-II onward)
 

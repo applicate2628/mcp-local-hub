@@ -1,6 +1,6 @@
 # mcp-local-hub — repository instructions for coding agents
 
-This is the **single canonical instruction entry point** for this repository. It replaces the former root `CLAUDE.md`; that file imports this one only for older Claude Code versions. The complete former guidance is preserved **byte-for-byte** in [the project operational runbook](docs/agent-runbook.md). Use that runbook for relevant subsystem procedures, not as a second general instruction layer. The runbook contains historical "REMOVED" mechanisms; do not treat them as implemented without verifying current code.
+This is the **single canonical instruction entry point** for this repository. It replaces the former root `CLAUDE.md`; that file imports this one only for older Claude Code versions. Project operational procedures are maintained in [the project operational runbook](docs/agent-runbook.md). Use that runbook for relevant subsystem procedures, not as a second general instruction layer. The runbook contains historical "REMOVED" mechanisms; do not treat them as implemented without verifying current code.
 
 ## Scope and safety
 
