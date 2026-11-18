@@ -44,7 +44,7 @@ Go can supply an allow/deny decision, request stop, observe finite settlement, t
 
 The manually maintained [C header](include/owner_v1.h) is small and verified by both C compile-time assertions and Rust layout tests. `mh_version1` negotiates ABI 1; creation carries a version/reserved field and an exact request byte size. Every operation receives an exact output-buffer size. A mismatch is rejected before native work; no forward-layout guessing or variable-sized Rust types cross the boundary.
 
-Existing exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and `mh_admit_checked1` / `mh_create_env1` / `mh_create_io1`. The loader continues to require that established ABI1 baseline. New `mh_admit_identity1` is resolved optionally and has a separately versioned [identity header](include/identity_v1.h); absence is reported when identity admission is requested. `mh_version1` still returns 1 and all existing ABI1 layouts/exports remain unchanged. No missing symbol causes automatic fallback to weaker admission. Symbols and numeric values in the headers are the source of truth for this experiment, not a promise to keep them as the future product API.
+Existing exports: `mh_create1`, `mh_admit1`, `mh_stop1`, `mh_finish1`, `mh_release1`, and `mh_admit_checked1` / `mh_create_env1` / `mh_create_io1`. The loader continues to require that established ABI1 baseline. `mh_admit_identity1` and `mh_query_identity1` are resolved independently as optional exports and share a separately versioned [identity header](include/identity_v1.h); an absent export is reported only when its operation is requested. `mh_version1` still returns 1 and all existing ABI1 layouts/exports remain unchanged. No missing symbol causes automatic fallback to another admission or query operation. Symbols and numeric values in the headers are the source of truth for this experiment, not a promise to keep them as the future product API.
 
 **Table 2. Separate facts in `mh_out`.**
 
@@ -250,7 +250,15 @@ A NONE report only means collection did not start. It does not authorize replay 
 
 The original owner mutex remains held across observation, policy and native return. The callback must return normally and obey the same non-reentry/no-Goexit restrictions as `AdmitChecked`. Its call-scoped `cgo.Handle` is removed after native return. The callback receives no raw process/token handle, and Go never frees or retains a Rust allocation.
 
-This protocol does **not** construct the product's `CreatorIdentity` capability or `SIDFormatObservation`. The latter records SID-to-text conversion, input binding and associated native allocation/free outcomes; copied bytes, text or a digest cannot recreate its private issuer. Product context/custody, identity-in-flight and retirement rules, actual policy integration and executable-file admission remain open. See the [current identity report](verification/identity-2026-11-15/RESULTS.md) for the exact implementation snapshot, completed checks and remaining qualification.
+This protocol does **not** construct the product's `CreatorIdentity` capability or `SIDFormatObservation`. The latter records SID-to-text conversion, input binding and associated native allocation/free outcomes; copied bytes, text or a digest cannot recreate its private issuer. Product context/custody, identity-in-flight and retirement rules, actual policy integration and executable-file admission remain open. See the [identity-admission report](verification/identity-2026-11-15/RESULTS.md) and the later [read-only query report](verification/query-2026-11-15/RESULTS.md) for their exact implementation snapshots, completed checks and remaining qualification.
+
+### Independent read-only query
+
+`Owner.QueryIdentity() (IdentityObservation, error)` calls optional `mh_query_identity1` on the same retained owner. Its distinct C receiver returns `void`: it copies values and makes no admission decision. The call never consumes admission, resumes or stops the process, performs settlement, or records a newly observed root exit. Explicit repeated queries are allowed before and after admission, including denial and a pending `Finish` without Stop. Any Stop attempt, even a failed one, and terminal settlement prevent later queries.
+
+The Go wrapper validates the schema and report, the successful call status, exactly one receiver, the original diagnostic PID, and the implication that a previously known root exit requires a signaled wait state. Query cannot report a settlement state or an active-member observation. Any failure returns an empty Go observation and preserves the independent query/token-close errors; a later success does not repair an earlier ambiguous token close. Missing query support returns `ErrIdentityQueryUnsupported` without calling an admission export.
+
+Collection is synchronous under the owner mutex and has no context cancellation deadline. It uses temporary allocations and a token handle: read-only refers to the process/owner lifecycle. The returned image and SID are independent Go copies. Only `AdmitIdentity`, not a query on an already running process, guarantees collection before its own resume operation. The [query report](verification/query-2026-11-15/RESULTS.md) records compatibility with the frozen ABI1 and admission-only DLLs and the controlled corrupt-response checks; those historical runs are not re-executed by this documentation change.
 
 ## Memory, concurrency and failures
 
@@ -341,7 +349,7 @@ test assumption and invalid first mutation attempt, both preserved as failures.
 
 ## Evidence
 
-The [current identity report](verification/identity-2026-11-15/RESULTS.md) records the new increment's source identities, actual completed runs and limitations. The [verification/archive index](verification/README.md) locates current evidence and preserved history. The counts and milestone narratives below belong to frozen source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07`; they are not the current identity increment's final suite totals.
+The [identity-admission report](verification/identity-2026-11-15/RESULTS.md) and later [read-only query report](verification/query-2026-11-15/RESULTS.md) record their source identities, actual completed runs and limitations. The [verification/archive index](verification/README.md) locates current evidence and preserved history. The counts and milestone narratives below belong to frozen source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07`; they are not the identity/query increments' final suite totals. The later query report includes native debug qualification but no repeat of the complete native release suite.
 
 **Table 7. Historical verification layers at the frozen ABI1 baseline.**
 
@@ -395,9 +403,9 @@ missing-symbol code127. Neither test is counted among the normal functions.
 
 ## Reproduction
 
-### Current identity increment
+### Identity and read-only query increments
 
-Use the [current identity report](verification/identity-2026-11-15/RESULTS.md) for the exact source combination, existing toolchain/cache paths, current qualification runner and any frozen old-DLL compatibility inputs. The old milestone scripts below are preserved for reproducing their own immutable sources.
+Use the [identity-admission report](verification/identity-2026-11-15/RESULTS.md) and later [query report](verification/query-2026-11-15/RESULTS.md) for the exact source combination, existing toolchain/cache inputs, qualification runners and frozen old-DLL compatibility inputs. The query report identifies its archived `runners/qualify-query.ps1` and `controls/run-query-controls.ps1`; they require the stated owned inputs. The old milestone scripts below reproduce their own immutable sources.
 
 ### Frozen ABI1 baseline
 
