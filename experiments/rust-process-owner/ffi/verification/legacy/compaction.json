@@ -1,0 +1,13 @@
+{
+    "schema":  1,
+    "recordedUtc":  "2026-11-14T21:47:17.9113362Z",
+    "sourceCommit":  "eb4ca1d40244ba1915638b76c3e30b2a684d9b07",
+    "independentlyRecheckedFiles":  624,
+    "uncompressedBytes":  2364014,
+    "validation":  "Every ZIP file compared with immutable Git blob SHA1 plus independent SHA256/length manifest; no extraction",
+    "packageCopiesVerified":  true,
+    "historicalWorkingTreeWasClean":  true,
+    "disposableOriginalCheckoutMovedTo":  "D:\\dev\\ChatGPT\\trash\\mcphub-ffi-identity-20261115\\legacy-verification",
+    "archivePreservedAt":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\verification\\legacy\\history.zip",
+    "permanentDeletionPerformed":  false
+}

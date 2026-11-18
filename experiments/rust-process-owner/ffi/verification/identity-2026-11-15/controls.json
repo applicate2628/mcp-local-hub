@@ -1,0 +1,827 @@
+{
+    "Schema":  1,
+    "StartedUtc":  "2026-11-14T21:46:05.4634653Z",
+    "RunId":  "20261114T2146053593724Z",
+    "SourceRoot":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source",
+    "NativeSource":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner",
+    "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+    "Inputs":  {
+                   "QualifiedNewDll":  {
+                                           "SHA256":  "f87027915e60020457495d9c5a67548152e69559ca9b9a8fdf53305815417b1b",
+                                           "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\target\\debug\\mcphub_owner_ffi_spike.dll"
+                                       },
+                   "LegacyDll":  {
+                                     "SHA256":  "32276f47f356cb7473f06a6bb5bba1a89d1545f3986ce9f640013c72b41047f1",
+                                     "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\target\\debug\\mcphub_owner_ffi_spike.dll"
+                                 },
+                   "Child":  {
+                                 "SHA256":  "176d91c6687feb0bbb69e08eda3c072d84ef85ec9b0d76691b2f1d95bc94ddfa",
+                                 "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\target\\debug\\owner_child.exe"
+                             }
+               },
+    "Scope":  "Eight representative malformed producers; one legacy baseline; four weakened consumers. Synthetic errors do not establish spontaneous Windows failure behavior.",
+    "QualifiedNewDllUse":  "Provenance input only; normal qualification belongs to the main runner.",
+    "SourceUntouched":  true,
+    "Completed":  true,
+    "CargoHome":  "D:\\dev\\ChatGPT\\mcphub-rx02-stdio-20261113\\cargo-home",
+    "WorkingRoot":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z",
+    "PrivateFixtures":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\tmp\\identity-controls\\20261114T2146053593724Z",
+    "Cases":  [
+                  {
+                      "Name":  "identity-version",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Unsupported observation schema version",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "80b338d9612f6fc9d938751b8cf4edf65fc7096f59237e119b7012ca6a18f85c",
+                                            "Pattern":  "value\\.sid\\[\\.\\.sid\\.len\\(\\)\\]\\.copy_from_slice\\(\u0026sid\\);",
+                                            "Replacement":  "value.sid[..sid.len()].copy_from_slice(\u0026sid);\n    value.version = VERSION + 1;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\identity-version\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "edd4497a23b4e7b8f3de6c6b5674ee788b39f55471569a205c65fc4f6fc600bd",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\identity-version\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\identity-version",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:46:05.6439023Z",
+                                                     "FinishedUtc":  "2026-11-14T21:46:08.3836922Z",
+                                                     "Log":  "identity-version.cargo.log",
+                                                     "LogSHA256":  "3abd6be85317753f24cdf0b0370646e74bf50cc8b0fd0f48d452f4ecb975044f"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\identity-version\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:46:08.4033235Z",
+                                                   "FinishedUtc":  "2026-11-14T21:46:27.9312079Z",
+                                                   "Log":  "identity-version.go.jsonl",
+                                                   "LogSHA256":  "44342f5fb1f68fc2b28c1848b3070691ee13615c76b5d49c674e4b28b10ce324"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "creation-zero",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Missing process creation binding",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "4bc3e60b084a9fbb1c8a6700a6b8a4da32704671f9e724b0d7fab949c690ece0",
+                                            "Pattern":  "value\\.sid\\[\\.\\.sid\\.len\\(\\)\\]\\.copy_from_slice\\(\u0026sid\\);",
+                                            "Replacement":  "value.sid[..sid.len()].copy_from_slice(\u0026sid);\n    value.creation_time_100ns = 0;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\creation-zero\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "f6ef5476a7baf32d2313467a07c8cf04bf280137fab432476eed67ac0139cc7b",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\creation-zero\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\creation-zero",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:46:28.0237639Z",
+                                                     "FinishedUtc":  "2026-11-14T21:46:29.9484556Z",
+                                                     "Log":  "creation-zero.cargo.log",
+                                                     "LogSHA256":  "25a524e5c007700135f3c69f3642662f461042e3bae7a3f3680da6d55885ec5c"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\creation-zero\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:46:29.9517327Z",
+                                                   "FinishedUtc":  "2026-11-14T21:46:38.2261869Z",
+                                                   "Log":  "creation-zero.go.jsonl",
+                                                   "LogSHA256":  "28ebd74934afe12d5c54ec971b5c71cd7861d6ee534e0cde05fdb1cd1876d0b8"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "job-unknown",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Unknown Job membership enum",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "7d3f8d6ddf4e866c1257d5478491fe56100ed53a203f20cd2c6d5d96d6b24bae",
+                                            "Pattern":  "value\\.sid\\[\\.\\.sid\\.len\\(\\)\\]\\.copy_from_slice\\(\u0026sid\\);",
+                                            "Replacement":  "value.sid[..sid.len()].copy_from_slice(\u0026sid);\n    value.job_membership = 0;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\job-unknown\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "091fccf4313ddfeef7176b203b4675204823ce39be8c5af34363bfb2e2a0aeba",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\job-unknown\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\job-unknown",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:46:38.2734729Z",
+                                                     "FinishedUtc":  "2026-11-14T21:46:40.1572442Z",
+                                                     "Log":  "job-unknown.cargo.log",
+                                                     "LogSHA256":  "9437362a5d8df47fbda513ed88a06e5e285b3692cceb2834a5d9460639f70b40"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\job-unknown\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:46:40.1588705Z",
+                                                   "FinishedUtc":  "2026-11-14T21:46:48.4832571Z",
+                                                   "Log":  "job-unknown.go.jsonl",
+                                                   "LogSHA256":  "924a642e0bcd14fa2ba6909470b2d1f1d6840d8f1444183e236be19328dafe74"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "sid-revision",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Invalid binary SID revision",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "a606c7b905ba7d08994f0a4e5765c0b7edac5374f805ae80b82648f493c12926",
+                                            "Pattern":  "value\\.sid\\[\\.\\.sid\\.len\\(\\)\\]\\.copy_from_slice\\(\u0026sid\\);",
+                                            "Replacement":  "value.sid[..sid.len()].copy_from_slice(\u0026sid);\n    value.sid[0] = 0;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\sid-revision\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "48423f30fb03661ee5277b073025ace40a7d30ae2525488fe83e7a848e73460b",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-revision\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-revision",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:46:48.5648237Z",
+                                                     "FinishedUtc":  "2026-11-14T21:46:50.3204454Z",
+                                                     "Log":  "sid-revision.cargo.log",
+                                                     "LogSHA256":  "39f0defbe51cf9271796081e0578c2b449ae55ea08ee1820e1da0327565ca9d3"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-revision\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:46:50.3234469Z",
+                                                   "FinishedUtc":  "2026-11-14T21:46:57.5272438Z",
+                                                   "Log":  "sid-revision.go.jsonl",
+                                                   "LogSHA256":  "cb04b3d1cf6ca4faf4aa50c634b44cdcab9dda6751f43b24c041d6e23834a734"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "sid-tail",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Well-shaped short SID prefix with forbidden nonzero unused storage",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "6d6302868869af67de2e93b77fe1a7e588288d8395fbe4e2b9506cbcfe26d97d",
+                                            "Pattern":  "value\\.sid\\[\\.\\.sid\\.len\\(\\)\\]\\.copy_from_slice\\(\u0026sid\\);",
+                                            "Replacement":  "value.sid[..sid.len()].copy_from_slice(\u0026sid);\n    value.sid_len = 8;\n    value.sid[1] = 0;\n    value.sid[SID_CAPACITY - 1] = 1;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\sid-tail\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "5ada09747bd338b14576433a6ccfd85bd855ba4e0428942ba36048376b174185",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-tail\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-tail",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:46:57.5651400Z",
+                                                     "FinishedUtc":  "2026-11-14T21:46:59.4227671Z",
+                                                     "Log":  "sid-tail.cargo.log",
+                                                     "LogSHA256":  "dcea03aa4a088c8609b250dc9c0c1a929bf45e381d2e6b697581e791aeee6736"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\sid-tail\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:46:59.4247949Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:06.5183733Z",
+                                                   "Log":  "sid-tail.go.jsonl",
+                                                   "LogSHA256":  "4e61761dbd3b92b9ba737874c271980f0437d7801c75ccd06689cfa012aca32d"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "late-report-version",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Incompatible report after actual policy approval and native resume",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "823f7be5adaeea6fbb611d8050f60bd3e17dda0fe7b6e870ad4cb9f7e48312b0",
+                                            "Pattern":  "if report\\.stage != STAGE_NONE \u0026\u0026 report\\.stage != STAGE_COMPLETE \\{",
+                                            "Replacement":  "report.version = VERSION + 1;\n            if report.stage != STAGE_NONE \u0026\u0026 report.stage != STAGE_COMPLETE {"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\late-report-version\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "50e230d9709960d53d4b4a77dc2ebd4681e2ef76be0b4c500349fa4ba2106a29",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\late-report-version\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\late-report-version",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:47:06.5864031Z",
+                                                     "FinishedUtc":  "2026-11-14T21:47:08.1951505Z",
+                                                     "Log":  "late-report-version.cargo.log",
+                                                     "LogSHA256":  "a613a62188a8cbc68a485e444c9b9f18e2b7c40f68b8b247eda477d6663ef048"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\late-report-version\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:47:08.1967163Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:15.8919684Z",
+                                                   "Log":  "late-report-version.go.jsonl",
+                                                   "LogSHA256":  "0942b7b9d4635c4355f4218e3409d152bf61c9ced864d9523b307eeb813cb10b"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "late-report",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "query-close",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Synthetic simultaneous query error 5 and token close error 6, after real token query/close succeeds",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "3cc898029abd087bb04839d37b218692047998755da46145216757e20d912450",
+                                            "Pattern":  "let sid = view\\s*\\.token_user_sid\\(\\)\\s*\\.map_err\\(\\|error\\| record_token_error\\(report, error\\)\\)\\?;",
+                                            "Replacement":  "let sid = view\n        .token_user_sid()\n        .and_then(|_| Err::\u003cVec\u003cu8\u003e, TokenUserError\u003e(TokenUserError::Cleanup {\n            observation: Some(io::Error::from_raw_os_error(5)),\n            failure: mcphub_process_owner_spike::NativeFailure {\n                operation: \"CloseToken\",\n                code: 6,\n            },\n        }))\n        .map_err(|error| record_token_error(report, error))?;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\query-close\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "b7494bf63d788b080fa03be3a73efce23000c65d5fe6de48039584f84ce4e96b",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\query-close\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\query-close",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:47:15.9208130Z",
+                                                     "FinishedUtc":  "2026-11-14T21:47:17.4421508Z",
+                                                     "Log":  "query-close.cargo.log",
+                                                     "LogSHA256":  "80289d71bb7908f7a5a1b943b39ee1ae64b2f040a83f41207b7ea370d795d6c1"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\query-close\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:47:17.4446606Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:23.7309562Z",
+                                                   "Log":  "query-close.go.jsonl",
+                                                   "LogSHA256":  "939aca3013904ec7f63c422882c92f9b5d529af6e02193265faaa345618d1847"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "query-close",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "close-only",
+                      "Category":  "malformed-producer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\src\\identity.rs",
+                                            "Purpose":  "Synthetic token close error 6 without a query error, after real token query/close succeeds",
+                                            "BeforeSHA256":  "9bb8e19703220f3f7eb1b5782203234d4d715fd6e4a293b749ab1bad84e030e1",
+                                            "AfterSHA256":  "90bb6a93976f181f89f6304ae3345693ed4262d07e00f58dee4a28b59a378206",
+                                            "Pattern":  "let sid = view\\s*\\.token_user_sid\\(\\)\\s*\\.map_err\\(\\|error\\| record_token_error\\(report, error\\)\\)\\?;",
+                                            "Replacement":  "let sid = view\n        .token_user_sid()\n        .and_then(|_| Err::\u003cVec\u003cu8\u003e, TokenUserError\u003e(TokenUserError::Cleanup {\n            observation: None,\n            failure: mcphub_process_owner_spike::NativeFailure {\n                operation: \"CloseToken\",\n                code: 6,\n            },\n        }))\n        .map_err(|error| record_token_error(report, error))?;"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\close-only\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "86dc7247f113dbba7716424ebfffe1ed9ddf4b235872b9f18c1b01857508a4cb",
+                                       "Build":  {
+                                                     "Executable":  "cargo.exe",
+                                                     "Arguments":  [
+                                                                       "build",
+                                                                       "--offline",
+                                                                       "--locked",
+                                                                       "--manifest-path",
+                                                                       "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\close-only\\ffi\\Cargo.toml"
+                                                                   ],
+                                                     "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\close-only",
+                                                     "ExitCode":  0,
+                                                     "StartedUtc":  "2026-11-14T21:47:23.7614993Z",
+                                                     "FinishedUtc":  "2026-11-14T21:47:25.0984387Z",
+                                                     "Log":  "close-only.cargo.log",
+                                                     "LogSHA256":  "e1bcecd020a0572083b2c65a30e998271c1dcc53dde5c1b10c07bc76d9bb83b0"
+                                                 }
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\close-only\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:47:25.0999467Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:32.0343940Z",
+                                                   "Log":  "close-only.go.jsonl",
+                                                   "LogSHA256":  "67c996c518e3b3bf2695216475f56ec125ce1647b39312ab29c5745a1daea771"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "close-only",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "legacy-optional-baseline",
+                      "Category":  "legacy-baseline",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+
+                                    ],
+                      "Artifact":  {
+                                       "SHA256":  "32276f47f356cb7473f06a6bb5bba1a89d1545f3986ce9f640013c72b41047f1",
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\target\\debug\\mcphub_owner_ffi_spike.dll"
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_legacy",
+                                                                     "-run",
+                                                                     "^TestIdentityUnsupportedPreservesLegacyAdmission$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\legacy-optional-baseline\\ffi\\go",
+                                                   "ExitCode":  0,
+                                                   "StartedUtc":  "2026-11-14T21:47:32.0645965Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:38.8580640Z",
+                                                   "Log":  "legacy-optional-baseline.go.jsonl",
+                                                   "LogSHA256":  "a565af9f9eaadaa570125b5f7568c76bbcdaff528bc344e6c1331f29d40a0a04"
+                                               },
+                                   "Test":  "TestIdentityUnsupportedPreservesLegacyAdmission",
+                                   "Mode":  "",
+                                   "ExpectedFailure":  false,
+                                   "Runs":  1,
+                                   "Passes":  1,
+                                   "Failures":  0,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "unchecked-identity-version",
+                      "Category":  "weakened-consumer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\go\\identity_windows.go",
+                                            "Purpose":  "Remove observation schema validation",
+                                            "BeforeSHA256":  "99c0de8b9c4b7c898b702b8bf2bfa2f2de27b3d372de8e0e76dd00cfbff4980e",
+                                            "AfterSHA256":  "a700a4397e2e3605c6824236a98c3ba9074fe8a90d4530a022d906258fc73e25",
+                                            "Pattern":  "if raw\\.size != C\\.sizeof_mh_identity \\|\\| raw\\.version != C\\.MH_ID_VERSION \\|\\| raw\\.reserved != 0 \\{",
+                                            "Replacement":  "if false {"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\identity-version\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "edd4497a23b4e7b8f3de6c6b5674ee788b39f55471569a205c65fc4f6fc600bd",
+                                       "ProducerCase":  "identity-version"
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\unchecked-identity-version\\ffi\\go",
+                                                   "ExitCode":  1,
+                                                   "StartedUtc":  "2026-11-14T21:47:38.8980546Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:44.6919241Z",
+                                                   "Log":  "unchecked-identity-version.go.jsonl",
+                                                   "LogSHA256":  "d8fb5bf7374aabbb5a2fc45cabcb06732771728d011f85e209152fc8c2457467"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "invalid-observation",
+                                   "ExpectedFailure":  true,
+                                   "Runs":  1,
+                                   "Passes":  0,
+                                   "Failures":  1,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "malformed identity observation reached policy",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "unchecked-report-version",
+                      "Category":  "weakened-consumer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\go\\identity_windows.go",
+                                            "Purpose":  "Remove report schema validation",
+                                            "BeforeSHA256":  "99c0de8b9c4b7c898b702b8bf2bfa2f2de27b3d372de8e0e76dd00cfbff4980e",
+                                            "AfterSHA256":  "4b75b5261f04093af8944182e38c6bad43a737c28ae5152bd6e0fe56dab618c9",
+                                            "Pattern":  "if raw\\.size != C\\.sizeof_mh_identity_report \\|\\| raw\\.version != C\\.MH_ID_VERSION \\{",
+                                            "Replacement":  "if false {"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\late-report-version\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "50e230d9709960d53d4b4a77dc2ebd4681e2ef76be0b4c500349fa4ba2106a29",
+                                       "ProducerCase":  "late-report-version"
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\unchecked-report-version\\ffi\\go",
+                                                   "ExitCode":  1,
+                                                   "StartedUtc":  "2026-11-14T21:47:44.7248037Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:50.1767783Z",
+                                                   "Log":  "unchecked-report-version.go.jsonl",
+                                                   "LogSHA256":  "351872561a960fb0bffa36c351d21b6e341f7b48fc8ed3c3815565224beb16ab"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "late-report",
+                                   "ExpectedFailure":  true,
+                                   "Runs":  1,
+                                   "Passes":  0,
+                                   "Failures":  1,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "malformed identity report was accepted or callback was lost",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "lost-token-close",
+                      "Category":  "weakened-consumer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\go\\identity_windows.go",
+                                            "Purpose":  "Discard independent token close error",
+                                            "BeforeSHA256":  "99c0de8b9c4b7c898b702b8bf2bfa2f2de27b3d372de8e0e76dd00cfbff4980e",
+                                            "AfterSHA256":  "0cfbcbe6e94553a1843d46871a0fd602f07f362c0fc994c6af06f024792b47f8",
+                                            "Pattern":  "TokenCloseError: int32\\(raw\\.token_close_error\\)",
+                                            "Replacement":  "TokenCloseError: 0"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\targets\\query-close\\debug\\mcphub_owner_ffi_spike.dll",
+                                       "SHA256":  "b7494bf63d788b080fa03be3a73efce23000c65d5fe6de48039584f84ce4e96b",
+                                       "ProducerCase":  "query-close"
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_faults",
+                                                                     "-run",
+                                                                     "^TestIdentityForeignFault$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\lost-token-close\\ffi\\go",
+                                                   "ExitCode":  1,
+                                                   "StartedUtc":  "2026-11-14T21:47:50.2058268Z",
+                                                   "FinishedUtc":  "2026-11-14T21:47:57.6080566Z",
+                                                   "Log":  "lost-token-close.go.jsonl",
+                                                   "LogSHA256":  "aeaac8821e32b4904892e196b4c4367a9b5df3e9bc3faea703736fd2ef92b01c"
+                                               },
+                                   "Test":  "TestIdentityForeignFault",
+                                   "Mode":  "query-close",
+                                   "ExpectedFailure":  true,
+                                   "Runs":  1,
+                                   "Passes":  0,
+                                   "Failures":  1,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "token close receipt was lost or changed",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  },
+                  {
+                      "Name":  "required-identity-export",
+                      "Category":  "weakened-consumer",
+                      "SourceManifestSHA256":  "e8bb3d2ba79a9d2adbb450036f3f9af8fe2cdb0b16179f97c24dca06732a97bf",
+                      "Mutations":  [
+                                        {
+                                            "Path":  "ffi\\go\\bridge_windows.go",
+                                            "Purpose":  "Make the additive identity export mandatory at DLL load",
+                                            "BeforeSHA256":  "fa1168cfd51bd6f3a01f2e332b5c560715536fdb521d0ff10ad8e4b48d88bc5c",
+                                            "AfterSHA256":  "0466011e0398965124cdfbd433dcbdbd4818adf125a830126c6f71424954f950",
+                                            "Pattern":  "p=GetProcAddress\\(b-\u003emodule,\"mh_admit_identity1\"\\);",
+                                            "Replacement":  "p=GetProcAddress(b-\u003emodule,\"mh_admit_identity1\");\n    if (!p) { *error=ERROR_PROC_NOT_FOUND; goto fail; }"
+                                        },
+                                        {
+                                            "Path":  "ffi\\go\\bridge_windows.go",
+                                            "Purpose":  "Diagnostic annotation only; preserve the loader error cause and numeric code",
+                                            "BeforeSHA256":  "0466011e0398965124cdfbd433dcbdbd4818adf125a830126c6f71424954f950",
+                                            "AfterSHA256":  "dad76e15deb735e7be805907c76f4e1feb53d39c031e8207b9f0fd6b40203660",
+                                            "Pattern":  "return nil, syscall\\.Errno\\(code\\)",
+                                            "Replacement":  "return nil, fmt.Errorf(\"control: required identity export error=%d: %w\", uint32(code), syscall.Errno(code))"
+                                        }
+                                    ],
+                      "Artifact":  {
+                                       "SHA256":  "32276f47f356cb7473f06a6bb5bba1a89d1545f3986ce9f640013c72b41047f1",
+                                       "Path":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\target\\debug\\mcphub_owner_ffi_spike.dll"
+                                   },
+                      "Test":  {
+                                   "Command":  {
+                                                   "Executable":  "go.exe",
+                                                   "Arguments":  [
+                                                                     "test",
+                                                                     "-json",
+                                                                     "-race",
+                                                                     "-count=1",
+                                                                     "-timeout=90s",
+                                                                     "-tags=identity_legacy",
+                                                                     "-run",
+                                                                     "^TestIdentityUnsupportedPreservesLegacyAdmission$",
+                                                                     "."
+                                                                 ],
+                                                   "WorkingDirectory":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\evidence\\controls\\runs\\20261114T2146053593724Z\\copies\\required-identity-export\\ffi\\go",
+                                                   "ExitCode":  1,
+                                                   "StartedUtc":  "2026-11-14T21:47:57.6433488Z",
+                                                   "FinishedUtc":  "2026-11-14T21:48:03.6363951Z",
+                                                   "Log":  "required-identity-export.go.jsonl",
+                                                   "LogSHA256":  "0015a0712801d3b02d0644849961c057ae59aa6ea69218f4e11b8e8b1b2c9de0"
+                                               },
+                                   "Test":  "TestIdentityUnsupportedPreservesLegacyAdmission",
+                                   "Mode":  "",
+                                   "ExpectedFailure":  true,
+                                   "Runs":  1,
+                                   "Passes":  0,
+                                   "Failures":  1,
+                                   "Skips":  0,
+                                   "IntendedDiagnostic":  "control: required identity export error=127:",
+                                   "DiagnosticObserved":  true,
+                                   "Accepted":  true
+                               }
+                  }
+              ],
+    "FinishedUtc":  "2026-11-14T21:48:03.6495239Z"
+}

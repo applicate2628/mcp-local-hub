@@ -1,0 +1,306 @@
+[
+    {
+        "name":  "rust-fmt",
+        "program":  "cargo",
+        "arguments":  [
+                          "fmt",
+                          "--check"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:41.2725102Z",
+        "finishedUtc":  "2026-11-14T21:43:41.4441127Z",
+        "exitCode":  0,
+        "log":  "rust-fmt.log"
+    },
+    {
+        "name":  "rust-clippy",
+        "program":  "cargo",
+        "arguments":  [
+                          "clippy",
+                          "--offline",
+                          "--locked",
+                          "--all-targets",
+                          "--",
+                          "-D",
+                          "warnings"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:41.4499299Z",
+        "finishedUtc":  "2026-11-14T21:43:41.6779157Z",
+        "exitCode":  0,
+        "log":  "rust-clippy.log"
+    },
+    {
+        "name":  "rust-tests-debug",
+        "program":  "cargo",
+        "arguments":  [
+                          "test",
+                          "--offline",
+                          "--locked",
+                          "--",
+                          "--test-threads=1"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:41.6789149Z",
+        "finishedUtc":  "2026-11-14T21:43:42.1769538Z",
+        "exitCode":  0,
+        "log":  "rust-tests-debug.log"
+    },
+    {
+        "name":  "rust-tests-release",
+        "program":  "cargo",
+        "arguments":  [
+                          "test",
+                          "--offline",
+                          "--locked",
+                          "--release",
+                          "--",
+                          "--test-threads=1"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:42.1789604Z",
+        "finishedUtc":  "2026-11-14T21:43:42.7031467Z",
+        "exitCode":  0,
+        "log":  "rust-tests-release.log"
+    },
+    {
+        "name":  "dll-debug",
+        "program":  "cargo",
+        "arguments":  [
+                          "build",
+                          "--offline",
+                          "--locked"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:42.7052163Z",
+        "finishedUtc":  "2026-11-14T21:43:43.0362516Z",
+        "exitCode":  0,
+        "log":  "dll-debug.log"
+    },
+    {
+        "name":  "dll-release",
+        "program":  "cargo",
+        "arguments":  [
+                          "build",
+                          "--offline",
+                          "--locked",
+                          "--release"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:43:43.0377534Z",
+        "finishedUtc":  "2026-11-14T21:43:43.4978257Z",
+        "exitCode":  0,
+        "log":  "dll-release.log"
+    },
+    {
+        "name":  "go-format",
+        "program":  "gofmt",
+        "arguments":  [
+                          "-l",
+                          "bridge_windows.go",
+                          "identity_windows.go",
+                          "identity_windows_test.go",
+                          "identity_legacy_windows_test.go",
+                          "identity_faults_windows_test.go"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:43:43.4988278Z",
+        "finishedUtc":  "2026-11-14T21:43:43.5242307Z",
+        "exitCode":  0,
+        "log":  "go-format.log"
+    },
+    {
+        "name":  "go-race-debug",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-race",
+                          "-count=1",
+                          "-timeout=120s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:43:43.5262362Z",
+        "finishedUtc":  "2026-11-14T21:43:51.5444625Z",
+        "exitCode":  0,
+        "log":  "go-race-debug.log",
+        "topLevelPass":  54,
+        "nestedPass":  68,
+        "skips":  0,
+        "failures":  0
+    },
+    {
+        "name":  "go-cgocheck2-debug",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-count=1",
+                          "-timeout=120s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:43:51.6283283Z",
+        "finishedUtc":  "2026-11-14T21:44:01.8751510Z",
+        "exitCode":  0,
+        "log":  "go-cgocheck2-debug.log",
+        "topLevelPass":  54,
+        "nestedPass":  68,
+        "skips":  0,
+        "failures":  0
+    },
+    {
+        "name":  "go-race-release",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-race",
+                          "-count=1",
+                          "-timeout=120s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:44:01.9338515Z",
+        "finishedUtc":  "2026-11-14T21:44:05.8665528Z",
+        "exitCode":  0,
+        "log":  "go-race-release.log",
+        "topLevelPass":  54,
+        "nestedPass":  68,
+        "skips":  0,
+        "failures":  0
+    },
+    {
+        "name":  "go-cgocheck2-release",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-count=1",
+                          "-timeout=120s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:44:05.9092340Z",
+        "finishedUtc":  "2026-11-14T21:44:08.6129423Z",
+        "exitCode":  0,
+        "log":  "go-cgocheck2-release.log",
+        "topLevelPass":  54,
+        "nestedPass":  68,
+        "skips":  0,
+        "failures":  0
+    },
+    {
+        "name":  "go-vet",
+        "program":  "go",
+        "arguments":  [
+                          "vet",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:44:08.6685975Z",
+        "finishedUtc":  "2026-11-14T21:44:19.4252210Z",
+        "exitCode":  0,
+        "log":  "go-vet.log"
+    },
+    {
+        "name":  "archive-native-parent",
+        "program":  "git",
+        "arguments":  [
+                          "archive",
+                          "--format=zip",
+                          "--output=D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\native.zip",
+                          "84119b51e089cce9ca42da2fce35a012eb86cb7c",
+                          "--",
+                          "experiments/rust-process-owner/Cargo.toml",
+                          "experiments/rust-process-owner/Cargo.lock",
+                          "experiments/rust-process-owner/src"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source",
+        "startedUtc":  "2026-11-14T21:44:19.4284110Z",
+        "finishedUtc":  "2026-11-14T21:44:19.4946795Z",
+        "exitCode":  0,
+        "log":  "archive-native-parent.log"
+    },
+    {
+        "name":  "archive-old-foreign",
+        "program":  "git",
+        "arguments":  [
+                          "archive",
+                          "--format=zip",
+                          "--output=D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\foreign.zip",
+                          "eb4ca1d40244ba1915638b76c3e30b2a684d9b07",
+                          "--",
+                          "experiments/rust-process-owner/ffi/Cargo.toml",
+                          "experiments/rust-process-owner/ffi/Cargo.lock",
+                          "experiments/rust-process-owner/ffi/src",
+                          "experiments/rust-process-owner/ffi/include",
+                          "experiments/rust-process-owner/ffi/go"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source",
+        "startedUtc":  "2026-11-14T21:44:19.4963075Z",
+        "finishedUtc":  "2026-11-14T21:44:19.5660595Z",
+        "exitCode":  0,
+        "log":  "archive-old-foreign.log"
+    },
+    {
+        "name":  "legacy-dll-build",
+        "program":  "cargo",
+        "arguments":  [
+                          "build",
+                          "--offline",
+                          "--locked"
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\source\\experiments\\rust-process-owner\\ffi",
+        "startedUtc":  "2026-11-14T21:44:19.5872150Z",
+        "finishedUtc":  "2026-11-14T21:44:21.6561780Z",
+        "exitCode":  0,
+        "log":  "legacy-dll-build.log"
+    },
+    {
+        "name":  "old-go-new-dll",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-race",
+                          "-count=1",
+                          "-timeout=120s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\compatibility\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:44:21.6588113Z",
+        "finishedUtc":  "2026-11-14T21:44:31.4871404Z",
+        "exitCode":  0,
+        "log":  "old-go-new-dll.log",
+        "topLevelPass":  49,
+        "nestedPass":  63,
+        "skips":  0,
+        "failures":  0
+    },
+    {
+        "name":  "new-go-old-dll",
+        "program":  "go",
+        "arguments":  [
+                          "test",
+                          "-json",
+                          "-race",
+                          "-tags=identity_legacy",
+                          "-run",
+                          "^TestIdentityUnsupportedPreservesLegacyAdmission$",
+                          "-count=1",
+                          "-timeout=60s",
+                          "."
+                      ],
+        "cwd":  "D:\\dev\\ChatGPT\\mcphub-ffi-identity-20261115\\source\\experiments\\rust-process-owner\\ffi\\go",
+        "startedUtc":  "2026-11-14T21:44:31.5278580Z",
+        "finishedUtc":  "2026-11-14T21:44:39.0101020Z",
+        "exitCode":  0,
+        "log":  "new-go-old-dll.log",
+        "topLevelPass":  1,
+        "nestedPass":  0,
+        "skips":  0,
+        "failures":  0
+    }
+]
