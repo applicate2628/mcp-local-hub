@@ -296,9 +296,9 @@ func TestRestartAll_NilLookupPortKillNoOpRunsScheduler(t *testing.T) {
 	restartSchedulerFactory = func() (scheduler.Scheduler, error) { return fake, nil }
 	defer func() { restartSchedulerFactory = origFactory }()
 
-	origLookup := lookupProcess
-	lookupProcess = nil
-	defer func() { lookupProcess = origLookup }()
+	origLookup := lookupPortPID
+	lookupPortPID = nil
+	defer func() { lookupPortPID = origLookup }()
 
 	results, err := NewAPI().RestartAll()
 	if err != nil {

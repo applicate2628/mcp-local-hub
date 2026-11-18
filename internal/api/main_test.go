@@ -63,6 +63,8 @@ import (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	runPortProbeTestChild()
+
 	// caller_start_time oracle child fast-path. Sentinel-gated, short-circuits
 	// BEFORE m.Run() so the child never runs the suite. It emits one
 	// intent-audit row into a parent-chosen state dir after a deliberate delay,
@@ -108,7 +110,7 @@ func TestMain(m *testing.M) {
 	readPidportFn = testReadLegacyPidport
 
 	// ── PRIMARY seal: the process-lookup / wmic family ──────────────────────
-	// lookupProcess + lookupProcessBatch are wired at processes.go init() to real
+	// lookupPortPID + lookupProcess + lookupProcessBatch are wired at processes.go init() to real
 	// `netstat -ano` + `wmic` shell-outs on Windows (~31s per wmic call on Win11
 	// 24H2). killByPortFn / forceKillByPortFn / status enrichment all funnel
 	// through them, so a test that seeds a real manifest port and reaches a
@@ -119,8 +121,10 @@ func TestMain(m *testing.M) {
 	// makes every port-kill seam short-circuit to portKillLookupUnavailable/nil
 	// (install.go ~3461). This is the dominant timeout cost; several tests already
 	// nil lookupProcess manually (restart_supervisor_test.go, status_workspace_test.go).
+	prevLookupPortPID := lookupPortPID
 	prevLookupProcess := lookupProcess
 	prevLookupProcessBatch := lookupProcessBatch
+	lookupPortPID = nil
 	lookupProcess = nil
 	lookupProcessBatch = nil
 
@@ -260,6 +264,7 @@ func TestMain(m *testing.M) {
 		_ = os.Unsetenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
 	}
 	daemonStateRootOverride = prevOverride
+	lookupPortPID = prevLookupPortPID
 	lookupProcess = prevLookupProcess
 	lookupProcessBatch = prevLookupProcessBatch
 	registerSupervisorReconcileFn = prevRegisterReconcile

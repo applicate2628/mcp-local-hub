@@ -16,10 +16,11 @@ var selfPIDFn = os.Getpid
 // Populated by internal/api/processes.go's init() on Windows (Task 2); stays
 // nil elsewhere so cross-platform callers fall through the (ok==false) branch.
 //
-// This single-port variant is O(netstat+wmic) per call — expensive for
+// This diagnostic-only single-port variant is O(netstat+wmic) per call — expensive for
 // status/scan which probe many ports at once. Prefer lookupProcessBatch
 // when the set of ports is known up front; it amortizes both subprocess
-// invocations across all ports.
+// invocations across all ports. Control paths use lookupPortPID so optional
+// metrics are never acquired and a query failure is not read as absence.
 var lookupProcess func(port int) (pid int, ramBytes uint64, uptimeSec int64, ok bool)
 
 // lookupProcessBatch returns per-port process info for every port in

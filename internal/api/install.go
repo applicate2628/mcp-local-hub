@@ -2850,7 +2850,7 @@ func checkSecretRefs(env map[string]string) error {
 //  3. scheduler task `\mcp-local-hub-<server>-<daemon>` exists and
 //     is in State == "Running"
 //
-// Test seam: lookupProcess, processIdentityByPID, and
+// Test seam: lookupPortPID, processIdentityByPID, and
 // schedulerStatusForOwnPort are package vars in production wired to
 // the processes.go init helper, the wmic-or-PowerShell identity
 // lookup, and scheduler.New().Status respectively. Tests assign
@@ -2863,11 +2863,11 @@ func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervi
 	if portHeldBySupervisorIntentDaemonForPortArm(port, server, daemon, allowSupervisorInternalPortMatch) {
 		return true
 	}
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return false
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok || pid == 0 {
+	pid, found, err := lookupPortPID(port)
+	if err != nil || !found || pid <= 0 {
 		return false
 	}
 	// Image-identity gate. Accept ownership when EITHER the port-
@@ -3132,16 +3132,16 @@ const (
 // supervisorOwnedPortPIDOutcome is the single owner of "who listens on this
 // port", reporting WHY it could not answer rather than only that it could not.
 //
-// A non-nil lookupProcess that returns !ok is classified probeUnknown, not
+// A wired lookupPortPID that fails or finds no owner is probeUnknown, not
 // probeSurfaceUnavailable: the ownership gate is only consulted for a port that
 // is already bound (fixedPortStatus gates on !portAvailable), so "bound, yet no
 // resolvable owner" is an unresolved probe — never a reason to claim the port.
 func supervisorOwnedPortPIDOutcome(port int) (int, probeOutcome) {
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return 0, probeSurfaceUnavailable
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok || pid == 0 {
+	pid, found, err := lookupPortPID(port)
+	if err != nil || !found || pid <= 0 {
 		return 0, probeUnknown
 	}
 	return pid, probeResolved
@@ -4898,6 +4898,7 @@ const (
 	portKillNoListener
 	portKillKilled
 	portKillIdentityMismatch
+	portKillProbeUnknown
 )
 
 var forceKillByPortFn = killDaemonByPortOutcome
@@ -4931,17 +4932,20 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 	if port == 0 {
 		return portKillNoPort, nil
 	}
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		return portKillLookupUnavailable, nil
 	}
-	pid, _, _, ok := lookupProcess(port)
-	if !ok {
+	pid, found, err := lookupPortPID(port)
+	if err != nil {
+		return portKillProbeUnknown, fmt.Errorf("query port %d before kill: %w", port, err)
+	}
+	if !found {
 		return portKillNoListener, nil
 	}
 	if err := requireMcphubPortOwnerPID(port, pid); err != nil {
 		if errors.Is(err, process.ErrProcessAlreadyExited) {
 			// pr301 r5 Finding 2: the PID owning this port exited between
-			// lookupProcess and the owner-SID gate's OpenProcess (a TOCTOU
+			// lookupPortPID and the owner-SID gate's OpenProcess (a TOCTOU
 			// window). The owner-SID arm surfaces the canonical
 			// ErrProcessAlreadyExited sentinel. A gone port owner is the
 			// already-released SUCCESS condition — there is nothing left to
@@ -4958,7 +4962,11 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if _, _, _, stillUp := lookupProcess(port); !stillUp {
+		_, stillUp, err := lookupPortPID(port)
+		if err != nil {
+			return portKillProbeUnknown, fmt.Errorf("killed pid %d; port %d release unknown: %w", pid, port, err)
+		}
+		if !stillUp {
 			return portKillKilled, nil
 		}
 		time.Sleep(daemonPortReleasePollInterval)

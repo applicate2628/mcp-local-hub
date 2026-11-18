@@ -4,14 +4,14 @@ package api
 
 // POSIX-only (Linux beta / macOS preview) coverage for the supervisor-owned
 // force-stop path. On non-Windows the Windows-only port-owner lookup hook
-// (lookupProcess, status_enrich.go) is structurally nil — processes.go init only
+// (lookupPortPID) is structurally nil — processes.go init only
 // wires it when GOOS=="windows". These tests pin the two sites where a
 // SUCCESSFUL or already-confirmed-dead trusted PID/tree kill must report a
 // SUCCESS row even though the platform cannot supply a Windows-only port-release
 // proof (bot PR #288 r35-1, sites 1 + 2).
 //
 // Both tests exercise forceKillOneSupervisorTarget directly over its function-
-// pointer seams (stopForceKillPIDFn, forceKillByPortFn, lookupProcess,
+// pointer seams (stopForceKillPIDFn, forceKillByPortFn, lookupPortPID,
 // processIdentityByPID) and a caller-supplied pidByTask map. Nothing touches the
 // real state dir, scheduler, supervisor IPC, or any real process — there is no
 // real kill, no schtasks, no IPC, and no port bind.
@@ -23,14 +23,14 @@ import (
 )
 
 // TestForceKillOneSupervisorTarget_POSIXSuccessfulPIDKillReportsWarningNotError
-// is the FIX 1 falsifying test. With a descriptor port set, lookupProcess nil
+// is the FIX 1 falsifying test. With a descriptor port set, lookupPortPID nil
 // (the POSIX reality), and the trusted PID kill SUCCEEDING (stopForceKillPIDFn
 // returns nil), the per-target row must be a SUCCESS (empty Err) carrying a
 // non-empty Warning, and forceKillByPortFn must NOT be consulted (the trusted
 // kill already achieved the force-stop goal).
 //
 // Pre-fix this FAILS: waitPortReleasedAfterPIDKill returned an errPortKillUnsupported
-// error when lookupProcess == nil, so the row carried a non-empty Err.
+// error when lookupPortPID == nil, so the row carried a non-empty Err.
 func TestForceKillOneSupervisorTarget_POSIXSuccessfulPIDKillReportsWarningNotError(t *testing.T) {
 	const (
 		taskName = `\mcp-local-hub-time-default`
@@ -40,17 +40,17 @@ func TestForceKillOneSupervisorTarget_POSIXSuccessfulPIDKillReportsWarningNotErr
 
 	origPID := stopForceKillPIDFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdentity := processIdentityByPID
 	t.Cleanup(func() {
 		stopForceKillPIDFn = origPID
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdentity
 	})
 
 	// POSIX reality: no port-owner lookup hook.
-	lookupProcess = nil
+	lookupPortPID = nil
 
 	var killedPIDs []int
 	stopForceKillPIDFn = func(got int) error {
@@ -88,12 +88,12 @@ func TestForceKillOneSupervisorTarget_POSIXSuccessfulPIDKillReportsWarningNotErr
 }
 
 // TestForceKillOneSupervisorTarget_POSIXAlreadyGonePIDKillReportsSuccess is the
-// FIX 2 falsifying test. With a descriptor port set, lookupProcess nil, and the
+// FIX 2 falsifying test. With a descriptor port set, lookupPortPID nil, and the
 // trusted PID kill reporting the process ALREADY GONE ("no such process"), the
 // daemon is confirmed dead so the per-target row must be a clean SUCCESS (empty
 // Err). forceKillByPortFn must NOT be consulted — falling through to it on POSIX
 // is exactly the bug: killDaemonByPortOutcome returns portKillLookupUnavailable
-// when lookupProcess == nil, which the caller turned into a "no usable
+// when lookupPortPID == nil, which the caller turned into a "no usable
 // port-release proof" FAILED row.
 //
 // Pre-fix this FAILS: the already-gone branch returned clean success only when
@@ -108,16 +108,16 @@ func TestForceKillOneSupervisorTarget_POSIXAlreadyGonePIDKillReportsSuccess(t *t
 
 	origPID := stopForceKillPIDFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origIdentity := processIdentityByPID
 	t.Cleanup(func() {
 		stopForceKillPIDFn = origPID
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		processIdentityByPID = origIdentity
 	})
 
-	lookupProcess = nil
+	lookupPortPID = nil
 
 	stopForceKillPIDFn = func(int) error {
 		// pidKillAlreadyGoneError(...) matches "no such process".

@@ -17,14 +17,14 @@ func TestStopForceSupervisorPIDPathUsesTaskkillTreePrimitive(t *testing.T) {
 	origIdent := processIdentityByPID
 	origForcePort := forceKillByPortFn
 	origPIDKill := stopForceKillPIDFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	origSID := processOwnerSIDMatchesCurrentFn
 	t.Cleanup(func() {
 		processIdentityByPID = origIdent
 		forceKillByPortFn = origForcePort
 		stopForceKillPIDFn = origPIDKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		taskkillProcessTreeByPIDFn = origTaskkill
 		processOwnerSIDMatchesCurrentFn = origSID
 	})
@@ -43,11 +43,11 @@ func TestStopForceSupervisorPIDPathUsesTaskkillTreePrimitive(t *testing.T) {
 		t.Fatalf("forceKillByPortFn called for port %d after successful PID tree kill", gotPort)
 		return portKillNoListener, nil
 	}
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	var treeKilled []int
 	taskkillProcessTreeByPIDFn = func(gotPID int) error {
