@@ -20,7 +20,7 @@
 
 `wait_root` observes the retained handle, including a valid exit code of 259. `finish` distinguishes a pending root, an exited root with active descendants, a settled Job and failed native close attempts. An incomplete result keeps the original owner. Later descendant termination does not overwrite the root's observed exit status. Failed/ambiguous actions are not replayed through a different backend.
 
-`Drop` is a best-effort fallback, **not** proof of wait/reap or successful cleanup. Explicit `finish` reports settlement; real close-failure injection remains unqualified.
+`Drop` is a best-effort fallback, **not** proof of wait/reap or successful cleanup. Explicit `finish` reports settlement; the selected real close failures are described under [Native failure paths](#native-failure-paths).
 
 ## Explicit borrowed standard streams
 
