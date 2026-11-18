@@ -67,6 +67,9 @@ func TestQualificationBuildEnvironmentCannotInheritSourceOrTagOverrides(t *testi
 	t.Setenv("GONOSUMDB", "*")
 	t.Setenv("APPDATA", "C:\\foreign-config")
 	t.Setenv("LOCALAPPDATA", "C:\\foreign-cache")
+	t.Setenv("TEST_TELEMETRY_DIR", "D:\\foreign-telemetry")
+	t.Setenv("GO_TELEMETRY_CHILD", "1")
+	t.Setenv("GO_TELEMETRY_CHILD_UPLOAD", "1")
 	t.Setenv("GOWORK", "D:\\foreign.work")
 	t.Setenv("GOOS", "linux")
 	t.Setenv("CGO_ENABLED", "1")
@@ -90,6 +93,7 @@ func TestQualificationBuildEnvironmentCannotInheritSourceOrTagOverrides(t *testi
 		"GOOS": "windows", "GOARCH": "amd64", "GOMODCACHE": o.moduleCache,
 		"GOROOT": o.goRoot, "GOCACHEPROG": "", "GO111MODULE": "on", "GOEXPERIMENT": "",
 		"GOAMD64": "v1", "GOFIPS140": "off",
+		"TEST_TELEMETRY_DIR": "", "GO_TELEMETRY_CHILD": "", "GO_TELEMETRY_CHILD_UPLOAD": "",
 		"GOPRIVATE": "", "GONOPROXY": "none", "GONOSUMDB": "none",
 		"APPDATA": filepath.Join(o.root, "appdata"), "LOCALAPPDATA": filepath.Join(o.root, "localappdata"),
 		"GOCACHE": filepath.Join(o.root, "gocache"), "GOTMPDIR": filepath.Join(o.root, "temp"),
