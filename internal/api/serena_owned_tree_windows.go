@@ -208,9 +208,10 @@ func (w *windowsSerenaOwnedTree) workingDirectory(ctx context.Context) (string, 
 	return filepath.Join(w.parentPath(), w.rootName), nil
 }
 
-// The original acquisition remains evidence for this retained capability. A
-// fresh, read-only observation receives cleanup's separate bounded context;
-// neither the original observation nor its work deadline is renewed.
+// The original acquisition remains evidence for this retained capability.
+// A fresh observation checks the parent without creating missing components,
+// using cleanup's separate bounded context. Policy evaluation may emit audit
+// events; neither the original observation nor its work deadline is renewed.
 func (w *windowsSerenaOwnedTree) observeCleanupParent(ctx context.Context) (policy *ConfigParentPolicyObservation, retErr error) {
 	if w.readExisting {
 		return nil, errors.New("SERENA_PUBLISHED_READ_HAS_NO_CLEANUP_AUTHORITY")
