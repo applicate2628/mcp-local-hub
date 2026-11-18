@@ -1,0 +1,560 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "baseline_commit": "06d8706a446b456642a13f23cfa58e10c6e3c28f",
+  "scope": "Finite correctness controls for the measurement oracle, not performance samples",
+  "phases": {
+    "baseline": {
+      "commands": [
+        {
+          "name": "build-control",
+          "started_utc": "2026-11-18T17:51:41.354865+00:00",
+          "finished_utc": "2026-11-18T17:52:10.744018+00:00",
+          "arguments": [
+            "build",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-local-hub-pr626-audit-20261118\\.scratch\\probe-oracle-20261118\\probe-control.exe",
+            "D:\\dev\\ChatGPT\\mcp-local-hub-pr626-audit-20261118\\.scratch\\probe-oracle-20261118\\fixture"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "clean",
+          "started_utc": "2026-11-18T17:52:10.744826+00:00",
+          "finished_utc": "2026-11-18T17:52:57.902707+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "dbb4b32c7d6d78f90d5b39a18b7df654e96379d527329ff7ec9bc9f208c9997e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "extra-tail",
+          "started_utc": "2026-11-18T17:52:57.903673+00:00",
+          "finished_utc": "2026-11-18T17:53:02.759908+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e0daf732ff8c28cdf820902b0eb696a0f89e757e7211ef206757f6f96f34b8e8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "wrong-init-version",
+          "started_utc": "2026-11-18T17:53:02.760998+00:00",
+          "finished_utc": "2026-11-18T17:53:07.120401+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "82a6a110e176ee9c6c8bdb5bacf423a45d8260a55813589b1052a924ffb0985c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "wrong-call-version",
+          "started_utc": "2026-11-18T17:53:07.121350+00:00",
+          "finished_utc": "2026-11-18T17:53:11.443399+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "b1bf2e944c4e0a691b48e1bd0e19295a8463b332a9ded1632338e5803df87f09",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "original_summary": {
+        "phase": "baseline",
+        "fixture_sha256": "1a7cf244e089bddc0c2582a1022aadd24bd5e8250e9fe676a48b5f0d398433a6",
+        "fixture_source_sha256": "640cda49da31b88cbc19547e67d346b8f09e827a360f6e89442853f809601121",
+        "probe_source_sha256": "e29a175eb9493ee4af7612d162e270e83ee0830c111464a34bb305eae023a724",
+        "go_version": "go version go1.27.4 windows/amd64",
+        "cases": [
+          {
+            "mode": "clean",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "matched_expected_control": true
+          },
+          {
+            "mode": "extra-tail",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-init-version",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-call-version",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "matched_expected_control": true
+          }
+        ],
+        "all_expected_controls_matched": true
+      },
+      "checked_summary": {
+        "phase": "baseline",
+        "fixture_sha256": "1a7cf244e089bddc0c2582a1022aadd24bd5e8250e9fe676a48b5f0d398433a6",
+        "fixture_source_sha256": "640cda49da31b88cbc19547e67d346b8f09e827a360f6e89442853f809601121",
+        "probe_source_sha256": "e29a175eb9493ee4af7612d162e270e83ee0830c111464a34bb305eae023a724",
+        "go_version": "go version go1.27.4 windows/amd64",
+        "cases": [
+          {
+            "mode": "clean",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "extra-tail",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-init-version",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-call-version",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          }
+        ],
+        "all_expected_controls_matched": true,
+        "runner_sha256": "3590b7584d4c2ba0ceb662ce3061188463c52f4493f702a071a45aa2f7dd35b8",
+        "rechecked_retained_logs": true
+      },
+      "stdout_jsonl": {
+        "clean": "{\"Time\":\"2026-11-18T20:52:55.7885653+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:52:56.0265809+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:52:56.0271288+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:52:56.0271288+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:52:56.0271288+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:254: {\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p50_ms\\\": 0.5513,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p95_ms\\\": 1.0852,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"owned_process_lifetime_cpu_ms\\\": 15.625,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"payload_bytes\\\": 1024,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"post_load_working_set_sum_bytes\\\": 11538432,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"processes\\\": 1,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"qualification\\\": \\\"default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim\\\",\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"ready_working_set_sum_bytes\\\": 10924032,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"samples\\\": 16,\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"startup_median_ms\\\": 32.4324\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"        }\\n\"}\n{\"Time\":\"2026-11-18T20:52:56.2275577+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe/processes_1 (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:52:56.2280825+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:52:56.2280825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:52:56.2280825+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:52:56.2280825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:52:57.2457435+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.457s\\n\"}\n{\"Time\":\"2026-11-18T20:52:57.2467526+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.458}\n",
+        "extra-tail": "{\"Time\":\"2026-11-18T20:53:01.2641144+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:53:01.5068735+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:53:01.5074199+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:01.5074199+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:53:01.5074199+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:254: {\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p50_ms\\\": 0.5626,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p95_ms\\\": 1.1757,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"owned_process_lifetime_cpu_ms\\\": 0,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"payload_bytes\\\": 1024,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"post_load_working_set_sum_bytes\\\": 11534336,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"processes\\\": 1,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"qualification\\\": \\\"default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim\\\",\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"ready_working_set_sum_bytes\\\": 10891264,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"samples\\\": 16,\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"startup_median_ms\\\": 26.5452\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7017188+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"        }\\n\"}\n{\"Time\":\"2026-11-18T20:53:01.7022355+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe/processes_1 (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:01.7022355+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:53:01.7022355+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:01.7022355+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:53:01.7027549+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:02.7170339+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.450s\\n\"}\n{\"Time\":\"2026-11-18T20:53:02.7171903+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.453}\n",
+        "wrong-init-version": "{\"Time\":\"2026-11-18T20:53:05.6425139+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:53:05.8689881+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:53:05.8689881+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:05.8689881+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:53:05.8689881+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:06.061859+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:254: {\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p50_ms\\\": 0.5223,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p95_ms\\\": 1.0352,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"owned_process_lifetime_cpu_ms\\\": 0,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"payload_bytes\\\": 1024,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"post_load_working_set_sum_bytes\\\": 11567104,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"processes\\\": 1,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"qualification\\\": \\\"default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim\\\",\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"ready_working_set_sum_bytes\\\": 11030528,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"samples\\\": 16,\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"startup_median_ms\\\": 26.1439\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"        }\\n\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe/processes_1 (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:06.0623624+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:53:06.0628753+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:06.0628753+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:53:06.0628753+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:07.077126+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.435s\\n\"}\n{\"Time\":\"2026-11-18T20:53:07.0773725+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.435}\n",
+        "wrong-call-version": "{\"Time\":\"2026-11-18T20:53:09.9587732+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:53:10.1904209+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:53:10.1904209+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:10.1904209+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:53:10.1904209+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:10.3850394+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:254: {\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p50_ms\\\": 0.5566,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p95_ms\\\": 1.0285,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"owned_process_lifetime_cpu_ms\\\": 15.625,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"payload_bytes\\\": 1024,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"post_load_working_set_sum_bytes\\\": 11567104,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"processes\\\": 1,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"qualification\\\": \\\"default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim\\\",\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"ready_working_set_sum_bytes\\\": 10907648,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"samples\\\": 16,\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"startup_median_ms\\\": 27.1918\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"        }\\n\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe/processes_1 (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:10.385556+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:53:10.3860759+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:10.3860759+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:53:10.3860759+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:53:11.4005021+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.441s\\n\"}\n{\"Time\":\"2026-11-18T20:53:11.4005021+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.442}\n"
+      }
+    },
+    "fixed": {
+      "commands": [
+        {
+          "name": "clean",
+          "started_utc": "2026-11-18T17:58:50.836663+00:00",
+          "finished_utc": "2026-11-18T17:58:58.452034+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "49624eed8515d897829ad915ab90f99b807e1361e6ff81453f2c7ce012d6ee47",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "extra-tail",
+          "started_utc": "2026-11-18T17:58:58.453139+00:00",
+          "finished_utc": "2026-11-18T17:59:01.809058+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "stdout_sha256": "5b12c3cb8c73108b02864767be7e1729e08408c881cde667c9d3c93b115831c7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "wrong-init-version",
+          "started_utc": "2026-11-18T17:59:01.810103+00:00",
+          "finished_utc": "2026-11-18T17:59:04.932319+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "stdout_sha256": "ac2e87356c22cec27fe03f18628fd581a5799ef3032ea8ccd6e7a4b64e5fb15e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "wrong-call-version",
+          "started_utc": "2026-11-18T17:59:04.933242+00:00",
+          "finished_utc": "2026-11-18T17:59:08.242047+00:00",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-p=1",
+            "-timeout=90s",
+            "-run=^TestRXRelayBinaryProbe$/^processes_1$",
+            "./internal/daemon"
+          ],
+          "exit_code": 1,
+          "stdout_sha256": "dfb1c5ef4d70a0a18aff0b64affc72b3f1edf6bb30c2076a731d7f58c9a15646",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "original_summary": {
+        "phase": "fixed",
+        "fixture_sha256": "1a7cf244e089bddc0c2582a1022aadd24bd5e8250e9fe676a48b5f0d398433a6",
+        "fixture_source_sha256": "640cda49da31b88cbc19547e67d346b8f09e827a360f6e89442853f809601121",
+        "probe_source_sha256": "6de4d1554dd967402e7fbfb14d2e97a9ebf65f87b6ef31e5676601e1c2a87684",
+        "go_version": "go version go1.27.4 windows/amd64",
+        "cases": [
+          {
+            "mode": "clean",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "extra-tail",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:234: unexpected trailing relay response \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":16,\\\"result\\\":{\\\"payload\\\":\\\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            ],
+            "unexpected_output": [
+              "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\\",\\\"session\\\":\\\"rx-session-1\\\"}}\""
+            ],
+            "matched_expected_control": false
+          },
+          {
+            "mode": "wrong-init-version",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:126: bad init \"{\\\"jsonrpc\\\":\\\"1.0\\\",\\\"id\\\":0,\\\"result\\\":{\\\"payload\\\":\\\"\\\",\\\"session\\\":\\\"rx-session-1\\\"}}\" err=<nil>"
+            ],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-call-version",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:188: wrong binary relay response, err=<nil>"
+            ],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          }
+        ],
+        "all_expected_controls_matched": false
+      },
+      "checked_summary": {
+        "phase": "fixed",
+        "fixture_sha256": "1a7cf244e089bddc0c2582a1022aadd24bd5e8250e9fe676a48b5f0d398433a6",
+        "fixture_source_sha256": "640cda49da31b88cbc19547e67d346b8f09e827a360f6e89442853f809601121",
+        "probe_source_sha256": "6de4d1554dd967402e7fbfb14d2e97a9ebf65f87b6ef31e5676601e1c2a87684",
+        "go_version": "go version go1.27.4 windows/amd64",
+        "cases": [
+          {
+            "mode": "clean",
+            "exit_code": 0,
+            "expected_rejection": false,
+            "expected_diagnostic_found": null,
+            "measurement_receipt_written": true,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "pass",
+              "TestRXRelayBinaryProbe": "pass",
+              "package": "pass"
+            },
+            "diagnostics": [],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "extra-tail",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:234: unexpected trailing relay response \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":16,\\\"result\\\":{\\\"payload\\\":\\\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\\",\\\"session\\\":\\\"rx-session-1\\\"}}\""
+            ],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-init-version",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:126: bad init \"{\\\"jsonrpc\\\":\\\"1.0\\\",\\\"id\\\":0,\\\"result\\\":{\\\"payload\\\":\\\"\\\",\\\"session\\\":\\\"rx-session-1\\\"}}\" err=<nil>"
+            ],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          },
+          {
+            "mode": "wrong-call-version",
+            "exit_code": 1,
+            "expected_rejection": true,
+            "expected_diagnostic_found": true,
+            "measurement_receipt_written": false,
+            "skip_events": 0,
+            "test_outcomes": {
+              "TestRXRelayBinaryProbe/processes_1": "fail",
+              "TestRXRelayBinaryProbe": "fail",
+              "package": "fail"
+            },
+            "diagnostics": [
+              "relay_binary_probe_windows_test.go:188: wrong binary relay response, err=<nil>"
+            ],
+            "unexpected_output": [],
+            "matched_expected_control": true
+          }
+        ],
+        "all_expected_controls_matched": true,
+        "runner_sha256": "3590b7584d4c2ba0ceb662ce3061188463c52f4493f702a071a45aa2f7dd35b8",
+        "rechecked_retained_logs": true
+      },
+      "stdout_jsonl": {
+        "clean": "{\"Time\":\"2026-11-18T20:58:56.7390806+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:58:57.1823795+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:58:57.1828896+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:58:57.1828896+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:58:57.1828896+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:257: {\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p50_ms\\\": 0.9128,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"closed_loop_p95_ms\\\": 1.0801,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"owned_process_lifetime_cpu_ms\\\": 15.625,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"payload_bytes\\\": 1024,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"post_load_working_set_sum_bytes\\\": 11522048,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"processes\\\": 1,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"qualification\\\": \\\"default relay binary; warm loopback; 16 sequential requests per child; no open-loop p99 claim\\\",\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"ready_working_set_sum_bytes\\\": 10899456,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3806825+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"samples\\\": 16,\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"          \\\"startup_median_ms\\\": 28.4139\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"        }\\n\"}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe/processes_1 (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- PASS: TestRXRelayBinaryProbe (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:58:57.3811958+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:58:58.3986845+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.660s\\n\"}\n{\"Time\":\"2026-11-18T20:58:58.3986845+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.6600000000000001}\n",
+        "extra-tail": "{\"Time\":\"2026-11-18T20:59:01.3181365+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:59:01.5678181+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:59:01.5678181+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.5678181+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:59:01.5678181+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.7645014+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:234: unexpected trailing relay response \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"2.0\\\\\\\",\\\\\\\"id\\\\\\\":16,\\\\\\\"result\\\\\\\":{\\\\\\\"payload\\\\\\\":\\\\\\\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"OutputType\":\"error\"}\n{\"Time\":\"2026-11-18T20:59:01.7645014+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\\\\\\",\\\\\\\"session\\\\\\\":\\\\\\\"rx-session-1\\\\\\\"}}\\\"\\n\",\"OutputType\":\"error-continue\"}\n{\"Time\":\"2026-11-18T20:59:01.7650216+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe/processes_1 (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.7650216+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:59:01.7650216+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe (0.20s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.7650216+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.2}\n{\"Time\":\"2026-11-18T20:59:01.7655416+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.7697406+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\tmcp-local-hub/internal/daemon\\t0.452s\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:01.7697406+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":0.452}\n",
+        "wrong-init-version": "{\"Time\":\"2026-11-18T20:59:04.6262747+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:59:04.8554395+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:59:04.855988+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.855988+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:59:04.855988+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.8863447+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:126: bad init \\\"{\\\\\\\"jsonrpc\\\\\\\":\\\\\\\"1.0\\\\\\\",\\\\\\\"id\\\\\\\":0,\\\\\\\"result\\\\\\\":{\\\\\\\"payload\\\\\\\":\\\\\\\"\\\\\\\",\\\\\\\"session\\\\\\\":\\\\\\\"rx-session-1\\\\\\\"}}\\\" err=\\u003cnil\\u003e\\n\",\"OutputType\":\"error\"}\n{\"Time\":\"2026-11-18T20:59:04.8895834+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe/processes_1 (0.03s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.8895834+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.03}\n{\"Time\":\"2026-11-18T20:59:04.8895834+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe (0.03s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.8895834+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.03}\n{\"Time\":\"2026-11-18T20:59:04.8901207+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.8938654+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\tmcp-local-hub/internal/daemon\\t0.268s\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:04.8938654+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":0.268}\n",
+        "wrong-call-version": "{\"Time\":\"2026-11-18T20:59:07.7094616+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T20:59:07.9995965+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\"}\n{\"Time\":\"2026-11-18T20:59:08.0002198+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.0002198+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\"}\n{\"Time\":\"2026-11-18T20:59:08.0002198+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"=== RUN   TestRXRelayBinaryProbe/processes_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.1822537+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"    relay_binary_probe_windows_test.go:188: wrong binary relay response, err=\\u003cnil\\u003e\\n\",\"OutputType\":\"error\"}\n{\"Time\":\"2026-11-18T20:59:08.1855268+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe/processes_1 (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.1855268+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe/processes_1\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:59:08.1855268+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Output\":\"--- FAIL: TestRXRelayBinaryProbe (0.19s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.1855268+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRXRelayBinaryProbe\",\"Elapsed\":0.19}\n{\"Time\":\"2026-11-18T20:59:08.1861264+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.1898318+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"FAIL\\tmcp-local-hub/internal/daemon\\t0.480s\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T20:59:08.1898318+03:00\",\"Action\":\"fail\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":0.48}\n"
+      }
+    }
+  },
+  "support": [
+    {
+      "name": "format",
+      "command": [
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+        "-l",
+        "D:\\dev\\ChatGPT\\mcp-local-hub-pr626-audit-20261118\\internal\\daemon\\relay_binary_probe_windows_test.go",
+        "D:\\dev\\ChatGPT\\mcp-local-hub-pr626-audit-20261118\\.scratch\\probe-oracle-20261118\\fixture\\main.go"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "vet",
+      "command": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "vet",
+        "./internal/daemon"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "load-contracts-tagged",
+      "command": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "test",
+        "-json",
+        "-race",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-p=1",
+        "-timeout=90s",
+        "-run=^TestRelayLoad(Contract|HTTPErrorPreservesID|OracleRejectsCorruption|EOFDrainsFinalResponse)$",
+        "./internal/daemon"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "92ee1b2928f9cec853dda7b4ba2befa958ac10e0698353e6c8424ea331cb3c10",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "{\"Time\":\"2026-11-18T21:03:23.5604635+03:00\",\"Action\":\"start\",\"Package\":\"mcp-local-hub/internal/daemon\"}\n{\"Time\":\"2026-11-18T21:03:23.8415493+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract\"}\n{\"Time\":\"2026-11-18T21:03:23.8415493+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract\",\"Output\":\"=== RUN   TestRelayLoadContract\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.8415493+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_1\"}\n{\"Time\":\"2026-11-18T21:03:23.8415493+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_1\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_false/clients_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.8517187+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_1\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_false/clients_1 (0.01s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.8517187+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_1\",\"Elapsed\":0.01}\n{\"Time\":\"2026-11-18T21:03:23.8517187+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_8\"}\n{\"Time\":\"2026-11-18T21:03:23.8517187+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_8\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_false/clients_8\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.8860085+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_8\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_false/clients_8 (0.03s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.8860085+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_8\",\"Elapsed\":0.03}\n{\"Time\":\"2026-11-18T21:03:23.8860085+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_32\"}\n{\"Time\":\"2026-11-18T21:03:23.8860085+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_32\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_false/clients_32\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.9723955+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_32\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_false/clients_32 (0.09s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.9723955+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_false/clients_32\",\"Elapsed\":0.09}\n{\"Time\":\"2026-11-18T21:03:23.9723955+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_1\"}\n{\"Time\":\"2026-11-18T21:03:23.9723955+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_1\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_true/clients_1\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.9791367+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_1\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_true/clients_1 (0.01s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:23.9791367+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_1\",\"Elapsed\":0.01}\n{\"Time\":\"2026-11-18T21:03:23.9791367+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_8\"}\n{\"Time\":\"2026-11-18T21:03:23.9791367+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_8\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_true/clients_8\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.012135+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_8\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_true/clients_8 (0.03s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.012135+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_8\",\"Elapsed\":0.03}\n{\"Time\":\"2026-11-18T21:03:24.012135+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_32\"}\n{\"Time\":\"2026-11-18T21:03:24.012135+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_32\",\"Output\":\"=== RUN   TestRelayLoadContract/sse_true/clients_32\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_32\",\"Output\":\"--- PASS: TestRelayLoadContract/sse_true/clients_32 (0.09s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract/sse_true/clients_32\",\"Elapsed\":0.09}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract\",\"Output\":\"--- PASS: TestRelayLoadContract (0.26s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadContract\",\"Elapsed\":0.26}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadHTTPErrorPreservesID\"}\n{\"Time\":\"2026-11-18T21:03:24.0985229+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadHTTPErrorPreservesID\",\"Output\":\"=== RUN   TestRelayLoadHTTPErrorPreservesID\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1031422+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadHTTPErrorPreservesID\",\"Output\":\"--- PASS: TestRelayLoadHTTPErrorPreservesID (0.00s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadHTTPErrorPreservesID\",\"Elapsed\":0}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadOracleRejectsCorruption\"}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadOracleRejectsCorruption\",\"Output\":\"=== RUN   TestRelayLoadOracleRejectsCorruption\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadOracleRejectsCorruption\",\"Output\":\"--- PASS: TestRelayLoadOracleRejectsCorruption (0.00s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadOracleRejectsCorruption\",\"Elapsed\":0}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"run\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadEOFDrainsFinalResponse\"}\n{\"Time\":\"2026-11-18T21:03:24.1036587+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadEOFDrainsFinalResponse\",\"Output\":\"=== RUN   TestRelayLoadEOFDrainsFinalResponse\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1062622+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadEOFDrainsFinalResponse\",\"Output\":\"--- PASS: TestRelayLoadEOFDrainsFinalResponse (0.00s)\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:24.1062622+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Test\":\"TestRelayLoadEOFDrainsFinalResponse\",\"Elapsed\":0}\n{\"Time\":\"2026-11-18T21:03:24.1067789+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"PASS\\n\",\"OutputType\":\"frame\"}\n{\"Time\":\"2026-11-18T21:03:25.1413224+03:00\",\"Action\":\"output\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Output\":\"ok  \\tmcp-local-hub/internal/daemon\\t1.580s\\n\"}\n{\"Time\":\"2026-11-18T21:03:25.1413224+03:00\",\"Action\":\"pass\",\"Package\":\"mcp-local-hub/internal/daemon\",\"Elapsed\":1.581}\n",
+      "stderr": ""
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "status",
+      "command": [
+        "git",
+        "status",
+        "--short"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "e5d969cd89e09dde158c7098bac4a670c14da68dd8f516d92e3b97d57dfb1992",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": " M internal/daemon/relay_binary_probe_windows_test.go\n",
+      "stderr": ""
+    },
+    {
+      "name": "diff-stat",
+      "command": [
+        "git",
+        "diff",
+        "--stat"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "10a76786e0861c08389b0426e060c5bbf15a9c67c16f6c422f09ad0e9324328a",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": " internal/daemon/relay_binary_probe_windows_test.go | 7 +++++--\n 1 file changed, 5 insertions(+), 2 deletions(-)\n",
+      "stderr": ""
+    }
+  ]
+}

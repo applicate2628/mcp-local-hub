@@ -122,7 +122,7 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 					t.Fatal(err)
 				}
 				var init relayLoadResponse
-				if err = json.Unmarshal(line, &init); err != nil || string(init.ID) != "0" || !strings.HasPrefix(init.Result.Session, "rx-session-") {
+				if err = json.Unmarshal(line, &init); err != nil || init.JSONRPC != "2.0" || string(init.ID) != "0" || !strings.HasPrefix(init.Result.Session, "rx-session-") {
 					t.Fatalf("bad init %q err=%v", line, err)
 				}
 				c.session = init.Result.Session
@@ -172,7 +172,7 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 							return
 						}
 						var response relayLoadResponse
-						if err = json.Unmarshal(line, &response); err != nil || string(response.ID) != string(request.ID) || response.Result.Session != c.session || response.Result.Payload != request.Params.Payload {
+						if err = json.Unmarshal(line, &response); err != nil || response.JSONRPC != "2.0" || string(response.ID) != string(request.ID) || response.Result.Session != c.session || response.Result.Payload != request.Params.Payload {
 							failures <- fmt.Errorf("wrong binary relay response, err=%v", err)
 							return
 						}
@@ -229,6 +229,9 @@ func TestRXRelayBinaryProbe(t *testing.T) {
 				}
 				if c.stderr.Len() != 0 {
 					t.Fatalf("unexpected relay diagnostic %q", c.stderr.String())
+				}
+				if line, ok := <-c.lines; ok {
+					t.Fatalf("unexpected trailing relay response %q", line)
 				}
 				cpu += c.cmd.ProcessState.UserTime() + c.cmd.ProcessState.SystemTime()
 			}
