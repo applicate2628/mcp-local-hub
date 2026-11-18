@@ -1,0 +1,82 @@
+{
+  "source_commit": "c028db723295f02909969b57f9d1ee8837a22344",
+  "pr": 628,
+  "archive": {
+    "name": "logs.zip",
+    "sha256": "5691d2fc6e077c241ea76d198a018e50c5e23d8c6358e3b1633e43129e0961e3"
+  },
+  "redactions": [],
+  "original_bytes_preserved": true,
+  "entries": [
+    {
+      "name": "benchmark-samples.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "benchmark-samples.stdout.log",
+      "bytes": 4589,
+      "sha256": "b5e316a020cecce6932d67559fefaa16bfac0bedebaa612566b3165ec6e6830f"
+    },
+    {
+      "name": "benchmark-smoke.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "benchmark-smoke.stdout.log",
+      "bytes": 599,
+      "sha256": "4df003715a2dd6f6134ac3d21e50c00d0905ade11bb26d7f5cceb86549b96c62"
+    },
+    {
+      "name": "go-env.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "go-env.stdout.log",
+      "bytes": 90,
+      "sha256": "dcc31e604d791e68116ddd31c8c4ba868e08911f737db091cfb98f4f39422258"
+    },
+    {
+      "name": "go-version.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "go-version.stdout.log",
+      "bytes": 34,
+      "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+    },
+    {
+      "name": "receipt.json",
+      "bytes": 4399,
+      "sha256": "be6a736b8733f4c2296fd4e873f5f77b637b01cd0c29e21b30c253526eef4a5a"
+    },
+    {
+      "name": "summary.json",
+      "bytes": 1351,
+      "sha256": "8e6ad007c74a71862a3a38f7470957dd85af6638813d22572b81c0dc8c40d329"
+    },
+    {
+      "name": "tests-race.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "tests-race.stdout.log",
+      "bytes": 5365,
+      "sha256": "ac2469306da5fbe6b1638ae37644d1a2a22da4d02b7bb8f27d540ef6b9f75908"
+    },
+    {
+      "name": "vet.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "vet.stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}
