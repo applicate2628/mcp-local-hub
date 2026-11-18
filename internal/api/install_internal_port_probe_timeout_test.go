@@ -50,20 +50,20 @@ func TestInternalPortOwnership_TimedOutIdentityProbeIsNotOwnership(t *testing.T)
 		t.Fatalf("seed supervisor intent: %v", err)
 	}
 
-	origLookup, origStatus, origNameParent := lookupProcess, supervisorIPCStatusFn, processNameAndParentByPID
+	origLookup, origStatus, origNameParent := lookupPortPID, supervisorIPCStatusFn, processNameAndParentByPID
 	t.Cleanup(func() {
-		lookupProcess, supervisorIPCStatusFn, processNameAndParentByPID = origLookup, origStatus, origNameParent
+		lookupPortPID, supervisorIPCStatusFn, processNameAndParentByPID = origLookup, origStatus, origNameParent
 	})
 
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{{TaskName: taskName, PID: wrapperPID, State: "Running"}}, nil
 	}
 	// netstat resolves a listener, and it is NOT our wrapper.
-	lookupProcess = func(p int) (int, uint64, int64, bool) {
+	lookupPortPID = func(p int) (int, bool, error) {
 		if p == internalPort {
-			return listenerPID, 0, 0, true
+			return listenerPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	// The identity probe RAN and was cut by its deadline — ownership unknown.
 	processNameAndParentByPID = fakeProcessNameAndParentTimingOut()
@@ -107,18 +107,18 @@ func TestInternalPortOwnership_UnresolvablePortOwnerIsNotOwnership(t *testing.T)
 		t.Fatalf("seed supervisor intent: %v", err)
 	}
 
-	origLookup, origStatus, origNameParent := lookupProcess, supervisorIPCStatusFn, processNameAndParentByPID
+	origLookup, origStatus, origNameParent := lookupPortPID, supervisorIPCStatusFn, processNameAndParentByPID
 	t.Cleanup(func() {
-		lookupProcess, supervisorIPCStatusFn, processNameAndParentByPID = origLookup, origStatus, origNameParent
+		lookupPortPID, supervisorIPCStatusFn, processNameAndParentByPID = origLookup, origStatus, origNameParent
 	})
 
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
 		return []DaemonStatus{{TaskName: taskName, PID: wrapperPID, State: "Running"}}, nil
 	}
 	// A WIRED port-owner probe that cannot resolve the owner — distinct from
-	// having no probe surface at all (lookupProcess == nil), which legitimately
+	// having no probe surface at all (lookupPortPID == nil), which legitimately
 	// keeps the downgrade and is asserted below.
-	lookupProcess = func(int) (int, uint64, int64, bool) { return 0, 0, 0, false }
+	lookupPortPID = func(int) (int, bool, error) { return 0, false, nil }
 	processNameAndParentByPID = fakeProcessNameAndParent(nil)
 
 	if portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha") {
@@ -128,7 +128,7 @@ func TestInternalPortOwnership_UnresolvablePortOwnerIsNotOwnership(t *testing.T)
 	// Control: with NO probe surface at all the documented downgrade still
 	// applies. This is the case the downgrade was written for, and the fix must
 	// not break it (non-Windows hosts rely on it).
-	lookupProcess = nil
+	lookupPortPID = nil
 	processNameAndParentByPID = nil
 	if !portHeldBySupervisorIntentDaemon(internalPort, "demo", "alpha") {
 		t.Fatal("with no probe surface wired at all, the documented live-wrapper-PID " +

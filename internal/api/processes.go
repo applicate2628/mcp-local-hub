@@ -729,6 +729,68 @@ func netstatLinePIDForLoopbackPort(line string, port int) (int, bool) {
 	return pid, true
 }
 
+// lookupPortPID observes only the listener on the exact IPv4 loopback port.
+// A nil function means the observation surface is not wired on this host.
+// With a wired function, found=false is absence ONLY when err is nil. Query
+// failures (including deadlines) remain unknown and must not license a kill
+// or a claim that a port was released. This is diagnostic observation, not
+// process identity or lifecycle authority.
+//
+// Windows init wires the bounded collector below. Other platforms retain the
+// existing unavailable behavior; TestMain seals this independently of metrics.
+var lookupPortPID func(port int) (pid int, found bool, err error)
+
+func queryLoopbackPortPID(port int) (int, bool, error) {
+	if port <= 0 || port > 65535 {
+		return 0, false, fmt.Errorf("invalid loopback port %d", port)
+	}
+	out, err := runProbeCommand(probeCommandTimeout, "netstat", "-ano")
+	if err != nil {
+		return 0, false, fmt.Errorf("query loopback port %d: %w", port, err)
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if pid, found := netstatLinePIDForLoopbackPort(line, port); found {
+			return pid, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// queryPortProcessInfo preserves the diagnostic scalar fallback: a listener
+// remains useful when its optional RAM/start-time query fails. Control paths
+// use lookupPortPID and never acquire these unused metrics.
+func queryPortProcessInfo(port int) (int, uint64, int64, bool) {
+	pid, found, err := queryLoopbackPortPID(port)
+	if err != nil || !found {
+		return 0, 0, 0, false
+	}
+	// Step 2: RAM + CreationDate via wmic
+	out2, err := runProbeCommand(probeCommandTimeout, "wmic", "process", "where",
+		fmt.Sprintf("ProcessId=%d", pid),
+		"get", "WorkingSetSize,CreationDate", "/format:csv")
+	if err != nil {
+		return pid, 0, 0, true
+	}
+	var ram uint64
+	var created time.Time
+	for _, line := range strings.Split(string(out2), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Node,") {
+			continue
+		}
+		fields := splitCSVLine(line)
+		if len(fields) >= 3 {
+			created = parseWmicDate(strings.TrimSpace(fields[1]))
+			ram, _ = strconv.ParseUint(strings.TrimSpace(fields[2]), 10, 64)
+		}
+	}
+	var uptime int64
+	if !created.IsZero() {
+		uptime = int64(time.Since(created).Seconds())
+	}
+	return pid, ram, uptime, true
+}
+
 // init populates status_enrich.go's lookupProcess function pointer with a
 // real Windows implementation that combines netstat (to find the PID owning
 // the port) and wmic (to fetch RAM + start time for that PID).
@@ -740,51 +802,8 @@ func init() {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
-		if port <= 0 {
-			return 0, 0, 0, false
-		}
-		// Step 1: PID via netstat
-		out, err := runProbeCommand(probeCommandTimeout, "netstat", "-ano")
-		if err != nil {
-			return 0, 0, 0, false
-		}
-		var pid int
-		for line := range strings.SplitSeq(string(out), "\n") {
-			if parsedPID, ok := netstatLinePIDForLoopbackPort(line, port); ok {
-				pid = parsedPID
-				break
-			}
-		}
-		if pid == 0 {
-			return 0, 0, 0, false
-		}
-		// Step 2: RAM + CreationDate via wmic
-		out2, err := runProbeCommand(probeCommandTimeout, "wmic", "process", "where",
-			fmt.Sprintf("ProcessId=%d", pid),
-			"get", "WorkingSetSize,CreationDate", "/format:csv")
-		if err != nil {
-			return pid, 0, 0, true
-		}
-		var ram uint64
-		var created time.Time
-		for _, line := range strings.Split(string(out2), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "Node,") {
-				continue
-			}
-			fields := splitCSVLine(line)
-			if len(fields) >= 3 {
-				created = parseWmicDate(strings.TrimSpace(fields[1]))
-				ram, _ = strconv.ParseUint(strings.TrimSpace(fields[2]), 10, 64)
-			}
-		}
-		var uptime int64
-		if !created.IsZero() {
-			uptime = int64(time.Since(created).Seconds())
-		}
-		return pid, ram, uptime, true
-	}
+	lookupPortPID = queryLoopbackPortPID
+	lookupProcess = queryPortProcessInfo
 
 	// processIdentityByPID returns (image, parentImage) for a PID,
 	// used by portHeldByOurDaemon (install.go) for the ownership

@@ -70,9 +70,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_SparesHyphenSibling(t *
 	}
 	installFakeScheduler(t, f)
 
-	origLookup := lookupProcess
-	lookupProcess = nil
-	t.Cleanup(func() { lookupProcess = origLookup })
+	origLookup := lookupPortPID
+	lookupPortPID = nil
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	origKill := forceKillByPortFn
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
@@ -115,9 +115,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_ReclaimsOwnHyphenatedDa
 	}
 	installFakeScheduler(t, f)
 
-	origLookup := lookupProcess
-	lookupProcess = nil
-	t.Cleanup(func() { lookupProcess = origLookup })
+	origLookup := lookupPortPID
+	lookupPortPID = nil
+	t.Cleanup(func() { lookupPortPID = origLookup })
 
 	origKill := forceKillByPortFn
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {

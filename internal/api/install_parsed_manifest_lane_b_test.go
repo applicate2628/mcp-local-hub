@@ -156,19 +156,19 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 
 	var killedPorts []int
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killedPorts = append(killedPorts, port)
 		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
 		return portKillKilled, nil
 	}
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
-		return 0, 0, 0, false
+	lookupPortPID = func(port int) (int, bool, error) {
+		return 0, false, nil
 	}
 	t.Cleanup(func() {
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
 
 	// Lane A inverted the kill preference: a captured supervisor-reported PID

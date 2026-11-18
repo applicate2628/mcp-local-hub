@@ -1078,14 +1078,14 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 	origStatus := supervisorIPCStatusFn
 	origPID := stopForceKillPIDFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
 		processIdentityByPID = origIdentity
 		supervisorIPCStatusFn = origStatus
 		stopForceKillPIDFn = origPID
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
@@ -1107,15 +1107,15 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 		return nil
 	}
 	var portLookups int
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	lookupPortPID = func(port int) (int, bool, error) {
 		portLookups++
 		if port != 33105 {
-			t.Fatalf("lookupProcess port = %d, want 33105", port)
+			t.Fatalf("lookupPortPID port = %d, want 33105", port)
 		}
 		if portLookups <= 2 {
-			return supervisorPID, 0, 0, true
+			return supervisorPID, true, nil
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	var taskkillPIDs []int
 	taskkillProcessTreeByPIDFn = func(pid int) error {
@@ -1141,7 +1141,7 @@ func TestStopForceKillSupervisorOwned_PIDSuccessWithPortWaitsForRelease(t *testi
 		t.Fatalf("PID kills = %v, want [%d]", killedPIDs, supervisorPID)
 	}
 	if portLookups < 3 {
-		t.Fatalf("port release wait consulted lookupProcess %d times, want initial lookup plus release polling", portLookups)
+		t.Fatalf("port release wait consulted lookupPortPID %d times, want initial lookup plus release polling", portLookups)
 	}
 	if len(taskkillPIDs) != 0 {
 		t.Fatalf("taskkill PIDs = %v, want none for wait-only release", taskkillPIDs)
@@ -1157,12 +1157,12 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 
 	origIdentity := processIdentityByPID
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	origTaskkill := taskkillProcessTreeByPIDFn
 	t.Cleanup(func() {
 		processIdentityByPID = origIdentity
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 		taskkillProcessTreeByPIDFn = origTaskkill
 	})
 
@@ -1177,11 +1177,11 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 			return "", "", false
 		}
 	}
-	lookupProcess = func(gotPort int) (int, uint64, int64, bool) {
+	lookupPortPID = func(gotPort int) (int, bool, error) {
 		if gotPort != port {
-			t.Fatalf("lookupProcess port = %d, want %d", gotPort, port)
+			t.Fatalf("lookupPortPID port = %d, want %d", gotPort, port)
 		}
-		return foreignPID, 0, 0, true
+		return foreignPID, true, nil
 	}
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		t.Fatalf("forceKillByPortFn called for reused foreign port %d", port)
@@ -1203,7 +1203,7 @@ func TestWaitPortReleasedAfterPIDKill_ForeignPortReuseSucceedsWithoutKill(t *tes
 
 // TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnverifiedPortWarning
 // covers the POSIX supervisor-owned force path: descriptor ports exist, but the
-// Windows-only port lookup hook is structurally absent (lookupProcess == nil on
+// Windows-only port lookup hook is structurally absent (lookupPortPID == nil on
 // non-Windows). A SUCCESSFUL trusted PID/tree kill IS the proof the daemon is
 // gone, so the force-stop goal is achieved: the per-target row must be SUCCESS
 // (empty Err) carrying a warning that notes the port-release proof was
@@ -1230,14 +1230,14 @@ func TestStopForceKillSupervisorOwned_UnsupportedPortKillReportsSuccessWithUnver
 
 	origKill := killByPortFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	killByPortFn = killDaemonByPort
 	forceKillByPortFn = killDaemonByPortOutcome
-	lookupProcess = nil
+	lookupPortPID = nil
 	t.Cleanup(func() {
 		killByPortFn = origKill
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
 
 	var killedPIDs []int

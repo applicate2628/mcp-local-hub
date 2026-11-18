@@ -151,7 +151,7 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 				// UNCONDITIONALLY, regardless of d.Port. Falling through to the
 				// port path when d.Port != 0 broke POSIX (bot PR #288 r35-1,
 				// site 2): forceKillByPortFn → killDaemonByPortOutcome returns
-				// (portKillLookupUnavailable, nil) because lookupProcess is nil
+				// (portKillLookupUnavailable, nil) because lookupPortPID is nil
 				// on non-Windows, which the caller turned into a "no usable
 				// port-release proof" FAILED row even though the daemon is
 				// already dead. Windows reports success here too (an already-gone
@@ -207,19 +207,21 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 //   - timeout + same PID still reported → ERROR; that PID was already killed,
 //     so this is a process-table/port-lookup race and we must not switch to a
 //     blind port kill.
-//   - timeout + mcphub.exe listener → KILL that PID's tree through the existing
-//     identity-gated taskkill primitive, then require the port to release.
+//   - timeout + a different verified mcphub.exe listener → SUCCESS with a
+//     warning about supervisor auto-revival; do not kill the new process.
 //   - timeout + foreign listener image → SUCCESS with warning context
 //     ("port now owned by foreign process <image>; not killing"); the force-stop
 //     goal holds because our daemon PID died, and killing the re-user is the
 //     unsafe r21 over-correction this path must avoid.
-//   - lookup/identity proof unavailable → ERROR; without a release or identity
-//     proof, this path cannot honestly claim the descriptor port is safe.
+//   - wired lookup fails, or listener identity is unresolved → ERROR; the
+//     successful PID kill is retained, but port release remains unknown.
+//   - port lookup structurally unavailable → SUCCESS with a warning after the
+//     trusted PID/tree kill, preserving the existing non-Windows contract.
 func waitPortReleasedAfterPIDKill(port, killedPID int, timeout time.Duration) (string, error) {
 	if port == 0 {
 		return "", nil
 	}
-	if lookupProcess == nil {
+	if lookupPortPID == nil {
 		// POSIX (Linux beta / macOS preview): the Windows-only port-owner lookup
 		// hook is structurally nil (processes.go init only wires it when
 		// GOOS=="windows"). This branch is reached ONLY after the trusted
@@ -235,10 +237,14 @@ func waitPortReleasedAfterPIDKill(port, killedPID int, timeout time.Duration) (s
 
 	deadline := time.Now().Add(timeout)
 	var pid int
-	var ok bool
+	var found bool
+	var err error
 	for {
-		pid, _, _, ok = lookupProcess(port)
-		if !ok {
+		pid, found, err = lookupPortPID(port)
+		if err != nil {
+			return "", fmt.Errorf("port %d release unknown after killing pid %d: %w", port, killedPID, err)
+		}
+		if !found {
 			return "", nil
 		}
 		if timeout <= 0 || !time.Now().Before(deadline) {

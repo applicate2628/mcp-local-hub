@@ -2422,13 +2422,13 @@ func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *test
 func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *testing.T) {
 	origKill := killByPortFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	t.Cleanup(func() {
 		killByPortFn = origKill
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
-	lookupProcess = nil
+	lookupPortPID = nil
 
 	legacyKillCalled := false
 	killByPortFn = func(port int, timeout time.Duration) error {
@@ -2456,13 +2456,13 @@ func TestKillLegacySchedulerTaskDaemonByPortBestEffort_ForeignOwnerNotKilled(t *
 func TestKillLegacySchedulerTaskDaemonByPortBestEffort_McphubOwnerKilled(t *testing.T) {
 	origKill := killByPortFn
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	t.Cleanup(func() {
 		killByPortFn = origKill
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
-	lookupProcess = nil
+	lookupPortPID = nil
 
 	killByPortFn = func(port int, timeout time.Duration) error {
 		t.Fatalf("legacy handoff must use outcome-aware kill path, got killByPortFn(%d)", port)
@@ -2598,22 +2598,22 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 
 	var killPorts []int
 	origForceKill := forceKillByPortFn
-	origLookup := lookupProcess
+	origLookup := lookupPortPID
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		order = append(order, "kill-port")
 		killPorts = append(killPorts, port)
 		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
 		return portKillNoListener, nil
 	}
-	lookupProcess = func(port int) (int, uint64, int64, bool) {
+	lookupPortPID = func(port int) (int, bool, error) {
 		if port != 9322 {
-			t.Fatalf("lookupProcess port = %d, want 9322", port)
+			t.Fatalf("lookupPortPID port = %d, want 9322", port)
 		}
-		return 0, 0, 0, false
+		return 0, false, nil
 	}
 	t.Cleanup(func() {
 		forceKillByPortFn = origForceKill
-		lookupProcess = origLookup
+		lookupPortPID = origLookup
 	})
 
 	var killedPIDs []int
@@ -2855,9 +2855,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
 		installFakeScheduler(t, f)
 
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
+		origLookup := lookupPortPID
+		lookupPortPID = nil
+		t.Cleanup(func() { lookupPortPID = origLookup })
 
 		var killed []int
 		origKill := forceKillByPortFn
@@ -2900,9 +2900,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-vscode-css`}}
 		installFakeScheduler(t, f)
 
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
+		origLookup := lookupPortPID
+		lookupPortPID = nil
+		t.Cleanup(func() { lookupPortPID = origLookup })
 
 		var killed []int
 		origKill := forceKillByPortFn
@@ -2941,9 +2941,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
 		installFakeScheduler(t, f)
 
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
+		origLookup := lookupPortPID
+		lookupPortPID = nil
+		t.Cleanup(func() { lookupPortPID = origLookup })
 
 		var killed []int
 		origKill := forceKillByPortFn
@@ -2979,9 +2979,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		f := newInstallFakeScheduler()
 		installFakeScheduler(t, f)
 
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
+		origLookup := lookupPortPID
+		lookupPortPID = nil
+		t.Cleanup(func() { lookupPortPID = origLookup })
 
 		var killed []int
 		origKill := forceKillByPortFn
@@ -3015,9 +3015,9 @@ func TestCleanupLegacySchedulerTasksForSupervisorInstall_DeletesTaskAndKillsPort
 		f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha`}}
 		installFakeScheduler(t, f)
 
-		origLookup := lookupProcess
-		lookupProcess = nil
-		t.Cleanup(func() { lookupProcess = origLookup })
+		origLookup := lookupPortPID
+		lookupPortPID = nil
+		t.Cleanup(func() { lookupPortPID = origLookup })
 
 		var killed []int
 		origKill := forceKillByPortFn
