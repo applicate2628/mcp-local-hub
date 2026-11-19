@@ -1,0 +1,17 @@
+{
+  "mode": "APPLY",
+  "run_id": "027ca2dd03624a318f469ad87b259bff",
+  "fixture_sha256": "b3cf12165b57df5f8ab43e41fc00b57ecdc824c650203ab3d4732386beebc514",
+  "probe_sha256": "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc",
+  "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+  "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+  "named_tasks": [
+    "\\mcp-r17-027ca2dd03624a318f469ad87b259bff-visible",
+    "\\mcp-r17-027ca2dd03624a318f469ad87b259bff-hidden"
+  ],
+  "effects": "Two CREATE-only disabled, inert tasks; five public Go reads; fresh guarded cleanup even after a semantic failure",
+  "execution_policy": "RemoteSigned for this PowerShell process and its inherited process environment only",
+  "whole_process_tree_deadline_enforced": false,
+  "started_utc": "2026-11-19T19:05:49.651603+00:00",
+  "launcher_sha256": "c317bd988f9519a4bb0f085b12f90c8e090d66e7a8d29dcc97ab3436ba4eca64"
+}

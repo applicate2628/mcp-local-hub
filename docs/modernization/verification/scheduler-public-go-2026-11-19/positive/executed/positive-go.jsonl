@@ -1,0 +1,12 @@
+{"backend_type":"*scheduler.windowsScheduler","error_present":false,"event":"admission","manifest_valid":true,"pass":true,"target_head":"1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3"}
+{"check":"status-visible","event":"begin"}
+{"check":"status-visible","duration_ns":540582000,"error_present":false,"event":"result","is_task_not_found":false,"is_unavailable":false,"observations":{"last_result_observed":0,"name_exact":true,"owner_exact":true,"runtime_disabled":true,"state_disabled":true},"pass":true}
+{"check":"export-visible","event":"begin"}
+{"check":"export-visible","duration_ns":480367100,"error_present":false,"event":"result","is_task_not_found":false,"is_unavailable":false,"observations":{"unicode_marker_preserved":true,"utf8_valid":true,"xml_exact":true},"pass":true}
+{"check":"status-hidden","event":"begin"}
+{"check":"status-hidden","duration_ns":460882400,"error_present":false,"event":"result","is_task_not_found":false,"is_unavailable":false,"observations":{"last_result_observed":0,"name_exact":true,"owner_exact":true,"runtime_disabled":true,"state_disabled":true},"pass":true}
+{"check":"export-hidden","event":"begin"}
+{"check":"export-hidden","duration_ns":471852700,"error_present":false,"event":"result","is_task_not_found":false,"is_unavailable":false,"observations":{"unicode_marker_preserved":true,"utf8_valid":true,"xml_exact":true},"pass":true}
+{"check":"list-visible-only","event":"begin"}
+{"check":"list-visible-only","duration_ns":503943600,"error_present":false,"event":"result","is_task_not_found":false,"is_unavailable":false,"observations":{"exactly_one":true,"last_result_observed":0,"name_exact":true,"owner_exact":true,"runtime_disabled":true,"state_disabled":true},"pass":true}
+{"duration_ns":2490548200,"event":"overall","last_result_semantics_qualified":false,"panic_recovered":false,"pass":true,"status":"PASS","task_status_subset_only":true}

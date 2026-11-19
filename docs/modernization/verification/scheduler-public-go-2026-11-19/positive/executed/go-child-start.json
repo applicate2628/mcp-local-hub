@@ -1,0 +1,15 @@
+{
+    "check":  "public-go-positive",
+    "start_attempted":  true,
+    "pid":  48700,
+    "started_utc":  "2026-11-19T19:05:50.5764519Z",
+    "probe_sha256":  "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc",
+    "settled":  false,
+    "capture_complete":  false,
+    "stdout_written":  false,
+    "stderr_written":  false,
+    "persistence_errors":  [
+
+                           ],
+    "exit_code":  null
+}

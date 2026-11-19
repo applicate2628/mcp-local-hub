@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "record_kind": "curated projection of Remote Desktop Commander process completion messages",
+  "run_id": "027ca2dd03624a318f469ad87b259bff",
+  "approved_proposal_commit": "2b5e44f92e10d27af9d559bd3e66ed9fb2e03840",
+  "fixture_launch": {
+    "command": "python -I -B D:\\dev\\ChatGPT\\mcp-r17-public-go-positive-prepare-20261119\\launch_positive.py --apply",
+    "working_directory": "D:\\dev\\ChatGPT",
+    "tool_process_id": 36300,
+    "reported_exit_code": 0,
+    "reported_runtime_seconds": 3.87,
+    "completion_message": "Process completed with exit code 0 (runtime: 3.87s)",
+    "invocations": 1
+  },
+  "post_settlement_observer": {
+    "script_sha256": "19a7a1ab928f61a74120084167c86623f6c84cbfdcad09a22edbc59a039baf39",
+    "tool_process_id": 3788,
+    "reported_exit_code": 0,
+    "reported_runtime_seconds": 0.74,
+    "completion_message": "Process completed with exit code 0 (runtime: 0.74s)",
+    "invocations": 1,
+    "scheduler_mutations": 0,
+    "execution_policy_override": false
+  },
+  "notes": [
+    "The fixture launch was explicitly approved in the conversation and was not repeated.",
+    "These numeric outer codes were returned by the tool; they are not inferred from the child receipts.",
+    "This file is not a raw native receipt and does not replace the stored Go, owner, launcher or observer evidence."
+  ],
+  "saved_file_analyzer": {
+    "script_sha256": "d00f57a5f48c22689c07e67f36401e7da10939b2d84cf670e85cccadbc94b718",
+    "tool_process_id": 30400,
+    "reported_exit_code": 0,
+    "reported_runtime_seconds": 0.14,
+    "completion_message": "Process completed with exit code 0 (runtime: 0.14s)",
+    "invocations": 1,
+    "scheduler_calls": 0,
+    "child_processes": 0,
+    "evidence_bytes": 6847,
+    "evidence_sha256": "7897c0bf73fbcf13a0e47c9dfcd027fde1ce1c554aeba2267335cc5d139b1735"
+  }
+}

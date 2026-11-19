@@ -1,0 +1,11 @@
+{
+  "run_id": "027ca2dd03624a318f469ad87b259bff",
+  "observer_sha256": "19a7a1ab928f61a74120084167c86623f6c84cbfdcad09a22edbc59a039baf39",
+  "started_utc": "2026-11-19T19:12:12.104627+00:00",
+  "settled": false,
+  "exit_code": null,
+  "all_absent": false,
+  "error_type": null,
+  "scheduler_mutations": 0,
+  "execution_policy_override": false
+}

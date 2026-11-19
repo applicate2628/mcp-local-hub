@@ -1,0 +1,11 @@
+{
+  "run_id": "027ca2dd03624a318f469ad87b259bff",
+  "started_utc": "2026-11-19T19:05:49.651603+00:00",
+  "start_attempted": true,
+  "settled": true,
+  "exit_code": 0,
+  "error": null,
+  "stdout_sha256": "17f9cd73d96afb7527a99ed95bb2e88f881d04dbe9ea46f7c80a5009d4967887",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "finished_utc": "2026-11-19T19:05:53.356695+00:00"
+}

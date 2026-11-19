@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "checked_utc": "2026-11-19T19:05:27.731044+00:00",
+  "run_id": "027ca2dd03624a318f469ad87b259bff",
+  "published_proposal": "2b5e44f92e10d27af9d559bd3e66ed9fb2e03840",
+  "input_files": {
+    "launcher": {
+      "bytes": 5724,
+      "sha256": "c317bd988f9519a4bb0f085b12f90c8e090d66e7a8d29dcc97ab3436ba4eca64",
+      "expected_sha256": "c317bd988f9519a4bb0f085b12f90c8e090d66e7a8d29dcc97ab3436ba4eca64"
+    },
+    "fixture": {
+      "bytes": 16825,
+      "sha256": "b3cf12165b57df5f8ab43e41fc00b57ecdc824c650203ab3d4732386beebc514",
+      "expected_sha256": "b3cf12165b57df5f8ab43e41fc00b57ecdc824c650203ab3d4732386beebc514"
+    },
+    "probe_source": {
+      "bytes": 5636,
+      "sha256": "c618d809208ffa0be23b8c27bd26c0ee0c825faf981bed0310ca8b16ee809650",
+      "expected_sha256": "c618d809208ffa0be23b8c27bd26c0ee0c825faf981bed0310ca8b16ee809650"
+    },
+    "probe_executable": {
+      "bytes": 5365760,
+      "sha256": "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc",
+      "expected_sha256": "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc"
+    },
+    "production_source": {
+      "bytes": 10040,
+      "sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+      "expected_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+    },
+    "system_powershell": {
+      "bytes": 450560,
+      "sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+      "expected_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8"
+    }
+  },
+  "native_run_directory_absent": true,
+  "launch_markers_absent": true,
+  "scheduler_calls": 0,
+  "policy_changes": 0
+}

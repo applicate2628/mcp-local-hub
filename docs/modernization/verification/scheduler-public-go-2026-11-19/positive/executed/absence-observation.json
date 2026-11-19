@@ -1,0 +1,15 @@
+{
+    "observed_utc":  "2026-11-19T19:12:12.6615946Z",
+    "get_tasks_flag":  1,
+    "query_only":  true,
+    "counts":  [
+                   {
+                       "kind":  "visible",
+                       "count":  0
+                   },
+                   {
+                       "kind":  "hidden",
+                       "count":  0
+                   }
+               ]
+}
