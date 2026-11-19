@@ -88,7 +88,9 @@ function Test-OwnedDefinition($task,[string]$snapshot,$request){
   return $true
  }catch{return $false}
 }
-$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');$all=@($f.GetTasks(0));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
+$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');
+# Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
+$flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
 if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
 if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};
 if($r.operation -eq 'run_owned'){
