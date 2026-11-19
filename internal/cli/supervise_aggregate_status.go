@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +13,8 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -25,6 +26,9 @@ type routeAggregateSupervisor struct {
 	ctx       context.Context
 	launch    api.RouteAggregateLaunch
 	launchEnv string
+	binding   *routeAggregateBinding // daemonCreatorRecords.mu
+
+	beforeDetach func(*routeAggregateBinding) // fixture barrier; nil in production
 }
 
 func newRouteAggregateSupervisor(ctx context.Context, stateDir string, owner api.SupervisorLockOwner) (*routeAggregateSupervisor, error) {
@@ -79,7 +83,7 @@ func (r *daemonCreatorRecords) observeRouteAggregatePeer(ctx context.Context, co
 	if r == nil || r.routeAggregate == nil || tracker == nil {
 		return nil, 0, refused
 	}
-	peer, err := api.ObserveSupervisorIPCClientIdentityV1(conn)
+	peer, err := observeAggregateIPCClient(conn)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -128,69 +132,341 @@ func (r *daemonCreatorRecords) observeRouteAggregatePeer(ctx context.Context, co
 	return operation, operation.generation, ctx.Err()
 }
 
+// aggregateIPCConn serializes native handle inspection with the existing
+// ipcSession close. go-winio's raw Fd does not synchronize with Close.
+type aggregateIPCConn struct {
+	net.Conn
+	nativeMu sync.Mutex
+}
+
+func (c *aggregateIPCConn) Close() error {
+	c.nativeMu.Lock()
+	defer c.nativeMu.Unlock()
+	return c.Conn.Close()
+}
+
+func observeAggregateIPCClient(conn net.Conn) (api.SupervisorProcessIdentityV1, error) {
+	if owned, ok := conn.(*aggregateIPCConn); ok {
+		owned.nativeMu.Lock()
+		defer owned.nativeMu.Unlock()
+		conn = owned.Conn
+	}
+	return api.ObserveSupervisorIPCClientIdentityV1(conn)
+}
+
+type routeAggregateBinding struct {
+	conn       net.Conn
+	operation  *daemonCreatorOperation
+	generation int
+	done       chan struct{}
+	closeOnce  sync.Once
+	ready      bool                 // daemonCreatorRecords.mu
+	pending    *routeAggregateQuery // daemonCreatorRecords.mu
+	err        error                // published by closing done
+}
+
+type routeAggregateQuery struct {
+	challenge api.RouteAggregateStatusChallenge
+	reply     chan api.RouteAggregateStatusProof
+	received  bool // daemonCreatorRecords.mu
+}
+
+var (
+	errAggregateUnavailable = errors.New("no attached current route")
+	errAggregateBusy        = errors.New("a live query is already in progress")
+	errAggregatePeerChanged = errors.New("original route generation changed")
+	errAggregateMalformed   = errors.New("route reply did not match the live query")
+)
+
+func (b *routeAggregateBinding) close() {
+	b.closeOnce.Do(func() { _ = b.conn.Close() })
+}
+
+// Revoke before closing: the route may consume its one reattach immediately
+// after peer loss. Only the matching handle/generation may leave the slot.
+func (r *daemonCreatorRecords) revokeRouteAggregateBinding(b *routeAggregateBinding) {
+	r.mu.Lock()
+	if r.routeAggregate.binding == b {
+		r.routeAggregate.binding = nil
+	}
+	r.mu.Unlock()
+	b.close()
+}
+
+func (r *daemonCreatorRecords) retireRouteAggregateBinding(operation *daemonCreatorOperation) {
+	if r.routeAggregate == nil {
+		return
+	}
+	r.mu.Lock()
+	b := r.routeAggregate.binding
+	r.mu.Unlock()
+	if b != nil && b.operation == operation {
+		r.revokeRouteAggregateBinding(b)
+	}
+}
+
+func writeAggregateFailure(conn net.Conn, id int64, code, message string) error {
+	return writeIPCFrame(conn, api.IPCResponse{
+		ID: id, Final: true,
+		Error: &api.IPCErr{Code: code, Message: message, Retryable: code == "OPERATOR_AGGREGATE_BUSY"},
+	})
+}
+
 func serveRouteAggregateStatus(conn net.Conn, deps ipcDispatchDeps) error {
-	var requestID int64
-	refuse := func(code, message string) error {
-		return writeIPCFrame(conn, api.IPCResponse{ID: requestID, Error: &api.IPCErr{Code: code, Message: message}, Final: true})
-	}
 	creators := deps.daemonCreators
-	parent := context.Background()
-	if creators != nil && creators.routeAggregate != nil {
-		parent = creators.routeAggregate.ctx
-	}
-	ctx, cancel := context.WithTimeout(parent, api.SupervisorAggregateStatusTimeout)
+	ctx, cancel := context.WithTimeout(aggregateIPCContext(creators), api.SupervisorAggregateStatusTimeout)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
 		return err
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
-	defer stop()
 	original, generation, err := creators.observeRouteAggregatePeer(ctx, conn, deps.runtimeTracker)
 	if err != nil {
-		return refuse("ROUTE_AGGREGATE_PEER_DENIED", "current original route peer required")
+		return writeAggregateFailure(conn, 0, "ROUTE_AGGREGATE_PEER_DENIED", "current original route peer required")
 	}
-
-	// This is the first application-body read. The marker used a single raw
-	// connection byte and no buffered I/O took place before native admission.
+	// No application body is read until the kernel peer and creator agree.
 	req, err := api.ReadRouteAggregateStatusOpen(conn)
 	if err != nil {
-		return refuse("ROUTE_AGGREGATE_INVALID", "invalid bounded aggregate-status v1 query")
+		return writeAggregateFailure(conn, 0, "ROUTE_AGGREGATE_INVALID", "invalid bounded route attach")
 	}
-	requestID = req.ID
-	if deps.events != nil {
-		_ = deps.events.TryEmit(api.SupervisorEvent{
-			Severity: "info", Source: "ipc", Event: "ipc-command",
-			Body: map[string]any{"cmd": req.Cmd, "id": req.ID},
-		})
+	b := &routeAggregateBinding{conn: conn, operation: original, generation: generation, done: make(chan struct{})}
+	creators.mu.Lock()
+	s := creators.routeAggregate
+	prior := s.binding
+	if original != creators.routeAggregateOperation() || original.terminal != nil {
+		creators.mu.Unlock()
+		return writeAggregateFailure(conn, req.ID, "ROUTE_AGGREGATE_PEER_DENIED", "original route generation changed")
 	}
+	if prior != nil && prior.operation == original {
+		creators.mu.Unlock()
+		return writeAggregateFailure(conn, req.ID, "ROUTE_AGGREGATE_BUSY", "current route already attached")
+	}
+	s.binding = b
+	creators.mu.Unlock()
+	if prior != nil {
+		prior.close()
+	}
+	defer func() {
+		if s.beforeDetach != nil {
+			s.beforeDetach(b)
+		}
+		creators.revokeRouteAggregateBinding(b)
+		close(b.done)
+	}()
+	if err := writeIPCFrame(conn, api.IPCResponse{
+		ID: req.ID, OK: true, Result: api.RouteAggregateControlAttached{Generation: generation}, Final: true,
+	}); err != nil {
+		b.err = err
+		return err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		b.err = err
+		return err
+	}
+	creators.mu.Lock()
+	b.ready = s.binding == b
+	creators.mu.Unlock()
 
+	// This same reader observes EOF in idle and active periods. Unknown,
+	// duplicate and mismatched proofs revoke only this binding.
+	for {
+		proof, err := api.ReadRouteAggregateStatusProof(conn)
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+				err = errors.Join(errAggregateMalformed, err)
+			}
+			b.err = err
+			return err
+		}
+		creators.mu.Lock()
+		q := b.pending
+		valid := s.binding == b && q != nil && !q.received &&
+			proof.ID == q.challenge.ID && proof.Challenge == q.challenge.Challenge &&
+			proof.Generation == q.challenge.Generation && proof.Ownership == api.RouteAggregateNotOwner
+		if valid {
+			q.received = true
+			q.reply <- proof
+		}
+		creators.mu.Unlock()
+		if !valid {
+			b.err = errAggregateMalformed
+			return b.err
+		}
+	}
+}
+
+func aggregateIPCContext(r *daemonCreatorRecords) context.Context {
+	if r == nil || r.routeAggregate == nil {
+		return context.Background()
+	}
+	return r.routeAggregate.ctx
+}
+
+func (r *daemonCreatorRecords) queryRouteAggregateStatus(ctx context.Context, id int64, tracker *DaemonRuntimeTracker) (api.RouteAggregateStatus, error) {
+	var zero api.RouteAggregateStatus
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	if r == nil || r.routeAggregate == nil {
+		return zero, errAggregateUnavailable
+	}
 	var nonce [api.RouteAggregateChallengeBytes]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
+		return zero, err
 	}
-	challenge := api.RouteAggregateStatusChallenge{Challenge: hex.EncodeToString(nonce[:]), Generation: generation}
-	if err := writeIPCFrame(conn, api.IPCResponse{ID: req.ID, OK: true, Result: challenge}); err != nil {
-		return err
+	r.mu.Lock()
+	b := r.routeAggregate.binding
+	if b == nil || !b.ready {
+		r.mu.Unlock()
+		return zero, errAggregateUnavailable
 	}
-	// The challenge reply is a single small control frame on this connection.
-	// It must fit the existing IPC reader buffer and end with LF.
-	line, err := bufio.NewReader(conn).ReadSlice('\n')
+	if b.pending != nil {
+		r.mu.Unlock()
+		return zero, errAggregateBusy
+	}
+	q := &routeAggregateQuery{
+		challenge: api.RouteAggregateStatusChallenge{ID: id, Challenge: hex.EncodeToString(nonce[:]), Generation: b.generation},
+		reply:     make(chan api.RouteAggregateStatusProof, 1),
+	}
+	b.pending = q
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		b.pending = nil
+		r.mu.Unlock()
+	}()
+
+	current, generation, err := r.observeRouteAggregatePeer(ctx, b.conn, tracker)
+	if err != nil || current != b.operation || generation != b.generation {
+		if ctx.Err() != nil {
+			return zero, ctx.Err()
+		}
+		r.revokeRouteAggregateBinding(b)
+		<-b.done
+		return zero, errAggregatePeerChanged
+	}
+	sent, err := writeRouteAggregateQuery(ctx, b.conn, q.challenge)
 	if err != nil {
+		if sent || ctx.Err() == nil {
+			r.revokeRouteAggregateBinding(b)
+			<-b.done
+		}
+		if cause := ctx.Err(); cause != nil {
+			return zero, cause
+		}
+		return zero, errors.Join(errAggregateUnavailable, err)
+	}
+	select {
+	case <-ctx.Done():
+		r.revokeRouteAggregateBinding(b)
+		<-b.done
+		return zero, ctx.Err()
+	case <-b.done:
+		return zero, errors.Join(errAggregateUnavailable, b.err)
+	case proof := <-q.reply:
+		current, generation, err := r.observeRouteAggregatePeer(ctx, b.conn, tracker)
+		if cause := ctx.Err(); cause != nil {
+			r.revokeRouteAggregateBinding(b)
+			<-b.done
+			return zero, cause
+		}
+		r.mu.Lock()
+		stillBound := r.routeAggregate.binding == b
+		r.mu.Unlock()
+		if !stillBound || err != nil || current != b.operation || generation != b.generation {
+			r.revokeRouteAggregateBinding(b)
+			<-b.done
+			return zero, errAggregatePeerChanged
+		}
+		return api.RouteAggregateStatus{Ownership: proof.Ownership, Generation: generation}, nil
+	}
+}
+
+func writeRouteAggregateQuery(ctx context.Context, conn net.Conn, challenge api.RouteAggregateStatusChallenge) (bool, error) {
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return false, err
+	}
+	wakeup := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(wakeup)
+		_ = conn.SetWriteDeadline(time.Now())
+	})
+	defer func() {
+		if !stop() {
+			<-wakeup
+		}
+	}()
+	frame, err := json.Marshal(api.IPCResponse{ID: challenge.ID, OK: true, Result: challenge})
+	if err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	frame = append(frame, '\n')
+	n, err := conn.Write(frame)
+	if err == nil && n != len(frame) {
+		err = io.ErrShortWrite
+	}
+	return n != 0, err
+}
+
+func serveOperatorAggregateStatus(conn net.Conn, deps ipcDispatchDeps) (retErr error) {
+	creators := deps.daemonCreators
+	ctx, cancel := context.WithTimeout(aggregateIPCContext(creators), api.SupervisorAggregateStatusTimeout)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
 		return err
 	}
-	var proof api.RouteAggregateStatusProof
-	if err := json.Unmarshal(line, &proof); err != nil || proof.ID != req.ID ||
-		proof.Challenge != challenge.Challenge || proof.Generation != generation || proof.Effective != api.RouteAggregateOff {
-		return refuse("ROUTE_AGGREGATE_PROOF_INVALID", "aggregate-status proof did not match this exchange")
+	if creators == nil || creators.routeAggregate == nil ||
+		!admitAggregateStatusOperator(conn, creators.routeAggregate.launch.Peer) {
+		return writeAggregateFailure(conn, 0, "OPERATOR_AGGREGATE_PEER_DENIED", "verified local operator required")
 	}
-	current, currentGeneration, err := creators.observeRouteAggregatePeer(ctx, conn, deps.runtimeTracker)
-	if err != nil || current != original || currentGeneration != generation {
-		return refuse("ROUTE_AGGREGATE_PEER_DENIED", "original route generation changed")
+	req, err := api.ReadOperatorAggregateStatusOpen(conn)
+	if err != nil {
+		return writeAggregateFailure(conn, 0, "OPERATOR_AGGREGATE_INVALID", "invalid bounded aggregate-status query")
 	}
-	return writeIPCFrame(conn, api.IPCResponse{
-		ID: req.ID, OK: true, Result: api.RouteAggregateStatus{Effective: proof.Effective, Generation: generation}, Final: true,
-	})
+
+	// From the bounded request's final LF to transport close, this is
+	// the only reader. EOF or an extra byte cancels the live query.
+	var ending atomic.Bool
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		var extra [1]byte
+		_, _ = conn.Read(extra[:])
+		if ending.CompareAndSwap(false, true) {
+			cancel()
+		}
+	}()
+	defer func() {
+		retErr = errors.Join(retErr, conn.Close())
+		<-readerDone
+	}()
+	result, err := creators.queryRouteAggregateStatus(ctx, req.ID, deps.runtimeTracker)
+	if cause := ctx.Err(); cause != nil {
+		return cause
+	}
+	if !ending.CompareAndSwap(false, true) {
+		return context.Canceled
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, errAggregateMalformed):
+			return writeAggregateFailure(conn, req.ID, "OPERATOR_AGGREGATE_MALFORMED", "malformed route reply")
+		case errors.Is(err, errAggregateBusy):
+			return writeAggregateFailure(conn, req.ID, "OPERATOR_AGGREGATE_BUSY", "another live query is in progress")
+		case errors.Is(err, errAggregatePeerChanged):
+			return writeAggregateFailure(conn, req.ID, "OPERATOR_AGGREGATE_PEER_CHANGED", "original route generation changed")
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+			return writeAggregateFailure(conn, req.ID, "OPERATOR_AGGREGATE_TIMEOUT", "live route query timed out")
+		default:
+			return writeAggregateFailure(conn, req.ID, "OPERATOR_AGGREGATE_UNAVAILABLE", "no live route reply available")
+		}
+	}
+	return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, OK: true, Result: result, Final: true})
 }
 
 func startRouteAggregateStatus(ctx context.Context, diagnostics io.Writer, observe func() string) func() {
@@ -207,14 +483,9 @@ func startRouteAggregateStatus(ctx context.Context, diagnostics io.Writer, obser
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		status, err := api.DialRouteAggregateStatus(ctx, launch, observe)
-		if err != nil {
-			if ctx.Err() == nil {
-				fmt.Fprintf(diagnostics, "route: aggregate-status refused: %v\n", err)
-			}
-			return
+		if err := api.ServeRouteAggregateStatus(ctx, launch, observe); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(diagnostics, "route: aggregate-status unavailable: %v\n", err)
 		}
-		fmt.Fprintf(diagnostics, "route: aggregate-status effective=%s generation=%d\n", status.Effective, status.Generation)
 	}()
 	return func() {
 		cancel()

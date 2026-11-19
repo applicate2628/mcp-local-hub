@@ -312,9 +312,8 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	go func() { errCh <- httpSrv.Serve(ln) }()
 
 	// This composition owns only the workspace HTTP server. The separate
-	// route-owned aggregate has no listener in this slice. Its OFF proof
-	// says nothing about the legacy GUI-owned aggregate.
-	stopAggregateStatus := startRouteAggregateStatus(ctx, cmd.ErrOrStderr(), func() string { return api.RouteAggregateOff })
+	// aggregate remains owned by the legacy GUI composition.
+	stopAggregateStatus := startRouteAggregateStatus(ctx, cmd.ErrOrStderr(), func() string { return api.RouteAggregateNotOwner })
 	defer stopAggregateStatus()
 
 	fmt.Fprintf(cmd.OutOrStdout(),

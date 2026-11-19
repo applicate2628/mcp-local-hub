@@ -432,6 +432,7 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 type ipcDispatchDeps struct {
 	// The original singleton remains held until IPC handlers join on shutdown.
 	supervisorLock *api.SupervisorLock
+	aggregateConn  net.Conn
 	daemonCreators *daemonCreatorRecords
 	stateDir       string
 	events         *api.SupervisorEventLog
@@ -2082,19 +2083,25 @@ func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps,
 			continue
 		}
 		consecErrs = 0
-		if session != nil && !session.register(conn) {
-			_ = conn.Close()
+		handlerDeps := deps
+		retainedConn := conn
+		if deps.daemonCreators != nil && deps.daemonCreators.routeAggregate != nil {
+			retainedConn = &aggregateIPCConn{Conn: conn}
+			handlerDeps.aggregateConn = retainedConn
+		}
+		if session != nil && !session.register(retainedConn) {
+			_ = retainedConn.Close()
 			continue
 		}
 		go func() {
 			if session != nil {
-				defer session.finish(conn)
+				defer session.finish(retainedConn)
 			}
 			defer guardSupervisorGoroutine(deps.events, "ipc-connection-handler", "")
 			if deps.beforeHandlerDone != nil {
 				defer deps.beforeHandlerDone(conn)
 			}
-			serveIPCConn(conn, listener, deps, ipcAcceptTiming{
+			serveIPCConn(conn, listener, handlerDeps, ipcAcceptTiming{
 				acceptedAt:  acceptedAt,
 				acceptDwell: acceptedAt.Sub(enteredAccept),
 			})
@@ -2187,8 +2194,16 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	if err != nil {
 		return
 	}
-	if first[0] == api.RouteAggregateStatusMarker {
+	if deps.aggregateConn != nil &&
+		(first[0] == api.RouteAggregateStatusMarker || first[0] == api.OperatorAggregateStatusMarker) {
+		conn = deps.aggregateConn
+	}
+	switch first[0] {
+	case api.RouteAggregateStatusMarker:
 		_ = serveRouteAggregateStatus(conn, deps)
+		return
+	case api.OperatorAggregateStatusMarker:
+		_ = serveOperatorAggregateStatus(conn, deps)
 		return
 	}
 
@@ -4540,6 +4555,7 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 				creators.mu.Lock()
 				operation.root, operation.rootErr, operation.terminal, operation.terminalErr = root, rootErr, terminal, terminalErr
 				creators.mu.Unlock()
+				creators.retireRouteAggregateBinding(operation)
 				workerErr = terminalErr
 			} else {
 				waitErr = cmd.Wait()

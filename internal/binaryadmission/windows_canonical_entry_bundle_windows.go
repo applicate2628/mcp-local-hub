@@ -67,7 +67,25 @@ func AcquireDispatchWindowsCanonicalEntrySetV2(ctx context.Context, launcherBuil
 	return acquireCurrentCanonicalEntryOriginal(ctx, executable, registry, launcherBuildID)
 }
 
+// AcquireInstalledWindowsCanonicalEntryDispatchSetV2 uses the executing
+// Product's linker binding and the caller's canonical installed launcher path.
+// It owns current file objects only, with the same read-only scope as launch.
+func AcquireInstalledWindowsCanonicalEntryDispatchSetV2(ctx context.Context, launcherPath string, binding WindowsCanonicalEntryBuildBindingV1) (*WindowsCanonicalEntryDispatchSetV2, error) {
+	if _, err := NewWindowsCanonicalEntryBuildBindingV1(binding.BuildID(), binding.ExpectedCanonicalEntrySHA256(), binding.ReverseProjection()); err != nil {
+		return nil, err
+	}
+	registry, err := CompiledWindowsProductRegistry()
+	if err != nil {
+		return nil, err
+	}
+	return acquireBoundCurrentCanonicalEntryOriginal(ctx, launcherPath, registry, binding.BuildID(), &binding)
+}
+
 func acquireCurrentCanonicalEntryOriginal(ctx context.Context, entryPath string, registry WindowsProductRegistryV4, dispatchBuildID string) (*WindowsCanonicalEntryDispatchSetV2, error) {
+	return acquireBoundCurrentCanonicalEntryOriginal(ctx, entryPath, registry, dispatchBuildID, nil)
+}
+
+func acquireBoundCurrentCanonicalEntryOriginal(ctx context.Context, entryPath string, registry WindowsProductRegistryV4, dispatchBuildID string, binding *WindowsCanonicalEntryBuildBindingV1) (*WindowsCanonicalEntryDispatchSetV2, error) {
 	o := &WindowsCanonicalEntryDispatchSetV2{}
 	if ctx == nil {
 		return o, errors.New("nil current canonical entry context")
@@ -87,7 +105,7 @@ func acquireCurrentCanonicalEntryOriginal(ctx context.Context, entryPath string,
 			return o, err
 		}
 	}
-	if err = o.receive(ctx, registry, dispatchBuildID); err != nil {
+	if err = o.receive(ctx, registry, dispatchBuildID, binding); err != nil {
 		return o, err
 	}
 	if err = ctx.Err(); err != nil {
@@ -97,8 +115,8 @@ func acquireCurrentCanonicalEntryOriginal(ctx context.Context, entryPath string,
 	return o, nil
 }
 
-func (o *WindowsCanonicalEntryDispatchSetV2) receive(ctx context.Context, registry WindowsProductRegistryV4, dispatchBuildID string) error {
-	base, identity, _, err := receiveCanonicalEntryFilesWithRegistry(ctx, [3]*os.File{o.entry.file, o.product.file, o.identity.file}, WindowsCanonicalEntrySetTargetsV1{o.entry.path, o.product.path, o.identity.path}, nil, dispatchBuildID, registry)
+func (o *WindowsCanonicalEntryDispatchSetV2) receive(ctx context.Context, registry WindowsProductRegistryV4, dispatchBuildID string, binding *WindowsCanonicalEntryBuildBindingV1) error {
+	base, identity, _, err := receiveCanonicalEntryFilesWithRegistry(ctx, [3]*os.File{o.entry.file, o.product.file, o.identity.file}, WindowsCanonicalEntrySetTargetsV1{o.entry.path, o.product.path, o.identity.path}, binding, dispatchBuildID, registry)
 	if err != nil {
 		return err
 	}
@@ -163,7 +181,7 @@ func (o *WindowsCanonicalEntryDispatchSetV2) DispatchSnapshot() (WindowsCanonica
 	return o.snapshot, nil
 }
 
-func (o *WindowsCanonicalEntryDispatchSetV2) verifyLocked() error {
+func (o *WindowsCanonicalEntryDispatchSetV2) verifyLocked(ctx context.Context) error {
 	if !o.ready || o.closed {
 		return errors.New("current canonical entry owner is not admitted/open")
 	}
@@ -181,12 +199,12 @@ func (o *WindowsCanonicalEntryDispatchSetV2) verifyLocked() error {
 		original *canonicalEntryNativeFile
 		expected WindowsCanonicalEntryFileV1
 	}{{o.entry, o.snapshot.CanonicalEntry}, {o.product, o.snapshot.Product}, {o.identity, o.snapshot.Identity}} {
-		digest, err := canonicalEntryHashFile(context.Background(), pair.original.file)
+		digest, err := canonicalEntryHashFile(ctx, pair.original.file)
 		if err != nil || digest != pair.expected.SHA256 {
 			return errors.Join(fmt.Errorf("current canonical entry original bytes changed: %s", pair.expected.Path), err)
 		}
 	}
-	indexBytes, err := readHeldCanonicalRuntimeIndex(context.Background(), o.runtimeIndex.file)
+	indexBytes, err := readHeldCanonicalRuntimeIndex(ctx, o.runtimeIndex.file)
 	if err != nil || RuntimeDigest(indexBytes) != o.snapshot.RuntimeIndex.SHA256 {
 		return errors.Join(fmt.Errorf("current canonical entry original bytes changed: %s", o.snapshot.RuntimeIndex.Path), err)
 	}
@@ -199,21 +217,27 @@ func (o *WindowsCanonicalEntryDispatchSetV2) VerifyUnchanged() error {
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.verifyLocked()
+	return o.verifyLocked(context.Background())
 }
 
 // Synchronous borrow only: the caller owns and settles the original process.
 // All original file guards remain held until the foreground owner receives Close.
 func (o *WindowsCanonicalEntryDispatchSetV2) VerifyOriginalProductProcessHandle(borrowedProcessHandle uintptr) error {
-	if o == nil {
-		return errors.New("missing current canonical entry owner")
+	return o.VerifyCurrentProductProcessPath(context.Background(), borrowedProcessHandle)
+}
+
+// VerifyCurrentProductProcessPath compares the retained current file with the
+// running handle's reported image path. It does not read the mapped image.
+func (o *WindowsCanonicalEntryDispatchSetV2) VerifyCurrentProductProcessPath(ctx context.Context, borrowedProcessHandle uintptr) error {
+	if o == nil || ctx == nil {
+		return errors.New("missing current canonical entry owner or operation context")
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if err := o.verifyLocked(); err != nil {
+	if err := o.verifyLocked(ctx); err != nil {
 		return err
 	}
-	return verifyCanonicalEntryOriginalProductProcessHandle(o.product, borrowedProcessHandle, nil)
+	return errors.Join(verifyCanonicalEntryOriginalProductProcessHandle(o.product, borrowedProcessHandle, nil), ctx.Err())
 }
 
 func (o *WindowsCanonicalEntryDispatchSetV2) Close() error {

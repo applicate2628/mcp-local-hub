@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -163,8 +164,22 @@ func (l *SupervisorLock) Owner() SupervisorLockOwner {
 // parsed sidecar. Returns the zero owner + error on missing/corrupt
 // file.
 func ReadSupervisorLockOwner(path string) (SupervisorLockOwner, error) {
+	return readSupervisorLockOwnerWith(path, readStateFileInodeAnchored)
+}
+
+func readSupervisorLockOwnerNoAudit(path string) (SupervisorLockOwner, error) {
+	owner, err := readSupervisorLockOwnerWith(path, func(sidecarPath string) ([]byte, error) {
+		return readStateFileInodeAnchoredWithStrictPolicyNoAudit(sidecarPath, operatorRequiresSingleUserHome)
+	})
+	if err != nil {
+		return SupervisorLockOwner{}, err
+	}
+	return owner, nil
+}
+
+func readSupervisorLockOwnerWith(path string, read func(string) ([]byte, error)) (SupervisorLockOwner, error) {
 	var o SupervisorLockOwner
-	raw, err := readStateFileInodeAnchored(path + ".owner.json")
+	raw, err := read(path + ".owner.json")
 	if err != nil {
 		return o, err
 	}
@@ -280,6 +295,40 @@ func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err
 	})
 }
 
+// ReadOccupiedSupervisorLockOwner observes the existing Windows singleton without
+// creating a lock leaf. PID/birth are a hint until the actual peer proves them.
+func ReadOccupiedSupervisorLockOwner(stateDir string) (SupervisorLockOwner, error) {
+	var zero SupervisorLockOwner
+	if runtime.GOOS != "windows" {
+		return zero, ErrSupervisorControlPeerUnsupported
+	}
+	if !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir {
+		return zero, errors.New("absolute supervisor state directory required")
+	}
+	running, firstOwner, err := supervisorRunningUnderStateDirWithOwnerReader(stateDir, func(path string) supervisorLockProbeLease {
+		return flock.New(path, flock.SetFlag(os.O_RDONLY))
+	}, readSupervisorLockOwnerNoAudit)
+	if err != nil {
+		return zero, err
+	}
+	if !running || firstOwner.PID <= 0 {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	firstBirth, parseErr := time.Parse(time.RFC3339Nano, firstOwner.StartedAt)
+	if parseErr != nil || firstBirth.IsZero() {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	owner, err := readSupervisorLockOwnerNoAudit(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return zero, err
+	}
+	birth, parseErr := time.Parse(time.RFC3339Nano, owner.StartedAt)
+	if owner.PID != firstOwner.PID || parseErr != nil || birth.IsZero() || !birth.Equal(firstBirth) {
+		return zero, ErrSupervisorIPCUnavailable
+	}
+	return owner, nil
+}
+
 // supervisorLockProbeLease is the minimal flock surface the probe needs from its
 // TENTATIVE lease. *flock.Flock satisfies it.
 type supervisorLockProbeLease interface {
@@ -298,13 +347,22 @@ func supervisorRunningUnderStateDir(
 	stateDir string,
 	newProbeLease func(lockFilePath string) supervisorLockProbeLease,
 ) (running bool, pid int, err error) {
+	running, owner, err := supervisorRunningUnderStateDirWithOwnerReader(stateDir, newProbeLease, ReadSupervisorLockOwner)
+	return running, owner.PID, err
+}
+
+func supervisorRunningUnderStateDirWithOwnerReader(
+	stateDir string,
+	newProbeLease func(lockFilePath string) supervisorLockProbeLease,
+	readOwner func(string) (SupervisorLockOwner, error),
+) (bool, SupervisorLockOwner, error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	// Mirror AcquireSupervisorLock's flock leaf: it locks `path + ".lock"`.
 	lk := newProbeLease(lockPath + ".lock")
 	got, lerr := lk.TryLock()
 	if lerr != nil {
 		// Probe error → UNDETERMINABLE. Surface it so the gate fails closed.
-		return false, 0, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
+		return false, SupervisorLockOwner{}, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
 	}
 	if got {
 		// We acquired it → no supervisor held it at that instant. Release at
@@ -312,14 +370,14 @@ func supervisorRunningUnderStateDir(
 		// swallowing it, because an unreleased probe lease makes "not running"
 		// a claim this process itself falsifies (see the doc comment).
 		if uerr := lk.Unlock(); uerr != nil {
-			return false, 0, fmt.Errorf("release supervisor lock probe lease %s: %w", lockPath+".lock", uerr)
+			return false, SupervisorLockOwner{}, fmt.Errorf("release supervisor lock probe lease %s: %w", lockPath+".lock", uerr)
 		}
-		return false, 0, nil
+		return false, SupervisorLockOwner{}, nil
 	}
 	// Held by another process → a supervisor is running. The PID is best-effort
 	// diagnostic from the sidecar (absent/corrupt → 0).
-	owner, _ := ReadSupervisorLockOwner(lockPath)
-	return true, owner.PID, nil
+	owner, _ := readOwner(lockPath)
+	return true, owner, nil
 }
 
 // InstallParsedManifestBypass is an opaque, constructor-enforced capability

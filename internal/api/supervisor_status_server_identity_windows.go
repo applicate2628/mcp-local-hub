@@ -5,6 +5,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 	"unsafe"
@@ -160,4 +161,9 @@ func supervisorStatusTokenIntegrityRID(token windows.Token) (uint32, error) {
 		return 0, fmt.Errorf("supervisor integrity SID has no RID")
 	}
 	return sid.SubAuthority(uint32(count - 1)), nil
+}
+
+func aggregateRoutePeerClosed(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, windows.ERROR_BROKEN_PIPE) ||
+		errors.Is(err, windows.ERROR_NO_DATA) || errors.Is(err, windows.ERROR_PIPE_NOT_CONNECTED)
 }

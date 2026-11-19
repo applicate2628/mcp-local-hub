@@ -3,7 +3,9 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -22,3 +24,5 @@ func ObserveSupervisorIPCClientIdentityV1(net.Conn) (SupervisorProcessIdentityV1
 func ObserveSupervisorProcessIdentityV1(int) (SupervisorProcessIdentityV1, error) {
 	return SupervisorProcessIdentityV1{}, ErrSupervisorControlPeerUnsupported
 }
+
+func aggregateRoutePeerClosed(err error) bool { return errors.Is(err, io.EOF) }
