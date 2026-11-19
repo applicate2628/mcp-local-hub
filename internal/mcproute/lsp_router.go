@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -93,7 +93,7 @@ type lspRouterDeps struct {
 
 var lspRouterTestSeam func() *lspRouterDeps
 
-func (s *Server) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
+func (s *WorkspaceRoutes) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
@@ -152,7 +152,7 @@ func (s *Server) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver,
 // function is what actually stops an EnsureLSPRegistered call, after the
 // trust check has already run. Keeping the gate wired costs nothing and
 // keeps this constructor's deps shape consistent with the production one.
-func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
+func (s *WorkspaceRoutes) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
@@ -197,23 +197,18 @@ func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, s
 	})
 }
 
-func (s *Server) SetLSPRouterDeps(deps *lspRouterDeps) {
+func (s *WorkspaceRoutes) SetLSPRouterDeps(deps *lspRouterDeps) {
 	s.lspRouterDeps.Store(deps)
 }
 
-func (s *Server) lspRouterDepsProd() *lspRouterDeps {
+func (s *WorkspaceRoutes) lspRouterDepsProd() *lspRouterDeps {
 	if lspRouterTestSeam != nil {
 		return lspRouterTestSeam()
 	}
 	return s.lspRouterDeps.Load()
 }
 
-func registerLSPRouterRoutes(s *Server) {
-	s.mux.HandleFunc("/lsp/", s.requireSameOrigin(s.lspRouterHandler))
-	registerLSPRouterControlRoutes(s)
-}
-
-func (s *Server) lspRouterHandler(w http.ResponseWriter, r *http.Request) {
+func (s *WorkspaceRoutes) lspRouterHandler(w http.ResponseWriter, r *http.Request) {
 	language, ok := parseLSPRouterLanguage(r.URL.Path)
 	if !ok {
 		http.NotFound(w, r)
@@ -373,7 +368,7 @@ func lspBackendKind(deps *lspRouterDeps, language string) (string, bool) {
 	return deps.BackendKindForLanguage(language)
 }
 
-func (s *Server) handleLSPInitialize(w http.ResponseWriter, tb *toolBody, backendKind string) {
+func (s *WorkspaceRoutes) handleLSPInitialize(w http.ResponseWriter, tb *toolBody, backendKind string) {
 	if isJSONRPCNotificationID(tb.ID) {
 		writeJSONRPCErrorStatus(w, json.RawMessage("null"), http.StatusBadRequest, jsonrpcInvalidRequest,
 			"invalid request: initialize requires a non-null id", nil)
@@ -397,7 +392,7 @@ func (s *Server) handleLSPInitialize(w http.ResponseWriter, tb *toolBody, backen
 	writeLSPRawJSON(w, resp)
 }
 
-func (s *Server) handleLSPToolsList(w http.ResponseWriter, tb *toolBody, backendKind string) {
+func (s *WorkspaceRoutes) handleLSPToolsList(w http.ResponseWriter, tb *toolBody, backendKind string) {
 	if isJSONRPCNotificationID(tb.ID) {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -415,15 +410,15 @@ func (s *Server) handleLSPToolsList(w http.ResponseWriter, tb *toolBody, backend
 	writeLSPRawJSON(w, resp)
 }
 
-func (s *Server) handleLSPResourcesList(w http.ResponseWriter, tb *toolBody, backendKind string) {
+func (s *WorkspaceRoutes) handleLSPResourcesList(w http.ResponseWriter, tb *toolBody, backendKind string) {
 	s.handleLSPEmptyList(w, tb, backendKind, api.SyntheticResourcesListResponse)
 }
 
-func (s *Server) handleLSPPromptsList(w http.ResponseWriter, tb *toolBody, backendKind string) {
+func (s *WorkspaceRoutes) handleLSPPromptsList(w http.ResponseWriter, tb *toolBody, backendKind string) {
 	s.handleLSPEmptyList(w, tb, backendKind, api.SyntheticPromptsListResponse)
 }
 
-func (s *Server) handleLSPEmptyList(
+func (s *WorkspaceRoutes) handleLSPEmptyList(
 	w http.ResponseWriter,
 	tb *toolBody,
 	backendKind string,
@@ -452,7 +447,7 @@ func writeLSPRawJSON(w http.ResponseWriter, body []byte) {
 	_, _ = w.Write(body)
 }
 
-func (s *Server) resolveLSPToolWorkspace(
+func (s *WorkspaceRoutes) resolveLSPToolWorkspace(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *lspRouterDeps,
@@ -486,7 +481,7 @@ func (s *Server) resolveLSPToolWorkspace(
 	return entry, sessionID != "", ok
 }
 
-func (s *Server) resolveLSPToolPathArg(
+func (s *WorkspaceRoutes) resolveLSPToolPathArg(
 	w http.ResponseWriter,
 	deps *lspRouterDeps,
 	tb *toolBody,
@@ -527,7 +522,7 @@ func (s *Server) resolveLSPToolPathArg(
 	return resolved, true
 }
 
-func (s *Server) workspaceFromResolvedLSPPath(
+func (s *WorkspaceRoutes) workspaceFromResolvedLSPPath(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *lspRouterDeps,
@@ -621,7 +616,7 @@ func (s *Server) workspaceFromResolvedLSPPath(
 // insecure-parent rejection) all return false so the caller emits the
 // "not registered" refusal. An unset or erroring gate must never
 // silently authorize an untrusted path.
-func (s *Server) lspWorkspaceRootIsTrusted(deps *lspRouterDeps, resolved *lsp_routing.ResolveResult) bool {
+func (s *WorkspaceRoutes) lspWorkspaceRootIsTrusted(deps *lspRouterDeps, resolved *lsp_routing.ResolveResult) bool {
 	if deps == nil || deps.TrustedRootCheckFn == nil {
 		return false
 	}
@@ -713,7 +708,7 @@ func lspResolvedWorkspaceLabel(res *lsp_routing.ResolveResult) string {
 	return "unknown"
 }
 
-func (s *Server) ensureResolvedLSPWorkspace(
+func (s *WorkspaceRoutes) ensureResolvedLSPWorkspace(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *lspRouterDeps,
@@ -823,7 +818,7 @@ func lspCandidateList(candidates []api.WorkspaceEntry) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Server) handleLSPNotification(
+func (s *WorkspaceRoutes) handleLSPNotification(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *lspRouterDeps,
@@ -931,7 +926,7 @@ func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client
 	}
 }
 
-func (s *Server) forwardLSPToWorkspace(
+func (s *WorkspaceRoutes) forwardLSPToWorkspace(
 	w http.ResponseWriter,
 	r *http.Request,
 	body []byte,

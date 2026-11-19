@@ -84,14 +84,14 @@ func defaultPruneWorkspaceRows(s *Server) []*api.WorkspaceEntry {
 
 // pruneBeginFn claims the serena stop gate for prune teardown. It must use the
 // same gate as idle-stop/forward so "no in-flight request" is atomic with prune
-// mutation. Test seam over beginSerenaPrune.
+// mutation. Test seam over BeginSerenaPrune.
 var pruneBeginFn = func(s *Server, serenaKey string) bool {
-	return s.beginSerenaPrune(serenaKey)
+	return s.BeginSerenaPrune(serenaKey)
 }
 
-// pruneEndFn releases the prune teardown claim. Test seam over endSerenaPrune.
+// pruneEndFn releases the prune teardown claim. Test seam over EndSerenaPrune.
 var pruneEndFn = func(s *Server, serenaKey string) {
-	s.endSerenaPrune(serenaKey)
+	s.EndSerenaPrune(serenaKey)
 }
 
 // pruneIdleThresholdFn returns the Phase-3 idle-prune threshold; 0 disables

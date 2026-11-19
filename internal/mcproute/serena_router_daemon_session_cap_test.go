@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"context"
@@ -491,7 +491,7 @@ func TestDaemonSessionStore_ReclaimSkipsInFlightPlaceholder(t *testing.T) {
 	}
 }
 
-func daemonSessionCount(s *Server) int {
+func daemonSessionCount(s *WorkspaceRoutes) int {
 	s.serenaDaemonSessions.mu.Lock()
 	defer s.serenaDaemonSessions.mu.Unlock()
 	return len(s.serenaDaemonSessions.bindings)

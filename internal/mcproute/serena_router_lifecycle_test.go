@@ -1,4 +1,4 @@
-// internal/gui/serena_router_lifecycle_test.go
+// internal/mcproute/serena_router_lifecycle_test.go
 //
 // ROUTER-COMPLETION phase tests: the /serena/mcp router synthesizes the
 // non-tool MCP lifecycle (initialize, tools/list, notifications/*, ping)
@@ -6,7 +6,7 @@
 //
 // These complement serena_router_test.go (tool-call routing, session
 // bind, SSE, upstream errors) which must keep passing.
-package gui
+package mcproute
 
 import (
 	"context"
@@ -61,7 +61,7 @@ func (r *listerStubResolver) ListWorkspaces() []*api.WorkspaceEntry { return r.l
 // to carry a session id minted by a prior initialize at this router, so
 // the tools/list tests establish one through this helper rather than
 // inventing a raw id the router never minted.
-func mintRouterSession(t *testing.T, s *Server, protocolVersion string) string {
+func mintRouterSession(t *testing.T, s *WorkspaceRoutes, protocolVersion string) string {
 	t.Helper()
 	body := buildLifecycleBody(t, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
@@ -782,14 +782,14 @@ func TestSerenaRouter_ReconcileReadinessProbeShape_PassesAgainstCompletedRouter(
 	sessions := serena_routing.NewSessionRouter()
 
 	// Build an unstarted httptest server, learn its port, construct the
-	// gui Server with that port so requireAllowedHost accepts the
+	// workspace router with that port so requireAllowedHost accepts the
 	// 127.0.0.1:<port> Host header the probe will send, then mount the
 	// production handler chain and start.
 	ts := httptest.NewUnstartedServer(nil)
 	port := ts.Listener.Addr().(*net.TCPAddr).Port
-	s := NewServer(Config{Port: port, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(port)
 	s.SetSerenaRouterProduction(resolver, sessions)
-	ts.Config.Handler = s.httpHandler()
+	ts.Config.Handler = s.RouteHandler()
 	ts.Start()
 	t.Cleanup(ts.Close)
 
@@ -1723,7 +1723,7 @@ func daemonCancelHits(d *fakeSerenaDaemon) int {
 
 // deleteSerena issues a same-origin DELETE /serena/mcp with the supplied
 // headers (mirrors postSerena for the client-origin teardown path).
-func deleteSerena(t *testing.T, s *Server, headers map[string]string) *httptest.ResponseRecorder {
+func deleteSerena(t *testing.T, s *WorkspaceRoutes, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, "/serena/mcp", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -1732,7 +1732,7 @@ func deleteSerena(t *testing.T, s *Server, headers map[string]string) *httptest.
 		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -2033,7 +2033,7 @@ func TestSerenaRouter_DeleteBranchDoesNotAffectGet405(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET status = %d, want 405", rr.Code)
 	}
@@ -2045,7 +2045,7 @@ func TestSerenaRouter_DeleteBranchDoesNotAffectGet405(t *testing.T) {
 
 // bindingDaemonSession reads the daemon-session id the router bound for a
 // client session id (test accessor over the unexported store).
-func bindingDaemonSession(s *Server, clientSID string) (daemonSID string, ok bool, wsKey string) {
+func bindingDaemonSession(s *WorkspaceRoutes, clientSID string) (daemonSID string, ok bool, wsKey string) {
 	wsKey, daemonSID, _, ok = s.serenaDaemonSessions.bindingFor(clientSID)
 	return daemonSID, ok, wsKey
 }

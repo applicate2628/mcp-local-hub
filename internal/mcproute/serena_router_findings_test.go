@@ -1,4 +1,4 @@
-// internal/gui/serena_router_findings_test.go
+// internal/mcproute/serena_router_findings_test.go
 //
 // Code-review-finding tests for the /serena/mcp router (deduplicated to 8):
 //
@@ -15,7 +15,7 @@
 // The shared routerSessionStore (serena_router_session.go) backs D + E + G;
 // initialize populates it, DELETE clears it. These tests exercise the WHOLE
 // set together via the real handler over the test seam.
-package gui
+package mcproute
 
 import (
 	"encoding/json"
@@ -1192,7 +1192,7 @@ func TestSerenaRouter_Delete_OmittedHeaderAndUnknownSessionProceed(t *testing.T)
 // expire-on-read only fires on reuse/DELETE.
 // ---------------------------------------------------------------------
 func TestServer_SweepSerenaSessions_DropsIdleKeepsFresh(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 
 	base := time.Now()
 	// Drive both stores' clocks so we control lastSeen deterministically.

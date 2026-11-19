@@ -1,4 +1,4 @@
-// internal/gui/serena_router_handshake.go
+// internal/mcproute/serena_router_handshake.go
 //
 // Upstream MCP session handshake + the router-owned client→daemon
 // session map for the /serena/mcp router (ROUTER-COMPLETION phase,
@@ -21,7 +21,7 @@
 // records client-session → (workspace W, daemon-session D). Subsequent
 // tool calls for that client session forward upstream with D, NOT the
 // router-minted client id.
-package gui
+package mcproute
 
 import (
 	"bytes"

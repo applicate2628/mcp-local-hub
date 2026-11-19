@@ -1,4 +1,4 @@
-// internal/gui/serena_router_pr249_findings_test.go
+// internal/mcproute/serena_router_pr249_findings_test.go
 //
 // Codex PR #249 review findings (serena /serena/mcp router):
 //
@@ -19,7 +19,7 @@
 //	            concurrent POST with the same Mcp-Session-Id during the DELETE's
 //	            blocking workspace resolution is rejected (session already
 //	            revoked), not routed.
-package gui
+package mcproute
 
 import (
 	"context"

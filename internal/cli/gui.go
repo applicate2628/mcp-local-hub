@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"mcp-local-hub/internal/mcproute"
 )
 
 // selfRestartHandoffEnv mirrors gui.SelfRestartHandoffEnv. RestartV3 carries a
@@ -1163,7 +1164,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	// against the router's live sessions even when no client request is in
 	// flight to surface the dead forward. The always-on forward-failure floor
 	// is the primary signal; this is the safety net behind it.
-	gui.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
+	mcproute.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
 	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's seams.
 	// The threshold reader resolves the GUI-settable daemons.serena_idle_shutdown
 	// each tick (so an operator change takes effect within ~60s, no restart); the
@@ -1172,7 +1173,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	// The canonical routing authority shares this API instance and limits idle
 	// shutdown authority to a stably GUI-routed MCP front for the whole tick.
 	guiAPI := api.NewAPI()
-	gui.SetSerenaIdleShutdownFns(
+	mcproute.SetSerenaIdleShutdownFns(
 		func() (time.Duration, bool) {
 			v, err := guiAPI.SettingsGet(api.SerenaIdleShutdownSettingKey)
 			if err != nil {
@@ -1297,7 +1298,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// goroutine (rather than spawning a second ticker) keeps one
 		// correctly-shutdown background loop and ages every store on the
 		// same 24h idle clock.
-		go runSessionCleanupTicker(ctx, s, sessions, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
+		go runSessionCleanupTicker(ctx, s.WorkspaceRoutes, sessions, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
 		// §3 fail-loud reconcile FALLBACK: a faster, lighter ticker that polls
 		// the supervisor IPC status and tears down router sessions for any
 		// serena workspace whose daemon restarted (PID changed) or vanished
@@ -1305,7 +1306,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// sessions for, so it is a cheap no-op when the router is idle. 30s
 		// bounds the post-death zombie window for the case where NO client
 		// request fires to trip the always-on forward-failure floor.
-		go runSerenaBackendLossReconcileTicker(ctx, s, 30*time.Second)
+		go runSerenaBackendLossReconcileTicker(ctx, s.WorkspaceRoutes, 30*time.Second)
 		go s.RunSerenaBackendLossEventSubscriber(ctx)
 		// v0.6 idle-shutdown (#6, spec §6): the 60s in-GUI idle sweeper. Each
 		// tick it stops every RUNNING serena pool daemon idle longer than the
@@ -1692,7 +1693,7 @@ const sessionCleanupInterval = time.Hour
 // forever because their expire-on-read only fires on reuse/DELETE. s may
 // be nil in tests that exercise only the sticky-router path; the sweep is
 // skipped then.
-func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *serena_routing.SessionRouter, interval, ttl time.Duration) {
+func runSessionCleanupTicker(ctx context.Context, s *mcproute.WorkspaceRoutes, sessions *serena_routing.SessionRouter, interval, ttl time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -1719,7 +1720,7 @@ func runSessionCleanupTicker(ctx context.Context, s *gui.Server, sessions *seren
 // cancelled. The reconcile read is bounded by a short per-tick context so a
 // slow/unreachable supervisor IPC cannot wedge the ticker. s may be nil in
 // tests; the tick is skipped then.
-func runSerenaBackendLossReconcileTicker(ctx context.Context, s *gui.Server, interval time.Duration) {
+func runSerenaBackendLossReconcileTicker(ctx context.Context, s *mcproute.WorkspaceRoutes, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

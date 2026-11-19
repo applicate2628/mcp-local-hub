@@ -1,4 +1,4 @@
-// internal/gui/serena_idle_sweeper.go
+// internal/mcproute/serena_idle_sweeper.go
 //
 // v0.6 idle-shutdown (#6, spec §6) — the 60s in-GUI idle sweeper + the
 // per-daemon LAST-ACTIVITY tracking it reads.
@@ -29,8 +29,8 @@
 //     recently-FINISHED call has a fresh timestamp and is never idled. But a
 //     single tool call that STREAMS (SSE) past the threshold would leave a stale
 //     start-of-call timestamp and could be idled MID-CALL on its own. So:
-//  2. The router tracks IN-FLIGHT requests per workspace (enterSerenaForward /
-//     exitSerenaForward from workspace resolution through the whole upstream
+//  2. The router tracks IN-FLIGHT requests per workspace (EnterSerenaForward /
+//     ExitSerenaForward from workspace resolution through the whole upstream
 //     forward incl. the SSE stream), and the sweep SKIPS any daemon with a
 //     started request (hasSerenaForwardInFlight). The forward's completion ALSO
 //     re-stamps last-activity, so a just-finished long call resets the idle
@@ -45,7 +45,7 @@
 // last-activity map — cannot immediately idle-kill a daemon that was active just
 // before the restart; every daemon gets a full fresh threshold window after a
 // GUI restart (FIX-1).
-package gui
+package mcproute
 
 import (
 	"context"
@@ -105,7 +105,7 @@ func SetSerenaIdleShutdownFns(
 // workspace the call routes to), so the sweeper sees a fresh timestamp for any
 // daemon that is being used or attempted. Idempotent + cheap (one map write
 // under a dedicated mutex). An empty wsKey is ignored.
-func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
+func (s *WorkspaceRoutes) recordSerenaActivity(wsKey string, now time.Time) {
 	if s == nil || wsKey == "" {
 		return
 	}
@@ -119,7 +119,7 @@ func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
 
 // lastSerenaActivity returns wsKey's recorded last-activity time and whether
 // any activity has been recorded for it. Used by the sweeper.
-func (s *Server) lastSerenaActivity(wsKey string) (time.Time, bool) {
+func (s *WorkspaceRoutes) lastSerenaActivity(wsKey string) (time.Time, bool) {
 	if s == nil {
 		return time.Time{}, false
 	}
@@ -132,7 +132,7 @@ func (s *Server) lastSerenaActivity(wsKey string) (time.Time, bool) {
 // dropSerenaActivity removes wsKey's activity entry. Called after the sweeper
 // idle-stops a daemon so the map does not retain a stale baseline for a now-
 // stopped daemon (the next wake re-establishes activity on the next call).
-func (s *Server) dropSerenaActivity(wsKey string) {
+func (s *WorkspaceRoutes) dropSerenaActivity(wsKey string) {
 	if s == nil || wsKey == "" {
 		return
 	}
@@ -342,25 +342,25 @@ func (g *serenaWorkspaceStopGate) pruneIdleEntryLocked(wsKey string, entry *sere
 	}
 }
 
-// enterSerenaForward marks the start of a daemon-bound Serena request for wsKey,
+// EnterSerenaForward marks the start of a daemon-bound Serena request for wsKey,
 // including tool-call forwards, tools/list candidate probes, cancel forwards,
 // and client DELETE forwards (increments the in-flight counter). The matching
-// exitSerenaForward MUST be deferred so the count is decremented on EVERY return
+// ExitSerenaForward MUST be deferred so the count is decremented on EVERY return
 // path including a panic. The sweeper uses the same per-workspace gate to make
 // "no in-flight request" atomic with starting idle-stop/prune teardown; new
 // requests wait for that phase to finish before wake/handshake/forward. An empty
 // wsKey is ignored.
-func (s *Server) enterSerenaForward(wsKey string) serenaWorkspaceStopGateEnterResult {
+func (s *WorkspaceRoutes) EnterSerenaForward(wsKey string) serenaWorkspaceStopGateEnterResult {
 	if s == nil || wsKey == "" {
 		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
 	return s.serenaStopGate.enter(wsKey)
 }
 
-// enterSerenaForwardCtx is the bounded form of enterSerenaForward. The result
+// enterSerenaForwardCtx is the bounded form of EnterSerenaForward. The result
 // reports whether the request entered before ctx expired and whether it waited
 // across a prune phase, which means callers must re-read workspace state.
-func (s *Server) enterSerenaForwardCtx(ctx context.Context, wsKey string) serenaWorkspaceStopGateEnterResult {
+func (s *WorkspaceRoutes) enterSerenaForwardCtx(ctx context.Context, wsKey string) serenaWorkspaceStopGateEnterResult {
 	if s == nil || wsKey == "" {
 		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
@@ -370,24 +370,24 @@ func (s *Server) enterSerenaForwardCtx(ctx context.Context, wsKey string) serena
 // tryEnterSerenaForward is the non-blocking form used by tools/list candidate
 // selection. A candidate already in idle-stop/prune is reported through
 // phaseActive and is not marked in-flight.
-func (s *Server) tryEnterSerenaForward(wsKey string) serenaWorkspaceStopGateEnterResult {
+func (s *WorkspaceRoutes) tryEnterSerenaForward(wsKey string) serenaWorkspaceStopGateEnterResult {
 	if s == nil || wsKey == "" {
 		return serenaWorkspaceStopGateEnterResult{entered: true}
 	}
 	return s.serenaStopGate.tryEnter(wsKey)
 }
 
-// exitSerenaForward marks the end of a /serena/mcp request to wsKey's daemon
+// ExitSerenaForward marks the end of a /serena/mcp request to wsKey's daemon
 // (decrements the in-flight counter). An empty wsKey is ignored; a decrement of
 // an absent/zero key is a defensive no-op (the count never goes negative).
-func (s *Server) exitSerenaForward(wsKey string) {
+func (s *WorkspaceRoutes) ExitSerenaForward(wsKey string) {
 	if s == nil || wsKey == "" {
 		return
 	}
 	s.serenaStopGate.exit(wsKey)
 }
 
-func (s *Server) withSerenaWorkspaceGate(
+func (s *WorkspaceRoutes) withSerenaWorkspaceGate(
 	ctx context.Context,
 	wsKey string,
 	policy serenaWorkspaceGatePolicy,
@@ -410,7 +410,7 @@ func (s *Server) withSerenaWorkspaceGate(
 			if ctxProvided {
 				gate = s.enterSerenaForwardCtx(ctx, currentKey)
 			} else {
-				gate = s.enterSerenaForward(currentKey)
+				gate = s.EnterSerenaForward(currentKey)
 			}
 		}
 		if !gate.entered {
@@ -433,7 +433,7 @@ func (s *Server) withSerenaWorkspaceGate(
 		entered = true
 		exitKey := currentKey
 		retry, innerAborted, innerErr := func() (bool, bool, error) {
-			defer s.exitSerenaForward(exitKey)
+			defer s.ExitSerenaForward(exitKey)
 			out := &serenaWorkspaceGateOutcome{gate: gate}
 			if resolve != nil {
 				out.ws = resolve(currentKey)
@@ -468,35 +468,37 @@ func (s *Server) withSerenaWorkspaceGate(
 // hasSerenaForwardInFlight reports whether at least one /serena/mcp forward is
 // currently open or preparing to open to wsKey's daemon. The sweeper consults
 // it to skip a daemon with an in-flight call or pre-forward request.
-func (s *Server) hasSerenaForwardInFlight(wsKey string) bool {
+func (s *WorkspaceRoutes) hasSerenaForwardInFlight(wsKey string) bool {
 	if s == nil || wsKey == "" {
 		return false
 	}
 	return s.serenaStopGate.hasInFlight(wsKey)
 }
 
-func (s *Server) beginSerenaIdleStop(wsKey string) bool {
+func (s *WorkspaceRoutes) beginSerenaIdleStop(wsKey string) bool {
 	if s == nil || wsKey == "" {
 		return false
 	}
 	return s.serenaStopGate.beginIdleStop(wsKey)
 }
 
-func (s *Server) endSerenaIdleStop(wsKey string) {
+func (s *WorkspaceRoutes) endSerenaIdleStop(wsKey string) {
 	if s == nil || wsKey == "" {
 		return
 	}
 	s.serenaStopGate.endIdleStop(wsKey)
 }
 
-func (s *Server) beginSerenaPrune(wsKey string) bool {
+// BeginSerenaPrune claims the forward gate while the caller prunes wsKey.
+func (s *WorkspaceRoutes) BeginSerenaPrune(wsKey string) bool {
 	if s == nil || wsKey == "" {
 		return false
 	}
 	return s.serenaStopGate.beginPrune(wsKey)
 }
 
-func (s *Server) endSerenaPrune(wsKey string) {
+// EndSerenaPrune releases a successful BeginSerenaPrune claim.
+func (s *WorkspaceRoutes) EndSerenaPrune(wsKey string) {
 	if s == nil || wsKey == "" {
 		return
 	}
@@ -526,7 +528,7 @@ func serenaTaskHasActiveIdleStop(taskName string, now time.Time) bool {
 // unwired / there is no resolver / the supervisor IPC status is unreachable
 // (do NOT stop daemons on a status-read failure — that would be a false
 // positive; the next successful tick retries).
-func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int {
+func (s *WorkspaceRoutes) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int {
 	if s == nil {
 		return 0
 	}
@@ -702,10 +704,10 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 // on the very first post-restart sweep. Capping at time-since-GUI-start gives
 // every daemon a full fresh threshold window after a GUI restart: until the GUI
 // has itself been up at least `threshold`, no never-called daemon can be idled.
-// The cap is skipped only when guiProcessStart is the zero value (test servers
+// The cap is skipped only when startedAt is the zero value (test servers
 // that construct a bare &Server{} without NewServer), where it would otherwise
 // be a ~2000-year span that never binds anyway.
-func serenaIdleDuration(s *Server, wsKey string, uptimeSec int64, now time.Time) time.Duration {
+func serenaIdleDuration(s *WorkspaceRoutes, wsKey string, uptimeSec int64, now time.Time) time.Duration {
 	if last, ok := s.lastSerenaActivity(wsKey); ok {
 		d := now.Sub(last)
 		if d < 0 {
@@ -720,9 +722,9 @@ func serenaIdleDuration(s *Server, wsKey string, uptimeSec int64, now time.Time)
 	}
 	idle := time.Duration(uptimeSec) * time.Second
 	// Cap at time-since-GUI-start so a GUI restart cannot immediately idle a
-	// daemon (see docstring). Only when guiProcessStart is set (production).
-	if !s.guiProcessStart.IsZero() {
-		if sinceGUIStart := now.Sub(s.guiProcessStart); sinceGUIStart >= 0 && sinceGUIStart < idle {
+	// daemon (see docstring). Only when startedAt is set (production).
+	if !s.startedAt.IsZero() {
+		if sinceGUIStart := now.Sub(s.startedAt); sinceGUIStart >= 0 && sinceGUIStart < idle {
 			idle = sinceGUIStart
 		}
 	}

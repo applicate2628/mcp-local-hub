@@ -15,6 +15,10 @@ func observeSupervisorStatusServerIdentityV1(net.Conn, bool) (SupervisorProcessI
 	return SupervisorProcessIdentityV1{}, ErrSupervisorControlPeerUnsupported
 }
 
+func ObserveSupervisorIPCClientIdentityV1(net.Conn) (SupervisorProcessIdentityV1, error) {
+	return SupervisorProcessIdentityV1{}, ErrSupervisorControlPeerUnsupported
+}
+
 func ObserveSupervisorProcessIdentityV1(int) (SupervisorProcessIdentityV1, error) {
 	return SupervisorProcessIdentityV1{}, ErrSupervisorControlPeerUnsupported
 }

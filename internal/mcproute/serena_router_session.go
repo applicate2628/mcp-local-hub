@@ -1,4 +1,4 @@
-// internal/gui/serena_router_session.go
+// internal/mcproute/serena_router_session.go
 //
 // routerSessionStore: the authoritative registry of client sessions that
 // were minted by a prior `initialize` AT THIS ROUTER, plus the protocol
@@ -31,7 +31,7 @@
 // injectable clock, idle-TTL = daemonSessionTTL (24h), expire-on-read in
 // lookup, an unbind. A successful lookup refreshes lastSeen so an active
 // session never expires.
-package gui
+package mcproute
 
 import (
 	"container/list"
@@ -656,7 +656,7 @@ func (st *routerSessionStore) cleanupExpired(now time.Time, ttl time.Duration) [
 // This avoids an upstream DELETE on the sweep / on-read paths (the named
 // referent coordinates LOCAL stores only) and is bounded by the daemon's idle
 // TTL.
-func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
+func (s *WorkspaceRoutes) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
 	// Reclaim expired router sessions first and capture their ids so the other
 	// two stores can be coordinated (Finding 3).
 	expiredRouter := s.serenaRouterSessions.cleanupExpired(now, ttl)
@@ -693,7 +693,7 @@ func (s *Server) SweepSerenaSessions(now time.Time, ttl time.Duration) int {
 // the ticker SweepSerenaSessions and the on-read pathless-expiry close
 // (serenaRouterHandler) share ONE owner for the coordinated-unbind decision
 // rather than duplicating it (Round-13).
-func (s *Server) coordinateExpiredRouterSessionUnbind(id string, sticky sessionRouter) {
+func (s *WorkspaceRoutes) coordinateExpiredRouterSessionUnbind(id string, sticky sessionRouter) {
 	s.serenaDaemonSessions.unbind(id)
 	if sticky != nil {
 		sticky.UnbindSession(id)
@@ -716,7 +716,7 @@ func (s *Server) coordinateExpiredRouterSessionUnbind(id string, sticky sessionR
 // Unbinding an id absent from a store is a no-op, so a session with no
 // downstream binding is handled cleanly. sticky may be nil (no production
 // sessionRouter wired) — only the two router-local stores are then unbound.
-func (s *Server) coordinateBackendLossUnbind(id string, sticky sessionRouter) {
+func (s *WorkspaceRoutes) coordinateBackendLossUnbind(id string, sticky sessionRouter) {
 	// Router store FIRST — this is the store that returns 200 on a dead
 	// backend, so dropping it is what makes the next request fail loud.
 	s.serenaRouterSessions.unbind(id)
@@ -741,7 +741,7 @@ func (s *Server) coordinateBackendLossUnbind(id string, sticky sessionRouter) {
 // is taken under the router store lock; each per-id unbind runs lock-free
 // (coordinateBackendLossUnbind touches OTHER stores), the same lock-ordering
 // discipline the sweep follows.
-func (s *Server) terminateSerenaSessionsForWorkspace(wsKey string) int {
+func (s *WorkspaceRoutes) terminateSerenaSessionsForWorkspace(wsKey string) int {
 	if wsKey == "" {
 		return 0
 	}
@@ -759,7 +759,7 @@ func (s *Server) terminateSerenaSessionsForWorkspace(wsKey string) int {
 	return len(ids)
 }
 
-func (s *Server) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.WorkspaceEntry) {
+func (s *WorkspaceRoutes) seedSerenaBackendPIDBaseline(ctx context.Context, ws *api.WorkspaceEntry) {
 	if ws == nil || ws.WorkspacePath == "" {
 		return
 	}
@@ -817,7 +817,7 @@ func serenaBackendLivePIDForWorkspace(ctx context.Context, wsPath string) int {
 	return 0
 }
 
-func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, ws *api.WorkspaceEntry) {
+func (s *WorkspaceRoutes) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, ws *api.WorkspaceEntry) {
 	if s == nil || ws == nil || ws.WorkspacePath == "" {
 		return
 	}
@@ -871,7 +871,7 @@ func (s *Server) reseedSerenaBackendPIDAfterConfirmedWake(ctx context.Context, w
 	}
 }
 
-func (s *Server) rememberSerenaBackendWorkspacePath(ws *api.WorkspaceEntry) {
+func (s *WorkspaceRoutes) rememberSerenaBackendWorkspacePath(ws *api.WorkspaceEntry) {
 	if ws == nil || ws.WorkspaceKey == "" || ws.WorkspacePath == "" {
 		return
 	}
@@ -883,7 +883,7 @@ func (s *Server) rememberSerenaBackendWorkspacePath(ws *api.WorkspaceEntry) {
 	s.serenaBackendPIDMu.Unlock()
 }
 
-func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
+func (s *WorkspaceRoutes) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
 	if wsPath == "" {
 		return
 	}
@@ -892,7 +892,7 @@ func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePath(wsPath string) {
 	s.serenaBackendPIDMu.Unlock()
 }
 
-func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath string) {
+func (s *WorkspaceRoutes) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath string) {
 	if wsPath == "" {
 		return
 	}
@@ -913,7 +913,7 @@ func (s *Server) dropSerenaBackendPIDTrackingForWorkspacePathLocked(wsPath strin
 // store does not know workspace paths. The PID maps are path-keyed, so Server
 // first uses its non-blocking key->path cache; only cache misses fall back to
 // the resolver's workspaceLister view.
-func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
+func (s *WorkspaceRoutes) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 	if wsKey == "" {
 		return
 	}
@@ -972,7 +972,7 @@ func (s *Server) handleSerenaRouterWorkspaceEmpty(wsKey string) {
 // RunSerenaBackendLossEventSubscriber below — it subscribes to the GUI event
 // bus's `daemon-backend-lost` event and wakes the IPC reconcile immediately,
 // ahead of the 30s fallback interval. This floor stays the always-on backstop.
-func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
+func (s *WorkspaceRoutes) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID string, cause error, auditFn func(level, event string, fields map[string]any) error) {
 	var sticky sessionRouter
 	if deps := s.serenaRouterDepsProd(); deps != nil {
 		sticky = deps.Sessions
@@ -1001,50 +1001,21 @@ func (s *Server) handleSerenaBackendLossOnForwardFailure(wsKey, failedSessionID 
 
 // SerenaBackendLossReconcileTrigger returns the coalesced wake channel consumed
 // by the GUI lifecycle ticker. Nil means no event wake source is configured.
-func (s *Server) SerenaBackendLossReconcileTrigger() <-chan struct{} {
+func (s *WorkspaceRoutes) SerenaBackendLossReconcileTrigger() <-chan struct{} {
 	if s == nil {
 		return nil
 	}
 	return s.serenaBackendLossTrigger
 }
 
-func (s *Server) triggerSerenaBackendLossReconcile() {
+// TriggerSerenaBackendLossReconcile coalesces an early reconcile wake.
+func (s *WorkspaceRoutes) TriggerSerenaBackendLossReconcile() {
 	if s == nil || s.serenaBackendLossTrigger == nil {
 		return
 	}
 	select {
 	case s.serenaBackendLossTrigger <- struct{}{}:
 	default:
-	}
-}
-
-// RunSerenaBackendLossEventSubscriber is §3.x signal #1: the event-driven
-// backend-loss trigger. It subscribes to the GUI event bus and, on each serena
-// `daemon-backend-lost` event, wakes ReconcileSerenaBackendLossViaIPC instead
-// of duplicating the reconcile owner's teardown decisions.
-func (s *Server) RunSerenaBackendLossEventSubscriber(ctx context.Context) {
-	if s == nil {
-		return
-	}
-	bus := s.Broadcaster()
-	if bus == nil {
-		return
-	}
-	// Subscribe is best-effort: if the bounded subscriber channel drops an
-	// event, the 30s IPC reconcile fallback remains the correctness floor.
-	s.consumeSerenaBackendLossEvents(ctx, bus.Subscribe(ctx))
-}
-
-func (s *Server) consumeSerenaBackendLossEvents(ctx context.Context, ch <-chan Event) {
-	_ = ctx
-	for ev := range ch {
-		if ev.Type != "daemon-backend-lost" {
-			continue
-		}
-		if srv, _ := ev.Body["server"].(string); srv != "serena" {
-			continue
-		}
-		s.triggerSerenaBackendLossReconcile()
 	}
 }
 
@@ -1090,7 +1061,7 @@ func SetSerenaBackendStatusFn(fn func(ctx context.Context) ([]api.DaemonStatus, 
 // the FIRST time (no prior snapshot) is NOT treated as a loss — only a change
 // from a known prior PID is. Returns the number of sessions torn down across
 // all workspaces this tick.
-func (s *Server) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
+func (s *WorkspaceRoutes) ReconcileSerenaBackendLossViaIPC(ctx context.Context) int {
 	knownKeys := s.serenaRouterSessions.knownWorkspaceKeys()
 	if len(knownKeys) == 0 {
 		return 0

@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func withIdleSweeperSeams(t *testing.T, threshold time.Duration, enabled bool, s
 
 // serenaSweeperServer builds a router server with a single serena workspace
 // (sentinel-language, serena backend) and the lister/resolver wired.
-func serenaSweeperServer(t *testing.T, ws *api.WorkspaceEntry) *Server {
+func serenaSweeperServer(t *testing.T, ws *api.WorkspaceEntry) *WorkspaceRoutes {
 	t.Helper()
 	deps := &serenaRouterDeps{
 		Resolver:      &listerStubResolver{stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}}, list: []*api.WorkspaceEntry{ws}},
@@ -442,7 +442,7 @@ func TestIdleSweeper_NeverCalled_LongUptime_Killed(t *testing.T) {
 	now := time.Now().UTC()
 	// GUI has been up 1h (> the 1m threshold), so the GUI-restart cap does not
 	// suppress the idle-kill of a long-uptime never-called daemon.
-	s.guiProcessStart = now.Add(-time.Hour)
+	s.startedAt = now.Add(-time.Hour)
 	captured := withIdleSweeperSeams(t, time.Minute, true,
 		func(context.Context) ([]api.DaemonStatus, error) {
 			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9205, UptimeSec: 600}}, nil
@@ -471,7 +471,7 @@ func TestIdleSweeper_GUIRestartBaseline_LongUptimeNotKilled(t *testing.T) {
 	now := time.Now().UTC()
 	// The GUI just restarted 30s ago; the activity map is empty (simulating the
 	// wipe). The daemon has a 3h supervisor uptime.
-	s.guiProcessStart = now.Add(-30 * time.Second)
+	s.startedAt = now.Add(-30 * time.Second)
 	captured := withIdleSweeperSeams(t, time.Minute, true,
 		func(context.Context) ([]api.DaemonStatus, error) {
 			return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9210, UptimeSec: 3 * 3600}}, nil
@@ -486,7 +486,7 @@ func TestIdleSweeper_GUIRestartBaseline_LongUptimeNotKilled(t *testing.T) {
 
 	// Once the GUI has been up PAST the threshold (here 2m), the same
 	// never-called long-uptime daemon IS idled — the cap no longer binds.
-	s.guiProcessStart = now.Add(-2 * time.Minute)
+	s.startedAt = now.Add(-2 * time.Minute)
 	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
 		t.Fatalf("after the GUI has been up past the threshold, the long-uptime never-called daemon must be idled; got n=%d", n)
 	}
@@ -511,7 +511,7 @@ func TestIdleSweeper_InFlightForward_NotKilledMidCall(t *testing.T) {
 	// Activity was stamped at call-start, 45m ago (well past the 1m threshold) —
 	// the call is STILL streaming (mid-call), so the in-flight counter is open.
 	s.recordSerenaActivity("inflight", now.Add(-45*time.Minute))
-	s.enterSerenaForward("inflight")
+	s.EnterSerenaForward("inflight")
 
 	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
 		t.Fatalf("a daemon with an OPEN forward must NOT be idle-killed mid-call; got n=%d", n)
@@ -523,7 +523,7 @@ func TestIdleSweeper_InFlightForward_NotKilledMidCall(t *testing.T) {
 	// The call completes: the forward closes AND last-activity is re-stamped to
 	// now (the production defer does both). The daemon is no longer mid-call and
 	// its activity is fresh → still not idled.
-	s.exitSerenaForward("inflight")
+	s.ExitSerenaForward("inflight")
 	s.recordSerenaActivity("inflight", now)
 	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 0 {
 		t.Fatalf("a just-finished call re-stamps activity, so the daemon must not be immediately idled; got n=%d", n)
@@ -555,13 +555,13 @@ func TestIdleSweeper_InFlightCounter_Balanced(t *testing.T) {
 	s.recordSerenaActivity("counter", now.Add(-45*time.Minute))
 
 	// Two concurrent forwards open.
-	s.enterSerenaForward("counter")
-	s.enterSerenaForward("counter")
+	s.EnterSerenaForward("counter")
+	s.EnterSerenaForward("counter")
 	if !s.hasSerenaForwardInFlight("counter") {
 		t.Fatalf("two opens must register in-flight")
 	}
 	// One closes — still protected.
-	s.exitSerenaForward("counter")
+	s.ExitSerenaForward("counter")
 	if !s.hasSerenaForwardInFlight("counter") {
 		t.Fatalf("one of two forwards still open must keep the daemon protected")
 	}
@@ -569,12 +569,12 @@ func TestIdleSweeper_InFlightCounter_Balanced(t *testing.T) {
 		t.Fatalf("a daemon with one forward still open must not be idled; got n=%d", n)
 	}
 	// Second closes — no longer in-flight.
-	s.exitSerenaForward("counter")
+	s.ExitSerenaForward("counter")
 	if s.hasSerenaForwardInFlight("counter") {
 		t.Fatalf("after both forwards close, the daemon must not be in-flight")
 	}
 	// A defensive extra exit must not drive the count negative / re-create state.
-	s.exitSerenaForward("counter")
+	s.ExitSerenaForward("counter")
 	if s.hasSerenaForwardInFlight("counter") {
 		t.Fatalf("an extra exit must stay a no-op (count never negative)")
 	}
@@ -588,10 +588,10 @@ func TestIdleSweeper_InFlightCounter_Balanced(t *testing.T) {
 }
 
 func TestSerenaStopGate_PrunesIdleEntryAfterLastExit(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 
-	s.enterSerenaForward("zero-count")
-	s.exitSerenaForward("zero-count")
+	s.EnterSerenaForward("zero-count")
+	s.ExitSerenaForward("zero-count")
 
 	s.serenaStopGate.mu.Lock()
 	_, exists := s.serenaStopGate.byWorkspace["zero-count"]
@@ -604,7 +604,7 @@ func TestSerenaStopGate_PrunesIdleEntryAfterLastExit(t *testing.T) {
 }
 
 func TestSerenaStopGate_WaitingForwardBlocksNewPhase(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	const wsKey = "waiting-forward"
 
 	if !s.beginSerenaIdleStop(wsKey) {
@@ -631,8 +631,8 @@ func TestSerenaStopGate_WaitingForwardBlocksNewPhase(t *testing.T) {
 		releaseWaitingSerenaForward(t, s, wsKey, entered)
 		t.Fatalf("beginSerenaIdleStop succeeded while a forward was waiting on the gate")
 	}
-	if s.beginSerenaPrune(wsKey) {
-		s.endSerenaPrune(wsKey)
+	if s.BeginSerenaPrune(wsKey) {
+		s.EndSerenaPrune(wsKey)
 		releaseWaitingSerenaForward(t, s, wsKey, entered)
 		t.Fatalf("beginSerenaPrune succeeded while a forward was waiting on the gate")
 	}
@@ -643,10 +643,10 @@ func TestSerenaStopGate_WaitingForwardBlocksNewPhase(t *testing.T) {
 		t.Fatalf("beginSerenaIdleStop should succeed after the waiter enters and exits")
 	}
 	s.endSerenaIdleStop(wsKey)
-	if !s.beginSerenaPrune(wsKey) {
+	if !s.BeginSerenaPrune(wsKey) {
 		t.Fatalf("beginSerenaPrune should succeed after the waiter enters and exits")
 	}
-	s.endSerenaPrune(wsKey)
+	s.EndSerenaPrune(wsKey)
 }
 
 func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
@@ -699,7 +699,7 @@ func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+			s := newTestWorkspaceRoutes(9125)
 			wsKey := "gate-" + strings.ReplaceAll(tc.name, " ", "-")
 			ws := serenaWS(wsKey, "/proj/"+wsKey, 9126)
 			switch tc.phase {
@@ -709,10 +709,10 @@ func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
 				}
 				defer s.endSerenaIdleStop(wsKey)
 			case serenaWorkspaceStopGatePhasePrune:
-				if !s.beginSerenaPrune(wsKey) {
+				if !s.BeginSerenaPrune(wsKey) {
 					t.Fatalf("precondition: could not hold prune gate for %s", wsKey)
 				}
-				defer s.endSerenaPrune(wsKey)
+				defer s.EndSerenaPrune(wsKey)
 			default:
 				t.Fatalf("unsupported test phase %d", tc.phase)
 			}
@@ -775,7 +775,7 @@ func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
 				case serenaWorkspaceStopGatePhaseIdleStop:
 					s.endSerenaIdleStop(wsKey)
 				case serenaWorkspaceStopGatePhasePrune:
-					s.endSerenaPrune(wsKey)
+					s.EndSerenaPrune(wsKey)
 				}
 				select {
 				case got = <-done:
@@ -810,7 +810,7 @@ func TestWithSerenaWorkspaceGatePolicies(t *testing.T) {
 }
 
 func TestWithSerenaWorkspaceGateTimeoutSkipsCallbacksAndBody(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	const wsKey = "gate-timeout"
 
 	if !s.beginSerenaIdleStop(wsKey) {
@@ -873,7 +873,7 @@ func TestWithSerenaWorkspaceGateTimeoutSkipsCallbacksAndBody(t *testing.T) {
 	}
 }
 
-func waitForSerenaStopGateWaiters(t *testing.T, s *Server, wsKey string, want int) {
+func waitForSerenaStopGateWaiters(t *testing.T, s *WorkspaceRoutes, wsKey string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -891,7 +891,7 @@ func waitForSerenaStopGateWaiters(t *testing.T, s *Server, wsKey string, want in
 	t.Fatalf("stop gate waiters for %s did not reach %d", wsKey, want)
 }
 
-func releaseWaitingSerenaForward(t *testing.T, s *Server, wsKey string, entered <-chan serenaWorkspaceStopGateEnterResult) {
+func releaseWaitingSerenaForward(t *testing.T, s *WorkspaceRoutes, wsKey string, entered <-chan serenaWorkspaceStopGateEnterResult) {
 	t.Helper()
 	s.serenaStopGate.mu.Lock()
 	if entry := s.serenaStopGate.byWorkspace[wsKey]; entry != nil {
@@ -907,7 +907,7 @@ func releaseWaitingSerenaForward(t *testing.T, s *Server, wsKey string, entered 
 		if !gate.phaseActive {
 			t.Fatalf("waiting forward did not report phaseActive after waiting")
 		}
-		s.exitSerenaForward(wsKey)
+		s.ExitSerenaForward(wsKey)
 	case <-time.After(2 * time.Second):
 		t.Fatalf("waiting forward did not return after release")
 	}

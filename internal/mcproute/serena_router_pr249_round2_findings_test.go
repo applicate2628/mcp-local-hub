@@ -1,4 +1,4 @@
-// internal/gui/serena_router_pr249_round2_findings_test.go
+// internal/mcproute/serena_router_pr249_round2_findings_test.go
 //
 // Codex PR #249 round-2 review findings (serena /serena/mcp router). Two of
 // these (#2 + #4) complete the EXPIRED/removed-router-session reanimation class
@@ -27,7 +27,7 @@
 //	            TRUE-legacy caller (fresh handshake), the same distinction the
 //	            pathless branch already makes — an expired router session can no
 //	            longer continue simply by including a path argument.
-package gui
+package mcproute
 
 import (
 	"encoding/json"
@@ -464,7 +464,7 @@ func TestSerenaRouter_PR249R2_F4_PathBearing_TrueLegacyStillHandshakes(t *testin
 // Reads len under the store mutex so it is race-free even when this is called
 // from a test that also drives concurrent requests (none here, but the lock
 // keeps it honest).
-func routerSessionCount(s *Server) int {
+func routerSessionCount(s *WorkspaceRoutes) int {
 	s.serenaRouterSessions.mu.Lock()
 	defer s.serenaRouterSessions.mu.Unlock()
 	return len(s.serenaRouterSessions.bindings)

@@ -1,4 +1,4 @@
-// internal/gui/serena_router_postpass_test.go
+// internal/mcproute/serena_router_postpass_test.go
 //
 // Post-PASS deeper-review refinements for the /serena/mcp router (PR #249):
 //
@@ -18,7 +18,7 @@
 //	            bindings are unbound (no reanimation via the sticky lastSeen
 //	            refresh); a TRUE-legacy sticky-only session (never minted at this
 //	            router) still routes (legacy compat preserved).
-package gui
+package mcproute
 
 import (
 	"bytes"

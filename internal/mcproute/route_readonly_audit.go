@@ -1,4 +1,4 @@
-// internal/gui/route_readonly_audit.go
+// internal/mcproute/route_readonly_audit.go
 //
 // P1-1 fix (adversarial cross-family review of Increment 1, mcphub-front-daemon):
 // the standalone `mcphub route` front daemon (internal/cli/route.go) is
@@ -27,10 +27,9 @@
 // fallback-writes-hub-mcp-log.md): internal/api/serena_routing and
 // internal/api/lsp_routing need the SAME sink for the shared inode-anchored
 // state-file reader's relax-fallback diagnostic, and neither may import this
-// gui package (gui already imports both of them, so the reverse import
-// would cycle). This unexported wrapper is kept so every existing reference
+// router package (it imports both resolver packages). This unexported wrapper is kept so every existing reference
 // in this package (serena_router.go, lsp_router.go) needs no change.
-package gui
+package mcproute
 
 import (
 	"mcp-local-hub/internal/api"

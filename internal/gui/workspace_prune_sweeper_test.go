@@ -461,8 +461,8 @@ func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	path := "d:/dev/x/.claude/worktrees/agent-prune-busy/sub"
 	pruneEnabledFn = func() bool { return true }
-	pruneBeginFn = func(s *Server, key string) bool { return s.beginSerenaPrune(key) }
-	pruneEndFn = func(s *Server, key string) { s.endSerenaPrune(key) }
+	pruneBeginFn = func(s *Server, key string) bool { return s.BeginSerenaPrune(key) }
+	pruneEndFn = func(s *Server, key string) { s.EndSerenaPrune(key) }
 	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
 		return []*api.WorkspaceEntry{mkPruneEntry(path, "kbusy-real", api.SerenaLanguageSentinel)}
 	}
@@ -472,8 +472,8 @@ func TestSweepPruneWorkspaces_InFlightForwardSkipsPruneAction(t *testing.T) {
 		return &api.PruneReport{Workspace: path}, nil
 	}
 
-	s.enterSerenaForward("kbusy-real")
-	defer s.exitSerenaForward("kbusy-real")
+	s.EnterSerenaForward("kbusy-real")
+	defer s.ExitSerenaForward("kbusy-real")
 
 	if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
 		t.Fatalf("in-flight serena forward must skip prune, got %d", n)
@@ -498,8 +498,8 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	path := "d:/dev/x/.claude/worktrees/agent-prune-claim/sub"
 	pruneEnabledFn = func() bool { return true }
-	pruneBeginFn = func(s *Server, key string) bool { return s.beginSerenaPrune(key) }
-	pruneEndFn = func(s *Server, key string) { s.endSerenaPrune(key) }
+	pruneBeginFn = func(s *Server, key string) bool { return s.BeginSerenaPrune(key) }
+	pruneEndFn = func(s *Server, key string) { s.EndSerenaPrune(key) }
 	pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
 		return []*api.WorkspaceEntry{mkPruneEntry(path, "kclaim", api.SerenaLanguageSentinel)}
 	}
@@ -528,9 +528,9 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 	enteredForward := make(chan struct{})
 	forwardDone := make(chan struct{})
 	go func() {
-		s.enterSerenaForward("kclaim")
+		s.EnterSerenaForward("kclaim")
 		close(enteredForward)
-		s.exitSerenaForward("kclaim")
+		s.ExitSerenaForward("kclaim")
 		close(forwardDone)
 	}()
 

@@ -1,4 +1,4 @@
-// internal/gui/route_readonly_test.go
+// internal/mcproute/route_readonly_test.go
 //
 // Falsifying test for bot/architect review finding F1 (Increment-1,
 // 2026-07-25): the standalone `mcphub route` front daemon uses a restricted
@@ -22,7 +22,7 @@
 // registry mutation that happened to preserve the 503 status (e.g. a write
 // added AFTER the response was already written). Together they are exactly
 // what the F1 fix depends on.
-package gui
+package mcproute
 
 import (
 	"encoding/json"
@@ -40,6 +40,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/serena_routing"
+	"mcp-local-hub/internal/testkit"
 )
 
 // TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryMutation
@@ -86,7 +87,7 @@ func TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryM
 
 	// Port 9125 matches postSerena's hardcoded Origin header (every other
 	// serena_router_test.go case uses the same port for the same reason).
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile})
@@ -135,7 +136,7 @@ func TestSetSerenaRouterReadOnly_WiresIdleWakeWithoutAutoRegister(t *testing.T) 
 	}
 	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath)
 	sessions := serena_routing.NewSessionRouter()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	deps := s.serenaRouterDepsProd()
@@ -199,7 +200,7 @@ func TestSetSerenaRouterReadOnly_OperatorStopReturns503WithoutForward(t *testing
 		t.Fatalf("seed operator stop: %v", err)
 	}
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterReadOnly(serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath), serena_routing.NewSessionRouter())
 	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile}), nil)
 	if rr.Code != http.StatusServiceUnavailable {
@@ -287,10 +288,10 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath)
 	sessions := serena_routing.NewSessionRouter()
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
-	before := snapshotTree(t, stateDir)
+	before := testkit.SnapshotTree(t, stateDir)
 
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile})
 	rr := postSerena(t, s, body, nil)
@@ -304,7 +305,7 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 		t.Fatalf("status = 200; fixture expected a forward failure against a closed port, got success body=%s", rr.Body.String())
 	}
 
-	after := snapshotTree(t, stateDir)
+	after := testkit.SnapshotTree(t, stateDir)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("state directory %s changed after a registered-workspace, unreachable-backend request via the restricted route wiring (want ZERO shared-state writes):\nbefore=%v\nafter=%v", stateDir, before, after)
 	}
@@ -344,15 +345,15 @@ func TestSetSerenaRouterReadOnly_DefaultMarkerFailureDoesNotWriteSharedLog(t *te
 		t.Fatalf("replace marker with directory: %v", err)
 	}
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterReadOnly(serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath), serena_routing.NewSessionRouter())
 	sid := mintRouterSession(t, s, "2025-11-25")
-	before := snapshotTree(t, stateDir)
+	before := testkit.SnapshotTree(t, stateDir)
 	rr := postSerena(t, s, buildToolCallBody(t, "get_current_config", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
 	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), `"code":"UNAVAILABLE"`) {
 		t.Fatalf("default marker failure = %d %s, want path-free unavailable 503", rr.Code, rr.Body.String())
 	}
-	after := snapshotTree(t, stateDir)
+	after := testkit.SnapshotTree(t, stateDir)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("route default-marker failure changed shared state: before=%v after=%v", before, after)
 	}

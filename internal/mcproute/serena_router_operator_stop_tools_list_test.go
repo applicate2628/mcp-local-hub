@@ -1,4 +1,4 @@
-// internal/gui/serena_router_operator_stop_tools_list_test.go
+// internal/mcproute/serena_router_operator_stop_tools_list_test.go
 //
 // r37-2 P2 regression: the serena tools/list flow must EXCLUDE a candidate
 // whose wake was refused with api.ErrWakeRefusedOperatorStop (an operator
@@ -12,7 +12,7 @@
 // (serena_idle_sweeper_test.go TestRouterWake_OperatorStopRefused_*) and the
 // multi-candidate wake-continuation tests; here the surface under test is the
 // tools/list fetch-loop EXCLUSION, not the wake refusal itself.
-package gui
+package mcproute
 
 import (
 	"context"

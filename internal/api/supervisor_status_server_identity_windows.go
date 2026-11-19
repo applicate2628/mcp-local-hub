@@ -33,6 +33,23 @@ func observeSupervisorStatusServerIdentityV1(conn net.Conn, checked bool) (Super
 	return observeSupervisorProcessIdentityV1(int(pid), checked)
 }
 
+// ObserveSupervisorIPCClientIdentityV1 reads the peer of this same accepted
+// connection, including checked release of temporary native handles.
+func ObserveSupervisorIPCClientIdentityV1(conn net.Conn) (SupervisorProcessIdentityV1, error) {
+	fdConn, ok := conn.(interface{ Fd() uintptr })
+	if !ok {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("supervisor pipe connection does not expose a kernel handle")
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeClientProcessId(windows.Handle(fdConn.Fd()), &pid); err != nil {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("query supervisor pipe client PID: %w", err)
+	}
+	if pid == 0 {
+		return SupervisorProcessIdentityV1{}, fmt.Errorf("supervisor pipe client has no PID")
+	}
+	return observeSupervisorProcessIdentityV1(int(pid), true)
+}
+
 // ObserveSupervisorProcessIdentityV1 observes native process data. It conveys no
 // creator/termination capability; callers must bind it to their original creator.
 func ObserveSupervisorProcessIdentityV1(pid int) (SupervisorProcessIdentityV1, error) {

@@ -1,4 +1,4 @@
-// internal/gui/serena_router_test.go
+// internal/mcproute/serena_router_test.go
 //
 // Phase C.2 tests for the /serena/mcp path-aware router. The eight
 // canonical scenarios in plan v10 test contract are covered here:
@@ -16,7 +16,7 @@
 // httptest upstream mock. The seam injection point is
 // serenaRouterTestSeam (package-level var); tests restore it via
 // t.Cleanup so ordering does not leak state between cases.
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -318,11 +318,11 @@ func idOrNull(id json.RawMessage) string {
 // newSerenaTestServer constructs a Server with the seam wired to deps.
 // Returns the Server plus the deps so tests can inspect the resolver +
 // session router after the handler runs.
-func newSerenaTestServer(t *testing.T, deps *serenaRouterDeps) *Server {
+func newSerenaTestServer(t *testing.T, deps *serenaRouterDeps) *WorkspaceRoutes {
 	t.Helper()
 	resetSerenaRouterTestSeam(t)
 	serenaRouterTestSeam = func() *serenaRouterDeps { return deps }
-	return newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
+	return newTestWorkspaceRoutes(9125)
 }
 
 // buildToolCallBody marshals a JSON-RPC tools/call envelope around the
@@ -414,7 +414,7 @@ func testServerPort(t *testing.T, ts *httptest.Server) int {
 
 // postSerena issues a same-origin POST /serena/mcp with body and the
 // supplied headers. Returns the recorder.
-func postSerena(t *testing.T, s *Server, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+func postSerena(t *testing.T, s *WorkspaceRoutes, body []byte, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/serena/mcp", bytes.NewReader(body))
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -426,7 +426,7 @@ func postSerena(t *testing.T, s *Server, body []byte, headers map[string]string)
 		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -1263,7 +1263,7 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 
 	resolver := serena_routing.NewWorkspaceResolver(reg, regPath)
 	sessions := serena_routing.NewSessionRouter()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterProduction(resolver, sessions)
 	commitCalls := 0
 	s.SetSerenaActivityCommitterForTest(func(_ context.Context, request api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
@@ -1327,7 +1327,7 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 func TestSerenaRouter_RoutingLayerNotWired_Returns503(t *testing.T) {
 	resetSerenaRouterTestSeam(t)
 	serenaRouterTestSeam = func() *serenaRouterDeps { return nil }
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/x"})
 	rr := postSerena(t, s, body, nil)
@@ -1359,7 +1359,7 @@ func TestSerenaRouter_NonPostReturns405(t *testing.T) {
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET status = %d, want 405", rr.Code)
 	}
@@ -1387,7 +1387,7 @@ func TestSerenaRouter_CrossOriginPostRejected(t *testing.T) {
 	req.Header.Set("Origin", "http://attacker.example.com")
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("cross-origin status = %d, want 403", rr.Code)
 	}

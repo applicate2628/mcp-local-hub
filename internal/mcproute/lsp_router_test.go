@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -22,6 +22,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/lsp_routing"
 	"mcp-local-hub/internal/daemon"
+	"mcp-local-hub/internal/testkit"
 )
 
 // TestLSPRouter_ForwardTimeoutOrderingInvariant asserts the cross-component
@@ -120,7 +121,7 @@ func (s *stubLSPResolver) RegisteredWorkspace(workspaceKey, language string) (*a
 	return &cp, true
 }
 
-func postLSP(t *testing.T, s *Server, language string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+func postLSP(t *testing.T, s *WorkspaceRoutes, language string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/lsp/"+language+"/mcp", bytes.NewReader(body))
 	if _, hasCT := headers["Content-Type"]; !hasCT {
@@ -130,7 +131,7 @@ func postLSP(t *testing.T, s *Server, language string, body []byte, headers map[
 		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -154,7 +155,7 @@ func lspToolCallParamsJSON(t *testing.T, name string, arguments map[string]any) 
 }
 
 func TestLSPRouter_InitializeAndToolsListUseCatalogWithoutProxy(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{},
 		Sessions: lsp_routing.NewSessionRouter(),
@@ -189,7 +190,7 @@ func TestLSPRouter_InitializeAndToolsListUseCatalogWithoutProxy(t *testing.T) {
 // TestCleanupDirectLSP_RealGUIRouteToolsListPassesOracle anchors the cleanup
 // oracle's positive fixture to the actual GUI mux, not a hand-written response.
 func TestCleanupDirectLSP_ProductionProberPassesRealGUIMux(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{},
 		Sessions: lsp_routing.NewSessionRouter(),
@@ -201,7 +202,7 @@ func TestCleanupDirectLSP_ProductionProberPassesRealGUIMux(t *testing.T) {
 		},
 	})
 
-	server := httptest.NewUnstartedServer(s.mux)
+	server := httptest.NewUnstartedServer(workspaceTestMux(s))
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -219,12 +220,12 @@ func TestCleanupDirectLSP_ProductionProberPassesRealGUIMux(t *testing.T) {
 	}
 	ok, failureClass := api.ProbeManagedLanguageRoute(context.Background(), port, "go", "gopls-mcp")
 	if !ok || failureClass != "" {
-		t.Fatalf("production prober -> real GUI mux proof ok=%v class=%q", ok, failureClass)
+		t.Fatalf("production prober -> real workspace mux proof ok=%v class=%q", ok, failureClass)
 	}
 }
 
 func TestLSPRouter_ResourcesAndPromptsListAreSyntheticEmpty(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{},
 		Sessions: lsp_routing.NewSessionRouter(),
@@ -320,7 +321,7 @@ func TestLSPRouter_RegisteredWorkspaceForwardsSessionless(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -361,7 +362,7 @@ func TestLSPRouter_RegisteredWorkspaceWaitsForEnsureBeforeForward(t *testing.T) 
 	}}
 	ensureEntered := make(chan struct{})
 	releaseEnsure := make(chan struct{})
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -424,7 +425,7 @@ func TestLSPRouter_UntrustedMarkerWorkspaceRefusedAndNotAutoRegistered(t *testin
 			ProjectMarker: true, // marker present, but markers are NOT authorization
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -472,7 +473,7 @@ func TestLSPRouter_TrustedRootWorkspaceAutoRegistersThenForwards(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -520,7 +521,7 @@ func TestLSPRouter_TrustedRootGateErrorFailsClosed(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -560,7 +561,7 @@ func TestLSPRouter_NilTrustedRootGateFailsClosed(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -621,7 +622,7 @@ func TestLSPRouter_AutoRegisterPathDoesNotBless(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -674,7 +675,7 @@ func TestLSPRouter_GitOnlyResolvedWorkspaceDoesNotAutoSpawn(t *testing.T) {
 			ProjectMarker: false,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -711,7 +712,7 @@ func TestLSPRouter_TrustedRootGitOnlyWorkspaceRefusedByMarkerGuard(t *testing.T)
 			ProjectMarker: false,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -735,7 +736,7 @@ func TestLSPRouter_TrustedRootGitOnlyWorkspaceRefusedByMarkerGuard(t *testing.T)
 }
 
 func TestLSPRouter_WorkspaceNotFoundReturnsJSONRPCError(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{errs: map[string]error{
 			"python|/outside/file.py": lsp_routing.ErrWorkspaceNotFound,
@@ -777,7 +778,7 @@ func TestLSPRouter_PathlessDisambiguation(t *testing.T) {
 		"go|/repo/alpha/main.go": {WorkspaceRoot: "/repo/alpha", WorkspaceKey: "alpha", Registered: true, Entry: alpha, ProjectMarker: true},
 		"go|/repo/beta/main.go":  {WorkspaceRoot: "/repo/beta", WorkspaceKey: "beta", Registered: true, Entry: beta, ProjectMarker: true},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -837,7 +838,7 @@ func TestLSPRouter_PathlessSingleCandidateReEnsuresWorkspace(t *testing.T) {
 	sessions.TouchWorkspace("client-session", &stale)
 
 	var autoCalls atomic.Int32
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{markers: map[string]bool{
 			"go|/repo/alpha": true,
@@ -875,7 +876,7 @@ func TestLSPRouter_PathlessSingleCandidateRefusesWhenRequestedLanguageMarkerAbse
 	sessions.TouchWorkspace("client-session", &cached)
 
 	var autoCalls atomic.Int32
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{markers: map[string]bool{
 			"go|/repo/alpha": false,
@@ -920,7 +921,7 @@ func TestLSPRouter_PathlessRegisteredGitFallbackWorkspaceSkipsMarkerGate(t *test
 	sessions.TouchWorkspace("client-session", &registered)
 
 	var autoCalls atomic.Int32
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{
 			markers: map[string]bool{
@@ -963,7 +964,7 @@ func TestLSPRouter_PathlessUnregisteredGitFallbackWorkspaceStillRequiresMarker(t
 	sessions.TouchWorkspace("client-session", &cached)
 
 	var autoCalls atomic.Int32
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{markers: map[string]bool{
 			"go|/repo/alpha": false,
@@ -1004,7 +1005,7 @@ func TestLSPRouter_PathlessSingleCandidateReEnsuresWhenRequestedLanguageMarkerPr
 	sessions.TouchWorkspace("client-session", &stale)
 
 	var autoCalls atomic.Int32
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{markers: map[string]bool{
 			"go|/repo/alpha": true,
@@ -1052,7 +1053,7 @@ func TestLSPRouter_RelativeFilePathUsesSingleBoundSessionWorkspace(t *testing.T)
 	sessions := lsp_routing.NewSessionRouter()
 	sessions.TouchWorkspace("client-session", entry)
 
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{
 			errs: map[string]error{
@@ -1079,7 +1080,7 @@ func TestLSPRouter_RelativeFilePathUsesSingleBoundSessionWorkspace(t *testing.T)
 
 func TestLSPRouter_RelativeFilePathWithoutSessionStillErrors(t *testing.T) {
 	relPath := "src/main.py"
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{errs: map[string]error{
 			"python|" + relPath: lsp_routing.ErrInvalidPath,
@@ -1104,7 +1105,7 @@ func TestLSPRouter_RelativeFilePathWithMultipleCandidatesIsAmbiguous(t *testing.
 	sessions.TouchWorkspace("client-session", &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201})
 	sessions.TouchWorkspace("client-session", &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/repo/beta", Language: "python", Backend: "mcp-language-server", Port: 9202})
 
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{errs: map[string]error{
 			"python|" + relPath: lsp_routing.ErrInvalidPath,
@@ -1140,7 +1141,7 @@ func TestLSPRouter_FilesBatchAcrossWorkspacesRejected(t *testing.T) {
 	alphaEntry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: alphaRoot, Language: "go", Backend: "gopls-mcp", Port: 9201}
 	betaEntry := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: betaRoot, Language: "go", Backend: "gopls-mcp", Port: 9202}
 
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
 			"go|" + alphaFile: {WorkspaceRoot: alphaRoot, WorkspaceKey: "alpha", Registered: true, Entry: alphaEntry, ProjectMarker: true},
@@ -1180,7 +1181,7 @@ func TestLSPRouter_FilesBatchSameWorkspaceRoutes(t *testing.T) {
 	fileB := filepath.Join(workspaceRoot, "b.go")
 	entry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: workspaceRoot, Language: "go", Backend: "gopls-mcp", Port: 9201}
 
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver: &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
 			"go|" + fileA: {WorkspaceRoot: workspaceRoot, WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
@@ -1212,7 +1213,7 @@ func TestLSPRouter_ForwardsSSEPassthrough(t *testing.T) {
 	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
 		"python|/repo/alpha/main.py": {WorkspaceRoot: "/repo/alpha", WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -1247,7 +1248,7 @@ func TestLSPRouter_UntrustedRoot_RefusalCarriesNeedsTrust(t *testing.T) {
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -1312,7 +1313,7 @@ func TestLSPRouter_UntrustedRoot_RefusalUsesResolvedRootNotFileArg(t *testing.T)
 			ProjectMarker: true,
 		},
 	}}
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               lsp_routing.NewSessionRouter(),
@@ -1373,7 +1374,7 @@ func TestLSPRouter_ForwardsDaemon503AndRetryAfterVerbatim_StillTouchesSession(t 
 		"python|/repo/alpha/main.py": {WorkspaceRoot: "/repo/alpha", WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
 	}}
 	sessions := lsp_routing.NewSessionRouter()
-	s := NewServer(Config{Port: 9125})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetLSPRouterDeps(&lspRouterDeps{
 		Resolver:               resolver,
 		Sessions:               sessions,
@@ -1426,11 +1427,11 @@ func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	newBound := func(upstreamURL string) *Server {
+	newBound := func(upstreamURL string) *WorkspaceRoutes {
 		sessions := lsp_routing.NewSessionRouter()
 		ws := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "go", Backend: "gopls-mcp", Port: 9201}
 		sessions.TouchWorkspace("client-session", &ws)
-		s := NewServer(Config{Port: 9125})
+		s := newTestWorkspaceRoutes(9125)
 		s.SetLSPRouterDeps(&lspRouterDeps{
 			Resolver:               &stubLSPResolver{},
 			Sessions:               sessions,
@@ -1461,7 +1462,7 @@ func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
 	if rrB.Code != http.StatusAccepted {
 		t.Fatalf("unreachable-upstream notification status = %d, want 202 (must not propagate 502/504 to a notification); body=%s", rrB.Code, rrB.Body.String())
 	}
-	waitHubRestartTestLogEvent(t, "lsp-notification-forward-failed")
+	testkit.WaitForHubLogEvent(t, "lsp-notification-forward-failed", api.RecentHubMcpEvents)
 }
 
 // TestForwardLSPNotificationDetached_UsesProvidedAuditFnNotHardcodedLogHubMcpEvent
@@ -1542,7 +1543,7 @@ func TestSetLSPRouterReadOnly_WiresRouteReadOnlySinkAsAuditFn(t *testing.T) {
 		t.Fatalf("Save empty registry: %v", err)
 	}
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	resolver := lsp_routing.NewReadOnlyWorkspaceResolver(reg, regPath, nil)
 	sessions := lsp_routing.NewSessionRouter()
 	s.SetLSPRouterReadOnly(resolver, sessions, nil)

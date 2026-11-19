@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -44,10 +44,10 @@ func withTempSerenaStateRoot(t *testing.T) {
 	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
 }
 
-func newSerenaStoreSeedServer(t *testing.T, ws *api.WorkspaceEntry) (*Server, *InMemorySessionRouter) {
+func newSerenaStoreSeedServer(t *testing.T, ws *api.WorkspaceEntry) (*WorkspaceRoutes, *InMemorySessionRouter) {
 	t.Helper()
 	sessions := NewInMemorySessionRouter()
-	s := newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: &listerStubResolver{
 			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
@@ -180,7 +180,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcileSkipsStalePersistAfterDropAndRebin
 }
 
 func TestSerenaRouter_SetDepsDoesNotRewriteWorkspaceEmptyCallback(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	called := false
 	s.serenaRouterSessions.onWorkspaceEmpty = func(wsKey string) {
 		if wsKey == "alpha" {
@@ -196,7 +196,7 @@ func TestSerenaRouter_SetDepsDoesNotRewriteWorkspaceEmptyCallback(t *testing.T) 
 	}
 }
 
-func seedBoundSerenaSession(s *Server, sessions *InMemorySessionRouter, ws *api.WorkspaceEntry, sid, daemonSessionID string) {
+func seedBoundSerenaSession(s *WorkspaceRoutes, sessions *InMemorySessionRouter, ws *api.WorkspaceEntry, sid, daemonSessionID string) {
 	s.serenaRouterSessions.store(sid, "2025-11-25")
 	s.serenaRouterSessions.bindWorkspace(sid, ws.WorkspaceKey)
 	if daemonSessionID != "" {
@@ -205,13 +205,13 @@ func seedBoundSerenaSession(s *Server, sessions *InMemorySessionRouter, ws *api.
 	sessions.BindSession(sid, ws)
 }
 
-func seedSerenaBackendBaseline(s *Server, wsPath string, pid int) {
+func seedSerenaBackendBaseline(s *WorkspaceRoutes, wsPath string, pid int) {
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
 	s.serenaBackendLastPID = map[string]int{wsPath: pid}
 }
 
-func seedSerenaBackendIdleMarker(s *Server, wsPath string, ticks int) {
+func seedSerenaBackendIdleMarker(s *WorkspaceRoutes, wsPath string, ticks int) {
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
 	if s.serenaBackendIdlePaths == nil {
@@ -220,21 +220,21 @@ func seedSerenaBackendIdleMarker(s *Server, wsPath string, ticks int) {
 	s.serenaBackendIdlePaths[wsPath] = ticks
 }
 
-func serenaBackendBaselineForTest(s *Server, wsPath string) (int, bool) {
+func serenaBackendBaselineForTest(s *WorkspaceRoutes, wsPath string) (int, bool) {
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
 	pid, ok := s.serenaBackendLastPID[wsPath]
 	return pid, ok
 }
 
-func serenaBackendIdleMarkerForTest(s *Server, wsPath string) (int, bool) {
+func serenaBackendIdleMarkerForTest(s *WorkspaceRoutes, wsPath string) (int, bool) {
 	s.serenaBackendPIDMu.Lock()
 	defer s.serenaBackendPIDMu.Unlock()
 	ticks, ok := s.serenaBackendIdlePaths[wsPath]
 	return ticks, ok
 }
 
-func assertSerenaSessionLive(t *testing.T, s *Server, sessions *InMemorySessionRouter, wsKey, sid string) {
+func assertSerenaSessionLive(t *testing.T, s *WorkspaceRoutes, sessions *InMemorySessionRouter, wsKey, sid string) {
 	t.Helper()
 	if !s.serenaRouterSessions.known(sid) {
 		t.Fatalf("router session %q was torn down; want it alive", sid)
@@ -247,7 +247,7 @@ func assertSerenaSessionLive(t *testing.T, s *Server, sessions *InMemorySessionR
 	}
 }
 
-func assertSerenaSessionGone(t *testing.T, s *Server, sessions *InMemorySessionRouter, sid string) {
+func assertSerenaSessionGone(t *testing.T, s *WorkspaceRoutes, sessions *InMemorySessionRouter, sid string) {
 	t.Helper()
 	if s.serenaRouterSessions.known(sid) {
 		t.Fatalf("router session %q survived backend loss; want it gone", sid)
@@ -284,31 +284,6 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 	withSerenaIdleReconcileGlobals(t)
 	withTempSerenaStateRoot(t)
 
-	t.Run("subscriber-filters-and-coalesces-serena-events", func(t *testing.T) {
-		const wsPath = "/proj/event-lsp-ignore"
-		ws := serenaWS("event-lsp-ignore", wsPath, 9308)
-		s, _ := newSerenaStoreSeedServer(t, ws)
-
-		ch := make(chan Event, 8)
-		ch <- Event{Type: "daemon-state", Body: map[string]any{
-			"server": "serena", "daemon": ws.WorkspaceKey,
-		}}
-		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "mcp-language-server", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
-		}}
-		for i := 0; i < 5; i++ {
-			ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-				"server": "serena", "daemon": ws.WorkspaceKey, "port": 9308, "state": "Stopped",
-			}}
-		}
-		close(ch)
-		s.consumeSerenaBackendLossEvents(context.Background(), ch)
-
-		if got := len(s.serenaBackendLossTrigger); got != 1 {
-			t.Fatalf("backend-loss trigger depth after 5 serena events = %d, want 1 coalesced wake", got)
-		}
-	})
-
 	t.Run("triggered-reconcile-preserves-idle-stopped-session", func(t *testing.T) {
 		const wsPath = "/proj/event-idle-stop"
 		const sid = "sid-event-idle-stop"
@@ -326,12 +301,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 			}, nil
 		}
 
-		ch := make(chan Event, 1)
-		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9306, "state": "Stopped",
-		}}
-		close(ch)
-		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+		s.TriggerSerenaBackendLossReconcile()
 
 		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
 		if got := len(s.serenaBackendLossTrigger); got != 1 {
@@ -360,12 +330,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 			}, nil
 		}
 
-		ch := make(chan Event, 1)
-		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": ws.WorkspaceKey, "port": 9307, "state": "Running",
-		}}
-		close(ch)
-		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+		s.TriggerSerenaBackendLossReconcile()
 
 		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
 		if got := len(s.serenaBackendLossTrigger); got != 1 {
@@ -393,12 +358,7 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 			}, nil
 		}
 
-		ch := make(chan Event, 1)
-		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{
-			"server": "serena", "daemon": "default", "port": 9305, "state": "Stopped",
-		}}
-		close(ch)
-		s.consumeSerenaBackendLossEvents(context.Background(), ch)
+		s.TriggerSerenaBackendLossReconcile()
 
 		assertSerenaSessionLive(t, s, sessions, ws.WorkspaceKey, sid)
 		if got := len(s.serenaBackendLossTrigger); got != 1 {
@@ -414,23 +374,23 @@ func TestSerenaRouter_BackendLoss_DaemonBackendLostEvent(t *testing.T) {
 }
 
 func TestSerenaRouter_BackendLossTriggerCoalesces(t *testing.T) {
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 
 	for i := 0; i < 10; i++ {
-		s.triggerSerenaBackendLossReconcile()
+		s.TriggerSerenaBackendLossReconcile()
 	}
 	if got := len(s.serenaBackendLossTrigger); got != 1 {
 		t.Fatalf("trigger depth after rapid sends = %d, want 1", got)
 	}
 	<-s.serenaBackendLossTrigger
 
-	s.triggerSerenaBackendLossReconcile()
+	s.TriggerSerenaBackendLossReconcile()
 	if got := len(s.serenaBackendLossTrigger); got != 1 {
 		t.Fatalf("trigger depth after drain and resend = %d, want 1", got)
 	}
 
-	(&Server{}).triggerSerenaBackendLossReconcile()
-	(*Server)(nil).triggerSerenaBackendLossReconcile()
+	(&WorkspaceRoutes{}).TriggerSerenaBackendLossReconcile()
+	(*WorkspaceRoutes)(nil).TriggerSerenaBackendLossReconcile()
 }
 
 func TestSerenaRouter_BackendLoss_LastUnbindDropsBaselineAndIdleMarker(t *testing.T) {
@@ -713,7 +673,7 @@ func TestSerenaRouter_IdleStopConcurrentWakeDoesNotReuseStaleDaemonSession(t *te
 		UpstreamTimeout: 2 * time.Second,
 		WakeIdleFn:      func(context.Context, string, int, string) error { return nil },
 	}
-	s := NewServer(Config{Port: 9300, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9300)
 	s.SetSerenaRouterDeps(deps)
 	seedBoundSerenaSession(s, sessions, ws, sid, staleDaemonSession)
 
@@ -811,7 +771,7 @@ func TestSerenaRouter_IdleStopOldWorkspacePreservesActiveSwitchReservation(t *te
 		UpstreamTimeout: 2 * time.Second,
 		AuditFn:         func(string, string, map[string]any) error { return nil },
 	}
-	s := NewServer(Config{Port: 9300, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9300)
 	s.SetSerenaRouterDeps(deps)
 	init := buildLifecycleBody(t, "initialize", map[string]any{
 		"protocolVersion": "2025-11-25",
@@ -1163,7 +1123,7 @@ func newSafeSerenaHTTPTestServer(t *testing.T, h http.Handler) *httptest.Server 
 	return nil
 }
 
-func postSerenaOnGUIOrigin(t *testing.T, s *Server, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+func postSerenaOnGUIOrigin(t *testing.T, s *WorkspaceRoutes, body []byte, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/serena/mcp", bytes.NewReader(body))
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -1175,7 +1135,7 @@ func postSerenaOnGUIOrigin(t *testing.T, s *Server, body []byte, headers map[str
 		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -1208,7 +1168,7 @@ func TestSerenaRouter_IdleShutdownWakeReconcilesAndRehandshakes(t *testing.T) {
 			return nil
 		},
 	}
-	s := NewServer(Config{Port: 9300, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9300)
 	s.SetSerenaRouterDeps(deps)
 	seedBoundSerenaSession(s, sessions, ws, sid, "stale-daemon-session-before-idle")
 	seedSerenaBackendBaseline(s, wsPath, pidA)
@@ -1308,7 +1268,7 @@ func TestSerenaRouter_IdleWakeNoRespawnReseedsToolCallBaseline(t *testing.T) {
 			return nil
 		},
 	}
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newTestWorkspaceRoutes(9125)
 	s.SetSerenaRouterDeps(deps)
 	seedBoundSerenaSession(s, sessions, ws, "sid-live-through-tool-wake", "daemon-before-wake")
 	seedSerenaBackendBaseline(s, wsPath, pid)

@@ -1,4 +1,4 @@
-// internal/gui/serena_router_round12_findings_test.go
+// internal/mcproute/serena_router_round12_findings_test.go
 //
 // Round-12 code-review-finding tests for the /serena/mcp router:
 //
@@ -22,7 +22,7 @@
 //	Finding 2 — the partial-handshake (notifications/initialized-fail)
 //	            cleanup DELETE honors a SHORT injected UpstreamTimeout rather
 //	            than the fixed 5s serenaCleanupTimeout default.
-package gui
+package mcproute
 
 import (
 	"encoding/json"

@@ -1,8 +1,8 @@
-// internal/gui/serena_router.go
+// internal/mcproute/serena_router.go
 //
 // POST /serena/mcp -- path-aware MCP request router for per-workspace
 // serena daemons (plan v10 Phase C.2).
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -223,7 +223,7 @@ func serenaHTTPClient(httpClient *http.Client, upstreamTimeout time.Duration) *h
 // test seam is set, returns its output; otherwise reads the Server's
 // atomic deps slot. A nil return means the routing layer is not yet
 // wired -- the handler then emits 503 with the canonical body.
-func (s *Server) serenaRouterDepsProd() *serenaRouterDeps {
+func (s *WorkspaceRoutes) serenaRouterDepsProd() *serenaRouterDeps {
 	if serenaRouterTestSeam != nil {
 		return serenaRouterTestSeam()
 	}
@@ -235,7 +235,7 @@ func (s *Server) serenaRouterDepsProd() *serenaRouterDeps {
 // at GUI server construction time (cannot construct the unexported
 // serenaRouterDeps from outside this package, so this exported helper
 // fills the role).
-func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
+func (s *WorkspaceRoutes) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
@@ -283,7 +283,7 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 //
 // This function does not change SetSerenaRouterProduction or existing GUI
 // wiring; its name is retained for source compatibility.
-func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
+func (s *WorkspaceRoutes) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
@@ -314,7 +314,7 @@ func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResol
 // CLI boot (cmd/mcphub) calls this after constructing Agent A1's
 // adapters from the live api.Registry. Calling with nil clears the
 // wiring (the route then emits 503).
-func (s *Server) SetSerenaRouterDeps(deps *serenaRouterDeps) {
+func (s *WorkspaceRoutes) SetSerenaRouterDeps(deps *serenaRouterDeps) {
 	s.serenaRouterDeps.Store(deps)
 }
 
@@ -323,7 +323,7 @@ func (s *Server) SetSerenaRouterDeps(deps *serenaRouterDeps) {
 // tests that exercise the real GUI/route resolver and session topology without
 // starting a supervisor process. Production never calls it and retains the
 // direct supervisor IPC function installed by the constructors.
-func (s *Server) SetSerenaActivityCommitterForTest(fn func(context.Context, api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error)) {
+func (s *WorkspaceRoutes) SetSerenaActivityCommitterForTest(fn func(context.Context, api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error)) {
 	if s == nil || fn == nil {
 		return
 	}
@@ -341,10 +341,6 @@ func (s *Server) SetSerenaActivityCommitterForTest(fn func(context.Context, api.
 // on Agent A1's serena_routing package directly.
 func NewInMemorySessionRouter() *InMemorySessionRouter {
 	return newInMemorySessionRouter()
-}
-
-func registerSerenaRouterRoutes(s *Server) {
-	s.mux.HandleFunc("/serena/mcp", s.requireSameOrigin(s.serenaRouterHandler))
 }
 
 // toolBody is the narrow shape we decode from the incoming MCP body.
@@ -519,7 +515,7 @@ func writeRequiredFieldError(w http.ResponseWriter, field string) {
 	_, _ = fmt.Fprintf(w, `{"error": "missing required field: %s"}`, field)
 }
 
-func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
+func (s *WorkspaceRoutes) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// DELETE is the MCP Streamable HTTP client-origin session-termination
 	// method (Finding 3). A Streamable HTTP client sends DELETE /serena/mcp
 	// on shutdown; without this branch it would 405 and leak the upstream
@@ -1514,7 +1510,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 // request-scoped values), WithoutCancel preserves request values while
 // severing only cancellation — the exact posture an important best-effort
 // register needs.
-func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, sessionID, pathArg string) *api.WorkspaceEntry {
+func (s *WorkspaceRoutes) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Request, deps *serenaRouterDeps, id json.RawMessage, sessionID, pathArg string) *api.WorkspaceEntry {
 	if deps.AutoRegisterFn == nil {
 		writeWorkspaceNotFound(w, pathArg, false)
 		return nil
@@ -1648,7 +1644,7 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 // already done. peekVersionState does NOT refresh lastSeen, so polling here never
 // keeps a session artificially alive. The 500 ms cadence bounds the post-death
 // window without busy-spinning over the up-to-45 s register.
-func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string, sessions sessionRouter) {
+func (s *WorkspaceRoutes) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel context.CancelFunc, stop <-chan struct{}, sessionID string, sessions sessionRouter) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -1727,7 +1723,7 @@ func (s *Server) cancelAutoRegisterOnSessionDeath(ctx context.Context, cancel co
 // than rejecting a missing header outright (as the hub does) because the
 // router mints its own sessions and uses the session version as the source
 // of truth, the same posture Finding G takes on the tool-call path.
-func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
+func (s *WorkspaceRoutes) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("Mcp-Session-Id")
 	if sessionID == "" {
 		// No client session to tear down. Acknowledge (best-effort
@@ -1941,7 +1937,7 @@ func (s *Server) handleSerenaDelete(w http.ResponseWriter, r *http.Request) {
 // remains the fallback for Finding B's leak case (a daemon binding with an
 // EMPTY wsKey, or a key no longer registered, while the sticky binding still
 // resolves). Returns nil when neither path resolves it.
-func (s *Server) resolveDeleteWorkspace(deps *serenaRouterDeps, sessionID, wsKey string) *api.WorkspaceEntry {
+func (s *WorkspaceRoutes) resolveDeleteWorkspace(deps *serenaRouterDeps, sessionID, wsKey string) *api.WorkspaceEntry {
 	if deps == nil {
 		return nil
 	}
@@ -1965,7 +1961,7 @@ func (s *Server) resolveDeleteWorkspace(deps *serenaRouterDeps, sessionID, wsKey
 // workspaceLister capability (serena_router_lifecycle.go) — for the entry
 // whose WorkspaceKey == wsKey. Returns nil when the resolver cannot
 // enumerate workspaces or the key is no longer registered.
-func (s *Server) resolveWorkspaceByKey(deps *serenaRouterDeps, wsKey string) *api.WorkspaceEntry {
+func (s *WorkspaceRoutes) resolveWorkspaceByKey(deps *serenaRouterDeps, wsKey string) *api.WorkspaceEntry {
 	if deps == nil || wsKey == "" {
 		return nil
 	}
@@ -1995,7 +1991,7 @@ func (s *Server) resolveWorkspaceByKey(deps *serenaRouterDeps, wsKey string) *ap
 // the client gets its 204. Callers pass the negotiated version
 // (effectiveHandshakeProtocolVersion-resolved). An empty value omits the
 // header (sessionless daemon / legacy caller).
-func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, auditFn func(level, event string, fields map[string]any) error) {
+func (s *WorkspaceRoutes) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, auditFn func(level, event string, fields map[string]any) error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, upstreamURL, nil)
 	if err != nil {
 		_ = auditFn("warn", "serena-upstream-delete-failed", map[string]any{
@@ -2060,7 +2056,7 @@ func (s *Server) forwardSerenaDeleteUpstream(ctx context.Context, httpClient *ht
 // in-flight daemon request it never legitimately negotiated. A matching or
 // missing header (or an UNKNOWN session — a legacy direct caller) forwards
 // as before with the resolved version (V-forward).
-func (s *Server) handleSerenaCancelled(
+func (s *WorkspaceRoutes) handleSerenaCancelled(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *serenaRouterDeps,
@@ -2223,7 +2219,7 @@ func (s *Server) handleSerenaCancelled(
 // cancels the matching in-flight tool call. Best-effort: a transport
 // failure or a non-2xx status is audited (warn) but never propagated (a
 // cancellation notification has no response).
-func (s *Server) forwardSerenaCancelledUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, body []byte, auditFn func(level, event string, fields map[string]any) error) {
+func (s *WorkspaceRoutes) forwardSerenaCancelledUpstream(ctx context.Context, httpClient *http.Client, upstreamURL, daemonSessionID, protocolVersion, wsKey string, ws *api.WorkspaceEntry, body []byte, auditFn func(level, event string, fields map[string]any) error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		_ = auditFn("warn", "serena-upstream-cancel-failed", map[string]any{

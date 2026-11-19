@@ -1,4 +1,4 @@
-// internal/gui/serena_router_lifecycle.go
+// internal/mcproute/serena_router_lifecycle.go
 //
 // MCP session-lifecycle synthesis for the /serena/mcp router
 // (ROUTER-COMPLETION phase; design
@@ -14,7 +14,7 @@
 // and no bound session). Tool calls (params.name + path-arg, or a bound
 // session) keep their existing path-routing + upstream-forward unchanged
 // in serenaRouterHandler.
-package gui
+package mcproute
 
 import (
 	"bufio"
@@ -51,6 +51,7 @@ import (
 //   - DEL/C1 controls and Unicode bidi/line/paragraph separators → '?';
 //   - invalid UTF-8 bytes → '?' so a raw C1 byte cannot hide behind a decode
 //     failure.
+//
 // Everything else (printable ASCII + safe UTF-8) passes through unchanged.
 func sanitizeRefusalPath(s string) string {
 	if s == "" {
@@ -573,7 +574,7 @@ func toolsListIsCursorRequest(body []byte) bool {
 // type/version validation below mirror the hub handler's handleInitialize
 // (internal/api/hub_mcp_handler.go) so the router and hub reject the same
 // non-compliant clients identically.
-func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBody, incomingSessionID string) {
+func (s *WorkspaceRoutes) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBody, incomingSessionID string) {
 	// Finding 1 (mirror hub handleInitialize): a session id on initialize
 	// is invalid — initialize is what mints the session. Reject it instead
 	// of echoing the caller-supplied id (which would let a client
@@ -704,7 +705,7 @@ func (s *Server) handleInitialize(w http.ResponseWriter, body []byte, tb *toolBo
 //
 // NOTE: id-less ping is gated to 202 by the caller (serenaRouterHandler)
 // before this runs, so the ping branch here only sees id-bearing pings.
-func (s *Server) handleNotificationOrPing(w http.ResponseWriter, tb *toolBody) bool {
+func (s *WorkspaceRoutes) handleNotificationOrPing(w http.ResponseWriter, tb *toolBody) bool {
 	switch {
 	case tb.Method == "ping":
 		// Reaches here only with an id present (the caller's notification
@@ -782,7 +783,7 @@ func isNotificationMethod(method string) bool {
 // operator runs `mcphub workspace register`; a fail-loud error is the
 // honest, retryable signal consistent with the router's fail-closed
 // posture.
-func (s *Server) handleToolsList(
+func (s *WorkspaceRoutes) handleToolsList(
 	w http.ResponseWriter,
 	r *http.Request,
 	deps *serenaRouterDeps,
@@ -1012,7 +1013,7 @@ func (s *Server) handleToolsList(
 //
 // The returned map is keyed by TaskName (the same key handleToolsList filters
 // entries on); it is nil when no candidate was excluded.
-func (s *Server) wakeOneSerenaCandidateForToolsList(
+func (s *WorkspaceRoutes) wakeOneSerenaCandidateForToolsList(
 	r *http.Request,
 	deps *serenaRouterDeps,
 	entries []*api.WorkspaceEntry,
@@ -1253,7 +1254,7 @@ func toolsListErrorCode(errObj json.RawMessage) (int, bool) {
 // error, the loop returns the LAST server error envelope (forwarded to the
 // client, preserving the signal) rather than the generic transport error. Only a
 // genuine transport/handshake failure (the `err` return) is recorded in lastErr.
-func (s *Server) fetchToolsListFromAnyDaemon(
+func (s *WorkspaceRoutes) fetchToolsListFromAnyDaemon(
 	ctx context.Context,
 	entries []*api.WorkspaceEntry,
 	body []byte,

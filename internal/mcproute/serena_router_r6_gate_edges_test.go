@@ -1,4 +1,4 @@
-package gui
+package mcproute
 
 import (
 	"context"
@@ -99,10 +99,10 @@ func TestSerenaRouter_RevalidatesWorkspaceAfterGateEntry(t *testing.T) {
 	}
 	s := newSerenaTestServer(t, deps)
 	resolver.onFirst = func() {
-		if !s.beginSerenaPrune(stale.WorkspaceKey) {
+		if !s.BeginSerenaPrune(stale.WorkspaceKey) {
 			t.Fatalf("precondition: could not start prune for %s", stale.WorkspaceKey)
 		}
-		s.endSerenaPrune(stale.WorkspaceKey)
+		s.EndSerenaPrune(stale.WorkspaceKey)
 	}
 
 	sid := mintRouterSession(t, s, "2025-11-25")
@@ -245,13 +245,13 @@ func TestRouterToolsList_WakePruneCandidateExcludedFromFetch(t *testing.T) {
 		WakeIdleFn: func(context.Context, string, int, string) error { return nil },
 	}
 	s := newSerenaTestServer(t, deps)
-	if !s.beginSerenaPrune(pruned.WorkspaceKey) {
+	if !s.BeginSerenaPrune(pruned.WorkspaceKey) {
 		t.Fatalf("precondition: could not hold prune gate for %s", pruned.WorkspaceKey)
 	}
 	gateHeld := true
 	defer func() {
 		if gateHeld {
-			s.endSerenaPrune(pruned.WorkspaceKey)
+			s.EndSerenaPrune(pruned.WorkspaceKey)
 		}
 	}()
 
@@ -268,7 +268,7 @@ func TestRouterToolsList_WakePruneCandidateExcludedFromFetch(t *testing.T) {
 		}
 		assertToolsListNames(t, rr.Body.Bytes(), []string{"find_symbol"})
 	case <-time.After(300 * time.Millisecond):
-		s.endSerenaPrune(pruned.WorkspaceKey)
+		s.EndSerenaPrune(pruned.WorkspaceKey)
 		gateHeld = false
 		select {
 		case <-done:
@@ -279,14 +279,14 @@ func TestRouterToolsList_WakePruneCandidateExcludedFromFetch(t *testing.T) {
 	if prunedHits != 0 {
 		t.Fatalf("pruned candidate was fetched %d time(s); want 0", prunedHits)
 	}
-	s.endSerenaPrune(pruned.WorkspaceKey)
+	s.EndSerenaPrune(pruned.WorkspaceKey)
 	gateHeld = false
 }
 
 func TestRouterToolsList_RewakesCandidateIdleStoppedAfterWake(t *testing.T) {
 	ws := serenaWS("tools-list-rewake-after-idle-stop", "/proj/tools-list-rewake-after-idle-stop", 9345)
 
-	var s *Server
+	var s *WorkspaceRoutes
 	var mu sync.Mutex
 	awake := false
 	wakeCalls := 0

@@ -1,4 +1,4 @@
-// internal/gui/serena_router_invariant_d_test.go
+// internal/mcproute/serena_router_invariant_d_test.go
 //
 // Tests for the cross-cutting Invariant D (best-effort fire-and-forget
 // upstream calls: one-shot teardowns + cancellation forwards) plus the
@@ -18,7 +18,7 @@
 //	            router requested binds subsequent forwards to the
 //	            daemon-negotiated version.
 //	#3        — a present-but-malformed tools/list cursor bypasses the cache.
-package gui
+package mcproute
 
 import (
 	"bytes"
@@ -41,7 +41,7 @@ import (
 // postSerenaCtx is postSerena with a caller-supplied request context, so a
 // test can cancel the inbound context and assert a detached best-effort
 // upstream call still fires (D-detach).
-func postSerenaCtx(t *testing.T, s *Server, ctx context.Context, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+func postSerenaCtx(t *testing.T, s *WorkspaceRoutes, ctx context.Context, body []byte, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/serena/mcp", bytes.NewReader(body))
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -53,7 +53,7 @@ func postSerenaCtx(t *testing.T, s *Server, ctx context.Context, body []byte, he
 		req.Header.Set(k, v)
 	}
 	rr := httptest.NewRecorder()
-	s.mux.ServeHTTP(rr, req)
+	workspaceTestMux(s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -499,13 +499,13 @@ func TestSerenaRouter_ToolCall_WaitedThroughPruneReResolvesWorkspace(t *testing.
 	}
 	s := newSerenaTestServer(t, deps)
 
-	if !s.beginSerenaPrune(ws.WorkspaceKey) {
+	if !s.BeginSerenaPrune(ws.WorkspaceKey) {
 		t.Fatalf("precondition: could not hold prune gate for %s", ws.WorkspaceKey)
 	}
 	gateHeld := true
 	defer func() {
 		if gateHeld {
-			s.endSerenaPrune(ws.WorkspaceKey)
+			s.EndSerenaPrune(ws.WorkspaceKey)
 		}
 	}()
 
@@ -521,7 +521,7 @@ func TestSerenaRouter_ToolCall_WaitedThroughPruneReResolvesWorkspace(t *testing.
 	}
 
 	resolver.replaceEntries(nil)
-	s.endSerenaPrune(ws.WorkspaceKey)
+	s.EndSerenaPrune(ws.WorkspaceKey)
 	gateHeld = false
 
 	select {
