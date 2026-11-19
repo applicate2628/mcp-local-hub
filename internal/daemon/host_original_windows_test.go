@@ -16,11 +16,27 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"mcp-local-hub/internal/process"
 )
 
-const stdioOriginalHelperMode = "MCPHUB_STDIO_ORIGINAL_HELPER_MODE"
-const stdioOriginalHelperRoot = "MCPHUB_STDIO_ORIGINAL_HELPER_ROOT"
+func init() {
+	stdioOriginalHelperDirectoryCheck = func(root string) error {
+		path, err := windows.UTF16PtrFromString(root)
+		if err != nil {
+			return err
+		}
+		attributes, err := windows.GetFileAttributes(path)
+		if err != nil {
+			return fmt.Errorf("original stdio helper directory: %w", err)
+		}
+		if attributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 ||
+			attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+			return errors.New("original stdio helper root must be an existing non-reparse directory")
+		}
+		return nil
+	}
+}
 
 func TestStdioOriginalHelper(t *testing.T) {
 	mode := os.Getenv(stdioOriginalHelperMode)

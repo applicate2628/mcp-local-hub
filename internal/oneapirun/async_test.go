@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"mcp-local-hub/internal/api/apitest"
+
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -16,7 +18,7 @@ func TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt(t *testing.T) {
 	command, args, _ := trivialEcho()
 	rs := newTestServer(nil, false, nil)
 	owner, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
-		StatePath: t.TempDir() + "/runs-v1.json",
+		StatePath: apitest.HardenedTempDir(t) + "/runs-v1.json",
 		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
 			return asyncExecution{Result: runResult{ExitCode: 0, Stdout: "fixture"}}
 		},
