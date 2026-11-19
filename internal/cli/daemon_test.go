@@ -15,6 +15,8 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/daemon"
 	"mcp-local-hub/internal/secrets"
 )
 
@@ -1112,5 +1114,109 @@ func TestFormatChildExit_RealProcessShowsExitCode(t *testing.T) {
 	}
 	if !strings.Contains(suffix, "pid=") {
 		t.Errorf("suffix=%q must contain pid=...", suffix)
+	}
+}
+
+func TestDaemonCmdProtectedStdioRefusesBeforeEffects(t *testing.T) {
+	const selected = "sequential-thinking"
+	const header = "name: " + selected + "\nkind: global\ntransport: stdio-bridge\ncommand: fixture-child\ndaemons:\n"
+	const local = "    mcp_stdio_state: session-local\n"
+	const shared = "    mcp_stdio_state: shared\n"
+	const first = "  - name: default\n    port: 9134\n"
+	const second = "  - name: default\n    port: 9135\n"
+	const unresolved = "base_args: ['${MCPHUB_TEST_MISSING_STDIO_STATE}']\n"
+	t.Setenv("MCPHUB_TEST_MISSING_STDIO_STATE", "")
+	cases := []struct {
+		name, rows string
+		want       error
+	}{
+		{"isolated override wins over shipped shared row", first + local, daemon.ErrIsolatedStdioUnavailable},
+		{"omitted then isolated", first + second + local, config.ErrAmbiguousDaemonMCPStdioState},
+		{"isolated then omitted", first + local + second, config.ErrAmbiguousDaemonMCPStdioState},
+		{"shared then isolated", first + shared + second + local, config.ErrAmbiguousDaemonMCPStdioState},
+		{"isolated then shared", first + local + second + shared, config.ErrAmbiguousDaemonMCPStdioState},
+		{"repeated isolated", first + local + second + local, config.ErrAmbiguousDaemonMCPStdioState},
+		{"non-string before diagnostic", first + "    mcp_stdio_state: [PRIVATE-MODE-MARKER]\n", config.ErrInvalidDaemonMCPStdioState},
+		{"null before diagnostic", first + "    mcp_stdio_state: null\n", config.ErrInvalidDaemonMCPStdioState},
+		{"isolated with unresolved environment", first + local + unresolved, daemon.ErrIsolatedStdioUnavailable},
+		{"mixed with unresolved environment", first + shared + second + local + unresolved, config.ErrAmbiguousDaemonMCPStdioState},
+		{"repeated with unresolved environment", first + local + second + local + unresolved, config.ErrAmbiguousDaemonMCPStdioState},
+		{"ordinary unresolved environment keeps diagnostic", first + shared + unresolved, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			state := t.TempDir()
+			t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
+			t.Setenv("LOCALAPPDATA", state)
+			t.Setenv("XDG_STATE_HOME", state)
+			dir := filepath.Join(root, selected)
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(header+tc.rows), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			cmd := newDaemonCmdWithLaunchBarrier(func() error {
+				calls++
+				return errors.New("unexpected launch preparation")
+			})
+			if tc.want == nil {
+				cmd = newDaemonCmdReal()
+			}
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			cmd.SetOut(io.Discard)
+			cmd.SetArgs([]string{"--server", selected, "--daemon", "default"})
+			err := cmd.Execute()
+			if tc.want == nil {
+				const unresolvedError = "manifest references unresolved environment variable(s)"
+				if err == nil || !strings.Contains(err.Error(), unresolvedError) {
+					t.Fatalf("ordinary error = %v, want unresolved environment", err)
+				}
+				logPath := filepath.Join(state, "mcp-local-hub", "logs", selected+"-default.log")
+				raw, err := os.ReadFile(logPath)
+				if err != nil || !strings.Contains(string(raw), unresolvedError) {
+					t.Fatalf("ordinary DM-3 diagnostic missing, read error = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) || strings.Contains(err.Error()+stderr.String(), "PRIVATE-MODE-MARKER") {
+				t.Fatalf("command error = %v, want content-free %v", err, tc.want)
+			}
+			if calls != 0 {
+				t.Fatalf("launch preparation called %d times", calls)
+			}
+			if _, err := os.Stat(filepath.Join(state, "mcp-local-hub")); !os.IsNotExist(err) {
+				t.Fatalf("expected no daemon log directory, stat error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDaemonCmdPreparedSelectorStaysSerenaOnly(t *testing.T) {
+	reached := errors.New("prepared observer boundary")
+	for _, server := range []string{"sequential-thinking", api.SerenaServerName} {
+		t.Run(server, func(t *testing.T) {
+			calls := 0
+			cmd := newDaemonCmdWithLaunchBarrier(func() error {
+				calls++
+				return reached
+			})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{
+				"--server", server, "--daemon", "default",
+				"--task-name", "mcp-local-hub-serena-default", "--startup-bind-deadline-seconds", "120",
+			})
+			want, wantCalls := errPreparedDaemonRequiresSerena, 0
+			if server == api.SerenaServerName {
+				want, wantCalls = reached, 1
+			}
+			if err := cmd.Execute(); !errors.Is(err, want) || calls != wantCalls {
+				t.Fatalf("prepared command error = %v, calls = %d, want %v and %d", err, calls, want, wantCalls)
+			}
+		})
 	}
 }
