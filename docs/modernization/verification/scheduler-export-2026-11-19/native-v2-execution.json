@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "provenance": "Curated from this executor's tool responses and approval sequence; not produced by the file analyzer.",
+  "authorization": {
+    "user_reply": "да",
+    "scope": "One exact recovery invocation, then only after recorded successful recovery one exact V2 invocation; no repeats.",
+    "permitted_process_execution_policy": "RemoteSigned in each new session and its children; no persistent policy changes"
+  },
+  "preflight": {
+    "observed_utc": "2026-11-19T17:01:10.340766+00:00",
+    "all_hashes_match": true,
+    "checked_file_count": 10,
+    "existing_recovery_files": {
+      "recovery-visible-intent.json": false,
+      "recovery-visible-result.json": false
+    },
+    "files": [
+      {
+        "name": "Recover-R17VisibleFixture.ps1",
+        "bytes": 8480,
+        "sha256": "3e0f68e2858d6a214a2ecd14db26a973d92149c553275df2e3a323b06a1a0c89"
+      },
+      {
+        "name": "Invoke-R17HiddenFixture-v2.ps1",
+        "bytes": 13579,
+        "sha256": "8118e1c02937dbf27a9aaa12f63f4e34a91b0ce3e7ad675b4e1758960c9cb010"
+      },
+      {
+        "name": "scheduler_com_windows-1b870e04.go",
+        "bytes": 10040,
+        "sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+      },
+      {
+        "name": "Invoke-R17HiddenFixture.ps1",
+        "bytes": 13619,
+        "sha256": "6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c"
+      },
+      {
+        "name": "intent.json",
+        "bytes": 734,
+        "sha256": "eab630c66d1c377d7201f204c6b29f2fd6933a462e856936af4de5e2e5eb2d8d"
+      },
+      {
+        "name": "result.json",
+        "bytes": 5367,
+        "sha256": "c151564a1c5d873aa4f3197b91124289235b8d73e4d1d472f6f778afe0971833"
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible.xml",
+        "bytes": 1262,
+        "sha256": "28affda1fe9d55a47e7bc5cbd9add47a041bc7e28c0e7d1da2b10f988b853c97"
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden.xml",
+        "bytes": 1288,
+        "sha256": "09348cba1f2219e842d78bab9c9d94bb8a46bd27e81cb37587900acdbdbbfd53"
+      },
+      {
+        "name": "status-visible.json",
+        "bytes": 1918,
+        "sha256": "7f1acf1e4659982ec7992fb4868fc476707d160bb9e9d25998a30a4bdefcc13b"
+      },
+      {
+        "name": "status-visible.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      }
+    ]
+  },
+  "recovery": {
+    "invocation_count": 1,
+    "command": "powershell.exe -ExecutionPolicy RemoteSigned -NoProfile -NonInteractive -File \"D:\\dev\\ChatGPT\\mcp-r17-resume-20261119\\Recover-R17VisibleFixture.ps1\" -Apply",
+    "tool_reported_finished": true,
+    "outer_exit_code_observed": false,
+    "outer_exit_code": null,
+    "stdout": {
+      "state": "ABSENCE_OBSERVED",
+      "delete_attempted": true,
+      "absence_observed": true,
+      "receipt_written": true,
+      "evidence": "D:\\dev\\ChatGPT\\mcp-r17-native-qualification-20261119\\d55a6763eb064445a46ef592d52a9e6f"
+    },
+    "intent_started_utc": "2026-11-19T17:01:55.2765148Z",
+    "recorded_completed_utc": "2026-11-19T17:01:56.2017613Z",
+    "result_read_back_before_v2": true,
+    "gate_checked_before_v2": true,
+    "result_sha256": "144796b7bb6c8666a3449b7389b0b891df296796ce5178eeecacba3f823b4f56",
+    "intent_sha256": "12ef4dcc3619a7672ffeb9d184c1de71821ee1f11bdbcedfca99d7e1d8ebc1e6"
+  },
+  "v2": {
+    "invocation_count": 1,
+    "command": "powershell.exe -ExecutionPolicy RemoteSigned -NoProfile -NonInteractive -File \"D:\\dev\\ChatGPT\\mcp-r17-resume-20261119\\Invoke-R17HiddenFixture-v2.ps1\" -SourceFile \"D:\\dev\\ChatGPT\\mcp-r17-resume-20261119\\scheduler_com_windows-1b870e04.go\" -Apply",
+    "tool_reported_finished": true,
+    "outer_exit_code_observed": false,
+    "outer_exit_code": null,
+    "stdout": {
+      "reads_passed": true,
+      "cleanup_complete": true,
+      "evidence": "D:\\dev\\ChatGPT\\mcp-r17-native-qualification-20261119\\68c2db3e983a41f9bded8e068e88bab8",
+      "failure_recorded": false
+    }
+  },
+  "read_only_observation": {
+    "invocation_count": 1,
+    "script": "Observe-R17NativeV2.ps1",
+    "transport": "powershell.exe -NoProfile -NonInteractive -Command; authored lines joined with spaces",
+    "execution_policy_argument": false,
+    "tool_reported_finished": true,
+    "recorded_utc": "2026-11-19T17:05:58.7262160Z",
+    "receipt_sha256": "e148779f337234e2f7b57c77f5e8ab32e57a151783dc0a01ff0bcfda77107078"
+  },
+  "file_analysis": {
+    "script": "inspect_native_v2.py",
+    "executed_sha256": "b83792b064f9a368c582d9252d4a27783e70af76e520275b1bab4bf64489bbcf",
+    "tool_reported_finished": true,
+    "analyzed_utc": "2026-11-19T17:11:20.836780+00:00",
+    "report_bytes": 11202,
+    "report_sha256": "85fcbd2e4e5324c7b8e7ce9f88fd5fa6b364e1ff662a97314fc01452b0d7e1b2",
+    "report_read_back_exact": true
+  },
+  "terminal_sessions_after": "No active sessions reported by the service; not a global OS process inventory."
+}

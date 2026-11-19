@@ -1,6 +1,6 @@
-# R17 / #660: two-task native fixture proposal
+# R17 / #660: two-task native fixture and qualification
 
-**Status: the single authorized original run failed; corrected V2 is prepared and syntax-checked, not applied.** See [the native result](NATIVE-RESULTS.md) and [the retained-task recovery](RECOVERY.md). One visible fixture remains disabled. Another full run requires a new exact approval and confirmed cleanup of that retained task first.
+**Status: the separately approved recovery and one V2 invocation completed. All seven native read checks passed; both V2 tasks were removed.** A later read-only enumeration found all four names from both attempts absent. See [the V2 result](NATIVE-V2-RESULTS.md) and [the verified evidence](native-v2-evidence.json). The [original failed attempt](NATIVE-RESULTS.md) remains historical. Both one-shot permissions are consumed; this record does not authorize another run.
 
 ## Contents
 
@@ -20,7 +20,7 @@ Both definitions are disabled before registration, registered with `TASK_CREATE 
 
 The script requests only `status`, `export`, and `list` from the production script. **It never requests task Run, RunOwned, or Stop.** Windows PowerShell child processes execute the read requests; no fixture action is invoked. An unresolved child is recorded and prevents task cleanup. On a read timeout, the script terminates only its retained child process object, never a process selected by name.
 
-The proposed approval covers conditional removal of these confirmed creations after an immediate ownership and definition recheck. The previous one-session `RemoteSigned` approval was used by the original run. Another session and full retry have not been approved. The future request includes `RemoteSigned` for the new session and its children only, using the exact command below. It does not cover any existing task, installed Hub, service, scheduled run, access-control policy, persistent user/machine execution-policy change, Group Policy change, installation, network operation, or additional branch. A name collision fails CREATE; there is no UPDATE, CREATE_OR_UPDATE, `/F`, or fallback mechanism. If the approved invocation is still blocked, stop and report that boundary.
+The separately granted sequence covered one exact recovery of the original retained visible fixture, followed only after verified recovery by one V2 invocation and conditional removal of its confirmed creations. Both invocations completed once. Each used `RemoteSigned` for its new session and children only. The command below records the executed V2 invocation; a later retry would require its own approval. Apart from the separately identified recovery target, that sequence did not cover any other existing task, installed Hub, service, scheduled run, access-control policy, persistent user/machine execution-policy change, Group Policy change, installation, network operation, or additional branch. A name collision fails CREATE; there is no UPDATE, CREATE_OR_UPDATE, `/F`, or fallback mechanism. If the approved invocation is still blocked, stop and report that boundary.
 
 ## Exact input and invocation
 
@@ -39,13 +39,13 @@ $source  = 'D:\dev\ChatGPT\mcp-r17-resume-20261119\scheduler_com_windows-1b870e0
 # Default path: plan only if permitted. V2 default execution has not been attempted.
 powershell.exe -NoProfile -NonInteractive -File $fixture
 
-# PROPOSAL ONLY: new approval and confirmed recovery of the retained visible task required.
+# Executed once after approved recovery; this record is not permission to rerun.
 powershell.exe -ExecutionPolicy RemoteSigned -NoProfile -NonInteractive -File $fixture -SourceFile $source -Apply
 ```
 
 The script has no automatic elevation. It explicitly refuses `WindowsIdentity.IsSystem`, session 0, or a noninteractive Windows station; it does not classify every possible service account. Registration uses the current identity without credentials. It requires the authorized root and parent directories to be real directories rather than junctions. It creates a new per-run evidence directory; it never overwrites a previous run directory.
 
-The `-ExecutionPolicy` argument applies to the new session and its children without changing registry policy. Group Policy takes precedence [7, 8]. `RemoteSigned` allows locally written unsigned scripts but can still reject files marked as downloaded; no `Unblock-File`, `Bypass`, persistent policy change, or alternate execution route is proposed. This is a request for a specific exception, not an assumption that the host will permit it.
+The `-ExecutionPolicy` argument applies to the new session and its children without changing registry policy. Group Policy takes precedence [7, 8]. `RemoteSigned` allows locally written unsigned scripts but can still reject files marked as downloaded; no `Unblock-File`, `Bypass`, persistent policy change, or alternate execution route is proposed. Both explicitly approved invocations completed; that observation grants no additional policy exception or future invocation.
 
 ## Completed preparation and host block
 
@@ -61,9 +61,9 @@ The fixture computes its source digest through .NET rather than that module's `G
 
 ## Checks and the meaning of success
 
-The V2 change removes only the extra nonempty-stderr failure predicate. Stderr remains recorded; nonzero exit, invalid JSON, and failed semantic assertions remain failures. The saved original response and stderr establish the false failure; they do not replace a V2 native run. [V2 syntax receipt](fixture-v2-validation.json): zero errors, 2449 tokens, no script evaluation.
+The V2 change removes only the extra nonempty-stderr failure predicate. Stderr remains recorded; nonzero exit, invalid JSON, and failed semantic assertions remain failures. The saved original response and stderr establish the false failure; the later separately approved V2 native run is recorded in [NATIVE-V2-RESULTS.md](NATIVE-V2-RESULTS.md). [V2 syntax receipt](fixture-v2-validation.json): zero errors, 2449 tokens, no script evaluation.
 
-**Table 1. Required native observations.** The original run reached only the first request and stopped before accepting its semantic assertions. The complete suite has not passed.
+**Table 1. Required native observations.** The original run stopped before accepting its first semantic check. The later V2 invocation passed all seven observations below and confirmed cleanup; the historical failure remains unchanged.
 
 | Request | Required observation |
 |---|---|
@@ -131,11 +131,11 @@ All output stays under `D:\dev\ChatGPT\mcp-r17-native-qualification-20261119\<gu
 
 Evidence and recovery files remain outside trash. There is no automatic file deletion, trash purge, or removal of uncertain state. The missing executable is intentionally never created.
 
-A future successful run would qualify the exact production PowerShell script against the native scheduler on that machine, for the cases in Table 1. It would **not** qualify the Go public backend, its subprocess launch arguments or timeout mapping, Go error conversion, public status conversion, successful RunOwned, running Stop, production Delete, task action settlement, access-denied behavior, policy behavior, or release/installable-product readiness. The extra `-EncodedCommand` transport is part of this proposal, while production Go uses `-Command`. Both carry the same source script, but their launch paths are not asserted equivalent by this test.
+The successful V2 run qualifies the exact production PowerShell script against the native scheduler on that machine for the cases in Table 1. It does **not** qualify the Go public backend, its subprocess launch arguments or timeout mapping, Go error conversion, public status conversion, successful RunOwned, running Stop, production Delete, task action settlement, access-denied behavior, policy behavior, or release/installable-product readiness. The extra `-EncodedCommand` transport is part of this proposal, while production Go uses `-Command`. Both carry the same source script, but their launch paths are not asserted equivalent by this test.
 
 The 15-second wait in `Invoke-ProductionRead` bounds only child-process exit. Reading the two asynchronous stream results has no separate deadline, and in-process COM calls have no enforced overall deadline. The source review found no descendant process launch in the pinned read script that would keep an inherited stream writer open, but this is not proof of a globally bounded run. An interrupted run requires the recovery procedure above.
 
-Historical preparation included review and the parser/blocked default invocation described above. The later original run created two tasks, removed the hidden one and retained the visible one after the stderr gate failed. The corrected version has only been statically reviewed and parsed. Its publication is not native qualification, and its next Apply must wait for the separately authorized recovery and retry sequence.
+Historical preparation included review and the parser/blocked default invocation described above. The later original run created two tasks, removed the hidden one and retained the visible one after the stderr gate failed. The corrected version later passed the seven-read native suite after the separately approved recovery. The new [file analyzer](inspect_native_v2.py) verified 31 saved files; the separate [read-only observation](Observe-R17NativeV2.ps1) found all four names absent. The tool exposed no numeric outer-shell exit codes, while all seven recorded child exit codes are zero. See [the exact scope and limits](NATIVE-V2-RESULTS.md#limits).
 
 ## Primary contracts
 
