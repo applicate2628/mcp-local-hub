@@ -27,10 +27,11 @@ type schedulerCOMRequest struct {
 }
 
 type schedulerCOMTask struct {
-	Name  string `json:"name"`
-	State int    `json:"state"`
-	XML   string `json:"xml,omitempty"`
-	Owner string `json:"owner,omitempty"`
+	Name       string `json:"name"`
+	State      int    `json:"state"`
+	XML        string `json:"xml,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	LastResult *int32 `json:"last_result"`
 }
 
 type schedulerCOMResponse struct {
@@ -46,6 +47,11 @@ type schedulerCOMResponse struct {
 // The script is fixed code. Request values arrive solely through JSON stdin;
 // task names are never interpolated into PowerShell source.
 const schedulerCOMScript = `$r=[Console]::In.ReadToEnd()|ConvertFrom-Json;try{
+function Get-TaskLastResult($task){
+ $result=$task.LastTaskResult
+ if($null -eq $result){throw 'task result unavailable'}
+ return [int]$result
+}
 function Get-OwnerSID([string]$owner){
  if([string]::IsNullOrWhiteSpace($owner)){return ''}
  if($owner.StartsWith('S-1-')){return ([System.Security.Principal.SecurityIdentifier]::new($owner)).Value}
@@ -91,7 +97,7 @@ function Test-OwnedDefinition($task,[string]$snapshot,$request){
 $s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');
 # Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
 $flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
-if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
+if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId;last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
 if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};
 if($r.operation -eq 'run_owned'){
  $snapshot=[string]$t.Xml
@@ -109,7 +115,9 @@ if($r.operation -eq 'run_owned'){
 if($r.operation -eq 'delete'){$f.DeleteTask($t.Name,0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};
 if($r.operation -eq 'stop'){if([int]$t.State -ne 4){[pscustomobject]@{ok=$false;kind='task_not_running'}|ConvertTo-Json -Compress;exit};$t.Stop(0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};
 if($r.operation -notin @('status','export')){[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='operation'}|ConvertTo-Json -Compress;exit};
-[pscustomobject]@{ok=$true;task=[pscustomobject]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}}|ConvertTo-Json -Compress -Depth 4
+$row=[ordered]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}
+if($r.operation -eq 'status'){$row['last_result']=Get-TaskLastResult $t}
+[pscustomobject]@{ok=$true;task=[pscustomobject]$row}|ConvertTo-Json -Compress -Depth 4
 }catch{[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress}`
 
 var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (schedulerCOMResponse, error) {
@@ -177,5 +185,14 @@ func taskStatusFromCOM(task schedulerCOMTask) (TaskStatus, error) {
 	default:
 		return TaskStatus{}, fmt.Errorf("%w: unknown task state %d", ErrUnavailable, task.State)
 	}
-	return TaskStatus{Name: `\` + strings.TrimPrefix(task.Name, `\`), RuntimeState: state, Owner: task.Owner, State: map[TaskRuntimeState]string{TaskRuntimeDisabled: "Disabled", TaskRuntimeQueued: "Queued", TaskRuntimeReady: "Ready", TaskRuntimeRunning: "Running"}[state]}, nil
+	if task.LastResult == nil {
+		return TaskStatus{}, fmt.Errorf("%w: missing task result", ErrUnavailable)
+	}
+	return TaskStatus{
+		Name:         `\` + strings.TrimPrefix(task.Name, `\`),
+		RuntimeState: state,
+		LastResult:   int(*task.LastResult),
+		Owner:        task.Owner,
+		State:        map[TaskRuntimeState]string{TaskRuntimeDisabled: "Disabled", TaskRuntimeQueued: "Queued", TaskRuntimeReady: "Ready", TaskRuntimeRunning: "Running"}[state],
+	}, nil
 }

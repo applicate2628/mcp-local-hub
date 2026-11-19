@@ -53,9 +53,12 @@ type TaskStatus struct {
 	Name         string
 	State        string // display-only compatibility projection
 	RuntimeState TaskRuntimeState
-	LastResult   int    // exit code of last run, or -1 if never run
-	NextRun      string // human-readable, backend-specific
-	Owner        string // backend-specific task owner/account, if available
+	// LastResult is the backend's observed task result, not proof of readiness.
+	// Windows preserves the signed 32-bit native code without normalization.
+	// Sources without runtime data may use -1; it can also be a native code.
+	LastResult int
+	NextRun    string // human-readable, backend-specific
+	Owner      string // backend-specific task owner/account, if available
 }
 
 type TaskRuntimeState uint8

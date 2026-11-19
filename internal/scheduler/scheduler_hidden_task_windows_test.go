@@ -36,8 +36,8 @@ func TestSchedulerCOMHiddenTaskLookup(t *testing.T) {
 	const visibleXML = `<Task><Settings><Hidden>false</Hidden></Settings></Task>`
 	const hiddenXML = `<Task><Settings><Hidden>true</Hidden></Settings><RegistrationInfo><Description>Привет §</Description></RegistrationInfo></Task>`
 	const fixtureBody = `
-$visible=[pscustomobject]@{Name='fixture-visible';Hidden=$false;State=3;Xml=[string]$script:fixture.visible_xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}}}
-$hidden=[pscustomobject]@{Name='fixture-hidden';Hidden=$true;State=[int]$script:fixture.hidden_state;Xml=[string]$script:fixture.hidden_xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}}}
+$visible=[pscustomobject]@{Name='fixture-visible';Hidden=$false;State=3;LastTaskResult=0;Xml=[string]$script:fixture.visible_xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}}}
+$hidden=[pscustomobject]@{Name='fixture-hidden';Hidden=$true;State=[int]$script:fixture.hidden_state;LastTaskResult=0;Xml=[string]$script:fixture.hidden_xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}}}
 foreach($task in @($visible,$hidden)){$task|Add-Member ScriptMethod Stop {param($flags);[Console]::Error.WriteLine('fixture-stop:'+ $this.Name)}}
 $script:fixtureTasks=@($visible,$hidden)
 $script:fixtureFolder=[pscustomobject]@{}
