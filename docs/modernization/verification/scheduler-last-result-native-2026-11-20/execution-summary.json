@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "validation": "PASS",
+  "mode": "saved_files_only",
+  "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+  "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+  "verified_utc": "2026-11-19T22:40:50.245159+00:00",
+  "claim": "observed_native_last_result_transfer_only",
+  "source_sha256": {
+    "PROBE.md": "df7314d31ce9a10ab7c9627cb1afda94a2f17a592e111a68159ffa9bb425ab90",
+    "probe.go": "951b34ef26eb98238efd2589bca29a36c074f4c0424984aa7ecd56f87a1410f1",
+    "run_probe.py": "728c5d9fa0431fc65c565b6f38657c6cec935740420f344697cf68e433c34216",
+    "snapshot.ps1": "c327a31e4fe952e87ad64bc0020a3a223fc9af44d09aa46996871ac64165e1d7",
+    "observe_candidates.ps1": "aa7777092f7eb1b01bd2676bd6309e60f43caa063785ffb7180e187910ef87de",
+    "run_observation.py": "15c6eb66b3ce083d0b020b0613a7a07d0797002c2cd32ef0692e1248dffa527c",
+    "observe_owned_processes.py": "a371cdc38aadaa8fa286878f27868a304f535ca21d452b8482f14ece593b78c1",
+    "history/probe-unformatted.go": "08610c3f23b8db7fa82c600f4322c2c219dcbe10f5df1dd052e18825442dbb0b",
+    "history/run_probe-prepare1.py": "29fe2719655e6e14a89480e8316f04a6f286f9b9c40fa972cb4a2c7b2fbb037e",
+    "package_evidence.py": "b3ce5bf07e176b91ad332d610927056d989ed4e0c122b26ad3d66063926a4db0"
+  },
+  "binary_sha256": "25d0d47edfda212512c36df614729eb81b49ef27bf8b2d4bbd21aaa021a66576",
+  "all_recorded_direct_children_settled": true,
+  "stream_checks": {
+    "prepare/go-version.stdout.log": {
+      "original_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "original_bytes": 34,
+      "recorded_size_present": true
+    },
+    "prepare/go-version.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare/gofmt-check.stdout.log": {
+      "original_sha256": "b86e8d537daef13b579a89a9a1517ba45c3f1f7df2b4005ccae1679f47ef013c",
+      "original_bytes": 85,
+      "recorded_size_present": true
+    },
+    "prepare/gofmt-check.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/go-version.stdout.log": {
+      "original_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "original_bytes": 34,
+      "recorded_size_present": true
+    },
+    "prepare-v2/go-version.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/gofmt-check.stdout.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/gofmt-check.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/build.stdout.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/build.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "prepare-v2/empty-manifest.stdout.log": {
+      "original_sha256": "46b4304c65fc336a913f6428f782d529798785168f1d08d385d1d4cfc2dc1217",
+      "original_bytes": 267,
+      "recorded_size_present": true
+    },
+    "prepare-v2/empty-manifest.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "verify/snapshot-before.stdout.log": {
+      "original_sha256": "0bbb292bcf14589d4e108c555ca4cca3711245cbdedae1c8c5ebf385f3585b51",
+      "original_bytes": 447,
+      "recorded_size_present": true
+    },
+    "verify/snapshot-before.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "verify/public-go-reads.stdout.log": {
+      "original_sha256": "9a83327ba3344bc4cfa5b1734f47d86f37b13b4a6eb75878aa1a70aa84f7c155",
+      "original_bytes": 675,
+      "recorded_size_present": true
+    },
+    "verify/public-go-reads.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "verify/snapshot-after.stdout.log": {
+      "original_sha256": "9a1d8a0b500747c80616dbb3f2680de35a9bdec7b96c76b1c79435bb7ab90adb",
+      "original_bytes": 446,
+      "recorded_size_present": true
+    },
+    "verify/snapshot-after.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "observation.stdout.log": {
+      "original_sha256": "fbe5fc4179b87e90edc179e980a96bd1b5342bdbd1b5199b4816e28e905fb07e",
+      "original_bytes": 371,
+      "recorded_size_present": false
+    },
+    "observation.stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": true
+    },
+    "post-verify/stdout.log": {
+      "original_sha256": "76e3b22275957071e66907a9f49c8fb8d42561dc02eef12722c4f1ee8aee1beb",
+      "original_bytes": 182,
+      "recorded_size_present": false
+    },
+    "post-verify/stderr.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "recorded_size_present": false
+    }
+  },
+  "stream_sizes_absent_from_original_receipts": [
+    "observation.stdout.log",
+    "post-verify/stderr.log",
+    "post-verify/stdout.log"
+  ],
+  "source_before_after_clean_in_both_successful_receipts": true,
+  "first_prepare": {
+    "outcome": "stopped_on_nonempty_gofmt_listing",
+    "build_or_probe_command_recorded": false,
+    "temporary_source_moved_to_trash": true,
+    "recovery_required": false
+  },
+  "negative_empty_manifest_admission": "PASS",
+  "private_snapshots_fully_equal": true,
+  "private_manifest_matches_snapshot": true,
+  "native_observation": {
+    "last_result": 267011,
+    "hex": "0x41303",
+    "result_runtime_type": "System.Int32",
+    "state": 3,
+    "hidden": false,
+    "visible_instances": 0
+  },
+  "candidate_counts": {
+    "queried_visible_root_tasks": 16,
+    "current_account_visible_tasks": 14,
+    "eligible_nonzero_idle_tasks": 7,
+    "query_failures": 0
+  },
+  "public_events": [
+    {
+      "check": "status",
+      "event": "begin"
+    },
+    {
+      "check": "status",
+      "duration_ns": 459537600,
+      "error_category": "none",
+      "event": "result",
+      "observed_last_result": 267011,
+      "observed_last_result_type": "int",
+      "pass": true
+    },
+    {
+      "check": "list",
+      "event": "begin"
+    },
+    {
+      "check": "list",
+      "duration_ns": 405698800,
+      "error_category": "none",
+      "event": "result",
+      "observed_last_result": 267011,
+      "observed_last_result_type": "int",
+      "pass": true
+    },
+    {
+      "backend_type": "*scheduler.windowsScheduler",
+      "claim": "observed_native_last_result_transfer_only",
+      "completed_task_exit_qualified": false,
+      "duration_ns": 867821400,
+      "error_category": "none",
+      "event": "overall",
+      "full_native_qualification": false,
+      "panic_recovered": false,
+      "pass": true,
+      "status": "PASS"
+    }
+  ],
+  "post_verify": {
+    "scoped_absence_observed": true,
+    "remaining": 0,
+    "scope": "work-root marker in executable path or command line",
+    "observed_utc": "2026-11-19T22:31:54.4578718Z"
+  },
+  "scheduler_mutations": false,
+  "packager_native_calls": false,
+  "completed_action_exit_qualified": false,
+  "full_native_qualification": false,
+  "atomic_snapshot_claimed": false,
+  "whole_process_tree_proven": false,
+  "whole_process_tree_deadline_enforced": false,
+  "limitations": [
+    "Only transfer of the observed nonzero native value through Status and List is qualified.",
+    "Instance counts cover the current security context; equal snapshots do not prove atomic isolation.",
+    "Process absence is scoped to a work-root marker, not an ancestry-complete process tree.",
+    "Source head/tree/status are verified from saved receipts; this packager performs no Git operation.",
+    "The original observation source hash is a post-launch reread digest, not a capture-bound hash or race protection.",
+    "Recorded stream sizes are checked where present; missing historical sizes are computed now and listed separately."
+  ]
+}
