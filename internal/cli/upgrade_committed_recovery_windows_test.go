@@ -116,7 +116,11 @@ func committedRecoveryFixture(t *testing.T) (productRecoveryV3Fixture, string, u
 
 func writeCommittedRecoveryJournal(t *testing.T, f productRecoveryV3Fixture) {
 	t.Helper()
-	if err := persistWindowsProductRecoveryJournalV3(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal,
+	allowance, err := NewWindowsProductJournalAllowance(32 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistWindowsProductRecoveryJournalV3(t.Context(), allowance, filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal,
 		api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +132,30 @@ func committedRecoveryCommand() (*cobra.Command, *bytes.Buffer) {
 	cmd.SetOut(out)
 	cmd.SetErr(&bytes.Buffer{})
 	return cmd, out
+}
+
+func TestCommittedRecoveryCurrentExecutorFailureDoesNotFallBack(t *testing.T) {
+	f, executor, deps := committedRecoveryFixture(t)
+	refusal := errors.New("synthetic current executor refusal")
+	calls := 0
+	deps.currentRegistry = true
+	deps.AcquireExecuting = func(context.Context) (*binaryadmission.WindowsCanonicalEntrySetV2, error) {
+		calls++
+		return nil, refusal
+	}
+	deps.AdmitProduct = func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
+		t.Fatal("current executor refusal selected the legacy executor")
+		return binaryadmission.WindowsArtifact{}, nil
+	}
+	deps.Recover = func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error) {
+		t.Fatal("refused executor reached recovery")
+		return nil, nil
+	}
+	cmd, out := committedRecoveryCommand()
+	err := runCommittedRecoveryWindowsWithDeps(cmd, f.stateDir, executor, f.product, deps)
+	if !errors.Is(err, refusal) || calls != 1 || out.Len() != 0 {
+		t.Fatalf("current executor refusal changed: calls=%d error=%v", calls, err)
+	}
 }
 
 func TestCommittedRecoveryExternalDifferentHashSettlesOnlyJournaledTransaction(t *testing.T) {

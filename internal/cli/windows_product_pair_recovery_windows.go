@@ -21,43 +21,52 @@ import (
 )
 
 type WindowsProductPairRecoverySettled struct {
-	TransactionID     string
-	Outcome           WindowsProductPairRecoveryPhase
-	PairOrPriorHashes [2]string
-	Runtime           *pendingRuntimeReceiving
+	journalReadEvidence *windowsProductJournalReadEvidence
+	TransactionID       string
+	Outcome             WindowsProductPairRecoveryPhase
+	PairOrPriorHashes   [2]string
+	Runtime             *pendingRuntimeReceiving
 }
 
 type windowsProductPairRecoveryRequest struct {
-	Context            context.Context
-	StateDir           string
-	CLIPath            string
-	WindowlessPath     string
-	SettleSuccessor    func(string) error
-	ObservePriorReady  func(context.Context, string, string) (bool, error)
-	RestartPrior       func(string) (SupervisorLaunch, error)
-	WaitPriorReady     func(context.Context, string, string) error
-	ReconcileCommitted func(windowsProductPairRecoveryJournal) error
-	Deps               windowsProductPairRecoveryDeps
+	JournalAllowance    WindowsProductJournalAllowance
+	journalReadEvidence *windowsProductJournalReadEvidence
+	Context             context.Context
+	StateDir            string
+	CLIPath             string
+	WindowlessPath      string
+	SettleSuccessor     func(string) error
+	ObservePriorReady   func(context.Context, string, string) (bool, error)
+	RestartPrior        func(string) (SupervisorLaunch, error)
+	WaitPriorReady      func(context.Context, string, string) error
+	ReconcileCommitted  func(windowsProductPairRecoveryJournal) error
+	Deps                windowsProductPairRecoveryDeps
 }
 
 type windowsProductPairRecoveryDeps struct {
-	ReadJournal      func(string) ([]byte, error)
-	WriteJournal     func(string, []byte) error
-	RemoveJournal    func(string) error
-	ReadReceipt      func(string) ([]byte, error)
-	WriteReceipt     func(string, []byte) error
-	RemoveReceipt    func(string) error
-	ListAsides       func(string) ([]string, error)
-	HashFile         func(string) (string, error)
-	AdmitPair        func(binaryadmission.WindowsArtifact, binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
-	ReopenTasks      func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductPairTaskTxn, error)
-	DiscardTaskStore func(WindowsProductPairTaskRecovery) error
-	RestorePromotion func(WindowsProductPairPromotion) (string, error)
-	RestoreNoReplace func(string, string) error
-	RemoveExact      func(string) error
+	journal              windowsProductJournalBinding
+	journalReaderDefault bool
+	ReadJournal          func(string) ([]byte, error)
+	WriteJournal         func(string, []byte) error
+	RemoveJournal        func(string) error
+	ReadReceipt          func(string) ([]byte, error)
+	WriteReceipt         func(string, []byte) error
+	RemoveReceipt        func(string) error
+	ListAsides           func(string) ([]string, error)
+	HashFile             func(string) (string, error)
+	AdmitPair            func(binaryadmission.WindowsArtifact, binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
+	ReopenTasks          func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductPairTaskTxn, error)
+	DiscardTaskStore     func(WindowsProductPairTaskRecovery) error
+	RestorePromotion     func(WindowsProductPairPromotion) (string, error)
+	RestoreNoReplace     func(string, string) error
+	RemoveExact          func(string) error
 }
 
 type windowsProductRecoveryRequest struct {
+	JournalAllowance           WindowsProductJournalAllowance
+	journalReadEvidence        *windowsProductJournalReadEvidence
+	AcquireSuccessorQuiescence func(context.Context, windowsProductRecoveryJournalV3, binaryadmission.WindowsCanonicalRecoverySourceV2, *binaryadmission.WindowsCanonicalEntryRecoverySetV2) (*windowsProductSuccessorQuiescence, error)
+
 	CanonicalEntryPath             string
 	IdentityPath                   string
 	Context                        context.Context
@@ -80,28 +89,31 @@ type windowsProductRecoveryRequest struct {
 }
 
 type windowsProductRecoveryDeps struct {
-	ReopenEntrySetTasks func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error)
-	RetainEntry         func(string) (string, error)
-	AdmitEntrySet       func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV1, binaryadmission.WindowsCanonicalEntrySetSnapshotV1) (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error)
-	ReadJournal         func(string) ([]byte, error)
-	WriteJournal        func(string, []byte) error
-	RemoveJournal       func(string) error
-	ReadReceipt         func(string) ([]byte, error)
-	WriteReceipt        func(string, []byte) error
-	RemoveReceipt       func(string) error
-	ListAsides          func(string) ([]string, error)
-	HashFile            func(string) (string, error)
-	AdmitProduct        func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
-	ReopenTasks         func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductTaskTxn, error)
-	DiscardTaskStore    func(WindowsProductPairTaskRecovery) error
-	RestorePromotion    func(WindowsProductPairPromotion) (string, error)
-	RestoreNoReplace    func(string, string) error
-	RemoveExact         func(string) error
-	PublishCommitted    func(WindowsProductCommitEvent) (string, error)
-	Now                 func() time.Time
+	journal                windowsProductJournalBinding
+	journalReaderDefault   bool
+	ReopenEntryBundleTasks func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV2) (WindowsProductTaskTxn, error)
+	AdmitEntryBundle       func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV2, binaryadmission.WindowsCanonicalEntrySetSnapshotV2) (binaryadmission.WindowsCanonicalEntrySetSnapshotV2, error)
+	ReopenEntrySetTasks    func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV1) (WindowsProductTaskTxn, error)
+	RetainEntry            func(string) (string, error)
+	AdmitEntrySet          func(context.Context, binaryadmission.WindowsCanonicalEntrySetTargetsV1, binaryadmission.WindowsCanonicalEntrySetSnapshotV1) (binaryadmission.WindowsCanonicalEntrySetSnapshotV1, error)
+	ReadJournal            func(string) ([]byte, error)
+	WriteJournal           func(string, []byte) error
+	RemoveJournal          func(string) error
+	ReadReceipt            func(string) ([]byte, error)
+	WriteReceipt           func(string, []byte) error
+	RemoveReceipt          func(string) error
+	ListAsides             func(string) ([]string, error)
+	HashFile               func(string) (string, error)
+	AdmitProduct           func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
+	ReopenTasks            func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductTaskTxn, error)
+	DiscardTaskStore       func(WindowsProductPairTaskRecovery) error
+	RestorePromotion       func(WindowsProductPairPromotion) (string, error)
+	RestoreNoReplace       func(string, string) error
+	RemoveExact            func(string) error
+	PublishCommitted       func(WindowsProductCommitEvent) (string, error)
+	Now                    func() time.Time
 }
 
-// The recovery owner, shared by stored-pending admission and execution.
 func windowsProductPriorRecoveryPending(j windowsProductRecoveryJournalV3) bool {
 	if j.Mode != WindowsProductPairModeUpgrade || j.PreSettlement == nil {
 		return false
@@ -115,6 +127,23 @@ func windowsProductPriorRecoveryPending(j windowsProductRecoveryJournalV3) bool 
 }
 
 func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result *WindowsProductPairRecoverySettled, retErr error) {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	defer func() {
+		retErr = withWindowsProductJournalEvidence(retErr, req.journalReadEvidence)
+		if result != nil {
+			result.journalReadEvidence = req.journalReadEvidence
+		}
+	}()
+	if err := validateWindowsProductJournalOperation(req.Context, req.JournalAllowance); err != nil {
+		return nil, err
+	}
+	if req.Legacy.JournalAllowance != req.JournalAllowance {
+		return nil, errors.New("Product and Legacy journal allowances differ")
+	}
+	req.Legacy.journalReadEvidence = req.journalReadEvidence
+
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
@@ -124,30 +153,36 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	if req.RequirePriorSettlementOnSettledRollback && !validLowerHexSHA256(req.ExpectedJournalSHA256) {
 		return nil, fmt.Errorf("%w: pending command requires an admitted V3 journal digest", ErrWindowsProductRecoveryIdentity)
 	}
-	d := withWindowsProductRecoveryDefaults(req.Deps)
+	d := boundWindowsProductRecoveryDefaults(req)
 	v3Path := filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)
 	legacyPath := filepath.Join(req.StateDir, WindowsProductPairRecoveryFileLeaf)
 	_, v3Err := d.ReadJournal(v3Path)
 	_, legacyErr := d.ReadJournal(legacyPath)
+	if v3Err != nil && !windowsProductJournalCleanAbsence(v3Err) {
+		return nil, fmt.Errorf("%w: read V3 journal: %w", ErrWindowsProductRecoveryIdentity, v3Err)
+	}
+	if legacyErr != nil && !windowsProductJournalCleanAbsence(legacyErr) {
+		return nil, fmt.Errorf("%w: read Legacy journal: %w", ErrWindowsProductRecoveryIdentity, legacyErr)
+	}
 	v3Present := v3Err == nil
 	legacyPresent := legacyErr == nil
 	if req.ExpectedJournalSHA256 != "" {
-		if !validLowerHexSHA256(req.ExpectedJournalSHA256) || !v3Present || legacyPresent || (legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist)) {
+		if !validLowerHexSHA256(req.ExpectedJournalSHA256) || !v3Present || legacyPresent || (legacyErr != nil && !windowsProductJournalCleanAbsence(legacyErr)) {
 			return nil, fmt.Errorf("%w: expected V3 journal admission is unavailable or mixed", ErrWindowsProductRecoveryIdentity)
 		}
 	}
 	if v3Present && legacyPresent {
 		return nil, fmt.Errorf("%w: legacy and V3 recovery journals coexist", ErrWindowsProductRecoveryIdentity)
 	}
-	if !v3Present && v3Err != nil && !errors.Is(v3Err, os.ErrNotExist) {
-		return nil, fmt.Errorf("%w: read V3 journal: %v", ErrWindowsProductRecoveryIdentity, v3Err)
-	}
 	if legacyPresent {
 		if _, err := reconcileWindowsProductPairRecovery(req.Legacy); err != nil {
 			return nil, err
 		}
 		_, err := d.ReadJournal(legacyPath)
-		if !errors.Is(err, os.ErrNotExist) {
+		if !windowsProductJournalCleanAbsence(err) {
+			if err != nil {
+				return nil, fmt.Errorf("%w: legacy recovery journal did not settle: %w", ErrWindowsProductRecoveryIdentity, err)
+			}
 			return nil, fmt.Errorf("%w: legacy recovery journal did not settle", ErrWindowsProductRecoveryIdentity)
 		}
 		return nil, nil
@@ -157,7 +192,7 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	}
 	raw, err := d.ReadJournal(v3Path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: read V3 journal: %v", ErrWindowsProductRecoveryIdentity, err)
+		return nil, fmt.Errorf("%w: read V3 journal: %w", ErrWindowsProductRecoveryIdentity, err)
 	}
 	if req.ExpectedJournalSHA256 != "" {
 		sum := sha256.Sum256(raw)
@@ -175,12 +210,15 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json")) {
 		return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch", ErrWindowsProductRecoveryIdentity)
 	}
-	if journal.EntrySet != nil && journal.Phase == WindowsProductRecoverySettledRollback {
+	if err := requireWindowsProductWithoutBackendHold(req.Context, req.StateDir); err != nil {
+		return nil, err
+	}
+	if hasCanonicalEntryArm(journal) && journal.Phase == WindowsProductRecoverySettledRollback {
 		return rollbackCanonicalEntryRecovery(req, d, v3Path, journal, nil)
 	}
 	// Stored pre-decision GUI-owned recovery binds current desired state before
 	// task opening or material inverse. Immediate rollback never enters this hook.
-	if journal.EntrySet == nil && req.PreparePendingRuntime != nil && windowsProductPriorRecoveryPending(journal) && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+	if !hasCanonicalEntryArm(journal) && req.PreparePendingRuntime != nil && windowsProductPriorRecoveryPending(journal) && journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
 		if req.PendingRuntime == nil {
 			req.PendingRuntime = new(pendingRuntimeReceiving)
 		}
@@ -244,11 +282,20 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		}
 		return &WindowsProductPairRecoverySettled{TransactionID: journal.TransactionID, Outcome: outcome}, nil
 	}
-	if d.ReopenTasks == nil || d.DiscardTaskStore == nil {
+	if (!hasCanonicalEntryArm(journal) && d.ReopenTasks == nil) || d.DiscardTaskStore == nil {
 		return nil, fmt.Errorf("%w: retained task recovery owner is unavailable", ErrWindowsProductRecoveryIdentity)
 	}
 	var tasks WindowsProductTaskTxn
-	if journal.EntrySet != nil {
+	if journal.EntryBundle != nil {
+		targets, targetErr := binaryadmission.CanonicalEntryTargetsV2(journal.EntryBundle.CanonicalEntry.Target)
+		if targetErr != nil {
+			return nil, targetErr
+		}
+		if d.ReopenEntryBundleTasks == nil {
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, errors.New("current task recovery projection unavailable"))
+		}
+		tasks, err = d.ReopenEntryBundleTasks(req.Context, journal.Tasks, targets)
+	} else if journal.EntrySet != nil {
 		targets, targetErr := canonicalEntrySetJournalTargets(journal)
 		if targetErr != nil {
 			return nil, targetErr
@@ -271,7 +318,7 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 }
 
 func rollbackWindowsProductRecovery(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
-	if journal.EntrySet != nil {
+	if hasCanonicalEntryArm(journal) {
 		return rollbackCanonicalEntryRecovery(req, d, journalPath, journal, tasks)
 	}
 	productArtifact := windowsProductPairRecoveryArtifact{
@@ -332,7 +379,7 @@ func rollbackWindowsProductRecovery(req windowsProductRecoveryRequest, d windows
 	}
 	journal.Phase = WindowsProductRecoverySettledRollback
 	journal.TaskSetSHA256 = ""
-	if err := persistWindowsProductRecoveryJournalV3(journalPath, journal, d.WriteJournal, d.ReadJournal); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(req.Context, req.JournalAllowance, journalPath, journal, d.WriteJournal, d.ReadJournal); err != nil {
 		return nil, fmt.Errorf("%w: persist settled rollback: %v", ErrWindowsProductPairRecoveryCleanup, err)
 	}
 	if err := d.DiscardTaskStore(journal.Tasks); err != nil {
@@ -353,8 +400,8 @@ func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j 
 	if err := req.Context.Err(); err != nil {
 		return err
 	}
-	d := withWindowsProductRecoveryDefaults(req.Deps)
-	if j.EntrySet != nil {
+	d := boundWindowsProductRecoveryDefaults(req)
+	if hasCanonicalEntryArm(j) {
 		return validateCanonicalEntryPendingRecovery(req, d, j)
 	}
 	product := windowsProductPairRecoveryArtifact{Target: j.Product.Target, PriorPresent: j.Product.PriorPresent, PriorSHA256: j.Product.PriorSHA256, NewSHA256: j.Product.NewSHA256, BaselineAsideBasenames: recoveryAsideBasenames(j.Product.BaselineAsides)}
@@ -395,7 +442,7 @@ func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j 
 }
 
 func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
-	if journal.EntrySet != nil {
+	if hasCanonicalEntryArm(journal) {
 		if err := cleanupColdCanonicalOriginals(req, d, journalPath, &journal); err != nil {
 			return nil, err
 		}
@@ -434,24 +481,29 @@ func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d 
 			return nil, fmt.Errorf("%w: committed successor readiness/control: %w", ErrWindowsProductCleanupPending, err)
 		}
 	}
-	productPriorAside, err := inspectWindowsProductForwardAsides(journal.Product.Target,
-		journal.Product.PriorPresent, journal.Product.PriorSHA256, journal.Product.BaselineAsides, d)
-	if err != nil {
-		return nil, fmt.Errorf("%w: product asides: %v", ErrWindowsProductCleanupPending, err)
+	productPriorAside := ""
+	if journal.EntryBundle == nil {
+		productPriorAside, err = inspectWindowsProductForwardAsides(journal.Product.Target, journal.Product.PriorPresent, journal.Product.PriorSHA256, journal.Product.BaselineAsides, d)
+		if err != nil {
+			return nil, fmt.Errorf("%w: product asides: %v", ErrWindowsProductCleanupPending, err)
+		}
 	}
 	legacyPriorAside, err := inspectWindowsProductForwardAsides(journal.LegacyWindowless.Target,
 		journal.LegacyWindowless.PriorPresent, journal.LegacyWindowless.PriorSHA256, journal.LegacyWindowless.BaselineAsides, d)
 	if err != nil {
 		return nil, fmt.Errorf("%w: legacy asides: %v", ErrWindowsProductCleanupPending, err)
 	}
-	productTxn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
-		StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath,
+	productTxn := &WindowsProductTxn{journalReadEvidence: req.journalReadEvidence, Opts: WindowsProductTxnOpts{
+		JournalAllowance: req.JournalAllowance, journalReadEvidence: req.journalReadEvidence,
+		Context: req.Context, StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath,
 		StagedProduct: journal.Staged.Path, ReceiptV3Path: journal.Receipts.V3.Path, ReceiptV2Path: journal.Receipts.V2.Path,
 		Mode: journal.Mode, Tasks: tasks,
 	}}
 	productTxn.prepared = &windowsProductPreparedTxn{
+		journalAllowance: req.JournalAllowance, journalContext: req.Context,
 		deps: withWindowsProductDefaults(WindowsProductTxnDeps{
-			AdmitProduct: d.AdmitProduct, RestorePromotion: d.RestorePromotion,
+			journal: d.journal, journalReaderDefault: d.journalReaderDefault,
+			AdmitProduct: d.AdmitProduct, AdmitEntryBundle: d.AdmitEntryBundle, RestorePromotion: d.RestorePromotion,
 			WriteReceipt: d.WriteReceipt, ReadReceipt: d.ReadReceipt, RemoveReceipt: d.RemoveReceipt,
 			WriteRecoveryJournal: d.WriteJournal, ReadRecoveryJournal: d.ReadJournal,
 			RemoveRecoveryJournal: d.RemoveJournal, ListGeneratedAsides: d.ListAsides,
@@ -605,6 +657,9 @@ func withWindowsProductNativeDefaults(d WindowsProductTxnDeps) WindowsProductTxn
 }
 
 func withWindowsProductRecoveryDefaults(d windowsProductRecoveryDeps) windowsProductRecoveryDeps {
+	if d.AdmitEntryBundle == nil {
+		d.AdmitEntryBundle = readCanonicalEntryBundle
+	}
 	if d.RetainEntry == nil {
 		d.RetainEntry = api.RetainBinaryTargetAside
 	}
@@ -612,6 +667,7 @@ func withWindowsProductRecoveryDefaults(d windowsProductRecoveryDeps) windowsPro
 		d.AdmitEntrySet = readCanonicalEntrySet
 	}
 	product := withWindowsProductDefaults(WindowsProductTxnDeps{
+		journal: d.journal, journalReaderDefault: d.journalReaderDefault,
 		WriteReceipt: d.WriteReceipt, ReadReceipt: d.ReadReceipt, RemoveReceipt: d.RemoveReceipt,
 		WriteRecoveryJournal: d.WriteJournal, ReadRecoveryJournal: d.ReadJournal,
 		RemoveRecoveryJournal: d.RemoveJournal, ListGeneratedAsides: d.ListAsides,
@@ -619,6 +675,7 @@ func withWindowsProductRecoveryDefaults(d windowsProductRecoveryDeps) windowsPro
 		RestoreNoReplace: d.RestoreNoReplace, PublishCommitted: d.PublishCommitted, Now: d.Now,
 	})
 	d.ReadJournal, d.WriteJournal, d.RemoveJournal = product.ReadRecoveryJournal, product.WriteRecoveryJournal, product.RemoveRecoveryJournal
+	d.journalReaderDefault = product.journalReaderDefault
 	d.ReadReceipt, d.WriteReceipt, d.RemoveReceipt = product.ReadReceipt, product.WriteReceipt, product.RemoveReceipt
 	d.ListAsides, d.HashFile, d.RemoveExact = product.ListGeneratedAsides, product.HashFile, product.RemoveExact
 	d.RestorePromotion, d.RestoreNoReplace = product.RestorePromotion, product.RestoreNoReplace
@@ -630,24 +687,40 @@ func withWindowsProductRecoveryDefaults(d windowsProductRecoveryDeps) windowsPro
 }
 
 func reconcileWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) (result *WindowsProductPairRecoverySettled, retErr error) {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	defer func() {
+		retErr = withWindowsProductJournalEvidence(retErr, req.journalReadEvidence)
+		if result != nil {
+			result.journalReadEvidence = req.journalReadEvidence
+		}
+	}()
+	if err := validateWindowsProductJournalOperation(req.Context, req.JournalAllowance); err != nil {
+		return nil, err
+	}
+
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
 	if req.StateDir == "" || req.CLIPath == "" || req.WindowlessPath == "" {
 		return nil, fmt.Errorf("%w: state and canonical pair paths are required", ErrWindowsProductPairRecoveryIdentity)
 	}
-	d := withWindowsProductPairRecoveryDefaults(req.Deps)
+	d := boundWindowsProductPairRecoveryDefaults(req)
 	journalPath := filepath.Join(req.StateDir, WindowsProductPairRecoveryFileLeaf)
 	raw, err := d.ReadJournal(journalPath)
-	if errors.Is(err, os.ErrNotExist) {
+	if windowsProductJournalCleanAbsence(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: read journal: %v", ErrWindowsProductPairRecoveryIdentity, err)
+		return nil, fmt.Errorf("%w: read journal: %w", ErrWindowsProductPairRecoveryIdentity, err)
 	}
 	journal, err := decodeWindowsProductPairRecoveryJournal(raw)
 	if err != nil || !sameWindowsRecoveryPath(journal.CLI.Target, req.CLIPath) || !sameWindowsRecoveryPath(journal.Windowless.Target, req.WindowlessPath) || !sameWindowsRecoveryPath(journal.Receipt.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json")) {
 		return nil, fmt.Errorf("%w: journal schema or resolved target mismatch", ErrWindowsProductPairRecoveryIdentity)
+	}
+	if err := requireWindowsProductWithoutBackendHold(req.Context, req.StateDir); err != nil {
+		return nil, err
 	}
 	if journal.Phase == WindowsProductPairRecoverySettledCommit || journal.Phase == WindowsProductPairRecoverySettledRollback {
 		if d.DiscardTaskStore == nil {
@@ -975,7 +1048,7 @@ func cleanupSettledWindowsProductPairRecovery(path string, journal windowsProduc
 }
 
 func persistRecoveredWindowsProductPairJournal(path string, journal windowsProductPairRecoveryJournal, d windowsProductPairRecoveryDeps) error {
-	txnDeps := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{WriteRecoveryJournal: d.WriteJournal, ReadRecoveryJournal: d.ReadJournal})
+	txnDeps := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{journal: d.journal, journalReaderDefault: d.journalReaderDefault, WriteRecoveryJournal: d.WriteJournal, ReadRecoveryJournal: d.ReadJournal})
 	return persistWindowsProductPairRecoveryJournal(path, journal, txnDeps)
 }
 
@@ -988,8 +1061,9 @@ func recoverySettledResult(j windowsProductPairRecoveryJournal) *WindowsProductP
 }
 
 func withWindowsProductPairRecoveryDefaults(d windowsProductPairRecoveryDeps) windowsProductPairRecoveryDeps {
-	if d.ReadJournal == nil {
-		d.ReadJournal = api.ReadStateFileInodeAnchored
+	if d.ReadJournal == nil || d.journalReaderDefault {
+		d.ReadJournal = d.journal.reader
+		d.journalReaderDefault = true
 	}
 	if d.WriteJournal == nil {
 		d.WriteJournal = api.WriteStateFileBytesAtomic
@@ -1041,4 +1115,25 @@ func moveWindowsFileNoReplace(source, target string) error {
 
 func sameWindowsRecoveryPath(left, right string) bool {
 	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
+}
+
+func boundWindowsProductRecoveryDefaults(req windowsProductRecoveryRequest) windowsProductRecoveryDeps {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	req.Deps.journal = windowsProductJournalBinding{ctx: req.Context, allowance: req.JournalAllowance, evidence: req.journalReadEvidence, phase: func() string { return "product-recovery" }}
+	return withWindowsProductRecoveryDefaults(req.Deps)
+}
+func boundWindowsProductPairRecoveryDefaults(req windowsProductPairRecoveryRequest) windowsProductPairRecoveryDeps {
+	if req.journalReadEvidence == nil {
+		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
+	}
+	req.Deps.journal = windowsProductJournalBinding{ctx: req.Context, allowance: req.JournalAllowance, evidence: req.journalReadEvidence, phase: func() string { return "legacy-recovery" }}
+	return withWindowsProductPairRecoveryDefaults(req.Deps)
+}
+func (r *WindowsProductPairRecoverySettled) JournalReadObservations() []*api.StateFileReadObservation {
+	if r == nil {
+		return nil
+	}
+	return r.journalReadEvidence.observations()
 }

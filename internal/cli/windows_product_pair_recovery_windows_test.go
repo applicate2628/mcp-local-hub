@@ -87,7 +87,7 @@ func TestWindowsProductRecoveryGUIOwnedPendingNeverClearsJournalWithoutFleetProo
 		Ports: []windowsProductPortSettlementV1{}, GUIOwner: windowsProductGUIOwnerConfirmedPresent,
 	}
 	path := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
-	if err := persistWindowsProductRecoveryJournalV3(path, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), path, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 		t.Fatal(err)
 	}
 	tasks := &recoveryTaskTxnFake{}
@@ -187,7 +187,7 @@ func TestWindowsProductRecoveryForwardReplaysInterruptedCleanup(t *testing.T) {
 				Basename: filepath.Base(legacyBaseline), SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("legacy-baseline"))),
 			}}
 			journalPath := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
-			if err := persistWindowsProductRecoveryJournalV3(journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+			if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 				t.Fatal(err)
 			}
 			tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}
@@ -315,7 +315,7 @@ func TestWindowsProductRecoveryForwardRejectsUnboundAsides(t *testing.T) {
 				t.Fatal(err)
 			}
 			journalPath := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
-			if err := persistWindowsProductRecoveryJournalV3(journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+			if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 				t.Fatal(err)
 			}
 			tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}
@@ -423,7 +423,7 @@ func newProductRecoveryV3Fixture(t *testing.T, phase WindowsProductRecoveryPhase
 	if phase == WindowsProductRecoveryPrepared || phase == WindowsProductRecoverySettledRollback {
 		f.journal.TaskSetSHA256 = ""
 	}
-	if err := persistWindowsProductRecoveryJournalV3(
+	if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(),
 		filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal,
 		api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored,
 	); err != nil {
@@ -433,7 +433,7 @@ func newProductRecoveryV3Fixture(t *testing.T, phase WindowsProductRecoveryPhase
 }
 
 func (f productRecoveryV3Fixture) request(tasks WindowsProductTaskTxn) windowsProductRecoveryRequest {
-	return windowsProductRecoveryRequest{
+	return windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: f.stateDir,
 		ProductPath: f.product, LegacyWindowlessPath: f.legacy,
 		Deps: windowsProductRecoveryDeps{
@@ -648,7 +648,7 @@ func promoteRecoveryFixture(t *testing.T, target string, successor []byte, secon
 func (f recoveryFixture) request(tasks *recoveryTaskTxnFake, order *[]string, eventErr error) windowsProductPairRecoveryRequest {
 	tasks.order = order
 	defaults := withWindowsProductPairDefaults(WindowsProductPairTxnDeps{})
-	return windowsProductPairRecoveryRequest{
+	return windowsProductPairRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: f.stateDir, CLIPath: f.cli, WindowlessPath: f.windowless,
 		SettleSuccessor: func(string) error { *order = append(*order, "settle-successor"); return nil },
 		ObservePriorReady: func(context.Context, string, string) (bool, error) {
@@ -1034,7 +1034,7 @@ func TestWindowsProductPairRecoveryWiringReopensExistingSchedulerStore(t *testin
 	}
 	f.journal.Tasks = recovery
 	f.persistJournal(t)
-	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRequest{
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: f.stateDir, CLIPath: f.cli, WindowlessPath: f.windowless,
 		ReconcileCommitted: func(windowsProductPairRecoveryJournal) error { return nil },
 	})

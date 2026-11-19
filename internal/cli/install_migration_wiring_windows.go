@@ -627,6 +627,15 @@ func recheckUpgradeGUIBeforeExit(ctx context.Context, held *upgradeGUIHeldTopolo
 }
 
 func recheckUpgradeGUIBeforeExitWithJournal(ctx context.Context, held *upgradeGUIHeldTopology, pending *windowsProductRecoveryJournalV3) error {
+	allowance, err := resolveWindowsProductJournalAllowance()
+	if err != nil {
+		return err
+	}
+	return recheckUpgradeGUIBeforeExitWithBoundedJournal(ctx, held, pending, allowance, nil)
+}
+
+func recheckUpgradeGUIBeforeExitWithBoundedJournal(ctx context.Context, held *upgradeGUIHeldTopology, pending *windowsProductRecoveryJournalV3, allowance WindowsProductJournalAllowance, evidence *windowsProductJournalReadEvidence) (retErr error) {
+	defer func() { retErr = withWindowsProductJournalEvidence(retErr, evidence) }()
 	if held == nil || !held.inputs.complete() {
 		return errors.New("UPGRADE_GUI_IDENTITY_AMBIGUOUS: incomplete held-topology recheck inputs")
 	}
@@ -636,7 +645,8 @@ func recheckUpgradeGUIBeforeExitWithJournal(ctx context.Context, held *upgradeGU
 			return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: exact journal state changed: present=%v error=%v", present, err)
 		}
 	} else {
-		raw, err := os.ReadFile(filepath.Join(held.StateDir, WindowsProductRecoveryFileLeafV3))
+		raw, original, err := readWindowsProductRecoveryJournal(ctx, filepath.Join(held.StateDir, WindowsProductRecoveryFileLeafV3), allowance)
+		evidence.retain(windowsProductJournalReadOutcome{phase: string(pending.Phase), path: filepath.Join(held.StateDir, WindowsProductRecoveryFileLeafV3), allowance: allowance, original: original, readError: err})
 		if err != nil {
 			return fmt.Errorf("UPGRADE_GUI_PAIR_PREIMAGE_UNRECOVERABLE: read pending V3 journal: %w", err)
 		}
@@ -744,7 +754,7 @@ func exitAndReserveUpgradeGUIOwnedPair(ctx context.Context, held *upgradeGUIHeld
 		AllowPair: true,
 		Observe:   func(context.Context, string, string) (*upgradeGUIHeldTopology, error) { return held, nil },
 		PreExitCheck: func(ctx context.Context, held *upgradeGUIHeldTopology) error {
-			return recheckUpgradeGUIBeforeExitWithJournal(ctx, held, &txn.prepared.journal)
+			return recheckUpgradeGUIBeforeExitWithBoundedJournal(ctx, held, &txn.prepared.journal, txn.prepared.journalAllowance, txn.journalReadEvidence)
 		},
 		OnExitRequested: emitExitRequested,
 		Reserve: func(observedPath string) (gui.OwnedSingleInstanceLease, error) {
@@ -934,7 +944,19 @@ func prepareUpgradeGUIOwnedPairTransaction(txn *WindowsProductTxn, held *upgrade
 		return errors.New("UPGRADE_GUI_PAIR_PREIMAGE_UNRECOVERABLE: Product transaction or held pair is unavailable")
 	}
 	priorTarget := txn.Opts.ProductPath
-	if txn.Opts.EntrySet != nil {
+	if txn.Opts.EntryBundle != nil {
+		if txn.Opts.EntrySet != nil || txn.Opts.EntryBundle.prior == nil {
+			return errors.New("UPGRADE_GUI_PAIR_PREIMAGE_UNRECOVERABLE: current original prior owner is unavailable or mixed")
+		}
+		priorRuntime, err := txn.Opts.EntryBundle.prior.RuntimeProduct(txn.Opts.Context)
+		if err != nil || priorRuntime == nil {
+			return errors.Join(err, errors.New("UPGRADE_GUI_PAIR_PREIMAGE_UNRECOVERABLE: current original prior runtime is unavailable"))
+		}
+		if err := priorRuntime.ValidateOriginal(txn.Opts.Context); err != nil {
+			return err
+		}
+		priorTarget = priorRuntime.Artifact().Path
+	} else if txn.Opts.EntrySet != nil {
 		if txn.Opts.EntrySet.prior == nil {
 			return errors.New("UPGRADE_GUI_PAIR_PREIMAGE_UNRECOVERABLE: original prior entry-set owner is unavailable")
 		}
@@ -1573,15 +1595,19 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 // boundary projects current policy, releases the GUI lease and outer fence,
 // then reports completion. Earlier failures remain part of the result.
 func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionText string, retErr error, projectCurrentAutorunOff func() error, guiLease gui.OwnedSingleInstanceLease, fence *api.UpgradeFenceLease) error {
-	if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
-		retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
+	if projectCurrentAutorunOff != nil {
+		if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
+		}
 	}
 	if guiLease != nil {
 		if releaseErr := guiLease.ReleaseErr(); releaseErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_GUI_LEASE_RELEASE_UNCONFIRMED: %w", releaseErr))
 		}
 	}
-	if optIn {
+	if fence == nil {
+		// No outer reservation was acquired on this path.
+	} else if optIn {
 		if releaseErr := fence.Release(); releaseErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_FENCE_RELEASE_UNCONFIRMED: %w", releaseErr))
 		}
@@ -1607,6 +1633,16 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	if _, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(input.binding.BuildID(), input.binding.ExpectedCanonicalEntrySHA256(), input.binding.ReverseProjection()); err != nil {
 		return err
 	}
+	current, err := windowsProductUsesCurrentRegistry()
+	if err != nil {
+		return err
+	}
+	allowance, err := resolveWindowsProductJournalAllowance()
+	if err != nil {
+		return err
+	}
+	evidence := &windowsProductJournalReadEvidence{}
+	defer func() { retErr = withWindowsProductJournalEvidence(retErr, evidence) }()
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
@@ -1642,8 +1678,12 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 		return fmt.Errorf("v0.5 upgrade: acquire upgrade transaction fence: %w", err)
 	}
+	if err := requireWindowsProductWithoutBackendHold(ctx, stateDir); err != nil {
+		return finishV5UpgradeWindowsCommand(cmd, optIn, "", err, nil, nil, fence)
+	}
 	var guiLease gui.OwnedSingleInstanceLease
 	completionText := ""
+	var projectOnFinish func() error
 	projectCurrentAutorunOff := func() error {
 		return (&api.API{}).WithGUIOwnerControl(func(control api.GUIOwnerControl) error {
 			if control.AutorunEnabled == nil || *control.AutorunEnabled {
@@ -1657,7 +1697,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		})
 	}
 	defer func() {
-		retErr = finishV5UpgradeWindowsCommand(cmd, optIn, completionText, retErr, projectCurrentAutorunOff, guiLease, fence)
+		retErr = finishV5UpgradeWindowsCommand(cmd, optIn, completionText, retErr, projectOnFinish, guiLease, fence)
 	}()
 	if optIn {
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "UPGRADE_GUI_FENCE_HELD: one upgrade fence acquired"); err != nil {
@@ -1665,11 +1705,26 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 	}
 	legacyWindowlessTarget := scheduler.WindowsLegacyEntrypointPath(target)
+	var original *binaryadmission.WindowsCanonicalEntrySetV2
+	if current {
+		original, err = binaryadmission.AcquireExecutingWindowsCanonicalEntrySetV2(ctx, input.binding)
+		if original != nil {
+			defer api.ReleaseAndJoin(&retErr, original.Close, "close upgrade original entry-set acquisition")
+		}
+		if err != nil || original == nil {
+			return errors.Join(err, errors.New("upgrade original entry-set owner unavailable"))
+		}
+	} else if err := verifyWindowsLegacyCallerSource(ctx, input.binding); err != nil {
+		return err
+	}
 	// Recover or refuse pending publication before staging a new candidate.
 	if !optIn {
-		recoveryRequest, err := windowsCanonicalEntryRecoveryRuntimeRequest(ctx, stateDir, target, legacyWindowlessTarget)
+		recoveryRequest, err := windowsCanonicalEntryRecoveryRequestForDomain(ctx, stateDir, target, legacyWindowlessTarget, current, allowance, evidence)
 		if err != nil {
 			return err
+		}
+		if current {
+			bindWindowsProductSuccessorQuiescence(&recoveryRequest, original)
 		}
 		if _, err := reconcileWiredWindowsProductRecovery(recoveryRequest); err != nil {
 			return ordinaryWindowsProductRecoveryError(err)
@@ -1677,48 +1732,83 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	} else if present, err := inspectWindowsProductRecoveryLeaves(stateDir); err != nil || present {
 		return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: pending=%v error=%v", present, err)
 	}
-	original, err := binaryadmission.AcquireExecutingWindowsCanonicalEntrySetV1(ctx, input.binding)
-	if original != nil {
-		defer api.ReleaseAndJoin(&retErr, original.Close, "close upgrade original entry-set acquisition")
+	request := windowsProductTxnRequest{
+		Context: ctx, StateDir: stateDir, LegacyWindowlessPath: legacyWindowlessTarget, Mode: WindowsProductPairModeUpgrade,
+		JournalAllowance: allowance, journalReadEvidence: evidence,
 	}
-	if err != nil {
-		return err
-	}
-	if original == nil {
-		return errors.New("upgrade original entry-set owner unavailable")
-	}
-	stage, err := original.Stage(ctx, target)
-	if stage != nil {
-		defer api.ReleaseAndJoin(&retErr, stage.Close, "close upgrade original entry-set stage")
-	}
-	if err != nil {
-		return err
-	}
-	if stage == nil {
-		return errors.New("upgrade original entry-set stage unavailable")
-	}
-	stageTargets, err := stage.Targets()
-	if err != nil {
-		return err
-	}
-	targets, err := stage.DestinationTargets()
-	if err != nil {
-		return err
-	}
-	if err := original.Close(); err != nil {
-		return err
-	}
-	entrySet := &stagedWindowsCanonicalEntrySetV1{original: stage}
-	prior, err := entrySet.acquirePrior(ctx)
-	if prior != nil {
-		defer api.ReleaseAndJoin(&retErr, prior.Close, "close upgrade original prior entry set")
-	}
-	if err != nil {
-		return err
-	}
-	priorRuntime, err := prior.RuntimeProduct(ctx)
-	if err != nil {
-		return err
+	var successorSource windowsCanonicalSuccessorRuntimeSource
+	var priorRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	if current {
+		stage, err := original.Stage(ctx, target)
+		if stage != nil {
+			request.EntryBundle = &stagedWindowsCanonicalEntrySetV2{original: stage}
+			defer api.ReleaseAndJoin(&retErr, request.EntryBundle.Close, "close upgrade original entry-set carrier")
+		}
+		if err != nil || stage == nil {
+			return errors.Join(err, errors.New("upgrade original entry-set stage unavailable"))
+		}
+		request.StagedProduct, err = currentStageProductPath(stage)
+		if err != nil {
+			return err
+		}
+		targets, err := stage.DestinationTargets()
+		if err != nil {
+			return err
+		}
+		request.CanonicalEntryPath, request.ProductPath, request.IdentityPath = targets.CanonicalEntryPath, targets.ProductPath, targets.IdentityPath
+		if err := original.Close(); err != nil {
+			return err
+		}
+		prior, err := request.EntryBundle.acquirePrior(ctx)
+		if err != nil {
+			return err
+		}
+		priorRuntime, err = prior.RuntimeProduct(ctx)
+		if err != nil {
+			return err
+		}
+		successorSource = stage
+	} else {
+		legacySource, err := acquireWindowsLegacyCallerSource(ctx, input.binding)
+		if legacySource != nil {
+			defer api.ReleaseAndJoin(&retErr, legacySource.Close, "close upgrade original legacy entry-set acquisition")
+		}
+		if err != nil {
+			return err
+		}
+		stage, err := legacySource.Stage(ctx, target)
+		if stage != nil {
+			defer api.ReleaseAndJoin(&retErr, stage.Close, "close upgrade original entry-set stage")
+		}
+		if err != nil || stage == nil {
+			return errors.Join(err, errors.New("upgrade original entry-set stage unavailable"))
+		}
+		stageTargets, err := stage.Targets()
+		if err != nil {
+			return err
+		}
+		targets, err := stage.DestinationTargets()
+		if err != nil {
+			return err
+		}
+		request.CanonicalEntryPath, request.ProductPath, request.IdentityPath = targets.CanonicalEntryPath, targets.ProductPath, targets.IdentityPath
+		request.StagedProduct = stageTargets.ProductPath
+		if err := legacySource.Close(); err != nil {
+			return err
+		}
+		request.EntrySet = &stagedWindowsCanonicalEntrySetV1{original: stage}
+		prior, err := request.EntrySet.acquirePrior(ctx)
+		if prior != nil {
+			defer api.ReleaseAndJoin(&retErr, prior.Close, "close upgrade original prior entry set")
+		}
+		if err != nil {
+			return err
+		}
+		priorRuntime, err = prior.RuntimeProduct(ctx)
+		if err != nil {
+			return err
+		}
+		successorSource = stage
 	}
 	priorPath := target // used only by the existing native absence oracle if no runtime exists
 	if priorRuntime != nil {
@@ -1729,32 +1819,29 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	}
 	deps := buildV5UpgradeDeps(priorPath, stateDir)
 	deps.originalRuntime, deps.originalContext = priorRuntime, ctx
-	successorDeps := buildV5UpgradeDeps(targets.ProductPath, stateDir)
+	successorDeps := buildV5UpgradeDeps(request.ProductPath, stateDir)
 	// The transaction starts and receives one branch at a time. Equal Product
 	// bytes at the same path can still be different native file objects.
 	readinessDeps := successorDeps
-	productTxn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
-		Context: ctx, StateDir: stateDir, CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,
-		LegacyWindowlessPath: legacyWindowlessTarget, StagedProduct: stageTargets.ProductPath, EntrySet: entrySet, Mode: WindowsProductPairModeUpgrade,
-		StartSupervisor: func(path string) (SupervisorLaunch, error) {
-			readinessDeps = successorDeps
-			return successorDeps.startCanonicalEntrySuccessor(ctx, path, entrySet)
-		},
-		RestartPrior: func(string) (SupervisorLaunch, error) {
-			readinessDeps = deps
-			return deps.StartSupervisor(priorPath)
-		},
-		SettleSuccessor: func(string) error {
-			err := successorDeps.ForceKillSupervisor(successorDeps.pipePath)
-			if isAlreadyExitedError(err) {
-				return nil
-			}
-			return err
-		},
-		WaitSupervisorReady: func(ctx context.Context, path string, product binaryadmission.WindowsArtifact) error {
-			return readinessDeps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: product.Version, Commit: product.Commit, BuildDate: product.BuildDate, SHA256: product.SHA256})
-		},
-	})
+	request.StartSupervisor = func(path string) (SupervisorLaunch, error) {
+		readinessDeps = successorDeps
+		return successorDeps.startCanonicalEntrySuccessorFromOriginal(ctx, path, successorSource)
+	}
+	request.RestartPrior = func(string) (SupervisorLaunch, error) {
+		readinessDeps = deps
+		return deps.StartSupervisor(priorPath)
+	}
+	request.SettleSuccessor = func(string) error {
+		err := successorDeps.ForceKillSupervisor(successorDeps.pipePath)
+		if isAlreadyExitedError(err) {
+			return nil
+		}
+		return err
+	}
+	request.WaitSupervisorReady = func(ctx context.Context, path string, product binaryadmission.WindowsArtifact) error {
+		return readinessDeps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, path, UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: product.Version, Commit: product.Commit, BuildDate: product.BuildDate, SHA256: product.SHA256})
+	}
+	productTxn, err := newWindowsProductTxnFn(request)
 	if productTxn != nil {
 		defer api.ReleaseAndJoin(&retErr, productTxn.Close, "close upgrade complete-set transaction")
 	}
@@ -1764,9 +1851,19 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	if productTxn == nil {
 		return errors.New("upgrade complete-set transaction unavailable")
 	}
-	if same, err := reconcileWindowsCanonicalEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, entrySet, productTxn.Opts.Tasks); err != nil {
+	var same bool
+	if current {
+		same, err = reconcileWindowsCurrentEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntryBundle, productTxn.Opts.Tasks)
+	} else {
+		same, err = reconcileWindowsCanonicalEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntrySet, productTxn.Opts.Tasks)
+	}
+	if err != nil {
 		return err
-	} else if same {
+	}
+	if same {
+		if !current {
+			projectOnFinish = projectCurrentAutorunOff
+		}
 		completionText = string(upgradeGUIAlreadyCurrent)
 		return nil
 	}
@@ -1875,14 +1972,17 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 			// The temporary lease handoff above is needed to start/prove RUNNING.
 			// Reconcile OFF only after that proof returns, while the outer fence
 			// remains held; preserve both the original proof and policy outcomes.
-			err = errors.Join(err, projectCurrentAutorunOff())
+			if project := projectOnFinish; project != nil {
+				projectOnFinish = nil
+				err = errors.Join(err, project())
+			}
 			if err != nil {
 				return digest, fmt.Errorf("%w: GUI/tray forward proof: %w", ErrWindowsProductRecoveryPending, err)
 			}
 			return digest, nil
 		}
 		productTxn.Opts.Deps.RecoverPriorSettlement = func(journal windowsProductRecoveryJournalV3) error {
-			if guiDeps.RecoverPriorPair != nil && journal.EntrySet == nil {
+			if guiDeps.RecoverPriorPair != nil && !hasCanonicalEntryArm(journal) {
 				return guiDeps.RecoverPriorPair(journal)
 			}
 			return recoverGUIOwnedPriorSettlementWithOriginal(context.Background(), stateDir, priorPath, journal, guiLease, nil, priorRuntime)
@@ -1890,6 +1990,7 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		if err := prepareUpgradeGUIOwnedPairTransaction(productTxn, pairHeld); err != nil {
 			return err
 		}
+		projectOnFinish = projectCurrentAutorunOff
 		pairPrepared := true
 		defer func() {
 			if pairPrepared && retErr != nil {
@@ -1925,13 +2026,20 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 	}
 
-	var onProductPrepared func() error
+	var emitProductPrepared func() error
 	var preparedOutputErr error
 	if optIn && !pairOptIn {
-		onProductPrepared = upgradeGUIPreparedStageReporter(cmd.ErrOrStderr(), &preparedOutputErr)
+		emitProductPrepared = upgradeGUIPreparedStageReporter(cmd.ErrOrStderr(), &preparedOutputErr)
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "UPGRADE_GUI_TXN_ENTERED: entering existing Product transaction"); err != nil {
 			return fmt.Errorf("UPGRADE_GUI_PREPARE_FAILED: report transaction entry: %w", err)
 		}
+	}
+	onProductPrepared := func() error {
+		projectOnFinish = projectCurrentAutorunOff
+		if emitProductPrepared != nil {
+			return emitProductPrepared()
+		}
+		return nil
 	}
 	txnEntered = true
 	observePair := func(ctx context.Context, target string, ports []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
@@ -2549,8 +2657,17 @@ func buildV5UpgradeDeps(canonicalTarget, stateDir string) *v5UpgradeDeps {
 }
 
 func windowsProductPairRecoveryRuntimeRequest(ctx context.Context, stateDir, cliPath, windowlessPath string) windowsProductPairRecoveryRequest {
+	return windowsProductPairRecoveryRuntimeRequestWithJournal(ctx, stateDir, cliPath, windowlessPath,
+		WindowsProductJournalAllowance{maxEncodedBytes: defaultWindowsProductJournalMaxBytes}, nil)
+}
+
+func windowsProductPairRecoveryRuntimeRequestWithJournal(ctx context.Context, stateDir, cliPath, windowlessPath string, allowance WindowsProductJournalAllowance, evidence *windowsProductJournalReadEvidence) windowsProductPairRecoveryRequest {
+	if evidence == nil {
+		evidence = &windowsProductJournalReadEvidence{}
+	}
 	deps := buildV5UpgradeDeps(cliPath, stateDir)
 	return windowsProductPairRecoveryRequest{
+		JournalAllowance: allowance, journalReadEvidence: evidence,
 		Context:        ctx,
 		StateDir:       stateDir,
 		CLIPath:        cliPath,
@@ -2848,16 +2965,40 @@ func validatePendingHistoricalCohort(ctx context.Context, journal windowsProduct
 }
 
 func windowsCanonicalEntryRecoveryRuntimeRequest(ctx context.Context, stateDir, canonicalEntry, legacy string) (windowsProductRecoveryRequest, error) {
-	targets, err := binaryadmission.CanonicalEntryTargetsV1(canonicalEntry)
+	allowance, err := resolveWindowsProductJournalAllowance()
 	if err != nil {
 		return windowsProductRecoveryRequest{}, err
 	}
-	req := windowsProductRecoveryRuntimeRequest(ctx, stateDir, targets.ProductPath, legacy)
-	req.CanonicalEntryPath, req.IdentityPath = targets.CanonicalEntryPath, targets.IdentityPath
-	req.Legacy = windowsProductPairRecoveryRuntimeRequest(ctx, stateDir, canonicalEntry, legacy)
-	return req, nil
+	return windowsCanonicalEntryRecoveryRequestForDomain(ctx, stateDir, canonicalEntry, legacy, false, allowance, nil)
 }
 
+func windowsCanonicalEntryRecoveryRequestForDomain(ctx context.Context, stateDir, canonicalEntry, legacy string, current bool, allowance WindowsProductJournalAllowance, evidence *windowsProductJournalReadEvidence) (windowsProductRecoveryRequest, error) {
+	if evidence == nil {
+		evidence = &windowsProductJournalReadEvidence{}
+	}
+	var productPath, entryPath, identityPath string
+	if current {
+		targets, err := binaryadmission.CanonicalEntryTargetsV2(canonicalEntry)
+		if err != nil {
+			return windowsProductRecoveryRequest{}, err
+		}
+		productPath, entryPath = targets.ProductPath, targets.CanonicalEntryPath
+		// The selected journal arm admits its own exact typed identity target.
+	} else {
+		targets, err := binaryadmission.CanonicalEntryTargetsV1(canonicalEntry)
+		if err != nil {
+			return windowsProductRecoveryRequest{}, err
+		}
+		productPath, entryPath, identityPath = targets.ProductPath, targets.CanonicalEntryPath, targets.IdentityPath
+	}
+	req := windowsProductRecoveryRuntimeRequestWithJournal(ctx, stateDir, productPath, legacy, allowance, evidence)
+	req.CanonicalEntryPath, req.IdentityPath = entryPath, identityPath
+	req.Legacy = windowsProductPairRecoveryRuntimeRequestWithJournal(ctx, stateDir, canonicalEntry, legacy, allowance, evidence)
+	if current {
+		bindWindowsProductSuccessorQuiescence(&req, nil)
+	}
+	return req, nil
+}
 func recoverWindowsCanonicalEntryPriorRuntime(ctx context.Context, stateDir string, journal windowsProductRecoveryJournalV3, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error {
 	runtimePath := journal.Product.Target
 	if original != nil {
@@ -3090,6 +3231,13 @@ func validateCanonicalEntryRuntimeAbsence(ctx context.Context, path string, froz
 }
 
 func windowsProductRecoveryPriorRuntime(j windowsProductRecoveryJournalV3) (path, digest string, present bool, err error) {
+	if j.EntryBundle != nil {
+		prior := canonicalJournalPriorRuntime(j)
+		if prior == nil {
+			return "", "", false, errors.New("current recovery has no bound original prior runtime")
+		}
+		return prior.Path, prior.SHA256, prior.Present, nil
+	}
 	if j.EntrySet == nil {
 		return j.Product.Target, j.Product.PriorSHA256, j.Product.PriorPresent, nil
 	}
@@ -3100,16 +3248,25 @@ func windowsProductRecoveryPriorRuntime(j windowsProductRecoveryJournalV3) (path
 	return prior.Path, prior.SHA256, prior.Present, nil
 }
 func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, productPath, legacyWindowlessPath string) windowsProductRecoveryRequest {
+	return windowsProductRecoveryRuntimeRequestWithJournal(ctx, stateDir, productPath, legacyWindowlessPath,
+		WindowsProductJournalAllowance{maxEncodedBytes: defaultWindowsProductJournalMaxBytes}, nil)
+}
+
+func windowsProductRecoveryRuntimeRequestWithJournal(ctx context.Context, stateDir, productPath, legacyWindowlessPath string, allowance WindowsProductJournalAllowance, evidence *windowsProductJournalReadEvidence) windowsProductRecoveryRequest {
+	if evidence == nil {
+		evidence = &windowsProductJournalReadEvidence{}
+	}
 	deps := buildV5UpgradeDeps(productPath, stateDir)
-	legacy := windowsProductPairRecoveryRuntimeRequest(ctx, stateDir, productPath, legacyWindowlessPath)
+	legacy := windowsProductPairRecoveryRuntimeRequestWithJournal(ctx, stateDir, productPath, legacyWindowlessPath, allowance, evidence)
 	return windowsProductRecoveryRequest{
+		JournalAllowance: allowance, journalReadEvidence: evidence,
 		Context: ctx, StateDir: stateDir, ProductPath: productPath, PendingRuntime: new(pendingRuntimeReceiving),
 		RecoverPriorSettlementOriginal: func(ctx context.Context, journal windowsProductRecoveryJournalV3, original *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1) error {
 			return recoverWindowsCanonicalEntryPriorRuntime(ctx, stateDir, journal, original)
 		},
 		LegacyWindowlessPath: legacyWindowlessPath, Legacy: legacy,
 		PreparePendingRuntime: func(ctx context.Context, journal windowsProductRecoveryJournalV3, receiving *pendingRuntimeReceiving) (func(context.Context, windowsProductRecoveryJournalV3) error, error) {
-			if journal.EntrySet != nil {
+			if hasCanonicalEntryArm(journal) {
 				return nil, nil
 			} // new arm receives its original runtime through the typed callback
 			expectation, err := capturePendingRuntimeExpectation(ctx, time.Now, func(ctx context.Context, now time.Time) (*api.SupervisorRuntimeIntent, error) {
@@ -3137,7 +3294,8 @@ func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, product
 			if err != nil {
 				return digest, err
 			}
-			raw, err := os.ReadFile(filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3))
+			raw, original, err := readWindowsProductRecoveryJournal(ctx, filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3), allowance)
+			evidence.retain(windowsProductJournalReadOutcome{phase: "committed-publication", path: filepath.Join(stateDir, WindowsProductRecoveryFileLeafV3), allowance: allowance, original: original, readError: err})
 			if err != nil {
 				return digest, err
 			}
@@ -3155,7 +3313,9 @@ func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, product
 		ReconcileCommitted: func(journal windowsProductRecoveryJournalV3) error {
 			var matched bool
 			var err error
-			if journal.EntrySet != nil {
+			if journal.EntryBundle != nil {
+				matched, err = reconcileCurrentEntryCommitReceipt(ctx, stateDir, journal, withWindowsProductDefaults(WindowsProductTxnDeps{PublishCommitted: windowsProductEventPublisher(stateDir)}))
+			} else if journal.EntrySet != nil {
 				matched, err = reconcileCanonicalEntryCommitReceipt(ctx, stateDir, journal, withWindowsProductDefaults(WindowsProductTxnDeps{PublishCommitted: windowsProductEventPublisher(stateDir)}))
 			} else {
 				matched, err = reconcileWindowsProductReceipt(stateDir, productPath, productPath, journal.Mode)
@@ -3169,15 +3329,15 @@ func windowsProductRecoveryRuntimeRequest(ctx context.Context, stateDir, product
 			return nil
 		},
 		RecoverPriorSettlement: func(ctx context.Context, journal windowsProductRecoveryJournalV3) error {
-			if journal.EntrySet != nil {
+			if hasCanonicalEntryArm(journal) {
 				return fmt.Errorf("%w: complete-set recovery requires its original-runtime callback", ErrWindowsProductRecoveryPending)
 			}
 			runtimePath, runtimeSHA, present, err := windowsProductRecoveryPriorRuntime(journal)
 			if err != nil {
 				return err
 			}
-			if !present && journal.EntrySet != nil {
-				runtimePath = journal.EntrySet.CanonicalEntry.Target
+			if !present && hasCanonicalEntryArm(journal) {
+				runtimePath = canonicalJournalEntryPath(journal)
 			}
 			priorDeps := buildV5UpgradeDeps(runtimePath, stateDir)
 			if journal.Mode != WindowsProductPairModeUpgrade || journal.PreSettlement == nil {
@@ -4385,11 +4545,22 @@ func (d *v5UpgradeDeps) supervisorLaunchDependencies() (supervisorLaunchDependen
 // Receive the published successor from its still-held transaction originals
 // before launch. Both control and readiness retain this same view; an ordinary
 // path reader cannot reopen these DELETE-owned objects while rollback is armed.
+type windowsCanonicalSuccessorRuntimeSource interface {
+	SuccessorRuntimeProduct(context.Context) (*binaryadmission.WindowsCanonicalEntryRuntimeV1, error)
+}
+
 func (d *v5UpgradeDeps) startCanonicalEntrySuccessor(ctx context.Context, binaryPath string, source *stagedWindowsCanonicalEntrySetV1) (SupervisorLaunch, error) {
 	if source == nil || source.original == nil {
 		return nil, errors.New("original successor entry-set owner unavailable")
 	}
-	original, err := source.original.SuccessorRuntimeProduct(ctx)
+	return d.startCanonicalEntrySuccessorFromOriginal(ctx, binaryPath, source.original)
+}
+
+func (d *v5UpgradeDeps) startCanonicalEntrySuccessorFromOriginal(ctx context.Context, binaryPath string, source windowsCanonicalSuccessorRuntimeSource) (SupervisorLaunch, error) {
+	if source == nil {
+		return nil, errors.New("original successor entry-set owner unavailable")
+	}
+	original, err := source.SuccessorRuntimeProduct(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("receive original successor runtime: %w", err)
 	}

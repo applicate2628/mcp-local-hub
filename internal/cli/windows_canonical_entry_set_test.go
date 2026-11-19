@@ -390,7 +390,7 @@ func TestCanonicalCommittedClassifierReceivesDisposedPrior(t *testing.T) {
 			j.EntrySet.Cleanup = []windowsCanonicalEntryCleanupV1{{TransactionID: j.TransactionID, Side: "prior", Member: "product", SourceRelative: "mcphub-product/mcphub.exe.old-20261111T000000Z", ExpectedSHA256: j.Product.PriorSHA256, State: state}}
 			hashes := map[string]string{j.EntrySet.CanonicalEntry.Target: j.EntrySet.CanonicalEntry.NewSHA256, j.Product.Target: j.Product.NewSHA256, j.EntrySet.Identity.Target: j.EntrySet.Identity.NewSHA256}
 			d := canonicalClassifierDeps(t, j, hashes)
-			source, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{Context: context.Background()}, d, "original-journal", j, canonicalRecoveryCommittedCleanup)
+			source, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(), Context: context.Background()}, d, "original-journal", j, canonicalRecoveryCommittedCleanup)
 			if state == "retained" {
 				if err == nil {
 					t.Fatal("missing prior without durable intent was accepted")
@@ -409,7 +409,7 @@ func TestCanonicalCommittedClassifierReceivesDisposedPrior(t *testing.T) {
 				t.Fatal("generic rollback no longer requires the prior")
 			}
 			hashes[j.Product.Target] = strings.Repeat("9", 64)
-			if _, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{Context: context.Background()}, d, "original-journal", j, canonicalRecoveryCommittedCleanup); err == nil {
+			if _, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(), Context: context.Background()}, d, "original-journal", j, canonicalRecoveryCommittedCleanup); err == nil {
 				t.Fatal("foreign canonical successor bypassed committed admission")
 			}
 		})
@@ -450,7 +450,7 @@ func TestCanonicalRollbackClassifierReceivesDisposedPayloadParent(t *testing.T) 
 		}
 		return originalList(target)
 	}
-	source, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{Context: context.Background()}, d, "original-journal", j, canonicalRecoveryRollback)
+	source, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(), Context: context.Background()}, d, "original-journal", j, canonicalRecoveryRollback)
 	if err != nil {
 		t.Fatal("durable directory intent could not reach its native absence observer", err)
 	}
@@ -461,7 +461,7 @@ func TestCanonicalRollbackClassifierReceivesDisposedPayloadParent(t *testing.T) 
 	// Removing intent must restore the ordinary missing-parent refusal.
 	dir.State = "created_identity_received"
 	d = canonicalClassifierDeps(t, j, map[string]string{})
-	if _, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{Context: context.Background()}, d, "original-journal", j, canonicalRecoveryRollback); err == nil {
+	if _, err := prepareCanonicalRecoverySource(windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(), Context: context.Background()}, d, "original-journal", j, canonicalRecoveryRollback); err == nil {
 		t.Fatal("missing parent without disposal intent was accepted")
 	}
 }
@@ -603,7 +603,7 @@ func TestBuiltWindowsCanonicalEntrySetTransaction(t *testing.T) {
 			tasks := &productPairTaskFake{order: &order}
 			publish := windowsProductEventPublisher(stateDir)
 			publishCalls := 0
-			txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+			txn := &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(),
 				Context: ctx, EntrySet: source, StateDir: stateDir, Mode: WindowsProductPairModeCanonicalize,
 				CanonicalEntryPath: targets.CanonicalEntryPath, ProductPath: targets.ProductPath, IdentityPath: targets.IdentityPath,
 				LegacyWindowlessPath: legacy, StagedProduct: stages.ProductPath, Tasks: tasks,

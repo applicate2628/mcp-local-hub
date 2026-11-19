@@ -212,6 +212,9 @@ type WindowsCanonicalEntrySetV1 struct {
 	closeError               error
 	payloadDirectoryLink     *canonicalEntryPayloadDirectoryLinkV1
 	payloadDirectoryBorrowed bool
+	memberDirectories        *canonicalEntryMemberDirectoriesV2
+	memberDirectoryBorrows   map[*WindowsCanonicalEntryPayloadDirectoryV1]bool
+	memberFinalPaths         []string
 }
 
 type StagedWindowsCanonicalEntrySetV1 struct {

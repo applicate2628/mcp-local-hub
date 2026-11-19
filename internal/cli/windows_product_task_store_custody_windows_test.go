@@ -64,7 +64,7 @@ func TestWindowsProductStoreErrorReceiversKeepOriginalOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 		beginErr := errors.New("test-owned original begin failure")
-		txn, err := newWindowsProductTxnWith(windowsProductTxnRequest{
+		txn, err := newWindowsProductTxnWith(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 			Context: context.Background(), StateDir: stateDir,
 			ProductPath:          filepath.Join(stateDir, "mcphub.exe"),
 			LegacyWindowlessPath: filepath.Join(stateDir, "mcphub-windowless.exe"),
@@ -89,7 +89,7 @@ func TestWindowsProductStoreErrorReceiversKeepOriginalOwner(t *testing.T) {
 		f := newProductRecoveryV3Fixture(t, WindowsProductRecoverySuccessorStarting)
 		store, recovery := productStoreLoadFailureFixture(t, f.stateDir)
 		f.journal.Tasks = recovery
-		if err := persistWindowsProductRecoveryJournalV3(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+		if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 			t.Fatal(err)
 		}
 		req := f.request(&recoveryTaskTxnFake{})
@@ -139,7 +139,7 @@ func TestWindowsProductStoreErrorReceiversKeepOriginalOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.journal.Tasks = WindowsProductPairTaskRecovery{StoreRoot: store.RootPath(), Backups: []WindowsProductPairTaskBackup{}}
-		if err := persistWindowsProductRecoveryJournalV3(filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+		if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3), f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 			t.Fatal(err)
 		}
 		req := f.request(&recoveryTaskTxnFake{})

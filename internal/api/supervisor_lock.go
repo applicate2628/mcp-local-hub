@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -44,7 +46,10 @@ type SupervisorLock struct {
 	// overwriting it with the interlock-holder's own CLI PID would make the reap
 	// kill the caller instead of the old supervisor. Release() therefore skips the
 	// sidecar removal for a quiet lock — it never owned that file.
-	quiet bool
+	quiet            bool
+	quietObserved    bool
+	quietMu          sync.Mutex
+	quietAcquisition flock.AcquisitionObservation
 }
 
 var (
@@ -151,6 +156,64 @@ func AcquireSupervisorLockQuiet(path string) (*SupervisorLock, error) {
 	return &SupervisorLock{path: path, fl: lk, quiet: true}, nil
 }
 
+// AcquireSupervisorLockQuietObserved borrows the original singleton without
+// touching its owner sidecar. A partial owner is returned before any error.
+func AcquireSupervisorLockQuietObserved(ctx context.Context, path string) (*SupervisorLock, flock.AcquisitionObservation, error) {
+	if ctx == nil {
+		return nil, flock.AcquisitionObservation{}, errors.New("quiet lock context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, flock.AcquisitionObservation{}, err
+	}
+	if _, err := observedStateFileLeasePath(path); err != nil {
+		return nil, flock.AcquisitionObservation{}, err
+	}
+	owner := &SupervisorLock{path: path, fl: flock.New(path + ".lock"), quiet: true, quietObserved: true}
+	observation, err := owner.fl.TryLockObserved(ctx)
+	if !observation.Attempted {
+		return nil, observation, errors.Join(err, errors.New("supervisor quiet reservation not entered"))
+	}
+	owner.quietAcquisition = observation
+	if err != nil || !observation.Attempted || !observation.Returned || !observation.Held || observation.Generation == 0 {
+		return owner, observation, errors.Join(err, errors.New("supervisor quiet reservation unavailable"))
+	}
+	return owner, observation, nil
+}
+
+func (l *SupervisorLock) ValidateQuietObservedHeld(ctx context.Context, path string) error {
+	if l == nil || ctx == nil {
+		return errors.New("original quiet observed reservation required")
+	}
+	l.quietMu.Lock()
+	defer l.quietMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a := l.quietAcquisition
+	if !l.quietObserved || !l.quiet || l.fl == nil || l.path != path || !l.fl.Locked() ||
+		!a.Attempted || !a.Returned || !a.Held || a.Error != nil || a.Generation == 0 {
+		return errors.New("original quiet reservation is not held")
+	}
+	return nil
+}
+
+func (l *SupervisorLock) ReleaseQuietObserved() (flock.ReleaseObservation, error) {
+	if l == nil {
+		return flock.ReleaseObservation{}, errors.New("original observed quiet lock required")
+	}
+	l.quietMu.Lock()
+	defer l.quietMu.Unlock()
+	if !l.quiet || !l.quietObserved || l.fl == nil {
+		return flock.ReleaseObservation{}, errors.New("original observed quiet acquisition required")
+	}
+	view, err := l.fl.ReleaseObserved()
+	a := l.quietAcquisition
+	if view.Generation != a.Generation || !view.AcquisitionReturned || !view.AllocatedFilesClosed || view.Pending || (a.Held && !view.Complete) {
+		err = errors.Join(err, errors.New("original observed quiet release incomplete"))
+	}
+	return view, err
+}
+
 // Owner returns the exact sidecar identity written when the lock was acquired.
 // IPC listeners use this as the single source of truth for hello frames.
 func (l *SupervisorLock) Owner() SupervisorLockOwner {
@@ -198,6 +261,10 @@ func readSupervisorLockOwnerWith(path string, read func(string) ([]byte, error))
 // successor will overwrite it on its next acquire anyway, and removing
 // it on graceful release keeps the state directory tidy.
 func (l *SupervisorLock) Release() {
+	if l != nil && l.quietObserved {
+		_, _ = l.ReleaseQuietObserved()
+		return
+	}
 	if l == nil || l.fl == nil {
 		return
 	}
@@ -410,5 +477,8 @@ type InstallParsedManifestBypass struct{ lk *SupervisorLock }
 // at use time), so a stale token can never re-open the split-brain the gate
 // prevents.
 func (l *SupervisorLock) AllowSpecBearingWriteBypass() InstallParsedManifestBypass {
+	if l != nil && l.quietObserved {
+		return InstallParsedManifestBypass{}
+	}
 	return InstallParsedManifestBypass{lk: l}
 }

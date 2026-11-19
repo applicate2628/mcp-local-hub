@@ -357,19 +357,25 @@ func migrateLegacyKeys(raw map[string]string) {
 // A4-b's GUI editor) are preserved verbatim. Returns an empty map if
 // the file does not exist.
 func readRawSettingsMap(path string) (map[string]string, error) {
-	out := map[string]string{}
+	out, present, err := readRawSettingsMapPresence(path)
+	if !present && os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	return out, err
+}
+
+// Presence comes from the same inode-anchored read as the decoded map.
+func readRawSettingsMapPresence(path string) (map[string]string, bool, error) {
 	data, err := readStateFileInodeAnchored(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return out, nil
-		}
-		return nil, err
+		return nil, !os.IsNotExist(err), err
 	}
+	out := map[string]string{}
 	if err := yaml.Unmarshal(data, &out); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	migrateLegacyKeys(out)
-	return out, nil
+	return out, true, nil
 }
 
 var errInvalidSettingsDocument = errors.New("cannot verify complete settings document")

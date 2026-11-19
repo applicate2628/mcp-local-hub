@@ -9,6 +9,10 @@ import (
 // This immutable compiler input is correlation data, never native authority.
 var compiledWindowsProductRegistryBase64 string
 
+// ErrCompiledWindowsProductRegistryAbsent denotes only a missing linker input.
+// Invalid current input is a distinct terminal error.
+var ErrCompiledWindowsProductRegistryAbsent = errors.New("compiled current Windows Product registry is missing")
+
 // CompiledWindowsProductRegistry lazily receives the normal current registry.
 // DATA-only tools may use the ordinary codecs without a compiled native input.
 func CompiledWindowsProductRegistry() (WindowsProductRegistryV4, error) {
@@ -18,7 +22,7 @@ func CompiledWindowsProductRegistry() (WindowsProductRegistryV4, error) {
 func parseCompiledWindowsProductRegistry(encoded string) (WindowsProductRegistryV4, error) {
 	var zero WindowsProductRegistryV4
 	if encoded == "" {
-		return zero, errors.New("compiled current Windows Product registry is missing")
+		return zero, ErrCompiledWindowsProductRegistryAbsent
 	}
 	raw, err := base64.StdEncoding.Strict().DecodeString(encoded)
 	if err != nil || base64.StdEncoding.EncodeToString(raw) != encoded {

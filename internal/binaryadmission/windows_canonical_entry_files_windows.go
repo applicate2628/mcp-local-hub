@@ -117,6 +117,7 @@ func receiveCanonicalEntryFilesWithRegistry(ctx context.Context, files [3]*os.Fi
 		CanonicalEntry: WindowsCanonicalEntryFileV1{targets.CanonicalEntryPath, entryHash},
 		Product: WindowsCanonicalEntryFileV1{targets.ProductPath, productHash},
 		Identity: WindowsCanonicalEntryFileV1{targets.IdentityPath, canonicalEntrySHA256(raw)},
+		IdentityBytes: raw,
 		ProductArtifact: WindowsArtifact{Path: targets.ProductPath, Role: metadata.Role, Version: metadata.Version,
 			Commit: metadata.Commit, BuildDate: metadata.BuildDate, SHA256: productHash, Machine: ph.machine, Subsystem: ph.subsystem},
 	}
@@ -127,6 +128,7 @@ type canonicalEntryFilesObservation struct {
 	BuildID, RegistryProjectionSHA256 string
 	CanonicalEntry, Product, Identity WindowsCanonicalEntryFileV1
 	ProductArtifact                   WindowsArtifact
+	IdentityBytes                     []byte
 }
 
 // Read only from the held original, retaining an acquired prefix alongside

@@ -181,7 +181,7 @@ func newQualifiedUpgradeGUICommandFixture(t *testing.T) *qualifiedUpgradeGUIComm
 				return nil
 			}
 		}
-		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(),
 			Context: req.Context, StateDir: req.StateDir, ProductPath: req.ProductPath,
 			CanonicalEntryPath: req.CanonicalEntryPath, IdentityPath: req.IdentityPath, EntrySet: req.EntrySet,
 			LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct,

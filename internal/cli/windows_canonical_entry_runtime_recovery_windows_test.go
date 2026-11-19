@@ -27,7 +27,7 @@ func TestCanonicalRuntimeRecoveryNonUpgradeSettlesWithoutPriorRuntime(t *testing
 			journal.Mode = mode
 			path := filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)
 			writeCanonicalPendingValidationJournal(t, req.StateDir, journal)
-			runtimeRequest, err := windowsCanonicalEntryRecoveryRuntimeRequest(req.Context, req.StateDir, req.CanonicalEntryPath, req.LegacyWindowlessPath)
+			runtimeRequest, err := windowsCanonicalEntryRecoveryRequestForDomain(req.Context, req.StateDir, req.CanonicalEntryPath, req.LegacyWindowlessPath, false, productJournalFixtureAllowance(), &windowsProductJournalReadEvidence{})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -142,7 +142,7 @@ func newUpgradeGUICommandC3Fixture(t *testing.T) *upgradeGUICommandC3Fixture {
 				return nil
 			}
 		}
-		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
+		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(), StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
 		return f.txn, nil
 	}
 	return f
@@ -972,7 +972,7 @@ func TestUpgradeGUIOwnedPairIdentityRequiresExactChildJobTopology(t *testing.T) 
 
 func TestUpgradeGUIOwnedPairPreparePersistsLivePreimage(t *testing.T) {
 	f := newUpgradeGUICommandC3Fixture(t)
-	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
+	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: f.stateDir, ProductPath: f.target,
 		LegacyWindowlessPath: filepath.Join(filepath.Dir(f.target), "mcphub-windowless.exe"),
 		StagedProduct:        f.candidate, Mode: WindowsProductPairModeUpgrade,
@@ -1728,7 +1728,7 @@ func TestUpgradeGUIOwnedCommittedForwardRetainsJournalUntilGUIProof(t *testing.T
 	}
 	f.journal.Quiescence, f.journal.QuiescenceReceiptSHA256, f.journal.PriorFleetReaped = &projection, digest, true
 	journalPath := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
-	if err := persistWindowsProductRecoveryJournalV3(journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 		t.Fatal(err)
 	}
 	tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}

@@ -33,6 +33,10 @@ func canonicalEntryNativeID(h windows.Handle, directory bool) (canonicalEntryNat
 }
 
 func canonicalEntryOpenNative(parent windows.Handle, name string, directory bool, access, share, disposition uint32) (windows.Handle, error) {
+	return canonicalEntryOpenNativeAttributes(parent, name, directory, access, share, disposition, windows.FILE_ATTRIBUTE_NORMAL)
+}
+
+func canonicalEntryOpenNativeAttributes(parent windows.Handle, name string, directory bool, access, share, disposition, attributes uint32) (windows.Handle, error) {
 	u, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return 0, err
@@ -46,7 +50,7 @@ func canonicalEntryOpenNative(parent windows.Handle, name string, directory bool
 	var h windows.Handle
 	var iosb windows.IO_STATUS_BLOCK
 	var allocation int64
-	err = windows.NtCreateFile(&h, access|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, &oa, &iosb, &allocation, windows.FILE_ATTRIBUTE_NORMAL, share, disposition, options, 0, 0)
+	err = windows.NtCreateFile(&h, access|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, &oa, &iosb, &allocation, attributes, share, disposition, options, 0, 0)
 	return h, err
 }
 
@@ -392,6 +396,45 @@ func (o *WindowsCanonicalEntrySetV1) verifyLocked() error {
 	return nil
 }
 
+// VerifyLegacyProductBuild positively checks the legacy build domain through
+// the admitted Product original. Binding alone does not distinguish domains.
+func (o *WindowsCanonicalEntrySetV1) VerifyLegacyProductBuild(ctx context.Context) error {
+	if o == nil || ctx == nil {
+		return errors.New("held legacy canonical entry owner and context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.verifyLocked(); err != nil {
+		return err
+	}
+	info, err := o.product.file.Stat()
+	if err != nil {
+		return err
+	}
+	product, err := readWindowsBuildIdentityAt(o.product.file, info.Size())
+	if err != nil {
+		return err
+	}
+	comments, err := parseWindowsBuildCommentsComposition(product.Comments)
+	if err != nil {
+		return err
+	}
+	return errors.Join(validateLegacyCanonicalEntryBuild(comments, o.snapshot), ctx.Err())
+}
+
+func validateLegacyCanonicalEntryBuild(comments windowsBuildCommentsComposition, snapshot WindowsCanonicalEntrySetSnapshotV1) error {
+	if !comments.hasEntry || comments.runtimeSHA256 != "" ||
+		comments.entry.BuildID() != snapshot.BuildID ||
+		comments.entry.ExpectedCanonicalEntrySHA256() != snapshot.CanonicalEntry.SHA256 ||
+		comments.entry.ReverseProjection() != snapshot.ReverseProjection {
+		return errors.New("held Product does not attest the legacy canonical entry build")
+	}
+	return nil
+}
+
 func (o *WindowsCanonicalEntrySetV1) VerifyUnchanged() error {
 	if o == nil {
 		return errors.New("missing canonical entry owner")
@@ -452,6 +495,10 @@ func verifyCanonicalEntryOriginalProductProcessHandle(product *canonicalEntryNat
 // mutex. This compatible name probe only compares the process image to that
 // object; it never replaces the original handle or grants disposition rights.
 func verifyCanonicalEntryProductProcessImage(product *canonicalEntryNativeFile, borrowedProcessHandle uintptr, leafShare uint32, payloadDirectoryLink *canonicalEntryPayloadDirectoryLinkV1) error {
+	return verifyCanonicalEntryProductProcessImageInNamespace(product, borrowedProcessHandle, leafShare, payloadDirectoryLink, nil)
+}
+
+func verifyCanonicalEntryProductProcessImageInNamespace(product *canonicalEntryNativeFile, borrowedProcessHandle uintptr, leafShare uint32, payloadDirectoryLink *canonicalEntryPayloadDirectoryLinkV1, memberDirectories *canonicalEntryMemberDirectoriesV2) error {
 	if borrowedProcessHandle == 0 || windows.Handle(borrowedProcessHandle) == windows.InvalidHandle {
 		return errors.New("missing original process handle")
 	}
@@ -472,7 +519,7 @@ func verifyCanonicalEntryProductProcessImage(product *canonicalEntryNativeFile, 
 		}
 		size *= 2
 	}
-	probe := &WindowsCanonicalEntrySetV1{payloadDirectoryLink: payloadDirectoryLink}
+	probe := &WindowsCanonicalEntrySetV1{payloadDirectoryLink: payloadDirectoryLink, memberDirectories: memberDirectories}
 	f, err := probe.openAbsoluteWithOptions(actualImagePath, false, leafShare, windows.FILE_OPEN)
 	if err == nil && f.identity != product.identity {
 		err = errors.New("actual original process image differs from retained Product")
