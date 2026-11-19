@@ -51,11 +51,17 @@ func canonicalEntryOpenNative(parent windows.Handle, name string, directory bool
 }
 
 func (o *WindowsCanonicalEntrySetV1) retain(h windows.Handle, name string, directory bool) (*canonicalEntryNativeFile, error) {
+	return canonicalEntryRetainNative(&o.files, h, name, directory)
+}
+
+// The namespace primitive retains every original handle before validation, so
+// each semantic owner can settle even a partially acquired invalid object.
+func canonicalEntryRetainNative(files *[]*os.File, h windows.Handle, name string, directory bool) (*canonicalEntryNativeFile, error) {
 	f := os.NewFile(uintptr(h), name)
 	if f == nil {
 		return nil, errors.Join(errors.New("native file wrapper unavailable"), windows.CloseHandle(h))
 	}
-	o.files = append(o.files, f)
+	*files = append(*files, f)
 	id, err := canonicalEntryNativeID(h, directory)
 	if err != nil {
 		return nil, err
@@ -85,6 +91,14 @@ func (o *WindowsCanonicalEntrySetV1) openAbsolute(name string, directory bool) (
 // Only destination staging permits FILE_OPEN_IF for directories. Source and
 // recovery admission keep FILE_OPEN and cannot create missing evidence.
 func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithOptions(name string, directory bool, leafShare, directoryDisposition uint32) (*canonicalEntryNativeFile, error) {
+	return canonicalEntryOpenAbsolute(name, directory, leafShare, directoryDisposition, o.retain, func(parent *canonicalEntryNativeFile, part string) (*canonicalEntryNativeFile, bool, error) {
+		return canonicalEntryBorrowPayloadDirectory(o, parent, part)
+	})
+}
+
+// Share only original namespace/handle acquisition across semantic domains.
+// Borrowing is supplied solely by the existing V1 transaction directory owner.
+func canonicalEntryOpenAbsolute(name string, directory bool, leafShare, directoryDisposition uint32, retain func(windows.Handle, string, bool) (*canonicalEntryNativeFile, error), borrow func(*canonicalEntryNativeFile, string) (*canonicalEntryNativeFile, bool, error)) (*canonicalEntryNativeFile, error) {
 	volume, parts, err := nativeCanonicalEntryPathParts(name)
 	if err != nil {
 		return nil, err
@@ -97,15 +111,15 @@ func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithOptions(name string, direct
 	if err != nil {
 		return nil, err
 	}
-	parent, err := o.retain(h, volume+`\`, true)
+	parent, err := retain(h, volume+`\`, true)
 	if err != nil {
 		return nil, err
 	}
 	path := volume + `\`
 	for i, part := range parts {
 		isDir := i < len(parts)-1 || directory
-		if isDir {
-			borrowed, matched, borrowErr := canonicalEntryBorrowPayloadDirectory(o, parent, part)
+		if isDir && borrow != nil {
+			borrowed, matched, borrowErr := borrow(parent, part)
 			if borrowErr != nil {
 				return nil, borrowErr
 			}
@@ -128,7 +142,7 @@ func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithOptions(name string, direct
 			return nil, fmt.Errorf("open original component %q: %w", part, err)
 		}
 		path = filepath.Join(path, part)
-		parent, err = o.retain(h, path, isDir)
+		parent, err = retain(h, path, isDir)
 		if err != nil {
 			return nil, err
 		}
