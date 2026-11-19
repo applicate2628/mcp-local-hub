@@ -1,6 +1,6 @@
 # R17 / #660: two-task native fixture proposal
 
-**Status: statically reviewed; syntax parse passed; ordinary script launch blocked; never applied.** This folder contains one small native fixture proposal. It does not authorize Windows Task Scheduler or execution-policy changes. The proposed run needs explicit approval for the precise creation, conditional cleanup, and one-session execution policy below.
+**Status: the single authorized original run failed; corrected V2 is prepared and syntax-checked, not applied.** See [the native result](NATIVE-RESULTS.md) and [the retained-task recovery](RECOVERY.md). One visible fixture remains disabled. Another full run requires a new exact approval and confirmed cleanup of that retained task first.
 
 ## Contents
 
@@ -14,13 +14,13 @@
 
 ## Scope and authority
 
-The approval unit is **one invocation** of `Invoke-R17HiddenFixture.ps1 -Apply` on the approved Windows machine, in the current interactive user's session. The script generates a unique 32-digit GUID (globally unique identifier), then attempts exactly two root-folder tasks: `\mcp-r17-<guid>-visible` and `\mcp-r17-<guid>-hidden`. A partial failure can leave fewer than two confirmed creations. There are no retries or replacement attempts.
+The approval unit for a future full retry is **one invocation** of `Invoke-R17HiddenFixture.ps1 -Apply` on the approved Windows machine, in the current interactive user's session. The script generates a unique 32-digit GUID (globally unique identifier), then attempts exactly two root-folder tasks: `\mcp-r17-<guid>-visible` and `\mcp-r17-<guid>-hidden`. A partial failure can leave fewer than two confirmed creations. There are no retries or replacement attempts.
 
 Both definitions are disabled before registration, registered with `TASK_CREATE | TASK_DISABLE = 2 | 8 = 10`, and have zero triggers. The task principal is the current user's SID (security identifier), with interactive-token logon and least privilege. Demand start is disabled. The sole action names a deliberately nonexistent executable beneath `D:\dev\ChatGPT\mcp-r17-native-qualification-20261119\<guid>\`; the script never creates that executable. The two tasks differ only in name, URI (uniform resource identifier), and visibility. A unique marker containing two non-ASCII characters tests preservation of Unicode text in the returned definition.
 
 The script requests only `status`, `export`, and `list` from the production script. **It never requests task Run, RunOwned, or Stop.** Windows PowerShell child processes execute the read requests; no fixture action is invoked. An unresolved child is recorded and prevents task cleanup. On a read timeout, the script terminates only its retained child process object, never a process selected by name.
 
-The proposed approval covers conditional removal of these confirmed creations after an immediate ownership and definition recheck. Because ordinary script launch has been blocked, it separately requests `RemoteSigned` for this new PowerShell session and its children only, using the exact command below. No approval has yet been granted. It does not cover any existing task, installed Hub, service, scheduled run, access-control policy, persistent user/machine execution-policy change, Group Policy change, installation, network operation, or additional branch. A name collision fails CREATE; there is no UPDATE, CREATE_OR_UPDATE, `/F`, or fallback mechanism. If the approved invocation is still blocked, stop and report that boundary.
+The proposed approval covers conditional removal of these confirmed creations after an immediate ownership and definition recheck. The previous one-session `RemoteSigned` approval was used by the original run. Another session and full retry have not been approved. The future request includes `RemoteSigned` for the new session and its children only, using the exact command below. It does not cover any existing task, installed Hub, service, scheduled run, access-control policy, persistent user/machine execution-policy change, Group Policy change, installation, network operation, or additional branch. A name collision fails CREATE; there is no UPDATE, CREATE_OR_UPDATE, `/F`, or fallback mechanism. If the approved invocation is still blocked, stop and report that boundary.
 
 ## Exact input and invocation
 
@@ -30,16 +30,16 @@ The source input must be the unmodified `internal/scheduler/scheduler_com_window
 e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa
 ```
 
-The reviewed [fixture script](Invoke-R17HiddenFixture.ps1) has SHA-256 `6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c`. Keep it and the exact source snapshot in the authorized work area without converting line endings. The source argument must also resolve lexically inside that area. A hash mismatch stops before task creation. The script extracts the two existing Go raw-string constants, concatenates the preamble and body unchanged, and passes that code through Windows PowerShell's `-EncodedCommand` transport. Request values arrive through standard input as JSON (JavaScript Object Notation); they are never interpolated into the script.
+The corrected [fixture script](Invoke-R17HiddenFixture.ps1) has SHA-256 `8118e1c02937dbf27a9aaa12f63f4e34a91b0ce3e7ad675b4e1758960c9cb010`. The original authorized run used `6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c`; its result is preserved separately. Keep it and the exact source snapshot in the authorized work area without converting line endings. The source argument must also resolve lexically inside that area. A hash mismatch stops before task creation. The script extracts the two existing Go raw-string constants, concatenates the preamble and body unchanged, and passes that code through Windows PowerShell's `-EncodedCommand` transport. Request values arrive through standard input as JSON (JavaScript Object Notation); they are never interpolated into the script.
 
 ```powershell
-$fixture = 'D:\dev\ChatGPT\mcp-r17-resume-20261119\Invoke-R17HiddenFixture.ps1'
+$fixture = 'D:\dev\ChatGPT\mcp-r17-resume-20261119\Invoke-R17HiddenFixture-v2.ps1'
 $source  = 'D:\dev\ChatGPT\mcp-r17-resume-20261119\scheduler_com_windows-1b870e04.go'
 
-# Default path: plan only if permitted by the host. The actual check was BLOCKED.
+# Default path: plan only if permitted. V2 default execution has not been attempted.
 powershell.exe -NoProfile -NonInteractive -File $fixture
 
-# PROPOSAL ONLY: not executed; requires approval of the exact task and policy scope.
+# PROPOSAL ONLY: new approval and confirmed recovery of the retained visible task required.
 powershell.exe -ExecutionPolicy RemoteSigned -NoProfile -NonInteractive -File $fixture -SourceFile $source -Apply
 ```
 
@@ -49,19 +49,21 @@ The `-ExecutionPolicy` argument applies to the new session and its children with
 
 ## Completed preparation and host block
 
-On 19 November 2026, preparation checks ran on Comet. The [preparation receipt](fixture-validation.json) distinguishes the final script from the earlier version used for the blocked default invocation:
+Historical preparation checks ran on Comet before the authorized native run. The unchanged [preparation receipt](fixture-validation.json) distinguishes the originally approved script from an earlier version used for the blocked default invocation:
 
-- The native PowerShell parser reported zero syntax errors, 2459 tokens, and the `Apply` parameter on the final script after the source-digest correction. `Parser.ParseFile` did not evaluate the script or access Task Scheduler.
+- The native PowerShell parser reported zero syntax errors, 2459 tokens, and the `Apply` parameter on the originally approved script after the source-digest correction. `Parser.ParseFile` did not evaluate the script or access Task Scheduler.
 - An ordinary `powershell.exe -NoProfile -NonInteractive -File …` invocation without `-Apply`, on the preceding script version with SHA-256 `342661c6f69bbbadaecd258fd193b033fb3378f3aa251bb92c707b58ea166e69`, was blocked before script code ran, with `FullyQualifiedErrorId=UnauthorizedAccess` and the host's scripts-disabled error. No plan JSON was produced. This is a host execution-policy denial, not an automatic approval-review rejection.
 - The earlier read-only `Get-ExecutionPolicy -List` query failed while autoloading `Microsoft.PowerShell.Security`, so the effective policy value and its governing scope remain unknown. No policy change or module reinstall was performed.
 
 Final source verification against Git blob `bbc2d73a2fa3d59c3edb206e5be48c5cbd6f0eb7` found that the first prepared source copy had one extra final LF byte. The exact Git source is 10040 bytes. The isolated copy and the fixture's source-digest literal were corrected; the production script constants were unchanged. The final syntax check and both remote file digests were repeated. The unchanged host-policy block was not retried on this new script version, and the earlier blocked run is not presented as its execution.
 
-The fixture computes its source digest through .NET rather than that module's `Get-FileHash`. A syntax parse does not establish that the default plan, modules, registration, reads, or cleanup can execute. No `-Apply` run or native fixture observation has occurred. A further policy or module failure remains a stop condition; it does not authorize installation, repair, or an alternate executor.
+The fixture computes its source digest through .NET rather than that module's `Get-FileHash`. A syntax parse does not establish that the default plan, modules, registration, reads, or cleanup can execute. The later single authorized `-Apply` run and its failed result are documented in [NATIVE-RESULTS.md](NATIVE-RESULTS.md); the original preparation receipt remains historical. A further policy or module failure remains a stop condition; it does not authorize installation, repair, or an alternate executor.
 
 ## Checks and the meaning of success
 
-**Table 1. Proposed native observations.** None has yet been executed.
+The V2 change removes only the extra nonempty-stderr failure predicate. Stderr remains recorded; nonzero exit, invalid JSON, and failed semantic assertions remain failures. The saved original response and stderr establish the false failure; they do not replace a V2 native run. [V2 syntax receipt](fixture-v2-validation.json): zero errors, 2449 tokens, no script evaluation.
+
+**Table 1. Required native observations.** The original run reached only the first request and stopped before accepting its semantic assertions. The complete suite has not passed.
 
 | Request | Required observation |
 |---|---|
@@ -125,7 +127,7 @@ Windows Task Scheduler does not provide an atomic compare-and-delete operation. 
 
 ## Evidence and limitations
 
-All output stays under `D:\dev\ChatGPT\mcp-r17-native-qualification-20261119\<guid>\`. `intent.json` is written before any registration. Successful creations save their exact registered XML. The seven read responses are saved as separate JSON files, and nonempty standard-error output is retained beside them. `result.json` records the source hash, completed checks, read-child settlement, both task states, cleanup outcomes, and any failure. These runtime files may contain local principal identifiers and must remain local until a separately reviewed redacted report is prepared. The proposal itself contains none. Standard output contains only pass/cleanup booleans, a failure-present flag, and the authorized evidence-directory path; detailed errors and definitions are not printed as shareable results.
+All output stays under `D:\dev\ChatGPT\mcp-r17-native-qualification-20261119\<guid>\`. `intent.json` is written before any registration. Successful creations save their exact registered XML. Each completed read response is saved as a separate JSON file, and nonempty standard-error output is retained beside it; up to seven reads are planned. `result.json` records the source hash, completed checks, read-child settlement, both task states, cleanup outcomes, and any failure. These runtime files may contain local principal identifiers and must remain local until a separately reviewed redacted report is prepared. The proposal itself contains none. Standard output contains only pass/cleanup booleans, a failure-present flag, and the authorized evidence-directory path; detailed errors and definitions are not printed as shareable results.
 
 Evidence and recovery files remain outside trash. There is no automatic file deletion, trash purge, or removal of uncertain state. The missing executable is intentionally never created.
 
@@ -133,7 +135,7 @@ A future successful run would qualify the exact production PowerShell script aga
 
 The 15-second wait in `Invoke-ProductionRead` bounds only child-process exit. Reading the two asynchronous stream results has no separate deadline, and in-process COM calls have no enforced overall deadline. The source review found no descendant process launch in the pinned read script that would keep an inherited stream writer open, but this is not proof of a globally bounded run. An interrupted run requires the recovery procedure above.
 
-Preparation included local review and the remote parser/blocked default invocation described above. It included no fixture registration, deletion, start, stop, installation, or policy change. Publication of this proposal and source reading are not native qualification.
+Historical preparation included review and the parser/blocked default invocation described above. The later original run created two tasks, removed the hidden one and retained the visible one after the stderr gate failed. The corrected version has only been statically reviewed and parsed. Its publication is not native qualification, and its next Apply must wait for the separately authorized recovery and retry sequence.
 
 ## Primary contracts
 

@@ -98,7 +98,7 @@ function Invoke-ProductionRead($request, [string]$label) {
         $raw = $stdout.Result; $err = $stderr.Result
         [IO.File]::WriteAllText((Join-Path $runDir ($label + '.json')), $raw, $utf8)
         if (![string]::IsNullOrWhiteSpace($err)) { [IO.File]::WriteAllText((Join-Path $runDir ($label + '.stderr.txt')), $err, $utf8) }
-        if ($child.ExitCode -ne 0 -or ![string]::IsNullOrWhiteSpace($err)) { throw 'Production read failed; stdout retained locally.' }
+        if ($child.ExitCode -ne 0) { throw 'Production read failed; stdout retained locally.' }
         return ($raw | ConvertFrom-Json)
     } finally {
         if ($null -ne $entry.pid -and !$entry.settled) {

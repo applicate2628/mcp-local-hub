@@ -1,0 +1,18 @@
+{
+  "script": "Recover-R17VisibleFixture.ps1",
+  "sha256": "3e0f68e2858d6a214a2ecd14db26a973d92149c553275df2e3a323b06a1a0c89",
+  "syntax_parse": {
+    "engine": "Windows PowerShell on Comet",
+    "syntax_errors": 0,
+    "messages": [],
+    "token_count": 1429,
+    "script_evaluated": false,
+    "process_completion_observed": true
+  },
+  "default_plan_executed": false,
+  "apply_executed": false,
+  "new_recovery_approval_received": false,
+  "target_task": "\\mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible",
+  "source_run_id": "d55a6763eb064445a46ef592d52a9e6f",
+  "scope": "One conditional deletion, fresh complete definition checks, exclusive attempt marker, no retry"
+}

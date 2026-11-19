@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "run_id": "d55a6763eb064445a46ef592d52a9e6f",
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "executed_fixture_sha256": "6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c",
+  "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+  "authorization": "One user-approved Apply invocation with session RemoteSigned; consumed",
+  "native_qualification_passed": false,
+  "accepted_checks": [],
+  "cleanup_complete": false,
+  "recorded_failure": "Production read failed; stdout retained locally.",
+  "first_child": {
+    "check": "status-visible",
+    "started_utc": "2026-11-19T15:35:33.8350968Z",
+    "settled": true,
+    "exit_code": 0
+  },
+  "saved_first_response": {
+    "ok": true,
+    "exact_name_state_xml": true,
+    "owner_normalized_in_read_only_observation": true,
+    "accepted_by_original_fixture": false
+  },
+  "stderr": {
+    "format": "CLIXML",
+    "header_line_ending": "CRLF",
+    "top_level_record_count": 1,
+    "record_streams": [
+      "progress"
+    ],
+    "progress_state": "Completed",
+    "activity_meaning": "Preparing modules for first use"
+  },
+  "tasks": [
+    {
+      "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible",
+      "hidden": false,
+      "attempted": true,
+      "created": true,
+      "confirmed": false,
+      "cleanup": "retained"
+    },
+    {
+      "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden",
+      "hidden": true,
+      "attempted": true,
+      "created": true,
+      "confirmed": true,
+      "cleanup": "removed"
+    }
+  ],
+  "saved_files": [
+    {
+      "name": "intent.json",
+      "bytes": 734,
+      "sha256": "eab630c66d1c377d7201f204c6b29f2fd6933a462e856936af4de5e2e5eb2d8d"
+    },
+    {
+      "name": "result.json",
+      "bytes": 5367,
+      "sha256": "c151564a1c5d873aa4f3197b91124289235b8d73e4d1d472f6f778afe0971833"
+    },
+    {
+      "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible.xml",
+      "bytes": 1262,
+      "sha256": "28affda1fe9d55a47e7bc5cbd9add47a041bc7e28c0e7d1da2b10f988b853c97"
+    },
+    {
+      "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden.xml",
+      "bytes": 1288,
+      "sha256": "09348cba1f2219e842d78bab9c9d94bb8a46bd27e81cb37587900acdbdbbfd53"
+    },
+    {
+      "name": "status-visible.json",
+      "bytes": 1918,
+      "sha256": "7f1acf1e4659982ec7992fb4868fc476707d160bb9e9d25998a30a4bdefcc13b"
+    },
+    {
+      "name": "status-visible.stderr.txt",
+      "bytes": 441,
+      "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+    }
+  ],
+  "read_only_observation": {
+    "observed_utc": "2026-11-19T15:40:26.3096978Z",
+    "read_only": true,
+    "hidden_inclusive_enumeration_completed": true,
+    "current_user_matches_intent": true,
+    "saved_status_owner_matches": true,
+    "tasks": [
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible",
+        "hidden": false,
+        "observed_count": 1,
+        "observed_absent": false,
+        "exact_path": true,
+        "same_xml": true,
+        "same_principal": true,
+        "task_disabled": true,
+        "settings_disabled": true,
+        "state": 1,
+        "hidden_setting": false,
+        "trigger_count": 0,
+        "demand_start_disabled": true,
+        "logon_type": 3,
+        "run_level": 0,
+        "marker_matches": true,
+        "uri_matches": true,
+        "action_count": 1,
+        "action_type": 0,
+        "action_matches": true,
+        "empty_arguments": true,
+        "action_file_absent": true
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden",
+        "hidden": true,
+        "observed_count": 0,
+        "observed_absent": true
+      }
+    ]
+  },
+  "observation_sha256": "98269c3d2b54fd023e6b4cbc0a0e8001fdb9cee69353ae7df7fa39876d9d1c8e",
+  "analyzer_sha256": "d4366cf9b833b32b29c349d8f9cba1223ffbef7c79a511b2a329e19f7de63cb0",
+  "limits": [
+    "Captured UTF-8 text files, not a new native replay or raw pipe-byte capture",
+    "Private XML and principal identifiers are omitted; raw records remain local",
+    "The first saved answer is an observation, not a passed seven-check suite",
+    "Current-state observation is not atomic deletion authority",
+    "Separate recovery and another native Apply are not yet authorized"
+  ]
+}
