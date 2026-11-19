@@ -1,0 +1,36 @@
+{
+  "checked_utc": "2026-11-19T18:27:58.223868+00:00",
+  "input_sha256": {
+    "probe.go": "c618d809208ffa0be23b8c27bd26c0ee0c825faf981bed0310ca8b16ee809650",
+    "run_probe.py": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1",
+    "Invoke-R17PublicGoPositiveFixture.ps1": "b3cf12165b57df5f8ab43e41fc00b57ecdc824c650203ab3d4732386beebc514",
+    "launch_positive.py": "c317bd988f9519a4bb0f085b12f90c8e090d66e7a8d29dcc97ab3436ba4eca64"
+  },
+  "python_syntax": "PASS",
+  "parser_exit_code": 0,
+  "parser": {
+    "parse_errors": 0,
+    "parsed_only": true,
+    "apply_executed": false
+  },
+  "parser_stderr_empty": true,
+  "plan_exit_code": 0,
+  "plan": {
+    "mode": "PLAN_ONLY",
+    "run_id": "027ca2dd03624a318f469ad87b259bff",
+    "fixture_sha256": "b3cf12165b57df5f8ab43e41fc00b57ecdc824c650203ab3d4732386beebc514",
+    "probe_sha256": "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc",
+    "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+    "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+    "named_tasks": [
+      "\\mcp-r17-027ca2dd03624a318f469ad87b259bff-visible",
+      "\\mcp-r17-027ca2dd03624a318f469ad87b259bff-hidden"
+    ],
+    "effects": "Two CREATE-only disabled, inert tasks; five public Go reads; fresh guarded cleanup even after a semantic failure",
+    "execution_policy": "RemoteSigned for this PowerShell process and its inherited process environment only",
+    "whole_process_tree_deadline_enforced": false
+  },
+  "plan_stderr_empty": true,
+  "native_run_directory_absent": true,
+  "launch_markers_absent": true
+}
