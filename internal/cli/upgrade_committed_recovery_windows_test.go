@@ -803,7 +803,8 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			journal := windowsProductRecoveryJournalV3{PreSettlement: &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}}
 			ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), journal, ops)
 			public := committedRecoveryCommandError(committedRecoveryOwnerFailureID(ownerErr), "recover pending prior settlement", ownerErr)
-			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
+			wantFields := "; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
+			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement" + wantFields
 			if public.Error() != want || !errors.Is(public, ErrWindowsProductRecoveryPending) || public.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" {
 				t.Fatal("actual reservation substep or original causal chain was lost")
 			}
@@ -826,6 +827,30 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			}
 			if strings.Contains(public.Error(), private) || strings.Contains(public.Error(), "PRIVATE_RELEASE_X") || strings.Contains(fmt.Sprintf("%v %#v", ownerErr, ownerErr), private) {
 				t.Fatal("private reservation detail escaped its closed projection")
+			}
+			quiescence := errors.New("current successor quiescence unavailable")
+			quiescenceClose := errors.New("PRIVATE_QUIESCENCE_CLOSE_X")
+			memberClose := errors.New("PRIVATE_MEMBER_CLOSE_X")
+			directoryClose := errors.New("PRIVATE_DIRECTORY_CLOSE_X")
+			joined := errors.Join(ErrWindowsProductRecoveryPending, ownerErr, quiescence)
+			joined = errors.Join(joined, quiescenceClose)
+			joined = errors.Join(joined, memberClose, directoryClose)
+			ordinary := ordinaryWindowsProductRecoveryError(joined)
+			wantOrdinary := "v0.5 upgrade: recover Windows product pair: E_WINDOWS_PRODUCT_RECOVERY_PENDING: prior GUI settlement unconfirmed" + wantFields
+			var projection *upgradeCommittedCommandError
+			if ordinary.Error() != wantOrdinary || !errors.As(ordinary, &projection) || projection.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" {
+				t.Fatalf("ordinary reservation projection = %q, want %q", ordinary.Error(), wantOrdinary)
+			}
+			if projection.Unwrap() != joined {
+				t.Fatal("ordinary projection dropped the outer rollback error")
+			}
+			for _, cause := range []error{ErrWindowsProductRecoveryPending, ownerErr, quiescence, quiescenceClose, memberClose, directoryClose} {
+				if !errors.Is(ordinary, cause) {
+					t.Fatal("ordinary projection dropped a nested recovery or cleanup cause")
+				}
+			}
+			if (!tc.missingLease && !errors.Is(ordinary, primary)) || (tc.releaseErr != nil && !errors.Is(ordinary, tc.releaseErr)) {
+				t.Fatal("ordinary projection dropped the typed reservation causes")
 			}
 			wantReleases := 0
 			if tc.secondFails {

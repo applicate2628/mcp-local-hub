@@ -74,7 +74,10 @@ const (
 	upgradePendingTransactionDifferent upgradePendingRecoveryResult = "TRANSACTION_DIFFERENT"
 )
 
-const currentPendingRuntimeStage = "current runtime receiving unconfirmed"
+const (
+	currentPendingRuntimeStage = "current runtime receiving unconfirmed"
+	priorGUISettlementStage    = "prior GUI settlement unconfirmed"
+)
 
 func (e *upgradeCommittedCommandError) Error() string {
 	message := e.id + ": " + e.stage
@@ -84,7 +87,7 @@ func (e *upgradeCommittedCommandError) Error() string {
 			message += "; last_failed_predicate=" + health.predicate
 		}
 	}
-	if e.stage == "recover pending prior settlement" || e.stage == currentPendingRuntimeStage {
+	if e.stage == "recover pending prior settlement" || e.stage == currentPendingRuntimeStage || e.stage == priorGUISettlementStage {
 		switch e.pendingResult {
 		case upgradePendingResultMissing, upgradePendingOutcomeDifferent, upgradePendingTransactionDifferent:
 			message += "; recovery_result=" + string(e.pendingResult)
@@ -138,14 +141,19 @@ func pendingRuntimeProjection(cause error, receiving *pendingRuntimeReceiving) s
 	return message
 }
 
-// This is the ordinary Product recovery return boundary. Only retained typed
-// current-pending failures receive the existing safe recovery projection.
+// At the ordinary Product recovery boundary, classified pending failures use
+// the same closed diagnostic fields as the dedicated recovery commands.
 func ordinaryWindowsProductRecoveryError(cause error) error {
 	var current *pendingRuntimeError
 	if errors.As(cause, &current) && current != nil {
 		projected := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", currentPendingRuntimeStage, cause)
 		projected.runtime = current.receiving
 		cause = projected
+	} else {
+		var prior *upgradeGUIPriorSettlementError
+		if errors.As(cause, &prior) && prior != nil && isUpgradeGUIPriorOperation(prior.operation) {
+			cause = committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", priorGUISettlementStage, cause)
+		}
 	}
 	return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", cause)
 }
