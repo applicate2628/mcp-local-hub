@@ -216,12 +216,12 @@
       "name": "Sequential Thinking MCP server",
       "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/sequentialthinking/README.md",
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
+        "@modelcontextprotocol/server-sequential-thinking@2.2.0"
       ],
       "env": {},
       "categories": [

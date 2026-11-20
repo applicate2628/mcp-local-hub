@@ -7,13 +7,18 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,6 +28,9 @@ import (
 const (
 	repositoryURL        = "https://github.com/oraios/serena"
 	serversRepositoryURL = "https://github.com/modelcontextprotocol/servers"
+
+	sequentialNodePackage   = "@modelcontextprotocol/node"
+	sequentialServerPackage = "@modelcontextprotocol/server"
 )
 
 var (
@@ -32,8 +40,11 @@ var (
 	semverPattern        = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	mcpV1Pattern         = regexp.MustCompile(`^1\.[0-9]+\.[0-9]+$`)
 	npmIntegrityPattern  = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
+	nodeEnginePattern    = regexp.MustCompile(`^>=[1-9][0-9]*$`)
 	pinnedCommentPattern = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
 )
+
+var sequentialV2VersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
 // Descriptor is the sole checked-in source of Serena release metadata.
 type Descriptor struct {
@@ -69,6 +80,7 @@ type FetchDescriptor struct {
 
 type sequentialArtifacts struct {
 	PackageIntegrity string `yaml:"package_integrity"`
+	NodeEngine       string `yaml:"node_engine"`
 }
 
 type resolvedSDKDescriptor struct {
@@ -77,10 +89,11 @@ type resolvedSDKDescriptor struct {
 }
 
 type sequentialLockDescriptor struct {
-	LockfileVersion int                   `yaml:"lockfile_version"`
-	PackageCount    int                   `yaml:"package_count"`
-	SHA256          string                `yaml:"sha256"`
-	ResolvedSDK     resolvedSDKDescriptor `yaml:"resolved_sdk"`
+	LockfileVersion              int                              `yaml:"lockfile_version"`
+	PackageCount                 int                              `yaml:"package_count"`
+	SHA256                       string                           `yaml:"sha256"`
+	ResolvedSDK                  resolvedSDKDescriptor            `yaml:"resolved_sdk"`
+	ResolvedProtocolDependencies map[string]resolvedSDKDescriptor `yaml:"resolved_protocol_dependencies"`
 }
 
 // SequentialDescriptor is the sole checked-in source of Sequential Thinking
@@ -142,8 +155,8 @@ func loadFetchDescriptor(path string) (FetchDescriptor, error) {
 }
 
 func (d SequentialDescriptor) validate() error {
-	if d.SchemaVersion != 1 || d.ServerID != "sequential-thinking" {
-		return errors.New("Sequential descriptor must use schema_version 1 and server_id sequential-thinking")
+	if d.ServerID != "sequential-thinking" {
+		return fmt.Errorf("Sequential descriptor must use schema_version %d and server_id sequential-thinking", d.SchemaVersion)
 	}
 	if d.UpstreamRepository != serversRepositoryURL || !semverPattern.MatchString(d.Version) {
 		return errors.New("Sequential descriptor repository or version is not an exact release")
@@ -157,7 +170,24 @@ func (d SequentialDescriptor) validate() error {
 	if d.Runtime.Command != "npx" || !equalStrings(d.Runtime.Args, sequentialExpectedArgs(d)) {
 		return errors.New("Sequential runtime command does not equal the descriptor-derived exact package release")
 	}
-	if !npmIntegrityPattern.MatchString(d.Artifacts.PackageIntegrity) || d.Lock.LockfileVersion != 3 || d.Lock.PackageCount <= 0 || !sha256Pattern.MatchString(d.Lock.SHA256) {
+	return nil
+}
+
+func (l sequentialLockDescriptor) validateMetadata() error {
+	switch {
+	case l.LockfileVersion != 3:
+		return errors.New("Sequential lock.lockfile_version must be 3")
+	case l.PackageCount <= 0:
+		return errors.New("Sequential lock.package_count must be positive")
+	case !sha256Pattern.MatchString(l.SHA256):
+		return errors.New("Sequential lock.sha256 must be an exact SHA-256 digest")
+	default:
+		return nil
+	}
+}
+
+func (d SequentialDescriptor) validateV1Evidence() error {
+	if !npmIntegrityPattern.MatchString(d.Artifacts.PackageIntegrity) || d.Lock.validateMetadata() != nil {
 		return errors.New("Sequential package or npm-lock evidence is not an exact closure")
 	}
 	if !semverPattern.MatchString(d.Lock.ResolvedSDK.Version) || !npmIntegrityPattern.MatchString(d.Lock.ResolvedSDK.Integrity) {
@@ -175,14 +205,201 @@ func loadSequentialDescriptor(path string) (SequentialDescriptor, error) {
 	if err != nil {
 		return SequentialDescriptor{}, err
 	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var document yaml.Node
+	if err := decoder.Decode(&document); err != nil {
+		if errors.Is(err, io.EOF) {
+			err = errors.New("Sequential descriptor is missing schema_version")
+		}
+		return SequentialDescriptor{}, err
+	}
+	var header struct {
+		SchemaVersion int `yaml:"schema_version"`
+	}
+	if err := document.Decode(&header); err != nil {
+		return SequentialDescriptor{}, err
+	}
+	var validateEvidence func(SequentialDescriptor) error
+	switch header.SchemaVersion {
+	case 1:
+		// Decode only the first document with the legacy YAML rules.
+		if err := rejectSequentialV1Hybrid(&document); err != nil {
+			return SequentialDescriptor{}, err
+		}
+		validateEvidence = SequentialDescriptor.validateV1Evidence
+	case 2:
+		var trailing yaml.Node
+		if err := decoder.Decode(&trailing); err == nil {
+			return SequentialDescriptor{}, errors.New("Sequential schema_version 2 requires a single YAML document")
+		} else if !errors.Is(err, io.EOF) {
+			return SequentialDescriptor{}, fmt.Errorf("Sequential schema_version 2 trailing YAML: %w", err)
+		}
+		if err := validateSequentialV2Shape(document.Content[0]); err != nil {
+			return SequentialDescriptor{}, err
+		}
+		validateEvidence = SequentialDescriptor.validateV2Evidence
+	default:
+		return SequentialDescriptor{}, fmt.Errorf("unsupported Sequential schema_version %d (want 1 or 2)", header.SchemaVersion)
+	}
 	var descriptor SequentialDescriptor
-	if err := yaml.Unmarshal(data, &descriptor); err != nil {
+	if err := document.Decode(&descriptor); err != nil {
 		return SequentialDescriptor{}, err
 	}
 	if err := descriptor.validate(); err != nil {
 		return SequentialDescriptor{}, err
 	}
+	if err := validateEvidence(descriptor); err != nil {
+		return SequentialDescriptor{}, err
+	}
 	return descriptor, nil
+}
+
+func rejectSequentialV1Hybrid(document *yaml.Node) error {
+	// Node values distinguish a missing key from an explicitly null value
+	// while the decoder retains V1 alias, merge, and unknown-field behavior.
+	var reserved struct {
+		Artifacts struct {
+			NodeEngine yaml.Node `yaml:"node_engine"`
+		} `yaml:"artifacts"`
+		Lock struct {
+			ResolvedProtocolDependencies yaml.Node `yaml:"resolved_protocol_dependencies"`
+		} `yaml:"lock"`
+	}
+	if err := document.Decode(&reserved); err != nil {
+		return err
+	}
+	if !reserved.Artifacts.NodeEngine.IsZero() {
+		return errors.New("Sequential schema_version 1 reserves artifacts.node_engine for schema_version 2")
+	}
+	if !reserved.Lock.ResolvedProtocolDependencies.IsZero() {
+		return errors.New("Sequential schema_version 1 reserves lock.resolved_protocol_dependencies for schema_version 2")
+	}
+	return nil
+}
+
+func validateSequentialV2Shape(root *yaml.Node) error {
+	fields, err := sequentialV2Mapping(root, "Sequential descriptor", map[string]string{
+		"schema_version": "!!int", "server_id": "!!str", "upstream_repository": "!!str",
+		"version": "!!str", "source_commit": "!!str", "readme_path": "!!str",
+		"runtime": "!!map", "artifacts": "!!map", "lock": "!!map",
+	})
+	if err != nil {
+		return err
+	}
+	runtime, err := sequentialV2Mapping(fields["runtime"], "runtime", map[string]string{
+		"command": "!!str", "args": "!!seq",
+	})
+	if err != nil {
+		return err
+	}
+	for i, arg := range runtime["args"].Content {
+		if !sequentialV2Value(arg, "!!str") {
+			return fmt.Errorf("Sequential runtime.args[%d] must be a nonempty YAML string", i)
+		}
+	}
+	if _, err := sequentialV2Mapping(fields["artifacts"], "artifacts", map[string]string{
+		"package_integrity": "!!str", "node_engine": "!!str",
+	}); err != nil {
+		return err
+	}
+	lock, err := sequentialV2Mapping(fields["lock"], "lock", map[string]string{
+		"lockfile_version": "!!int", "package_count": "!!int", "sha256": "!!str",
+		"resolved_protocol_dependencies": "!!map",
+	})
+	if err != nil {
+		return err
+	}
+	dependencies, err := sequentialV2Mapping(lock["resolved_protocol_dependencies"], "lock.resolved_protocol_dependencies", map[string]string{
+		sequentialNodePackage: "!!map", sequentialServerPackage: "!!map",
+	})
+	if err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(dependencies)) {
+		if _, err := sequentialV2Mapping(dependencies[name], "lock.resolved_protocol_dependencies."+name, map[string]string{
+			"version": "!!str", "integrity": "!!str",
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sequentialV2Mapping(node *yaml.Node, path string, required map[string]string) (map[string]*yaml.Node, error) {
+	if !sequentialV2Value(node, "!!map") {
+		return nil, fmt.Errorf("%s must be a YAML mapping", path)
+	}
+	fields := make(map[string]*yaml.Node, len(required))
+	for i := 0; i < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if !sequentialV2Value(key, "!!str") {
+			return nil, fmt.Errorf("%s has an invalid YAML key %q", path, key.Value)
+		}
+		tag, known := required[key.Value]
+		if !known {
+			return nil, fmt.Errorf("%s has unexpected field %q", path, key.Value)
+		}
+		if _, duplicate := fields[key.Value]; duplicate {
+			return nil, fmt.Errorf("%s has duplicate field %q", path, key.Value)
+		}
+		if !sequentialV2Value(value, tag) {
+			return nil, fmt.Errorf("%s.%s must be a nonempty YAML %s", path, key.Value, strings.TrimPrefix(tag, "!!"))
+		}
+		fields[key.Value] = value
+	}
+	for _, key := range slices.Sorted(maps.Keys(required)) {
+		if _, present := fields[key]; !present {
+			return nil, fmt.Errorf("%s is missing required field %q", path, key)
+		}
+	}
+	return fields, nil
+}
+
+func sequentialV2Value(node *yaml.Node, tag string) bool {
+	if node.ShortTag() != tag {
+		return false
+	}
+	switch tag {
+	case "!!map":
+		return node.Kind == yaml.MappingNode
+	case "!!seq":
+		return node.Kind == yaml.SequenceNode
+	default:
+		return node.Kind == yaml.ScalarNode && node.Value != ""
+	}
+}
+
+func (d SequentialDescriptor) validateV2Evidence() error {
+	if !sequentialV2VersionPattern.MatchString(d.Version) {
+		return errors.New("Sequential version must be an exact numeric release without leading zeros")
+	}
+	if !exactSHA512Integrity(d.Artifacts.PackageIntegrity) {
+		return errors.New("Sequential artifacts.package_integrity must be an exact SHA-512 digest")
+	}
+	if !nodeEnginePattern.MatchString(d.Artifacts.NodeEngine) {
+		return errors.New("Sequential artifacts.node_engine must be >= followed by a positive integer major version")
+	}
+	if err := d.Lock.validateMetadata(); err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(d.Lock.ResolvedProtocolDependencies)) {
+		pin := d.Lock.ResolvedProtocolDependencies[name]
+		if !sequentialV2VersionPattern.MatchString(pin.Version) {
+			return fmt.Errorf("Sequential locked %s version must be an exact numeric release without leading zeros", name)
+		}
+		if !exactSHA512Integrity(pin.Integrity) {
+			return fmt.Errorf("Sequential locked %s integrity must be an exact SHA-512 digest", name)
+		}
+	}
+	return nil
+}
+
+func exactSHA512Integrity(token string) bool {
+	if !npmIntegrityPattern.MatchString(token) {
+		return false
+	}
+	digest, err := base64.StdEncoding.Strict().DecodeString(strings.TrimPrefix(token, "sha512-"))
+	return err == nil && len(digest) == sha512.Size
 }
 
 func (d Descriptor) validate() error {
@@ -652,14 +869,38 @@ this release closure.
 }
 
 func renderSequentialReadme(descriptor SequentialDescriptor) []byte {
-	return []byte(fmt.Sprintf(`# Sequential Thinking MCP server
+	var readme strings.Builder
+	fmt.Fprintf(&readme, `# Sequential Thinking MCP server
 
 Release metadata in this file is generated from [release.yaml](release.yaml).
 
 - Runtime command: `+"`%s %s`"+`
 - Immutable upstream README: %s
 - Package integrity: `+"`%s`"+`
-- npm lockfile v%d closure: %d packages, SHA-256 `+"`%s`"+`
+`, descriptor.Runtime.Command, strings.Join(descriptor.Runtime.Args, " "), descriptor.readmeURL(), descriptor.Artifacts.PackageIntegrity)
+	if descriptor.SchemaVersion == 2 {
+		fmt.Fprintf(&readme, `- Published Node.js engine: `+"`%s`"+`
+- Upstream monorepo npm lockfile at the source commit: v%d, %d lockfile entries, SHA-256 `+"`%s`"+`
+- Resolved protocol dependencies for workspace `+"`%s`"+`:
+`, descriptor.Artifacts.NodeEngine, descriptor.Lock.LockfileVersion, descriptor.Lock.PackageCount,
+			descriptor.Lock.SHA256, filepath.ToSlash(filepath.Dir(descriptor.ReadmePath)))
+		for _, name := range slices.Sorted(maps.Keys(descriptor.Lock.ResolvedProtocolDependencies)) {
+			pin := descriptor.Lock.ResolvedProtocolDependencies[name]
+			fmt.Fprintf(&readme, "  - `%s@%s`, integrity `%s`\n", name, pin.Version, pin.Integrity)
+		}
+		readme.WriteString(`
+npx launches the pinned outer release and resolves its dependencies at launch.
+
+## Terms and Abbreviations
+
+- MCP: Model Context Protocol.
+- npm: Node Package Manager.
+- npx: npm package runner.
+- SHA-256 and SHA-512: Secure Hash Algorithm artifact digests.
+`)
+		return []byte(readme.String())
+	}
+	fmt.Fprintf(&readme, `- npm lockfile v%d closure: %d packages, SHA-256 `+"`%s`"+`
 - Resolved @modelcontextprotocol/sdk %s integrity: `+"`%s`"+`
 
 The exact lock evidence records the isolated candidate closure used by the
@@ -671,9 +912,9 @@ release probe; runtime still launches the exact outer package through npx.
 - npm: Node Package Manager.
 - SDK: Software Development Kit.
 - SHA-256: Secure Hash Algorithm 256-bit artifact digest.
-`, descriptor.Runtime.Command, strings.Join(descriptor.Runtime.Args, " "), descriptor.readmeURL(), descriptor.Artifacts.PackageIntegrity,
-		descriptor.Lock.LockfileVersion, descriptor.Lock.PackageCount, descriptor.Lock.SHA256,
-		descriptor.Lock.ResolvedSDK.Version, descriptor.Lock.ResolvedSDK.Integrity))
+`, descriptor.Lock.LockfileVersion, descriptor.Lock.PackageCount, descriptor.Lock.SHA256,
+		descriptor.Lock.ResolvedSDK.Version, descriptor.Lock.ResolvedSDK.Integrity)
+	return []byte(readme.String())
 }
 
 func checkManifest(data []byte, descriptor Descriptor) error {
