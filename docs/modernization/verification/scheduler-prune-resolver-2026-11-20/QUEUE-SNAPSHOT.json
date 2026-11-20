@@ -1,0 +1,1200 @@
+{
+  "repository": "applicate2628/mcp-local-hub",
+  "observed_at_utc": "2026-11-20T14:55:47Z",
+  "mode": "read-only GitHub audit; no remote mutations, tests, process or task operations",
+  "master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "open_prs": 31,
+  "draft_prs": 31,
+  "sources": [
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls?state=open&per_page=100&sort=updated&direction=desc",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/branches/master",
+    "mcp__codex_apps__github_list_pr_changed_filenames: all 31 open PR numbers",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/659/files?per_page=100"
+  ],
+  "prs": [
+    {
+      "number": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "head": "b70dd87183c01bf22eaacd9f606ea1e8813e5f68",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-20T13:40:49Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/plans/measurement-consumers-2026-11-18.md",
+        "docs/modernization/plans/rust-creator-receiving-contract-2026-11-15.md",
+        "docs/modernization/plans/rust-cross-platform-boundaries.svg",
+        "docs/modernization/plans/rust-cross-platform-plan-2026-11-12.md",
+        "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+        "docs/modernization/plans/scheduler-contracts-2026-11-19.md",
+        "docs/modernization/plans/scheduler-contracts-2026-11-19.sources.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/BRANCHES.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/PROGRESS.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/RESULTS.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/SHA256SUMS.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/analyze.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/branches-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/fetch-history.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/ffi-sync-head.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/historical-patch-check.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/merge-predictions-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/open-pr-analysis-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/overlaps-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/prepare-sync.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/prepared-sync.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/pulls-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-cache-transfer.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/COMPLETED.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/clippy.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/fmt.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/test.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/refs-before.tsv",
+        "docs/modernization/verification/branch-audit-2026-11-14/refs-prepublish.tsv",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merge-prediction.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/COMPLETED.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/affected-vet.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/cli-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/commit.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/counts.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/daemon-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/go-version.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/indexed-tree.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/main-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/product-build.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/selected-json.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/render-index.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/resolve-relay.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/roots-verification/run.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/roots-verification/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/summary-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/verify-relay.ps1",
+        "docs/modernization/verification/branch-audit-2026-11-14/verify-roots.ps1",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/archive-verification.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/ALLOCATION-REVIEW.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/API-CLI-FINDINGS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/GUI-PROCESS-FINDINGS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/candidate-manifest-v2.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/MANIFEST.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Invoke-R17HiddenFixture.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-FIXTURE.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-V2-RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Observe-R17NativeV2.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/RECOVERY.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Recover-R17VisibleFixture.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/evidence.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/fixture-v2-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/fixture-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/inspect_native_attempt.py",
+        "docs/modernization/verification/scheduler-export-2026-11-19/inspect_native_v2.py",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-attempt-redacted.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-v2-evidence.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-v2-execution.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/recovery-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/verify_saved_native_export.py",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/INDEPENDENT-REVIEW.md",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/SOURCE-AUDIT.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/history.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/Invoke-R17PublicGoPositiveFixture.ps1",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/README.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/RESULTS.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/V2-owner.diff",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/build-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/empty-input.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation-intent.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/execution-preflight.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/go-child-start.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/launch-intent.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/launch-result.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/outer-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/positive-evidence.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/positive-go.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/source-catalog.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/inspect_saved_positive.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/launch_positive.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/observe_absence.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/positive_probe.go",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/preparation-validation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/preparation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/probe.go",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/probe.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/run_probe.py"
+      ]
+    },
+    {
+      "number": 658,
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "head": "cbefb0dd140e046732a7ee9ab2a92937eb483840",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-20T13:38:13Z",
+      "draft": true,
+      "filenames": [
+        ".plans/2026-11/open-pr-integration-20261117.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "cmd/mcphub/main_test.go",
+        "docs/agent-runbook.md",
+        "docs/frontend-flowbite.md",
+        "docs/skills/mcphub-explained/SKILL.md",
+        "internal/api/lsp_routing/main_test.go",
+        "internal/api/lsp_routing/resolver_test.go",
+        "internal/api/serena_routing/main_test.go",
+        "internal/api/serena_routing/resolver_test.go",
+        "internal/api/serena_routing/shared_observer_public_test.go",
+        "internal/cli/gui_force_test.go",
+        "internal/daemon/host_original_windows_test.go",
+        "internal/daemon/lazy_proxy_readiness_test.go",
+        "internal/daemon/lazy_proxy_test.go",
+        "internal/daemon/main_test.go",
+        "internal/oneapirun/async_owner_test.go",
+        "internal/oneapirun/async_test.go",
+        "internal/oneapirun/main_test.go",
+        "tools/testshards/main.go",
+        "tools/testshards/main_test.go"
+      ]
+    },
+    {
+      "number": 660,
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "head": "b7831aabdb7162b3a39c78e73c3ab67558236d1d",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-20T13:38:10Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/evidence-redacted.zip",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "internal/scheduler/scheduler_last_result_windows_test.go",
+        "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "internal/scheduler/scheduler_windows.go"
+      ]
+    },
+    {
+      "number": 628,
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "head": "453e856347cabcebb289ec1c9af70f12af3376c0",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-19T03:13:07Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/native-observation-2026-11-18/.gitattributes",
+        "docs/modernization/verification/native-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/native-observation-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/native-observation-2026-11-18/logs.zip",
+        "docs/modernization/verification/native-observation-2026-11-18/manifest.json",
+        "docs/modernization/verification/status-observation-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/status-observation-2026-11-19/evidence-redacted.zip",
+        "internal/cli/supervise_liveness.go",
+        "internal/cli/supervise_status.go",
+        "internal/cli/supervise_status_process_other.go",
+        "internal/cli/supervise_status_process_test.go",
+        "internal/cli/supervise_status_process_windows.go",
+        "internal/process/native_observation_benchmark_windows_test.go",
+        "internal/process/pid_status.go",
+        "internal/process/pid_status_windows.go",
+        "internal/process/pid_status_windows_test.go",
+        "internal/process/process_rss_windows.go"
+      ]
+    },
+    {
+      "number": 659,
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T21:13:10Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/port-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/port-observation-2026-11-18/evidence-redacted.zip",
+        "internal/api/install.go",
+        "internal/api/install_hyphen_family_ownership_test.go",
+        "internal/api/install_internal_port_probe_timeout_test.go",
+        "internal/api/install_own_port_test.go",
+        "internal/api/install_parsed_manifest_lane_b_test.go",
+        "internal/api/install_parsed_manifest_test.go",
+        "internal/api/lane_a_internal_review_test.go",
+        "internal/api/main_test.go",
+        "internal/api/phase_f_lifecycle_test.go",
+        "internal/api/port_pid_outcome_test.go",
+        "internal/api/port_pid_probe_test.go",
+        "internal/api/processes.go",
+        "internal/api/r36_lane_a2_fixes_test.go",
+        "internal/api/restart_supervisor_test.go",
+        "internal/api/status_enrich.go",
+        "internal/api/status_enrich_test.go",
+        "internal/api/stop_force_supervisor.go",
+        "internal/api/stop_force_supervisor_other_test.go",
+        "internal/api/stop_force_supervisor_sentinel_windows_test.go",
+        "internal/api/stop_force_supervisor_windows_test.go",
+        "internal/api/supervisor_seal_guard_test.go"
+      ]
+    },
+    {
+      "number": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T19:45:34Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/relay-oracle-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/relay-oracle-2026-11-18/receipt.json",
+        "docs/modernization/verification/relay-oracle-2026-11-18/run.py",
+        "docs/modernization/verification/relay-oracle-2026-11-18/testdata/main.go",
+        "internal/daemon/relay_benchmark_test.go",
+        "internal/daemon/relay_binary_probe_windows_test.go",
+        "internal/daemon/relay_load_test.go",
+        "internal/daemon/relay_private_memory_probe_windows_test.go",
+        "internal/daemon/testdata/relay-minimal/main.go"
+      ]
+    },
+    {
+      "number": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "head": "251fb4f03405ba438662976137afec0d9c27105e",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T19:45:30Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/cmaketrace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/cmaketrace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/cmaketrace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/cmaketrace-2026-11-18/logs.zip",
+        "docs/modernization/verification/cmaketrace-2026-11-18/manifest.json",
+        "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go"
+      ]
+    },
+    {
+      "number": 631,
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "head": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "base": "spike/rx02-native-identity-20261114",
+      "baseSHA": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "updated_at": "2026-11-18T19:20:52Z",
+      "draft": true,
+      "filenames": [
+        "experiments/rust-process-owner/ffi/Cargo.lock",
+        "experiments/rust-process-owner/ffi/Cargo.toml",
+        "experiments/rust-process-owner/ffi/README.md",
+        "experiments/rust-process-owner/ffi/go/admission_windows.go",
+        "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/go.mod",
+        "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+        "experiments/rust-process-owner/ffi/include/identity_v1.h",
+        "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "experiments/rust-process-owner/ffi/src/identity.rs",
+        "experiments/rust-process-owner/ffi/src/lib.rs",
+        "experiments/rust-process-owner/ffi/src/tests.rs",
+        "experiments/rust-process-owner/ffi/verification/README.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/AUDIT.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/artifacts.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/audit.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/disposition.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/log-manifest.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/pr-audit.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/qualification.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/run.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-hashes.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-identity.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/legacy/compaction.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/history.zip",
+        "experiments/rust-process-owner/ffi/verification/legacy/manifest.tsv",
+        "experiments/rust-process-owner/ffi/verification/legacy/receipt.json",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/manifest.json"
+      ]
+    },
+    {
+      "number": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "baseSHA": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "updated_at": "2026-11-18T19:20:50Z",
+      "draft": true,
+      "filenames": [
+        "experiments/rust-process-owner/README.md",
+        "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "experiments/rust-process-owner/src/lib.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/src/token_user.rs",
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/SHA256SUMS.txt",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/verification.json",
+        "experiments/rust-process-owner/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/verification/query-2026-11-15/manifest.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/SHA256SUMS",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/verification.json"
+      ]
+    },
+    {
+      "number": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "head": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T18:15:59Z",
+      "draft": true,
+      "filenames": [
+        "experiments/rust-anchored-read/.gitignore",
+        "experiments/rust-anchored-read/Cargo.lock",
+        "experiments/rust-anchored-read/Cargo.toml",
+        "experiments/rust-anchored-read/README.md",
+        "experiments/rust-anchored-read/src/lib.rs",
+        "experiments/rust-anchored-read/src/read_tests.rs",
+        "experiments/rust-anchored-read/src/windows.rs"
+      ]
+    },
+    {
+      "number": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T18:15:57Z",
+      "draft": true,
+      "filenames": [
+        "experiments/rust-process-owner/.gitignore",
+        "experiments/rust-process-owner/Cargo.lock",
+        "experiments/rust-process-owner/Cargo.toml",
+        "experiments/rust-process-owner/README.md",
+        "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+        "experiments/rust-process-owner/src/launch_context.rs",
+        "experiments/rust-process-owner/src/lib.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/tests/launch_context.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs",
+        "experiments/rust-process-owner/tests/owner_crash.rs",
+        "experiments/rust-process-owner/tests/stdio.rs"
+      ]
+    },
+    {
+      "number": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "head": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T17:05:49Z",
+      "draft": true,
+      "filenames": [
+        "cmd/mcphub/main.go",
+        "cmd/mcphub/relay_input_windows_test.go",
+        "internal/cli/relay.go",
+        "internal/cli/relay_process_input.go",
+        "internal/cli/relay_process_input_native_windows_test.go",
+        "internal/cli/relay_process_input_other.go",
+        "internal/cli/relay_process_input_test.go",
+        "internal/cli/relay_process_input_windows.go",
+        "internal/cli/relay_process_input_windows_test.go",
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_input_contract_test.go",
+        "internal/daemon/relay_output_contract_test.go"
+      ]
+    },
+    {
+      "number": 657,
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T16:56:03Z",
+      "draft": true,
+      "filenames": [
+        "build.ps1",
+        "scripts/test-windows-product-build.ps1"
+      ]
+    },
+    {
+      "number": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T16:56:02Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_uv_discovery_test.go"
+      ]
+    },
+    {
+      "number": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "base": "fix/serena-qualification-namespace-20261114",
+      "baseSHA": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "updated_at": "2026-11-18T15:48:53Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/serena-namespace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-namespace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-namespace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-namespace-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-namespace-2026-11-18/manifest.json",
+        "docs/testing/serena-qualification.md",
+        "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go"
+      ]
+    },
+    {
+      "number": 656,
+      "title": "fix: receive the original qualification connection close result",
+      "head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:17Z",
+      "draft": true,
+      "filenames": [
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_connection_close_test.go"
+      ]
+    },
+    {
+      "number": 655,
+      "title": "fix(serena): settle preparation before canceling work context",
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:16Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_finalization_context_windows_test.go",
+        "internal/api/serena_prepared_runtime.go"
+      ]
+    },
+    {
+      "number": 654,
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:15Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/serena_prepared_publication_native_windows_test.go"
+      ]
+    },
+    {
+      "number": 653,
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "base": "master",
+      "baseSHA": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:14Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_tcp_rows_observed.go",
+        "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+        "internal/api/serena_tcp_rows_observed_test.go",
+        "internal/api/serena_tcp_rows_observed_windows.go"
+      ]
+    },
+    {
+      "number": 652,
+      "title": "fix(serena): read installed files through original tree",
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:13Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_file_unsupported.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_owned_file_windows_test.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go"
+      ]
+    },
+    {
+      "number": 651,
+      "title": "fix(serena): unlink owned readonly cache entries",
+      "head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:11Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_owned_tree_delete_windows_test.go",
+        "internal/api/serena_owned_tree_windows.go"
+      ]
+    },
+    {
+      "number": 650,
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:10Z",
+      "draft": true,
+      "filenames": [
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_test.go",
+        "internal/daemon/relay_qualification_transport_test.go"
+      ]
+    },
+    {
+      "number": 649,
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:09Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_qualification_resources.go"
+      ]
+    },
+    {
+      "number": 648,
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "head": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:07Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_build_constraint_policy_windows_test.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_build_constraint.go",
+        "internal/api/serena_prepared_build_constraint_test.go",
+        "internal/api/serena_prepared_build_constraint_unsupported.go",
+        "internal/api/serena_prepared_build_constraint_windows.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_install_effects.go"
+      ]
+    },
+    {
+      "number": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:06Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_executable_windows_test.go"
+      ]
+    },
+    {
+      "number": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:05Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_preparation_policy.go",
+        "internal/api/serena_preparation_policy_test.go"
+      ]
+    },
+    {
+      "number": 645,
+      "title": "fix(serena): accept native empty stream enumeration",
+      "head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:04Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_owned_tree_streams_windows_test.go",
+        "internal/api/serena_owned_tree_windows.go"
+      ]
+    },
+    {
+      "number": 643,
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:02Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_cleanup_windows_test.go",
+        "internal/api/serena_owned_tree_unsupported.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_qualification_resources.go"
+      ]
+    },
+    {
+      "number": 639,
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "base": "master",
+      "baseSHA": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:01Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_python_test.go"
+      ]
+    },
+    {
+      "number": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "baseSHA": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "updated_at": "2026-11-18T15:44:58Z",
+      "draft": true,
+      "filenames": [
+        "docs/modernization/verification/serena-publisher-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-publisher-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-publisher-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-publisher-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-publisher-2026-11-18/manifest.json",
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/source_prepare_test.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_pe_test.go",
+        "internal/binaryadmission/windows_serena_qualification_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "tools/test-serena-publisher/README.md",
+        "tools/test-serena-publisher/main_windows.go",
+        "tools/test-serena-publisher/main_windows_test.go"
+      ]
+    },
+    {
+      "number": 636,
+      "title": "test(serena): retain a private native qualification namespace",
+      "head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "baseSHA": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "updated_at": "2026-11-18T11:02:23Z",
+      "draft": true,
+      "filenames": [
+        "internal/api/serena_publisher_image.go",
+        "internal/api/serena_publisher_role.go",
+        "internal/api/serena_publisher_role_qualification_windows.go",
+        "internal/api/serena_publisher_role_qualification_windows_test.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_qualification_namespace_unavailable_test.go",
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_windows_test.go",
+        "internal/api/state_dir_resolution_observed.go",
+        "internal/api/state_dir_resolution_observed_production_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+        "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+        "internal/api/state_dir_resolution_observed_windows.go"
+      ]
+    }
+  ],
+  "shared_paths": [
+    {
+      "path": "experiments/rust-process-owner/README.md",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_child.rs",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/lib.rs",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/native_failure_tests.rs",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/windows.rs",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/lifecycle.rs",
+      "prs": [
+        644,
+        625
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "prs": [
+        632,
+        643
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification.go",
+      "prs": [
+        656,
+        650
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "prs": [
+        655,
+        652
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "prs": [
+        652,
+        648,
+        643
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "prs": [
+        652,
+        648
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "prs": [
+        652,
+        648
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "prs": [
+        651,
+        648,
+        645,
+        643
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "prs": [
+        649,
+        643
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "prs": [
+        648,
+        647,
+        639
+      ]
+    }
+  ],
+  "scheduler_consumers": [
+    {
+      "path": "go.mod",
+      "baseline_blob": "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/scheduler_mgmt.go",
+      "baseline_blob": "e1b4e4a1d48185bd27ebc4defedab338dff54cfb",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_test.go",
+      "baseline_blob": "715c9920805c5e18c56500fc4633a210e4e0133b",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_validation_test.go",
+      "baseline_blob": "dee982a2006cb6a78f8ba932ef8a79ee1e85e62f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/scheduler_swap.go",
+      "baseline_blob": "91f6808364b974a8260abeb6da4223d519c66ed9",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/scheduler_swap_test.go",
+      "baseline_blob": "840e736a7fc239107d370e24533ea066ce7aa150",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "baseline_blob": "7e6be38ab49246f8c38577302b8bfd255ac7409d",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/weekly_refresh_atomic_test.go",
+      "baseline_blob": "c5f3ea22dd616cf12dddba7638925262bd07f7ed",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/weekly_refresh_test.go",
+      "baseline_blob": "4520dc6ac50885cbc66587a45ab33bd4433de748",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/autostart.go",
+      "baseline_blob": "bf5e0d1d9bf734d5848de82f9e08b3abd1792a99",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/autostart_test.go",
+      "baseline_blob": "a38c0e57d9d2c18922a110a4f2dd729f331d4af2",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/darwin.go",
+      "baseline_blob": "ab9b4278f67e005665116f1e6414c5fe68a87b00",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/darwin_test.go",
+      "baseline_blob": "c1bf67aeb1a282dc65f09a94a564d466b1cfb786",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/linux.go",
+      "baseline_blob": "a85e0c1dda468ec8594101c0b33a1fb1ad234575",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/linux_test.go",
+      "baseline_blob": "fe7a382229ab489d9d64923e056fb25e8eb0f0a8",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/start_darwin.go",
+      "baseline_blob": "8d1a0bd20dd3aacdbb8aeec2fa76a9e47d83a7b0",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/start_linux.go",
+      "baseline_blob": "969acdf9da30286d6202467d054891b304a75a3a",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/start_windows.go",
+      "baseline_blob": "663a5039d5ffefbb56b4bb66c69ade5c66f6c8fc",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/start_windows_test.go",
+      "baseline_blob": "d58d9f460f422e558b9cf9cf6cdc48077cb0385f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/windows.go",
+      "baseline_blob": "23a69f5e2598dbf9bed2286b66da4c0bce7e2f90",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/windows_status_observation_test.go",
+      "baseline_blob": "080c32f3e9846ec95cce98564f3deff8d7b9e23b",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/autostart/windows_test.go",
+      "baseline_blob": "125ba00eb945ab0426d9f4a45572326ec47f921f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/cli/scheduler_cmd.go",
+      "baseline_blob": "3065d08f8f9338633bafb73a31e1e5888fc0b627",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/cli/weekly_refresh.go",
+      "baseline_blob": "d97e8e1afaa3c1f4a9b07ef67b55990597b613f7",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/cli/weekly_refresh_test.go",
+      "baseline_blob": "59de662e5a605244c7f223e6b3aa6c30bcd242a9",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/entrypoint_canonical_entry_set_windows_test.go",
+      "baseline_blob": "87d41ed888db4a3fa131edd59848bdd22fa405e4",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/entrypoint_inventory_windows_test.go",
+      "baseline_blob": "2c4ae6b5d83a1012045f37b45cf1c15bfcdc75cd",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/entrypoint_migration_windows.go",
+      "baseline_blob": "ebc2e755f3623c57e499d09b1ee48e8173323382",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/entrypoint_migration_windows_test.go",
+      "baseline_blob": "03aa14765ad8a72866f0dda01f632fdf0b7d6773",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/enumerate_all_windows.go",
+      "baseline_blob": "23d258300738aa461330b5e35d0026362f7bcbd0",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/enumerate_all_windows_test.go",
+      "baseline_blob": "a07b4fcd41278af844772618e8a92fa8ac9313cc",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "baseline_blob": "79d7af80bf0ebe67e5f5b3aba083a541694b160d",
+      "open_pr_owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_target_windows_test.go",
+      "baseline_blob": "d4db12298243a7f88ff8e489c5ac7092021b1822",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "baseline_blob": "d3e19c517345c85965e38c83a69e11a3adbc662b",
+      "open_pr_owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows_test.go",
+      "baseline_blob": "c6a1d0cf93f262f0c802da2aff21924b5666cc81",
+      "open_pr_owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_darwin.go",
+      "baseline_blob": "f8802bbeece131647ede6587139f12c8a6d74eb7",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_linux.go",
+      "baseline_blob": "a0cc4c7f0171e6db60651356fb06ff721234a7ba",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_liveness_xml.go",
+      "baseline_blob": "e45ec163ac7827d5810c6d082c080343d43edd49",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_liveness_xml_test.go",
+      "baseline_blob": "123ddd7dc790e146403533990f09be66ee1f946e",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_noop.go",
+      "baseline_blob": "01996d16a20d45bab36f2ee3c52520550aabd8bc",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_noop_test.go",
+      "baseline_blob": "bfc8552f2385ea3d7a13be01cb4db2beaf2feb5f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_darwin_test.go",
+      "baseline_blob": "c4d5c783c25145e194ccd6605f8fe8488b49a0f9",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_linux_test.go",
+      "baseline_blob": "9a5a6e8db151ba6b360a57e4374fc487b4a281f4",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_unix_test.go",
+      "baseline_blob": "0588caa91186e1b9f02087c75b63d18e2cb49ff4",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows.go",
+      "baseline_blob": "6f85544228f33ab66645a93aafefc36bc0d75c66",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+      "baseline_blob": "747de6435d6c9802e45ab4a2df37849ea1196521",
+      "open_pr_owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows.go",
+      "baseline_blob": "ab2062d3bcf707380fb7240c4729aefacd1007e5",
+      "open_pr_owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows_test.go",
+      "baseline_blob": "4fe9b21ce7f11234dab87d7fd2c1774447ce4450",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/xml_encoding.go",
+      "baseline_blob": "9b68455ae4d16648ac76602fa1e94e136931ee82",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/scheduler/xml_import_windows_test.go",
+      "baseline_blob": "73ee17c3cf8b245d48042aff37913507ef09db2a",
+      "open_pr_owners": []
+    }
+  ],
+  "install_overlap": {
+    "path": "internal/api/install.go",
+    "owner": 659,
+    "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+    "changed_base_line_ranges": [
+      [
+        2850,
+        2875
+      ],
+      [
+        3132,
+        3150
+      ],
+      [
+        4898,
+        4970
+      ]
+    ],
+    "scheduler_install_slice_base_lines": [
+      3815,
+      3840
+    ],
+    "scheduler_prune_slice_base_lines": [
+      4266,
+      4289
+    ],
+    "line_overlap": false
+  },
+  "supplied_checkpoint_unchanged": true,
+  "no_evidence_of_new_published_wait_close_checkpoint": true,
+  "local_parallel_wait_close_status": "unknown; protected by user's explicit parallel-work statement, regardless of published HEAD age"
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "retrieved_from_commit": "9a5febd67164b5c12beacbc9fd366d38673cf242",
+  "git_blob": "39e4946844bf96b89d9585b8de7c73c1b9c39a3e",
+  "sha256": "a75ef70ddf339b07bb36f423d01caf7df28631c9c7f5d43d9b2aec7886d17ad2",
+  "bytes": 69079,
+  "entries": 86,
+  "manifest_files_verified": 85,
+  "crc_verified": true,
+  "bytes_equal_to_host_transfer": true,
+  "native_or_product_rerun": false,
+  "recorded_at_utc": "2026-11-20T15:20:27.530036+00:00"
+}

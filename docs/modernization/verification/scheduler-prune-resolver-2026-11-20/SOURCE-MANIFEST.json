@@ -1,0 +1,54 @@
+{
+  "source_commit": "b7831aabdb7162b3a39c78e73c3ab67558236d1d",
+  "fetched_via": "GitHub read-only fetch_file with exact ref",
+  "files": [
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "git_blob_sha": "198e6b7cb3cef3b234a346b1c8b92f9001dac2d4",
+      "sha256": "abd4c9fc66e0bcf97b2d8413bec922b00ca72dbd0df472b7c0e531ff958c7256",
+      "bytes": 6824
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "git_blob_sha": "b8413756cb7c613644fa2dea73a4812eeeb96b80",
+      "sha256": "673388c2a825bf2ec424e56f1e8a7e929e73e9966deb66d13f9f3d539939f61b",
+      "bytes": 10555
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows_test.go",
+      "git_blob_sha": "db4d939a672a62927f12e5ef007f90a32871b5e9",
+      "sha256": "b411a72144af929ecd668e845d00c93e97d47d998d4ca68403239b32a4a6820f",
+      "bytes": 5278
+    },
+    {
+      "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+      "git_blob_sha": "99d37f7ae535e9fbc8f727ef01ad248dff6d37f7",
+      "sha256": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+      "bytes": 6146
+    },
+    {
+      "path": "internal/api/install.go",
+      "git_blob_sha": "bb45b6e98e4f040934fb68d366c5e1ba7001169a",
+      "sha256": "be0f52f06c24a93a30d008b18a6c44b5eee76a73da09d8731902b48874ebe46c",
+      "bytes": 212522
+    },
+    {
+      "path": "internal/api/register.go",
+      "git_blob_sha": "e8383d2219a9a9ef1b46100031da307acb922da2",
+      "sha256": "03591553268727b349418d1ca3291aeb9d5a131cf5f6587165545f5da13771e0",
+      "bytes": 133129
+    },
+    {
+      "path": "internal/scheduler/enumerate_all_windows.go",
+      "git_blob_sha": "23d258300738aa461330b5e35d0026362f7bcbd0",
+      "sha256": "1f0b3bc909460c5573bec701f5f271bf9dd9da14b828f61ba97f6bd025c900d8",
+      "bytes": 13332
+    },
+    {
+      "path": "internal/scheduler/entrypoint_migration_windows.go",
+      "git_blob_sha": "ebc2e755f3623c57e499d09b1ee48e8173323382",
+      "sha256": "63b1c4f52706231405717997cdce11b930954d797d300ffa67e290780c8b8aee",
+      "bytes": 45556
+    }
+  ]
+}
