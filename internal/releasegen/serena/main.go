@@ -38,7 +38,6 @@ var (
 	calverPattern        = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$`)
 	sha256Pattern        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	semverPattern        = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-	mcpV1Pattern         = regexp.MustCompile(`^1\.[0-9]+\.[0-9]+$`)
 	npmIntegrityPattern  = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
 	nodeEnginePattern    = regexp.MustCompile(`^>=[1-9][0-9]*$`)
 	pinnedCommentPattern = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
@@ -123,8 +122,8 @@ func (d FetchDescriptor) validate() error {
 	if d.ReadmePath != "src/fetch/README.md" {
 		return errors.New("Fetch readme_path must be src/fetch/README.md")
 	}
-	if !mcpV1Pattern.MatchString(d.Artifacts.MCPVersion) {
-		return errors.New("Fetch mcp_version must be an exact MCP 1.x release")
+	if !semverPattern.MatchString(d.Artifacts.MCPVersion) {
+		return errors.New("Fetch mcp_version must be an exact numeric release (major.minor.patch)")
 	}
 	if d.Runtime.Command != "uvx" || !equalStrings(d.Runtime.Args, fetchExpectedArgs(d)) {
 		return errors.New("Fetch runtime command does not equal the descriptor-derived exact package pair")
@@ -857,8 +856,7 @@ Release metadata in this file is generated from [release.yaml](release.yaml).
 - mcp-server-fetch %s wheel SHA-256: `+"`%s`"+`
 - mcp %s wheel SHA-256: `+"`%s`"+`
 
-The exact MCP 1.x pin is required by this Fetch release; MCP 2.x is not part of
-this release closure.
+The runtime command selects the exact MCP release recorded above.
 
 ## Terms and Abbreviations
 
