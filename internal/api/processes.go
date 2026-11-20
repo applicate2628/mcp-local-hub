@@ -662,19 +662,6 @@ func splitCSVLine(line string) []string {
 	return process.SplitWmicCSVLine(line)
 }
 
-func isUnsignedDecimalField(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 // netstatLineLoopbackPortPID parses a single `netstat -ano` line and, when it
 // represents a LISTENING socket on the IPv4 loopback 127.0.0.1:<port>, returns
 // that (port, pid). It is the SHARED low-level parser behind both the
