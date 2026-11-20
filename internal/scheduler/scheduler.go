@@ -76,6 +76,7 @@ const (
 // distinguish absent-but-expected tasks from schtasks communication
 // failures.
 var ErrTaskNotFound = errors.New("scheduler: task not found")
+var ErrTaskAlreadyExists = errors.New("scheduler: task already exists")
 var ErrTaskNotRunning = errors.New("scheduler: task not running")
 var ErrPermissionDenied = errors.New("scheduler: permission denied")
 var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
@@ -146,6 +147,15 @@ type Scheduler interface {
 // underlying list operation when the caller's context is done.
 type ContextLister interface {
 	ListContext(ctx context.Context, prefix string) ([]TaskStatus, error)
+}
+
+// XMLCreator optionally supports registering native XML without replacing an
+// occupied task name. A conflict returns ErrTaskAlreadyExists. XML alone does
+// not restore stored passwords or independently captured task permissions.
+// Registration is not proof of execution or readiness; ErrUnavailable leaves
+// the mutation outcome uncertain and must not prompt destructive compensation.
+type XMLCreator interface {
+	CreateXMLIfAbsent(name string, rawXML []byte) error
 }
 
 // e2eSchedulerEnv, when set to "none", swaps scheduler.New()'s return

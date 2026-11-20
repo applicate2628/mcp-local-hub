@@ -3692,6 +3692,18 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// Pass B / needsScheduler conditions keeps the client-config block + the
 	// intermediate supervisor-intent write inside the SAME rollback scope.
 	actions := selectedInstallActions(p, startTasks, skipPrune, skipTasks)
+	if actions.createEligible {
+		// A prior rollback must never refer to the current failed replacement.
+		// Windows root task names are case insensitive and may start with '\'.
+		for i, task := range p.SchedulerTasks {
+			name := strings.TrimPrefix(task.Name, `\`)
+			for _, prior := range p.SchedulerTasks[:i] {
+				if strings.EqualFold(name, strings.TrimPrefix(prior.Name, `\`)) {
+					return fmt.Errorf("duplicate scheduler task name %q in install plan", task.Name)
+				}
+			}
+		}
+	}
 	for _, notice := range p.Notices {
 		fmt.Fprintf(w, "  notice: %s\n", notice)
 	}
@@ -3812,12 +3824,11 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		} else if t.Trigger == "Weekly Sun 03:00" {
 			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
 		}
-		// Snapshot any existing task before replacing it so rollback can
-		// put it back. Prior to this, Delete-before-Create made install
-		// idempotent but a mid-sequence failure left the user with
-		// NOTHING — the old task was gone and the new one never got
-		// created. ExportXML gives us the full Task Scheduler XML of
-		// whatever was there; rollback feeds it to ImportXML to restore.
+		// Keep the prior definition before any deletion. Recovery of a failed
+		// Create must be conditional at the scheduler: an error can follow an
+		// applied creation, or another writer can occupy the name meanwhile.
+		var recovery scheduler.XMLCreator
+		var snapshotPath string
 		priorXML, exportErr := sch.ExportXML(spec.Name)
 		if exportErr != nil {
 			if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(priorXML) != 0 {
@@ -3827,11 +3838,28 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			if len(priorXML) == 0 {
 				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
 			}
+			var ok bool
+			recovery, ok = sch.(scheduler.XMLCreator)
+			if !ok {
+				return failAfterRollback(fmt.Errorf("restore task %s without replacement: %w", spec.Name, scheduler.ErrNotImplemented))
+			}
+			var err error
+			snapshotPath, err = retainInstallTaskSnapshot(spec.Name, priorXML)
+			if err != nil {
+				return failAfterRollback(fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err))
+			}
+			fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
 			if err := sch.Delete(spec.Name); err != nil {
-				return failAfterRollback(fmt.Errorf("delete task %s before replacement: %w", spec.Name, err))
+				return failAfterRollback(fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err))
 			}
 		}
 		if err := sch.Create(spec); err != nil {
+			if recovery != nil {
+				return failAfterRollback(&InstallTaskRecoveryError{
+					TaskName: spec.Name, SnapshotPath: snapshotPath, Cause: err,
+					Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
+				})
+			}
 			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
 		}
 		taskName := spec.Name

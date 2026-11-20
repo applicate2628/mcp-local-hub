@@ -24,6 +24,7 @@ type schedulerCOMRequest struct {
 	ExpectedCommand string `json:"expected_command,omitempty"`
 	ExpectedRole    string `json:"expected_role,omitempty"`
 	ExpectedOwner   string `json:"expected_owner,omitempty"`
+	XMLUTF16LE      []byte `json:"xml_utf16le,omitempty"`
 }
 
 type schedulerCOMTask struct {
@@ -51,6 +52,16 @@ function Get-TaskLastResult($task){
  $result=$task.LastTaskResult
  if($null -eq $result){throw 'task result unavailable'}
  return [int]$result
+}
+function Get-NativeHRESULT($exception){
+ $native=$null;$last=$exception
+ while($null -ne $exception){
+  $last=$exception
+  if($exception -is [System.Runtime.InteropServices.COMException]){$native=$exception.HResult}
+  $exception=$exception.InnerException
+ }
+ if($null -eq $native){$native=$last.HResult}
+ return [uint32]([int64]$native -band 0xffffffffL)
 }
 function Get-OwnerSID([string]$owner){
  if([string]::IsNullOrWhiteSpace($owner)){return ''}
@@ -95,6 +106,21 @@ function Test-OwnedDefinition($task,[string]$snapshot,$request){
  }catch{return $false}
 }
 $s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');
+if($r.operation -eq 'create_xml_if_absent'){
+ $phase='xml_decode'
+ if([string]::IsNullOrWhiteSpace([string]$r.name)){throw [System.FormatException]::new('empty task name')}
+ $raw=[Convert]::FromBase64String([string]$r.xml_utf16le)
+ if($raw.Length -le 2 -or $raw[0] -ne 255 -or $raw[1] -ne 254){throw [System.FormatException]::new('expected UTF-16LE XML with BOM')}
+ $decoder=[System.Text.UnicodeEncoding]::new($false,$false,$true);$xml=$decoder.GetString($raw,2,$raw.Length-2)
+ if([string]::IsNullOrWhiteSpace($xml)){throw [System.FormatException]::new('empty task XML')}
+ $phase='xml_register'
+ # TASK_CREATE | TASK_IGNORE_REGISTRATION_TRIGGERS. Never update an occupant.
+ # TASK_LOGON_NONE and empty credential overrides preserve the XML principal.
+ # https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_creation
+ $created=$f.RegisterTask([string]$r.name,$xml,34,$null,$null,0,$null)
+ if($null -eq $created){[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='xml_register_unconfirmed'}|ConvertTo-Json -Compress;exit}
+ [pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit
+};
 # Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
 $flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
 if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId;last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
@@ -118,7 +144,23 @@ if($r.operation -notin @('status','export')){[pscustomobject]@{ok=$false;kind='s
 $row=[ordered]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}
 if($r.operation -eq 'status'){$row['last_result']=Get-TaskLastResult $t}
 [pscustomobject]@{ok=$true;task=[pscustomobject]$row}|ConvertTo-Json -Compress -Depth 4
-}catch{[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress}`
+}catch{
+ if($r.operation -eq 'create_xml_if_absent'){
+  $h=Get-NativeHRESULT $_.Exception;$code='{0:X8}' -f $h;$kind='scheduler_unavailable'
+  if($phase -eq 'xml_decode'){$kind='task_corrupt'}
+  elseif($code -eq '80070005'){$kind='permission_denied'}
+  elseif($phase -eq 'xml_register'){
+   switch($code){
+    '800700B7' {$kind='task_already_exists'}
+    {$_ -in @('80070057','80041316','80041317','80041318','80041319','8004131A','8004131D')} {$kind='task_corrupt'}
+   }
+  }
+  if([string]::IsNullOrEmpty($phase)){$phase='com'}
+  [pscustomobject]@{ok=$false;kind=$kind;phase=$phase;hresult=$h}|ConvertTo-Json -Compress
+ }else{
+  [pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress
+ }
+}`
 
 var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (schedulerCOMResponse, error) {
 	raw, err := json.Marshal(request)
@@ -156,6 +198,8 @@ func schedulerCOM(ctx context.Context, request schedulerCOMRequest) (schedulerCO
 		return response, nil
 	}
 	switch response.Kind {
+	case "task_already_exists":
+		return response, ErrTaskAlreadyExists
 	case "task_absent":
 		return response, ErrTaskNotFound
 	case "task_not_running":

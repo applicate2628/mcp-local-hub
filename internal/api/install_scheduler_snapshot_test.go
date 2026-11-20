@@ -38,6 +38,7 @@ func (s *installSnapshotScheduler) Delete(name string) error {
 
 func installSnapshotPlan(t *testing.T, s *installSnapshotScheduler, names ...string) *Plan {
 	t.Helper()
+	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 	prior := schedulerFactoryFn
 	schedulerFactoryFn = func() (scheduler.Scheduler, error) { return s, nil }
 	t.Cleanup(func() { schedulerFactoryFn = prior })
