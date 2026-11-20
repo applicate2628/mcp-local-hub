@@ -3818,11 +3818,19 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		// NOTHING — the old task was gone and the new one never got
 		// created. ExportXML gives us the full Task Scheduler XML of
 		// whatever was there; rollback feeds it to ImportXML to restore.
-		var priorXML []byte
-		if xml, err := sch.ExportXML(spec.Name); err == nil {
-			priorXML = xml
+		priorXML, exportErr := sch.ExportXML(spec.Name)
+		if exportErr != nil {
+			if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(priorXML) != 0 {
+				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: %w", spec.Name, exportErr))
+			}
+		} else {
+			if len(priorXML) == 0 {
+				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
+			}
+			if err := sch.Delete(spec.Name); err != nil {
+				return failAfterRollback(fmt.Errorf("delete task %s before replacement: %w", spec.Name, err))
+			}
 		}
-		_ = sch.Delete(spec.Name)
 		if err := sch.Create(spec); err != nil {
 			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
 		}
