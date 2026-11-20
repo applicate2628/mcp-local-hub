@@ -1,0 +1,22 @@
+{
+  "base_commit": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+  "files": [
+    {
+      "path": "internal/api/install.go",
+      "base_blob": "e61a39827c8fa7801ef52482b954b929049f9bd8",
+      "base_sha256": "5cde143347a42b59a15eb31d1570e652db2fa8377e8fde6e485bdb969cff5267",
+      "candidate_blob": "18d246b0288620d1e65e81e5a4ee87e6a68431a5",
+      "candidate_sha256": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466"
+    },
+    {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "base_blob": null,
+      "base_sha256": null,
+      "candidate_blob": "99c1b93f70a57d8bca1f797484de154debb0ce4d",
+      "candidate_sha256": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+    }
+  ],
+  "candidate.patch": "25bdfb1729194288fd7be17b1c78849f33c976049f6b7ad149356a239007a1ca",
+  "control.patch": "3ee2a0bf4779524f323e6f4ffc3c11c3da5a7193f239ea80451fd35ca67b4eab",
+  "product.patch": "4b8b4c420988cc488d716dbce5768a95189ce78b5a136a48178f5bba318e1e03"
+}

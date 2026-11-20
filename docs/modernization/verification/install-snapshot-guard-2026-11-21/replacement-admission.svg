@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="610" viewBox="0 0 1120 610">
+  <rect width="1120" height="610" rx="20" fill="#f4f7fb"/>
+  <g font-family="DejaVu Sans, Arial, sans-serif" fill="#172b4d">
+    <text x="40" y="46" font-size="24" font-weight="700">Рисунок 1. Допуск к замене задачи</text>
+    <text x="40" y="76" font-size="15">Общий цикл install: решение по снимку предшествует разрушительному действию.</text>
+    <rect x="370" y="104" width="380" height="62" rx="12" fill="#173a61"/>
+    <text x="560" y="131" text-anchor="middle" font-size="18" fill="white" font-weight="700">ExportXML(имя)</text>
+    <text x="560" y="153" text-anchor="middle" font-size="14" fill="#e0ecff">Прочитать прежнее определение</text>
+    <g fill="none" stroke="#6c809c" stroke-width="2.5">
+      <path d="M560 166V190H190V212"/><path d="M560 166V212"/><path d="M560 190H930V212"/>
+    </g>
+    <g fill="#6c809c"><path d="M184 205L190 215L196 205Z"/><path d="M554 205L560 215L566 205Z"/><path d="M924 205L930 215L936 205Z"/></g>
+    <rect x="40" y="218" width="300" height="106" rx="12" fill="#fde8e8" stroke="#cb5c61"/>
+    <text x="190" y="247" text-anchor="middle" font-size="17" font-weight="700">Неизвестный снимок</text>
+    <text x="190" y="273" text-anchor="middle" font-size="14">Ошибка или пустой успех</text>
+    <text x="190" y="298" text-anchor="middle" font-size="14">Также: байты вместе с ошибкой</text>
+    <rect x="410" y="218" width="300" height="106" rx="12" fill="#e8f2ff" stroke="#6193c6"/>
+    <text x="560" y="247" text-anchor="middle" font-size="17" font-weight="700">Подтверждено отсутствие</text>
+    <text x="560" y="273" text-anchor="middle" font-size="14">ErrTaskNotFound + ноль байтов</text>
+    <text x="560" y="298" text-anchor="middle" font-size="14">Delete не вызывается</text>
+    <rect x="780" y="218" width="300" height="106" rx="12" fill="#e5f4ec" stroke="#5c9c77"/>
+    <text x="930" y="247" text-anchor="middle" font-size="17" font-weight="700">Непустой успешный снимок</text>
+    <text x="930" y="273" text-anchor="middle" font-size="14">Разрешена попытка Delete</text>
+    <text x="930" y="298" text-anchor="middle" font-size="14">Create — только после успеха</text>
+    <g fill="none" stroke-width="2.5">
+      <path d="M190 324V418" stroke="#cb5c61"/>
+      <path d="M560 324V418" stroke="#6193c6"/>
+      <path d="M930 324V375H560V418" stroke="#5c9c77"/>
+      <path d="M930 324V350H190V418" stroke="#cb5c61" stroke-dasharray="7 5"/>
+    </g>
+    <g fill="#cb5c61"><path d="M184 409L190 419L196 409Z"/></g>
+    <g fill="#5c9c77"><path d="M554 409L560 419L566 409Z"/></g>
+    <rect x="730" y="335" width="160" height="24" rx="6" fill="#f4f7fb"/>
+    <text x="810" y="352" text-anchor="middle" font-size="13" fill="#a92d3c">Delete: ошибка</text>
+    <rect x="730" y="366" width="160" height="24" rx="6" fill="#f4f7fb"/>
+    <text x="810" y="383" text-anchor="middle" font-size="13" fill="#286747">Delete: успех</text>
+    <rect x="40" y="424" width="300" height="88" rx="12" fill="#a92d3c"/>
+    <text x="190" y="455" text-anchor="middle" font-size="17" font-weight="700" fill="white">Остановить текущий шаг</text>
+    <text x="190" y="481" text-anchor="middle" font-size="14" fill="white">Вернуть причину через откат</text>
+    <rect x="410" y="424" width="300" height="88" rx="12" fill="#286747"/>
+    <text x="560" y="455" text-anchor="middle" font-size="18" font-weight="700" fill="white">Create(новое определение)</text>
+    <text x="560" y="481" text-anchor="middle" font-size="14" fill="white">Прежний контракт создания</text>
+    <text x="780" y="444" font-size="14">Откат касается ранее</text>
+    <text x="780" y="468" font-size="14">завершённых собственных шагов.</text>
+    <text x="40" y="552" font-size="15" font-weight="700">Граница доказательства</text>
+    <text x="40" y="578" font-size="14">Проверяется модель исполнителя. Нативная атомарность, внешняя замена и восстановление после отказа Create открыты.</text>
+  </g>
+</svg>

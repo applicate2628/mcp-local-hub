@@ -1,0 +1,852 @@
+{
+  "schema": 1,
+  "publication": {
+    "schema": 1,
+    "base": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+    "commit": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+    "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+    "parents": [
+      "11c286fb634cc63d2c6019a790ff376a1d834af9"
+    ],
+    "checkout_runner_sha256": "3f01181c7542f8250aba2640ef7d417e19c062519ba901974eb50fe663cd5687",
+    "execution_runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+    "source_manifest_sha256": "a58de0aa4504e09f414b2ec5ae38068bec0ffdaec78caaa7178746ed4cbec0ee"
+  },
+  "phases": {
+    "control": {
+      "completed": true,
+      "receipt_source_sha256": "c42ebe743be2e372b33b2f692d9cdb4716ce15cfdf7ea0b2e069c94f7051cefc",
+      "runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+      "source_before": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "5cde143347a42b59a15eb31d1570e652db2fa8377e8fde6e485bdb969cff5267",
+          "internal/api/install_scheduler_snapshot_test.go": null
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": ""
+      },
+      "source_after": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "5cde143347a42b59a15eb31d1570e652db2fa8377e8fde6e485bdb969cff5267",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": "?? internal/api/install_scheduler_snapshot_test.go"
+      }
+    },
+    "candidate": {
+      "completed": true,
+      "receipt_source_sha256": "3e81d03ce4fdec9db89a1cb8b95d2514d04ac07759c2de05d6a67cb77b7d3fe5",
+      "runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+      "source_before": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "5cde143347a42b59a15eb31d1570e652db2fa8377e8fde6e485bdb969cff5267",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": "?? internal/api/install_scheduler_snapshot_test.go"
+      },
+      "source_after": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go"
+      }
+    },
+    "adjacent": {
+      "completed": true,
+      "receipt_source_sha256": "ece03325c4a80a44edf8c517c1ea891c5e3bd5c18e43a2c38d93677b9f7f3380",
+      "runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+      "source_before": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go"
+      },
+      "source_after": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go"
+      }
+    },
+    "build-vet": {
+      "completed": true,
+      "receipt_source_sha256": "b561cd1488c12ed4163ff8e218d22bedb66d4739298664396c9bbe2c809a4820",
+      "runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+      "source_before": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go"
+      },
+      "source_after": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "materialized": true,
+        "staged": "",
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go"
+      }
+    },
+    "published-checkout": {
+      "completed": true,
+      "receipt_source_sha256": "d2bce55043601f4a819c59447f0cccde4620d8ad3988ffaa40449a90403bd4f0",
+      "runner_sha256": "3f01181c7542f8250aba2640ef7d417e19c062519ba901974eb50fe663cd5687",
+      "source_before": {
+        "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+        "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+        "parents": [
+          "f5fb00370a833255eacb992a7cd32f2e68da7399"
+        ],
+        "status": " M internal/api/install.go\n?? internal/api/install_scheduler_snapshot_test.go",
+        "staged": "",
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        }
+      },
+      "source_after": {
+        "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+        "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+        "parents": [
+          "11c286fb634cc63d2c6019a790ff376a1d834af9"
+        ],
+        "status": "",
+        "staged": "",
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        }
+      }
+    },
+    "published": {
+      "completed": true,
+      "receipt_source_sha256": "136c90a795c050a8f7d8606137cca2a7aa7b09494ba7e2a6dcf20acea2d1b309",
+      "runner_sha256": "3711efc6b06b3922ea6086ea589091672eb77f25402a8a5c6c146b18defb17f3",
+      "source_before": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+        "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+        "materialized": true,
+        "staged": "",
+        "status": ""
+      },
+      "source_after": {
+        "exists": true,
+        "sha256": {
+          "internal/api/install.go": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+          "internal/api/install_scheduler_snapshot_test.go": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd"
+        },
+        "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+        "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+        "materialized": true,
+        "staged": "",
+        "status": ""
+      }
+    }
+  },
+  "commands": [
+    {
+      "label": "clone",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\control\\empty-hooks",
+        "clone",
+        "--single-branch",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "<CANCELLATION_ROOT>\\source",
+        "<INSTALL_SNAPSHOT_ROOT>\\source"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0828669999027625,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 158,
+        "sha256": "7686e3fc1ac74c16e257f29f4999748de8a00b6045133169f0c94f32b65d742f"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "checkout-base",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\control\\empty-hooks",
+        "checkout",
+        "--detach",
+        "11c286fb634cc63d2c6019a790ff376a1d834af9"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0512868000660092,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 94,
+        "sha256": "9d4216ad1931485f63a03ee16436e842f297c76121a98dd269da471bd674d26a"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "check-control",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\control\\empty-hooks",
+        "apply",
+        "--check",
+        "<INSTALL_SNAPSHOT_ROOT>\\control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03900300001259893,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "apply-control",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\control\\empty-hooks",
+        "apply",
+        "<INSTALL_SNAPSHOT_ROOT>\\control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03904869989491999,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "gofmt-check",
+      "args": [
+        "-l",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1469846999971196,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "go-version",
+      "args": [
+        "version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.031931999954394996,
+      "stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "original-snapshot-control",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout=180s",
+        "-run",
+        "^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$",
+        "./internal/api"
+      ],
+      "exit_code": 1,
+      "seconds": 228.14654029998928,
+      "stdout": {
+        "bytes": 27201,
+        "sha256": "325dbfae4e4906eadb49d072b854301bd16689944cab3b0dd8d2cc4f38172ffb"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "expected FAIL retained",
+      "events": {
+        "pass": {
+          "test": 0,
+          "package": 0
+        },
+        "fail": {
+          "test": 15,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\control\\empty-hooks",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.3611051000189036,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "outcome": "PASS"
+    },
+    {
+      "label": "check-product",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\candidate\\empty-hooks",
+        "apply",
+        "--check",
+        "<INSTALL_SNAPSHOT_ROOT>\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03903460002038628,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate",
+      "outcome": "PASS"
+    },
+    {
+      "label": "apply-product",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\candidate\\empty-hooks",
+        "apply",
+        "<INSTALL_SNAPSHOT_ROOT>\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11908430000767112,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate",
+      "outcome": "PASS"
+    },
+    {
+      "label": "gofmt-check",
+      "args": [
+        "-l",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.22005350003018975,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate",
+      "outcome": "PASS"
+    },
+    {
+      "label": "snapshot-contract-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 52.912820899975486,
+      "stdout": {
+        "bytes": 27835,
+        "sha256": "d66a7d3bb49be849b4e3577021be408d3e49db2846081b6e546347dc39bbeddb"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate",
+      "outcome": "PASS",
+      "events": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\candidate\\empty-hooks",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.3895833999849856,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate",
+      "outcome": "PASS"
+    },
+    {
+      "label": "gofmt-check",
+      "args": [
+        "-l",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.17788530001416802,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "adjacent",
+      "outcome": "PASS"
+    },
+    {
+      "label": "pass-a-pass-b-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestExecuteInstallTo_PassAPassB_Separation)$",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 6.587194300023839,
+      "stdout": {
+        "bytes": 8248,
+        "sha256": "59be77b7158dbc52dc47d687ecd2aecc1472848248514539dce337a6722c7a34"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "adjacent",
+      "outcome": "PASS",
+      "events": {
+        "pass": {
+          "test": 8,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\adjacent\\empty-hooks",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.30873809999320656,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "adjacent",
+      "outcome": "PASS"
+    },
+    {
+      "label": "gofmt-check",
+      "args": [
+        "-l",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.026040000026114285,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet",
+      "outcome": "PASS"
+    },
+    {
+      "label": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 15.63000479992479,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet",
+      "outcome": "PASS"
+    },
+    {
+      "label": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 10.065699000027962,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet",
+      "outcome": "PASS"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\build-vet\\empty-hooks",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.3432530000573024,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet",
+      "outcome": "PASS"
+    },
+    {
+      "label": "stage-exact-files",
+      "args": [
+        "add",
+        "--",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.4864827999845147,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published-checkout",
+      "outcome": "PASS"
+    },
+    {
+      "label": "fetch-exact-commit",
+      "args": [
+        "fetch",
+        "--no-tags",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "c55d9ca619f6f9301ba1113615370fc6218d608f"
+      ],
+      "exit_code": 0,
+      "seconds": 20.334066200070083,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "2a36f66cb605ad15aa752434aa77f306d930a67f0464378f683f38a6d0fa5861"
+      },
+      "phase": "published-checkout",
+      "outcome": "PASS"
+    },
+    {
+      "label": "checkout-detached",
+      "args": [
+        "checkout",
+        "--detach",
+        "c55d9ca619f6f9301ba1113615370fc6218d608f"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07658250001259148,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 188,
+        "sha256": "eed0245e53ccf73e1b560546610678eb420ebf29f1b45819d975e66276b697b3"
+      },
+      "phase": "published-checkout",
+      "outcome": "PASS"
+    },
+    {
+      "label": "gofmt-check",
+      "args": [
+        "-l",
+        "internal/api/install.go",
+        "internal/api/install_scheduler_snapshot_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.306951200007461,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "outcome": "PASS"
+    },
+    {
+      "label": "snapshot-contract-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 7.02984769991599,
+      "stdout": {
+        "bytes": 27815,
+        "sha256": "fb10e8a731976e0ac139c76f41264cf6034a4b73f9ef9e58cf9049fa3baef1be"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "outcome": "PASS",
+      "events": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "-c",
+        "core.hooksPath=<INSTALL_SNAPSHOT_ROOT>\\runtime\\published\\empty-hooks",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05891940009314567,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "outcome": "PASS"
+    }
+  ],
+  "raw_command_streams_verified": 52,
+  "expected_failures_retained": true,
+  "negative_control_rerun": false,
+  "control_process_observation": {
+    "included": true,
+    "observer_source_sha256": "56bf6a1d695190a41d2f60e8833efbb1c25175019f8d9a7e794c37586c329859",
+    "observation_source_sha256": "6b1a50b7dff328d13531a3764c9b0437c24a6f969d36541e3582f165a164adf6",
+    "observed_utc": "2026-11-20T21:45:07.350897+00:00",
+    "observation_contains_runner_self_attestation": false,
+    "scope": "Limited read-only process snapshot. Pair hashes identify retained bytes; the original observation does not bind its runner. It does not establish delay cause or whole-tree settlement."
+  },
+  "limits": {
+    "whole_process_tree_deadline_enforced": false,
+    "direct_child_wait_bounded": false,
+    "native_task_operations": false,
+    "full_test_suites_run": false,
+    "native_concurrent_replacement_qualified": false
+  },
+  "generated_utc": "2026-11-20T21:56:50.680055+00:00"
+}

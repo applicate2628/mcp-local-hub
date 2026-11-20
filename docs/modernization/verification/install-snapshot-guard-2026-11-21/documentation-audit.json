@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "checkpoint": "install-snapshot-guard-20261121",
+  "input_sha256": "1dfe4cfc5c01024737efc4c26127d4cf7ff020abd15f87f367be3c5329148326",
+  "observed_at_utc": "2026-11-20T21:59:12.247647Z",
+  "target": "board",
+  "code_commit": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "evidence_commit": null,
+  "board_uses_relative_evidence_links": true,
+  "timing_observation_in_plan": false,
+  "documents": {
+    "board": {
+      "protected_units": {
+        "1": {
+          "before_sha256": "d07700a0768d4ff141f75cb25778561e1b1837ac381c084739a328d34719f5a4",
+          "after_sha256": "d07700a0768d4ff141f75cb25778561e1b1837ac381c084739a328d34719f5a4",
+          "byte_equal": true
+        },
+        "2": {
+          "before_sha256": "59ffccab2db712a545b4740a11dac3043d1a45d9f8bf1ab2ee33e73da2629972",
+          "after_sha256": "59ffccab2db712a545b4740a11dac3043d1a45d9f8bf1ab2ee33e73da2629972",
+          "byte_equal": true
+        },
+        "3": {
+          "before_sha256": "9e5ed9f62642dd184fac2a4538bdbdfd43061005c5f3ffc6182771d4bd3e35bc",
+          "after_sha256": "9e5ed9f62642dd184fac2a4538bdbdfd43061005c5f3ffc6182771d4bd3e35bc",
+          "byte_equal": true
+        },
+        "5": {
+          "before_sha256": "e4cd9939a0ae03dc680ef1445bcd975bbb85f6740ad0b81f6770a41b9279320c",
+          "after_sha256": "e4cd9939a0ae03dc680ef1445bcd975bbb85f6740ad0b81f6770a41b9279320c",
+          "byte_equal": true
+        },
+        "6": {
+          "before_sha256": "6146d91ae54dc36c0e0d7bc488bcaa0b6439950ad4343b6a84f6ad58c2a79b69",
+          "after_sha256": "6146d91ae54dc36c0e0d7bc488bcaa0b6439950ad4343b6a84f6ad58c2a79b69",
+          "byte_equal": true
+        }
+      },
+      "all_unit_count_before": 6,
+      "all_unit_count_after": 6,
+      "prior_text_reconstructed_byte_equal": true,
+      "reconstructed_prior_sha256": "9f2ca30c4f9aa85a815d6706bf1396a4c89795d6aebd2df14db0e335bb84a1db",
+      "source_sha256": "9f2ca30c4f9aa85a815d6706bf1396a4c89795d6aebd2df14db0e335bb84a1db",
+      "output_sha256": "6bd3005c84a1c599137b2c4760630205b3ebd4a3c47b039d3cdca3fa5e6bc829",
+      "output_git_blob": "48d2324a5053503ca3cf062a2e247b51b120dee6",
+      "output_bytes": 167504,
+      "repo_path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "source_commit": "203209df3a11b66ccba59cc7a308d3aa8e4cc7f8"
+    }
+  },
+  "sources": {
+    "plan": {
+      "repo_path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "commit": "6cc44839556653b2e8265c39143d36914c7e25e5",
+      "git_blob": "ece1e9263364168579142480a44f5cfdbbc17acc",
+      "sha256": "8761771c795f75c0fd034d7f7c91a1fdd2d10d790d0d40f7b32ec0b8a3ec8527",
+      "bytes": 339963,
+      "local": "<LOCAL_WORK_ROOT>/r19-cancellation/plan.candidate.md",
+      "protected_units": {
+        "1": "73d7a434afffb7ea0aafd7b4e6eb76210a96bc56c9d86c3d7480141399d5d3aa",
+        "2": "ee28b41440d88ecf42a5c93dd5e2e54c227b8bf8bfe5da64eb5ba598a5d5eef2",
+        "3": "ad1283433ef46ca756bab2778a0d9d78ed157b54703fb7b024d805cb2c81138a",
+        "4": "41cda0768326929111de2e9af8d9f603616c73df849bcb83379c336c637e0d2c",
+        "5": "e777bff67ed1c79a6596f1230055f0fec0024eda9a0c7ec486742e5fbce8dc49",
+        "6": "f71b7962c52dadd6024848225b924f23e3bd88c1cc60a5b769b0f0c1f7a9d565",
+        "7": "772537dda327deba58ac1f30c7c7eb1c90b9fe33b8ca9e16ef3f81a300c6986a",
+        "8": "b41fff75861947edf419602603e28f963781ce006a612357f7a107dc4f5e1150"
+      }
+    },
+    "board": {
+      "repo_path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "commit": "203209df3a11b66ccba59cc7a308d3aa8e4cc7f8",
+      "git_blob": "8c43010e08f7dc725ab53aa547088e2a523b334f",
+      "sha256": "9f2ca30c4f9aa85a815d6706bf1396a4c89795d6aebd2df14db0e335bb84a1db",
+      "bytes": 160106,
+      "local": "<LOCAL_WORK_ROOT>/r19-cancellation/board.candidate.md",
+      "protected_units": {
+        "1": "d07700a0768d4ff141f75cb25778561e1b1837ac381c084739a328d34719f5a4",
+        "2": "59ffccab2db712a545b4740a11dac3043d1a45d9f8bf1ab2ee33e73da2629972",
+        "3": "9e5ed9f62642dd184fac2a4538bdbdfd43061005c5f3ffc6182771d4bd3e35bc",
+        "4": "4c1f60df08ae2f86dd6a7fb279bf9b5d69ced3e4e80b8f22586403de7cdab727",
+        "5": "e4cd9939a0ae03dc680ef1445bcd975bbb85f6740ad0b81f6770a41b9279320c",
+        "6": "6146d91ae54dc36c0e0d7bc488bcaa0b6439950ad4343b6a84f6ad58c2a79b69"
+      }
+    }
+  },
+  "local_only": true,
+  "github_mutations": false
+}

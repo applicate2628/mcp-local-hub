@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 660,
+  "branch": "fix/scheduler-hidden-task-lookup-20261119",
+  "base": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+  "commit": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+  "parents": [
+    "11c286fb634cc63d2c6019a790ff376a1d834af9"
+  ],
+  "draft": true,
+  "compare": {
+    "repository_full_name": "applicate2628/mcp-local-hub",
+    "base": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+    "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+    "status": "ahead",
+    "ahead_by": 1,
+    "behind_by": 0,
+    "total_commits": 1,
+    "too_large": null,
+    "base_commit": {
+      "sha": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "url": "https://api.github.com/repos/applicate2628/mcp-local-hub/commits/11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "html_url": "https://github.com/applicate2628/mcp-local-hub/commit/11c286fb634cc63d2c6019a790ff376a1d834af9"
+    },
+    "merge_base_commit": {
+      "sha": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "url": "https://api.github.com/repos/applicate2628/mcp-local-hub/commits/11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "html_url": "https://github.com/applicate2628/mcp-local-hub/commit/11c286fb634cc63d2c6019a790ff376a1d834af9"
+    },
+    "files": [
+      {
+        "filename": "internal/api/install.go",
+        "status": "modified",
+        "additions": 12,
+        "deletions": 4,
+        "changes": 16,
+        "previous_filename": null
+      },
+      {
+        "filename": "internal/api/install_scheduler_snapshot_test.go",
+        "status": "added",
+        "additions": 171,
+        "deletions": 0,
+        "changes": 171,
+        "previous_filename": null
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "internal/api/install.go",
+      "git_blob": "18d246b0288620d1e65e81e5a4ee87e6a68431a5",
+      "sha256": "1caeaa407a9a7ad8ab4c4dfac6a304989e8fca9e5e24505a0658c32ba8d3a466",
+      "github_readback_byte_equal": true
+    },
+    {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "git_blob": "99c1b93f70a57d8bca1f797484de154debb0ce4d",
+      "sha256": "d20dcf2d771c997a2e473a5afcc1fed79c0ad3f13760dff0ec1cb4a541d065dd",
+      "github_readback_byte_equal": true
+    }
+  ],
+  "published_checkout": {
+    "receipt": "evidence/published-checkout/receipt.json inside evidence-redacted.zip",
+    "completed": true,
+    "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+    "tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+    "status": ""
+  },
+  "review_scope": "Root verified GitHub blobs/readback and exact published checkout; no external APPROVED claimed."
+}
