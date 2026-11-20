@@ -927,70 +927,71 @@ func stdioLine(line []byte) []byte {
 	return line
 }
 
-// readStdoutLoop is the subprocess stdout reader. It peeks at each line's
-// JSON-RPC id and dispatches it to the corresponding waiting HTTP handler
-// via the `pending` map. Lines without a matching pending entry (e.g.
-// notifications, server-initiated messages, or unrouted ids) fall through
-// to testStdout so unit tests can still observe raw subprocess output.
+// stdioOutputMember records field presence without copying the payload.
+type stdioOutputMember bool
+
+func (present *stdioOutputMember) UnmarshalJSON([]byte) error {
+	*present = true
+	return nil
+}
+
+type stdioOutputMethod bool
+
+func (present *stdioOutputMethod) UnmarshalJSON(raw []byte) error {
+	*present = true
+	// Preserve the stdout decoder's method type check for private hosts.
+	var method string
+	return json.Unmarshal(raw, &method)
+}
+
+// stdioResponseID identifies response envelopes with a Hub-style integer ID.
+func stdioResponseID(line []byte) (int64, bool, error) {
+	var envelope struct {
+		JSONRPC json.RawMessage   `json:"jsonrpc"`
+		ID      json.RawMessage   `json:"id"`
+		Method  stdioOutputMethod `json:"method"`
+		Result  stdioOutputMember `json:"result"`
+		Error   stdioOutputMember `json:"error"`
+	}
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		return 0, false, err
+	}
+	if envelope.Method || envelope.Result == envelope.Error {
+		return 0, false, nil
+	}
+	var version string
+	if err := json.Unmarshal(envelope.JSONRPC, &version); err != nil || version != "2.0" {
+		return 0, false, nil
+	}
+	id, err := strconv.ParseInt(string(envelope.ID), 10, 64)
+	if err != nil {
+		return 0, false, nil
+	}
+	return id, true, nil
+}
+
+// readStdoutLoop dispatches JSON-RPC responses to waiting callers.
+// All other lines and unmatched responses go only to the raw test observer.
 func (h *StdioHost) readStdoutLoop() {
 	defer h.wg.Done()
 	for h.stdoutScan.Scan() {
 		line := append([]byte(nil), h.stdoutScan.Bytes()...)
-		// Peek both id and method. The id alone is not enough to
-		// classify a message as a stale response: JSON-RPC requests
-		// (responses' opposite) carry an id AND a method, and MCP
-		// servers can legitimately send server-initiated requests
-		// (e.g. `sampling/createMessage`) with numeric ids. Codex
-		// finding 6290ce6e: a method-blind id filter would suppress
-		// those server-initiated requests as if they were stale
-		// responses. Only the (id, no method) shape is unambiguously
-		// a response and safe to drop.
-		var peek struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-		}
-		decodeErr := json.Unmarshal(line, &peek)
+		id, isResponse, decodeErr := stdioResponseID(line)
 		if decodeErr != nil && h.private != nil {
 			h.privateStdoutInvalid.Store(true)
 		}
-		if decodeErr == nil && len(peek.ID) > 0 {
-			var id int64
-			if err := json.Unmarshal(peek.ID, &id); err == nil {
-				h.pendingMu.Lock()
-				ch, ok := h.pending[id]
-				h.pendingMu.Unlock()
-				if ok {
-					select {
-					case ch <- line:
-					default:
-					}
-					continue
+		if isResponse {
+			h.pendingMu.Lock()
+			ch, ok := h.pending[id]
+			h.pendingMu.Unlock()
+			if ok {
+				select {
+				case ch <- line:
+				default:
 				}
-				if peek.Method == "" {
-					// Untracked response id (e.g. a late reply
-					// after caller timeout). Do not propagate
-					// further; it may belong to a different
-					// canceled client and could leak response
-					// contents. testStdout-only retains
-					// observability for unit tests.
-					select {
-					case h.testStdout <- line:
-					default:
-					}
-					continue
-				}
-				// id + method = server-initiated request. Fall
-				// through to the testStdout fallback so future
-				// SSE work can pick it up uniformly with
-				// notifications. SSE fan-out from this loop was
-				// removed in PR #64 because unrouted output
-				// cannot be attributed to a specific HTTP caller
-				// safely; if/when SSE broadcast is reintroduced
-				// (separately threat-modeled), it should
-				// branch from here rather than from this filter.
+				continue
 			}
 		}
-		// Also keep the testStdout path for tests that watch raw output.
 		select {
 		case h.testStdout <- line:
 		default:
