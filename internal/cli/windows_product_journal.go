@@ -147,6 +147,43 @@ type windowsProductJournalBinding struct {
 }
 
 func (b windowsProductJournalBinding) reader(path string) ([]byte, error) {
+	return b.read(b.ctx, path)
+}
+
+// readerContext keeps the original operation bound and adds the read-only
+// caller's cancellation and deadline to the same observed reader.
+func (b windowsProductJournalBinding) readerContext(ctx context.Context, path string) ([]byte, error) {
+	if b.ctx == nil || ctx == nil {
+		return nil, errors.New("Product journal context required")
+	}
+
+	var readCtx context.Context
+	var cancel context.CancelFunc
+	if deadline, ok := b.ctx.Deadline(); ok {
+		readCtx, cancel = context.WithDeadline(ctx, deadline)
+	} else {
+		readCtx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+	stop := context.AfterFunc(b.ctx, cancel)
+	defer stop()
+	if b.ctx.Err() != nil {
+		cancel()
+	}
+
+	raw, err := b.read(readCtx, path)
+	for _, contextErr := range []error{readCtx.Err(), b.ctx.Err()} {
+		if contextErr != nil {
+			raw = nil
+			if !errors.Is(err, contextErr) {
+				err = errors.Join(err, contextErr)
+			}
+		}
+	}
+	return raw, err
+}
+
+func (b windowsProductJournalBinding) read(ctx context.Context, path string) ([]byte, error) {
 	if b.evidence == nil {
 		return nil, errors.New("Product journal operation evidence owner required")
 	}
@@ -154,7 +191,7 @@ func (b windowsProductJournalBinding) reader(path string) ([]byte, error) {
 	if b.phase != nil {
 		phase = b.phase()
 	}
-	raw, original, err := readWindowsProductRecoveryJournal(b.ctx, path, b.allowance)
+	raw, original, err := readWindowsProductRecoveryJournal(ctx, path, b.allowance)
 	b.evidence.retain(windowsProductJournalReadOutcome{phase: phase, path: path, allowance: b.allowance, original: original, readError: err})
 	return raw, err
 }

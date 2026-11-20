@@ -202,7 +202,7 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	for _, image := range images {
 		names = append(names, filepath.Base(image))
 	}
-	rows, err := api.NewAPI().ListMatchingProcesses(names)
+	rows, err := api.NewAPI().ListMatchingProcessesContext(ctx, names)
 	if err != nil {
 		return err
 	}

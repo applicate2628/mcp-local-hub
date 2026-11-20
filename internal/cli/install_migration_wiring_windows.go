@@ -105,8 +105,8 @@ type upgradeGUIObservationInputs struct {
 	OwnerPath        func() (string, error)
 	VerifyListener   func(context.Context, string, int, int) error
 	ProbeLeaseUnheld func(string) (bool, error)
-	FindGUIs         func(string) ([]api.ProcessInfo, error)
-	ListProcesses    func([]string) ([]api.ProcessInfo, error)
+	FindGUIs         func(context.Context, string) ([]api.ProcessInfo, error)
+	ListProcesses    func(context.Context, []string) ([]api.ProcessInfo, error)
 	HoldTermination  func(int) (process.HeldPIDGeneration, error)
 	HoldJob          func(int) (process.HeldPIDJobObservation, error)
 	CurrentIdentity  func(int) (process.PIDHandleIdentity, error)
@@ -131,9 +131,11 @@ func productionUpgradeGUIObservationInputs() upgradeGUIObservationInputs {
 		OwnerPath:        resolveUpgradeGUIOwnerPath,
 		VerifyListener:   gui.VerifyGUIOwnerListener,
 		ProbeLeaseUnheld: gui.ProbeSingleInstanceLockUnheld,
-		FindGUIs:         func(target string) ([]api.ProcessInfo, error) { return findRunningGUIsOnTarget(api.NewAPI(), target) },
-		ListProcesses: func(patterns []string) ([]api.ProcessInfo, error) {
-			return api.NewAPI().ListMatchingProcesses(patterns)
+		FindGUIs: func(ctx context.Context, target string) ([]api.ProcessInfo, error) {
+			return findRunningGUIsOnTargetContext(ctx, api.NewAPI(), target)
+		},
+		ListProcesses: func(ctx context.Context, patterns []string) ([]api.ProcessInfo, error) {
+			return api.NewAPI().ListMatchingProcessesContext(ctx, patterns)
 		},
 		HoldTermination: process.HoldPIDForTermination,
 		HoldJob:         process.HoldPIDForJobObservation,
@@ -429,8 +431,11 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	if err != nil || unheld {
 		return nil, fmt.Errorf("UPGRADE_GUI_LOCK_PATH_MISMATCH: incumbent GUI lease is not held at its owner path: %v", err)
 	}
-	guis, err := in.FindGUIs(target)
+	guis, err := in.FindGUIs(ctx, target)
 	if err != nil || len(guis) != 1 || guis[0].PID != record.PID {
+		if err != nil {
+			return nil, fmt.Errorf("UPGRADE_GUI_DUPLICATE: expected one exact incumbent GUI; count=%d error=%w", len(guis), err)
+		}
 		return nil, fmt.Errorf("UPGRADE_GUI_DUPLICATE: expected one exact incumbent GUI; count=%d error=%v", len(guis), err)
 	}
 	held := &upgradeGUIHeldTopology{inputs: in, StateDir: stateDir, PidportPath: path, OwnerRecord: record}
@@ -444,7 +449,7 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: hold GUI: %w", err)
 	}
-	all, err := in.ListProcesses([]string{"mcphub.exe"})
+	all, err := in.ListProcesses(ctx, []string{"mcphub.exe"})
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: enumerate tray: %w", err)
 	}
@@ -666,8 +671,11 @@ func recheckUpgradeGUIBeforeExitWithBoundedJournal(ctx context.Context, held *up
 	if err != nil || unheld {
 		return fmt.Errorf("UPGRADE_GUI_LOCK_PATH_MISMATCH: incumbent lease changed: %v", err)
 	}
-	guis, err := in.FindGUIs(held.Identity.Target)
+	guis, err := in.FindGUIs(ctx, held.Identity.Target)
 	if err != nil || len(guis) != 1 || guis[0].PID != record.PID {
+		if err != nil {
+			return fmt.Errorf("UPGRADE_GUI_DUPLICATE: GUI population changed count=%d error=%w", len(guis), err)
+		}
 		return fmt.Errorf("UPGRADE_GUI_DUPLICATE: GUI population changed count=%d error=%v", len(guis), err)
 	}
 	if _, err := heldUpgradeGUIIdentity(held.GUI, record.PID, held.Identity.Target, record.StartTime, in.CurrentIdentity); err != nil {
@@ -691,11 +699,14 @@ func recheckUpgradeGUIAfterExit(ctx context.Context, held *upgradeGUIHeldTopolog
 		return errors.New("UPGRADE_GUI_IDENTITY_AMBIGUOUS: incomplete held-topology recheck inputs")
 	}
 	in := held.inputs
-	guis, err := in.FindGUIs(held.Identity.Target)
+	guis, err := in.FindGUIs(ctx, held.Identity.Target)
 	if err != nil || len(guis) != 0 {
+		if err != nil {
+			return fmt.Errorf("UPGRADE_GUI_RELAUNCH_RACE: GUI process remains count=%d error=%w", len(guis), err)
+		}
 		return fmt.Errorf("UPGRADE_GUI_RELAUNCH_RACE: GUI process remains count=%d error=%v", len(guis), err)
 	}
-	all, err := in.ListProcesses([]string{"mcphub.exe"})
+	all, err := in.ListProcesses(ctx, []string{"mcphub.exe"})
 	if err != nil {
 		return err
 	}
@@ -2162,7 +2173,7 @@ type retainedGenerationObservationDeps struct {
 	ReadSupervisorOwner func(string) (api.SupervisorLockOwner, error)
 	LookupIdentity      func(int) (process.ProcessIdentity, error)
 	OwnerMatchesCurrent func(int) (bool, error)
-	ConfirmGUIAbsent    func(string) error
+	ConfirmGUIAbsent    func(context.Context, string) error
 	HandleIdentity      func(int) (process.PIDHandleIdentity, error)
 	ParentPID           func(int) (int, error)
 	PortOwner           func(context.Context, int) (int, bool, error)
@@ -2183,8 +2194,8 @@ func productionRetainedGenerationObservationDeps() retainedGenerationObservation
 		ReadSupervisorOwner: api.ReadSupervisorLockOwner,
 		LookupIdentity:      processLookupIdentityFn,
 		OwnerMatchesCurrent: process.ProcessOwnerMatchesCurrent,
-		ConfirmGUIAbsent: func(target string) error {
-			processes, err := findRunningGUIsOnTarget(api.NewAPI(), target)
+		ConfirmGUIAbsent: func(ctx context.Context, target string) error {
+			processes, err := findRunningGUIsOnTargetContext(ctx, api.NewAPI(), target)
 			if err != nil {
 				return err
 			}
@@ -2214,7 +2225,7 @@ func observeRetainedGenerationWithDeps(ctx context.Context, stateDir, cliPath, w
 	if d.TrySupervisorAbsent == nil || d.ReadSupervisorOwner == nil || d.LookupIdentity == nil || d.OwnerMatchesCurrent == nil || d.HandleIdentity == nil || d.ParentPID == nil || d.PortOwner == nil || d.CurrentPairReceipt == nil || d.Now == nil {
 		return nil, fmt.Errorf("%w: retained-generation identity dependencies are incomplete", ErrRetainedGenerationChanged)
 	}
-	if err := d.ConfirmGUIAbsent(cliPath); err != nil {
+	if err := d.ConfirmGUIAbsent(ctx, cliPath); err != nil {
 		return nil, fmt.Errorf("E_UPGRADE_GUI_OWNER_PRESENT: %w", err)
 	}
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
@@ -2401,7 +2412,7 @@ func sendRetainedGenerationIPC(ctx context.Context, pipePath string, owner api.S
 }
 
 func observeWindowsProductPairQuiescence(ctx context.Context, stateDir, target string, frozen []windowsProductIntentPortV1) (windowsProductQuiescenceObservationV1, error) {
-	guiProcesses, err := findRunningGUIsOnTarget(api.NewAPI(), target)
+	guiProcesses, err := findRunningGUIsOnTargetContext(ctx, api.NewAPI(), target)
 	if err != nil {
 		return windowsProductQuiescenceObservationV1{}, fmt.Errorf("E_UPGRADE_GUI_OWNER_PRESENT: GUI owner absence is unverified: %w", err)
 	}
@@ -3207,7 +3218,7 @@ func validateCanonicalEntryRuntimeAbsence(ctx context.Context, path string, froz
 	}
 	// The lock/port and GUI observations do not own the tray role. Also refuse
 	// an unbound supervisor process before accepting absence or restarting.
-	rows, err := api.NewAPI().ListMatchingProcesses([]string{"mcphub.exe", "mcphub-windowless.exe"})
+	rows, err := api.NewAPI().ListMatchingProcessesContext(ctx, []string{"mcphub.exe", "mcphub-windowless.exe"})
 	if err != nil {
 		return err
 	}
@@ -3575,14 +3586,14 @@ func buildGUIOwnedPriorRecoveryOps(ctx context.Context, stateDir, productPath st
 		Reservation: func(ctx context.Context) (gui.OwnedSingleInstanceLease, error) {
 			return acquireGUIOwnedPriorReservation(ctx, ownedLease, guiOwnedPriorReservationOps{
 				ProveNoGUIOrTray: func(ctx context.Context) error {
-					processes, err := findRunningGUIsOnTarget(api.NewAPI(), productPath)
+					processes, err := findRunningGUIsOnTargetContext(ctx, api.NewAPI(), productPath)
 					if err != nil {
 						return err
 					}
 					if len(processes) != 0 {
 						return errors.New("target GUI process remains")
 					}
-					all, err := api.NewAPI().ListMatchingProcesses([]string{"mcphub.exe"})
+					all, err := api.NewAPI().ListMatchingProcessesContext(ctx, []string{"mcphub.exe"})
 					if err != nil {
 						return err
 					}
@@ -3874,12 +3885,16 @@ func restoreGUIOwnedForwardWithObserver(ctx context.Context, journal windowsProd
 	if lastHealthErr == nil {
 		return nil
 	}
-	processes, err := findRunningGUIsOnTarget(api.NewAPI(), productPath)
+	processes, err := findRunningGUIsOnTargetContext(limit, api.NewAPI(), productPath)
 	if err != nil || len(processes) != 0 {
+		observer := lastHealthErr
+		if err != nil {
+			observer = errors.Join(observer, err)
+		}
 		return &upgradeGUIForwardHealthError{
 			predicate: upgradeGUIForwardHealthPredicate(lastHealthErr),
 			summary:   "GUI present without forward fleet health or owner unknown",
-			observer:  lastHealthErr,
+			observer:  observer,
 		}
 	}
 	if releaseLease != nil {

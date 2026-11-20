@@ -61,14 +61,14 @@ func (s *windowsCanonicalJournalRecoverySource) ValidateOriginalRecovery(ctx con
 	if err := s.validateOriginalRecoveryState(ctx); err != nil {
 		return err
 	}
-	current, err := s.deps.ReadJournal(s.path)
+	current, err := s.deps.readJournalContext(ctx, s.path)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(current, s.raw) {
 		return fmt.Errorf("%w: original recovery journal changed", ErrWindowsProductRecoveryIdentity)
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (s *windowsCanonicalJournalRecoverySource) validateOriginalRecoveryState(ctx context.Context) error {

@@ -578,27 +578,36 @@ type ProcessInfo struct {
 // StopAll then succeeded, and Bootstrap finally failed with
 // "target in use" leaving daemons down (exactly the regression A8
 // was added to prevent).
-func runMatchingProcessesSnapshot() ([]byte, error) {
+func runMatchingProcessesSnapshot(parent context.Context, run func(context.Context, string, ...string) ([]byte, error)) ([]byte, error) {
 	// Shared wmic→PowerShell chain deadline (see probeChainBudget).
-	ctx, cancel := newProbeChainContext()
+	ctx, cancel := context.WithTimeout(parent, probeChainBudget)
 	defer cancel()
 
-	if out, err := runProbeCommandCtx(ctx, "wmic", "process", "get",
-		"CommandLine,ProcessId,WorkingSetSize", "/format:csv"); err == nil {
-		return out, nil
-	} else {
-		// PS fallback below. Hold wmic error in case PS also fails.
-		const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
-			$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
-			[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
-		}`
-		psOut, psErr := runProbeCommandCtx(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-		if psErr != nil {
-			return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%v; powershell=%w", err, psErr)
-		}
-		header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
-		return append([]byte(header), psOut...), nil
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrProbeTimeout, err)
 	}
+	out, wmicErr := run(ctx, "wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrProbeTimeout, err, wmicErr)
+	}
+	if wmicErr == nil {
+		return out, nil
+	}
+
+	// Keep the WMIC error if PowerShell also fails.
+	const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
+		$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
+		[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
+	}`
+	psOut, psErr := run(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrProbeTimeout, err, wmicErr, psErr)
+	}
+	if psErr != nil {
+		return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%w; powershell=%w", wmicErr, psErr)
+	}
+	header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
+	return append([]byte(header), psOut...), nil
 }
 
 // ListMatchingProcesses returns full process info for every process whose
@@ -611,10 +620,34 @@ func runMatchingProcessesSnapshot() ([]byte, error) {
 // "target in use" leaving daemons down).
 // Windows-only; returns nil on other platforms.
 func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
+	return a.ListMatchingProcessesContext(context.Background(), patterns)
+}
+
+// ListMatchingProcessesContext runs the existing process inventory within the
+// caller's context. A canceled inventory supplies no usable process rows.
+func (a *API) ListMatchingProcessesContext(ctx context.Context, patterns []string) ([]ProcessInfo, error) {
+	if ctx == nil {
+		return nil, errors.New("process inventory context required")
+	}
 	if runtime.GOOS != "windows" {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(ErrProbeTimeout, err)
+		}
 		return nil, nil
 	}
-	out, err := runMatchingProcessesSnapshot()
+	return listMatchingProcessesContext(ctx, patterns, runProbeCommandCtx)
+}
+
+func listMatchingProcessesContext(ctx context.Context, patterns []string, run func(context.Context, string, ...string) ([]byte, error)) (results []ProcessInfo, retErr error) {
+	defer func() {
+		if err := ctx.Err(); err != nil {
+			results = nil
+			if !errors.Is(retErr, err) || !errors.Is(retErr, ErrProbeTimeout) {
+				retErr = errors.Join(ErrProbeTimeout, err, retErr)
+			}
+		}
+	}()
+	out, err := runMatchingProcessesSnapshot(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -624,6 +657,9 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 		lowerPatterns = append(lowerPatterns, strings.ToLower(p))
 	}
 	records, err := process.ReadWmicCSVRecords(strings.NewReader(string(out)))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, errors.Join(ErrProbeTimeout, ctxErr, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -631,8 +667,10 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	if !ok {
 		return nil, nil
 	}
-	var results []ProcessInfo
 	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(ErrProbeTimeout, err)
+		}
 		row, ok := process.ParseWmicProcessCSVRecord(record, header)
 		if !ok {
 			continue

@@ -114,6 +114,25 @@ type windowsProductRecoveryDeps struct {
 	Now                    func() time.Time
 }
 
+func (d windowsProductRecoveryDeps) readJournalContext(ctx context.Context, path string) ([]byte, error) {
+	if d.journalReaderDefault {
+		return d.journal.readerContext(ctx, path)
+	}
+	if ctx == nil || d.ReadJournal == nil {
+		return nil, errors.New("Product journal reader and context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The injected path-only fixture remains synchronous and receives no new
+	// authority. Its result must still be rejected on caller cancellation.
+	raw, err := d.ReadJournal(path)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return nil, errors.Join(err, contextErr)
+	}
+	return raw, err
+}
+
 func windowsProductPriorRecoveryPending(j windowsProductRecoveryJournalV3) bool {
 	if j.Mode != WindowsProductPairModeUpgrade || j.PreSettlement == nil {
 		return false
