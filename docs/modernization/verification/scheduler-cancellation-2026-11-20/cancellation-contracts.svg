@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="590" viewBox="0 0 1040 590" role="img" aria-labelledby="title desc">
+  <title id="title">Два отдельно проверенных контракта отмены</title>
+  <desc id="desc">Слева исправление причин ошибок в PR 660, справа проверка родительской отмены в тесте PR 658. Стрелок между ветками нет: совместный снимок не создавался. Отмена работающего PowerShell и срок дерева процессов остаются открытыми.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#476178"/></marker>
+  </defs>
+  <rect width="1040" height="590" rx="16" fill="#f3f6fa"/>
+  <g font-family="DejaVu Sans, Arial, sans-serif" fill="#172d43">
+    <text x="32" y="40" font-size="23" font-weight="700">Два отдельно проверенных контракта отмены</text>
+    <text x="32" y="67" font-size="15" fill="#506377">Рисунок 1. Проверены опубликованные коммиты каждой ветки; ветки не объединялись.</text>
+    <rect x="28" y="88" width="478" height="390" rx="12" fill="#ffffff" stroke="#cbd8e5"/>
+    <rect x="534" y="88" width="478" height="390" rx="12" fill="#ffffff" stroke="#cbd8e5"/>
+    <text x="50" y="119" font-size="19" font-weight="700">#660 · причины ошибок</text>
+    <text x="556" y="119" font-size="19" font-weight="700">#658 · тест потребителя</text>
+    <text x="50" y="143" font-size="14" fill="#506377">11c286fb · производственный мост и тесты</text>
+    <text x="556" y="143" font-size="14" fill="#506377">47c50527 · изменён один тест</text>
+    <rect x="50" y="163" width="434" height="70" rx="8" fill="#edf4ff" stroke="#c4d8f4"/>
+    <text x="67" y="190" font-size="16" font-weight="700">Контекст остановлен до запуска</text>
+    <text x="67" y="215" font-size="14">Canceled или DeadlineExceeded</text>
+    <path d="M267 233 V255" stroke="#476178" stroke-width="2"/><path d="M262 253 L267 261 L272 253 Z" fill="#476178"/>
+    <rect x="50" y="267" width="434" height="82" rx="8" fill="#edf4ff" stroke="#c4d8f4"/>
+    <text x="67" y="294" font-size="16" font-weight="700">Две границы оборачивания ошибки</text>
+    <text x="67" y="318" font-size="14">schedulerCOMRun → schedulerCOM</text>
+    <text x="67" y="338" font-size="13" fill="#506377">Обе причины сохраняются через %w</text>
+    <path d="M267 349 V371" stroke="#476178" stroke-width="2"/><path d="M262 369 L267 377 L272 369 Z" fill="#476178"/>
+    <rect x="50" y="383" width="434" height="70" rx="8" fill="#eaf6f0" stroke="#b9dccb"/>
+    <text x="67" y="410" font-size="16" font-weight="700">ListContext возвращает ошибку</text>
+    <text x="67" y="435" font-size="14">errors.Is видит ErrUnavailable и причину</text>
+    <rect x="556" y="163" width="434" height="70" rx="8" fill="#edf4ff" stroke="#c4d8f4"/>
+    <text x="573" y="190" font-size="16" font-weight="700">Вход в подменённый ListContext</text>
+    <text x="573" y="215" font-size="14">Контекст жив; затем вызывается cancelParent</text>
+    <path d="M773 233 V255" stroke="#476178" stroke-width="2"/><path d="M768 253 L773 261 L778 253 Z" fill="#476178"/>
+    <rect x="556" y="267" width="434" height="82" rx="8" fill="#edf4ff" stroke="#c4d8f4"/>
+    <text x="573" y="294" font-size="16" font-weight="700">Наблюдение полученного контекста</text>
+    <text x="573" y="318" font-size="14">ctx.Done() → фактический ctx.Err()</text>
+    <text x="573" y="338" font-size="13" fill="#506377">Без зависимости от таймера 25 мс</text>
+    <path d="M773 349 V371" stroke="#476178" stroke-width="2"/><path d="M768 369 L773 377 L778 369 Z" fill="#476178"/>
+    <rect x="556" y="383" width="434" height="70" rx="8" fill="#eaf6f0" stroke="#b9dccb"/>
+    <text x="573" y="410" font-size="16" font-weight="700">Обработчик выдаёт ответ отмены</text>
+    <text x="573" y="435" font-size="14">context.Canceled + RECONCILE_TIMEOUT</text>
+    <rect x="28" y="496" width="984" height="70" rx="10" fill="#fff4df" stroke="#e7d2a6"/>
+    <text x="47" y="523" font-size="16" font-weight="700">Открытая граница: отмена уже работающего PowerShell и срок всего дерева процессов</text>
+    <text x="47" y="548" font-size="14">Эти тесты не запускают штатную задачу Планировщика и не доказывают завершение всех потомков.</text>
+  </g>
+</svg>

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "archive": "evidence-redacted.zip",
+  "bytes": 131851,
+  "sha256": "3a44539421cff62e85750184b0e2ffbd9d643d3b2d151a1dfdb805d4eb438c8c",
+  "entries": 158,
+  "manifest_files": 157,
+  "raw_command_streams_verified": 86,
+  "crc_and_manifest_verified": true,
+  "original_hashes_distinct_from_saved_hashes": true,
+  "saved_files": {
+    "evidence-redacted.zip": {
+      "bytes": 131851,
+      "sha256": "3a44539421cff62e85750184b0e2ffbd9d643d3b2d151a1dfdb805d4eb438c8c"
+    },
+    "execution-summary.json": {
+      "bytes": 35977,
+      "sha256": "b5869186287883c0cc0fa29f1287cba3548a1b396fc5930ff9019628198474b2"
+    },
+    "source-identities.json": {
+      "bytes": 810,
+      "sha256": "47abc380784076c50d12eb30091d63c51d95c52231cebc79ea1eea47cbe5f480"
+    },
+    "MANIFEST.json": {
+      "bytes": 64450,
+      "sha256": "ce6720d3a6e4d6b86bf1276a45812181ad8276d1742f725d9f120e0f70e37759"
+    }
+  },
+  "metadata_self_hash_omitted_to_avoid_self_reference": true
+}

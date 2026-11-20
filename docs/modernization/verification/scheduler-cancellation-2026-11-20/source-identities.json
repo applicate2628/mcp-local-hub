@@ -1,0 +1,19 @@
+{
+  "scheduler": {
+    "commit": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+    "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+    "parent": "f5fb00370a833255eacb992a7cd32f2e68da7399",
+    "source_sha256": {
+      "internal/scheduler/scheduler_com_windows.go": "bddbb11722e1c1ac3a50edd85bb1acfef7278010ce4497aae87d22cb4a16442d",
+      "internal/scheduler/scheduler_com_windows_test.go": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6"
+    }
+  },
+  "cli": {
+    "commit": "47c50527b051e3c40a426171eef42703155fc7f4",
+    "tree": "3c8c83de08f650d2489e645d2e0ac28e6a8da774",
+    "parent": "4f3513d886e301d7a358884a34896402f99e8002",
+    "source_sha256": {
+      "internal/cli/supervise_reconcile_ipc_test.go": "e41e7500eb6e60b2abef2f590ad676810f46b90983bf7811cb4a248234e008d4"
+    }
+  }
+}
