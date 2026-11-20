@@ -217,7 +217,9 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 	}
 	tmp.Close()
 
-	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name(), "/F")
+	// Create never opts into replacement. ImportXML owns the explicit /F path.
+	// Stdin remains nil, so the child receives EOF rather than interactive input.
+	cmd := exec.Command(w.schtasksPath, "/Create", "/TN", spec.Name, "/XML", tmp.Name())
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
