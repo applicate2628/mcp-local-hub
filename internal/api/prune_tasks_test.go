@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ type fakeListScheduler struct {
 	tasks        map[string][]byte
 	listErr      error
 	exportErrFor map[string]error
+	exportXMLFor map[string][]byte
 	deleteErrFor map[string]error
 	deletes      []string
 	imports      []string
@@ -27,6 +29,7 @@ func newFakeListScheduler(tasks map[string][]byte) *fakeListScheduler {
 	return &fakeListScheduler{
 		tasks:        tasks,
 		exportErrFor: map[string]error{},
+		exportXMLFor: map[string][]byte{},
 		deleteErrFor: map[string]error{},
 	}
 }
@@ -45,6 +48,7 @@ func (f *fakeListScheduler) List(prefix string) ([]scheduler.TaskStatus, error) 
 			out = append(out, scheduler.TaskStatus{Name: name})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
@@ -74,6 +78,9 @@ func (f *fakeListScheduler) Delete(name string) error {
 }
 
 func (f *fakeListScheduler) ExportXML(name string) ([]byte, error) {
+	if xml, ok := f.exportXMLFor[name]; ok {
+		return xml, f.exportErrFor[name]
+	}
 	if err := f.exportErrFor[name]; err != nil {
 		return nil, err
 	}
@@ -181,37 +188,66 @@ func TestPruneObsoleteServerTasks_RollbackRestoresXML(t *testing.T) {
 	}
 }
 
-// TestPruneObsoleteServerTasks_RollbackNoopWhenExportFailed covers the
-// degraded-but-safe path: if ExportXML failed before the Delete (e.g.
-// platform doesn't support export), Delete still runs so the stale task
-// does not keep executing, but rollback has no XML to restore from. The
-// rollback closure must tolerate that and log rather than panic or
-// silently succeed.
-func TestPruneObsoleteServerTasks_RollbackNoopWhenExportFailed(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
-		"mcp-local-hub-s-weekly-refresh": []byte("<xml>w</xml>"),
-	})
-	sch.exportErrFor["mcp-local-hub-s-weekly-refresh"] = errors.New("export not supported on this platform")
+// A missing or unreliable snapshot must leave its task untouched while the
+// next independently exportable task is pruned and remains rollback-capable.
+func TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		xml       []byte
+		exportErr error
+	}{
+		{name: "export error", exportErr: errors.New("export unavailable")},
+		{name: "bytes with error", xml: []byte("<partial/>"), exportErr: errors.New("partial export")},
+		{name: "not found after list", exportErr: scheduler.ErrTaskNotFound},
+		{name: "nil snapshot"},
+		{name: "empty snapshot", xml: []byte{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const skippedName = "mcp-local-hub-s-unavailable"
+			const prunedName = "mcp-local-hub-s-zobsolete"
+			skippedXML := []byte("<xml>preserve-me</xml>")
+			prunedXML := []byte("<xml>restore-me</xml>")
+			sch := newFakeListScheduler(map[string][]byte{
+				skippedName: skippedXML,
+				prunedName:  prunedXML,
+			})
+			sch.exportXMLFor[skippedName] = tt.xml
+			sch.exportErrFor[skippedName] = tt.exportErr
 
-	var buf bytes.Buffer
-	rollbacks, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &buf)
-	if err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; ok {
-		t.Fatal("task should have been pruned even when ExportXML failed")
-	}
+			var buf bytes.Buffer
+			rollbacks, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &buf)
+			if err != nil {
+				t.Fatalf("prune: %v", err)
+			}
+			if len(sch.deletes) != 1 || sch.deletes[0] != prunedName {
+				t.Fatalf("Delete calls = %v, want only the later task %s", sch.deletes, prunedName)
+			}
+			if len(rollbacks) != 1 {
+				t.Fatalf("rollbacks = %d, want only the pruned task's rollback", len(rollbacks))
+			}
+			if _, ok := sch.tasks[prunedName]; ok {
+				t.Fatal("independently exportable task was not pruned")
+			}
+			wantCause := "empty XML snapshot"
+			if tt.exportErr != nil {
+				wantCause = tt.exportErr.Error()
+			}
+			if !strings.Contains(buf.String(), "Skipped pruning obsolete scheduler task "+skippedName) ||
+				!strings.Contains(buf.String(), wantCause) {
+				t.Errorf("warning does not identify the skipped task and snapshot failure: %q", buf.String())
+			}
 
-	buf.Reset()
-	for _, rb := range rollbacks {
-		rb()
-	}
-	// Rollback must not restore a task without a snapshot.
-	if _, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]; ok {
-		t.Error("rollback recreated task despite no XML snapshot available")
-	}
-	if !strings.Contains(buf.String(), "no XML snapshot") {
-		t.Errorf("rollback log should mention missing snapshot; got: %q", buf.String())
+			rollbacks[0]()
+			if len(sch.imports) != 1 || sch.imports[0] != prunedName {
+				t.Fatalf("ImportXML calls = %v, want only %s", sch.imports, prunedName)
+			}
+			if got, ok := sch.tasks[skippedName]; !ok || !bytes.Equal(got, skippedXML) {
+				t.Errorf("task without a reliable snapshot changed: present=%v XML=%q", ok, got)
+			}
+			if got, ok := sch.tasks[prunedName]; !ok || !bytes.Equal(got, prunedXML) {
+				t.Errorf("later task was not restored exactly: present=%v XML=%q", ok, got)
+			}
+		})
 	}
 }
 
@@ -240,7 +276,7 @@ func TestPruneObsoleteServerTasks_ListFailureIsFatal(t *testing.T) {
 func TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers(t *testing.T) {
 	sch := newFakeListScheduler(map[string][]byte{
 		"mcp-local-hub-s-weekly-refresh": []byte("<xml>a</xml>"),
-		"mcp-local-hub-s-stale-debug":    []byte("<xml>b</xml>"),
+		"mcp-local-hub-s-z-stale-debug":  []byte("<xml>b</xml>"),
 	})
 	sch.deleteErrFor["mcp-local-hub-s-weekly-refresh"] = errors.New("access denied")
 
@@ -258,7 +294,7 @@ func TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers(t *testing.T)
 		t.Error("weekly-refresh should be present (Delete induced to fail)")
 	}
 	// Stale task 2 is gone (delete succeeded).
-	if _, ok := sch.tasks["mcp-local-hub-s-stale-debug"]; ok {
+	if _, ok := sch.tasks["mcp-local-hub-s-z-stale-debug"]; ok {
 		t.Error("stale-debug should have been pruned")
 	}
 	if !strings.Contains(buf.String(), "Failed to prune obsolete scheduler task") {

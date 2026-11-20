@@ -4229,10 +4229,9 @@ func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}
 // Only safe to call for full installs. Partial installs (one daemon) would
 // see sibling-daemon tasks as "not in plan" and incorrectly prune them.
 //
-// Failures that are safe to continue past (per-task ExportXML errors,
-// per-task Delete errors) are logged as warnings and skipped; only an
-// initial List error is returned as fatal because we cannot reason about
-// what to prune without an enumeration.
+// Per-task ExportXML errors, empty snapshots, and Delete errors are logged
+// as warnings and skipped. Only an initial List error is returned as fatal
+// because we cannot reason about what to prune without an enumeration.
 func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func(), error) {
 	prefix := "mcp-local-hub-" + server + "-"
 	existing, err := sch.List(prefix)
@@ -4263,12 +4262,15 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 		if !taskOwnedByServerExactOrLongestPrefix(task.Name, server, installed) {
 			continue
 		}
-		// Snapshot XML for rollback. Best-effort: if the backend can't
-		// export (platform limitation, ACL, etc.), we still delete but
-		// rollback can only log that it cannot recreate.
-		var priorXML []byte
-		if xml, xerr := sch.ExportXML(name); xerr == nil {
-			priorXML = xml
+		// Require a nonempty snapshot before deletion so a later install
+		// failure can restore this task. The backend owns the XML format.
+		priorXML, xerr := sch.ExportXML(name)
+		if xerr == nil && len(priorXML) == 0 {
+			xerr = errors.New("empty XML snapshot")
+		}
+		if xerr != nil {
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: cannot snapshot for rollback: %v\n", name, xerr)
+			continue
 		}
 		if derr := sch.Delete(name); derr != nil {
 			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, derr)
@@ -4278,10 +4280,6 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 		taskName := name
 		savedXML := priorXML
 		rollbacks = append(rollbacks, func() {
-			if len(savedXML) == 0 {
-				fmt.Fprintf(w, "  rollback: cannot recreate pruned task %s (no XML snapshot)\n", taskName)
-				return
-			}
 			if ierr := sch.ImportXML(taskName, savedXML); ierr != nil {
 				fmt.Fprintf(w, "  rollback: restore pruned task %s failed: %v\n", taskName, ierr)
 				return
