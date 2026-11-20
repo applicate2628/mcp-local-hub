@@ -1,0 +1,77 @@
+{
+  "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+  "files": [
+    {
+      "path": "internal/api/lsp_routing/main_test.go",
+      "base_blob": null,
+      "sha256": "fa9f1781be314ac77080dfe1707f39ccd5fcbe26bcc21adf0f7bd20b16b66201",
+      "bytes": 1123
+    },
+    {
+      "path": "internal/api/lsp_routing/resolver_test.go",
+      "base_blob": "657f3b10fd122e5371a3c82aad89a847098029c8",
+      "sha256": "b347099b508dc68a7ee11cb8c83ce627fb66c39f38e8a0eb8c6800145ea61bd3",
+      "bytes": 18433
+    },
+    {
+      "path": "internal/api/serena_routing/main_test.go",
+      "base_blob": null,
+      "sha256": "f65cfa07f4ab7142d635631668288bbcaea7e810df4052c8d1fb40a964ddda6b",
+      "bytes": 1138
+    },
+    {
+      "path": "internal/api/serena_routing/resolver_test.go",
+      "base_blob": "35f00b3dcf11ff3f3808e20621e2eac2708c5000",
+      "sha256": "2a449f76293b73f17c0808708fef10542fd16a60c16d81810f028d84510e57a8",
+      "bytes": 30515
+    },
+    {
+      "path": "internal/api/serena_routing/shared_observer_public_test.go",
+      "base_blob": "e9d0d4552a087557be9f15a756de2c973a013df5",
+      "sha256": "050fd6c0f482c15a20562b09bae2bdac3e1e153228f518c15949b9f053d1405a",
+      "bytes": 7678
+    },
+    {
+      "path": "internal/daemon/host_original_windows_test.go",
+      "base_blob": "632d1eca23545bb900ae325651063fd5e2da79b4",
+      "sha256": "29c02fa3c97233d52c9f91c7386d5e599a12297e2d8d100762b51f81cfe63ce8",
+      "bytes": 15704
+    },
+    {
+      "path": "internal/daemon/lazy_proxy_readiness_test.go",
+      "base_blob": "e917932fb7e9b288c1b7ccf0eaf9ed3a37fd679c",
+      "sha256": "20c2fef9d8abdebe78fbd2288093ed9c6c1d9f5eb150ce1d774d8cc63f57e783",
+      "bytes": 23910
+    },
+    {
+      "path": "internal/daemon/lazy_proxy_test.go",
+      "base_blob": "12fb2ff609f83a098c5d53d1dd46bddf6fc4d0ae",
+      "sha256": "eb6c940ed87e156a2ed247966480a141e2a46595c8855839e97cea2bcf9401d3",
+      "bytes": 173471
+    },
+    {
+      "path": "internal/daemon/main_test.go",
+      "base_blob": null,
+      "sha256": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183",
+      "bytes": 2439
+    },
+    {
+      "path": "internal/oneapirun/async_owner_test.go",
+      "base_blob": "b56ca7673732e932b36d888c37e00c56f93d30b3",
+      "sha256": "9d61edc2ebc886a92950323238e624ece386b93a30077adf6e81f88a5588a863",
+      "bytes": 35797
+    },
+    {
+      "path": "internal/oneapirun/async_test.go",
+      "base_blob": "090e31811d3b557ff0e14c6e452b040aa5f83eb9",
+      "sha256": "c7ccafe80d3eecf8b5f46d37796379b61b794935ac3d4ae014e7786e48001ffa",
+      "bytes": 3279
+    },
+    {
+      "path": "internal/oneapirun/main_test.go",
+      "base_blob": null,
+      "sha256": "3e874dc6ef04d380f36319341089983ff5c466b99903ffe6e2bb08b68065cc15",
+      "bytes": 1144
+    }
+  ]
+}

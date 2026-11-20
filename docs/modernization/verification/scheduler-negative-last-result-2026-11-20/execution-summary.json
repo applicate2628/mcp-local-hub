@@ -1,0 +1,615 @@
+{
+  "schema": 1,
+  "evidence_validation": "PASS",
+  "mode": "saved_public_files_only",
+  "verified_utc": "2026-11-20T00:25:56.386123+00:00",
+  "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+  "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+  "initial_observation_outcome": "INCOMPLETE_OBSERVATION",
+  "initial_query_failures": 5,
+  "diagnostic_capture": "PASS",
+  "diagnostic_working_directory_null_count": 5,
+  "historical_failure_cause_proven": false,
+  "negative_public_value_transfer": "PASS",
+  "observed_last_result": -2147024894,
+  "claim": "observed_native_last_result_transfer_only",
+  "public_go_calls": 2,
+  "public_events": [
+    {
+      "check": "status",
+      "event": "begin"
+    },
+    {
+      "check": "status",
+      "duration_ns": 459320100,
+      "error_category": "none",
+      "event": "result",
+      "observed_last_result": -2147024894,
+      "observed_last_result_type": "int",
+      "pass": true
+    },
+    {
+      "check": "list",
+      "event": "begin"
+    },
+    {
+      "check": "list",
+      "duration_ns": 427515300,
+      "error_category": "none",
+      "event": "result",
+      "observed_last_result": -2147024894,
+      "observed_last_result_type": "int",
+      "pass": true
+    },
+    {
+      "backend_type": "*scheduler.windowsScheduler",
+      "claim": "observed_native_last_result_transfer_only",
+      "completed_task_exit_qualified": false,
+      "duration_ns": 889451100,
+      "error_category": "none",
+      "event": "overall",
+      "full_native_qualification": false,
+      "panic_recovered": false,
+      "pass": true,
+      "status": "PASS"
+    }
+  ],
+  "source_before_after_clean_reported": true,
+  "reused_binary_sha256_reported": "25d0d47edfda212512c36df614729eb81b49ef27bf8b2d4bbd21aaa021a66576",
+  "binary_rebuilt": false,
+  "private_snapshot_equality_reported": true,
+  "snapshot_hash_equality_verified_in_public_evidence": true,
+  "snapshot_sha256_reported": "119928aada217c0c86e2e559ca6e6b02979e5bd1e47960474201ad92a5b86d70",
+  "receipts": {
+    "existing": {
+      "run_id": "r17-lastresult-existing-candidates-20261120-01",
+      "source_sha256": "486a7c138f3d9fa12a43b8d6d0480d227741a3b16f30b9d3a5efc52c68882acb",
+      "runner_sha256": "8adb3fc9896e59afb9baf6835dbeb76143e3ccc97ec317d542b343ddce313ae1",
+      "started_utc": "2026-11-19T23:56:19.067322+00:00",
+      "commands": [
+        {
+          "name": "syntax",
+          "started_utc": "2026-11-19T23:56:19.067397+00:00",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "pid": 29192,
+          "exit_code": 0,
+          "seconds": 1.395701,
+          "stdout_bytes": 13,
+          "stdout_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "prepare-output",
+          "started_utc": "2026-11-19T23:56:20.463829+00:00",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "pid": 49260,
+          "exit_code": 0,
+          "seconds": 0.238758,
+          "stdout_bytes": 21,
+          "stdout_sha256": "d463974d50fae033114eeab05f25132045d5c46697ccdb22613924931167c930",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "observation",
+          "started_utc": "2026-11-19T23:56:20.704746+00:00",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "pid": 3044,
+          "exit_code": 2,
+          "seconds": 0.755787,
+          "stdout_bytes": 1120,
+          "stdout_sha256": "e8609cf594a243f33bdd92f52b51bab9ce59bea5d8c6a880ea0bea412adf4dfb",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "scheduler_changes": false,
+      "public_go_calls": 0,
+      "whole_process_tree_qualification": false,
+      "output_acl_verified": true,
+      "summary": {
+        "run_id": "r17-lastresult-existing-candidates-20261120-01",
+        "mode": "READ_ONLY_EXISTING_CANDIDATE_OBSERVATION",
+        "counts": {
+          "visible_root_tasks": 16,
+          "same_account_tasks": 14,
+          "other_account_tasks": 1,
+          "identity_unknown": 1,
+          "query_failures": 5,
+          "non_idle": 1,
+          "zero_result": 6,
+          "scheduler_status_range": 2,
+          "negative_nonstatus_observed": 1,
+          "positive_nonstatus_observed": 4,
+          "invalid_or_sentinel_last_run": 0,
+          "unsupported_action_shape": 0,
+          "changed_during_read": 0
+        },
+        "enumeration_complete": false,
+        "candidate_count": 0,
+        "nonstatus_observation_count": 5,
+        "candidates": [],
+        "eligible_for_contract_review": false,
+        "execution_authorized": false,
+        "minimum_last_run_policy": "2000-01-01 local/observed DATE; reject future by over 5 minutes",
+        "action_admission_policy": "one registered Exec action with nonempty Path; other nonstatus values retained privately",
+        "maximum_visible_tasks": 128,
+        "scheduler_changes": false,
+        "public_go_calls": 0,
+        "completed_action_exit_qualified": false,
+        "full_native_qualification": false,
+        "atomic_snapshot_claimed": false,
+        "in_process_deadline_enforced": false,
+        "started_utc": "2026-11-19T23:56:20.9418774Z",
+        "finished_utc": "2026-11-19T23:56:21.4291198Z"
+      },
+      "outcome": "INCOMPLETE_OBSERVATION",
+      "completed": true,
+      "finished_utc": "2026-11-19T23:56:21.461509+00:00"
+    },
+    "diagnostic": {
+      "run_id": "r17-lastresult-exec-fields-diagnostic-20261120-01",
+      "source_sha256": "2b6050ac622945d818b799c10ceb1be5940723fed890751f75d768331a675709",
+      "input_sha256": "405118b749e50fb1f30de62c93e24f1ad72d040291ef40d7cab1e2eb831bc43d",
+      "runner_sha256": "2dbfcad179b1a799312644104f1a6d1d78d14aeb569178a0eb18c083155df3c2",
+      "started_utc": "2026-11-20T00:04:36.926581+00:00",
+      "commands": [
+        {
+          "name": "syntax",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "pid": 18968,
+          "exit_code": 0,
+          "seconds": 0.502571,
+          "stdout_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f",
+          "stdout_bytes": 13,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0
+        },
+        {
+          "name": "diagnostic",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "pid": 42168,
+          "exit_code": 0,
+          "seconds": 0.805867,
+          "stdout_sha256": "8e404eb9754fda3b0696f5978c600e25a8f2755b30e9350f0740d227411f374d",
+          "stdout_bytes": 3445,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0
+        }
+      ],
+      "scheduler_changes": false,
+      "public_go_calls": 0,
+      "whole_process_tree_qualification": false,
+      "summary": {
+        "run_id": "r17-lastresult-exec-fields-diagnostic-20261120-01",
+        "mode": "EXACT_RETAINED_EXEC_FIELD_DIAGNOSTIC",
+        "input_run_id": "r17-lastresult-existing-candidates-20261120-01",
+        "input_sha256": "405118b749e50fb1f30de62c93e24f1ad72d040291ef40d7cab1e2eb831bc43d",
+        "requested_subject_count": 5,
+        "diagnostic_records": [
+          {
+            "observation_id": "observation-001",
+            "subject_match": "matched_retained_metadata",
+            "exec_fields": [
+              {
+                "field": "Path",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "Arguments",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "WorkingDirectory",
+                "outcome": "read_returned",
+                "runtime_type": "null",
+                "category": "null"
+              }
+            ],
+            "existing_exec_predicate": "would_reject",
+            "final_snapshot": "stable_observed_fields",
+            "owner_expression": "compatible",
+            "prefix_enumeration": "not_in_scope",
+            "failure_stage": null,
+            "failure": null
+          },
+          {
+            "observation_id": "observation-002",
+            "subject_match": "matched_retained_metadata",
+            "exec_fields": [
+              {
+                "field": "Path",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "Arguments",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "WorkingDirectory",
+                "outcome": "read_returned",
+                "runtime_type": "null",
+                "category": "null"
+              }
+            ],
+            "existing_exec_predicate": "would_reject",
+            "final_snapshot": "stable_observed_fields",
+            "owner_expression": "compatible",
+            "prefix_enumeration": "not_in_scope",
+            "failure_stage": null,
+            "failure": null
+          },
+          {
+            "observation_id": "observation-003",
+            "subject_match": "matched_retained_metadata",
+            "exec_fields": [
+              {
+                "field": "Path",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "Arguments",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "WorkingDirectory",
+                "outcome": "read_returned",
+                "runtime_type": "null",
+                "category": "null"
+              }
+            ],
+            "existing_exec_predicate": "would_reject",
+            "final_snapshot": "stable_observed_fields",
+            "owner_expression": "compatible",
+            "prefix_enumeration": "not_in_scope",
+            "failure_stage": null,
+            "failure": null
+          },
+          {
+            "observation_id": "observation-004",
+            "subject_match": "matched_retained_metadata",
+            "exec_fields": [
+              {
+                "field": "Path",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "Arguments",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "WorkingDirectory",
+                "outcome": "read_returned",
+                "runtime_type": "null",
+                "category": "null"
+              }
+            ],
+            "existing_exec_predicate": "would_reject",
+            "final_snapshot": "stable_observed_fields",
+            "owner_expression": "compatible",
+            "prefix_enumeration": "not_in_scope",
+            "failure_stage": null,
+            "failure": null
+          },
+          {
+            "observation_id": "observation-005",
+            "subject_match": "matched_retained_metadata",
+            "exec_fields": [
+              {
+                "field": "Path",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "Arguments",
+                "outcome": "read_returned",
+                "runtime_type": "System.String",
+                "category": "nonempty_string"
+              },
+              {
+                "field": "WorkingDirectory",
+                "outcome": "read_returned",
+                "runtime_type": "null",
+                "category": "null"
+              }
+            ],
+            "existing_exec_predicate": "would_reject",
+            "final_snapshot": "stable_observed_fields",
+            "owner_expression": "compatible",
+            "prefix_enumeration": "not_in_scope",
+            "failure_stage": null,
+            "failure": null
+          }
+        ],
+        "scheduler_changes": false,
+        "public_go_calls": 0,
+        "prior_definition_identity_available": false,
+        "historical_failure_cause_proven": false,
+        "native_qualification": false,
+        "execution_authorized": false
+      },
+      "completed": true,
+      "finished_utc": "2026-11-20T00:04:38.237900+00:00"
+    },
+    "negative": {
+      "run_id": "r17-lastresult-negative-read-20261120-01",
+      "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+      "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+      "runner_sha256": "33d393d4becbf40fcb7657418df3298a5ff8dde179ba93ff7e5161160d67870d",
+      "snapshot_sha256": "a8016c27cd274ae14054acf99d21d601e3e511c203b1c4b0dd328ab0d9483498",
+      "probe_source_sha256": "951b34ef26eb98238efd2589bca29a36c074f4c0424984aa7ecd56f87a1410f1",
+      "binary_sha256": "25d0d47edfda212512c36df614729eb81b49ef27bf8b2d4bbd21aaa021a66576",
+      "started_utc": "2026-11-20T00:10:25.466585+00:00",
+      "commands": [
+        {
+          "name": "syntax",
+          "executable": "powershell.exe",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "started_utc": "2026-11-20T00:10:25.734605+00:00",
+          "pid": 9508,
+          "exit_code": 0,
+          "seconds": 0.247619,
+          "stdout_bytes": 13,
+          "stdout_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "prepare-output",
+          "executable": "powershell.exe",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "started_utc": "2026-11-20T00:10:25.983096+00:00",
+          "pid": 38952,
+          "exit_code": 0,
+          "seconds": 0.263955,
+          "stdout_bytes": 21,
+          "stdout_sha256": "d463974d50fae033114eeab05f25132045d5c46697ccdb22613924931167c930",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "snapshot-before",
+          "executable": "powershell.exe",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "started_utc": "2026-11-20T00:10:26.249346+00:00",
+          "pid": 39516,
+          "exit_code": 0,
+          "seconds": 1.770629,
+          "stdout_bytes": 742,
+          "stdout_sha256": "d8436f4904b34640a963186041341e2cec9f276923c7f2bf10c083661bbaf9a1",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "public-go-reads",
+          "executable": "last-result-readonly.exe",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "started_utc": "2026-11-20T00:10:28.021351+00:00",
+          "pid": 30932,
+          "exit_code": 0,
+          "seconds": 0.975389,
+          "stdout_bytes": 685,
+          "stdout_sha256": "8214bef24ab4f47480b93620eb780fb41c6546015fc9e680eec3dec1c67219ad",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "snapshot-after",
+          "executable": "powershell.exe",
+          "settled": true,
+          "direct_child_deadline_seconds": 60,
+          "started_utc": "2026-11-20T00:10:28.997891+00:00",
+          "pid": 40272,
+          "exit_code": 0,
+          "seconds": 0.601228,
+          "stdout_bytes": 741,
+          "stdout_sha256": "a5bf276a965bae859abf53165a21912e9a1617c6d01141002945e014aeb47d0d",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "scheduler_changes": false,
+      "public_go_calls": 2,
+      "binary_rebuilt": false,
+      "output_acl_verified": true,
+      "completed_action_exit_qualified": false,
+      "full_native_qualification": false,
+      "atomic_snapshot_claimed": false,
+      "whole_process_tree_deadline_enforced": false,
+      "global_enumeration_complete_claimed": false,
+      "source_before": {
+        "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+        "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+        "status": ""
+      },
+      "snapshots": {
+        "before": {
+          "run_id": "r17-lastresult-negative-read-20261120-01",
+          "phase": "before",
+          "pass": true,
+          "observation_id": "observation-004",
+          "input_sha256": "405118b749e50fb1f30de62c93e24f1ad72d040291ef40d7cab1e2eb831bc43d",
+          "private_snapshot_sha256": "119928aada217c0c86e2e559ca6e6b02979e5bd1e47960474201ad92a5b86d70",
+          "retained_subject_matched": true,
+          "stable_within_phase": true,
+          "before_snapshot_identical": null,
+          "visible_root_names_counted": 16,
+          "visible_prefix_matches": 1,
+          "negative_native_int32": true,
+          "ownership_census_complete": false,
+          "unrelated_principals_interpreted": false,
+          "scheduler_changes": false,
+          "public_go_calls": 0,
+          "completed_action_exit_qualified": false,
+          "full_native_qualification": false,
+          "atomic_snapshot_claimed": false,
+          "whole_process_tree_qualification": false
+        },
+        "after": {
+          "run_id": "r17-lastresult-negative-read-20261120-01",
+          "phase": "after",
+          "pass": true,
+          "observation_id": "observation-004",
+          "input_sha256": "405118b749e50fb1f30de62c93e24f1ad72d040291ef40d7cab1e2eb831bc43d",
+          "private_snapshot_sha256": "119928aada217c0c86e2e559ca6e6b02979e5bd1e47960474201ad92a5b86d70",
+          "retained_subject_matched": true,
+          "stable_within_phase": true,
+          "before_snapshot_identical": true,
+          "visible_root_names_counted": 16,
+          "visible_prefix_matches": 1,
+          "negative_native_int32": true,
+          "ownership_census_complete": false,
+          "unrelated_principals_interpreted": false,
+          "scheduler_changes": false,
+          "public_go_calls": 0,
+          "completed_action_exit_qualified": false,
+          "full_native_qualification": false,
+          "atomic_snapshot_claimed": false,
+          "whole_process_tree_qualification": false
+        }
+      },
+      "public_reader_started": true,
+      "public_go_begin_events": 2,
+      "stable_private_snapshots": true,
+      "public_reads_passed": true,
+      "last_result_observed": -2147024894,
+      "binary_sha256_after": "25d0d47edfda212512c36df614729eb81b49ef27bf8b2d4bbd21aaa021a66576",
+      "source_after": {
+        "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+        "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+        "status": ""
+      },
+      "completed": true,
+      "finished_utc": "2026-11-20T00:10:29.794369+00:00"
+    }
+  },
+  "stream_checks": {
+    "existing/syntax.stdout.log": {
+      "source_bytes": 13,
+      "source_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f"
+    },
+    "existing/syntax.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "existing/prepare-output.stdout.log": {
+      "source_bytes": 21,
+      "source_sha256": "d463974d50fae033114eeab05f25132045d5c46697ccdb22613924931167c930"
+    },
+    "existing/prepare-output.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "existing/observation.stdout.log": {
+      "source_bytes": 1120,
+      "source_sha256": "e8609cf594a243f33bdd92f52b51bab9ce59bea5d8c6a880ea0bea412adf4dfb"
+    },
+    "existing/observation.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "diagnostic/syntax.stdout.log": {
+      "source_bytes": 13,
+      "source_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f"
+    },
+    "diagnostic/syntax.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "diagnostic/diagnostic.stdout.log": {
+      "source_bytes": 3445,
+      "source_sha256": "8e404eb9754fda3b0696f5978c600e25a8f2755b30e9350f0740d227411f374d"
+    },
+    "diagnostic/diagnostic.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative/syntax.stdout.log": {
+      "source_bytes": 13,
+      "source_sha256": "c96c17e04b5abcf9022910df36b0271c996dec88557174d85db9b0556604680f"
+    },
+    "negative/syntax.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative/prepare-output.stdout.log": {
+      "source_bytes": 21,
+      "source_sha256": "d463974d50fae033114eeab05f25132045d5c46697ccdb22613924931167c930"
+    },
+    "negative/prepare-output.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative/snapshot-before.stdout.log": {
+      "source_bytes": 742,
+      "source_sha256": "d8436f4904b34640a963186041341e2cec9f276923c7f2bf10c083661bbaf9a1"
+    },
+    "negative/snapshot-before.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative/public-go-reads.stdout.log": {
+      "source_bytes": 685,
+      "source_sha256": "8214bef24ab4f47480b93620eb780fb41c6546015fc9e680eec3dec1c67219ad"
+    },
+    "negative/public-go-reads.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative/snapshot-after.stdout.log": {
+      "source_bytes": 741,
+      "source_sha256": "a5bf276a965bae859abf53165a21912e9a1617c6d01141002945e014aeb47d0d"
+    },
+    "negative/snapshot-after.stderr.log": {
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "scheduler_changes": false,
+  "completed_action_exit_qualified": false,
+  "full_native_qualification": false,
+  "atomic_snapshot_claimed": false,
+  "global_enumeration_complete_claimed": false,
+  "whole_process_tree_proven": false,
+  "post_verify_dependency": false,
+  "packager_native_or_git_calls": false,
+  "private_files_or_binary_opened": false,
+  "limitations": [
+    "Initial enumeration remains incomplete with five query failures; later focused reads do not repair that historical result.",
+    "The diagnostic captured five null WorkingDirectory values but does not prove the cause of the earlier failures.",
+    "The two public PASS results establish transfer of one observed signed value through Status and List only.",
+    "This packager verifies public hash/equality claims and controller identities; it never opens private snapshots, manifests, or the binary.",
+    "Clean source and unchanged reused binary are bound through the pinned controller receipt, not re-probed here.",
+    "Equal snapshots are not atomic isolation; no completed-action exit or full native qualification is claimed.",
+    "Process settlement here covers recorded direct children; a separate process snapshot may be cited later.",
+    "Scripts are sanitized review copies. Raw and saved hashes identify original and archived bytes separately.",
+    "Closed public schemas, identity/path redaction, XML and credential-shape scans are bounded disclosure checks."
+  ]
+}

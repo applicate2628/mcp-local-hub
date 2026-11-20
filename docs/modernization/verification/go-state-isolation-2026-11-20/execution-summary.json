@@ -1,0 +1,4254 @@
+{
+  "schema": 1,
+  "evidence_validation": "PASS",
+  "mode": "saved_files_only",
+  "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+  "base_tree": "52c4919ab291021b80e19b6550808ce8a0d93f23",
+  "candidate_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+  "head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+  "verified_utc": "2026-11-20T00:25:53.454208+00:00",
+  "changed_test_files": [
+    "internal/api/lsp_routing/main_test.go",
+    "internal/api/lsp_routing/resolver_test.go",
+    "internal/api/serena_routing/main_test.go",
+    "internal/api/serena_routing/resolver_test.go",
+    "internal/api/serena_routing/shared_observer_public_test.go",
+    "internal/daemon/host_original_windows_test.go",
+    "internal/daemon/lazy_proxy_readiness_test.go",
+    "internal/daemon/lazy_proxy_test.go",
+    "internal/daemon/main_test.go",
+    "internal/oneapirun/async_owner_test.go",
+    "internal/oneapirun/async_test.go",
+    "internal/oneapirun/main_test.go"
+  ],
+  "published_product_source_sha256": "c05c5ebb9e00fd4fca6cd8158843001f6703ab48c8e1418994bbd12b003180b1",
+  "product_code_changed_in_published_candidate": false,
+  "temporary_mutation_restored": true,
+  "mutation_expected_assertion_observed": true,
+  "all_mandatory_commands_passed": false,
+  "phases": {
+    "bootstrap": {
+      "phase": "bootstrap",
+      "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "started_utc": "2026-11-19T23:35:35.811820+00:00",
+      "commands": [
+        {
+          "name": "clone",
+          "executable": "git.exe",
+          "arguments": [
+            "-c",
+            "core.autocrlf=false",
+            "clone",
+            "--local",
+            "--no-hardlinks",
+            "--no-checkout",
+            "<PREVIOUS_SOURCE>",
+            "<WORK_ROOT>\\source"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:35:36.392919+00:00",
+          "pid": 14276,
+          "exit_code": 0,
+          "seconds": 1.334,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 156,
+          "stderr_sha256": "975d5fc6b448ae4d6b58a075f5888b801dad24699b9f02e3a4e22ec5e1b3f675"
+        },
+        {
+          "name": "fetch",
+          "executable": "git.exe",
+          "arguments": [
+            "-C",
+            "<WORK_ROOT>\\source",
+            "fetch",
+            "--no-tags",
+            "https://github.com/applicate2628/mcp-local-hub.git",
+            "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:35:37.804338+00:00",
+          "pid": 42176,
+          "exit_code": 0,
+          "seconds": 13.387,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 128,
+          "stderr_sha256": "b1a55024367cc560d45db99a497b0cf29e8e7b1530bea22d9590c6751ab6c970"
+        },
+        {
+          "name": "go-version",
+          "executable": "go.exe",
+          "arguments": [
+            "version"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:35:52.493831+00:00",
+          "pid": 51012,
+          "exit_code": 0,
+          "seconds": 0.035,
+          "stdout_bytes": 34,
+          "stdout_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "environment": {
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOTELEMETRY": "off",
+        "GOMAXPROCS": "4",
+        "CGO_ENABLED": "1",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "native_lifecycle_opt_in_present": false,
+      "whole_process_tree_deadline_enforced": false,
+      "runner_sha256": "5bce29eeeb4888c8e23087de360dafa13874690108e21e953be3cc4ad28df154",
+      "head_after": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "tree_after": "52c4919ab291021b80e19b6550808ce8a0d93f23",
+      "status_after": "",
+      "completed": true,
+      "checks_passed": true,
+      "overall": "PASS",
+      "finished_utc": "2026-11-19T23:35:52.823244+00:00"
+    },
+    "candidate": {
+      "phase": "candidate",
+      "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "started_utc": "2026-11-19T23:38:13.150242+00:00",
+      "commands": [
+        {
+          "name": "gofmt-check",
+          "executable": "gofmt.exe",
+          "arguments": [
+            "-l",
+            "internal/api/lsp_routing/main_test.go",
+            "internal/api/lsp_routing/resolver_test.go",
+            "internal/api/serena_routing/main_test.go",
+            "internal/api/serena_routing/resolver_test.go",
+            "internal/api/serena_routing/shared_observer_public_test.go",
+            "internal/daemon/host_original_windows_test.go",
+            "internal/daemon/lazy_proxy_readiness_test.go",
+            "internal/daemon/lazy_proxy_test.go",
+            "internal/daemon/main_test.go",
+            "internal/oneapirun/async_owner_test.go",
+            "internal/oneapirun/async_test.go",
+            "internal/oneapirun/main_test.go"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:38:13.941703+00:00",
+          "pid": 33528,
+          "exit_code": 0,
+          "seconds": 0.159,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "focused-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^(TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups|TestResolveByPath_AbsoluteMatch|TestLazyProxy_InitializeSyntheticNoMaterialize|TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output|TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64|TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock|TestAsyncRun_CloseWaitsForEvictedTerminalWorker|TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt)$",
+            "./internal/api/lsp_routing",
+            "./internal/api/serena_routing",
+            "./internal/daemon",
+            "./internal/oneapirun"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:38:15.613943+00:00",
+          "pid": 13444,
+          "exit_code": 0,
+          "seconds": 55.279,
+          "stdout_bytes": 18725,
+          "stdout_sha256": "15c4832b31098870e9fc08df66471b1c4912ba4df504c3269a960a8d5d991e77",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestResolveByPath_AbsoluteMatch",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "PACKAGE:mcp-local-hub/internal/api/lsp_routing",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "PACKAGE:mcp-local-hub/internal/daemon",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "PACKAGE:mcp-local-hub/internal/oneapirun"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ]
+          ],
+          "timeouts": []
+        },
+        {
+          "name": "focused-strict-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^(TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups|TestResolveByPath_AbsoluteMatch|TestLazyProxy_InitializeSyntheticNoMaterialize|TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output|TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64|TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock|TestAsyncRun_CloseWaitsForEvictedTerminalWorker|TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt)$",
+            "./internal/api/lsp_routing",
+            "./internal/api/serena_routing",
+            "./internal/daemon",
+            "./internal/oneapirun"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:39:10.895628+00:00",
+          "pid": 19964,
+          "exit_code": 0,
+          "seconds": 29.927,
+          "stdout_bytes": 18732,
+          "stdout_sha256": "a32935a2a1dfff4873b760b5dc9cf0078aa43a5f3376c72fe802370a7e619054",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestResolveByPath_AbsoluteMatch",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "PACKAGE:mcp-local-hub/internal/daemon",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "PACKAGE:mcp-local-hub/internal/api/lsp_routing",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "PACKAGE:mcp-local-hub/internal/oneapirun"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ]
+          ],
+          "timeouts": []
+        },
+        {
+          "name": "packages-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "./internal/api/lsp_routing",
+            "./internal/api/serena_routing",
+            "./internal/daemon",
+            "./internal/oneapirun"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:39:40.824159+00:00",
+          "pid": 30400,
+          "exit_code": 1,
+          "seconds": 104.163,
+          "stdout_bytes": 445771,
+          "stdout_sha256": "b05a36ab3bf15c2a6f92afcf1f19e3cd1b4d8a5ab317af0fb5c7a8eadb54f2f1",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestToolCallParamsAndExtractPathArg/gopls_file",
+              "TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty",
+              "TestToolCallParamsAndExtractPathArg/gopls_dir",
+              "TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace",
+              "TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath",
+              "TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition",
+              "TestToolCallParamsAndExtractPathArg/priority_file_before_files",
+              "TestToolCallParamsAndExtractPathArg",
+              "TestToolCallParamsRejectsNonObject",
+              "TestExtractPathArgsReturnsAllFiles",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics",
+              "TestAsyncRun_CallerLossDoesNotCancelAcceptedWorker",
+              "TestAsyncRun_CancelJoinsBeforeReply",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestBackendLifecycle_StdioMaterializeStops",
+              "TestBackendLifecycle_MissingBinarySurfaces",
+              "TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing",
+              "TestBackendLifecycle_GoplsMissingBinarySurfaces",
+              "TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups",
+              "TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink",
+              "TestBackendLifecycle_SendRequestPreservesClientID",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows",
+              "TestResolveByPath_RelativeMatchFirstWorkspace",
+              "TestBackendLifecycle_SendRequestAfterStopErrors",
+              "TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration",
+              "TestResolveByPath_NestedLanguageMarkerWins",
+              "TestResolveByPath_RelativePathDotDotEscapeRejected",
+              "TestResolveByPath_RustCargoTomlMatchesExistingRegistration",
+              "TestBackendLifecycle_EndpointCloseIsIdempotent",
+              "TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound",
+              "TestResolveByPath_MatchesLegacySymlinkWorkspaceKey",
+              "TestAncestorWalk_FindsProjectYml",
+              "TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound",
+              "TestAncestorWalk_RejectsRelativeInput",
+              "TestResolveByPath_EmptyPath_ReturnsErrInvalidPath",
+              "TestResolveByPath_RegisteredMatchIsLanguageSpecific",
+              "TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists",
+              "TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound",
+              "TestResolveByPath_RefreshesRegistryOnMtimeAdvance",
+              "TestAsyncRun_TimeoutSettlesWithTimeoutState",
+              "TestAsyncRun_ShutdownJoinsAndPersistsServerShutdown",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/accepted",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/running",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/cancel_requested",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting",
+              "TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock",
+              "TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker",
+              "TestResolveByPath_RejectsUNCPath_OnWindows",
+              "TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound",
+              "TestResolveByPath_TransientStatErrorPreservesCache",
+              "TestResolveByPath_FileDeletionClearsCache",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups",
+              "TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess",
+              "TestAsyncRun_RetainsNewest64TerminalReceipts",
+              "TestAsyncRun_TerminalWriteFailureIsVisibleAndCloseReturns",
+              "TestAsyncRun_RejectsOversizedPersistedOutput",
+              "TestAsyncRunOwner_SameRootLeaseRefusesThenReopens",
+              "TestAsyncRunOwner_ConstructorErrorReleasesLease",
+              "TestAsyncRunOwner_ConstructorJoinsLoadAndUnlockFailures",
+              "TestAsyncRun_PersistsDigestWithoutExecutionInputAndReplaysAfterReload",
+              "TestBackendLifecycle_MaterializeReturnsExistingEndpoint",
+              "TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery",
+              "TestResolveByPath_IgnoresLSPEntries",
+              "TestCanonicalizeWorkspacePath_WindowsDriveLetter",
+              "TestCanonicalizeWorkspacePath_EmptyReturnsEmpty",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock",
+              "PACKAGE:mcp-local-hub/internal/api/lsp_routing",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock",
+              "TestSessionRouter_BindOnPathCall",
+              "TestSessionRouter_LookupUnboundReturnsNil",
+              "TestSessionRouter_UnbindRemovesEntry",
+              "TestSessionRouter_CleanupExpiresOldSessions",
+              "TestSessionRouter_CleanupPreservesRecentSessions",
+              "TestSessionRouter_RebindRefreshesTTL",
+              "TestSessionRouter_LookupRefreshesLastSeen",
+              "TestSessionRouter_NoLookupExpiresAtTTL",
+              "TestSessionRouter_BindNilWorkspaceIgnored",
+              "TestSessionRouter_BindEmptySessionIDIgnored",
+              "TestSessionRouter_BindOverwritesExistingBinding",
+              "TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession",
+              "TestSessionRouter_LookupReturnsValueCopy",
+              "TestSessionRouter_ConcurrentAccess",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/shared_sessions_and_owner_shutdown",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/materialize_cancellation",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/absent-provenance-above-normal",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/redundant-provenance-at-normal",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/expanded-provenance-above-migration-ceiling",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity",
+              "TestAsyncPersistedOutputRejectsDirectTextWithExpandedFlag",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/handshake_failure",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle",
+              "TestCstDirectSysProcAttrAppliesOnlySingletonCapability",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/token",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/parent",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/process-security",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/thread-security",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/no-inherit",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/preexisting-handle",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/custom-command-line",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/extra-creation-flag",
+              "TestCstDirectSysProcAttrRejectsEveryConflict",
+              "TestVerifyCstDirectImageBindsW2ImageAndManifest",
+              "TestCstDirectImageAdmissionIsOwnedByExistingSpawnPath",
+              "TestInheritedHandleFrontendTupleIsExactlyFour",
+              "TestInheritedHandleConflictingSysProcAttrFailsClosed",
+              "TestSharedRegistryObserver_GUILockedWriterAndReadersSettle",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other",
+              "TestStdioHostLegacyProfileAcceptsLLDBStyleTCPJSONL",
+              "TestNewStdioHostRejectsUnknownCompatibilityProfileBeforeStart",
+              "TestStdioOriginalHelper",
+              "TestStdioOriginalMemberBridgeUnavailableStates/nil-host",
+              "TestStdioOriginalMemberBridgeUnavailableStates/unstarted",
+              "TestStdioOriginalMemberBridgeUnavailableStates/legacy-no-original",
+              "TestStdioOriginalMemberBridgeUnavailableStates/no-process-acquisition",
+              "TestStdioOriginalMemberBridgeUnavailableStates/partial-process",
+              "TestStdioOriginalMemberBridgeUnavailableStates/specialized",
+              "TestStdioOriginalMemberBridgeUnavailableStates/terminal-started",
+              "TestStdioOriginalMemberBridgeUnavailableStates",
+              "TestStdioOriginalContainmentRefusalBeforeExecution",
+              "TestStdioOriginalFastWrapperDescendantAndForeignSentinel",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh",
+              "TestStdioOriginalConcurrentStopRetainsCloseFailure",
+              "TestStdioOriginalFinalReplyPrecedesExit",
+              "TestStdioOriginalDelayedReaderRetainsPendingAttempt",
+              "TestStdioOriginalNativeObservationFailureIsCached",
+              "TestAsyncPersistedSnapshotOversizeDoesNotMutateRecordsOrPriorBytes",
+              "TestStdioOriginalRepeatedStartPreservesRunningOwner",
+              "TestStdioOriginalCanceledAcquisitionAndConcurrentStop",
+              "TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/missing_session",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/unknown_session",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/unsupported_version",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/session_version_mismatch",
+              "TestStdioHostHTTPProtocolAndSessionContractR1",
+              "TestStdioHostInvalidInitializeResponseDoesNotPoisonCache",
+              "TestStdioHostSessionRegistryEvictsOldestAtBoundR1",
+              "TestExecStartClosesParentPipesOnFailure",
+              "TestStdioHostStartFailureNoGoroutineLeak",
+              "TestClosePipeChildEndReclaimsLeakedChildDescriptor",
+              "TestClosePipeChildEndIsNilSafe",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE",
+              "TestStdioHostLoopbackGuardAllowsNoOriginPOST",
+              "TestHostSubprocessLifecycle",
+              "TestHostEnvAppendsToOSEnviron",
+              "TestHostWorkingDirSetsSubprocessCwd",
+              "TestStdioHost_TeesStderrToLogFile",
+              "TestHostHTTPIDMultiplexing",
+              "TestHostHTTPRejectsOversizedPOSTBody",
+              "TestHostInitializeCached",
+              "TestHostInitializeCacheSkipsErrors",
+              "TestHostStopUnblocksPendingHandlers",
+              "TestHostStopUnblocksSSE",
+              "TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest",
+              "TestStdioHost_Stop_DoesNotRaceWithChildExit",
+              "TestStdioHost_SSE_ChildExitUnblocksStream",
+              "TestHostDELETETerminates",
+              "TestHostSSERequiresSessionID",
+              "TestComposeChildEnv_RemovesUnsetKeysAndAddsOverrides",
+              "TestNewHTTPHost_DerivesReadyBudgetFromOuterBindDeadline",
+              "TestNewHTTPHost_ReadyBudgetOrderingInvariant",
+              "TestNewHTTPHost_ClampsAndWarnsOnMisorderedReadyBudget",
+              "TestNewHTTPHost_GenericDefaultUnchangedWithoutOuterDeadline",
+              "TestNewHTTPHost_ExplicitBudgetUnderOuterDeadlineIsRespected",
+              "TestHTTPHost_JSON_InjectsReadResourceOnToolsList",
+              "TestHTTPHost_JSON_RewritesReadResourceCall",
+              "TestHTTPHost_SSE_InjectsAndReshapes",
+              "TestHTTPHost_POSTBodyTooLarge",
+              "TestHTTPHost_InitializeForwardsAndPreservesSessionID",
+              "TestHTTPHost_InitializeCapabilitiesCachedForInjection",
+              "TestHTTPHost_POSTBodyTooLargeRejected",
+              "TestHTTPHost_UpstreamJSONBodyTooLargeRejected",
+              "TestStreamSSE_PassesThroughNonJSONDataLines",
+              "TestHTTPHost_GETUsesStreamClient_NoClientTimeout",
+              "TestHTTPHost_GETPassthrough_RejectsWhenStreamLimitReached",
+              "TestHTTPHost_WaitForReady_ReturnsImmediatelyWhenUpstreamReady",
+              "TestHTTPHost_WaitForReady_HangingProbeBoundedByHealthTimeout",
+              "TestHTTPHost_ExitState_NilBeforeStart",
+              "TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream",
+              "TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects",
+              "TestHTTPHost_DELETE_ForwardsAuthorizationUpstream",
+              "TestHTTPHost_DELETE_DetachedFromInboundContext",
+              "TestInflight_FirstCallMaterializes",
+              "TestInflight_ConcurrentCallsShareOne",
+              "TestInflight_FailureReturnsError",
+              "TestInflight_RetryThrottleHonored",
+              "TestInflight_SuccessResetsThrottle",
+              "TestInflight_ForgetClearsThrottle",
+              "TestInflight_WinnerCancellationDoesNotAbortLosers",
+              "TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline",
+              "TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues",
+              "TestInflightGate_DoBounded_CtxCancelReturnsCtxErr",
+              "TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse",
+              "TestInflight_IndependentKeysDoNotInterfere",
+              "TestInflight_ConcurrentFailureBurstHonorsRetryThrottle",
+              "TestLaunchCapabilityLifecycleAllReturns/enroll_and_start",
+              "TestLaunchCapabilityLifecycleAllReturns/enroll_failure_cancels_and_degrades_without_capability",
+              "TestLaunchCapabilityLifecycleAllReturns/start_failure_cancels",
+              "TestLaunchCapabilityLifecycleAllReturns",
+              "TestLaunchCapabilityHandleListAndEnvironment",
+              "TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/tools_call",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/other_forwarded_request",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/forwarded_document_notification",
+              "TestAsyncPersistedSnapshotRetains64MaximumOutputTerminalsAndActive",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/nil_transport_error_with_JSON-RPC_error_payload",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms",
+              "TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/synthetic_and_absorbed",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/pre-delivery_saturation_refusal",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/delivered_notification_without_response",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/client_cancellation",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/idle_and_rematerialize",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/send_failure",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/probation_reap",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering",
+              "TestLazyProxyReadinessPublisher_SupersededInvalidationIsHarmless",
+              "TestLazyProxyReadinessPublisher_MailboxKeepsGreatestPendingState",
+              "TestLazyProxyReadinessPublisher_CurrentInvalidationFailureRetriesThenSignalsFatal",
+              "TestLazyProxyReadinessPublisher_StaleInvalidationFailureDoesNotRetryOrSignalFatal",
+              "TestLazyProxyReadinessPublisher_StopCancelsAndJoinsWorker",
+              "TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE",
+              "TestLazyProxyLoopbackGuardAllowsNoOriginPOST",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestLazyProxy_RejectsNonJSONContentType",
+              "TestLazyProxy_RejectsCrossSiteOrigin",
+              "TestLazyProxy_PingEchoesClientID",
+              "TestLazyProxy_UnknownNotificationReturns202NoForward",
+              "TestLazyProxy_NotificationsReturn202NoBody",
+              "TestLazyProxy_ToolsListSyntheticNoMaterialize",
+              "TestLazyProxy_ResourcesAndPromptsListSyntheticNoMaterialize",
+              "TestLazyProxy_BackendKindSelectsCatalog",
+              "TestLazyProxy_UnknownBackendKindRejectsSynthetic",
+              "TestLazyProxy_RepeatedInitializeStillSynthetic",
+              "TestLazyProxy_ToolsCallMaterializesOnce",
+              "TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper",
+              "TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse",
+              "TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse",
+              "TestLazyProxy_StopDuringMaterializeFailsClosed",
+              "TestLazyProxy_ConcurrentFirstCall",
+              "TestLazyProxy_MissingBinaryYieldsMissingState",
+              "TestLazyProxy_OtherFailureYieldsFailedState",
+              "TestLazyProxy_ThrottledRetryReturnsCachedError",
+              "TestLazyProxy_ClientCancelDoesNotTearDownBackend",
+              "TestLazyProxy_ServeBeforeBindErrors",
+              "TestLazyProxy_BackendCrashReMaterializes",
+              "TestLazyProxy_LastToolsCallAtDebounced",
+              "TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive",
+              "TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows",
+              "TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes",
+              "TestLazyProxy_IdleTTLStopsMaterializedBackend",
+              "TestLazyProxy_ShutdownStopsEndpoint",
+              "TestLazyProxy_ConfiguredStateOnStartup",
+              "TestLazyProxy_ListenAndServeBindsLoopback",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "TestLazyProxy_DidOpenMultiOpenSingleClose",
+              "TestOneAPIRunInputSchema_AsyncQueriesNeedNoCommand",
+              "TestNewOneAPIRunServer_GateOffSkipsStateRootAndOwner",
+              "TestCommandExtensions_WindowsUsesChildPathExt",
+              "TestCommandExtensions_DefaultWhenPathExtAbsent",
+              "TestCommandExtensions_CommandAlreadyHasExtension",
+              "TestResolveCommandPath_WindowsPathExtMatching",
+              "TestComputeRunEnv_VcvarsPlusOneAPIPrependsPath",
+              "TestComputeRunEnv_VcvarsOnlyNoOneAPIDirsStillVcvarsSource",
+              "TestComputeRunEnv_OneAPIOnlyFallbackWhenVcvarsNotFound",
+              "TestComputeRunEnv_PlainWhenNeitherAvailable",
+              "TestPrependOneAPIToPath_SynthesizesPathWhenAbsent",
+              "TestPrependOneAPIToPath_CaseInsensitivePathKey",
+              "TestPrependOneAPIToPath_NoDirsReturnsCopy",
+              "TestOneAPIRunEnabledRequiresExplicitUnsafeOptIn",
+              "TestRunInOneAPIEnvTool_TrivialCommandExitZero",
+              "TestRunInOneAPIEnvTool_ReportsEnvSourceFromSeams",
+              "TestLazyProxy_DidCloseAfterLastCloseReopensCleanly",
+              "TestLazyProxy_DidCloseSingleOpenMultiClose",
+              "TestLazyProxy_DidOpenDistinctURIsForwardIndependently",
+              "TestLazyProxy_DidOpenMalformedURIAbsorbed",
+              "TestLazyProxy_DocRefsRejectUniqueURIsOverCap",
+              "TestLazyProxy_DocRefRollsBackOnBackendJSONRPCError",
+              "TestLazyProxy_DocRefsResetOnBackendTeardown",
+              "TestLazyProxy_ColdToolsCall_BoundedWaitReturns503RetryAfter",
+              "TestRunInOneAPIEnvTool_Timeout",
+              "TestRunInOneAPIEnvTool_MissingCommandIsError",
+              "TestRunInOneAPIEnvTool_SpawnFailureReportedNotErrored",
+              "TestRunInOneAPIEnvTool_DefaultTimeoutWhenOmitted",
+              "TestCappedBuffer_TruncatesWithMarker",
+              "TestCappedBuffer_UnderLimitNoMarker",
+              "TestResolveCommandPath_FindsExeOnChildPathNotServerPath",
+              "TestResolveCommandPath_CaseInsensitivePathKey",
+              "TestResolveCommandPath_SeparatorBearingReturnedUnchanged",
+              "TestResolveCommandPath_UnresolvedReturnedUnchanged",
+              "TestResolveCommandPath_NoPathEntryReturnsUnchanged",
+              "TestSetEnvOverride_ReplacesInheritedValueCaseInsensitive",
+              "TestSetEnvOverride_AppendsWhenAbsent",
+              "TestWithWritableTemp_CreatesDirAndOverridesTempTmp",
+              "TestRunInOneAPIEnvTool_PanicRecoveredToStructuredJSON",
+              "TestOneAPIEnvStatus_SetvarsSourceWhenCapturable",
+              "TestOneAPIEnvStatus_OneAPIOnlyWhenSetvarsMissingButDirsPresent",
+              "TestOneAPIEnvStatus_PlainWhenNothingPresent",
+              "TestOneAPIEnvStatus_RootReportedEvenInOneAPIOnly",
+              "TestOneAPIEnvStatus_ComponentsOmittedWhenEmpty",
+              "TestOneAPIEnvStatus_PanicRecoveredToStructuredJSON",
+              "TestRegisterTools_StatusToolRegisteredWithoutUnsafeOptIn",
+              "TestEnvSourceFor",
+              "TestComponentsFromDLLDirs_WindowsAndPosixLayouts",
+              "TestComponentsFromDLLDirs_EmptyIsNil",
+              "TestComponentsFromDLLDirs_SkipsUnexpectedShape",
+              "TestComponentOf",
+              "TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline",
+              "TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget",
+              "TestLazyProxy_ColdToolsCall_AwaitsDeliveredResponse_ThenWarmActive",
+              "PACKAGE:mcp-local-hub/internal/oneapirun",
+              "TestLazyProxy_ColdToolsCall_CeilingExceeded_NonRetryableControlledError",
+              "TestLazyProxy_Probation_LifecycleActiveWrittenOnlyOnFirstSuccess",
+              "TestLazyProxy_ColdToolsCall_CeilingExceeded_EndpointStaysCachedForRetry",
+              "TestLazyProxy_ProbationWatchdog_WedgedBackendTornDownAndSlotFreed",
+              "TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize",
+              "TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored",
+              "TestLazyProxy_MissingLSPBinary_InstantMissingError",
+              "TestLazyProxy_WarmGoesCold_ReentersBoundedColdPath",
+              "TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting",
+              "TestLazyProxy_AbandonedMaterialize_FailureStampsFailed",
+              "TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint",
+              "TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay",
+              "TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed",
+              "TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused",
+              "TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex",
+              "TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown",
+              "TestLazyProxy_ProbationDwellRowRendersAsStartingContract",
+              "TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm",
+              "TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed",
+              "TestLazyProxy_Reconcile_RestoresActiveAfterConcurrentStartingDowngrade",
+              "TestLazyProxy_Reconcile_ConcurrentDowngradeSettlesActive",
+              "TestLazyProxy_Reconcile_ShadowResetOnTeardownReenablesWrite",
+              "TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows",
+              "TestLazyProxy_ColdRequestHoldCeilingInvariantClamped",
+              "TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/tools/call",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/textDocument/definition",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError",
+              "TestLazyProxy_ColdForward_AwaitsDeliveredResponse_ThenWarmActive",
+              "TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError",
+              "TestLazyProxy_ColdForward_HeldEventFires",
+              "TestLazyProxy_NegativeColdStartMaxProbation_NotClamped",
+              "TestLazyProxy_OnSendFailure_StaleGenerationNoOp",
+              "TestLazyProxy_ColdRequestHeldError_MessageDistinguishesWarmVsCold",
+              "TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext",
+              "TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive",
+              "TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount",
+              "TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled",
+              "TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer",
+              "TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting",
+              "TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured",
+              "TestLazyProxy_AppliedReservationReleaseContinuesMaterialization",
+              "TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount",
+              "TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown",
+              "TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep",
+              "TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown",
+              "TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError",
+              "TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown",
+              "TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker",
+              "TestRotateIfLarge_RotatesWhenOverLimit",
+              "TestRotateIfLarge_SkipsSmall",
+              "TestRotateIfLarge_PrunesOldestWhenOverCount",
+              "TestRotateIfLarge_NegativeKeepCountDoesNotPanic",
+              "TestRunProcess_RunsInCwdAndSurfacesCleanExit",
+              "TestRunProcess_CtxCancelReturnsNil",
+              "TestRunProcess_KillsWrapperGrandchildOnCancel",
+              "TestRunProcess_EmptyCommandErrors",
+              "TestListPromptsTool_MapArgs_EmptyInputAcceptedAndNormalized",
+              "TestListPromptsTool_MapArgs_RejectsMalformedJSON",
+              "TestListPromptsTool_MapResult_WrapsPromptsArrayAsTextContent",
+              "TestListPromptsTool_MapResult_EmptyPromptsReturnsEmptyArray",
+              "TestGetPromptTool_MapArgs_ForwardsNameAndArguments",
+              "TestGetPromptTool_MapArgs_AcceptsNameWithoutArguments",
+              "TestGetPromptTool_MapArgs_MissingNameErrors",
+              "TestGetPromptTool_MapResult_WrapsMessagesAsTextContent",
+              "TestSyntheticTools_PromptsRegistered",
+              "TestProtocolBridge_InjectTools_PromptsAndResources",
+              "TestProtocolBridge_InjectTools_OnlyPrompts",
+              "TestPromptBridge_EndToEnd_ListAndGet",
+              "TestQualificationExchangeUsesRealReceiver/json",
+              "TestQualificationExchangeUsesRealReceiver/wrong-id",
+              "TestQualificationExchangeUsesRealReceiver/rpc-error",
+              "TestQualificationExchangeUsesRealReceiver/sse-notification-before-reply",
+              "TestQualificationExchangeUsesRealReceiver/sse-missing",
+              "TestQualificationExchangeUsesRealReceiver/initialized",
+              "TestQualificationExchangeUsesRealReceiver/initialized-rejected",
+              "TestQualificationExchangeUsesRealReceiver/close-fault",
+              "TestQualificationExchangeUsesRealReceiver",
+              "TestQualificationSessionCloseIsCached",
+              "TestQualificationZeroObservationRefuses",
+              "TestRelay_InitializePOSTMintsSession",
+              "TestRelay_NotificationGets202NoReply",
+              "TestRelay_SessionHeaderEchoedOnSubsequentPOSTs",
+              "TestRelay_SSEResponseOnPOST",
+              "TestRelay_HTTPErrorSynthesizesJSONRPCError",
+              "TestRelay_GracefulShutdownSendsDELETE",
+              "TestRelay_ShutdownReleasesOwnedSessionReference/delete_accepted",
+              "TestRelay_ShutdownReleasesOwnedSessionReference/delete_HTTP_failure",
+              "TestRelay_ShutdownReleasesOwnedSessionReference",
+              "TestReadJSONRPCLine_TooLong",
+              "TestReadJSONRPCLine_MaxLengthAccepted",
+              "TestRelay_StdinPumpCapsConcurrentPOSTs",
+              "TestProtocolBridge_InjectTools_AppendsSyntheticEntry",
+              "TestProtocolBridge_InjectTools_EmptyTools",
+              "TestProtocolBridge_InjectTools_NoCapability_NoInjection",
+              "TestProtocolBridge_InjectTools_MalformedBodyReturnsUnchanged",
+              "TestProtocolBridge_TransformRequest_RewritesReadResource",
+              "TestProtocolBridge_TransformRequest_IgnoresOtherTools",
+              "TestProtocolBridge_TransformRequest_MissingURIReturnsError",
+              "TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError",
+              "TestProtocolBridge_TransformRequest_CapabilityGate",
+              "TestReadResourceTool_MapResult_ConvertsContentsToContent",
+              "TestReadResourceTool_MapResult_MalformedReturnsUnchanged",
+              "TestReadResourceTool_MapResult_ErrorEnvelopeReturnsUnchangedR1",
+              "TestHasCapability_ReadsCachedInitialize",
+              "TestSyntheticTools_NamesAreUnique",
+              "TestResourceBridge_EndToEnd_WrapsResourceAsTool",
+              "TestResourceBridge_NoResourcesCapability_NoInjection",
+              "TestDaemonDiagWriter_NonTTYIsDiscard",
+              "TestDaemonDiagWriter_TTYIsStderr",
+              "TestOpenStderrSink_LogPathEmptyNonTTY",
+              "TestOpenStderrSink_LogPathEmptyTTY",
+              "TestOpenStderrSink_LogPathSetNonTTY",
+              "TestOpenLogWriters_LogPathEmptyNonTTY",
+              "TestOpenStderrSink_FileOpenFailureFallsBackToDiscard",
+              "TestOpenLogWriters_FileOpenFailureFallsBackToDiscard",
+              "TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath",
+              "TestSetStderrIsTerminalForTest_OverlappingPanics",
+              "TestSetStderrIsTerminalForTest_SequentialReuse",
+              "TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent",
+              "TestLogSupervisorEvent_NoLogPathNonTTYIsBenign",
+              "TestOpenLogWriters_LogPathSetNonTTY",
+              "TestStdioLaunchEnvironmentRetainsDriveDirectories",
+              "TestStdioLaunchExecutionProfileDataAndFingerprint",
+              "TestStdioLaunchExecutionProfileLifetime/nil_context",
+              "TestStdioLaunchExecutionProfileLifetime/foreign_context",
+              "TestStdioLaunchExecutionProfileLifetime/cancelled",
+              "TestStdioLaunchExecutionProfileLifetime/consumed",
+              "TestStdioLaunchExecutionProfileLifetime/generation_changed",
+              "TestStdioLaunchExecutionProfileLifetime/ambient_changed",
+              "TestStdioLaunchExecutionProfileLifetime",
+              "TestStdioLaunchExecutionProfilePartialOutcomes/expired_original_context",
+              "TestStdioLaunchExecutionProfilePartialOutcomes/invalid_effective_environment",
+              "TestStdioLaunchExecutionProfilePartialOutcomes",
+              "TestStdioLaunchProjectServicePortUsesOriginalOwner",
+              "TestStdioLaunchPreparationRejectsForeignReceiver",
+              "TestStdioLaunchPreparationActorlessComparison",
+              "TestStdioLaunchContextFormatting/pointer",
+              "TestStdioLaunchContextFormatting/value",
+              "TestStdioLaunchContextFormatting/zero_pointer",
+              "TestStdioLaunchContextFormatting/zero_value",
+              "TestStdioLaunchContextFormatting/nil",
+              "TestStdioLaunchContextFormatting",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/actual_ambient_changed",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/original_cancellation",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/partial_cause_retained",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/single_use_guard",
+              "TestStdioLaunchPreparationRefusesBeforeCreator",
+              "TestStdioLaunchPreparationDetectsImageReplacement",
+              "TestPreparedStdioCapturedResolutionABA",
+              "TestPreparedStdioRelativeImageUsesCapturedParent",
+              "TestPreparedStdioWindowsSelectionRefusals",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/.",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/..",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection",
+              "TestPreparedStdioOriginalNativePositiveShapes/bare-parent-path",
+              "TestPreparedStdioOriginalNativePositiveShapes/relative-parent-child-cwd",
+              "TestPreparedStdioOriginalNativePositiveShapes/absolute-image",
+              "TestPreparedStdioOriginalNativePositiveShapes/exact-extensionless-image",
+              "TestPreparedStdioOriginalNativePositiveShapes"
+            ],
+            "fail": [
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "skip": [
+              "TestBackendLifecycle_MaterializeCompletesMCPHandshake_McpLanguageServer",
+              "TestBackendLifecycle_MaterializeCompletesMCPHandshake_GoplsMCP",
+              "TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows"
+            ]
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/gopls_file"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/gopls_files_first_non-empty"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/gopls_dir"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/gopls_pathless_workspace"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/mcp-language-server_filePath"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/mcp-language-server_pathless_definition"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg/priority_file_before_files"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsAndExtractPathArg"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestToolCallParamsRejectsNonObject"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestExtractPathArgsReturnsAllFiles"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CallerLossDoesNotCancelAcceptedWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CancelJoinsBeforeReply"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_StdioMaterializeStops"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_MissingBinarySurfaces"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_MissingWrappedLSPClassifiedAsMissing"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_GoplsMissingBinarySurfaces"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_SendRequestPreservesClientID"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RelativeMatchFirstWorkspace"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_SendRequestAfterStopErrors"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_NestedLanguageMarkerWins"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RelativePathDotDotEscapeRejected"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_RustCargoTomlMatchesExistingRegistration"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_EndpointCloseIsIdempotent"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_MatchesLegacySymlinkWorkspaceKey"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_FindsProjectYml"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_RejectsRelativeInput"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_EmptyPath_ReturnsErrInvalidPath"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_RegisteredMatchIsLanguageSpecific"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_GitFallbackWhenNoLanguageMarkerExists"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_RefreshesRegistryOnMtimeAdvance"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_TimeoutSettlesWithTimeoutState"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_ShutdownJoinsAndPersistsServerShutdown"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/accepted"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/running"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting/cancel_requested"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RejectsUNCPath_OnWindows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_TransientStatErrorPreservesCache"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_FileDeletionClearsCache"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_HandshakeTimeoutTearsDownSubprocess"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RetainsNewest64TerminalReceipts"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_TerminalWriteFailureIsVisibleAndCloseReturns"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_RejectsOversizedPersistedOutput"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRunOwner_SameRootLeaseRefusesThenReopens"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRunOwner_ConstructorErrorReleasesLease"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRunOwner_ConstructorJoinsLoadAndUnlockFailures"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsDigestWithoutExecutionInputAndReplaysAfterReload"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_MaterializeReturnsExistingEndpoint"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_IgnoresLSPEntries"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestCanonicalizeWorkspacePath_WindowsDriveLetter"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestCanonicalizeWorkspacePath_EmptyReturnsEmpty"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindOnPathCall"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupUnboundReturnsNil"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_UnbindRemovesEntry"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_CleanupExpiresOldSessions"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_CleanupPreservesRecentSessions"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_RebindRefreshesTTL"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupRefreshesLastSeen"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_NoLookupExpiresAtTTL"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindNilWorkspaceIgnored"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindEmptySessionIDIgnored"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindOverwritesExistingBinding"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupReturnsValueCopy"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_ConcurrentAccess"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/shared_sessions_and_owner_shutdown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/materialize_cancellation"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/absent-provenance-above-normal"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/redundant-provenance-at-normal"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity/expanded-provenance-above-migration-ceiling"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedOutputLegacyExpansionPolarity"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedOutputRejectsDirectTextWithExpandedFlag"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle/handshake_failure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestBackendLifecycle_DummyOwnedResourcesSettle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrAppliesOnlySingletonCapability"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/token"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/parent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/process-security"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/thread-security"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/no-inherit"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/preexisting-handle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/custom-command-line"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict/extra-creation-flag"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectSysProcAttrRejectsEveryConflict"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestVerifyCstDirectImageBindsW2ImageAndManifest"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestCstDirectImageAdmissionIsOwnedByExistingSpawnPath"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInheritedHandleFrontendTupleIsExactlyFour"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInheritedHandleConflictingSysProcAttrFailsClosed"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_GUILockedWriterAndReadersSettle"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLegacyProfileAcceptsLLDBStyleTCPJSONL"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewStdioHostRejectsUnknownCompatibilityProfileBeforeStart"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalHelper"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/nil-host"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/unstarted"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/legacy-no-original"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/no-process-acquisition"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/partial-process"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/specialized"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates/terminal-started"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalMemberBridgeUnavailableStates"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalContainmentRefusalBeforeExecution"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalFastWrapperDescendantAndForeignSentinel"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalConcurrentStopRetainsCloseFailure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalFinalReplyPrecedesExit"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalDelayedReaderRetainsPendingAttempt"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalNativeObservationFailureIsCached"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedSnapshotOversizeDoesNotMutateRecordsOrPriorBytes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalRepeatedStartPreservesRunningOwner"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioOriginalCanceledAcquisitionAndConcurrentStop"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/missing_session"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/unknown_session"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/unsupported_version"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostHTTPProtocolAndSessionContractR1/session_version_mismatch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostHTTPProtocolAndSessionContractR1"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostInvalidInitializeResponseDoesNotPoisonCache"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostSessionRegistryEvictsOldestAtBoundR1"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestExecStartClosesParentPipesOnFailure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostStartFailureNoGoroutineLeak"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestClosePipeChildEndReclaimsLeakedChildDescriptor"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestClosePipeChildEndIsNilSafe"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHostLoopbackGuardAllowsNoOriginPOST"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostSubprocessLifecycle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostEnvAppendsToOSEnviron"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostWorkingDirSetsSubprocessCwd"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHost_TeesStderrToLogFile"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostHTTPIDMultiplexing"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostHTTPRejectsOversizedPOSTBody"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostInitializeCached"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostInitializeCacheSkipsErrors"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostStopUnblocksPendingHandlers"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostStopUnblocksSSE"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHost_Stop_DoesNotRaceWithChildExit"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioHost_SSE_ChildExitUnblocksStream"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostDELETETerminates"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHostSSERequiresSessionID"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestComposeChildEnv_RemovesUnsetKeysAndAddsOverrides"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewHTTPHost_DerivesReadyBudgetFromOuterBindDeadline"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewHTTPHost_ReadyBudgetOrderingInvariant"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewHTTPHost_ClampsAndWarnsOnMisorderedReadyBudget"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewHTTPHost_GenericDefaultUnchangedWithoutOuterDeadline"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestNewHTTPHost_ExplicitBudgetUnderOuterDeadlineIsRespected"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_JSON_InjectsReadResourceOnToolsList"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_JSON_RewritesReadResourceCall"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_SSE_InjectsAndReshapes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_POSTBodyTooLarge"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_InitializeForwardsAndPreservesSessionID"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_InitializeCapabilitiesCachedForInjection"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_POSTBodyTooLargeRejected"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_UpstreamJSONBodyTooLargeRejected"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStreamSSE_PassesThroughNonJSONDataLines"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_GETUsesStreamClient_NoClientTimeout"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_GETPassthrough_RejectsWhenStreamLimitReached"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_WaitForReady_ReturnsImmediatelyWhenUpstreamReady"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_WaitForReady_HangingProbeBoundedByHealthTimeout"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_ExitState_NilBeforeStart"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_DELETE_ForwardsSessionTerminationUpstream"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_DELETE_BestEffortWhenUpstreamRejects"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_DELETE_ForwardsAuthorizationUpstream"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHTTPHost_DELETE_DetachedFromInboundContext"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_FirstCallMaterializes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_ConcurrentCallsShareOne"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_FailureReturnsError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_RetryThrottleHonored"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_SuccessResetsThrottle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_ForgetClearsThrottle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_WinnerCancellationDoesNotAbortLosers"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflightGate_DoBounded_CtxCancelReturnsCtxErr"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_IndependentKeysDoNotInterfere"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestInflight_ConcurrentFailureBurstHonorsRetryThrottle"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLaunchCapabilityLifecycleAllReturns/enroll_and_start"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLaunchCapabilityLifecycleAllReturns/enroll_failure_cancels_and_degrades_without_capability"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLaunchCapabilityLifecycleAllReturns/start_failure_cancels"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLaunchCapabilityLifecycleAllReturns"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLaunchCapabilityHandleListAndEnvironment"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/tools_call"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/other_forwarded_request"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/forwarded_document_notification"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncPersistedSnapshotRetains64MaximumOutputTerminalsAndActive"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms/nil_transport_error_with_JSON-RPC_error_payload"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_OrganicSuccessArms"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_StartingAcknowledgedBeforeEndpointExposure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/synthetic_and_absorbed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/pre-delivery_saturation_refusal"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/delivered_notification_without_response"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady/client_cancellation"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_NonOrganicPathsDoNotPublishReady"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/idle_and_rematerialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/send_failure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering/probation_reap"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_LifecycleOrdering"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_SupersededInvalidationIsHarmless"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_MailboxKeepsGreatestPendingState"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_CurrentInvalidationFailureRetriesThenSignalsFatal"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_StaleInvalidationFailureDoesNotRetryOrSignalFatal"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_StopCancelsAndJoinsWorker"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_host_same-origin_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/post_hostile_origin_cross-site_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_host_same-origin_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE/sse_hostile_origin_cross-site_fetch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardRejectsHostilePOSTAndSSE"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxyLoopbackGuardAllowsNoOriginPOST"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_RejectsNonJSONContentType"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_RejectsCrossSiteOrigin"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_PingEchoesClientID"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_UnknownNotificationReturns202NoForward"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_NotificationsReturn202NoBody"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ToolsListSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ResourcesAndPromptsListSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_BackendKindSelectsCatalog"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_UnknownBackendKindRejectsSynthetic"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_RepeatedInitializeStillSynthetic"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ToolsCallMaterializesOnce"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_StopDuringMaterializeFailsClosed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ConcurrentFirstCall"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MissingBinaryYieldsMissingState"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_OtherFailureYieldsFailedState"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ThrottledRetryReturnsCachedError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ClientCancelDoesNotTearDownBackend"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ServeBeforeBindErrors"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_BackendCrashReMaterializes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_LastToolsCallAtDebounced"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_IdleTTLStopsMaterializedBackend"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ShutdownStopsEndpoint"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ConfiguredStateOnStartup"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ListenAndServeBindsLoopback"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DidOpenMultiOpenSingleClose"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIRunInputSchema_AsyncQueriesNeedNoCommand"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestNewOneAPIRunServer_GateOffSkipsStateRootAndOwner"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestCommandExtensions_WindowsUsesChildPathExt"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestCommandExtensions_DefaultWhenPathExtAbsent"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestCommandExtensions_CommandAlreadyHasExtension"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_WindowsPathExtMatching"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComputeRunEnv_VcvarsPlusOneAPIPrependsPath"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComputeRunEnv_VcvarsOnlyNoOneAPIDirsStillVcvarsSource"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComputeRunEnv_OneAPIOnlyFallbackWhenVcvarsNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComputeRunEnv_PlainWhenNeitherAvailable"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestPrependOneAPIToPath_SynthesizesPathWhenAbsent"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestPrependOneAPIToPath_CaseInsensitivePathKey"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestPrependOneAPIToPath_NoDirsReturnsCopy"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIRunEnabledRequiresExplicitUnsafeOptIn"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_TrivialCommandExitZero"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_ReportsEnvSourceFromSeams"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DidCloseAfterLastCloseReopensCleanly"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DidCloseSingleOpenMultiClose"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DidOpenDistinctURIsForwardIndependently"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DidOpenMalformedURIAbsorbed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocRefsRejectUniqueURIsOverCap"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocRefRollsBackOnBackendJSONRPCError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocRefsResetOnBackendTeardown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdToolsCall_BoundedWaitReturns503RetryAfter"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_Timeout"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_MissingCommandIsError"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_SpawnFailureReportedNotErrored"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_DefaultTimeoutWhenOmitted"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestCappedBuffer_TruncatesWithMarker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestCappedBuffer_UnderLimitNoMarker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_FindsExeOnChildPathNotServerPath"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_CaseInsensitivePathKey"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_SeparatorBearingReturnedUnchanged"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_UnresolvedReturnedUnchanged"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestResolveCommandPath_NoPathEntryReturnsUnchanged"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestSetEnvOverride_ReplacesInheritedValueCaseInsensitive"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestSetEnvOverride_AppendsWhenAbsent"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestWithWritableTemp_CreatesDirAndOverridesTempTmp"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_PanicRecoveredToStructuredJSON"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_SetvarsSourceWhenCapturable"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_OneAPIOnlyWhenSetvarsMissingButDirsPresent"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_PlainWhenNothingPresent"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_RootReportedEvenInOneAPIOnly"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_ComponentsOmittedWhenEmpty"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestOneAPIEnvStatus_PanicRecoveredToStructuredJSON"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRegisterTools_StatusToolRegisteredWithoutUnsafeOptIn"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestEnvSourceFor"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComponentsFromDLLDirs_WindowsAndPosixLayouts"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComponentsFromDLLDirs_EmptyIsNil"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComponentsFromDLLDirs_SkipsUnexpectedShape"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestComponentOf"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdToolsCall_AwaitsDeliveredResponse_ThenWarmActive"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdToolsCall_CeilingExceeded_NonRetryableControlledError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Probation_LifecycleActiveWrittenOnlyOnFirstSuccess"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdToolsCall_CeilingExceeded_EndpointStaysCachedForRetry"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ProbationWatchdog_WedgedBackendTornDownAndSlotFreed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MissingLSPBinary_InstantMissingError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_WarmGoesCold_ReentersBoundedColdPath"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_AbandonedMaterialize_FailureStampsFailed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ProbationDwellRowRendersAsStartingContract"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Reconcile_RestoresActiveAfterConcurrentStartingDowngrade"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Reconcile_ConcurrentDowngradeSettlesActive"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Reconcile_ShadowResetOnTeardownReenablesWrite"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdRequestHoldCeilingInvariantClamped"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/tools/call"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError/textDocument/definition"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ReapSeveredDeliveredRequest_ControlledError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdForward_AwaitsDeliveredResponse_ThenWarmActive"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdForward_HeldEventFires"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_NegativeColdStartMaxProbation_NotClamped"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_OnSendFailure_StaleGenerationNoOp"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ColdRequestHeldError_MessageDistinguishesWarmVsCold"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_AppliedReservationReleaseContinuesMaterialization"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRotateIfLarge_RotatesWhenOverLimit"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRotateIfLarge_SkipsSmall"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRotateIfLarge_PrunesOldestWhenOverCount"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRotateIfLarge_NegativeKeepCountDoesNotPanic"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRunProcess_RunsInCwdAndSurfacesCleanExit"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRunProcess_CtxCancelReturnsNil"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRunProcess_KillsWrapperGrandchildOnCancel"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRunProcess_EmptyCommandErrors"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestListPromptsTool_MapArgs_EmptyInputAcceptedAndNormalized"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestListPromptsTool_MapArgs_RejectsMalformedJSON"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestListPromptsTool_MapResult_WrapsPromptsArrayAsTextContent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestListPromptsTool_MapResult_EmptyPromptsReturnsEmptyArray"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestGetPromptTool_MapArgs_ForwardsNameAndArguments"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestGetPromptTool_MapArgs_AcceptsNameWithoutArguments"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestGetPromptTool_MapArgs_MissingNameErrors"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestGetPromptTool_MapResult_WrapsMessagesAsTextContent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestSyntheticTools_PromptsRegistered"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_PromptsAndResources"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_OnlyPrompts"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPromptBridge_EndToEnd_ListAndGet"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/json"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/wrong-id"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/rpc-error"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/sse-notification-before-reply"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/sse-missing"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/initialized"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/initialized-rejected"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver/close-fault"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationExchangeUsesRealReceiver"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationSessionCloseIsCached"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestQualificationZeroObservationRefuses"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_InitializePOSTMintsSession"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_NotificationGets202NoReply"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_SessionHeaderEchoedOnSubsequentPOSTs"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_SSEResponseOnPOST"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_HTTPErrorSynthesizesJSONRPCError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_GracefulShutdownSendsDELETE"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_ShutdownReleasesOwnedSessionReference/delete_accepted"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_ShutdownReleasesOwnedSessionReference/delete_HTTP_failure"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_ShutdownReleasesOwnedSessionReference"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestReadJSONRPCLine_TooLong"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestReadJSONRPCLine_MaxLengthAccepted"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestRelay_StdinPumpCapsConcurrentPOSTs"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_AppendsSyntheticEntry"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_EmptyTools"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_NoCapability_NoInjection"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_InjectTools_MalformedBodyReturnsUnchanged"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_TransformRequest_RewritesReadResource"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_TransformRequest_IgnoresOtherTools"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_TransformRequest_MissingURIReturnsError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestProtocolBridge_TransformRequest_CapabilityGate"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestReadResourceTool_MapResult_ConvertsContentsToContent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestReadResourceTool_MapResult_MalformedReturnsUnchanged"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestReadResourceTool_MapResult_ErrorEnvelopeReturnsUnchangedR1"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestHasCapability_ReadsCachedInitialize"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestSyntheticTools_NamesAreUnique"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestResourceBridge_EndToEnd_WrapsResourceAsTool"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestResourceBridge_NoResourcesCapability_NoInjection"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestDaemonDiagWriter_NonTTYIsDiscard"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestDaemonDiagWriter_TTYIsStderr"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenStderrSink_LogPathEmptyNonTTY"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenStderrSink_LogPathEmptyTTY"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenStderrSink_LogPathSetNonTTY"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenLogWriters_LogPathEmptyNonTTY"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenStderrSink_FileOpenFailureFallsBackToDiscard"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenLogWriters_FileOpenFailureFallsBackToDiscard"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLogSupervisorEvent_NonTTYDiscardsStderrButAppendsToLogPath"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestSetStderrIsTerminalForTest_OverlappingPanics"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestSetStderrIsTerminalForTest_SequentialReuse"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestSetStderrIsTerminalForTest_DoubleRestoreIdempotent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLogSupervisorEvent_NoLogPathNonTTYIsBenign"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestOpenLogWriters_LogPathSetNonTTY"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchEnvironmentRetainsDriveDirectories"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileDataAndFingerprint"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/nil_context"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/foreign_context"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/cancelled"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/consumed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/generation_changed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime/ambient_changed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfileLifetime"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfilePartialOutcomes/expired_original_context"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfilePartialOutcomes/invalid_effective_environment"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchExecutionProfilePartialOutcomes"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchProjectServicePortUsesOriginalOwner"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRejectsForeignReceiver"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationActorlessComparison"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting/pointer"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting/value"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting/zero_pointer"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting/zero_value"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting/nil"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchContextFormatting"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/actual_ambient_changed"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/original_cancellation"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/partial_cause_retained"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRefusesBeforeCreator/single_use_guard"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationRefusesBeforeCreator"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestStdioLaunchPreparationDetectsImageReplacement"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioCapturedResolutionABA"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioRelativeImageUsesCapturedParent"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioWindowsSelectionRefusals"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/."
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection/.."
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioRejectsDotTokensBeforeSiblingSelection"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioOriginalNativePositiveShapes/bare-parent-path"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioOriginalNativePositiveShapes/relative-parent-child-cwd"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioOriginalNativePositiveShapes/absolute-image"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioOriginalNativePositiveShapes/exact-extensionless-image"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestPreparedStdioOriginalNativePositiveShapes"
+            ]
+          ],
+          "timeouts": []
+        }
+      ],
+      "environment": {
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOTELEMETRY": "off",
+        "GOMAXPROCS": "4",
+        "CGO_ENABLED": "1",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "native_lifecycle_opt_in_present": false,
+      "whole_process_tree_deadline_enforced": false,
+      "runner_sha256": "ded5f3e2f839653996a4887b5eef8cbd32fa9fa9fb212c4639cd1ade461cb9c4",
+      "manifest_sha256": "9b4e00789a9f1bd59610f483088f3186e43394fbe4bc84b462a741e411ebb872",
+      "applied_paths": [
+        "internal/api/lsp_routing/main_test.go",
+        "internal/api/lsp_routing/resolver_test.go",
+        "internal/api/serena_routing/main_test.go",
+        "internal/api/serena_routing/resolver_test.go",
+        "internal/api/serena_routing/shared_observer_public_test.go",
+        "internal/daemon/host_original_windows_test.go",
+        "internal/daemon/lazy_proxy_readiness_test.go",
+        "internal/daemon/lazy_proxy_test.go",
+        "internal/daemon/main_test.go",
+        "internal/oneapirun/async_owner_test.go",
+        "internal/oneapirun/async_test.go",
+        "internal/oneapirun/main_test.go"
+      ],
+      "candidate_tree": "e88a272660be4de2b60ab4e4a6940c3fb148e309",
+      "diff_stat": "internal/api/lsp_routing/main_test.go              | 40 ++++++++++++\n internal/api/lsp_routing/resolver_test.go          | 21 +++---\n internal/api/serena_routing/main_test.go           | 40 ++++++++++++\n internal/api/serena_routing/resolver_test.go       | 35 +++++-----\n .../serena_routing/shared_observer_public_test.go  |  5 +-\n internal/daemon/host_original_windows_test.go      | 20 +++++-\n internal/daemon/lazy_proxy_readiness_test.go       |  3 +-\n internal/daemon/lazy_proxy_test.go                 | 34 +++++-----\n internal/daemon/main_test.go                       | 74 ++++++++++++++++++++++\n internal/oneapirun/async_owner_test.go             |  9 +--\n internal/oneapirun/async_test.go                   |  4 +-\n internal/oneapirun/main_test.go                    | 42 ++++++++++++\n 12 files changed, 274 insertions(+), 53 deletions(-)",
+      "head_after": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "tree_after": "52c4919ab291021b80e19b6550808ce8a0d93f23",
+      "status_after": "A  internal/api/lsp_routing/main_test.go\nM  internal/api/lsp_routing/resolver_test.go\nA  internal/api/serena_routing/main_test.go\nM  internal/api/serena_routing/resolver_test.go\nM  internal/api/serena_routing/shared_observer_public_test.go\nM  internal/daemon/host_original_windows_test.go\nM  internal/daemon/lazy_proxy_readiness_test.go\nM  internal/daemon/lazy_proxy_test.go\nA  internal/daemon/main_test.go\nM  internal/oneapirun/async_owner_test.go\nM  internal/oneapirun/async_test.go\nA  internal/oneapirun/main_test.go",
+      "completed": true,
+      "checks_passed": false,
+      "overall": "FAIL",
+      "finished_utc": "2026-11-19T23:41:25.409849+00:00"
+    },
+    "measurement": {
+      "phase": "measurement",
+      "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "started_utc": "2026-11-19T23:56:50.454180+00:00",
+      "commands": [
+        {
+          "name": "gofmt-measurement",
+          "executable": "gofmt.exe",
+          "arguments": [
+            "-l",
+            "internal/api/serena_routing/resolver_test.go"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:56:50.807433+00:00",
+          "pid": 19804,
+          "exit_code": 0,
+          "seconds": 0.136,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "paired-allocation-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^TestResolveByPath_DoesNotCloneUnrelatedNestedRows$",
+            "./internal/api/serena_routing"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:56:51.671037+00:00",
+          "pid": 21908,
+          "exit_code": 0,
+          "seconds": 5.894,
+          "stdout_bytes": 2995,
+          "stdout_sha256": "fbe1d706a0f47b6fe97b66f25751c93d44370ad0be0285fcd09ae7296320ec18",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows"
+            ]
+          ],
+          "timeouts": []
+        },
+        {
+          "name": "clone-all-negative-control",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-run",
+            "^TestResolveByPath_DoesNotCloneUnrelatedNestedRows$",
+            "./internal/api/serena_routing"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:56:57.710074+00:00",
+          "pid": 32228,
+          "exit_code": 1,
+          "seconds": 3.653,
+          "stdout_bytes": 2132,
+          "stdout_sha256": "b2bd480b96e7576c07caa2ee0c48eb363f4c96549eb94f6e7e584cdb53f29b7f",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [],
+            "fail": [
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing"
+            ],
+            "skip": []
+          },
+          "package_test_passes": [],
+          "timeouts": [],
+          "expected_exit_code": 1,
+          "semantic_expected_failure_pass": true
+        },
+        {
+          "name": "restored-serena-strict-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "./internal/api/serena_routing"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:57:01.730807+00:00",
+          "pid": 2624,
+          "exit_code": 0,
+          "seconds": 7.587,
+          "stdout_bytes": 42965,
+          "stdout_sha256": "1d51bac7d0ca8d19cf79c63a76811262ecb79512c4494f8824a102819654dc57",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics",
+              "TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestResolveByPath_RelativeMatchFirstWorkspace",
+              "TestResolveByPath_RelativePathDotDotEscapeRejected",
+              "TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound",
+              "TestAncestorWalk_FindsProjectYml",
+              "TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound",
+              "TestAncestorWalk_RejectsRelativeInput",
+              "TestResolveByPath_EmptyPath_ReturnsErrInvalidPath",
+              "TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow",
+              "TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker",
+              "TestResolveByPath_RejectsUNCPath_OnWindows",
+              "TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound",
+              "TestResolveByPath_TransientStatErrorPreservesCache",
+              "TestResolveByPath_FileDeletionClearsCache",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "TestResolveByPath_IgnoresLSPEntries",
+              "TestCanonicalizeWorkspacePath_WindowsDriveLetter",
+              "TestCanonicalizeWorkspacePath_EmptyReturnsEmpty",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock",
+              "TestSessionRouter_BindOnPathCall",
+              "TestSessionRouter_LookupUnboundReturnsNil",
+              "TestSessionRouter_UnbindRemovesEntry",
+              "TestSessionRouter_CleanupExpiresOldSessions",
+              "TestSessionRouter_CleanupPreservesRecentSessions",
+              "TestSessionRouter_RebindRefreshesTTL",
+              "TestSessionRouter_LookupRefreshesLastSeen",
+              "TestSessionRouter_NoLookupExpiresAtTTL",
+              "TestSessionRouter_BindNilWorkspaceIgnored",
+              "TestSessionRouter_BindEmptySessionIDIgnored",
+              "TestSessionRouter_BindOverwritesExistingBinding",
+              "TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession",
+              "TestSessionRouter_LookupReturnsValueCopy",
+              "TestSessionRouter_ConcurrentAccess",
+              "TestSharedRegistryObserver_GUILockedWriterAndReadersSettle",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing"
+            ],
+            "fail": [],
+            "skip": [
+              "TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows"
+            ]
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-success"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics/sink-error"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RelativeMatchFirstWorkspace"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RelativePathDotDotEscapeRejected"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_FindsProjectYml"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_NoMarker_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestAncestorWalk_RejectsRelativeInput"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_EmptyPath_ReturnsErrInvalidPath"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_RejectsUNCPath_OnWindows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_TransientStatErrorPreservesCache"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_FileDeletionClearsCache"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_IgnoresLSPEntries"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestCanonicalizeWorkspacePath_WindowsDriveLetter"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestCanonicalizeWorkspacePath_EmptyReturnsEmpty"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindOnPathCall"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupUnboundReturnsNil"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_UnbindRemovesEntry"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_CleanupExpiresOldSessions"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_CleanupPreservesRecentSessions"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_RebindRefreshesTTL"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupRefreshesLastSeen"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_NoLookupExpiresAtTTL"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindNilWorkspaceIgnored"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindEmptySessionIDIgnored"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_BindOverwritesExistingBinding"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_LookupReturnsValueCopy"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSessionRouter_ConcurrentAccess"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_GUILockedWriterAndReadersSettle"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/serena-then-other"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh/lsp-then-other"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh"
+            ]
+          ],
+          "timeouts": []
+        }
+      ],
+      "environment": {
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOTELEMETRY": "off",
+        "GOMAXPROCS": "4",
+        "CGO_ENABLED": "1",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "native_lifecycle_opt_in_present": false,
+      "whole_process_tree_deadline_enforced": false,
+      "runner_sha256": "b2ea765ba2a0ce3d5c24c7aa150d3e7203437c253ef277ea1444caeab7a075a3",
+      "manifest_sha256": "1e3344169c730ec3ca893db86153209c499fb0fb90e1e998e4c5f402444e2428",
+      "previous_candidate_tree": "e88a272660be4de2b60ab4e4a6940c3fb148e309",
+      "applied_paths": [
+        "internal/api/serena_routing/resolver_test.go"
+      ],
+      "candidate_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "diff_stat": "internal/api/lsp_routing/main_test.go              | 40 ++++++++++++\n internal/api/lsp_routing/resolver_test.go          | 21 +++---\n internal/api/serena_routing/main_test.go           | 40 ++++++++++++\n internal/api/serena_routing/resolver_test.go       | 71 ++++++++++++---------\n .../serena_routing/shared_observer_public_test.go  |  5 +-\n internal/daemon/host_original_windows_test.go      | 20 +++++-\n internal/daemon/lazy_proxy_readiness_test.go       |  3 +-\n internal/daemon/lazy_proxy_test.go                 | 34 +++++-----\n internal/daemon/main_test.go                       | 74 ++++++++++++++++++++++\n internal/oneapirun/async_owner_test.go             |  9 +--\n internal/oneapirun/async_test.go                   |  4 +-\n internal/oneapirun/main_test.go                    | 42 ++++++++++++\n 12 files changed, 298 insertions(+), 65 deletions(-)",
+      "mutation": {
+        "path": "internal/api/serena_routing/resolver.go",
+        "original_sha256": "c05c5ebb9e00fd4fca6cd8158843001f6703ab48c8e1418994bbd12b003180b1",
+        "mutant_sha256": "f4c9f345b6edaf7e9f86ea4950f33c4b70bac5ef6b13ff68cf6e4afae2c5fb7f",
+        "restored": true,
+        "oracle_sensitive": true
+      },
+      "head_after": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "tree_after": "52c4919ab291021b80e19b6550808ce8a0d93f23",
+      "status_after": "A  internal/api/lsp_routing/main_test.go\nM  internal/api/lsp_routing/resolver_test.go\nA  internal/api/serena_routing/main_test.go\nM  internal/api/serena_routing/resolver_test.go\nM  internal/api/serena_routing/shared_observer_public_test.go\nM  internal/daemon/host_original_windows_test.go\nM  internal/daemon/lazy_proxy_readiness_test.go\nM  internal/daemon/lazy_proxy_test.go\nA  internal/daemon/main_test.go\nM  internal/oneapirun/async_owner_test.go\nM  internal/oneapirun/async_test.go\nA  internal/oneapirun/main_test.go",
+      "completed": true,
+      "checks_passed": true,
+      "overall": "PASS",
+      "finished_utc": "2026-11-19T23:57:09.738815+00:00"
+    },
+    "gates": {
+      "phase": "gates",
+      "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "started_utc": "2026-11-19T23:57:39.121422+00:00",
+      "commands": [
+        {
+          "name": "build",
+          "executable": "go.exe",
+          "arguments": [
+            "build",
+            "./..."
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:57:39.527216+00:00",
+          "pid": 26024,
+          "exit_code": 0,
+          "seconds": 23.01,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "vet",
+          "executable": "go.exe",
+          "arguments": [
+            "vet",
+            "./..."
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 180,
+          "started_utc": "2026-11-19T23:58:02.538815+00:00",
+          "pid": 1172,
+          "exit_code": 0,
+          "seconds": 11.379,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "full-test",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "./..."
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-19T23:58:13.919225+00:00",
+          "pid": 25632,
+          "exit_code": 1,
+          "seconds": 400.435,
+          "stdout_bytes": 68373,
+          "stdout_sha256": "886358e0515cfd2779bb20b254c9a646920f2e129d205904919b1efb44aadf34",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "failed_packages": [
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/cli",
+            "mcp-local-hub/internal/daemon",
+            "mcp-local-hub/internal/process"
+          ],
+          "failed_tests": [
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+            "TestJob_BreakawayEnabledDescendantEscapesClose",
+            "TestJobInformationTransportPreparationBoundary"
+          ],
+          "timeouts": [
+            "5m0s",
+            "5m0s"
+          ]
+        },
+        {
+          "name": "tagged-api-cli",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "./internal/api/",
+            "./internal/cli/"
+          ],
+          "environment_delta": {},
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-20T00:04:54.358709+00:00",
+          "pid": 1352,
+          "exit_code": 1,
+          "seconds": 319.67,
+          "stdout_bytes": 70885,
+          "stdout_sha256": "e3e77d577ebba44a208d87d4a3040cfa00cf4b6c7a877ca7c24a04d926466b61",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "failed_packages": [
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/cli"
+          ],
+          "failed_tests": [
+            "TestAttachExisting_PublicCLIReceiving",
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+            "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+            "TestMigrateSerena_DrivesSupervisorRestart",
+            "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+            "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+            "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+            "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+            "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+            "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+            "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+            "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+            "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+            "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+            "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+          ],
+          "timeouts": [
+            "5m0s",
+            "5m0s"
+          ]
+        }
+      ],
+      "environment": {
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOTELEMETRY": "off",
+        "GOMAXPROCS": "4",
+        "CGO_ENABLED": "1",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "native_lifecycle_opt_in_present": false,
+      "whole_process_tree_deadline_enforced": false,
+      "runner_sha256": "b2ea765ba2a0ce3d5c24c7aa150d3e7203437c253ef277ea1444caeab7a075a3",
+      "manifest_sha256": "1e3344169c730ec3ca893db86153209c499fb0fb90e1e998e4c5f402444e2428",
+      "candidate_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "head_after": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "tree_after": "52c4919ab291021b80e19b6550808ce8a0d93f23",
+      "status_after": "A  internal/api/lsp_routing/main_test.go\nM  internal/api/lsp_routing/resolver_test.go\nA  internal/api/serena_routing/main_test.go\nM  internal/api/serena_routing/resolver_test.go\nM  internal/api/serena_routing/shared_observer_public_test.go\nM  internal/daemon/host_original_windows_test.go\nM  internal/daemon/lazy_proxy_readiness_test.go\nM  internal/daemon/lazy_proxy_test.go\nA  internal/daemon/main_test.go\nM  internal/oneapirun/async_owner_test.go\nM  internal/oneapirun/async_test.go\nA  internal/oneapirun/main_test.go",
+      "completed": true,
+      "checks_passed": false,
+      "overall": "FAIL",
+      "finished_utc": "2026-11-20T00:10:14.421201+00:00"
+    },
+    "published-checkout": {
+      "phase": "published-checkout",
+      "previous_head": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+      "expected_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "commands": [
+        {
+          "name": "fetch",
+          "arguments": [
+            "fetch",
+            "--no-tags",
+            "https://github.com/applicate2628/mcp-local-hub.git",
+            "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2"
+          ],
+          "settled": true,
+          "direct_child_deadline_seconds": 90,
+          "started_utc": "2026-11-20T00:11:25.290311+00:00",
+          "pid": 26244,
+          "exit_code": 0,
+          "seconds": 13.757,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 128,
+          "stderr_sha256": "0b02bb077da33c18d2b6c416a853099b68f00b4ba69157d280a216fb35cdb860"
+        },
+        {
+          "name": "checkout",
+          "arguments": [
+            "checkout",
+            "--detach",
+            "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2"
+          ],
+          "settled": true,
+          "direct_child_deadline_seconds": 90,
+          "started_utc": "2026-11-20T00:11:39.126949+00:00",
+          "pid": 50524,
+          "exit_code": 0,
+          "seconds": 0.089,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_bytes": 192,
+          "stderr_sha256": "64b0307a7dc5073d6df5f89eaf235a6fef065906ccbcbc8364cac56ae7d66fd8"
+        }
+      ],
+      "started_utc": "2026-11-20T00:11:24.978024+00:00",
+      "whole_process_tree_deadline_enforced": false,
+      "script_sha256": "f0bdbb9579e5cdb3c9e64c8feb416f4eaaa874817dbf3af709c0ff6464e79ff7",
+      "prepared_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+      "tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "parents": [
+        "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22"
+      ],
+      "status": "",
+      "completed": true,
+      "finished_utc": "2026-11-20T00:11:39.440589+00:00"
+    },
+    "published": {
+      "phase": "published",
+      "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+      "expected_head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+      "started_utc": "2026-11-20T00:12:19.221595+00:00",
+      "commands": [
+        {
+          "name": "published-focused-strict-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^(TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups|TestResolveByPath_AbsoluteMatch|TestLazyProxy_InitializeSyntheticNoMaterialize|TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output|TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64|TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock|TestAsyncRun_CloseWaitsForEvictedTerminalWorker|TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt)$",
+            "./internal/api/lsp_routing",
+            "./internal/api/serena_routing",
+            "./internal/daemon",
+            "./internal/oneapirun"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-20T00:12:19.459067+00:00",
+          "pid": 38208,
+          "exit_code": 0,
+          "seconds": 29.635,
+          "stdout_bytes": 18717,
+          "stdout_sha256": "9ec1e9a51fd1926545b02c2a50e8085a247f1a56ff180cfdc8674aaa0575f7e2",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize",
+              "TestResolveByPath_AbsoluteMatch",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+              "PACKAGE:mcp-local-hub/internal/api/lsp_routing",
+              "PACKAGE:mcp-local-hub/internal/daemon",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt",
+              "PACKAGE:mcp-local-hub/internal/oneapirun"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/api/lsp_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/daemon",
+              "TestLazyProxy_InitializeSyntheticNoMaterialize"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_AbsoluteMatch"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestAsyncRun_CloseWaitsForEvictedTerminalWorker"
+            ],
+            [
+              "mcp-local-hub/internal/oneapirun",
+              "TestRunInOneAPIEnvTool_StartReturnsAcceptedReceipt"
+            ]
+          ],
+          "timeouts": []
+        },
+        {
+          "name": "published-paired-allocation-strict-race",
+          "executable": "go.exe",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^TestResolveByPath_DoesNotCloneUnrelatedNestedRows$",
+            "./internal/api/serena_routing"
+          ],
+          "environment_delta": {
+            "MCPHUB_REQUIRE_SINGLE_USER_HOME": "1"
+          },
+          "settled": true,
+          "direct_child_deadline_seconds": 900,
+          "started_utc": "2026-11-20T00:12:49.096410+00:00",
+          "pid": 21004,
+          "exit_code": 0,
+          "seconds": 4.229,
+          "stdout_bytes": 3010,
+          "stdout_sha256": "f9f3756e906bf73e79c71026e5ac11a469eed44f7ed1b8cdad64a2ce469c8203",
+          "stderr_bytes": 0,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "tests": {
+            "pass": [
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+              "PACKAGE:mcp-local-hub/internal/api/serena_routing"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "package_test_passes": [
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows"
+            ],
+            [
+              "mcp-local-hub/internal/api/serena_routing",
+              "TestResolveByPath_DoesNotCloneUnrelatedNestedRows"
+            ]
+          ],
+          "timeouts": []
+        }
+      ],
+      "environment": {
+        "GOENV": "off",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOVCS": "*:off",
+        "GOWORK": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOTELEMETRY": "off",
+        "GOMAXPROCS": "4",
+        "CGO_ENABLED": "1",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "native_lifecycle_opt_in_present": false,
+      "whole_process_tree_deadline_enforced": false,
+      "runner_sha256": "b2ea765ba2a0ce3d5c24c7aa150d3e7203437c253ef277ea1444caeab7a075a3",
+      "manifest_sha256": "1e3344169c730ec3ca893db86153209c499fb0fb90e1e998e4c5f402444e2428",
+      "head_after": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+      "tree_after": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+      "status_after": "",
+      "completed": true,
+      "checks_passed": true,
+      "overall": "PASS",
+      "finished_utc": "2026-11-20T00:12:53.478539+00:00"
+    }
+  },
+  "go_analysis": {
+    "candidate/focused-race": {
+      "test_pass": 18,
+      "test_fail": 0,
+      "test_skip": 0,
+      "package_pass": [
+        "mcp-local-hub/internal/api/lsp_routing",
+        "mcp-local-hub/internal/api/serena_routing",
+        "mcp-local-hub/internal/daemon",
+        "mcp-local-hub/internal/oneapirun"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "candidate/focused-strict-race": {
+      "test_pass": 18,
+      "test_fail": 0,
+      "test_skip": 0,
+      "package_pass": [
+        "mcp-local-hub/internal/daemon",
+        "mcp-local-hub/internal/api/lsp_routing",
+        "mcp-local-hub/internal/api/serena_routing",
+        "mcp-local-hub/internal/oneapirun"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "candidate/packages-race": {
+      "test_pass": 489,
+      "test_fail": 2,
+      "test_skip": 3,
+      "package_pass": [
+        "mcp-local-hub/internal/api/lsp_routing",
+        "mcp-local-hub/internal/oneapirun"
+      ],
+      "package_fail": [
+        "mcp-local-hub/internal/api/serena_routing",
+        "mcp-local-hub/internal/daemon"
+      ],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "measurement/paired-allocation-race": {
+      "test_pass": 2,
+      "test_fail": 0,
+      "test_skip": 0,
+      "package_pass": [
+        "mcp-local-hub/internal/api/serena_routing"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "measurement/clone-all-negative-control": {
+      "test_pass": 0,
+      "test_fail": 1,
+      "test_skip": 0,
+      "package_pass": [],
+      "package_fail": [
+        "mcp-local-hub/internal/api/serena_routing"
+      ],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "measurement/restored-serena-strict-race": {
+      "test_pass": 44,
+      "test_fail": 0,
+      "test_skip": 1,
+      "package_pass": [
+        "mcp-local-hub/internal/api/serena_routing"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "gates/full-test": {
+      "failed_packages": [
+        "mcp-local-hub/internal/api",
+        "mcp-local-hub/internal/cli",
+        "mcp-local-hub/internal/daemon",
+        "mcp-local-hub/internal/process"
+      ],
+      "failed_tests": [
+        "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+        "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+        "TestJob_BreakawayEnabledDescendantEscapesClose",
+        "TestJobInformationTransportPreparationBoundary"
+      ],
+      "timeouts": [
+        "5m0s",
+        "5m0s"
+      ]
+    },
+    "gates/tagged-api-cli": {
+      "failed_packages": [
+        "mcp-local-hub/internal/api",
+        "mcp-local-hub/internal/cli"
+      ],
+      "failed_tests": [
+        "TestAttachExisting_PublicCLIReceiving",
+        "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+        "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+        "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+        "TestMigrateSerena_DrivesSupervisorRestart",
+        "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+        "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+        "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+        "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+        "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+        "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+        "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+        "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+        "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+        "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+        "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+      ],
+      "timeouts": [
+        "5m0s",
+        "5m0s"
+      ]
+    },
+    "published/published-focused-strict-race": {
+      "test_pass": 18,
+      "test_fail": 0,
+      "test_skip": 0,
+      "package_pass": [
+        "mcp-local-hub/internal/api/lsp_routing",
+        "mcp-local-hub/internal/daemon",
+        "mcp-local-hub/internal/api/serena_routing",
+        "mcp-local-hub/internal/oneapirun"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    },
+    "published/published-paired-allocation-strict-race": {
+      "test_pass": 2,
+      "test_fail": 0,
+      "test_skip": 0,
+      "package_pass": [
+        "mcp-local-hub/internal/api/serena_routing"
+      ],
+      "package_fail": [],
+      "package_skip": [],
+      "all_test_runs_have_terminal_events": true,
+      "active_tests": [],
+      "panic_or_race": false
+    }
+  },
+  "post_verify": {
+    "phase": "post-verify",
+    "started_utc": "2026-11-20T00:13:13.131280+00:00",
+    "script_sha256": "170b24e047ce382274dde6da45fd1f8ca2377e52e974aaea35ef8c8e313e831c",
+    "query_sha256": "c3e70cbd54542f55b0837ac767c4f392e7dde17a616a4814178184d34da5da65",
+    "expected_head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+    "direct_child_deadline_seconds": 30,
+    "settled": true,
+    "completed": true,
+    "scoped_absence_observed": true,
+    "whole_process_tree_proven": false,
+    "observed_processes_modified": false,
+    "pid": 40528,
+    "exit_code": 0,
+    "stdout_bytes": 399,
+    "stdout_sha256": "ea6e249c030deca62e66bab29326ce137edd3cf08d2840c5860a0a3dcf52ddd3",
+    "stderr_bytes": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "observation": {
+      "observed_utc": "2026-11-20T00:13:13.5675837Z",
+      "observer_pid": 40528,
+      "excluded_pids": [
+        40528,
+        40184,
+        42752
+      ],
+      "remaining": [],
+      "root_labels": [
+        "go-state-isolation",
+        "native-exec-diagnostic",
+        "native-existing-candidates",
+        "native-negative-read"
+      ],
+      "scope": "exact owned-root marker in executable path or command line; no ancestry closure",
+      "command_lines_or_images_emitted": false,
+      "whole_process_tree_proven": false
+    },
+    "seconds": 0.483296,
+    "finished_utc": "2026-11-20T00:13:13.614954+00:00",
+    "overall": "ABSENCE_OBSERVED"
+  },
+  "stream_checks": {
+    "evidence/bootstrap/clone.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/bootstrap/clone.stderr.log": {
+      "source_sha256": "975d5fc6b448ae4d6b58a075f5888b801dad24699b9f02e3a4e22ec5e1b3f675",
+      "source_bytes": 156
+    },
+    "evidence/bootstrap/fetch.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/bootstrap/fetch.stderr.log": {
+      "source_sha256": "b1a55024367cc560d45db99a497b0cf29e8e7b1530bea22d9590c6751ab6c970",
+      "source_bytes": 128
+    },
+    "evidence/bootstrap/go-version.stdout.log": {
+      "source_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "source_bytes": 34
+    },
+    "evidence/bootstrap/go-version.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/candidate/gofmt-check.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/candidate/gofmt-check.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/candidate/focused-race.stdout.log": {
+      "source_sha256": "15c4832b31098870e9fc08df66471b1c4912ba4df504c3269a960a8d5d991e77",
+      "source_bytes": 18725
+    },
+    "evidence/candidate/focused-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/candidate/focused-strict-race.stdout.log": {
+      "source_sha256": "a32935a2a1dfff4873b760b5dc9cf0078aa43a5f3376c72fe802370a7e619054",
+      "source_bytes": 18732
+    },
+    "evidence/candidate/focused-strict-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/candidate/packages-race.stdout.log": {
+      "source_sha256": "b05a36ab3bf15c2a6f92afcf1f19e3cd1b4d8a5ab317af0fb5c7a8eadb54f2f1",
+      "source_bytes": 445771
+    },
+    "evidence/candidate/packages-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/measurement/gofmt-measurement.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/measurement/gofmt-measurement.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/measurement/paired-allocation-race.stdout.log": {
+      "source_sha256": "fbe1d706a0f47b6fe97b66f25751c93d44370ad0be0285fcd09ae7296320ec18",
+      "source_bytes": 2995
+    },
+    "evidence/measurement/paired-allocation-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/measurement/clone-all-negative-control.stdout.log": {
+      "source_sha256": "b2bd480b96e7576c07caa2ee0c48eb363f4c96549eb94f6e7e584cdb53f29b7f",
+      "source_bytes": 2132
+    },
+    "evidence/measurement/clone-all-negative-control.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/measurement/restored-serena-strict-race.stdout.log": {
+      "source_sha256": "1d51bac7d0ca8d19cf79c63a76811262ecb79512c4494f8824a102819654dc57",
+      "source_bytes": 42965
+    },
+    "evidence/measurement/restored-serena-strict-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/build.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/build.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/vet.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/vet.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/full-test.stdout.log": {
+      "source_sha256": "886358e0515cfd2779bb20b254c9a646920f2e129d205904919b1efb44aadf34",
+      "source_bytes": 68373
+    },
+    "evidence/gates/full-test.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/gates/tagged-api-cli.stdout.log": {
+      "source_sha256": "e3e77d577ebba44a208d87d4a3040cfa00cf4b6c7a877ca7c24a04d926466b61",
+      "source_bytes": 70885
+    },
+    "evidence/gates/tagged-api-cli.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/published-checkout/fetch.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/published-checkout/fetch.stderr.log": {
+      "source_sha256": "0b02bb077da33c18d2b6c416a853099b68f00b4ba69157d280a216fb35cdb860",
+      "source_bytes": 128
+    },
+    "evidence/published-checkout/checkout.stdout.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/published-checkout/checkout.stderr.log": {
+      "source_sha256": "64b0307a7dc5073d6df5f89eaf235a6fef065906ccbcbc8364cac56ae7d66fd8",
+      "source_bytes": 192
+    },
+    "evidence/published/published-focused-strict-race.stdout.log": {
+      "source_sha256": "9ec1e9a51fd1926545b02c2a50e8085a247f1a56ff180cfdc8674aaa0575f7e2",
+      "source_bytes": 18717
+    },
+    "evidence/published/published-focused-strict-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "evidence/published/published-paired-allocation-strict-race.stdout.log": {
+      "source_sha256": "f9f3756e906bf73e79c71026e5ac11a469eed44f7ed1b8cdad64a2ce469c8203",
+      "source_bytes": 3010
+    },
+    "evidence/published/published-paired-allocation-strict-race.stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    },
+    "post-verify/stdout.log": {
+      "source_sha256": "ea6e249c030deca62e66bab29326ce137edd3cf08d2840c5860a0a3dcf52ddd3",
+      "source_bytes": 399
+    },
+    "post-verify/stderr.log": {
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_bytes": 0
+    }
+  },
+  "packaging_redaction_diagnostic": {
+    "schema": 1,
+    "phase": "packaging-redaction-diagnostic",
+    "failed_packager_sha256": "c5f5cd64198d422a1117ab03d67c7a2c2e02d57a685040d0ab3ec21536d90012",
+    "initial_exit_code": 1,
+    "initial_error_category": "evidence_validation",
+    "initial_error_detail": "absolute_path_remains",
+    "first_diagnostic_exit_code": 0,
+    "second_diagnostic_exit_code": 0,
+    "diagnostic_source_sha256": {
+      "diagnose_redaction.py": "78e9facdbbb7e835a52c9c8aadf0618b3975559d7d02701ca913dfc4d0a29447",
+      "diagnose_redaction_values.py": "3032fea850ecd194e8f10c60d242e3a1650b75fb89a1a5e2e6a4751866d9eefe"
+    },
+    "rejected_members": [
+      "evidence/candidate/packages-race.stdout.log"
+    ],
+    "decoded_strings": 20506,
+    "counts": {
+      "drive": {
+        "serialized": 0,
+        "decoded_values": 0
+      },
+      "unc": {
+        "serialized": 1,
+        "decoded_values": 0
+      }
+    },
+    "outputs_created": false,
+    "outputs_created_basis": "The pinned failed packager scans all members before the first output open; the observed error occurred in that scan.",
+    "observation_source": "Root agent reported the command exits and counts from retained tool results; this local receipt does not reproduce those commands.",
+    "diagnostics_read_saved_inputs_only": true,
+    "tests_or_native_calls_repeated": false
+  },
+  "source_sha256": {
+    "run_checks.py": "b2ea765ba2a0ce3d5c24c7aa150d3e7203437c253ef277ea1444caeab7a075a3",
+    "history/run_checks-bootstrap.py": "5bce29eeeb4888c8e23087de360dafa13874690108e21e953be3cc4ad28df154",
+    "history/run_checks-candidate.py": "ded5f3e2f839653996a4887b5eef8cbd32fa9fa9fb212c4639cd1ade461cb9c4",
+    "checkout_published.py": "f0bdbb9579e5cdb3c9e64c8feb416f4eaaa874817dbf3af709c0ff6464e79ff7",
+    "candidate-manifest.json": "9b4e00789a9f1bd59610f483088f3186e43394fbe4bc84b462a741e411ebb872",
+    "candidate-manifest-v2.json": "1e3344169c730ec3ca893db86153209c499fb0fb90e1e998e4c5f402444e2428",
+    "history/package_evidence-attempt1.py": "c5f5cd64198d422a1117ab03d67c7a2c2e02d57a685040d0ab3ec21536d90012",
+    "diagnose_redaction.py": "78e9facdbbb7e835a52c9c8aadf0618b3975559d7d02701ca913dfc4d0a29447",
+    "diagnose_redaction_values.py": "3032fea850ecd194e8f10c60d242e3a1650b75fb89a1a5e2e6a4751866d9eefe",
+    "redaction-diagnostic.json": "bc78b29a637a3c9bd672ba1973fe2bf1fe8bb89193328256e555ba33702badd1",
+    "package_evidence.py": "0e504028d08c2fb80ccc871a0a595e671d64aecfe3383d655a0ca4405a0e9193",
+    "observe_owned_processes.py": "170b24e047ce382274dde6da45fd1f8ca2377e52e974aaea35ef8c8e313e831c",
+    "source/internal/api/lsp_routing/main_test.go": "fa9f1781be314ac77080dfe1707f39ccd5fcbe26bcc21adf0f7bd20b16b66201",
+    "source/internal/api/lsp_routing/resolver_test.go": "b347099b508dc68a7ee11cb8c83ce627fb66c39f38e8a0eb8c6800145ea61bd3",
+    "source/internal/api/serena_routing/main_test.go": "f65cfa07f4ab7142d635631668288bbcaea7e810df4052c8d1fb40a964ddda6b",
+    "source/internal/api/serena_routing/resolver_test.go": "2a449f76293b73f17c0808708fef10542fd16a60c16d81810f028d84510e57a8",
+    "source/internal/api/serena_routing/shared_observer_public_test.go": "050fd6c0f482c15a20562b09bae2bdac3e1e153228f518c15949b9f053d1405a",
+    "source/internal/daemon/host_original_windows_test.go": "29c02fa3c97233d52c9f91c7386d5e599a12297e2d8d100762b51f81cfe63ce8",
+    "source/internal/daemon/lazy_proxy_readiness_test.go": "20c2fef9d8abdebe78fbd2288093ed9c6c1d9f5eb150ce1d774d8cc63f57e783",
+    "source/internal/daemon/lazy_proxy_test.go": "eb6c940ed87e156a2ed247966480a141e2a46595c8855839e97cea2bcf9401d3",
+    "source/internal/daemon/main_test.go": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183",
+    "source/internal/oneapirun/async_owner_test.go": "9d61edc2ebc886a92950323238e624ece386b93a30077adf6e81f88a5588a863",
+    "source/internal/oneapirun/async_test.go": "c7ccafe80d3eecf8b5f46d37796379b61b794935ac3d4ae014e7786e48001ffa",
+    "source/internal/oneapirun/main_test.go": "3e874dc6ef04d380f36319341089983ff5c466b99903ffe6e2bb08b68065cc15",
+    "candidate/internal/api/serena_routing/resolver_test.go": "a0f98a201ba6620d8d6e52c37b649ea21265528ad42a02af75c735839f28f28e",
+    "mutation/resolver.go": "f4c9f345b6edaf7e9f86ea4950f33c4b70bac5ef6b13ff68cf6e4afae2c5fb7f",
+    "evidence/bootstrap/receipt.json": "84ea3ed290fb1e4241e28b8217e5a1739c2dec78b31a6d69c6c8edf853e97ef5",
+    "evidence/candidate/receipt.json": "fc30eb10905232f54c1bab45c655df0e056f8cb658c842e307ad0a01ed331095",
+    "evidence/measurement/receipt.json": "c16a6171ca3009944969d1c52a0b6f3f8d38aee47f79df6f6c27c1a2b43adb65",
+    "evidence/gates/receipt.json": "f8cbf29870c1faf799295882bb29ade1a1237652e507ad6ffc64b7ceab60d940",
+    "evidence/published-checkout/receipt.json": "f5519df3a917a22ec4830d4a412606e80b0855c05997492fe093f56436d2e8fa",
+    "evidence/published/receipt.json": "f688a5cafc84b720d5a970308de113e26f6b3b4b04b022387d88274d1be943ac",
+    "post-verify/receipt.json": "b263a73ccb3ed1403c2843cf525ab7da02ab2080aed6a5a3bfefbf2be3349a1f"
+  },
+  "all_recorded_direct_children_settled": true,
+  "whole_process_tree_proven": false,
+  "whole_process_tree_deadline_enforced": false,
+  "packager_process_or_git_calls": false,
+  "native_private_evidence_included": false,
+  "limitations": [
+    "Evidence integrity PASS does not mean mandatory gates or every phase passed; all original failures remain.",
+    "The initial candidate package failure is retained separately from the revised measurement and published checks.",
+    "The allocation mutation is an expected failing assertion, not a successful product test.",
+    "Commit/tree/index checks come from saved runner receipts; this packager does not invoke Git.",
+    "The twelve final test files and restored production resolver are additionally checked against exact raw hashes.",
+    "Process absence is a later snapshot of accessible exact-root markers, not an ancestry-complete process-tree proof.",
+    "Native private candidates, identities, XML, and arguments are excluded; native public evidence is packaged separately.",
+    "Archive sources are sanitized review copies; source hashes identify original bytes, saved hashes identify archive bytes.",
+    "Unstructured logs preserve undecodable UTF-8 bytes through surrogateescape; their origin is not established.",
+    "Identity/path redaction and credential-shape scans are bounded checks, not a proof that arbitrary secrets cannot exist."
+  ]
+}
