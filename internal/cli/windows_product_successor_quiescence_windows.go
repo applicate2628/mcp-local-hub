@@ -54,10 +54,50 @@ type windowsProductSuccessorQuiescence struct {
 	intentClose                                        *api.StateFileLeaseCloseObservation
 }
 
+type windowsProductQuiescenceAcquisitionStage string
+
+const (
+	windowsProductQuiescenceAtNativeIdentity   windowsProductQuiescenceAcquisitionStage = "NATIVE_IDENTITY"
+	windowsProductQuiescenceAtNativeJournal    windowsProductQuiescenceAcquisitionStage = "NATIVE_JOURNAL"
+	windowsProductQuiescenceAtSuccessorBank    windowsProductQuiescenceAcquisitionStage = "SUCCESSOR_BANK"
+	windowsProductQuiescenceAtInitialControls  windowsProductQuiescenceAcquisitionStage = "INITIAL_CONTROLS"
+	windowsProductQuiescenceAtInitialAbsence   windowsProductQuiescenceAcquisitionStage = "INITIAL_ABSENCE"
+	windowsProductQuiescenceAtReservation      windowsProductQuiescenceAcquisitionStage = "RESERVATION"
+	windowsProductQuiescenceAtReservedControls windowsProductQuiescenceAcquisitionStage = "RESERVED_CONTROLS"
+	windowsProductQuiescenceAtHeldRecheck      windowsProductQuiescenceAcquisitionStage = "HELD_RECHECK"
+)
+
+func isWindowsProductQuiescenceAcquisitionStage(stage windowsProductQuiescenceAcquisitionStage) bool {
+	switch stage {
+	case windowsProductQuiescenceAtNativeIdentity, windowsProductQuiescenceAtNativeJournal, windowsProductQuiescenceAtSuccessorBank,
+		windowsProductQuiescenceAtInitialControls, windowsProductQuiescenceAtInitialAbsence, windowsProductQuiescenceAtReservation,
+		windowsProductQuiescenceAtReservedControls, windowsProductQuiescenceAtHeldRecheck:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *windowsProductQuiescenceAcquisitionStage) record(next windowsProductQuiescenceAcquisitionStage) {
+	if s != nil {
+		*s = next
+	}
+}
+
+type windowsProductQuiescenceAcquisitionError struct {
+	stage windowsProductQuiescenceAcquisitionStage
+	cause error
+}
+
+func (e *windowsProductQuiescenceAcquisitionError) Error() string { return e.cause.Error() }
+func (e *windowsProductQuiescenceAcquisitionError) Unwrap() error { return e.cause }
+
 func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, guiControlPath string, journal windowsProductRecoveryJournalV3, source binaryadmission.WindowsCanonicalRecoverySourceV2, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, executing *binaryadmission.WindowsCanonicalEntrySetV2) (q *windowsProductSuccessorQuiescence, retErr error) {
 	q = &windowsProductSuccessorQuiescence{source: source, successor: successor, executing: executing, journal: journal, stateDir: stateDir, guiControlPath: guiControlPath, intentPath: filepath.Join(stateDir, "supervisor-intent.json")}
+	stage := windowsProductQuiescenceAtNativeIdentity
 	defer func() {
 		if retErr != nil {
+			retErr = &windowsProductQuiescenceAcquisitionError{stage: stage, cause: retErr}
 			q.causes = append(q.causes, retErr)
 		}
 	}()
@@ -74,7 +114,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	q.now = original.deps.Now
 	limit, cancel := context.WithTimeout(ctx, time.Duration(api.DefaultSupervisorReapQuiesceTimeoutMs)*time.Millisecond)
 	defer cancel()
-	if err := q.verifyNative(limit); err != nil {
+	if err := q.verifyNative(limit, &stage); err != nil {
 		return q, err
 	}
 	targets, err := binaryadmission.CanonicalEntryTargetsV2(journal.EntryBundle.CanonicalEntry.Target)
@@ -95,6 +135,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	if samePath(directory.Root, filepath.Dir(targets.CanonicalEntryPath)) {
 		return q, errors.New("executing-entry aliases current inverse root")
 	}
+	stage = windowsProductQuiescenceAtInitialControls
 	first, err := api.NewAPI().ObserveRequiredGUIOwnerControlContextIn(limit, guiControlPath)
 	q.guiReads = append(q.guiReads, first)
 	if err != nil || first.Control == nil {
@@ -114,9 +155,11 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	if !samePath(filepath.Dir(q.guiOwnerPath), stateDir) {
 		return q, errors.New("GUI reservation belongs to a different current namespace")
 	}
+	stage = windowsProductQuiescenceAtInitialAbsence
 	if err = q.absent(limit); err != nil {
 		return q, err
 	}
+	stage = windowsProductQuiescenceAtReservation
 	_, err = acquireGUIOwnedPriorReservation(limit, nil, guiOwnedPriorReservationOps{
 		ProveNoGUIOrTray: q.absent,
 		AcquireExact: func() (gui.OwnedSingleInstanceLease, error) {
@@ -128,6 +171,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	if err != nil {
 		return q, err
 	}
+	stage = windowsProductQuiescenceAtReservedControls
 	q.supervisor, q.acquisition, err = api.AcquireSupervisorLockQuietObserved(limit, filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
 		return q, err
@@ -144,6 +188,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	if err != nil {
 		return q, err
 	}
+	stage = windowsProductQuiescenceAtHeldRecheck
 	if err = q.verifyHeld(limit); err != nil {
 		return q, err
 	}
@@ -151,7 +196,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	return q, nil
 }
 
-func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) (retErr error) {
+func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context, stage *windowsProductQuiescenceAcquisitionStage) (retErr error) {
 	if ctx == nil {
 		return errors.New("quiescence context required")
 	}
@@ -161,12 +206,15 @@ func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) (r
 	if q.source == nil || q.successor == nil || q.executing == nil {
 		return errors.New("original native quiescence lenders required")
 	}
+	stage.record(windowsProductQuiescenceAtNativeJournal)
 	if err := q.source.ValidateOriginalRecovery(ctx); err != nil {
 		return err
 	}
+	stage.record(windowsProductQuiescenceAtSuccessorBank)
 	if err := q.successor.VerifyUnchanged(ctx); err != nil {
 		return err
 	}
+	stage.record(windowsProductQuiescenceAtNativeIdentity)
 	if err := q.executing.VerifyUnchanged(); err != nil {
 		return err
 	}
@@ -275,7 +323,7 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 }
 
 func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context) error {
-	if err := q.verifyNative(ctx); err != nil {
+	if err := q.verifyNative(ctx, nil); err != nil {
 		return err
 	}
 	if q.guiLease == nil || q.supervisor == nil || q.intentLease == nil {

@@ -75,8 +75,9 @@ const (
 )
 
 const (
-	currentPendingRuntimeStage = "current runtime receiving unconfirmed"
-	priorGUISettlementStage    = "prior GUI settlement unconfirmed"
+	currentPendingRuntimeStage      = "current runtime receiving unconfirmed"
+	priorGUISettlementStage         = "prior GUI settlement unconfirmed"
+	currentSuccessorQuiescenceStage = "current successor quiescence unavailable"
 )
 
 func (e *upgradeCommittedCommandError) Error() string {
@@ -121,6 +122,13 @@ func (e *upgradeCommittedCommandError) Error() string {
 	}
 	if e.runtime != nil || e.stage == currentPendingRuntimeStage {
 		message += pendingRuntimeProjection(e.cause, e.runtime)
+	}
+	if e.stage == currentSuccessorQuiescenceStage || e.stage == priorGUISettlementStage ||
+		e.stage == currentPendingRuntimeStage || e.stage == "recover pending prior settlement" {
+		var acquisition *windowsProductQuiescenceAcquisitionError
+		if errors.As(e.cause, &acquisition) && acquisition != nil && isWindowsProductQuiescenceAcquisitionStage(acquisition.stage) {
+			message += "; quiescence_stage=" + string(acquisition.stage)
+		}
 	}
 	return message
 }
@@ -175,6 +183,11 @@ func ordinaryWindowsProductRecoveryError(cause error) error {
 		var prior *upgradeGUIPriorSettlementError
 		if errors.As(cause, &prior) && prior != nil && isUpgradeGUIPriorOperation(prior.operation) {
 			cause = committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", priorGUISettlementStage, cause)
+		} else {
+			var acquisition *windowsProductQuiescenceAcquisitionError
+			if errors.As(cause, &acquisition) && acquisition != nil {
+				cause = committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", currentSuccessorQuiescenceStage, cause)
+			}
 		}
 	}
 	return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", cause)

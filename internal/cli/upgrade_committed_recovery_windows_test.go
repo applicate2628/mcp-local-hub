@@ -829,8 +829,13 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			}
 			journal := windowsProductRecoveryJournalV3{PreSettlement: &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}}
 			ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), journal, ops)
+			quiescenceSuffix := ""
+			if tc.secondFails {
+				ownerErr = &windowsProductQuiescenceAcquisitionError{stage: windowsProductQuiescenceAtReservation, cause: ownerErr}
+				quiescenceSuffix = "; quiescence_stage=RESERVATION"
+			}
 			public := committedRecoveryCommandError(committedRecoveryOwnerFailureID(ownerErr), "recover pending prior settlement", ownerErr)
-			wantFields := "; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + tc.absenceSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
+			wantFields := "; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + tc.absenceSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT" + quiescenceSuffix
 			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement" + wantFields
 			if public.Error() != want || !errors.Is(public, ErrWindowsProductRecoveryPending) || public.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" {
 				t.Fatal("actual reservation substep or original causal chain was lost")
@@ -908,5 +913,68 @@ func TestPendingRecoveryReservationProjectionRejectsInjectedStepAndCleanup(t *te
 	want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=UNCLASSIFIED"
 	if public.Error() != want || strings.Contains(public.Error(), "RELEASE_FAILED") || strings.Contains(public.Error(), private) {
 		t.Fatal("injected unknown step acquired a classified cleanup indication")
+	}
+}
+
+// Both native lender arguments are inert placeholders. Cancellation at the
+// actual bound journal phase must return before either can be consulted.
+func TestSuccessorQuiescenceAcquisitionReportsJournalCancellation(t *testing.T) {
+	outer := t.Context()
+	caller, cancel := context.WithCancel(outer)
+	defer cancel()
+	state := t.TempDir()
+	path := filepath.Join(state, WindowsProductRecoveryFileLeafV3)
+	journal := windowsProductRecoveryJournalV3{
+		Phase: WindowsProductRecoveryPrepared, EntryBundle: &windowsCanonicalEntrySetJournalV2{},
+	}
+	evidence := &windowsProductJournalReadEvidence{}
+	allowance := productJournalFixtureAllowance()
+	phaseCalls := 0
+	source := &windowsCanonicalJournalRecoverySource{
+		active: true, path: path, journal: journal, purpose: canonicalRecoveryRollback,
+		deps: withWindowsProductRecoveryDefaults(windowsProductRecoveryDeps{journal: windowsProductJournalBinding{
+			ctx: outer, allowance: allowance, evidence: evidence,
+			phase: func() string {
+				phaseCalls++
+				cancel()
+				return string(journal.Phase)
+			},
+		}}),
+	}
+	source.self = source
+	q, err := acquireWindowsProductSuccessorQuiescence(caller, state, filepath.Join(state, "gui-preferences.yaml"),
+		journal, source, &binaryadmission.WindowsCanonicalEntryRecoverySetV2{}, &binaryadmission.WindowsCanonicalEntrySetV2{})
+	if q == nil {
+		t.Fatal("canceled acquisition lost its partial owner")
+	}
+	closeErr := q.Close()
+	var acquisition *windowsProductQuiescenceAcquisitionError
+	if !errors.As(err, &acquisition) || acquisition == nil || acquisition.stage != windowsProductQuiescenceAtNativeJournal ||
+		!errors.Is(err, context.Canceled) || err.Error() != context.Canceled.Error() || !errors.Is(closeErr, err) ||
+		outer.Err() != nil || phaseCalls != 1 {
+		t.Fatal("native journal stage or original caller cancellation was lost")
+	}
+	if len(evidence.outcomes) != 1 || evidence.outcomes[0].original != nil ||
+		!errors.Is(evidence.outcomes[0].readError, context.Canceled) {
+		t.Fatal("journal phase cancellation entered the protected reader")
+	}
+
+	private := errors.New("PRIVATE_PROCESS_PATH_AND_SID")
+	cause := errors.Join(ErrWindowsProductRecoveryPending, err, errors.New(currentSuccessorQuiescenceStage))
+	cause = errors.Join(cause, closeErr)
+	cause = errors.Join(cause, private)
+	ordinary := ordinaryWindowsProductRecoveryError(cause)
+	want := "v0.5 upgrade: recover Windows product pair: E_WINDOWS_PRODUCT_RECOVERY_PENDING: current successor quiescence unavailable; quiescence_stage=NATIVE_JOURNAL"
+	if ordinary.Error() != want || !errors.Is(ordinary, private) || !errors.Is(ordinary, err) || !errors.Is(ordinary, context.Canceled) {
+		t.Fatal("ordinary projection changed its prefix or dropped original causes")
+	}
+	pending := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", cause)
+	want = "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR_UNCLASSIFIED; quiescence_stage=NATIVE_JOURNAL"
+	if pending.Error() != want || !errors.Is(pending, private) || !errors.Is(pending, err) {
+		t.Fatal("pending projection changed its prefix or dropped original causes")
+	}
+	injected := &windowsProductQuiescenceAcquisitionError{stage: windowsProductQuiescenceAcquisitionStage(private.Error()), cause: private}
+	if got := ordinaryWindowsProductRecoveryError(injected).Error(); strings.Contains(got, private.Error()) || strings.Contains(got, "quiescence_stage=") {
+		t.Fatal("ordinary projection accepted an unknown acquisition stage")
 	}
 }
