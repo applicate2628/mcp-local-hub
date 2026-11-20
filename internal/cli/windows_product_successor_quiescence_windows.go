@@ -212,7 +212,27 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 		}
 		identity, err := process.LookupPIDHandleIdentity(row.PID)
 		if err != nil {
-			return err
+			if row.PID <= 0 || row.PID != int(uint32(row.PID)) {
+				return err
+			}
+			// Keep joined identity and handle-close failures intact.
+			cause := err
+			for next := errors.Unwrap(cause); next != nil; next = errors.Unwrap(next) {
+				cause = next
+			}
+			if cause != windows.ERROR_INVALID_PARAMETER {
+				return err
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return errors.Join(err, ctxErr)
+			}
+			// The process may have exited between the snapshot and the handle lookup.
+			state, stateErr := process.QueryPIDState(row.PID)
+			ctxErr := ctx.Err()
+			if stateErr == nil && state == process.PIDStateDead && ctxErr == nil {
+				continue
+			}
+			return errors.Join(err, stateErr, ctxErr, fmt.Errorf("PID %d liveness after handle identity failed: %q", row.PID, state))
 		}
 		for _, image := range images {
 			if samePath(identity.ExecutablePath, image) {
