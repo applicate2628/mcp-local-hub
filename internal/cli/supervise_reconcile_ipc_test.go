@@ -1169,11 +1169,11 @@ func TestReconcileIPC_ApplyPreservesDaemonIntentCacheOnMissingSupervisorIntent(t
 	}
 }
 
-// TestReconcileIPC_HandlerTimeoutCancelsSchedulerList verifies the production
-// scheduler-list path hands the reconcile context to a context-aware scheduler
-// implementation instead of abandoning an uncancellable goroutine after the
-// handler deadline fires.
-func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
+// TestReconcileIPC_ParentCancellationReachesSchedulerList verifies the production
+// scheduler-list path propagates parent cancellation after the list operation
+// begins. TestReconcileIPC_HandlerTimeout separately checks the configured
+// deadline; this test does not rely on a timer expiring during setup.
+func TestReconcileIPC_ParentCancellationReachesSchedulerList(t *testing.T) {
 	taskName := `\mcp-local-hub-foo-default`
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
@@ -1183,9 +1183,9 @@ func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
 	}
 	fx := newReconcileTestFixture(t, intent)
 
-	origTimeout := reconcileHandlerTimeout
-	reconcileHandlerTimeout = 25 * time.Millisecond
-	t.Cleanup(func() { reconcileHandlerTimeout = origTimeout })
+	parentCtx, cancelParent := context.WithCancel(fx.ctrl.ctx)
+	t.Cleanup(cancelParent)
+	fx.ctrl.ctx = parentCtx
 
 	ctxCanceled := make(chan error, 1)
 	fakeScheduler := &reconcileContextSchedulerForTest{
@@ -1193,9 +1193,18 @@ func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
 			if prefix != "mcp-local-hub-" {
 				t.Errorf("scheduler prefix = %q, want mcp-local-hub-", prefix)
 			}
-			<-ctx.Done()
-			ctxCanceled <- ctx.Err()
-			return nil, ctx.Err()
+			if err := ctx.Err(); err != nil {
+				t.Fatalf("scheduler ListContext started with stopped context: %v", err)
+			}
+			cancelParent()
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+				t.Fatal("scheduler ListContext did not receive parent cancellation")
+			}
+			err := ctx.Err()
+			ctxCanceled <- err
+			return nil, err
 		},
 	}
 	uninstall := setReconcileSchedulerNewFnForTest(func() (scheduler.Scheduler, error) {
@@ -1214,7 +1223,7 @@ func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
 	}
 	resp := conn.lastResponse(t)
 	if resp.Error == nil {
-		t.Fatalf("expected timeout response, got %+v", resp)
+		t.Fatalf("expected cancellation response, got %+v", resp)
 	}
 	if resp.Error.Code != "RECONCILE_TIMEOUT" {
 		t.Fatalf("response code = %q, want RECONCILE_TIMEOUT", resp.Error.Code)
@@ -1222,11 +1231,11 @@ func TestReconcileIPC_HandlerTimeoutCancelsSchedulerList(t *testing.T) {
 
 	select {
 	case err := <-ctxCanceled:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("scheduler ListContext saw ctx err %v, want DeadlineExceeded", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("scheduler ListContext saw ctx err %v, want Canceled", err)
 		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("scheduler ListContext did not observe reconcile context cancellation")
+	default:
+		t.Fatal("scheduler ListContext did not observe parent cancellation")
 	}
 }
 
