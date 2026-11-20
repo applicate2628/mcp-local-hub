@@ -129,8 +129,8 @@ var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (sc
 	process.NoConsole(cmd)
 	cmd.Stdin = strings.NewReader(string(raw))
 	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return schedulerCOMResponse{}, fmt.Errorf("%w: timeout", ErrUnavailable)
+	if err := ctx.Err(); err != nil {
+		return schedulerCOMResponse{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if err != nil {
 		return schedulerCOMResponse{}, fmt.Errorf("%w: bridge", ErrUnavailable)
@@ -150,7 +150,7 @@ func schedulerCOM(ctx context.Context, request schedulerCOMRequest) (schedulerCO
 	defer cancel()
 	response, err := schedulerCOMRun(ctx, request)
 	if err != nil {
-		return schedulerCOMResponse{}, fmt.Errorf("%w: bridge execution: %v", ErrUnavailable, err)
+		return schedulerCOMResponse{}, fmt.Errorf("%w: bridge execution: %w", ErrUnavailable, err)
 	}
 	if response.OK {
 		return response, nil

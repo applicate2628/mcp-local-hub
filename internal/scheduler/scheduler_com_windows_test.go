@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/process"
 )
@@ -48,11 +49,63 @@ func TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable(t *testing.T) {
 			}
 		})
 	}
-	withCOMRunner(t, func(context.Context, schedulerCOMRequest) (schedulerCOMResponse, error) {
-		return schedulerCOMResponse{}, fmt.Errorf("bridge lost")
-	})
-	if _, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "status", Name: `\t`}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("err=%v", err)
+}
+
+func TestSchedulerCOMPreservesRunnerErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+	}{
+		{"canceled", context.Canceled},
+		{"deadline", context.DeadlineExceeded},
+		{"bridge", errors.New("bridge lost")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withCOMRunner(t, func(context.Context, schedulerCOMRequest) (schedulerCOMResponse, error) {
+				return schedulerCOMResponse{OK: true, Tasks: []schedulerCOMTask{{Name: "partial"}}}, fmt.Errorf("runner: %w", tc.cause)
+			})
+			response, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "list"})
+			if !errors.Is(err, ErrUnavailable) || !errors.Is(err, tc.cause) {
+				t.Fatalf("runner error identity lost: err=%v want ErrUnavailable and %v", err, tc.cause)
+			}
+			if response.OK || response.Task != nil || response.Tasks != nil {
+				t.Fatalf("runner error returned partial response: %+v", response)
+			}
+		})
+	}
+}
+
+func TestWindowsListContextPreservesStoppedContext(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want error
+	}{
+		{"canceled", context.Canceled},
+		{"deadline", context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if tc.want == context.Canceled {
+				ctx, cancel = context.WithCancel(context.Background())
+				cancel()
+			} else {
+				ctx, cancel = context.WithDeadline(context.Background(), time.Unix(1, 0))
+			}
+			defer cancel()
+			if ctx.Err() != tc.want {
+				t.Fatalf("context fixture: got %v want %v", ctx.Err(), tc.want)
+			}
+			// Keep the production runner: the stopped context prevents process start.
+			w := &windowsScheduler{}
+			tasks, err := w.ListContext(ctx, "mcp-local-hub-canceled-fixture")
+			if !errors.Is(err, ErrUnavailable) || !errors.Is(err, tc.want) {
+				t.Fatalf("context error identity lost: err=%v want ErrUnavailable and %v", err, tc.want)
+			}
+			if tasks != nil {
+				t.Fatalf("stopped context returned tasks: %+v", tasks)
+			}
+		})
 	}
 }
 
