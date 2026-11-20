@@ -151,7 +151,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	return q, nil
 }
 
-func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) error {
+func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) (retErr error) {
 	if ctx == nil {
 		return errors.New("quiescence context required")
 	}
@@ -170,7 +170,17 @@ func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) er
 	if err := q.executing.VerifyUnchanged(); err != nil {
 		return err
 	}
-	return errors.Join(q.executing.VerifyOriginalProductProcessHandle(uintptr(windows.CurrentProcess())), ctx.Err())
+	currentProcess := windows.CurrentProcess()
+	var originalProcess windows.Handle
+	if err := windows.DuplicateHandle(currentProcess, currentProcess, currentProcess, &originalProcess, windows.PROCESS_QUERY_LIMITED_INFORMATION, false, 0); err != nil {
+		return errors.Join(fmt.Errorf("duplicate current process query handle: %w", err), ctx.Err())
+	}
+	defer func() {
+		if err := windows.CloseHandle(originalProcess); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close current process query handle: %w", err))
+		}
+	}()
+	return errors.Join(q.executing.VerifyOriginalProductProcessHandle(uintptr(originalProcess)), ctx.Err())
 }
 
 func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
