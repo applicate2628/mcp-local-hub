@@ -575,7 +575,8 @@ func reopenCanonicalEntryTasks(ctx context.Context, stateDir, legacy string, rec
 	txn, err := scheduler.ReopenOwnedEntrypointTaskTxnForCanonicalEntrySetWithStore(ctx,
 		filepath.Join(stateDir, "windows-product-entrypoint.lock"), canonical, legacy, product, store, backups)
 	if err != nil {
-		return nil, errors.Join(err, store.Close())
+		// Keep the journal-owned XML available for the next recovery attempt.
+		return nil, err
 	}
 	return &windowsProductPairTaskOwner{txn: txn, store: store}, nil
 }
