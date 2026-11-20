@@ -1169,7 +1169,7 @@ func readbackGUIOwnedPriorWithOriginal(ctx context.Context, journal windowsProdu
 	artifacts := []priorArtifact{
 		{journal.LegacyWindowless.Target, windowsProductPreimageV1{Present: journal.LegacyWindowless.PriorPresent, SHA256: journal.LegacyWindowless.PriorSHA256}},
 	}
-	if journal.EntrySet != nil {
+	if hasCanonicalEntryArm(journal) {
 		if original == nil {
 			return errors.New("original native GUI prior runtime is required for new-arm readback")
 		}
@@ -3027,8 +3027,8 @@ func recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(ctx context.Context, sta
 	default:
 		return fmt.Errorf("%w: unsupported prior runtime recovery mode", ErrWindowsProductRecoveryIdentity)
 	}
-	if journal.EntrySet == nil {
-		return fmt.Errorf("%w: complete-set prior runtime recovery has no entry set", ErrWindowsProductRecoveryIdentity)
+	if !hasCanonicalEntryArm(journal) || (journal.EntrySet != nil && journal.EntryBundle != nil) {
+		return fmt.Errorf("%w: complete-set prior runtime recovery requires exactly one canonical entry arm", ErrWindowsProductRecoveryIdentity)
 	}
 	pre := journal.PreSettlement
 	if pre == nil {
@@ -3039,7 +3039,7 @@ func recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(ctx context.Context, sta
 		return err
 	}
 	if !present {
-		path = journal.EntrySet.CanonicalEntry.Target
+		path = canonicalJournalEntryPath(journal)
 	}
 	if pre.Supervisor.State != windowsProductSupervisorKnownAbsent && pre.Supervisor.State != windowsProductSupervisorGracefullySettled {
 		return fmt.Errorf("%w: unsupported prior supervisor state", ErrWindowsProductRecoveryIdentity)
@@ -3464,10 +3464,11 @@ func buildGUIOwnedPriorRecoveryOps(ctx context.Context, stateDir, productPath st
 	if projectionErr != nil {
 		return guiOwnedPriorRecoveryOps{}, projectionErr
 	}
-	if journal.EntrySet != nil && (!present || !samePath(productPath, selectedPath)) {
-		return guiOwnedPriorRecoveryOps{}, errors.New("original GUI prior runtime projection differs from recovery target")
-	}
-	if journal.EntrySet == nil {
+	if hasCanonicalEntryArm(journal) {
+		if !present || !samePath(productPath, selectedPath) {
+			return guiOwnedPriorRecoveryOps{}, errors.New("original GUI prior runtime projection differs from recovery target")
+		}
+	} else {
 		selectedPath = productPath
 	}
 	deps := buildV5UpgradeDeps(productPath, stateDir)

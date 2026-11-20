@@ -210,6 +210,69 @@ func TestCanonicalRuntimeRecoveryStillRequiresUpgradeProjection(t *testing.T) {
 	}
 }
 
+// A valid typed projection reaches the original-lender gate before GUI,
+// supervisor, port, or launch probes. The surrounding recovery owns admission
+// of the complete durable journal and the native original.
+func TestCanonicalRuntimeRecoveryV2ReachesPriorLenderGate(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "mcphub.exe")
+	product := filepath.Join(root, "mcphub-product", "mcphub.exe")
+	prior := &windowsCanonicalEntryRuntimePreimageV1{
+		Path: product, Present: true, SHA256: strings.Repeat("a", 64),
+	}
+	const transactionID = "0123456789abcdef0123456789abcdef"
+	v1 := &windowsCanonicalEntrySetJournalV1{
+		Schema: binaryadmission.WindowsCanonicalEntrySetSchemaV1, TransactionID: transactionID,
+		CanonicalEntry: windowsProductRecoveryArtifactV3{Target: launcher}, PriorRuntime: prior,
+	}
+	v2 := &windowsCanonicalEntrySetJournalV2{
+		Schema: binaryadmission.WindowsCanonicalEntrySetSchemaV2, TransactionID: transactionID,
+		CanonicalEntry: windowsProductRecoveryArtifactV3{Target: launcher}, PriorRuntime: prior,
+	}
+	for _, tc := range []struct {
+		name    string
+		entry   *windowsCanonicalEntrySetJournalV1
+		bundle  *windowsCanonicalEntrySetJournalV2
+		wantErr error
+	}{
+		{"legacy_v1", v1, nil, ErrWindowsProductRecoveryPending},
+		{"current_v2", nil, v2, ErrWindowsProductRecoveryPending},
+		{"missing_arm", nil, nil, ErrWindowsProductRecoveryIdentity},
+		{"mixed_arms", v1, v2, ErrWindowsProductRecoveryIdentity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			journal := windowsProductRecoveryJournalV3{
+				Schema: WindowsProductRecoverySchemaV3, TransactionID: transactionID,
+				Mode: WindowsProductPairModeUpgrade, Phase: WindowsProductRecoverySuccessorStarting,
+				Product: windowsProductRecoveryArtifactV3{Target: product}, EntrySet: tc.entry, EntryBundle: tc.bundle,
+				PreSettlement: &windowsProductPreSettlementV3{
+					GUIOwner: windowsProductGUIOwnerConfirmedAbsent,
+					Supervisor: windowsProductSupervisorSettlementV1{
+						State:      windowsProductSupervisorGracefullySettled,
+						Generation: &windowsProductSupervisorGenerationV1{PID: 31, StartedAt: "2026-11-20T00:00:00Z"},
+					},
+				},
+			}
+			err := recoverWindowsCanonicalEntryPriorRuntimeWithLaunch(t.Context(), root, journal, nil,
+				func(string) (SupervisorLaunch, error) {
+					t.Fatal("recovery without an original attempted a launch")
+					return nil, nil
+				},
+				func(context.Context, string, string) error {
+					t.Fatal("recovery without an original attempted readiness")
+					return nil
+				})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("prior settlement boundary: got %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == ErrWindowsProductRecoveryPending &&
+				!strings.Contains(err.Error(), "original recovery runtime view unavailable for a previously live runtime") {
+				t.Fatalf("typed projection did not reach the original-lender gate: %v", err)
+			}
+		})
+	}
+}
+
 // This is a real native pipe/held-generation check for the read-only replay
 // operation. It does not launch a Product or issue any service mutation.
 func TestCanonicalRuntimeRecoveryReplayReadinessBindsNativePeer(t *testing.T) {
