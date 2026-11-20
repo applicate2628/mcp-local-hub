@@ -183,20 +183,52 @@ func (q *windowsProductSuccessorQuiescence) verifyNative(ctx context.Context) (r
 	return errors.Join(q.executing.VerifyOriginalProductProcessHandle(uintptr(originalProcess)), ctx.Err())
 }
 
+type windowsProductAbsenceCheck string
+
+const (
+	windowsProductAbsenceContext          windowsProductAbsenceCheck = "CONTEXT"
+	windowsProductAbsenceIssuedImages     windowsProductAbsenceCheck = "ISSUED_IMAGES"
+	windowsProductAbsenceFrozenPorts      windowsProductAbsenceCheck = "FROZEN_PORTS"
+	windowsProductAbsenceProcessInventory windowsProductAbsenceCheck = "PROCESS_INVENTORY"
+	windowsProductAbsenceProcessIdentity  windowsProductAbsenceCheck = "PROCESS_IDENTITY"
+	windowsProductAbsenceProcessPresent   windowsProductAbsenceCheck = "PROCESS_PRESENT"
+	windowsProductAbsenceGUIOwnerRecord   windowsProductAbsenceCheck = "GUI_OWNER_RECORD"
+	windowsProductAbsenceGUIEndpoint      windowsProductAbsenceCheck = "GUI_ENDPOINT"
+)
+
+func isWindowsProductAbsenceCheck(check windowsProductAbsenceCheck) bool {
+	switch check {
+	case windowsProductAbsenceContext, windowsProductAbsenceIssuedImages, windowsProductAbsenceFrozenPorts,
+		windowsProductAbsenceProcessInventory, windowsProductAbsenceProcessIdentity, windowsProductAbsenceProcessPresent,
+		windowsProductAbsenceGUIOwnerRecord, windowsProductAbsenceGUIEndpoint:
+		return true
+	default:
+		return false
+	}
+}
+
+type windowsProductAbsenceError struct {
+	check windowsProductAbsenceCheck
+	cause error
+}
+
+func (e *windowsProductAbsenceError) Error() string { return e.cause.Error() }
+func (e *windowsProductAbsenceError) Unwrap() error { return e.cause }
+
 func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
 	}
 	if q.intent == nil {
-		return errors.New("complete current intent scope required")
+		return &windowsProductAbsenceError{check: windowsProductAbsenceFrozenPorts, cause: errors.New("complete current intent scope required")}
 	}
 	images, err := q.successor.IssuedImagePaths(ctx)
 	if err != nil {
-		return err
+		return &windowsProductAbsenceError{check: windowsProductAbsenceIssuedImages, cause: err}
 	}
 	frozen := expandWindowsProductFrozenPorts(q.intent.Ports)
 	if _, err := observeWindowsProductIntentPorts(ctx, q.journal.Product.Target, frozen, true); err != nil {
-		return err
+		return &windowsProductAbsenceError{check: windowsProductAbsenceFrozenPorts, cause: err}
 	}
 	names := []string{"mcphub.exe", "mcphub-windowless.exe"}
 	for _, image := range images {
@@ -204,15 +236,15 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	}
 	rows, err := api.NewAPI().ListMatchingProcessesContext(ctx, names)
 	if err != nil {
-		return err
+		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
 	}
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
-			return err
+			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
 		}
 		observation, err := process.ObservePIDHandleIdentity(ctx, row.PID)
 		if err != nil {
-			return err
+			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
 		}
 		if observation.ConfirmedAbsent {
 			continue
@@ -220,7 +252,7 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 		identity := observation.Identity
 		for _, image := range images {
 			if samePath(identity.ExecutablePath, image) {
-				return fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)
+				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
 			}
 		}
 		role := supervisorCommandLineSubcommand(row.Cmdline)
@@ -228,15 +260,18 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 			// Other namespaces remain untouched; their GUI listener/singleton may
 			// nevertheless conflict with this required per-user slot below.
 			if samePath(identity.ExecutablePath, q.journal.Product.Target) {
-				return errors.New("current runtime actor remains")
+				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: errors.New("current runtime actor remains")}
 			}
 		}
 	}
 	record, err := gui.ReadGUIOwnerRecord(q.guiOwnerPath)
 	if err != nil {
-		return err
+		return &windowsProductAbsenceError{check: windowsProductAbsenceGUIOwnerRecord, cause: err}
 	}
-	return proveUpgradeGUIOwnerEndpointAbsent(ctx, record, api.LoopbackPortOwnerPIDContext)
+	if err := proveUpgradeGUIOwnerEndpointAbsent(ctx, record, api.LoopbackPortOwnerPIDContext); err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceGUIEndpoint, cause: err}
+	}
+	return nil
 }
 
 func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context) error {

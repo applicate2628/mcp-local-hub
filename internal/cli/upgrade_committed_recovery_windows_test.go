@@ -759,33 +759,60 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 	private := "PRIVATE_PATH_X\\SID-S-1-5-21\\argv-secret\\<Task>PRIVATE_XML</Task>"
 	primary := errors.New(private)
 	cleanup := errors.New("PRIVATE_RELEASE_X")
+	diagnostic := func(check windowsProductAbsenceCheck, cause error) error {
+		return &windowsProductAbsenceError{check: check, cause: cause}
+	}
 	for _, tc := range []struct {
 		name                                  string
 		firstFails, acquireFails, secondFails bool
 		missingLease                          bool
 		releaseErr                            error
+		absenceErr                            error
 		step                                  string
-		cleanupSuffix                         string
+		cleanupSuffix, absenceSuffix          string
 	}{
 		{name: "first", firstFails: true, step: "FIRST_ABSENCE"},
 		{name: "acquire", acquireFails: true, step: "ACQUIRE_EXACT"},
 		{name: "missing-lease", missingLease: true, step: "ACQUIRE_EXACT"},
 		{name: "second", secondFails: true, step: "SECOND_ABSENCE"},
 		{name: "second-release", secondFails: true, releaseErr: cleanup, step: "SECOND_ABSENCE", cleanupSuffix: "; reservation_cleanup=RELEASE_FAILED"},
+		{name: "second-typed-deadline", secondFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceProcessInventory, errors.Join(primary, api.ErrProbeTimeout, context.Canceled, context.DeadlineExceeded)),
+			step:       "SECOND_ABSENCE", absenceSuffix: "; absence_check=PROCESS_INVENTORY; absence_reason=DEADLINE_EXCEEDED"},
+		{name: "second-typed-canceled", secondFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceContext, errors.Join(primary, api.ErrProbeTimeout, context.Canceled)),
+			step:       "SECOND_ABSENCE", absenceSuffix: "; absence_check=CONTEXT; absence_reason=CANCELED"},
+		{name: "second-typed-probe-timeout", secondFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceIssuedImages, errors.Join(primary, api.ErrProbeTimeout)),
+			step:       "SECOND_ABSENCE", absenceSuffix: "; absence_check=ISSUED_IMAGES; absence_reason=PROBE_TIMEOUT"},
+		{name: "second-timeout-only-in-release", secondFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceGUIOwnerRecord, primary), releaseErr: errors.Join(cleanup, context.DeadlineExceeded),
+			step: "SECOND_ABSENCE", cleanupSuffix: "; reservation_cleanup=RELEASE_FAILED", absenceSuffix: "; absence_check=GUI_OWNER_RECORD"},
+		{name: "second-type-only-in-release", secondFails: true,
+			releaseErr: diagnostic(windowsProductAbsenceGUIEndpoint, errors.Join(cleanup, context.DeadlineExceeded)),
+			step:       "SECOND_ABSENCE", cleanupSuffix: "; reservation_cleanup=RELEASE_FAILED"},
+		{name: "second-unknown-check", secondFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceCheck(private), primary), step: "SECOND_ABSENCE"},
+		{name: "first-typed", firstFails: true,
+			absenceErr: diagnostic(windowsProductAbsenceContext, errors.Join(primary, context.Canceled)), step: "FIRST_ABSENCE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			checks := 0
+			callbackErr := primary
+			if tc.absenceErr != nil {
+				callbackErr = tc.absenceErr
+			}
 			reservationLease := &upgradeGUITestLease{releaseErr: tc.releaseErr}
 			ops, _, _ := guiPriorDiagnosticOpsFixture(t)
 			ops.ObserveHealthy = func(context.Context, windowsProductRecoveryJournalV3) error {
-				return errors.New("UPGRADE_GUI_TASK_DRIFT: " + private)
+				return fmt.Errorf("UPGRADE_GUI_TASK_DRIFT: %w", diagnostic(windowsProductAbsenceIssuedImages, errors.Join(primary, context.DeadlineExceeded)))
 			}
 			ops.Reservation = func(ctx context.Context) (gui.OwnedSingleInstanceLease, error) {
 				return acquireGUIOwnedPriorReservation(ctx, nil, guiOwnedPriorReservationOps{
 					ProveNoGUIOrTray: func(context.Context) error {
 						checks++
 						if (checks == 1 && tc.firstFails) || (checks == 2 && tc.secondFails) {
-							return primary
+							return callbackErr
 						}
 						return nil
 					},
@@ -803,26 +830,37 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			journal := windowsProductRecoveryJournalV3{PreSettlement: &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}}
 			ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), journal, ops)
 			public := committedRecoveryCommandError(committedRecoveryOwnerFailureID(ownerErr), "recover pending prior settlement", ownerErr)
-			wantFields := "; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
+			wantFields := "; recovery_result=OWNER_ERROR; failed_operation=RESERVATION; reservation_step=" + tc.step + tc.cleanupSuffix + tc.absenceSuffix + "; initial_failed_predicate=UPGRADE_GUI_TASK_DRIFT"
 			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement" + wantFields
 			if public.Error() != want || !errors.Is(public, ErrWindowsProductRecoveryPending) || public.FailureID() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING" {
 				t.Fatal("actual reservation substep or original causal chain was lost")
 			}
-			if !tc.missingLease && !errors.Is(public, primary) {
+			wantPrimary := primary
+			if tc.firstFails || tc.secondFails {
+				wantPrimary = callbackErr
+			}
+			if !tc.missingLease && !errors.Is(public, wantPrimary) {
 				t.Fatal("original reservation primary cause was text-only")
 			}
 			var outer, inner *upgradeGUIPriorSettlementError
 			if !errors.As(ownerErr, &outer) || !errors.As(outer.cause, &inner) {
 				t.Fatal("original reservation carrier did not survive prior settlement wrapping")
 			}
+			var retainedCallback error
+			if tc.secondFails {
+				retainedCallback = callbackErr
+			}
+			if inner.reservationAbsence != retainedCallback || outer.reservationAbsence != retainedCallback {
+				t.Fatal("second absence callback was lost or merged with another failure")
+			}
 			if tc.releaseErr != nil {
-				if inner.reservationRelease != cleanup || strings.Index(inner.cause.Error(), primary.Error()) > strings.Index(inner.cause.Error(), cleanup.Error()) {
+				if inner.reservationRelease != tc.releaseErr || strings.Index(inner.cause.Error(), callbackErr.Error()) > strings.Index(inner.cause.Error(), tc.releaseErr.Error()) {
 					t.Fatal("actual release failure was lost or reordered before primary")
 				}
 			} else if inner.reservationRelease != nil {
 				t.Fatal("cleanup failure was manufactured")
 			}
-			if tc.releaseErr != nil && !errors.Is(public, cleanup) {
+			if tc.releaseErr != nil && !errors.Is(public, tc.releaseErr) {
 				t.Fatal("actual cleanup cause was dropped")
 			}
 			if strings.Contains(public.Error(), private) || strings.Contains(public.Error(), "PRIVATE_RELEASE_X") || strings.Contains(fmt.Sprintf("%v %#v", ownerErr, ownerErr), private) {
@@ -849,7 +887,7 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 					t.Fatal("ordinary projection dropped a nested recovery or cleanup cause")
 				}
 			}
-			if (!tc.missingLease && !errors.Is(ordinary, primary)) || (tc.releaseErr != nil && !errors.Is(ordinary, tc.releaseErr)) {
+			if (!tc.missingLease && !errors.Is(ordinary, wantPrimary)) || (tc.releaseErr != nil && !errors.Is(ordinary, tc.releaseErr)) {
 				t.Fatal("ordinary projection dropped the typed reservation causes")
 			}
 			wantReleases := 0

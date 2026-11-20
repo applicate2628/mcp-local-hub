@@ -98,8 +98,11 @@ func (e *upgradeCommittedCommandError) Error() string {
 				if prior.operation == upgradeGUIPriorReservation {
 					if isUpgradeGUIPriorReservationStep(prior.reservationStep) {
 						message += "; reservation_step=" + string(prior.reservationStep)
-						if prior.reservationStep == upgradeGUIReservationSecondAbsence && prior.reservationRelease != nil {
-							message += "; reservation_cleanup=RELEASE_FAILED"
+						if prior.reservationStep == upgradeGUIReservationSecondAbsence {
+							if prior.reservationRelease != nil {
+								message += "; reservation_cleanup=RELEASE_FAILED"
+							}
+							message += pendingReservationAbsenceProjection(prior.reservationAbsence)
 						}
 					} else {
 						message += "; reservation_step=UNCLASSIFIED"
@@ -123,6 +126,25 @@ func (e *upgradeCommittedCommandError) Error() string {
 }
 func (e *upgradeCommittedCommandError) Unwrap() error     { return e.cause }
 func (e *upgradeCommittedCommandError) FailureID() string { return e.id }
+
+// Only the actual callback's top-level typed observation can classify a
+// second absence. Earlier and release errors remain in the causal chain.
+func pendingReservationAbsenceProjection(cause error) string {
+	absence, ok := cause.(*windowsProductAbsenceError)
+	if !ok || absence == nil || !isWindowsProductAbsenceCheck(absence.check) {
+		return ""
+	}
+	message := "; absence_check=" + string(absence.check)
+	switch {
+	case errors.Is(absence.cause, context.DeadlineExceeded):
+		message += "; absence_reason=DEADLINE_EXCEEDED"
+	case errors.Is(absence.cause, context.Canceled):
+		message += "; absence_reason=CANCELED"
+	case errors.Is(absence.cause, api.ErrProbeTimeout):
+		message += "; absence_reason=PROBE_TIMEOUT"
+	}
+	return message
+}
 
 // pendingRuntimeProjection is the shared closed-field owner. It never renders
 // private cause text or manufactures a snapshot when original receiving is nil.

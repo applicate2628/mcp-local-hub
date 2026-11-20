@@ -1136,6 +1136,7 @@ func acquireGUIOwnedPriorReservation(ctx context.Context, owned gui.OwnedSingleI
 		releaseErr := lease.ReleaseErr()
 		return nil, &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIReservationSecondAbsence,
 			cause:              errors.Join(fmt.Errorf("%w: GUI/tray appeared during reservation: %w", ErrWindowsProductRecoveryPending, err), releaseErr),
+			reservationAbsence: err,
 			reservationRelease: releaseErr}
 	}
 	return lease, nil
@@ -1287,6 +1288,7 @@ func isUpgradeGUIPriorReservationStep(step upgradeGUIPriorReservationStep) bool 
 // are prerequisites retained only when the fallback ultimately fails.
 type upgradeGUIPriorSettlementError struct {
 	reservationStep           upgradeGUIPriorReservationStep
+	reservationAbsence        error
 	reservationRelease        error
 	operation                 upgradeGUIPriorOperation
 	cause                     error
@@ -1316,6 +1318,7 @@ func recoverGUIOwnedPriorSettlementWithOps(ctx context.Context, journal windowsP
 			var reservation *upgradeGUIPriorSettlementError
 			if operation == upgradeGUIPriorReservation && errors.As(retErr, &reservation) && reservation.operation == upgradeGUIPriorReservation {
 				diagnostic.reservationStep = reservation.reservationStep
+				diagnostic.reservationAbsence = reservation.reservationAbsence
 				diagnostic.reservationRelease = reservation.reservationRelease
 			}
 			retErr = diagnostic
