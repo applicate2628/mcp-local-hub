@@ -433,9 +433,11 @@ func newProductRecoveryV3Fixture(t *testing.T, phase WindowsProductRecoveryPhase
 }
 
 func (f productRecoveryV3Fixture) request(tasks WindowsProductTaskTxn) windowsProductRecoveryRequest {
-	return windowsProductRecoveryRequest{JournalAllowance: productJournalFixtureAllowance(),
+	allowance := productJournalFixtureAllowance()
+	return windowsProductRecoveryRequest{JournalAllowance: allowance,
 		Context: context.Background(), StateDir: f.stateDir,
 		ProductPath: f.product, LegacyWindowlessPath: f.legacy,
+		Legacy: windowsProductPairRecoveryRequest{JournalAllowance: allowance},
 		Deps: windowsProductRecoveryDeps{
 			ReopenTasks: func(context.Context, WindowsProductPairTaskRecovery) (WindowsProductTaskTxn, error) {
 				return tasks, nil
