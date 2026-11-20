@@ -794,10 +794,11 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 		{name: "second-unknown-check", secondFails: true,
 			absenceErr: diagnostic(windowsProductAbsenceCheck(private), primary), step: "SECOND_ABSENCE"},
 		{name: "first-typed", firstFails: true,
-			absenceErr: diagnostic(windowsProductAbsenceContext, errors.Join(primary, context.Canceled)), step: "FIRST_ABSENCE"},
+			absenceErr: diagnostic(windowsProductAbsenceContext, errors.Join(primary, context.Canceled)), step: "FIRST_ABSENCE",
+			absenceSuffix: "; absence_check=CONTEXT; absence_reason=CANCELED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			checks := 0
+			checks, acquisitions := 0, 0
 			callbackErr := primary
 			if tc.absenceErr != nil {
 				callbackErr = tc.absenceErr
@@ -817,6 +818,7 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 						return nil
 					},
 					AcquireExact: func() (gui.OwnedSingleInstanceLease, error) {
+						acquisitions++
 						if tc.acquireFails {
 							return nil, primary
 						}
@@ -830,7 +832,7 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			journal := windowsProductRecoveryJournalV3{PreSettlement: &windowsProductPreSettlementV3{GUIOwner: windowsProductGUIOwnerConfirmedPresent}}
 			ownerErr := recoverGUIOwnedPriorSettlementWithOps(context.Background(), journal, ops)
 			quiescenceSuffix := ""
-			if tc.secondFails {
+			if tc.firstFails || tc.secondFails {
 				ownerErr = &windowsProductQuiescenceAcquisitionError{stage: windowsProductQuiescenceAtReservation, cause: ownerErr}
 				quiescenceSuffix = "; quiescence_stage=RESERVATION"
 			}
@@ -852,11 +854,11 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 				t.Fatal("original reservation carrier did not survive prior settlement wrapping")
 			}
 			var retainedCallback error
-			if tc.secondFails {
+			if tc.firstFails || tc.secondFails {
 				retainedCallback = callbackErr
 			}
 			if inner.reservationAbsence != retainedCallback || outer.reservationAbsence != retainedCallback {
-				t.Fatal("second absence callback was lost or merged with another failure")
+				t.Fatal("failed absence callback was lost or merged with another failure")
 			}
 			if tc.releaseErr != nil {
 				if inner.reservationRelease != tc.releaseErr || strings.Index(inner.cause.Error(), callbackErr.Error()) > strings.Index(inner.cause.Error(), tc.releaseErr.Error()) {
@@ -895,12 +897,15 @@ func TestPendingRecoveryReservationSubstepsProjectOnlyActualClosedDetail(t *test
 			if (!tc.missingLease && !errors.Is(ordinary, wantPrimary)) || (tc.releaseErr != nil && !errors.Is(ordinary, tc.releaseErr)) {
 				t.Fatal("ordinary projection dropped the typed reservation causes")
 			}
-			wantReleases := 0
-			if tc.secondFails {
-				wantReleases = 1
+			wantChecks, wantAcquisitions, wantReleases := 1, 1, 0
+			if tc.firstFails {
+				wantAcquisitions = 0
 			}
-			if reservationLease.released != wantReleases {
-				t.Fatal("diagnostics repeated or fabricated a release")
+			if tc.secondFails {
+				wantChecks, wantReleases = 2, 1
+			}
+			if checks != wantChecks || acquisitions != wantAcquisitions || reservationLease.released != wantReleases {
+				t.Fatal("reservation repeated or skipped a check, acquisition, or release")
 			}
 		})
 	}

@@ -99,10 +99,10 @@ func (e *upgradeCommittedCommandError) Error() string {
 				if prior.operation == upgradeGUIPriorReservation {
 					if isUpgradeGUIPriorReservationStep(prior.reservationStep) {
 						message += "; reservation_step=" + string(prior.reservationStep)
-						if prior.reservationStep == upgradeGUIReservationSecondAbsence {
-							if prior.reservationRelease != nil {
-								message += "; reservation_cleanup=RELEASE_FAILED"
-							}
+						if prior.reservationStep == upgradeGUIReservationSecondAbsence && prior.reservationRelease != nil {
+							message += "; reservation_cleanup=RELEASE_FAILED"
+						}
+						if prior.reservationStep == upgradeGUIReservationFirstAbsence || prior.reservationStep == upgradeGUIReservationSecondAbsence {
 							message += pendingReservationAbsenceProjection(prior.reservationAbsence)
 						}
 					} else {
@@ -135,8 +135,8 @@ func (e *upgradeCommittedCommandError) Error() string {
 func (e *upgradeCommittedCommandError) Unwrap() error     { return e.cause }
 func (e *upgradeCommittedCommandError) FailureID() string { return e.id }
 
-// Only the actual callback's top-level typed observation can classify a
-// second absence. Earlier and release errors remain in the causal chain.
+// Only the failed absence callback's top-level typed observation can
+// classify its check. Other causes stay in the original error chain.
 func pendingReservationAbsenceProjection(cause error) string {
 	absence, ok := cause.(*windowsProductAbsenceError)
 	if !ok || absence == nil || !isWindowsProductAbsenceCheck(absence.check) {

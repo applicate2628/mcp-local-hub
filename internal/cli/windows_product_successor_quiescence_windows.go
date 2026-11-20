@@ -61,7 +61,6 @@ const (
 	windowsProductQuiescenceAtNativeJournal    windowsProductQuiescenceAcquisitionStage = "NATIVE_JOURNAL"
 	windowsProductQuiescenceAtSuccessorBank    windowsProductQuiescenceAcquisitionStage = "SUCCESSOR_BANK"
 	windowsProductQuiescenceAtInitialControls  windowsProductQuiescenceAcquisitionStage = "INITIAL_CONTROLS"
-	windowsProductQuiescenceAtInitialAbsence   windowsProductQuiescenceAcquisitionStage = "INITIAL_ABSENCE"
 	windowsProductQuiescenceAtReservation      windowsProductQuiescenceAcquisitionStage = "RESERVATION"
 	windowsProductQuiescenceAtReservedControls windowsProductQuiescenceAcquisitionStage = "RESERVED_CONTROLS"
 	windowsProductQuiescenceAtHeldRecheck      windowsProductQuiescenceAcquisitionStage = "HELD_RECHECK"
@@ -70,7 +69,7 @@ const (
 func isWindowsProductQuiescenceAcquisitionStage(stage windowsProductQuiescenceAcquisitionStage) bool {
 	switch stage {
 	case windowsProductQuiescenceAtNativeIdentity, windowsProductQuiescenceAtNativeJournal, windowsProductQuiescenceAtSuccessorBank,
-		windowsProductQuiescenceAtInitialControls, windowsProductQuiescenceAtInitialAbsence, windowsProductQuiescenceAtReservation,
+		windowsProductQuiescenceAtInitialControls, windowsProductQuiescenceAtReservation,
 		windowsProductQuiescenceAtReservedControls, windowsProductQuiescenceAtHeldRecheck:
 		return true
 	default:
@@ -154,10 +153,6 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 	}
 	if !samePath(filepath.Dir(q.guiOwnerPath), stateDir) {
 		return q, errors.New("GUI reservation belongs to a different current namespace")
-	}
-	stage = windowsProductQuiescenceAtInitialAbsence
-	if err = q.absent(limit); err != nil {
-		return q, err
 	}
 	stage = windowsProductQuiescenceAtReservation
 	_, err = acquireGUIOwnedPriorReservation(limit, nil, guiOwnedPriorReservationOps{

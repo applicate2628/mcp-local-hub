@@ -1122,7 +1122,8 @@ func acquireGUIOwnedPriorReservation(ctx context.Context, owned gui.OwnedSingleI
 	}
 	if err := ops.ProveNoGUIOrTray(ctx); err != nil {
 		return nil, &upgradeGUIPriorSettlementError{operation: upgradeGUIPriorReservation, reservationStep: upgradeGUIReservationFirstAbsence,
-			cause: fmt.Errorf("%w: exact GUI/tray absence unproven: %w", ErrWindowsProductRecoveryPending, err)}
+			cause:              fmt.Errorf("%w: exact GUI/tray absence unproven: %w", ErrWindowsProductRecoveryPending, err),
+			reservationAbsence: err}
 	}
 	if owned != nil {
 		return owned, nil
