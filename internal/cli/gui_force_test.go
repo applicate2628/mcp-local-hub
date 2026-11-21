@@ -329,7 +329,7 @@ func TestForce_KillRewritesPidportWithCurrentPID(t *testing.T) {
 	// acquire-poll succeeds.
 	var sleepCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		sleepCmd = exec.Command("powershell", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
+		sleepCmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
 	} else {
 		sleepCmd = exec.Command("sleep", "60")
 	}
@@ -696,7 +696,7 @@ func TestForce_KillRaceLost(t *testing.T) {
 	// Spawn a sleep child so Probe sees a live PID.
 	var sleepCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		sleepCmd = exec.Command("powershell", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
+		sleepCmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
 	} else {
 		sleepCmd = exec.Command("sleep", "60")
 	}
