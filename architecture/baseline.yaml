@@ -117,6 +117,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: 00df60c0aeb91d3b3118502831f2bb5d730880c27657d9c116243ceeefc019dc
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: establishDaemonSession
+        line: 639
+      evidence: Round-3
+      metric: 1
+      message: production comment contains review history marker "Round-3"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 014ad87b0c4101fda016b589604c4cc03522253d08b0e9a303414073a61c3f52
       kind: file_budget
       location:
@@ -169,20 +183,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 01e4b2a59c6e741b82a920b31824c9121d486c2025516d21d383f6b65e4f6e71
-      kind: file_budget
+    - fingerprint: 01e66155c9c9eec9bff989172e38bd8ae378999e64a6e1416e131e078493af80
+      kind: history_comment
       location:
-        path: internal/gui/hub_listener.go
-        symbol: gui
-        line: 1
-      evidence: production_advisory_lines
-      metric: 1294
-      message: file has 1294 lines and exceeds production_advisory_lines
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: isClientToolsListError
+        line: 1163
+      evidence: round-11
+      metric: 2
+      message: production comment contains review history marker "round-11"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1294
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 01eebd0f36fb7ee5afafc0a1a2f0b772e40968190688a70d76f13bcc11c0c6ba
       kind: mutable_global
       location:
@@ -367,6 +381,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
+    - fingerprint: 032ebfa18b56bbe5dfed7adf0167f009b52dac2f7f56f9ad0219547f1fb9c322
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaDelete'
+        line: 1783
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 0332abc0cb84ac50e94d1e511f12ee927df694a4e772b8d10c026fb18b369bc5
       kind: mutable_global
       location:
@@ -459,18 +487,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 038220c0b9df848f996e032a346fb9afbdf8b6e1d054b69e1c9c8701092994c4
-      kind: worker
-      location:
-        path: internal/gui/hub_listener.go
-        symbol: startHubMcpListenerWithOptions
-        line: 967
-      evidence: 'go healthWatcher.Run #1'
-      message: goroutine healthWatcher.Run requires an owner, cancellation, join, and bound contract
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 03b298d9051ebc2a960dfe83d99c93dc139e8861964cc4884a963712292dd863
       kind: mutable_global
       location:
@@ -497,6 +513,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 3
+    - fingerprint: 03e81c901ce43a0587b8baceb51e27b8d1e360b06a09cbf1e77cdd54af401f8c
+      kind: history_comment
+      location:
+        path: internal/mcproute/lsp_router.go
+        symbol: '*WorkspaceRoutes.workspaceFromResolvedLSPPath'
+        line: 545
+      evidence: 'PR #269'
+      metric: 1
+      message: 'production comment contains review history marker "PR #269"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 03f6f333373c6890fd0c7f0cc49c108f736f6df07b9d7f61aa8b8dbb729ee68e
       kind: mutable_global
       location:
@@ -565,20 +595,6 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
-    - fingerprint: 04822571c8de570c7fcae516e55536de07fc1737b6e6dbfb2099bfec9d277a2a
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.lookup'
-        line: 270
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 049c25a3e5fa8995f7a6249187b9308e7454d33b85140dddd8a590556b9afc9c
       kind: history_comment
       location:
@@ -607,20 +623,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 05852d65d7122ccf4ee565b4001d120afa6a404a5faecb47fa697052630b88a6
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: maxRouterSessions
-        line: 46
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 05bc9b85b086fcb9fc5f8dabf2240b1a58a7b17f72ac690593526e6ff08fc9da
       kind: mutable_global
       location:
@@ -751,20 +753,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 06ae9b79913f11ebfa201b6ac24e76d7144a76c2c9aa8b2f644263a5a0095545
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaCancelled'
-        line: 2102
-      evidence: Round-10
-      metric: 1
-      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 06ba3c2fa57616f14db19abf8472ba8ab681d38249a423300af47f6eb4c8b47a
       kind: history_comment
       location:
@@ -843,6 +831,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: 07976612b0b67d1cedf32df888d803f466efc3c8910786384f9f80575038e191
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1053
+      evidence: round-2
+      metric: 1
+      message: production comment contains repeated review history marker "round-2"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 07a10979260381ace2d8f1c6ebb408490b74c4e09e25361857e9630f92ade886
       kind: history_comment
       location:
@@ -1035,20 +1037,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 091c9aa159c9bc3344a741227d45e2752d0e9d7d02323f08ded53eaa8be81cfb
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router_findings_test.go
-        symbol: gui
-        line: 1
-      evidence: test_review_lines
-      metric: 2273
-      message: file has 2273 lines and exceeds test_review_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2273
     - fingerprint: 092b3043fd7e2eb52f5c2f5af3629cce5267ececca227d281c45fe2141f8177a
       kind: history_comment
       location:
@@ -1139,18 +1127,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 09a65ab375836935716de8b57d270b285345d578341ce1194dae7bfd3201945e
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_idle_sweeper.go
-        symbol: serenaIdleStopFn
-        line: 65
-      evidence: var serenaIdleStopFn
-      message: production package-level var serenaIdleStopFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 09aa5a7d007dfe33b2eddfe455eaff1458ba67c15ed4bcb20cb3ff40a6cd4b75
       kind: history_comment
       location:
@@ -1415,20 +1391,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 0c71f1814009db851ce328361e12bd33ae3e0a6f8904d559136fce8ef1f610de
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: routerSessionStore
-        line: 89
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 0c75d5ccdf74ee3f0f6228432128940d4ece3d53d3b2d68bf44b35a3d36946bd
       kind: worker
       location:
@@ -1637,20 +1599,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 0e2f308c2f74448b5d8c81eb4869310725e858cf70bc928e5f2ec0d34fc66d11
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.store'
-        line: 344
-      evidence: 'PR #249'
-      metric: 2
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 0e50da275b026e984ad78a9e555fdf82c3ad2f7fff1661e12f2ca4e9ab53a2f7
       kind: mutable_global
       location:
@@ -1675,6 +1623,18 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: 0e6049264b9c66f3e344ff9323812dd67420b33ebea1d55e2458e02dc26e4beb
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: serenaToolsListPortLiveFn
+        line: 101
+      evidence: var serenaToolsListPortLiveFn
+      message: production package-level var serenaToolsListPortLiveFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 0e8e9c7f20c8379b9055277595e3185578aff2bbf03d725879b79728081f2161
       kind: production_test_hook
       location:
@@ -1753,6 +1713,18 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 0f1eb68d0f7b90efcd7bd33294b9129527a544a490913996f010516e9ffe5610
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: serenaBackendStatusFn
+        line: 1027
+      evidence: var serenaBackendStatusFn
+      message: production package-level var serenaBackendStatusFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 0f3b7bd173ffac4aa92ee231893a750677161eb95d62da0772d3ce8c2e340897
       kind: mutable_global
       location:
@@ -1891,19 +1863,19 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
-    - fingerprint: 117581ef3b7d7a447d1c80b07d9396c1d34eb46aa18b0ce4daa868ccbc4f0098
+    - fingerprint: 117200aa6ef9a013406db4af6e574d9439d19730da36472ae536d246b172b3f5
       kind: history_comment
       location:
-        path: internal/gui/lsp_router.go
-        symbol: lspRouterDeps
-        line: 72
-      evidence: 'PR #269'
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.resolveDaemonSession'
+        line: 853
+      evidence: round-11
       metric: 1
-      message: 'production comment contains review history marker "PR #269"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
+      message: production comment contains repeated review history marker "round-11"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 11a295ada143746d3f46614971b1e6171572e4b16793a3a411776a2459460a18
       kind: history_comment
@@ -1918,6 +1890,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+      max_metric: 1
+    - fingerprint: 11b7dd9e021d4a5627844c082569525b8b4c8dbce4607fe7d7e75bd93214e69b
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaCancelled'
+        line: 2098
+      evidence: Round-10
+      metric: 1
+      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 11c735f6cb5968f84f749a90dea4dc934d79f80a6dba0a3998922c7375f6a03d
       kind: file_budget
@@ -2137,20 +2123,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
-    - fingerprint: 13c24566d4840f663d45ae13b8db3e12ba05517a234f17b5eca14f9e06b40a51
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaDelete'
-        line: 1787
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 13d19293054ca56e65f8882b3478225dd2bc192078255a403b2f07004b74934e
       kind: history_comment
       location:
@@ -2546,6 +2518,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+      max_metric: 1
+    - fingerprint: 1758fc7de7d246a13cfa335df474f8c4207354dd668be89050ce0f251128b9c9
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*WorkspaceRoutes.coordinateExpiredRouterSessionUnbind'
+        line: 683
+      evidence: Round-13
+      metric: 1
+      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 17b06859924d5baefca24cb54eae42de406ebe431fd2c84c1b16826d3040d3ae
       kind: history_comment
@@ -3105,6 +3091,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 3
+    - fingerprint: 1b50d9a6fc9ec9ae4410d11c18c50be646e2b4cce312373e87dd98450b03ac19
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaDelete'
+        line: 1783
+      evidence: Codex round
+      metric: 1
+      message: production comment contains review history marker "Codex round"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 1b5846373c1ba9c9f24afe98fd6823c84c56115ad739d6ca6c2e72983eb1ee61
       kind: history_comment
       location:
@@ -3145,6 +3145,20 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: 1b8960fca014e0b0b47f1ccad9eb9ee27251bcdd7b2acfa9debfcdbf91a0369b
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.reserveSlot'
+        line: 372
+      evidence: 'PR #251'
+      metric: 2
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 1b8b9a427331cd3bc60af160a7642b4352e2efd09c1aceefc1ea35781ebfdfb1
       kind: api_construction
       location:
@@ -3224,20 +3238,6 @@ entries:
       work_package: WP-11D
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
-      max_metric: 1
-    - fingerprint: 1c3ca6f910118d58ef6468d6e79a1f03f969b21cee89da8c124938b6016189a6
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: postHandshakeInitialized
-        line: 821
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: 1c47ca66ea628a7c3c2a04d44d82884811bbf690de144027c33bacfe2b6a1750
       kind: history_comment
@@ -3607,20 +3607,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 3
-    - fingerprint: 1e7af5ccfe56a5813b81a0cdf97dd8d443de06aa7a1d78ba812dba4546675c1e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1112
-      evidence: Round-9
-      metric: 2
-      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 1eb8d49801ebab5457476680ad3c8865cf415e9850a63969177e1af34b48545d
       kind: production_test_hook
       location:
@@ -3743,18 +3729,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 1f6bebe02eee1202f8afe520a88291228d6fd4ec44707df7e76ed5aacc1a2ce9
-      kind: production_test_hook
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.SetSerenaActivityCommitterForTest'
-        line: 326
-      evidence: SetSerenaActivityCommitterForTest
-      message: test hook *Server.SetSerenaActivityCommitterForTest is compiled into production code
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 1f92a1e1c3b622c8d40df88ed1195177925b1e5b2c298ce32c69cbedc6952d95
       kind: history_comment
       location:
@@ -3771,6 +3745,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
+    - fingerprint: 1f96ca67674f9a5e0e0e11b52e6fca00f36898e032731613a490b449df29826a
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.reclaimExpiredLocked'
+        line: 193
+      evidence: 'PR #251'
+      metric: 2
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 1fbd741a7feb07f083830d0bd2a321bcdd54f2409e3385bdbd5fc7624a6c28a5
       kind: history_comment
       location:
@@ -3985,6 +3973,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: 22283473b323293225d4d6275228828d0a8ffa28a1fa122878ee40a9ed65a679
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 799
+      evidence: round-10
+      metric: 4
+      message: production comment contains repeated review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 4
     - fingerprint: 2234eee5842cef91df76d132beaee1f1a2d2fc9af9441a99a37f7659aab437b1
       kind: api_construction
       location:
@@ -4168,6 +4170,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+      max_metric: 1
+    - fingerprint: 237206f492241744de38870864e0d678a0db730d83d7589a75661faddebfcf41
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.releaseReservation'
+        line: 423
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 23a418526167708342ba6cdb1943867c85c45c13b9cf2541be0ae792d418f31b
       kind: mutable_global
@@ -4421,20 +4437,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 25c94ac4b12eab42670a2abe2c526d1ab0ff48f335ef6354e6619b622357adab
-      kind: api_construction
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.SetSerenaRouterProduction'
-        line: 243
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 2
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 25e3c953f724cb48182509398fda5777c9191df2d0bb95df304cfe1d0ef53cc7
       kind: history_comment
       location:
@@ -4529,6 +4531,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 26e17b7ebb117a65d0d08bc628a77204b825284e1b0bc520f3359bd06434c841
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_idle_sweeper.go
+        symbol: serenaIdleAuditFn
+        line: 81
+      evidence: var serenaIdleAuditFn
+      message: production package-level var serenaIdleAuditFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 26f47f3eaa0108cc68ed8b85b9124829e5e7a676ab710fa84f17fa6b6df26ed1
       kind: file_budget
       location:
@@ -4591,20 +4605,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
-    - fingerprint: 273b2cb3cc33e7c198c0beed978306dbcbf14f5635b82df9ee195eb7945eb407
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*Server.SweepSerenaSessions'
-        line: 604
-      evidence: Round-13
-      metric: 1
-      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 27671bc82530b1de8d8d980e521e35fad1b5337a0bc4068f9fd30ef2ce6de659
       kind: history_comment
       location:
@@ -4632,20 +4632,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: 279c5e266f5bb23a8fe4d9288f96c065776843524b27f9844afaf98f41b4cff3
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1057
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: 27aef3a3910ae4a38715237731c7c22273cc561fe28cf783275fdac73679553b
       kind: mutable_global
@@ -4699,6 +4685,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
+    - fingerprint: 27ec233e037390552a02c3bd624eb4095562b76a129c33eb79ab338c575682e7
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: ErrWorkspaceNotFound
+        line: 32
+      evidence: var ErrWorkspaceNotFound
+      message: production package-level var ErrWorkspaceNotFound requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 2815c7a6e6c8f917a30c5685e15f21ae06945fcb8fcb4f33af4e19f37a5fdb77
       kind: mutable_global
       location:
@@ -4725,6 +4723,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
+    - fingerprint: 282f50c0ab1e109439d226f1d4b77e25c55c3ebdd4a6d15d7bafd80451fb8ccb
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: defaultSerenaClient
+        line: 195
+      evidence: var defaultSerenaClient
+      message: production package-level var defaultSerenaClient requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 283fe97c993a2bf60f7b07bfcae17138288c6456aa3cb1bd85b2438264be3756
       kind: mutable_global
       location:
@@ -4989,20 +4999,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 2a1a2b57e5b7e9f2a49e5923d535e14bfdb9c2e12bebe4ba099b4407c483b914
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: proxyToolsListOnce
-        line: 1537
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 2a30fbc244838bbcd56eb9f7b82c9414cf244613ec9e026fcf5aedbb05c945c9
       kind: mutable_global
       location:
@@ -5093,20 +5089,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
-    - fingerprint: 2ad2b10c22e28c7a16bbdda1419c1780e03f99e1725727eff6caf52dbeb59a43
-      kind: api_construction
+    - fingerprint: 2aa67a1ef07ce22f2e2d16dc314219dded30e36aec74561dadd7e4779424cbb1
+      kind: history_comment
       location:
-        path: internal/gui/lsp_router.go
-        symbol: '*Server.SetLSPRouterProduction'
-        line: 114
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 799
+      evidence: Round-13
+      metric: 2
+      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 2ade7ff695886f79d5e135a5ec1e7ab776240af893574066face53c08cacf44d
       kind: api_construction
       location:
@@ -5180,20 +5176,6 @@ entries:
       evidence: mcp-local-hub/internal/api.NewAPI
       metric: 1
       message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: 2b5575708b299b2e6a0977e64c48ee27f81b0e36b772b4c2c18ada3270d03aee
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.fetchToolsListFromAnyDaemon'
-        line: 1220
-      evidence: Round-11
-      metric: 1
-      message: production comment contains repeated review history marker "Round-11"; move history to an ADR or archive
       owner: gui-adapter
       work_package: WP-11B
       remove_by: "2027-03-31"
@@ -5285,6 +5267,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 2c16365d32c33a71df96bfc5a11bca33a75741072c15159fac3e77cc21e7e355
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.resolveDaemonSession'
+        line: 853
+      evidence: Round-9
+      metric: 2
+      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 2c313cc4802af0b7455e3c0870c3b81d503bb18e1ee6bbfff4cb5680d4fcc0e0
       kind: mutable_global
       location:
@@ -5399,20 +5395,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 2cfd646e2624927cb39d436c21e8799848fa48b728d9a6c35211f22cb282c532
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.store'
-        line: 295
-      evidence: round-9
-      metric: 1
-      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 2d2168160e64ecbd864ae8ddd318fcf76d3d6f617815ccc2a50b2d20240dc7a8
       kind: api_construction
       location:
@@ -5481,20 +5463,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 2d4a76031e2e2528644c63d980d7b433f88ff5af6aadc009d8f6ae2ecda39077
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.evictLRULocked'
-        line: 319
-      evidence: 'PR #249'
-      metric: 1
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 2d6666625b44c4fb29dd3463c90e1d3e7782de8fff829891e6fee7193e15a943
       kind: history_comment
       location:
@@ -5549,6 +5517,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 5
+    - fingerprint: 2dd2a5faa0ea763eee80485c0bca1dac1ee2fff0bd735375af2c6a6e497af99f
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 725
+      evidence: 'PR #253'
+      metric: 1
+      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 2dda1cfe438cfcfe6b203f903e55671100c369f00d0764df9d797de8ec931691
       kind: history_comment
       location:
@@ -5587,6 +5569,20 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+    - fingerprint: 2e3575cc12ad399a2eaa8f0651d5f0307a375f046e787d9095f220750b2c8084
+      kind: history_comment
+      location:
+        path: internal/mcproute/lsp_router.go
+        symbol: lspRouterDeps
+        line: 72
+      evidence: 'PR #269'
+      metric: 1
+      message: 'production comment contains review history marker "PR #269"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 2e4d7e32ef79b5fec31234c32cdd07f4242d3808bf96a59b908683020ba50601
       kind: mutable_global
       location:
@@ -5879,20 +5875,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 307e1b4e35da0cbd29423d910103b84f5cfd427377365bc8a5184d11fc538293
-      kind: history_comment
+    - fingerprint: 3077965904c65cdfb9c67cc01f71e17602d825652dffad34d72c6523178fb72f
+      kind: file_budget
       location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaDelete'
-        line: 1787
-      evidence: round-7
-      metric: 1
-      message: production comment contains review history marker "round-7"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: mcproute
+        line: 1
+      evidence: production_hard_lines
+      metric: 1799
+      message: file has 1799 lines and exceeds production_hard_lines
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1799
     - fingerprint: 307fe4c304afa67928baf74b05dff3bfc79547432ecec19b6155a542b267d46c
       kind: history_comment
       location:
@@ -5906,20 +5902,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: 3097e48216fcdcd694aa7a640ea17d268e80c7521c73d8bf53cd36014b85f0c3
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.resolveDeleteWorkspace'
-        line: 1923
-      evidence: Round-9
-      metric: 1
-      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: 30bffb6ecc7faa2f1ba6502b24d11af4770b58c596c8dd5a770f64beeb0307a5
       kind: mutable_global
@@ -6043,20 +6025,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 4
-    - fingerprint: 3155318996a4ffb87171a86628a5ec56d2933a5f4ee91f53edf01f0f80176f62
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaDelete'
-        line: 1787
-      evidence: Codex round
-      metric: 1
-      message: production comment contains review history marker "Codex round"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3156f58733a21d1965d0a0d0c39c250aed438a0858b6c85454c7453d834edbbc
       kind: mutable_global
       location:
@@ -6163,20 +6131,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 321505133f16a1ea68a0597f870eacf1466692ba8774a32a0f2b45cebabb4a2c
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.resolveDaemonSession'
-        line: 853
-      evidence: Round-9
-      metric: 2
-      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 3236068a82b2ea02e4ffb34f87c2e3de294d550441911928b58265379a844163
       kind: history_comment
       location:
@@ -6401,20 +6355,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 345c156c17ed6b119356ce9035191ef505b654dcfafe4b2b43ec3036e624aa80
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: toolBody
-        line: 350
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3460bd94bf257b0eecc8b0a0302c3f065a7eaa66204774bea45ef63b025f278f
       kind: mutable_global
       location:
@@ -6454,6 +6394,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+      max_metric: 1
+    - fingerprint: 348f8b66268383a4ac94e78f71d8a63eef3d3faf96b9bde99be7e207b415a627
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.store'
+        line: 295
+      evidence: round-9
+      metric: 1
+      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 34a4906067064982bed6336d1f97bbd55c0d67d7eb4ace3e3af5e795620e9b5d
       kind: history_comment
@@ -6507,20 +6461,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 35174fc4771d08ce3dd96f2fc13a8c3c237d088de7f08b6a38fa14f79c5a901c
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.cancelAutoRegisterOnSessionDeath'
-        line: 1643
-      evidence: 'PR #253'
-      metric: 2
-      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 3548b66e9e8d8eab7686ff34e9ed6d283a4dab93bd54b1a21b9e1c116ff94445
       kind: mutable_global
       location:
@@ -6547,6 +6487,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 2
+    - fingerprint: 358d36d11914ce89862111878c6e9f98ab9942f4fe8e5ecc73b35a89d385c639
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: proxyToolsListOnce
+        line: 1537
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 35978350d0e3c1da5dc7a7872d900d64f68f249239b15957b247357a3107787f
       kind: mutable_global
       location:
@@ -6767,20 +6721,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 36661dd43ca3e8e96f82ebc482b840f07d5c13f65152b8f6bf6b75754cb13dad
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.resolveDaemonSession'
-        line: 853
-      evidence: round-11
-      metric: 1
-      message: production comment contains repeated review history marker "round-11"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3677719f198a30ff8f5dab1ba9cd1a02a12744a1d09d61632d7da1195d8aa58c
       kind: mutable_global
       location:
@@ -6873,6 +6813,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
+    - fingerprint: 3727d7c2ebe206b039e613ff5dba10847f5ae487ca80f44953c4c277b0ac6ae1
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1152
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 374021d2032e4dda2f489dbb5326b8c05d15b91d849b2f8608243ebbeca9084d
       kind: mutable_global
       location:
@@ -6989,6 +6943,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 38515cc505a1ddbaa7952aa17451f4b9dde1a3ed9e1d00e334298058dd4d3d55
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.store'
+        line: 322
+      evidence: 'PR #251'
+      metric: 2
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 388c0040b45282891e2cd426b28136750130d49e089d7a80491717be39bff6ef
       kind: worker
       location:
@@ -7043,6 +7011,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 2
+    - fingerprint: 391703eaafbd6c8abf159e1f454a5671dada27d3ddd2b8b9d884f5f531156808
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: toolsListIsCursorRequest
+        line: 481
+      evidence: round-10
+      metric: 4
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 4
     - fingerprint: 39183310a7d7f53d5c7b6fcfd692c30694c1a5055936a8ed9c5292f851f4e123
       kind: api_construction
       location:
@@ -7499,20 +7481,6 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 3
-    - fingerprint: 3d404bfd14da5447dfe8019179025cdeb2cef02ef98fe7a80356fda79c0b5a8e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: errRouterSessionTerminated
-        line: 41
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3d68df865699722c7b19a17699a5e47b192c803e9c3b13cdd3083c93b4a26dcf
       kind: worker
       location:
@@ -7525,20 +7493,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 3d6dca33e4d5ec118c26c3c677a51530424a6b20581754a300a13a87139b72d0
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.resolveDaemonSession'
-        line: 935
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3d75a36595c65a1c823a0ba74777d448d2cc4b80370f5db46cedf345e31a3c61
       kind: history_comment
       location:
@@ -7565,20 +7519,6 @@ entries:
       work_package: WP-11D
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
-    - fingerprint: 3daf8b247e49e2adae617945ab4de4e23729c2108005c1c20769a35d78ebdc71
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*Server.coordinateExpiredRouterSessionUnbind'
-        line: 683
-      evidence: Round-13
-      metric: 1
-      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3db13528f8c72cdb1dff378f2a72de4747326959888bc45b46efdda801c30e5e
       kind: history_comment
       location:
@@ -7685,6 +7625,18 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: 3ed749a93960c8ab86fe47e9c57b80998f378b526272ebbed542500053e537d1
+      kind: mutable_global
+      location:
+        path: internal/mcproute/lsp_router.go
+        symbol: defaultLSPForwardClient
+        line: 46
+      evidence: var defaultLSPForwardClient
+      message: production package-level var defaultLSPForwardClient requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 3edd6770280ec656ac42956b6d77a21840c1393532b8cc0ac998091c5c6eebfc
       kind: history_comment
       location:
@@ -7737,6 +7689,20 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+    - fingerprint: 3f953e2a66c9c929f23ea270f417f5b9b8f95bdeb583de20a2d20d8dd751e7e4
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.handleInitialize'
+        line: 589
+      evidence: 'PR #249'
+      metric: 2
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 3f9f90e4a3036c1869e7aac0c76d20eef18d84e2e10ff8fe8b9354334f3d3bf9
       kind: history_comment
       location:
@@ -7933,20 +7899,6 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
-    - fingerprint: 41d9c1604d3ec29f1305f830a215d871f9a6a7d76588dc0dc039b30ea276cbe6
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 803
-      evidence: round-9
-      metric: 2
-      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 41eaff66873d93ecc17788956a959659a52f8cb964f74532ff54e4cda4af4949
       kind: history_comment
       location:
@@ -8013,6 +7965,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
+    - fingerprint: 4251fc7d3c32bf839738063d9a3554f190a64d76c4157b1cbb26cf303a72a64e
+      kind: history_comment
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: '*HubListener.Shutdown'
+        line: 302
+      evidence: 'PR #158'
+      metric: 3
+      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 3
     - fingerprint: 425a1aa2c4f1ddba3c4bb44043a0c406171fbee4f4352a73b49e5f894f9f0465
       kind: history_comment
       location:
@@ -8787,6 +8753,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: 48c88ed1be4e558c606cb380321309fc3426a30d74444c8b254cf544881eb048
+      kind: api_construction
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.SetSerenaRouterProduction'
+        line: 243
+      evidence: mcp-local-hub/internal/api.NewAPI
+      metric: 2
+      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 48cd25b634ba9a37feff884acbb9abaa872a202b17229f52436be0cfbc8709fd
       kind: mutable_global
       location:
@@ -8919,20 +8899,6 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
-    - fingerprint: 49e49501f13b38ecd33b172ff12d10b328d54e18ff303c55777419c48a11b3d7
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.fetchToolsListFromAnyDaemon'
-        line: 1284
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 4a02329dd4d0e720ca5dfb6cccd2e8749d3873bffacaf57d451096ee336cb87a
       kind: history_comment
       location:
@@ -8963,18 +8929,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 4a30775b38937cd1940c9480a8c8a978b4477a413dcfc2b816d6b7e35b1c9db9
-      kind: mutable_global
-      location:
-        path: internal/gui/lsp_router.go
-        symbol: lspRouterTestSeam
-        line: 94
-      evidence: var lspRouterTestSeam
-      message: production package-level var lspRouterTestSeam requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 4a46d98df1dc94542ded8e514407cb7d8f73fa8039a5e4e7ce70678e6d0b91c1
       kind: mutable_global
       location:
@@ -8999,19 +8953,19 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 4aa4b512ee5353da2c3f0ca77dcdcdcbac4ca3abff4017f343e011d4012f983e
+    - fingerprint: 4a8925cdee361608a0abb70cfb812fe5b1d8288cf27178c58083fec88b64b25f
       kind: history_comment
       location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.handleToolsList'
-        line: 854
-      evidence: Round-9
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.handleToolsList'
+        line: 834
+      evidence: Round-10
       metric: 1
-      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
+      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: 4ac977d0c0242ac2c33e39a5eb9c54078453496403570dd12cfd204f27fedc34
       kind: mutable_global
@@ -9127,6 +9081,20 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+    - fingerprint: 4bcd8d596fa33d63e25b1122d7fc3af38a83b65caa021b275cad387e7e2d314d
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: routerSessionState
+        line: 430
+      evidence: Round-13
+      metric: 1
+      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 4c176182641bccfb4046c877d4d5b40c43afca0dc03e1d50aa33c055bbb5ddfe
       kind: history_comment
       location:
@@ -9325,18 +9293,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 2
-    - fingerprint: 4d59f9a2d1ad13dcb4c7a970e8810f143315abc226aa62732010f2ed0d7198f5
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: serenaToolsListPortLiveFn
-        line: 101
-      evidence: var serenaToolsListPortLiveFn
-      message: production package-level var serenaToolsListPortLiveFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 4d6c71c60748e689742253675a2f20871b773d0e7ca7d7cb4c66266d660833e6
       kind: mutable_global
       location:
@@ -9495,6 +9451,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: 4e327acc89cad2e91fdc689e50103d7912444bb6bfeb2f6f65909e3d049ce964
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: errRouterSessionTerminated
+        line: 41
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 4e54eb31f3101bdf26d27708bc1fe2f60ba7ac5edbac2787e616a1deaab60269
       kind: mutable_global
       location:
@@ -9507,20 +9477,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 4e9aa76fe199ae3d2630e63a2dd8e0c296ef3378ea25790172fffa26cd03d8f5
-      kind: history_comment
+    - fingerprint: 4e711dae2032f8329f4efd7bf357c1594df2ca0612c5e0060efc810cfae47a09
+      kind: api_construction
       location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 803
-      evidence: round-10
-      metric: 4
-      message: production comment contains repeated review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/lsp_router.go
+        symbol: '*WorkspaceRoutes.SetLSPRouterProduction'
+        line: 114
+      evidence: mcp-local-hub/internal/api.NewAPI
+      metric: 1
+      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 4
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 4eaf50a4290c5c572a7acea3f0e8b3c57664914b073c51deb4266350fab24e4c
       kind: history_comment
       location:
@@ -9839,6 +9809,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 514cf2d4797ffdf4a5d3512f721f3bf7c9a9cd8ea24cbf473b18d5cc9f4448b6
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.lookup'
+        line: 270
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 516cb7533f305bcb2e0dda5c5b7ab5f0f12076d6dc7f4eb7dd7c12e9e192c85c
       kind: history_comment
       location:
@@ -9879,6 +9863,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 5191786542ae64455f63de1300e6d07cedada9836fa0ebe98d4e5d6d5089debc
+      kind: history_comment
+      location:
+        path: internal/mcproute/lsp_router.go
+        symbol: '*WorkspaceRoutes.SetLSPRouterReadOnly'
+        line: 172
+      evidence: round 3
+      metric: 1
+      message: production comment contains review history marker "round 3"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 51aae8490091b68846349058a8187d67232c95534097461381b9719a36cbdc6d
       kind: mutable_global
       location:
@@ -9891,6 +9889,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: 51bc251d897916867a4b397fa59fcbaa4513f181a31ef14203be0b63551c738b
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.fetchToolsListFromAnyDaemon'
+        line: 1284
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 51cf7596271637940469a9d71af0c05eda850bb739e1b4ad3725c83802ce8930
       kind: history_comment
       location:
@@ -10147,6 +10159,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 53324ddeb1b2bf830800cec6f8f08361748ed9475344ffe1b2c6f1238e6c3ff0
+      kind: history_comment
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: StartHubListener
+        line: 55
+      evidence: 'PR #158'
+      metric: 9
+      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 10
     - fingerprint: 5373cd9297aa802eab06d9658b28ce6eeec0af5b7663a2baffa1a6dd14dac354
       kind: history_comment
       location:
@@ -10253,6 +10279,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 3
+    - fingerprint: 541ae2e807afdee70090029cd9d8b6fc9407b1a4e22d9821c09815562656438a
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.resolveDaemonSession'
+        line: 935
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 543a803453c5002bb0b6b19298a9733b9804e07dd3c269ee7504ad045a7079e4
       kind: history_comment
       location:
@@ -10385,6 +10425,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 54d9499cf95d7d067900e57d166a017d5b422591bb58b041d2398baf0d68a785
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.attemptSerenaAutoRegister'
+        line: 1519
+      evidence: 'PR #253'
+      metric: 2
+      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 55369e63fa84251bb65b27e4c4b23a78718ef8e53e17654e1f3e7fd06a3cddc6
       kind: history_comment
       location:
@@ -10553,18 +10607,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 56e44dcdb55e8ee0fe5a26c8efe74bcd637006616725d0e6f052e894511ab0bd
-      kind: worker
+    - fingerprint: 56ef7a0b546b43f0676c90f5f2474fb8cb9c2f3b8076236c5395d73038fa0611
+      kind: file_budget
       location:
-        path: internal/gui/hub_listener.go
-        symbol: startHubMcpListenerWithOptions
-        line: 949
-      evidence: 'go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run #1'
-      message: goroutine api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run requires an owner, cancellation, join, and bound contract
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_test.go
+        symbol: mcproute
+        line: 1
+      evidence: test_review_lines
+      metric: 2257
+      message: file has 2257 lines and exceeds test_review_lines
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2257
     - fingerprint: 5707898344d905a5c0694cc458f7545227d57c8ad1da785aa7e5e5a35f6dd5d2
       kind: history_comment
       location:
@@ -11425,6 +11481,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 2
+    - fingerprint: 5db9df1961c9cef4b265c693555163b86e011beec5c472c11e107e7e08ab0830
+      kind: worker
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: StartHubListener
+        line: 251
+      evidence: 'go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run #1'
+      message: goroutine api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 5dbb97a715a5fd5d494f49bfcae7460867f254099f749088dc5d6dd1ecd301a1
       kind: history_comment
       location:
@@ -11709,6 +11777,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 60074316409bf2aa4ad455c2a9507615010ecbbb1a6ac2a846b42ab3c2d7417b
+      kind: file_budget
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: mcproute
+        line: 1
+      evidence: production_advisory_lines
+      metric: 1394
+      message: file has 1394 lines and exceeds production_advisory_lines
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1423
     - fingerprint: 601183853bf4d125270028bb35f5647a85db62a1b6226a0d76bbc2b9bbd9049c
       kind: mutable_global
       location:
@@ -11913,20 +11995,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 61a83cafcc7cfa285d1f0b4f8cc4e7e0481832fdfd71f8c270c39fee0eac230a
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: proxyToolsListOnce
-        line: 1491
-      evidence: round-10
-      metric: 2
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 61abc2bc66a37d89477414e1cd9f3e5a01864a355fc7e4ef2d6df148361f5769
       kind: history_comment
       location:
@@ -11955,6 +12023,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 2
+    - fingerprint: 61bf3dc78016501930cd3af75b0f7ec0011891466eb6349be72d30c912fbe943
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: daemonSessionBinding
+        line: 125
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 61e9fe46ae5241b3bbe4d3eaf625fae0a8436a0ff47c6117177a49c3b4907e7e
       kind: history_comment
       location:
@@ -12257,6 +12339,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
+    - fingerprint: 63da3bf3f1a39acfcbf37d0ea85cbf1a1e90f49668efbe712061d3908b5e4bd1
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.reserveSlot'
+        line: 396
+      evidence: round 1
+      metric: 1
+      message: production comment contains review history marker "round 1"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 63fdfef801f3dc2aa9611d1cdaad3d3181dd960914f362cdd5aa48de1ef9e282
       kind: mutable_global
       location:
@@ -12281,20 +12377,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 6438ddba0f8c3404b2fb1da79716f77a6bc05e768d5287253f98edf0d14f29ba
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router_test.go
-        symbol: gui
-        line: 1
-      evidence: test_review_lines
-      metric: 2257
-      message: file has 2257 lines and exceeds test_review_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2257
     - fingerprint: 644f486ba4ae8d177bf64de19e1840a22c1aeefd44ff976faaf439a304c776e6
       kind: file_budget
       location:
@@ -12789,20 +12871,6 @@ entries:
       work_package: WP-11A
       remove_by: "2027-03-31"
       reason: Architecture-tooling debt is reduced while A2-A6 establish the repository ratchet.
-    - fingerprint: 690a14beb1fb8cc36ae6426ef7044233ca6fb455dece28c481dc00533cf44f62
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaCancelled'
-        line: 2135
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 69103b01c3bc165d75643f862d5799ae82e71de282eefff0ea862745b2c73c8d
       kind: mutable_global
       location:
@@ -13319,34 +13387,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 6cf19db54d2c1e43056faecfde1491df714ce3c34caef5d5e759ca163126dd1e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1202
-      evidence: 'PR #288'
-      metric: 1
-      message: 'production comment contains review history marker "PR #288"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: 6cff90c3386c36eaea2092ade0415faaa6ceaf837d0f92a0105efbf2117c290a
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: gui
-        line: 1
-      evidence: production_hard_lines
-      metric: 1799
-      message: file has 1799 lines and exceeds production_hard_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1799
     - fingerprint: 6d0ba8454558a16ff08c1aa4fb8d31a4cf6946c2a416ee5352674e459aba7cd3
       kind: history_comment
       location:
@@ -13411,20 +13451,6 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
-    - fingerprint: 6dc2caef6f7fddcc6e56262d6e1a118047b3fedfe5b9ce931845c4d75c8714b8
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.store'
-        line: 344
-      evidence: round-2
-      metric: 1
-      message: production comment contains review history marker "round-2"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 6df18781767f3aaf0f865800f9d7f1092abd7c8585a7f12011e347ce6a06a686
       kind: mutable_global
       location:
@@ -13491,20 +13517,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 2
-    - fingerprint: 6e5ecf941e054effb9c09ae24288e613ed95874b54b89c3521aacff8aa49bc88
-      kind: history_comment
+    - fingerprint: 6e584d5c76d714556b66b5def170f47f83e6f00f6b25c69fb23ff18a384f1c1d
+      kind: worker
       location:
-        path: internal/gui/hub_listener.go
-        symbol: startHubMcpListenerWithOptions
-        line: 734
-      evidence: 'PR #158'
-      metric: 10
-      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/lsp_router.go
+        symbol: '*WorkspaceRoutes.handleLSPNotification'
+        line: 875
+      evidence: 'go func literal #1'
+      message: goroutine func literal requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 10
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 6e68d8b630d85555328253840a2cfaebb8fcd11bdbf01aaf5f9dff948107984a
       kind: history_comment
       location:
@@ -13559,6 +13583,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 2
+    - fingerprint: 6eab8bd460bd07f58a2a8222aeb1373777459acc0231ff75b3988b3efd4bd130
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.evictLRULocked'
+        line: 319
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 6ed2a55b372258c952cf19d9eb31433d799f1cc9bf8175b618d156783ddf0e1e
       kind: mutable_global
       location:
@@ -13687,20 +13725,6 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
-    - fingerprint: 7027ba5d4ab44a97f4362c13d722b43e4dfd1c8a797bc56ec20d836ee2e570c8
-      kind: history_comment
-      location:
-        path: internal/gui/lsp_router.go
-        symbol: '*Server.workspaceFromResolvedLSPPath'
-        line: 550
-      evidence: 'PR #269'
-      metric: 1
-      message: 'production comment contains review history marker "PR #269"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 70449bd56bbbbae23b7f29571253eb1fd603fab482ba9c469109b24d34dc5080
       kind: history_comment
       location:
@@ -13736,6 +13760,20 @@ entries:
       evidence: 'PR #72'
       metric: 1
       message: 'production comment contains review history marker "PR #72"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
+    - fingerprint: 70a04012bd9b4e6a8dcb911c930b782c759a6cbe5677c7d13358e6f053e3bd57
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.peekVersionState'
+        line: 451
+      evidence: Round-13
+      metric: 1
+      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
       owner: mcp-runtime
       work_package: WP-11E
       remove_by: "2027-03-31"
@@ -13779,20 +13817,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 70c5383c392a615b5187d664c2fef39cdfdf11e8bcbeeb19d1588fb18eac2412
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: daemonSessionBinding
-        line: 125
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 70e6fe6feaceb0102e622880f1498b610c8479e367949fdd34d47e67d3ec96c0
       kind: api_construction
       location:
@@ -13875,20 +13899,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 7112103a6f90fec193b9fcb3cb6f565bd86e44efbacc80fa9b28519e75153d1e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.store'
-        line: 322
-      evidence: 'PR #251'
-      metric: 2
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 71192396c5edc0bb05ee3591144892cf389d32e60d2a0a3ef19630e75b32e5ee
       kind: file_budget
       location:
@@ -13903,20 +13913,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1696
-    - fingerprint: 713662d964f022a314cf27c78abdece081e0cf994ad2a0d6e95a572e656fa19c
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: toolsListIsCursorRequest
-        line: 481
-      evidence: round-10
-      metric: 4
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 4
     - fingerprint: 713b1bc3318f9227fe5ec591237324a6213653dfa27fb12ad5feb6d2b5ceadca
       kind: file_budget
       location:
@@ -13931,20 +13927,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
       max_metric: 2183
-    - fingerprint: 7147cdc499ba7743d1c01d04ca687fbda5024201bfe0f071ac31f6c5579f95a3
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: establishDaemonSession
-        line: 639
-      evidence: Round-3
-      metric: 1
-      message: production comment contains review history marker "Round-3"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 718644fb51f0b353c95940349337ac7b1052b7c91d684e49e27d707ab363fc37
       kind: mutable_global
       location:
@@ -13971,6 +13953,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 7219dc938f0effbc5157f728ac561f38e3819f67c8d033ccb079b84172cdfdb1
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: proxyToolsListOnce
+        line: 1491
+      evidence: round-10
+      metric: 2
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 7227958b6e02b2ba9e6de7b432117ea79226c6d3fb3185ef01db2e66830ec7f0
       kind: history_comment
       location:
@@ -14319,18 +14315,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
       max_metric: 1196
-    - fingerprint: 7522a9e3ede387d37e5bdc7487d7675696e6521c33b8146a44f42aaa98a0565c
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router.go
-        symbol: defaultSerenaClient
-        line: 195
-      evidence: var defaultSerenaClient
-      message: production package-level var defaultSerenaClient requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 752b8529f8d01b94a2f2a4a4ff91baa80d319aafd5ee795617e3f92dd4b80c37
       kind: history_comment
       location:
@@ -14677,20 +14661,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: 77d710fa420b1b2fa69bc1aa7794a9469d2a4dfafd74dceb5d61b055f052916f
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router.go
-        symbol: gui
-        line: 1
-      evidence: production_hard_lines
-      metric: 2456
-      message: file has 2456 lines and exceeds production_hard_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2456
     - fingerprint: 77e865c13e1e7d41066d59d71f8219a1b6632468c1062073e9164c7e13575b2b
       kind: history_comment
       location:
@@ -14731,18 +14701,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 7811b76e28318a355e35eda12c66202816eb2d09613b69689c1dbf7befb2b3d1
-      kind: mutable_global
-      location:
-        path: internal/gui/lsp_router.go
-        symbol: defaultLSPForwardClient
-        line: 46
-      evidence: var defaultLSPForwardClient
-      message: production package-level var defaultLSPForwardClient requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 7820d9e43f1e49282afe42025cc6741d51dc1901f058487ccc0007510d726845
       kind: mutable_global
       location:
@@ -15495,18 +15453,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 7db526f3df0923638fb0cb637f5a25b3bf3530cdeda40b524879ed3fd666ce7f
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: errDaemonSessionStoreFull
-        line: 58
-      evidence: var errDaemonSessionStoreFull
-      message: production package-level var errDaemonSessionStoreFull requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 7ddbf3da06e2a8f12d9ccf11301014aab40e2b0755d0162dcde45ebf36685f6b
       kind: history_comment
       location:
@@ -15675,6 +15621,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 7f48a9fee37c5abf2288db78154fd5626b2237698821e53872bb80bab0481fa9
+      kind: file_budget
+      location:
+        path: internal/mcproute/serena_router_lifecycle_test.go
+        symbol: mcproute
+        line: 1
+      evidence: test_review_lines
+      metric: 3608
+      message: file has 3608 lines and exceeds test_review_lines
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 3608
     - fingerprint: 7f555cacff596d7961fbe589903e683e523afd0e8380a8418936c1f55ca25c60
       kind: history_comment
       location:
@@ -15859,6 +15819,20 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
+    - fingerprint: 80fb36f1e54ab03443b7c9a27fe860e317d416458ea6d2df246cc7243cd9c175
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.evictLRULocked'
+        line: 319
+      evidence: round-2
+      metric: 1
+      message: production comment contains review history marker "round-2"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 80feac56244dd88ed0688a5d70fabe8b540ed53b8cd5bfdb915a6a9e6e8adce8
       kind: history_comment
       location:
@@ -15937,18 +15911,6 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
-    - fingerprint: 82362e1dd2740fa6bc4cdd525c62d5c369ce014220c71dc4de19bfec62828fd4
-      kind: worker
-      location:
-        path: internal/gui/lsp_router.go
-        symbol: '*Server.handleLSPNotification'
-        line: 880
-      evidence: 'go func literal #1'
-      message: goroutine func literal requires an owner, cancellation, join, and bound contract
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 8250d09b11907ff779e9322b156d71491b2480a16730b7a866bf20834845f09e
       kind: history_comment
       location:
@@ -16011,18 +15973,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Executable entry points must delegate construction to the single composition root.
-    - fingerprint: 8310bed6105d3946ab9f893b4b6e0ed73cd28d5ebf6b6fcac47725116b635f55
-      kind: worker
+    - fingerprint: 82fb488d0f5b33173e893ec98d20b752cb840bd150a4de5d7fdebe85173b4b75
+      kind: history_comment
       location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.attemptSerenaAutoRegister'
-        line: 1577
-      evidence: 'go s.cancelAutoRegisterOnSessionDeath #1'
-      message: goroutine s.cancelAutoRegisterOnSessionDeath requires an owner, cancellation, join, and bound contract
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: proxyToolsListOnce
+        line: 1537
+      evidence: round-2
+      metric: 1
+      message: production comment contains review history marker "round-2"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 832d450a1cfb3bc2192bc88223ca27ead7401c3a68cea954365e50d4b4ae7652
       kind: mutable_global
       location:
@@ -16221,6 +16185,20 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: 842880caaab8993f89d9d029202fa7f8aa9e2ddc5ed3692c647acf20c4132850
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaCancelled'
+        line: 2131
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 846c17e2c1ae6bfeeb384f13347542770e86735fcf4cbc8bacf9fe8d16a9c93d
       kind: production_test_hook
       location:
@@ -16289,6 +16267,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: 84ee9423ffec5380cee51b3e5afe030a91cb531bdb928a32ab7aaf87b4b3d1e9
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_idle_sweeper.go
+        symbol: serenaIdleStopFn
+        line: 65
+      evidence: var serenaIdleStopFn
+      message: production package-level var serenaIdleStopFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 85043571dd39bd9f84d08048a09338308b50638cb979f68a79706248fae38ce7
       kind: mutable_global
       location:
@@ -16315,6 +16305,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: 853e79a3b55879f07ce2614b9564d0db7e4c08330f27a0c03f8163aebe94be4d
+      kind: worker
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.attemptSerenaAutoRegister'
+        line: 1573
+      evidence: 'go s.cancelAutoRegisterOnSessionDeath #1'
+      message: goroutine s.cancelAutoRegisterOnSessionDeath requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: 8598830e7d4bdc5826a756f2c77c95f4fd089d0860049ecc1a4fbcb2e41e3ed7
       kind: mutable_global
       location:
@@ -16377,32 +16379,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: 86078e02487a4b9853e4fd515ad2fcaaaaa5c72176f0f3fabeaacca4d60bb683
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 803
-      evidence: Round-13
-      metric: 2
-      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
-    - fingerprint: 860be519da354f55c621c2ce607ab311b3aa74f9640c493abb767e67e85c1884
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router.go
-        symbol: ErrWorkspaceNotFound
-        line: 32
-      evidence: var ErrWorkspaceNotFound
-      message: production package-level var ErrWorkspaceNotFound requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 860e54bc938f8e377e6c357dd8cdd62a66b921b8caf1ec561eefe6e729c49e3d
       kind: mutable_global
       location:
@@ -16661,20 +16637,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 88091a925d4614b9544eb99b15dbde34ac35833655aaadb6b65c97efbb6abe03
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router_lifecycle_test.go
-        symbol: gui
-        line: 1
-      evidence: test_review_lines
-      metric: 3608
-      message: file has 3608 lines and exceeds test_review_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 3608
     - fingerprint: 8827e84dc599f5624b70f4959b8269d6a356ef1da403613733004bdd5a2c00c3
       kind: mutable_global
       location:
@@ -17093,20 +17055,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 2
-    - fingerprint: 8c6efdbde5bf2b482094d91b305f5234bf3206da3464d5c2badb54beca5f12ac
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1057
-      evidence: round-2
-      metric: 1
-      message: production comment contains repeated review history marker "round-2"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 8c7d8aec665581df812f7bdb0c3409acebe5facbc6f226c328225495ec053779
       kind: embedded_document
       location:
@@ -17185,20 +17133,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1448
-    - fingerprint: 8d75afa86de48e87caed15b6c4c1adc4295acc22bc89891ab1ac75f031b3a868
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.releaseReservation'
-        line: 423
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 8d8a5db9a70fe8ce59687b9ed3ea59db2226013f403ec5723fc4673fd05eaaeb
       kind: mutable_global
       location:
@@ -17288,34 +17222,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-      max_metric: 1
-    - fingerprint: 8e0c82c87e0e837fcaeb5768e716b04ce599298d696909df1f3c56ef3af9491b
-      kind: api_construction
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.SetSerenaRouterReadOnly'
-        line: 291
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: 8e5e99e45daa171889e5ea9436b951be58130aec7cbb89aa1f84a3109bac2bbc
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.cleanup'
-        line: 551
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: 8ebc19b5d252c857641b8aa6245439f10b6addc1595be9765a635b37ace8686a
       kind: mutable_global
@@ -17627,20 +17533,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
-    - fingerprint: 91d17fd5b238c44223a090f40b619fd3ed52d69d6f91c40f2163f87792f639db
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: isClientToolsListError
-        line: 1163
-      evidence: round-11
-      metric: 2
-      message: production comment contains review history marker "round-11"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 91f97340abe33fd1d117e8d62c11719ea871c2edd69cd4f5757f2ac1be7fed23
       kind: history_comment
       location:
@@ -17987,20 +17879,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 94bafbc9d20ae04c39b7f98ef40971035100982f1008c1a5563c93f52945efc6
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.attemptSerenaAutoRegister'
-        line: 1523
-      evidence: 'PR #253'
-      metric: 2
-      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: 94c67958d68ac8aa3eb628d7d51b6351dbb006d023d302b6ba8a39d6454ca4e5
       kind: api_construction
       location:
@@ -18361,20 +18239,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
-    - fingerprint: 97235591b9159db9800269825635bd631532ef3175c9b36f668e6fe208a3bf53
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.store'
-        line: 295
-      evidence: Round-9
-      metric: 1
-      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 97299e5f04a6673750168656eee4a387acd37e3bb0afbefcc4f18430676d4090
       kind: history_comment
       location:
@@ -18578,20 +18442,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: 98b1059a29fe21a0f2676401e67d5eff59a375812a9a783403d05c6ce1b33fb2
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: routerSessionState
-        line: 430
-      evidence: Round-13
-      metric: 1
-      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: 98da4eeb9fc038b6f8c04796df155307f7a7289ca3c47565ef9d282e003c5cf8
       kind: mutable_global
@@ -18905,6 +18755,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
+    - fingerprint: 9a7710a64745d6f287ef324f8a3b5ba34aabb2547865af22a21a241bdfeb026b
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.store'
+        line: 344
+      evidence: 'PR #249'
+      metric: 2
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: 9a8793fcd5d84e63b5ea392f0ccb803b1524c46804b9a6b372587ed0f0edb6c4
       kind: mutable_global
       location:
@@ -19045,20 +18909,6 @@ entries:
       work_package: WP-11D
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
-    - fingerprint: 9b92fe3a79c5096f3351b85ed5efa5f1788d1d17716f9ec782a59dd981fab843
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: errDaemonSessionHandshakeInFlight
-        line: 60
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 9ba4208f21ec02ea55f1f6b5e154848f13b32d7e199542bc96681e42367490af
       kind: history_comment
       location:
@@ -19417,6 +19267,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 9ed9c74040d3269b98081e6352587561984062b7f74fa3f5eecae21fba7729f8
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: establishDaemonSession
+        line: 607
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 9f180e4c5c5140c59c3c49e26603a61e0d57040bf1d9e7a7da6e3c50aa23d734
       kind: mutable_global
       location:
@@ -19429,6 +19293,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: 9f26b123d2ccd87b402a3cc7db3770f0433fa6f9f283db2a507455e1cc5bec45
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: routerSessionStore
+        line: 89
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: 9f38268e221216e72d6897f6a9ee887ba5b9db399b50e0d0ed1c86659803de52
       kind: mutable_global
       location:
@@ -19545,20 +19423,6 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
-    - fingerprint: 9fda42afd46dd726362514e01c487de46daf65c6f1675f4569e6d99d38d640d1
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 803
-      evidence: round-12
-      metric: 2
-      message: production comment contains repeated review history marker "round-12"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: a0109d72afd9e8d14e3cfb81c6baac4ac0e212d8c38d4c50188137ea41498da8
       kind: history_comment
       location:
@@ -19693,6 +19557,18 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: a0b228eb095f9cf3e018546b96024b62ce7f846dd36e68bc65d6ecd7d7adcd64
+      kind: worker
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: StartHubListener
+        line: 255
+      evidence: 'go healthWatcher.Run #1'
+      message: goroutine healthWatcher.Run requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: a0bd445659ae633af0b0245e2c5c0ef757fa3a5adab73888e1571d05150b4754
       kind: history_comment
       location:
@@ -19803,6 +19679,18 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: a1f17687ccafec48893d5a658a708fa4466e8d4200590be0e7509bd768065249
+      kind: production_test_hook
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.SetSerenaActivityCommitterForTest'
+        line: 326
+      evidence: SetSerenaActivityCommitterForTest
+      message: test hook *WorkspaceRoutes.SetSerenaActivityCommitterForTest is compiled into production code
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: a21c6c1b5f76e1f95095dd5215b4b6552722a0001a01812ee13136a8177e659d
       kind: history_comment
       location:
@@ -19829,20 +19717,6 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
-    - fingerprint: a23b1c08db0ac98a2965f5fcdcf4674a92e349d1f88c2dc396bdc31b2fc1aa92
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.reserveSlot'
-        line: 396
-      evidence: round 1
-      metric: 1
-      message: production comment contains review history marker "round 1"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: a2498bc5559dd8adb5e3d66070d38d4a4f0e345e648feacb057a49e5fe71e413
       kind: worker
       location:
@@ -20497,20 +20371,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: a70eb49a24da3c453f65d5481ce574cd0bff683f6b80409d964cea3d268bfaf7
-      kind: file_budget
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: gui
-        line: 1
-      evidence: production_advisory_lines
-      metric: 1423
-      message: file has 1423 lines and exceeds production_advisory_lines
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1423
     - fingerprint: a73623847ad11645872c0373b8e91aa4f3d71f87ab0b58c0035829a5a44ce90a
       kind: api_construction
       location:
@@ -20702,20 +20562,6 @@ entries:
       evidence: round 2
       metric: 1
       message: production comment contains repeated review history marker "round 2"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: a90729f32d9ffdd85654ce083eaad9bd2e472221494f7edce51c937e89312fa9
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: proxyToolsListOnce
-        line: 1537
-      evidence: round-2
-      metric: 1
-      message: production comment contains review history marker "round-2"; move history to an ADR or archive
       owner: gui-adapter
       work_package: WP-11B
       remove_by: "2027-03-31"
@@ -21163,6 +21009,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: ac98220467e5094ff784bd94b2985a0fb2a1f907930df837541ca784f57055aa
+      kind: file_budget
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: mcproute
+        line: 1
+      evidence: production_hard_lines
+      metric: 2452
+      message: file has 2452 lines and exceeds production_hard_lines
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2456
     - fingerprint: acb3a2999075d1fde6d677391c86a5e6047d59466e6e6cb679e7c5851b3bb999
       kind: history_comment
       location:
@@ -21257,6 +21117,18 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: ad3bed425a9ed7fa8591050ad46ed13fba43c426bab1acd8ebfcc0c4412ca845
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: serenaRouterTestSeam
+        line: 94
+      evidence: var serenaRouterTestSeam
+      message: production package-level var serenaRouterTestSeam requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: ad4349760addf4846b58244489813b79dea4a46ad66aad59947991518d85b6fc
       kind: mutable_global
       location:
@@ -21347,6 +21219,18 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: ae04ab5bd1835d5f9c95d2ab0620e21af1f3113fe433ef497e3faa875668c3c2
+      kind: worker
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: StartHubListener
+        line: 256
+      evidence: 'go listener.serve #1'
+      message: goroutine listener.serve requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: ae26e2ddf33064b878e37577cc2bd1b1874e1500472b6c7f909a1b6239b41847
       kind: mutable_global
       location:
@@ -21571,20 +21455,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: af7f22a9bda7008c983231dd219b5882b8891da92a029feecbb63c6f7ba99537
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.reclaimExpiredLocked'
-        line: 193
-      evidence: 'PR #251'
-      metric: 2
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: af86d3a1726849c8b00f0233dbc89634acda528ec0fe9c63774bd41f9b9599cf
       kind: mutable_global
       location:
@@ -21791,6 +21661,18 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: b0d1c5cf01b5677c71a827f17b02998cecfccc235d672a3e02790c8d76706af4
+      kind: worker
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaCancelled'
+        line: 2168
+      evidence: 'go func literal #1'
+      message: goroutine func literal requires an owner, cancellation, join, and bound contract
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: b0dfec7757e9efe86195394d8839f3dc736407168a72244e400e8d57db119ca3
       kind: history_comment
       location:
@@ -21977,6 +21859,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: b2c529c29189896ee877407136fe54178fc2e51bca066b32f6ffb79f48ccbadc
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*WorkspaceRoutes.SweepSerenaSessions'
+        line: 604
+      evidence: round-9
+      metric: 1
+      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: b2dd1ce6f04674555a73c68794d38f26b5a10312d004cb7c95487f699f43ad81
       kind: mutable_global
       location:
@@ -22056,6 +21952,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+      max_metric: 1
+    - fingerprint: b37a317c6d16977abb4efa31becde688752315bded666e2344b607b3b3525002
+      kind: api_construction
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.SetSerenaRouterReadOnly'
+        line: 291
+      evidence: mcp-local-hub/internal/api.NewAPI
+      metric: 1
+      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: b38a77d1b0577ca9f0fa7289f3424bc04d07a5761454b27792a10dcf323c5aaa
       kind: history_comment
@@ -22137,6 +22047,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: b4ab79160c6263455246616a3aff689199687db3e420e479d2de8bb9bea7a349
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.fetchToolsListFromAnyDaemon'
+        line: 1220
+      evidence: round-11
+      metric: 4
+      message: production comment contains review history marker "round-11"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 4
     - fingerprint: b4c27c265847f5e75d702c1b88c1a2bbdd816ae302932c7b35313d35e37d162d
       kind: history_comment
       location:
@@ -22225,18 +22149,34 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: b56ea48aee975e74b76d3f9941464a0a96de1cc087f479d0a8555154f5a60c35
-      kind: mutable_global
+    - fingerprint: b55d8d51a47ee3cce85c570e83981f00f0e2d92bc1628e80875f10b70b72e442
+      kind: history_comment
       location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: errDaemonSessionHandshakeInFlight
-        line: 65
-      evidence: var errDaemonSessionHandshakeInFlight
-      message: production package-level var errDaemonSessionHandshakeInFlight requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*WorkspaceRoutes.reseedSerenaBackendPIDAfterConfirmedWake'
+        line: 827
+      evidence: 'PR #291'
+      metric: 3
+      message: 'production comment contains review history marker "PR #291"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 3
+    - fingerprint: b56423979242f0186a137f24de3097b1bf92f1b570040f47d9ebe3c4cbfa0ff0
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: maxRouterSessions
+        line: 46
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: b58582bb8c671d8fe2ba028b4392d6e5fb87bf7cfc97be53da244e45e1d2dd07
       kind: history_comment
       location:
@@ -22577,20 +22517,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: b8d802b41c6e1f166d28deb47d266cd086925e8f3e5e28e01e4630732f78d462
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.reserveSlot'
-        line: 372
-      evidence: 'PR #251'
-      metric: 2
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: b8db768b2182c04f17c999ef5d79b3d8b35116661cdea6568d41013eb4193a5a
       kind: worker
       location:
@@ -22721,18 +22647,6 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
-    - fingerprint: b99daf2a2694e2dc9065880b405ed33841dabf66001f972b758ff7d90b79b980
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router.go
-        symbol: serenaRouterTestSeam
-        line: 94
-      evidence: var serenaRouterTestSeam
-      message: production package-level var serenaRouterTestSeam requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: b9a42e418f91fb719749fa3b8936ce6a2b0f1645957cb222c5ea8e64d60c2097
       kind: history_comment
       location:
@@ -22953,20 +22867,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: bb6725c99f2fb68398ebbc3ff76a47c9a3ce907c5466fe5b91f041593270eed2
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.evictLRULocked'
-        line: 319
-      evidence: round-2
-      metric: 1
-      message: production comment contains review history marker "round-2"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: bb942353366128eab3d295cb0192992a8edc52fcb18da251fe693c6e0b1c114c
       kind: history_comment
       location:
@@ -23058,20 +22958,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-      max_metric: 1
-    - fingerprint: bc3e8932fc21c8bce60268f1c231ad5a5b84d0235841af3840578c90582bfe7e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1156
-      evidence: 'PR #251'
-      metric: 1
-      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: bc52dbcb5e98f71c86af6a562bcb1555c83dfad8bdd1f3f18a88432a391fb926
       kind: worker
@@ -23188,20 +23074,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: bd5eea029c46ff84f2f2fcb1e573307015d102f3bd090914a4c10a8ce4d53351
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.handleToolsList'
-        line: 834
-      evidence: Round-10
-      metric: 1
-      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: bd6174b4b727e3dd3b7bd76fcb73c0f4b1f33fe63af1ea723b8528b5b4ce8935
       kind: history_comment
@@ -23545,6 +23417,20 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
+    - fingerprint: bfb2abdb94d5a9910f625cf524bea4cc7f771c19b5c398a2412ce0df5c3f552b
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: postHandshakeInitialized
+        line: 821
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: bfb9fc426292f823f38f6886daeff1d013e802aa01d8cc790f517f78990dd5c6
       kind: history_comment
       location:
@@ -23601,18 +23487,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: c021c64b2bbca619a40bf15c921959840504f4d19d7088ef823bf6c6c1951f2a
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: supportedProtocolVersions
-        line: 89
-      evidence: var supportedProtocolVersions
-      message: production package-level var supportedProtocolVersions requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: c044f30a19807b15d9adce8e70c4b13e1d658de88b77dfd6ba372021929b10b4
       kind: history_comment
       location:
@@ -23627,18 +23501,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: c04edaf6fcb75a83fa5b2eec254cf68d33893d6ce1c91dbd871527eec2dda9c8
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: errRouterSessionTerminated
-        line: 51
-      evidence: var errRouterSessionTerminated
-      message: production package-level var errRouterSessionTerminated requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: c07d2d23cd78444961ffd41554d2abf5da4f5e0b035b31c5d300ab5bcf2afdcf
       kind: history_comment
       location:
@@ -23653,6 +23515,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: c097211ef9b16e89e40c4b53658c4fc7cda4483b5d00107974ad1408c9f475af
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.fetchToolsListFromAnyDaemon'
+        line: 1220
+      evidence: Round-11
+      metric: 1
+      message: production comment contains repeated review history marker "Round-11"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: c09d40958947dfa7e4e51f466e858fab076d429432241e8cb8fbef462be17aa7
       kind: mutable_global
       location:
@@ -23661,18 +23537,6 @@ entries:
         line: 101
       evidence: var auditLockOccurrenceStatuses
       message: production package-level var auditLockOccurrenceStatuses requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-    - fingerprint: c0e2e16043eb4fb4b28ca8432582003433950d4bf356fd0a5816efafd24b79c7
-      kind: worker
-      location:
-        path: internal/gui/hub_listener.go
-        symbol: startHubMcpListenerWithOptions
-        line: 1004
-      evidence: 'go func literal #2'
-      message: goroutine func literal requires an owner, cancellation, join, and bound contract
       owner: gui-adapter
       work_package: WP-11B
       remove_by: "2027-03-31"
@@ -23725,20 +23589,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: c20b2e28de384fe90e1cf6dbf0db537c92e203f4670cb88fb955c9050d2d227d
-      kind: history_comment
-      location:
-        path: internal/gui/lsp_router.go
-        symbol: '*Server.SetLSPRouterReadOnly'
-        line: 172
-      evidence: round 3
-      metric: 1
-      message: production comment contains review history marker "round 3"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: c213ab404144665985e6c106a58feda0a076dc25a4ae3fa778d6be72a34ad666
       kind: file_budget
       location:
@@ -23843,6 +23693,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: c36a98abda4a3afd6c8d054822c6fbd84449bab961dd9817617f6c5cddef5bd9
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: upstreamReadContext
+        line: 144
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: c385533054bcaa08d4daa7d703dd666bb5469578ea28db12511949caaa3d211a
       kind: history_comment
       location:
@@ -23909,6 +23773,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: c3ed46de8e391dd1510035b75d3e39c83e600762878b97829bec2c2c047b4764
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: errDaemonSessionStoreFull
+        line: 58
+      evidence: var errDaemonSessionStoreFull
+      message: production package-level var errDaemonSessionStoreFull requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: c43438855aeae7b7ccbaaa521854322b1ed20d045a066b085885cee91b063e2a
       kind: history_comment
       location:
@@ -24055,6 +23931,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: c6604cbbfe176efbeba2a9b61b676dce9a6eeb13bca8f58e40eb68f2028187de
+      kind: file_budget
+      location:
+        path: internal/mcproute/serena_router_findings_test.go
+        symbol: mcproute
+        line: 1
+      evidence: test_review_lines
+      metric: 2273
+      message: file has 2273 lines and exceeds test_review_lines
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2273
     - fingerprint: c6642109fb0f7f67093b381b9a64977a49431d27c6e5046a3a78d7833dc44836
       kind: history_comment
       location:
@@ -24293,18 +24183,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: c7c90ec28965cdb138538a671fe4631891366c12fdb69af65ea8706bd53ef408
-      kind: mutable_global
+    - fingerprint: c7aa437803920b6519f7fe13b302acf35c1bc1ba523e2db22fe43fffef40ae7a
+      kind: history_comment
       location:
-        path: internal/gui/serena_idle_sweeper.go
-        symbol: serenaIdleRoutingAuthorityFn
-        line: 76
-      evidence: var serenaIdleRoutingAuthorityFn
-      message: production package-level var serenaIdleRoutingAuthorityFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1108
+      evidence: Round-9
+      metric: 2
+      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: c82e4a5f74bd97b36c201934adc1e8895ffcc2062a1e38c5db930217b50705ff
       kind: api_construction
       location:
@@ -24485,18 +24377,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1472
-    - fingerprint: c9bc6d640b84ceffca33c7cf6b3ffa855547506598297406dbf145b244d554cb
-      kind: mutable_global
+    - fingerprint: c9adee22a27e49eb5bbec2e28917bac2f7765c980438e98c37475ac0cfc92620
+      kind: history_comment
       location:
-        path: internal/gui/serena_idle_sweeper.go
-        symbol: serenaIdleAuditFn
-        line: 81
-      evidence: var serenaIdleAuditFn
-      message: production package-level var serenaIdleAuditFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.touch'
+        line: 485
+      evidence: Round-10
+      metric: 1
+      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: ca03e290440963c92a2c614c6638ce18fe061680d1f3bdadb67e6a708e549cec
       kind: history_comment
       location:
@@ -24603,6 +24497,34 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: cae2763b4a5bf1b9d06cb1ebc6ce7f72ed59b91f29455553fe242e959d6be4a1
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.cancelAutoRegisterOnSessionDeath'
+        line: 1639
+      evidence: 'PR #253'
+      metric: 2
+      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
+    - fingerprint: cb25071bd6b1dd2a7c62a1fdafea206c23412e2b912ac85cc916d14248525b69
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*WorkspaceRoutes.SweepSerenaSessions'
+        line: 604
+      evidence: Round-13
+      metric: 1
+      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: cb551d38ab560445d8b13812e249592d263194345de45fe5e475109f751d1e5f
       kind: history_comment
       location:
@@ -24643,6 +24565,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: cb6fec5bbde86710d142da9f70cfa1cb3418cb627609c141cc14f6a6fd1f4486
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 799
+      evidence: round-12
+      metric: 2
+      message: production comment contains repeated review history marker "round-12"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: cbbe1698756e4a9da93ebbbeb2dc51896c403f9fabbc39e2927d5d9fa1960d26
       kind: mutable_global
       location:
@@ -24891,6 +24827,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: ccfeaf0ea858b663861ad78d193d1fd5d7dc8122d0ce55bf67b48fd2559f0a75
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_idle_sweeper.go
+        symbol: serenaIdleThresholdFn
+        line: 87
+      evidence: var serenaIdleThresholdFn
+      message: production package-level var serenaIdleThresholdFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: cd17e5f40a4b76b67ac122bdd917a28b9692f6dd60cfa17dd56ae747e44d91e1
       kind: mutable_global
       location:
@@ -24916,6 +24864,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
+      max_metric: 1
+    - fingerprint: cd4df0c5fe582f2d14e4c9bbbf76fc7a2c4362c8e1c90e24c8e4782f3afa207f
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_session.go
+        symbol: '*routerSessionStore.store'
+        line: 344
+      evidence: round-2
+      metric: 1
+      message: production comment contains review history marker "round-2"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: cd4f0673c76c4269b69a868078e5b7d99f8abf6d1fb2a1217d2a1734c3c26227
       kind: mutable_global
@@ -25041,6 +25003,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: ce16176f9c07a39cc9c10837c115ae2c23d623fe7f4f029f38695ffb91b00b49
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.handleToolsList'
+        line: 854
+      evidence: Round-9
+      metric: 1
+      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: ce1e6079985e58495f681709598315b481e318ee3de652ee27c3a352f513f40b
       kind: mutable_global
       location:
@@ -25078,6 +25054,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+      max_metric: 1
+    - fingerprint: ce376a6dca273becfd65f9420b08c03b40cb35de5044c55689809adc6b7e506d
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.resolveDaemonSession'
+        line: 945
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: ce597df8d473b943752767378a1e8cd8085446f4e1a2a0450a9628fb8e99e02e
       kind: api_construction
@@ -25183,6 +25173,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: cf6c271c9d4847d835369fc335adfc5cd4573ca11c2ad855aff51be7be7721b4
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: '*WorkspaceRoutes.handleInitialize'
+        line: 589
+      evidence: round-2
+      metric: 2
+      message: production comment contains review history marker "round-2"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: cf71e77aeae0d30565297f8086e2ef0d307e8908fe6aaff12f6455ed940c123e
       kind: mutable_global
       location:
@@ -25195,6 +25199,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: cf865bd525b8dfdec4b23bfa2b39b76859297b46675a46993a602ab80546856d
+      kind: history_comment
+      location:
+        path: internal/mcproute/hub_listener.go
+        symbol: validateParticipatingManifestsForHubBind
+        line: 369
+      evidence: 'PR #158'
+      metric: 2
+      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: cf93ae5289d1030294757f4500996c72805be7c130a35a5eebbe1adbe1c8edd4
       kind: history_comment
       location:
@@ -25551,20 +25569,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: d142b25f980a410d670ffe6b66ca289eac14b3975b18af45b6a94bcad8264719
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: '*daemonSessionStore.resolveDaemonSession'
-        line: 945
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: d156ee8575dfedb5b409cfeaf5b61e8db895a5d8f2e8fd9ab8446edf9e19d6d6
       kind: history_comment
       location:
@@ -26053,20 +26057,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: d6784e57214a3db22b6dee9524001440ddfceb16ab8064322aea4f8d0e53ce16
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_handshake.go
-        symbol: establishDaemonSession
-        line: 607
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: d68df69e085ed709a109eda7ac9162dbc4aa983eb1d7c0a70a538627ec29048b
       kind: mutable_global
       location:
@@ -26327,6 +26317,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: d7f47f84793178efb1e8a9bd88b433b7ce504df88f50818ff3b802e49ed12795
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: errDaemonSessionHandshakeInFlight
+        line: 65
+      evidence: var errDaemonSessionHandshakeInFlight
+      message: production package-level var errDaemonSessionHandshakeInFlight requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: d80bbb84f711b2e094ce8f653a15a00ef715fb89d4122ec4b43d929da9836693
       kind: mutable_global
       location:
@@ -26389,6 +26391,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: d8a3f26b627c6b3f2bef69411ff341ba1e37906de797c889a8ea0d3895f168e0
+      kind: mutable_global
+      location:
+        path: internal/mcproute/lsp_router.go
+        symbol: lspRouterTestSeam
+        line: 94
+      evidence: var lspRouterTestSeam
+      message: production package-level var lspRouterTestSeam requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: d8b22c1d258b609f037c4549c0ad1b1e75141458a5d094dd47cef7dbc9031980
       kind: history_comment
       location:
@@ -26663,18 +26677,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: db311da06a7a8f000b1b72461247649c574f627067773ee2e8515d18ab253da0
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: serenaBackendStatusFn
-        line: 1056
-      evidence: var serenaBackendStatusFn
-      message: production package-level var serenaBackendStatusFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: db35dd787f751f675646f94b04c7f13f2d4d6eeb9949d223df41e63842e58810
       kind: mutable_global
       location:
@@ -26999,6 +27001,20 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: dd358b13543c6ba3f0b13e3ec2bf6d54dcef516d3f9bb3cb79724bb1cf5cb473
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.resolveDeleteWorkspace'
+        line: 1919
+      evidence: Round-9
+      metric: 1
+      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: dd3dd8bc0835a200dab684b338d1252a3b0ee70bf4db939c9d8e3bd815b24486
       kind: history_comment
       location:
@@ -27155,6 +27171,20 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+    - fingerprint: decb896bdb406a60e504ddd551493070c7eb5edd0ff722c3cae1adca426957f2
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.cleanup'
+        line: 551
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: df209e69e305a4e395bd8a99659bc1ba1c0f7637787c2f81e719e77ceff68e1f
       kind: production_test_hook
       location:
@@ -27545,20 +27575,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Executable entry points must delegate construction to the single composition root.
-    - fingerprint: e225190d9fc4d0265b5abc6abc6629606f0795c031d4a486586a4af86479b0de
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*Server.reseedSerenaBackendPIDAfterConfirmedWake'
-        line: 827
-      evidence: 'PR #291'
-      metric: 3
-      message: 'production comment contains review history marker "PR #291"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 3
     - fingerprint: e2332c6d1a6f65a7749349ff1e618902a95faa7e4bcbcbee7cae7cd0cc43c05e
       kind: mutable_global
       location:
@@ -27805,6 +27821,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: e45a16c85762ba9dec44ebbc745f8814e4dc3967094fc757019df5aebd9232b1
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_idle_sweeper.go
+        symbol: serenaIdleRoutingAuthorityFn
+        line: 76
+      evidence: var serenaIdleRoutingAuthorityFn
+      message: production package-level var serenaIdleRoutingAuthorityFn requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: e4747c623c2452e60a18b137e78bb35fd94c353721d6ed27d1064baf5eea2c87
       kind: history_comment
       location:
@@ -27870,6 +27898,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+      max_metric: 1
+    - fingerprint: e4ca2d26cf71cd37a158905c17697f611aff710d5101a2f53dc8368341e3e0cc
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1198
+      evidence: 'PR #288'
+      metric: 1
+      message: 'production comment contains review history marker "PR #288"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
       max_metric: 1
     - fingerprint: e5186a37d0be3e2d31a285d83918779076afa71cbbc92003e28603fe8ad91840
       kind: mutable_global
@@ -28233,20 +28275,20 @@ entries:
       work_package: WP-11E
       remove_by: "2027-03-31"
       reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
-    - fingerprint: e7461c3ed68d9af129430ba08887117904d3f7f61886003f419835c387602419
+    - fingerprint: e762eea0ff5bdd0b12b819b241973f767e94e256acc94783c756d7e75ebe6be5
       kind: history_comment
       location:
-        path: internal/gui/hub_listener.go
-        symbol: validateParticipatingManifestsForHubBind
-        line: 1154
-      evidence: 'PR #158'
-      metric: 2
-      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.handleSerenaDelete'
+        line: 1783
+      evidence: round-7
+      metric: 1
+      message: production comment contains review history marker "round-7"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
       remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: e7f29b64ccfbb97e6553b041f6a4c1d9952da9e14de4033f9da9820e976d1d88
       kind: file_budget
       location:
@@ -28421,6 +28463,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: e9d395266c0fcfc788d2bc393ef9891ffb94fd4a0a6357b156362f2d74407e69
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1053
+      evidence: 'PR #249'
+      metric: 1
+      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: e9d4aa73e6cb1145d5ed7dd40e0fa932f9779181f3f2a8a8a57749b5892c2815
       kind: worker
       location:
@@ -28527,20 +28583,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: ea895fd6ae28b084f65cb881956b4c66a450a13ec93a7bf15e3bbbcbdd5bbab4
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 1092
-      evidence: Round-10
-      metric: 1
-      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: eaada2d267acd4acc5e9ad41036ea75cde45ce5c15e26a13fe4fd31d97c31a78
       kind: mutable_global
       location:
@@ -28553,20 +28595,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: eacc0fe61a88718493654a700443533b1899ea82229ad29ab7e6f796a8e5f5f4
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.fetchToolsListFromAnyDaemon'
-        line: 1220
-      evidence: round-11
-      metric: 4
-      message: production comment contains review history marker "round-11"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 4
     - fingerprint: eafc834bd6095c3105914a262d3d761979e07723000fa387dde505278a0510da
       kind: history_comment
       location:
@@ -28887,20 +28915,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: ed59728941f13e3e7af691267041f31df6f3d61cded87db6260a425152b9fbba
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: upstreamReadContext
-        line: 144
-      evidence: round-10
-      metric: 1
-      message: production comment contains review history marker "round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: ed6263fded1917643804ee705dfbf3b91fc6a02dcac22311d336214811818181
       kind: api_construction
       location:
@@ -29013,20 +29027,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: edf37180a3bd7b13877abc5183de1189b2c58b206d9c289f6166e786b99d3038
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.handleInitialize'
-        line: 589
-      evidence: 'PR #249'
-      metric: 2
-      message: 'production comment contains review history marker "PR #249"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: ee0f44c9c923403f6f417be4999aa902d214d9471f57afba0ff28e166d0e374e
       kind: mutable_global
       location:
@@ -29039,20 +29039,6 @@ entries:
       work_package: WP-11D
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
-    - fingerprint: ee10b3b1257ae4d3dd04c05ad9cc1f96d872e0ed15297e826debc3e511cdc528
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_lifecycle.go
-        symbol: '*Server.handleInitialize'
-        line: 589
-      evidence: round-2
-      metric: 2
-      message: production comment contains review history marker "round-2"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 2
     - fingerprint: ee25e6ac7a72a55b35ee870c10c9414f82d4776a2f4bde43e4dabc903199dd3a
       kind: history_comment
       location:
@@ -29303,6 +29289,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
+    - fingerprint: ef7e958352ecee6dce02f82ae35bec3f65af5ee69082c440dbb172d095cb07f6
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 1088
+      evidence: Round-10
+      metric: 1
+      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: efcc85db072c3039516cb4df74cb71ce9c2e2bb9a84869ad70bee04d33bb9df0
       kind: mutable_global
       location:
@@ -29395,20 +29395,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: f031b209021208e2e23f59eec87495186c4b0087a03a6727e9c4e9c76075e7d3
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.peekVersionState'
-        line: 451
-      evidence: Round-13
-      metric: 1
-      message: production comment contains review history marker "Round-13"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: f03b51246daee1f470d71489bedb7a9ed0e961a08b476ad606e510f82bbfa673
       kind: history_comment
       location:
@@ -29459,6 +29445,20 @@ entries:
       work_package: WP-08
       remove_by: "2027-03-31"
       reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+    - fingerprint: f06db7545e13615dd2db2b4be8ab2ac73eb32e2eff875c9e80c4e28b7518ed8a
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: '*WorkspaceRoutes.serenaRouterHandler'
+        line: 799
+      evidence: round-9
+      metric: 2
+      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 2
     - fingerprint: f0888ef3030107e7b9e6070ae2dd98a476fb2b40f97284bdcba9e36c416f7983
       kind: history_comment
       location:
@@ -29473,20 +29473,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: f0a133e79bd41d785db5c1b289d8c3da885b57938b8e2b3bcca4dd6cc5a20c15
-      kind: history_comment
-      location:
-        path: internal/gui/hub_listener.go
-        symbol: ShutdownHubListener
-        line: 1087
-      evidence: 'PR #158'
-      metric: 3
-      message: 'production comment contains review history marker "PR #158"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 3
     - fingerprint: f0bb9e450bef075db7652002f87aa9d3d6bc2fa5384fb885365223a16d23354f
       kind: mutable_global
       location:
@@ -29845,6 +29831,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: f2f14aa4e272f8702a8d595d67b2ad6572e666e878504737424b763f10dc8281
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_lifecycle.go
+        symbol: supportedProtocolVersions
+        line: 89
+      evidence: var supportedProtocolVersions
+      message: production package-level var supportedProtocolVersions requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: f3110e014a5a65939563b700f5a7590be67cb95661c245d4b1dfc2da7d362d0d
       kind: history_comment
       location:
@@ -29962,20 +29960,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: f43ddb67409e3ed0db2ad23782f105ee2e219a846620a055dcb194ede53af8ad
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*Server.SweepSerenaSessions'
-        line: 604
-      evidence: round-9
-      metric: 1
-      message: production comment contains repeated review history marker "round-9"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: f451dee50a8945ff808abfd77fcf23e7284887d9e4858ab4179bee22ee02375c
       kind: history_comment
@@ -30271,6 +30255,18 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
+    - fingerprint: f672c99567d4f55f928d0468ba3edfcc2b69755f762c2ada7b52d93b107c742b
+      kind: mutable_global
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: errRouterSessionTerminated
+        line: 51
+      evidence: var errRouterSessionTerminated
+      message: production package-level var errRouterSessionTerminated requires an explicit policy allowance or instance-owned dependency
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
     - fingerprint: f6b5256cae2d8fe90637b1159499311499c362694a7f05ba6df11fae89826a9b
       kind: history_comment
       location:
@@ -30729,20 +30725,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: fa1793521c35e15d4482a103b724df11d855edfe953af8de91a45390548f64ec
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router_session.go
-        symbol: '*routerSessionStore.touch'
-        line: 485
-      evidence: Round-10
-      metric: 1
-      message: production comment contains review history marker "Round-10"; move history to an ADR or archive
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: fa21d7faacb9a500dd781ff73bfaee3a689775665e0c61125901c599c7ca30c9
       kind: mutable_global
       location:
@@ -30863,20 +30845,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: faf116aad5a68ac5a10795c3c76fd5908473d50e6e7d8c3e7ede298b56cca04e
-      kind: history_comment
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.serenaRouterHandler'
-        line: 729
-      evidence: 'PR #253'
-      metric: 1
-      message: 'production comment contains review history marker "PR #253"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: faff473892c49027eefaa42d8f6b23b5615beb0723a19c81715a4ffdb4cabe93
       kind: api_construction
       location:
@@ -31173,6 +31141,34 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
+    - fingerprint: fd507a7ec8641dc2cbddf536aed0f0f62c87f1d3da754d948aa5954b8a24ab71
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: '*daemonSessionStore.store'
+        line: 295
+      evidence: Round-9
+      metric: 1
+      message: production comment contains review history marker "Round-9"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
+    - fingerprint: fd72d89bd12b970ea0bddca60d6b3ed3f9c4ffed5a48cbe2d91b08c7f7a2b882
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router.go
+        symbol: toolBody
+        line: 346
+      evidence: round-10
+      metric: 1
+      message: production comment contains review history marker "round-10"; move history to an ADR or archive
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: fd7d30630b51a66076a8bbe3245011ac05c3dee80fa8a79ab0fcee36823445b5
       kind: mutable_global
       location:
@@ -31421,6 +31417,20 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
+    - fingerprint: fecced00a878ec494f1a28b25a4bac5482b401ef7f0b2388eb036bc9b3f7444a
+      kind: history_comment
+      location:
+        path: internal/mcproute/serena_router_handshake.go
+        symbol: errDaemonSessionHandshakeInFlight
+        line: 60
+      evidence: 'PR #251'
+      metric: 1
+      message: 'production comment contains review history marker "PR #251"; move history to an ADR or archive'
+      owner: mcp-runtime
+      work_package: WP-11E
+      remove_by: "2027-03-31"
+      reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+      max_metric: 1
     - fingerprint: ff1199c54a379bb1ed41be6147c600b331105127c4c31af2e58a34e3cfdf2b64
       kind: history_comment
       location:
@@ -31473,18 +31483,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-    - fingerprint: ff601247afef6c04d15f0db875c220c53236afaaf5e768b80da026f71fd1279d
-      kind: mutable_global
-      location:
-        path: internal/gui/serena_idle_sweeper.go
-        symbol: serenaIdleThresholdFn
-        line: 87
-      evidence: var serenaIdleThresholdFn
-      message: production package-level var serenaIdleThresholdFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: ff657bd86e5e5aeb68247163c9dbeff6ea8270cf528ef2529bc9d1a329b93463
       kind: mutable_global
       location:
@@ -31595,15 +31593,3 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: ffedc0666cc8bacd0ccbb3fa819b139babf1910471b0156e18e371a618ef3f32
-      kind: worker
-      location:
-        path: internal/gui/serena_router.go
-        symbol: '*Server.handleSerenaCancelled'
-        line: 2172
-      evidence: 'go func literal #1'
-      message: goroutine func literal requires an owner, cancellation, join, and bound contract
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
