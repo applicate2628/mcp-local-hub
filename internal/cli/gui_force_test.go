@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,116 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
 )
+
+// startForceKillTestSleeper keeps the fixture's original Cmd and one Wait.
+// Owned stop and the watchdog use that Process; PID lookup is not authority.
+func startForceKillTestSleeper(t *testing.T) (*exec.Cmd, func() error, <-chan struct{}) {
+	t.Helper()
+	name, args := "sleep", []string{"60"}
+	if runtime.GOOS == "windows" {
+		name = "powershell"
+		args = []string{"-NoProfile", "-NonInteractive", "-NoExit", "-Command", "Start-Sleep -Seconds 60"}
+	}
+	image, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatalf("resolve force-kill fixture %q: %v", name, err)
+	}
+	image, err = filepath.Abs(image)
+	if err != nil {
+		t.Fatalf("resolve absolute force-kill fixture image: %v", err)
+	}
+	childCtx, cancelChild := context.WithTimeout(context.Background(), 30*time.Second)
+	cmd := exec.CommandContext(childCtx, image, args...)
+	if err := cmd.Start(); err != nil {
+		cancelChild()
+		t.Fatalf("start force-kill fixture %q: %v", image, err)
+	}
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	var stopOnce sync.Once
+	var stopErr error
+	stopAndWait := func() error {
+		stopOnce.Do(func() {
+			killErr := cmd.Process.Kill()
+			<-done
+			if killErr != nil {
+				stopErr = fmt.Errorf("terminate original fixture: %w", killErr)
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(waitErr, &exitErr) {
+				stopErr = errors.Join(stopErr, fmt.Errorf("fixture must exit after owned kill; Wait returned %v", waitErr))
+			}
+			if cmd.ProcessState == nil || cmd.ProcessState.Pid() != cmd.Process.Pid {
+				stopErr = errors.Join(stopErr, errors.New("original fixture Wait did not return its process state"))
+			}
+			if err := childCtx.Err(); err != nil {
+				stopErr = errors.Join(stopErr, fmt.Errorf("fixture watchdog ended before owned settlement: %w", err))
+			}
+			cancelChild()
+			t.Logf("force-kill fixture settled: image=%q pid=%d kill=%v wait=%v", image, cmd.Process.Pid, killErr, waitErr)
+		})
+		return stopErr
+	}
+	t.Cleanup(func() {
+		if err := stopAndWait(); err != nil {
+			t.Errorf("force-kill fixture cleanup: %v", err)
+		}
+	})
+	t.Logf("force-kill fixture started: image=%q pid=%d", image, cmd.Process.Pid)
+	return cmd, stopAndWait, done
+}
+
+// guiForceCancellationOnly accepts cancellation through joined cleanup errors
+// without hiding another failure merely because errors.Is finds cancellation.
+func guiForceCancellationOnly(err error) bool {
+	if err == context.Canceled {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !guiForceCancellationOnly(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return guiForceCancellationOnly(wrapped.Unwrap())
+	}
+	return false
+}
+
+func TestGUIForceCancellationOnly(t *testing.T) {
+	cleanupErr := errors.New("cleanup failed")
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"canceled", context.Canceled, true},
+		{"wrapped", fmt.Errorf("command: %w", context.Canceled), true},
+		{"joined cancellation", errors.Join(context.Canceled, context.Canceled), true},
+		{"cleanup failure", cleanupErr, false},
+		{"cancellation and cleanup failure", errors.Join(context.Canceled, cleanupErr), false},
+		{"cancellation and deadline", errors.Join(context.Canceled, context.DeadlineExceeded), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := guiForceCancellationOnly(tc.err); got != tc.want {
+				t.Errorf("cancellation-only = %v, want %v for %v", got, tc.want, tc.err)
+			}
+		})
+	}
+}
 
 // ---------------------------------------------------------------
 // Scenario 1: Healthy --force (bare flag activates via handshake)
@@ -312,118 +423,118 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
 // Poll the pidport until it contains os.Getpid() (proof the rewrite
 // happened) OR the deadline expires, then assert.
 func TestForce_KillRewritesPidportWithCurrentPID(t *testing.T) {
-	prevGate := gui.IdentityGateForTest()
-	defer gui.RestoreIdentityGate(prevGate)
-	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
+	// Exercise the real GUI server without launching a supervisor or scheduler.
+	t.Setenv("MCPHUB_E2E_SUPERVISOR", "none")
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	t.Setenv(selfRestartHandoffEnv, "")
 
-	// Discover a free ephemeral port: bind on :0, read the port the
-	// OS picked, close. The actualPort==requestedPort branch is the
-	// one the P2 #2 bug hid in.
+	// Keep the actualPort==requestedPort regression oracle.
 	freePort := pickFreePort(t)
-
 	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
-
-	// Spawn a sleep helper so Probe sees a live PID. The kill path
-	// then terminates this child, the OS releases its flock, and our
-	// acquire-poll succeeds.
-	var sleepCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		sleepCmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
-	} else {
-		sleepCmd = exec.Command("sleep", "60")
-	}
-	if err := sleepCmd.Start(); err != nil {
-		t.Skipf("cannot spawn sleep helper: %v", err)
-	}
-	defer func() { _ = sleepCmd.Process.Kill() }()
+	sleepCmd, stopHolder, holderDone := startForceKillTestSleeper(t)
 	stalePid := sleepCmd.Process.Pid
 	const stalePort = 1
+	fl := flock.New(pidport + ".lock")
+	prevGate := gui.IdentityGateForTest()
+	prevHook := gui.PostKillHookForTest()
+	gui.SetPostKillHook(nil)
+	gui.SetIdentityGate(func(v gui.Verdict) (bool, string) {
+		return v.PID != stalePid, "force-kill test owns only its original child"
+	})
+	var killCalls atomic.Int32
+	restoreKill := gui.SetKillProcessForTest(func(pid int) error {
+		if pid != stalePid {
+			return fmt.Errorf("force-kill requested unowned PID %d", pid)
+		}
+		killCalls.Add(1)
+		if err := stopHolder(); err != nil {
+			return err
+		}
+		// This flock is parent-owned: release only after the original Cmd.Wait.
+		return fl.Unlock()
+	})
+	defer func() {
+		if err := stopHolder(); err != nil {
+			t.Errorf("settle original holder: %v", err)
+		}
+		if err := fl.Unlock(); err != nil {
+			t.Errorf("release original fixture flock: %v", err)
+		}
+		restoreKill()
+		gui.RestorePostKillHook(prevHook)
+		gui.RestoreIdentityGate(prevGate)
+	}()
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", stalePid, stalePort)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	fl := flock.New(pidport + ".lock")
-	if ok, _ := fl.TryLock(); !ok {
-		t.Fatal("could not pre-lock")
+	if ok, err := fl.TryLock(); err != nil || !ok {
+		t.Fatalf("pre-lock original holder: acquired=%v err=%v", ok, err)
 	}
-	// Release the flock when the child dies — simulate the OS
-	// auto-release so the acquire-poll loop inside KillRecordedHolder
-	// can succeed.
-	go func() {
-		_, _ = sleepCmd.Process.Wait()
-		_ = fl.Unlock()
-	}()
 
-	// Run the command with a context that we cancel as soon as the
-	// pidport has been rewritten with our PID. 10s overall deadline
-	// keeps the test bounded if the rewrite never happens.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	c := newGuiCmdRealForTest()
 	c.SetArgs([]string{"--port", fmt.Sprintf("%d", freePort), "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
-
 	cmdDone := make(chan error, 1)
 	go func() { cmdDone <- c.ExecuteContext(ctx) }()
+	var cmdErr error
+	cmdJoined := false
+	joinCommand := func() error {
+		if !cmdJoined {
+			cmdErr = <-cmdDone
+			cmdJoined = true
+		}
+		return cmdErr
+	}
+	defer func() {
+		cancel()
+		// Do not release fixtures or restore seams while this command is active.
+		if err := joinCommand(); err != nil && !guiForceCancellationOnly(err) {
+			t.Errorf("GUI command shutdown: %v", err)
+		}
+	}()
 
-	// Poll the pidport: succeed as soon as we observe
-	// (os.Getpid(), freePort) — that's the proof startGuiServer's
-	// WritePidport landed in the actualPort==requestedPort branch.
-	// Fail if the takeover happened (cmdDone fires early) without
-	// ever rewriting the pidport with our PID.
 	deadline := time.Now().Add(8 * time.Second)
 	var observedPid, observedPort int
 	for time.Now().Before(deadline) {
 		pid, port, rerr := gui.ReadPidport(pidport)
 		if rerr == nil && pid == os.Getpid() && port == freePort {
-			observedPid = pid
-			observedPort = port
+			observedPid, observedPort = pid, port
 			break
 		}
 		select {
-		case err := <-cmdDone:
-			// Command exited before we observed the rewrite.
-			// Re-check the pidport (it may have written and then
-			// the test's polling missed the window before
-			// shutdown). If still stale, fail with the command
-			// error for context.
-			pid2, port2, rerr2 := gui.ReadPidport(pidport)
-			if rerr2 == nil && pid2 == os.Getpid() && port2 == freePort {
-				observedPid = pid2
-				observedPort = port2
-				break
+		case cmdErr = <-cmdDone:
+			cmdJoined = true
+			pid, port, rerr = gui.ReadPidport(pidport)
+			if rerr == nil && pid == os.Getpid() && port == freePort {
+				observedPid, observedPort = pid, port
+			} else {
+				t.Fatalf("command exited (err=%v) before current PID + freePort publication: pid=%d port=%d stale=%d:%d want=%d:%d",
+					cmdErr, pid, port, stalePid, stalePort, os.Getpid(), freePort)
 			}
-			t.Fatalf("command exited (err=%v) but pidport still has pid=%d port=%d (stale=%d:%d, want %d:%d)",
-				err, pid2, port2, stalePid, stalePort, os.Getpid(), freePort)
 		case <-time.After(50 * time.Millisecond):
 		}
 		if observedPid != 0 {
 			break
 		}
 	}
-	// Cancel the context so startGuiServer shuts down cleanly.
+	if ctx.Err() != nil {
+		t.Errorf("GUI command reached its deadline before cancellation: %v", ctx.Err())
+	}
 	cancel()
-	// Drain the command goroutine so the test doesn't leak it.
+	_ = joinCommand()
 	select {
-	case <-cmdDone:
-	case <-time.After(5 * time.Second):
-		t.Logf("warning: command did not exit within 5s after cancel")
+	case <-holderDone:
+	default:
+		t.Error("original holder Cmd.Wait did not complete during takeover")
 	}
-
-	if observedPid == 0 {
-		t.Fatalf("pidport never rewritten with current PID + freePort=%d; last read: pid=%d port=%d (stale incumbent was pid=%d port=%d)",
-			freePort, observedPid, observedPort, stalePid, stalePort)
+	if killCalls.Load() != 1 {
+		t.Errorf("owned kill calls = %d, want 1", killCalls.Load())
 	}
-	if observedPid == stalePid {
-		t.Errorf("pidport still contains the killed incumbent's PID %d — WritePidport did not run", stalePid)
-	}
-	if observedPid != os.Getpid() {
-		t.Errorf("pidport pid = %d, want os.Getpid() = %d", observedPid, os.Getpid())
-	}
-	if observedPort != freePort {
-		t.Errorf("pidport port = %d, want freePort = %d", observedPort, freePort)
+	if observedPid != os.Getpid() || observedPort != freePort || observedPid == stalePid {
+		t.Fatalf("active pidport = %d:%d, want current PID + requested freePort %d:%d (stale %d:%d)",
+			observedPid, observedPort, os.Getpid(), freePort, stalePid, stalePort)
 	}
 }
 
@@ -678,72 +789,101 @@ func TestForce_KillDeadPID_NoPromptExits3(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_KillRaceLost(t *testing.T) {
-	// Inject seam: identity gate passes so the test binary's sleep
-	// child PID is accepted as a valid target.  The postKillHook
-	// immediately re-acquires the flock from a "competitor" goroutine
-	// so the acquire-poll loop inside KillRecordedHolder always sees
-	// ErrSingleInstanceBusy and eventually returns VerdictRaceLost.
-	prevGate := gui.IdentityGateForTest()
-	defer gui.RestoreIdentityGate(prevGate)
-	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
-
-	prevHook := gui.PostKillHookForTest()
-	defer gui.RestorePostKillHook(prevHook)
-
+	t.Setenv("MCPHUB_E2E_SUPERVISOR", "none")
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+	t.Setenv(selfRestartHandoffEnv, "")
 	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
-
-	// Spawn a sleep child so Probe sees a live PID.
-	var sleepCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		sleepCmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
-	} else {
-		sleepCmd = exec.Command("sleep", "60")
-	}
-	if err := sleepCmd.Start(); err != nil {
-		t.Skipf("cannot spawn sleep helper: %v", err)
-	}
-	defer func() { _ = sleepCmd.Process.Kill() }()
-
+	sleepCmd, stopHolder, holderDone := startForceKillTestSleeper(t)
 	pid := sleepCmd.Process.Pid
+	fl := flock.New(pidport + ".lock")
+	flCompetitor := flock.New(pidport + ".lock")
+	prevGate := gui.IdentityGateForTest()
+	prevHook := gui.PostKillHookForTest()
+	gui.SetIdentityGate(func(v gui.Verdict) (bool, string) {
+		return v.PID != pid, "force-kill test owns only its original child"
+	})
+	var killCalls atomic.Int32
+	restoreKill := gui.SetKillProcessForTest(func(target int) error {
+		if target != pid {
+			return fmt.Errorf("force-kill requested unowned PID %d", target)
+		}
+		killCalls.Add(1)
+		return stopHolder()
+	})
+	defer func() {
+		if err := stopHolder(); err != nil {
+			t.Errorf("settle original holder: %v", err)
+		}
+		if err := flCompetitor.Unlock(); err != nil {
+			t.Errorf("release competitor fixture flock: %v", err)
+		}
+		if err := fl.Unlock(); err != nil {
+			t.Errorf("release original fixture flock: %v", err)
+		}
+		restoreKill()
+		gui.RestorePostKillHook(prevHook)
+		gui.RestoreIdentityGate(prevGate)
+	}()
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	// Pre-acquire the lock as the "original holder".
-	fl := flock.New(pidport + ".lock")
-	if ok, _ := fl.TryLock(); !ok {
-		t.Fatal("could not pre-lock")
+	if ok, err := fl.TryLock(); err != nil || !ok {
+		t.Fatalf("pre-lock original holder: acquired=%v err=%v", ok, err)
 	}
 
-	// competitor flock — held by the "race winner" after the kill.
-	flCompetitor := flock.New(pidport + ".lock")
-
-	// postKillHook: release the original holder lock (simulating OS
-	// auto-release after kill), then immediately re-acquire as the
-	// competitor so the acquire-poll loop always sees the flock busy.
+	hookCalls, competitorAcquired := 0, false
+	var hookErr error
 	gui.SetPostKillHook(func() {
-		fl.Unlock()
-		// Spin until we acquire as the competitor.
+		hookCalls++
+		select {
+		case <-holderDone:
+		default:
+			hookErr = errors.New("post-kill hook ran before original holder Cmd.Wait")
+			return
+		}
+		if err := fl.Unlock(); err != nil {
+			hookErr = fmt.Errorf("release original holder in post-kill hook: %w", err)
+			return
+		}
 		for i := 0; i < 20; i++ {
-			if ok, _ := flCompetitor.TryLock(); ok {
+			ok, err := flCompetitor.TryLock()
+			if err != nil {
+				hookErr = fmt.Errorf("competitor acquire: %w", err)
+				return
+			}
+			if ok {
+				competitorAcquired = true
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
+		hookErr = errors.New("competitor did not acquire the fixture flock")
 	})
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	c := newGuiCmdRealForTest()
 	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
-	err := c.Execute()
-	// Release competitor flock after the command finishes.
-	_ = flCompetitor.Unlock()
-
+	err := c.ExecuteContext(ctx)
+	if ctx.Err() != nil {
+		t.Errorf("race-lost command reached its deadline: %v", ctx.Err())
+	}
+	select {
+	case <-holderDone:
+	default:
+		t.Error("original holder Cmd.Wait did not complete during kill")
+	}
+	if killCalls.Load() != 1 {
+		t.Errorf("owned kill calls = %d, want 1", killCalls.Load())
+	}
+	if hookCalls != 1 || !competitorAcquired || hookErr != nil {
+		t.Errorf("race-lost setup: hook calls=%d competitor acquired=%v err=%v", hookCalls, competitorAcquired, hookErr)
+	}
 	var fe interface{ ExitCode() int }
 	if !errors.As(err, &fe) {
-		t.Errorf("expected typed forceExitError from race-lost path; got %v", err)
-		return
+		t.Fatalf("expected typed forceExitError from race-lost path; got %v", err)
 	}
 	if fe.ExitCode() != 3 {
 		t.Errorf("exit code = %d, want 3 (RaceLost)", fe.ExitCode())
