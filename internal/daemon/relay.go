@@ -372,8 +372,6 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		attempts++
-
 		// Wait for session before first SSE request; server requires
 		// MCP-Session-Id on GET.
 		if r.getSessionID() == "" {
@@ -385,6 +383,7 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 			}
 		}
 
+		attempts++
 		req, err := http.NewRequestWithContext(ctx, "GET", r.URL, nil)
 		if err != nil {
 			return fmt.Errorf("build GET request: %w", err)
