@@ -42,7 +42,7 @@ Outside Windows the function returns `Unsupported` before side effects. That is 
 
 ## Native evidence
 
-**Current qualification — 2026-11-21:** the candidate based on `b827398ef127a1556b7b2bdcdcec7fe03fa6651d`, with the additional native-read-error test, passed **16 library tests, 0 failed/ignored/measured/filtered**, serially on Windows x64. The formatter check passed. The [execution record and source identities](evidence/README.md) distinguish this run from the historical 15-test evidence, retain the first failed formatting attempt, and explain the later documentation-only update. No Clippy rerun or product qualification is claimed.
+**Current qualification — 2026-11-21:** the candidate based on `b827398ef127a1556b7b2bdcdcec7fe03fa6651d`, with the additional native-read-error test, passed **16 library tests, 0 failed/ignored/measured/filtered**, serially on Windows x64. The formatter check passed. The [execution record and source identities](../../docs/modernization/verification/reader-native-read-2026-11-21/README.md) distinguish this run from the historical 15-test evidence, retain the first failed formatting attempt, and explain the later documentation-only update. No Clippy rerun or product qualification is claimed.
 
 **Historical evidence, not a rerun for the 2026-11-18 source comparison.** Windows 11 build 26100, x86_64, Rust 1.99.1. Dependencies were already cached and used offline: `windows-sys=0.61.2`, `sha2=0.10.9`, `zeroize=1.9.0`; lockfile included. No dependencies were installed or added to the Hub product.
 
