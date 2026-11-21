@@ -9,9 +9,10 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// InstallSchedulerRollbackIncompleteError reports scheduler compensations whose
-// prior definitions or absence could not be confirmed. Outer install owners must
-// retain recovery material rather than treat the original failure as unmutated.
+// InstallSchedulerRollbackIncompleteError reports scheduler mutations or
+// compensations whose prior definitions or absence could not be confirmed.
+// Outer install owners must retain recovery material rather than treat the
+// original failure as unmutated.
 // Tasks contains names only; cause preserves the install and compensation errors.
 type InstallSchedulerRollbackIncompleteError struct {
 	Tasks []string
@@ -48,6 +49,27 @@ func installSchedulerRecoveryTasks(err error) []string {
 		}
 	}
 	return names
+}
+
+// installTaskMutationFailure observes the prior definition or absence after a
+// failed current-step mutation. An error alone does not establish its outcome.
+// Reuse the scheduler recovery owner unless that prior state is observed;
+// never retry, delete an occupant, or restore by name in this classifier.
+// Like the later rollback's checks, this is a definition observation, not an
+// atomic object-generation or whole-process-tree settlement guarantee.
+func installTaskMutationFailure(s scheduler.Scheduler, name string, priorXML []byte, cause error) error {
+	current, readErr := s.ExportXML(name)
+	if len(priorXML) == 0 {
+		if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
+			return cause
+		}
+	} else if readErr == nil && bytes.Equal(current, priorXML) {
+		return cause
+	}
+	if readErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("observe task %s after failed mutation: %w", name, readErr))
+	}
+	return &InstallSchedulerRollbackIncompleteError{Tasks: []string{name}, cause: cause}
 }
 
 // installTaskRollback captures one acknowledged creation in this execution.

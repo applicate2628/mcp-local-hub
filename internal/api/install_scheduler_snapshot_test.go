@@ -15,28 +15,25 @@ import (
 
 type installSnapshotScheduler struct {
 	*fakeScheduler
-	name      string
-	snapshot  []byte
-	exportErr error
-	deleteErr error
-	created   bool
+	name            string
+	snapshot        []byte
+	exportErr       error
+	deleteErr       error
+	createAttempted bool
 }
 
 func (s *installSnapshotScheduler) ExportXML(name string) ([]byte, error) {
-	if name == s.name && !s.created {
+	if name == s.name && !s.createAttempted {
 		return s.snapshot, s.exportErr
 	}
 	return s.fakeScheduler.ExportXML(name)
 }
 
 func (s *installSnapshotScheduler) Create(spec scheduler.TaskSpec) error {
-	if err := s.fakeScheduler.Create(spec); err != nil {
-		return err
-	}
 	if spec.Name == s.name {
-		s.created = true
+		s.createAttempted = true
 	}
-	return nil
+	return s.fakeScheduler.Create(spec)
 }
 
 func (s *installSnapshotScheduler) Delete(name string) error {

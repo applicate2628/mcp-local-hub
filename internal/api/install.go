@@ -3795,6 +3795,8 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			cause = errors.Join(joined...)
 		}
 		if len(rollbackSchedulerTasks) > 0 {
+			// Keep a failed current mutation named alongside earlier compensations.
+			rollbackSchedulerTasks = append(rollbackSchedulerTasks, installSchedulerRecoveryTasks(cause)...)
 			cause = &InstallSchedulerRollbackIncompleteError{
 				Tasks: append([]string(nil), rollbackSchedulerTasks...),
 				cause: cause,
@@ -3864,7 +3866,8 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			}
 			fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
 			if err := sch.Delete(spec.Name); err != nil {
-				return failAfterRollback(fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err))
+				cause := fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err)
+				return failAfterRollback(installTaskMutationFailure(sch, spec.Name, priorXML, cause))
 			}
 		}
 		if err := sch.Create(spec); err != nil {
@@ -3874,7 +3877,8 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 					Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
 				})
 			}
-			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
+			cause := fmt.Errorf("create task %s: %w", spec.Name, err)
+			return failAfterRollback(installTaskMutationFailure(sch, spec.Name, nil, cause))
 		}
 		compensation := &installTaskRollback{
 			name: spec.Name, priorXML: priorXML, snapshotPath: snapshotPath, creator: recovery,
