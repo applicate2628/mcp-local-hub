@@ -144,12 +144,18 @@ func TestManagedIdentityCallerCancellationPortReceiver(t *testing.T) {
 			OwnerPath:        func() (string, error) { t.Fatal("unexpected owner path read"); return "", nil },
 			VerifyListener:   func(context.Context, string, int, int) error { t.Fatal("unexpected listener read"); return nil },
 			ProbeLeaseUnheld: func(string) (bool, error) { t.Fatal("unexpected lease read"); return false, nil },
-			FindGUIs:         func(string) ([]api.ProcessInfo, error) { t.Fatal("unexpected GUI read"); return nil, nil },
-			ListProcesses:    func([]string) ([]api.ProcessInfo, error) { t.Fatal("unexpected process list"); return nil, nil },
-			HoldTermination:  func(int) (process.HeldPIDGeneration, error) { t.Fatal("unexpected termination hold"); return nil, nil },
-			HoldJob:          func(int) (process.HeldPIDJobObservation, error) { t.Fatal("unexpected Job hold"); return nil, nil },
-			SIDMatches:       func(int) (bool, error) { t.Fatal("unexpected SID read"); return false, nil },
-			ParentPID:        func(int) (int, error) { t.Fatal("unexpected parent read"); return 0, nil },
+			FindGUIs: func(context.Context, string) ([]api.ProcessInfo, error) {
+				t.Fatal("unexpected GUI read")
+				return nil, nil
+			},
+			ListProcesses: func(context.Context, []string) ([]api.ProcessInfo, error) {
+				t.Fatal("unexpected process list")
+				return nil, nil
+			},
+			HoldTermination: func(int) (process.HeldPIDGeneration, error) { t.Fatal("unexpected termination hold"); return nil, nil },
+			HoldJob:         func(int) (process.HeldPIDJobObservation, error) { t.Fatal("unexpected Job hold"); return nil, nil },
+			SIDMatches:      func(int) (bool, error) { t.Fatal("unexpected SID read"); return false, nil },
+			ParentPID:       func(int) (int, error) { t.Fatal("unexpected parent read"); return 0, nil },
 			SupervisorOwner: func(string) (api.SupervisorLockOwner, error) {
 				return api.SupervisorLockOwner{PID: 7, StartedAt: start.Format(time.RFC3339Nano)}, nil
 			},

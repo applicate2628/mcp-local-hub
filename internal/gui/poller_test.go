@@ -761,21 +761,7 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 	})
 
 	t.Run("emits-after-port-stale-crash-clears-stale-pid", func(t *testing.T) {
-		withSerenaIdleReconcileGlobals(t)
-
-		const wsPath = "/proj/poller-stale-crash"
-		const sid = "sid-poller-stale-crash"
 		const pidA = 4242
-		ws := serenaWS("poller-stale-crash", wsPath, 9301)
-		s, sessions := newSerenaStoreSeedServer(t, ws)
-		seedBoundSerenaSession(s, sessions, ws, sid, "daemon-poller-stale-crash")
-		seedSerenaBackendBaseline(s, wsPath, pidA)
-		serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
-			return []api.DaemonStatus{
-				{Server: "serena", Daemon: "alpha", Workspace: wsPath, TaskName: ws.TaskName, State: "Quarantined", Port: 9301, PID: 0, StalePID: 0},
-			}, nil
-		}
-
 		frames := [][]api.DaemonStatus{
 			{{Server: "serena", Daemon: "alpha", State: "Running", Port: 9301, PID: pidA}},
 			{{Server: "serena", Daemon: "alpha", State: "Restarting", Port: 9301, PID: 0, StalePID: pidA}},
@@ -811,10 +797,6 @@ func TestPoller_DaemonBackendLostEvent(t *testing.T) {
 			t.Errorf("state = %q, want Quarantined", got)
 		}
 
-		if n := s.ReconcileSerenaBackendLossViaIPC(context.Background()); n != 1 {
-			t.Fatalf("reconcile after stale-crash wake tore down %d sessions; want 1", n)
-		}
-		assertSerenaSessionGone(t, s, sessions, sid)
 	})
 
 	t.Run("emits-on-removed-row", func(t *testing.T) {

@@ -353,7 +353,7 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 			}
 			if len(e.Env) > 0 {
 				sb.WriteString("env:\n")
-				for _, k := range sortedStringKeys(e.Env) {
+				for _, k := range sortedKeys(e.Env) {
 					sb.WriteString(fmt.Sprintf("  %s: %s\n", yamlEscape(k), yamlEscape(e.Env[k])))
 				}
 			}
@@ -361,7 +361,7 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 			sb.WriteString(fmt.Sprintf("url: %s\n", yamlEscape(e.URL)))
 			if len(e.Headers) > 0 {
 				sb.WriteString("headers:\n")
-				for _, k := range sortedStringKeys(e.Headers) {
+				for _, k := range sortedKeys(e.Headers) {
 					sb.WriteString(fmt.Sprintf("  %s: %s\n", yamlEscape(k), yamlEscape(e.Headers[k])))
 				}
 			}
@@ -369,7 +369,7 @@ func renderVSCodeProjectedYAML(entries []vscodeProjected) string {
 			sb.WriteString(fmt.Sprintf("url: %s\n", yamlEscape(e.URL)))
 			if len(e.Headers) > 0 {
 				sb.WriteString("headers:\n")
-				for _, k := range sortedStringKeys(e.Headers) {
+				for _, k := range sortedKeys(e.Headers) {
 					sb.WriteString(fmt.Sprintf("  %s: %s\n", yamlEscape(k), yamlEscape(e.Headers[k])))
 				}
 			}
@@ -659,15 +659,6 @@ func needsQuoting(s string) bool {
 }
 
 func sortedKeys[T any](m map[string]T) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func sortedStringKeys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
