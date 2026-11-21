@@ -1,0 +1,477 @@
+{
+  "schema": 1,
+  "scope": "R25 closeout plus the separately qualified reader follow-up",
+  "snapshot_relation": "GitHub observations before publication of this documentation receipt. The containing #623 commit advances the evidence branch from the recorded parent; it is not included in its own snapshot.",
+  "r25_original_commit": "a4c6de78d867d9e99ee596c15251ac7d4a522737",
+  "reader": {
+    "commit": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+    "files": [
+      {
+        "path": "experiments/rust-anchored-read/src/read_tests.rs",
+        "mode": "100644",
+        "type": "blob",
+        "bytes": 14670,
+        "sha256": "f77765527f80c93677d2ec3cb6991a2fa64c446b50c9c4f563136443603aa6b4",
+        "git_blob": "d16433d1db44f873e570d4cd65e2ac6f749ebc55"
+      },
+      {
+        "path": "experiments/rust-anchored-read/README.md",
+        "mode": "100644",
+        "type": "blob",
+        "bytes": 12593,
+        "sha256": "ae0f0bea99a24479fb8fcd2ae44acb2a13db908c43f3f46405095e6353d7d0ff",
+        "git_blob": "1a12a32c8e82b9c7899627f43179bc70ff0c9c06"
+      },
+      {
+        "path": "docs/modernization/verification/reader-native-read-2026-11-21/README.md",
+        "mode": "100644",
+        "type": "blob",
+        "bytes": 7593,
+        "sha256": "c6c85cdcf03f39b781ae42203baaa2afc9da47e773a5d2e9cb12c833567275cd",
+        "git_blob": "e5ce372ec08a39c50e025f53fb33d214008a5b3d"
+      },
+      {
+        "path": "docs/modernization/verification/reader-native-read-2026-11-21/evidence.json",
+        "mode": "100644",
+        "type": "blob",
+        "bytes": 88652,
+        "sha256": "ee434e3192445bf83573efc413ffbdb1442ba523fc90274e1f35ada8807898b8",
+        "git_blob": "d9c9cfcb870e1ba150c1e024b838e752fb9ce687"
+      },
+      {
+        "path": "docs/modernization/verification/reader-native-read-2026-11-21/qualification.py",
+        "mode": "100644",
+        "type": "blob",
+        "bytes": 17963,
+        "sha256": "8a6909eff30eea30a98ec0c9b3a659f5cd00a472eea79070f392ec27c1eca4a9",
+        "git_blob": "1327357ce3602ec176f3133d26c0e60f5450a94c"
+      }
+    ],
+    "matched": true
+  },
+  "plan": {
+    "commit": "31e86283ad2d390cba938397239ea95bef4ced1a",
+    "git_blob": "74f00e34a8707ef083484e26fbe00ba1c32139c6",
+    "matched": true
+  },
+  "open_pr_count": 27,
+  "all_open_draft": true,
+  "master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "original_branch_names_preserved": 31,
+  "branches": {
+    "docs/rust-cross-platform-no-com-20261112": "a4c6de78d867d9e99ee596c15251ac7d4a522737",
+    "perf/rx01-cmaketrace-benchmark-20261112": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+    "spike/rx02-native-process-owner-20261112": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+    "perf/rx01-relay-baseline-20261112": "04e1e19650318725850225ebadc521cbf97dadd9",
+    "spike/rx04-anchored-read-20261112": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+    "perf/rx16-native-observation-20261112": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+    "fix/relay-output-failure-contract-20261113": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+    "spike/rx02-go-rust-boundary-20261113": "412cd353d495a890b47992c0eae672a247862508",
+    "fix/serena-qualified-uv-path-20261114": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+    "fix/serena-qualification-publisher-20261114": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+    "fix/serena-qualification-namespace-20261114": "acac454e539a6b951d4b6ee998cc2142ee153069",
+    "fix/serena-integration-qualification-20261114": "1ebe00c5dbac448488d980072e689b1126875dde",
+    "fix/serena-unbuffered-build-input-20261114": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+    "fix/serena-cleanup-parent-observation-20261114": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+    "spike/rx02-native-identity-20261114": "1cf5754b81c850a3569be269642b49605895eeb2",
+    "fix/serena-stream-enumeration-20261114": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+    "fix/serena-python-discovery-preference-20261114": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+    "fix/serena-executable-discovery-20261114": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+    "fix/serena-build-compatibility-20261114": "184104c186108b150d1183318c3f6791f2a4ba5f",
+    "fix/serena-qualification-home-20261114": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+    "fix/serena-protocol-binding-20261114": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+    "fix/serena-readonly-cleanup-20261114": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+    "fix/serena-owned-file-reads-20261114": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+    "fix/serena-tcp-query-budget-20261115": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+    "fix/serena-ready-readback-20261115": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+    "fix/serena-finalize-context-20261115": "2defe618259f7db4144824d19927b032300d160d",
+    "fix/serena-connection-close-20261115": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+    "fix/canonical-command-test-product-20261116": "4fa52b60b719664ede441be339e196a8b9766c50",
+    "docs/agents-canonical-plan-20261117": "31e86283ad2d390cba938397239ea95bef4ced1a",
+    "fix/api-port-pid-observation-20261118": "a3568dfe3426afaca4176d57a2310097e5214e77",
+    "fix/scheduler-hidden-task-lookup-20261119": "610fb30348c10be7b645b6ce43c862397b190f60",
+    "master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "test/serena-conflict-validation-oracle-20261121": "23ed6b5c6a942812a72e345c5d886b3310e9017e"
+  },
+  "prs": [
+    {
+      "pr": 623,
+      "head": "a4c6de78d867d9e99ee596c15251ac7d4a522737",
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 624,
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 625,
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 626,
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 627,
+      "head": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 628,
+      "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 629,
+      "head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 631,
+      "head": "412cd353d495a890b47992c0eae672a247862508",
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "base": "spike/rx02-native-identity-20261114",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 632,
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 635,
+      "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 636,
+      "head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "head_ref": "fix/serena-qualification-namespace-20261114",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "state": "closed",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 637,
+      "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 639,
+      "head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "head_ref": "fix/serena-unbuffered-build-input-20261114",
+      "base": "master",
+      "state": "closed",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 643,
+      "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 644,
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 645,
+      "head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "head_ref": "fix/serena-stream-enumeration-20261114",
+      "base": "master",
+      "state": "closed",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 646,
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 647,
+      "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 648,
+      "head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 649,
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 650,
+      "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 651,
+      "head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "head_ref": "fix/serena-readonly-cleanup-20261114",
+      "base": "master",
+      "state": "closed",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 652,
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 653,
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 654,
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 655,
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 656,
+      "head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "head_ref": "fix/serena-connection-close-20261115",
+      "base": "master",
+      "state": "closed",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 657,
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 658,
+      "head": "31e86283ad2d390cba938397239ea95bef4ced1a",
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 659,
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 660,
+      "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    },
+    {
+      "pr": 661,
+      "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "head_ref": "test/serena-conflict-validation-oracle-20261121",
+      "base": "master",
+      "state": "open",
+      "draft": true,
+      "merged": false
+    }
+  ],
+  "donor_refs": [
+    {
+      "pr": 636,
+      "ref": "refs/heads/fix/serena-qualification-namespace-20261114",
+      "sha": "acac454e539a6b951d4b6ee998cc2142ee153069"
+    },
+    {
+      "pr": 639,
+      "ref": "refs/heads/fix/serena-unbuffered-build-input-20261114",
+      "sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74"
+    },
+    {
+      "pr": 645,
+      "ref": "refs/heads/fix/serena-stream-enumeration-20261114",
+      "sha": "98511ab9ea633b7e47e825396f002dc783c51d9f"
+    },
+    {
+      "pr": 651,
+      "ref": "refs/heads/fix/serena-readonly-cleanup-20261114",
+      "sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6"
+    },
+    {
+      "pr": 656,
+      "ref": "refs/heads/fix/serena-connection-close-20261115",
+      "sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff"
+    }
+  ],
+  "restrictions": {
+    "new_prs_in_this_continuation": 0,
+    "merges": 0,
+    "branch_deletions": 0,
+    "force_pushes": 0,
+    "base_changes": 0,
+    "manual_ci_dispatches": 0,
+    "installations": 0,
+    "dependency_downloads": 0,
+    "system_policy_changes": 0,
+    "installed_product_changes": 0
+  },
+  "whole_process_tree_settlement_proven": false,
+  "native_followup": {
+    "format_v1": "FAIL retained",
+    "native_v1": "NOT_RUN",
+    "format_v2": "PASS",
+    "native_v2": {
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0
+    },
+    "scope": "One native ReadFile failure after 4096 bytes; no new production source",
+    "metadata_erratum": "Frozen manifest test_policy.exact_passes=15 is stale; the executed driver enforces 16 named tests and exact 16-pass summary. Original evidence remains unchanged."
+  },
+  "remaining_program": "OPEN: original owner/authority consumers, stat/close and combined failures, R16/R17 native/product boundaries, representative workloads and budgets, complete Go gates, product/Serena/Unix ARM64 acceptance, external reviews on current commits",
+  "record_created_utc": "2026-11-21 14:49:18 UTC",
+  "last_remote_session_observation": {
+    "result": "No active sessions on both used devices",
+    "limitation": "Not proof of whole-process-tree settlement"
+  },
+  "description_updates": {
+    "624": {
+      "exact_readback": true,
+      "sha256": "e32a4ba0b5ade7c1e9a458cd8f7a728dea6dde0f9704099d35a6f54ee02f7772"
+    },
+    "627": {
+      "exact_readback": true,
+      "sha256": "6b3568a40ec8761d9145bac026cef6dbb0c1cdbf3fe71e48c2eaec4eb9bc0e13"
+    },
+    "648": {
+      "exact_readback": true,
+      "sha256": "0f70a197ca4e6c4b2177461bd02764fd561a9d9ad003c5d0128a40c2dc205003"
+    },
+    "658": {
+      "exact_readback": true,
+      "sha256": "e4a69deea6084f8615072d45104591411e7f65882c96285336f47a4a2962f7fe"
+    },
+    "661": {
+      "exact_readback": true,
+      "sha256": "1a006e1405b9d2d4cd64352ce7df4d20c2ecb6bdc30e2e9a26bb61da5485dacc"
+    }
+  },
+  "self_description_publication_order": "PR #623 description is updated and read back after the containing commit exists, so its link can use that immutable commit. Its own final body is not part of this prepublication snapshot.",
+  "cleanup": {
+    "receipt": "cleanup.json",
+    "state": "COMPLETE",
+    "moves": 7,
+    "files": 1718,
+    "bytes": 60645150,
+    "trash_emptied": false,
+    "important_material_outside_trash": true
+  }
+}
