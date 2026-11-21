@@ -36,6 +36,10 @@ const (
 	WindowsArtifactRoleCLI        WindowsArtifactRole = "cli"
 	WindowsArtifactRoleWindowless WindowsArtifactRole = "windowless"
 	WindowsArtifactRoleProduct    WindowsArtifactRole = "product"
+
+	// SerenaQualification identifies the source-issued integration test process.
+	// It is deliberately excluded from ordinary product/installer admission.
+	WindowsArtifactRoleSerenaQualification WindowsArtifactRole = "serena-qualification"
 )
 
 // WindowsArtifact binds product metadata and exact bytes to one explicit role.
@@ -287,8 +291,8 @@ func formatError(path string, err error) error {
 }
 
 type windowsPEHeader struct {
-	machine   uint16
-	subsystem uint16
+	machine         uint16
+	subsystem       uint16
 	characteristics uint16
 }
 
@@ -339,8 +343,8 @@ func readWindowsPEHeader(r io.ReaderAt, size int64) (windowsPEHeader, error) {
 		return windowsPEHeader{}, fmt.Errorf("unsupported optional-header magic %#x", magic)
 	}
 	return windowsPEHeader{
-		machine:   binary.LittleEndian.Uint16(header[4:6]),
-		subsystem: binary.LittleEndian.Uint16(header[24+68 : 24+70]),
+		machine:         binary.LittleEndian.Uint16(header[4:6]),
+		subsystem:       binary.LittleEndian.Uint16(header[24+68 : 24+70]),
 		characteristics: binary.LittleEndian.Uint16(header[22:24]),
 	}, nil
 }

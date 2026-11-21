@@ -55,6 +55,8 @@ func buildVersionResourceFixture(role WindowsArtifactRole, version, commit, buil
 		filename, internalName, subsystemRole = "mcphub-windowless.exe", "mcphub-windowless", "windowless"
 	case WindowsArtifactRole("product"):
 		filename, internalName, subsystemRole = "mcphub.exe", "mcphub", "product"
+	case WindowsArtifactRoleSerenaQualification:
+		filename, internalName, subsystemRole = "serena-qualification.test.exe", "mcphub-serena-qualification", "serena-qualification"
 	}
 	children := [][]byte{
 		versionStringFixture("ProductName", "mcp-local-hub"),
@@ -87,7 +89,7 @@ func writeWindowsPEVersionFixture(t *testing.T, role WindowsArtifactRole, versio
 func writeWindowsPEVersionFixtureWithCOFF(t *testing.T, role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool, machine, characteristics uint16) string {
 	t.Helper()
 	subsystem := WindowsCUISubsystem
-	if role == WindowsArtifactRoleWindowless || role == WindowsArtifactRole("product") {
+	if role == WindowsArtifactRoleWindowless || role == WindowsArtifactRole("product") || role == WindowsArtifactRoleSerenaQualification {
 		subsystem = WindowsGUISubsystem
 	}
 	versionResource := buildVersionResourceFixture(role, version, commit, buildDate, duplicateProductName)
@@ -126,9 +128,10 @@ func writeWindowsPEVersionFixtureWithCOFF(t *testing.T, role WindowsArtifactRole
 	binary.LittleEndian.PutUint32(resource[0x64:0x68], uint32(len(versionResource)))
 	copy(resource[resourceDataOffset:], versionResource)
 	path := filepath.Join(t.TempDir(), filepath.Base(map[WindowsArtifactRole]string{
-		WindowsArtifactRoleCLI:         "mcphub.exe",
-		WindowsArtifactRoleWindowless:  "mcphub-windowless.exe",
-		WindowsArtifactRole("product"): "mcphub.exe",
+		WindowsArtifactRoleCLI:                 "mcphub.exe",
+		WindowsArtifactRoleWindowless:          "mcphub-windowless.exe",
+		WindowsArtifactRole("product"):         "mcphub.exe",
+		WindowsArtifactRoleSerenaQualification: "serena-qualification.test.exe",
 	}[role]))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
