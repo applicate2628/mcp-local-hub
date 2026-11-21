@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "kind": "byte_only_packaging_final",
+  "started_utc": "2026-11-20T23:47:55.398485+00:00",
+  "packer_sha256": "8daf6ac8f380e12aaff277ca1811365e80586e13bac55dbda0be14ebb7a25d97",
+  "product_or_native_runs": false,
+  "preceding_attempt": {
+    "terminal_session_pid": 4956,
+    "terminal_output_unavailable": true,
+    "output_directories_observed_absent": true,
+    "python_processes_observed_absent": true,
+    "exit_code_unknown": true
+  },
+  "captured_prior_replay": {
+    "receipt_sha256": "d4ac9c3056bc41ccd2e852fb7ede44c4ebfc2185b777f39ceda56002a12b14a1",
+    "error": "Initial candidate failed in a different way",
+    "product_or_native_runs": false
+  },
+  "completed": true,
+  "finished_utc": "2026-11-20T23:48:38.334150+00:00"
+}

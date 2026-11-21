@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "<RECOVERY_ROOT>\run_pack_capture.py", line 21, in <module>
+    runpy.run_path(str(p),run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "<RECOVERY_ROOT>\pack_public.py", line 568, in <module>
+    main()
+    ~~~~^^
+  File "<RECOVERY_ROOT>\pack_public.py", line 462, in main
+    diagnostic_attempts, diagnostic_streams = initial_diagnostics(config["diagnostics"], manifest, publication, pins)
+                                              ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<RECOVERY_ROOT>\pack_public.py", line 315, in initial_diagnostics
+    require(receipt.get("completed") is False and receipt.get("state") == "failed" and receipt.get("error_type") == "RuntimeError" and receipt.get("error") == "Unexpected test selection, skips or terminal-event counts", "Initial candidate failed in a different way")
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<RECOVERY_ROOT>\pack_public.py", line 42, in require
+    raise ValueError(message)
+ValueError: Initial candidate failed in a different way

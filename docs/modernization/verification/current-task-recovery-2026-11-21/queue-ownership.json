@@ -1,0 +1,1578 @@
+{
+  "repository": "applicate2628/mcp-local-hub",
+  "observed_at_utc": "2026-11-20T22:57:14Z",
+  "observed_at_moscow": "2026-11-21T01:57:14+03:00",
+  "moscow_timezone": "UTC+03:00",
+  "source_head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "queue_snapshot": "snapshot.json",
+  "method": {
+    "read_only": true,
+    "prior_filename_source": "r19-cancellation/queue/snapshot.json",
+    "prior_overlap_source": "r20-continuation/queue/ownership.json",
+    "reused_filename_lists": 27,
+    "fresh_filename_lists": [
+      623,
+      658,
+      659,
+      660
+    ],
+    "reuse_condition": "Every reused PR has identical live head SHA, base ref and base SHA to saved list identity; #659 was independently refreshed and matched the reused list.",
+    "all_31_lists_complete": true,
+    "fresh_patch_files": [
+      "internal/api/install.go",
+      "internal/api/install_hyphen_family_ownership_test.go"
+    ],
+    "fresh_patch_prs": [
+      659,
+      660
+    ],
+    "tree_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/trees/c55d9ca619f6f9301ba1113615370fc6218d608f?recursive=1",
+    "tree_truncated": false,
+    "no_branch_integration": true,
+    "no_github_mutation": true
+  },
+  "filename_lists": [
+    {
+      "number": 623,
+      "head": "530a24978f573769ed59088a27300cdcb092a71d",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "docs/modernization/plans/measurement-consumers-2026-11-18.md",
+        "docs/modernization/plans/rust-creator-receiving-contract-2026-11-15.md",
+        "docs/modernization/plans/rust-cross-platform-boundaries.svg",
+        "docs/modernization/plans/rust-cross-platform-plan-2026-11-12.md",
+        "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+        "docs/modernization/plans/scheduler-contracts-2026-11-19.md",
+        "docs/modernization/plans/scheduler-contracts-2026-11-19.sources.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/BRANCHES.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/PROGRESS.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/RESULTS.md",
+        "docs/modernization/verification/branch-audit-2026-11-14/SHA256SUMS.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/analyze.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/branches-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/fetch-history.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/ffi-sync-head.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/historical-patch-check.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/merge-predictions-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/open-pr-analysis-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/overlaps-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/prepare-sync.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/prepared-sync.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/pulls-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-cache-transfer.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/COMPLETED.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/clippy.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/fmt.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/reader-verification/test.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/refs-before.tsv",
+        "docs/modernization/verification/branch-audit-2026-11-14/refs-prepublish.tsv",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merge-prediction.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/COMPLETED.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/affected-vet.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/cli-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/commit.txt",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/counts.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/daemon-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/go-version.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/indexed-tree.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/main-race.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/product-build.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/selected-json.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/relay-merged-master/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/render-index.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/resolve-relay.mjs",
+        "docs/modernization/verification/branch-audit-2026-11-14/roots-verification/run.log",
+        "docs/modernization/verification/branch-audit-2026-11-14/roots-verification/steps.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/summary-before.json",
+        "docs/modernization/verification/branch-audit-2026-11-14/verify-relay.ps1",
+        "docs/modernization/verification/branch-audit-2026-11-14/verify-roots.ps1",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/cmd-auto-gui-env-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/archive-verification.json",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/ALLOCATION-REVIEW.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/API-CLI-FINDINGS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/GUI-PROCESS-FINDINGS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/candidate-manifest-v2.json",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/go-state-isolation-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/ACCEPTANCE.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/AUDIT.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/CHECKOUT-REVIEW.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/EVIDENCE-REVIEW.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/INDEPENDENT-REVIEW.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/MANIFEST.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/OWNERSHIP.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/PACKER-REVIEW.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/QUEUE.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/README.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/RESULTS.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/SCOPE-NEXT.md",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/SHA256SUMS",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/archive-metadata.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/code-publication.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/documentation-amendment.py",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/documentation-audit.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/documentation-input.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/evidence-redacted.zip",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/execution-summary.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/local-archive-verification.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/ownership.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/queue-snapshot.json",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/replacement-admission.svg",
+        "docs/modernization/verification/install-snapshot-guard-2026-11-21/source-manifest.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/CLI-SOURCE-SNIPPETS.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/CONTRACT-REVIEW.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/EVIDENCE-REVIEW.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/INDEPENDENT-REVIEW.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/MANIFEST.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/QUEUE.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/README.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/SHA256SUMS.txt",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/TEST-FIX-REVIEW.md",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/cancellation-contracts.svg",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/preflight-redacted.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/queue-snapshot.json",
+        "docs/modernization/verification/scheduler-cancellation-2026-11-20/source-identities.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/MANIFEST.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-create-cim-inputobject-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Invoke-R17HiddenFixture.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-FIXTURE.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/NATIVE-V2-RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Observe-R17NativeV2.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/RECOVERY.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-export-2026-11-19/Recover-R17VisibleFixture.ps1",
+        "docs/modernization/verification/scheduler-export-2026-11-19/evidence.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/fixture-v2-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/fixture-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/inspect_native_attempt.py",
+        "docs/modernization/verification/scheduler-export-2026-11-19/inspect_native_v2.py",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-attempt-redacted.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-v2-evidence.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/native-v2-execution.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/recovery-validation.json",
+        "docs/modernization/verification/scheduler-export-2026-11-19/verify_saved_native_export.py",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/INDEPENDENT-REVIEW.md",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-last-result-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-last-result-native-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-negative-last-result-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/AUDIT.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/CONTRACT-REVIEW.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/INDEPENDENT-REVIEW.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/MANIFEST.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/PRUNE-REVIEW.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/QUEUE-AUDIT.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/QUEUE-SNAPSHOT.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/RESOLVER-INTERPRETATION.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/RESULTS.md",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/SOURCE-MANIFEST.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/archive-metadata.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/archive-verification.json",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/evidence-redacted.zip",
+        "docs/modernization/verification/scheduler-prune-resolver-2026-11-20/execution-summary.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/SOURCE-AUDIT.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/history.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/Invoke-R17PublicGoPositiveFixture.ps1",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/README.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/RESULTS.md",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/V2-owner.diff",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/build-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/empty-input.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation-intent.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/absence-observation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/execution-preflight.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/go-child-start.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/launch-intent.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/launch-result.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/outer-execution.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/positive-evidence.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/positive-go.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/executed/source-catalog.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/inspect_saved_positive.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/launch_positive.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/observe_absence.py",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/positive_probe.go",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/preparation-validation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/positive/preparation.json",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/probe.go",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/probe.jsonl",
+        "docs/modernization/verification/scheduler-public-go-2026-11-19/run_probe.py"
+      ],
+      "source": "fresh list_pr_changed_filenames"
+    },
+    {
+      "number": 624,
+      "head": "251fb4f03405ba438662976137afec0d9c27105e",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "docs/modernization/verification/cmaketrace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/cmaketrace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/cmaketrace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/cmaketrace-2026-11-18/logs.zip",
+        "docs/modernization/verification/cmaketrace-2026-11-18/manifest.json",
+        "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 625,
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "experiments/rust-process-owner/.gitignore",
+        "experiments/rust-process-owner/Cargo.lock",
+        "experiments/rust-process-owner/Cargo.toml",
+        "experiments/rust-process-owner/README.md",
+        "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "experiments/rust-process-owner/src/bin/owner_crash_fixture.rs",
+        "experiments/rust-process-owner/src/launch_context.rs",
+        "experiments/rust-process-owner/src/lib.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/tests/launch_context.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs",
+        "experiments/rust-process-owner/tests/owner_crash.rs",
+        "experiments/rust-process-owner/tests/stdio.rs"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 626,
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "docs/modernization/verification/relay-oracle-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/relay-oracle-2026-11-18/receipt.json",
+        "docs/modernization/verification/relay-oracle-2026-11-18/run.py",
+        "docs/modernization/verification/relay-oracle-2026-11-18/testdata/main.go",
+        "internal/daemon/relay_benchmark_test.go",
+        "internal/daemon/relay_binary_probe_windows_test.go",
+        "internal/daemon/relay_load_test.go",
+        "internal/daemon/relay_private_memory_probe_windows_test.go",
+        "internal/daemon/testdata/relay-minimal/main.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 627,
+      "head": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "experiments/rust-anchored-read/.gitignore",
+        "experiments/rust-anchored-read/Cargo.lock",
+        "experiments/rust-anchored-read/Cargo.toml",
+        "experiments/rust-anchored-read/README.md",
+        "experiments/rust-anchored-read/src/lib.rs",
+        "experiments/rust-anchored-read/src/read_tests.rs",
+        "experiments/rust-anchored-read/src/windows.rs"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 628,
+      "head": "453e856347cabcebb289ec1c9af70f12af3376c0",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "docs/modernization/verification/native-observation-2026-11-18/.gitattributes",
+        "docs/modernization/verification/native-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/native-observation-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/native-observation-2026-11-18/logs.zip",
+        "docs/modernization/verification/native-observation-2026-11-18/manifest.json",
+        "docs/modernization/verification/status-observation-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/status-observation-2026-11-19/evidence-redacted.zip",
+        "internal/cli/supervise_liveness.go",
+        "internal/cli/supervise_status.go",
+        "internal/cli/supervise_status_process_other.go",
+        "internal/cli/supervise_status_process_test.go",
+        "internal/cli/supervise_status_process_windows.go",
+        "internal/process/native_observation_benchmark_windows_test.go",
+        "internal/process/pid_status.go",
+        "internal/process/pid_status_windows.go",
+        "internal/process/pid_status_windows_test.go",
+        "internal/process/process_rss_windows.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 629,
+      "head": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "cmd/mcphub/main.go",
+        "cmd/mcphub/relay_input_windows_test.go",
+        "internal/cli/relay.go",
+        "internal/cli/relay_process_input.go",
+        "internal/cli/relay_process_input_native_windows_test.go",
+        "internal/cli/relay_process_input_other.go",
+        "internal/cli/relay_process_input_test.go",
+        "internal/cli/relay_process_input_windows.go",
+        "internal/cli/relay_process_input_windows_test.go",
+        "internal/daemon/relay.go",
+        "internal/daemon/relay_input_contract_test.go",
+        "internal/daemon/relay_output_contract_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 631,
+      "head": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "base": "spike/rx02-native-identity-20261114",
+      "base_sha": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "filenames": [
+        "experiments/rust-process-owner/ffi/Cargo.lock",
+        "experiments/rust-process-owner/ffi/Cargo.toml",
+        "experiments/rust-process-owner/ffi/README.md",
+        "experiments/rust-process-owner/ffi/go/admission_windows.go",
+        "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/go.mod",
+        "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+        "experiments/rust-process-owner/ffi/include/identity_v1.h",
+        "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "experiments/rust-process-owner/ffi/src/identity.rs",
+        "experiments/rust-process-owner/ffi/src/lib.rs",
+        "experiments/rust-process-owner/ffi/src/tests.rs",
+        "experiments/rust-process-owner/ffi/verification/README.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/AUDIT.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/artifacts.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/audit.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/disposition.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/log-manifest.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/pr-audit.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/qualification.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/run.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-hashes.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-identity.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/legacy/compaction.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/history.zip",
+        "experiments/rust-process-owner/ffi/verification/legacy/manifest.tsv",
+        "experiments/rust-process-owner/ffi/verification/legacy/receipt.json",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/manifest.json"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 632,
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_uv_discovery_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 635,
+      "head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "base_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "filenames": [
+        "docs/modernization/verification/serena-publisher-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-publisher-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-publisher-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-publisher-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-publisher-2026-11-18/manifest.json",
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/source_prepare_test.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_pe_test.go",
+        "internal/binaryadmission/windows_serena_qualification_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "tools/test-serena-publisher/README.md",
+        "tools/test-serena-publisher/main_windows.go",
+        "tools/test-serena-publisher/main_windows_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 636,
+      "head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "base_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "filenames": [
+        "internal/api/serena_publisher_image.go",
+        "internal/api/serena_publisher_role.go",
+        "internal/api/serena_publisher_role_qualification_windows.go",
+        "internal/api/serena_publisher_role_qualification_windows_test.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_qualification_namespace_unavailable_test.go",
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_windows_test.go",
+        "internal/api/state_dir_resolution_observed.go",
+        "internal/api/state_dir_resolution_observed_production_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+        "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+        "internal/api/state_dir_resolution_observed_windows.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 637,
+      "head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "base": "fix/serena-qualification-namespace-20261114",
+      "base_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "filenames": [
+        "docs/modernization/verification/serena-namespace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-namespace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-namespace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-namespace-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-namespace-2026-11-18/manifest.json",
+        "docs/testing/serena-qualification.md",
+        "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 639,
+      "head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_python_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 643,
+      "head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_cleanup_windows_test.go",
+        "internal/api/serena_owned_tree_unsupported.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 644,
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "base_sha": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "filenames": [
+        "experiments/rust-process-owner/README.md",
+        "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "experiments/rust-process-owner/src/lib.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/src/token_user.rs",
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/SHA256SUMS.txt",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/verification.json",
+        "experiments/rust-process-owner/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/verification/query-2026-11-15/manifest.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/SHA256SUMS",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/verification.json"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 645,
+      "head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_owned_tree_streams_windows_test.go",
+        "internal/api/serena_owned_tree_windows.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 646,
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_preparation_policy.go",
+        "internal/api/serena_preparation_policy_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 647,
+      "head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_executable_windows_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 648,
+      "head": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_build_constraint_policy_windows_test.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_build_constraint.go",
+        "internal/api/serena_prepared_build_constraint_test.go",
+        "internal/api/serena_prepared_build_constraint_unsupported.go",
+        "internal/api/serena_prepared_build_constraint_windows.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_install_effects.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 649,
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 650,
+      "head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_test.go",
+        "internal/daemon/relay_qualification_transport_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 651,
+      "head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_owned_tree_delete_windows_test.go",
+        "internal/api/serena_owned_tree_windows.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 652,
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "filenames": [
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_file_unsupported.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_owned_file_windows_test.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 653,
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "internal/api/serena_tcp_rows_observed.go",
+        "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+        "internal/api/serena_tcp_rows_observed_test.go",
+        "internal/api/serena_tcp_rows_observed_windows.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 654,
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/serena_prepared_publication_native_windows_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 655,
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "internal/api/serena_finalization_context_windows_test.go",
+        "internal/api/serena_prepared_runtime.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 656,
+      "head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_connection_close_test.go"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 657,
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "build.ps1",
+        "scripts/test-windows-product-build.ps1"
+      ],
+      "source": "reused exact head/base list"
+    },
+    {
+      "number": 658,
+      "head": "f440a5d86a0298d5f8228be3f7701577df0336f3",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        ".plans/2026-11/open-pr-integration-20261117.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "cmd/mcphub/main_test.go",
+        "docs/agent-runbook.md",
+        "docs/frontend-flowbite.md",
+        "docs/skills/mcphub-explained/SKILL.md",
+        "internal/api/lsp_routing/main_test.go",
+        "internal/api/lsp_routing/resolver_test.go",
+        "internal/api/serena_routing/main_test.go",
+        "internal/api/serena_routing/resolver_test.go",
+        "internal/api/serena_routing/shared_observer_public_test.go",
+        "internal/cli/gui_force_test.go",
+        "internal/cli/supervise_reconcile_ipc_test.go",
+        "internal/daemon/host_original_windows_test.go",
+        "internal/daemon/lazy_proxy_readiness_test.go",
+        "internal/daemon/lazy_proxy_test.go",
+        "internal/daemon/main_test.go",
+        "internal/oneapirun/async_owner_test.go",
+        "internal/oneapirun/async_test.go",
+        "internal/oneapirun/main_test.go",
+        "tools/testshards/main.go",
+        "tools/testshards/main_test.go"
+      ],
+      "source": "fresh list_pr_changed_filenames"
+    },
+    {
+      "number": 659,
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "docs/modernization/verification/port-observation-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/port-observation-2026-11-18/evidence-redacted.zip",
+        "internal/api/install.go",
+        "internal/api/install_hyphen_family_ownership_test.go",
+        "internal/api/install_internal_port_probe_timeout_test.go",
+        "internal/api/install_own_port_test.go",
+        "internal/api/install_parsed_manifest_lane_b_test.go",
+        "internal/api/install_parsed_manifest_test.go",
+        "internal/api/lane_a_internal_review_test.go",
+        "internal/api/main_test.go",
+        "internal/api/phase_f_lifecycle_test.go",
+        "internal/api/port_pid_outcome_test.go",
+        "internal/api/port_pid_probe_test.go",
+        "internal/api/processes.go",
+        "internal/api/r36_lane_a2_fixes_test.go",
+        "internal/api/restart_supervisor_test.go",
+        "internal/api/status_enrich.go",
+        "internal/api/status_enrich_test.go",
+        "internal/api/stop_force_supervisor.go",
+        "internal/api/stop_force_supervisor_other_test.go",
+        "internal/api/stop_force_supervisor_sentinel_windows_test.go",
+        "internal/api/stop_force_supervisor_windows_test.go",
+        "internal/api/supervisor_seal_guard_test.go"
+      ],
+      "source": "fresh list_pr_changed_filenames"
+    },
+    {
+      "number": 660,
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "filenames": [
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/RESULTS.md",
+        "docs/modernization/verification/scheduler-hidden-task-2026-11-19/evidence-redacted.zip",
+        "internal/api/install.go",
+        "internal/api/install_hyphen_family_ownership_test.go",
+        "internal/api/install_scheduler_snapshot_test.go",
+        "internal/api/prune_tasks_test.go",
+        "internal/scheduler/scheduler.go",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go",
+        "internal/scheduler/scheduler_hidden_task_windows_test.go",
+        "internal/scheduler/scheduler_last_result_windows_test.go",
+        "internal/scheduler/scheduler_owned_run_windows_test.go",
+        "internal/scheduler/scheduler_windows.go"
+      ],
+      "source": "fresh list_pr_changed_filenames"
+    }
+  ],
+  "focused_file_ownership": [
+    {
+      "path": "internal/api/install.go",
+      "owners": [
+        659,
+        660
+      ]
+    },
+    {
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "owners": [
+        659,
+        660
+      ]
+    },
+    {
+      "path": "internal/api/install_internal_port_probe_timeout_test.go",
+      "owners": [
+        659
+      ]
+    },
+    {
+      "path": "internal/api/install_own_port_test.go",
+      "owners": [
+        659
+      ]
+    },
+    {
+      "path": "internal/api/install_parsed_manifest_lane_b_test.go",
+      "owners": [
+        659
+      ]
+    },
+    {
+      "path": "internal/api/install_parsed_manifest_test.go",
+      "owners": [
+        659
+      ]
+    },
+    {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_last_result_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows.go",
+      "owners": [
+        660
+      ]
+    }
+  ],
+  "helper_file_ownership": [
+    {
+      "path": "internal/api/managed_registration_backup_io.go",
+      "owners": [],
+      "blob": "f9d2c9fbc4ca7284c0c1d52ee97f773324221f5f"
+    },
+    {
+      "path": "internal/api/managed_registration_journal.go",
+      "owners": [],
+      "blob": "a7d844dd55237dca9ba6c922976869ee8b1b77f5"
+    },
+    {
+      "path": "internal/api/register_transaction.go",
+      "owners": [],
+      "blob": "3abda1d58de46dd0a20f86ebf6b4289aa8b1e2d4"
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "owners": [],
+      "blob": "7e6be38ab49246f8c38577302b8bfd255ac7409d"
+    },
+    {
+      "path": "internal/api/scheduler_swap.go",
+      "owners": [],
+      "blob": "91f6808364b974a8260abeb6da4223d519c66ed9"
+    },
+    {
+      "path": "internal/api/backups.go",
+      "owners": [],
+      "blob": "0385729bb81f07278a8e96af9d2240860099d52f"
+    },
+    {
+      "path": "internal/api/secure_create_client_config.go",
+      "owners": [],
+      "blob": "d8b44268f26e615d98c7bfef63b3691fa8118e38"
+    },
+    {
+      "path": "internal/api/secure_create_client_config_posix.go",
+      "owners": [],
+      "blob": "598d38f783afebacb166b1cefeb37380a1aaff3d"
+    },
+    {
+      "path": "internal/api/secure_create_client_config_windows.go",
+      "owners": [],
+      "blob": "c59902ef324c8493f640304791362b46ef663fcb"
+    },
+    {
+      "path": "internal/api/secure_write_client_config.go",
+      "owners": [],
+      "blob": "131fbd4c3e0b77f58f8e0b1f6bd629f702e5fdea"
+    },
+    {
+      "path": "internal/api/secure_write_posix.go",
+      "owners": [],
+      "blob": "45efc023d7032787990875d33fb5ba2a0da1e68c"
+    },
+    {
+      "path": "internal/api/secure_write_windows.go",
+      "owners": [],
+      "blob": "9459cd42d6389b28c14dfd86727eef493f6aa69f"
+    },
+    {
+      "path": "internal/api/state_file_helper.go",
+      "owners": [],
+      "blob": "b47ce874f4e106c6874945bbad87dab45cfc4133"
+    },
+    {
+      "path": "internal/api/state_file_fresh_creation.go",
+      "owners": [],
+      "blob": "653ad497b5a4d77a0cd5ec8fe14d53637509ad63"
+    },
+    {
+      "path": "internal/api/state_paths.go",
+      "owners": [],
+      "blob": "d0dcdee3e22afe2c6ac6b0b53a0a7c7a6d35231e"
+    },
+    {
+      "path": "internal/api/state_paths_windows.go",
+      "owners": [],
+      "blob": "0620cf53bf308078bc514ed49956d231a224ebe7"
+    },
+    {
+      "path": "internal/api/state_paths_unix.go",
+      "owners": [],
+      "blob": "db9e5c6e4f0ea1072bf4d3e6a9504dd05ee4d2d2"
+    },
+    {
+      "path": "internal/api/secrets_init_recovery.go",
+      "owners": [],
+      "blob": "39caf9cc5d2a0162ac6b0ca5df73e0af3bb6e56d"
+    },
+    {
+      "path": "internal/api/retained_task_material_windows.go",
+      "owners": [],
+      "blob": "72373b617a88152f9fd4c095d6f5a75bcef0833a"
+    },
+    {
+      "path": "internal/api/retained_task_material_windows_test.go",
+      "owners": [],
+      "blob": "dc8d2745c7ab0b5b5a448d9e008a5498322d2977"
+    },
+    {
+      "path": "internal/api/retained_task_material_custody_windows_test.go",
+      "owners": [],
+      "blob": "6678cb3847836d851dea000a4c78e535b5ffab25"
+    },
+    {
+      "path": "internal/api/liveness_task.go",
+      "owners": [],
+      "blob": "12ee5d9020756948ca54a3e9c4e4c851c530fde0"
+    },
+    {
+      "path": "internal/api/liveness_task_test.go",
+      "owners": [],
+      "blob": "3df92d53696ae71442268676b977ca7d13ffdaad"
+    },
+    {
+      "path": "internal/cli/windows_product_pair_recovery_windows.go",
+      "owners": [],
+      "blob": "8aa740e76a6b44276eb1a77c5ea4f6d220ebcf30"
+    },
+    {
+      "path": "internal/cli/windows_product_pair_wiring_windows.go",
+      "owners": [],
+      "blob": "eaf0b4631891f167ecd81b988c69f85e4dd95616"
+    },
+    {
+      "path": "internal/api/state_read_inode_anchor.go",
+      "owners": [],
+      "blob": "7dc7150e046ce2faf69afea5c063fbbbd3870ec3"
+    }
+  ],
+  "shared_install_files": [
+    "internal/api/install.go",
+    "internal/api/install_hyphen_family_ownership_test.go"
+  ],
+  "diff_hunks": [
+    {
+      "pr": 659,
+      "path": "internal/api/install.go",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 2850,
+          "old_count": 7,
+          "new_start": 2850,
+          "new_count": 7,
+          "context": "func checkSecretRefs(env map[string]string) error {"
+        },
+        {
+          "old_start": 2863,
+          "old_count": 11,
+          "new_start": 2863,
+          "new_count": 11,
+          "context": "func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervi"
+        },
+        {
+          "old_start": 3132,
+          "old_count": 16,
+          "new_start": 3132,
+          "new_count": 16,
+          "context": "const ("
+        },
+        {
+          "old_start": 4898,
+          "old_count": 6,
+          "new_start": 4898,
+          "new_count": 7,
+          "context": "const ("
+        },
+        {
+          "old_start": 4931,
+          "old_count": 17,
+          "new_start": 4932,
+          "new_count": 20,
+          "context": "func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome,"
+        },
+        {
+          "old_start": 4958,
+          "old_count": 7,
+          "new_start": 4962,
+          "new_count": 11,
+          "context": "func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome,"
+        }
+      ]
+    },
+    {
+      "pr": 660,
+      "path": "internal/api/install.go",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 3818,
+          "old_count": 11,
+          "new_start": 3818,
+          "new_count": 19,
+          "context": "func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest,"
+        },
+        {
+          "old_start": 4229,
+          "old_count": 10,
+          "new_start": 4237,
+          "new_count": 9,
+          "context": "func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}"
+        },
+        {
+          "old_start": 4263,
+          "old_count": 12,
+          "new_start": 4270,
+          "new_count": 15,
+          "context": "func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st"
+        },
+        {
+          "old_start": 4278,
+          "old_count": 10,
+          "new_start": 4288,
+          "new_count": 6,
+          "context": "func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st"
+        }
+      ]
+    },
+    {
+      "pr": 659,
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 311,
+          "old_count": 7,
+          "new_start": 311,
+          "new_count": 7,
+          "context": "func TestStop_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {"
+        },
+        {
+          "old_start": 334,
+          "old_count": 12,
+          "new_start": 334,
+          "new_count": 12,
+          "context": "func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {"
+        },
+        {
+          "old_start": 386,
+          "old_count": 12,
+          "new_start": 386,
+          "new_count": 12,
+          "context": "func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {"
+        }
+      ]
+    },
+    {
+      "pr": 660,
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 190,
+          "old_count": 6,
+          "new_start": 190,
+          "new_count": 9,
+          "context": "func TestPruneObsoleteServerTasks_KeepsSiblingPrunesOwnObsolete(t *testing.T) {"
+        }
+      ]
+    }
+  ],
+  "intersections": [
+    {
+      "path": "internal/api/install.go",
+      "common_base": true,
+      "intersections": []
+    },
+    {
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "common_base": true,
+      "intersections": []
+    }
+  ],
+  "no_direct_hunk_overlap": true,
+  "guard": {
+    "path": "internal/api/install.go",
+    "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+    "new_lines": [
+      3818,
+      3836
+    ],
+    "open_pr_owners": [
+      659,
+      660
+    ],
+    "guard_owner": 660,
+    "pr659_hunk_overlap": false,
+    "regression_test": {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "owners": [
+        660
+      ]
+    },
+    "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/install.go#L3818-L3845"
+  },
+  "helpers": [
+    {
+      "path": "internal/api/secure_create_client_config.go",
+      "symbols": [
+        "SecureCreateOwnerOnlyFile"
+      ],
+      "lines": [
+        67,
+        100
+      ],
+      "role": "Generic create-if-missing owner-only bytes; suitable reusable low-level snapshot writer.",
+      "observed_contract": [
+        "Returns created=true only after successful publication and post-create verification.",
+        "created=false,nil means a regular destination already existed and the requested bytes were not written.",
+        "The parent permission gate is bypassed; parent existence is required.",
+        "No schema or client-config restriction on the supplied bytes."
+      ],
+      "limits": [
+        "Returns no retained created-file identity for later exact-leaf cleanup.",
+        "A non-nil error may occur after publication; do not infer that no artifact exists."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/secure_create_client_config.go#L67-L100",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "d8b44268f26e615d98c7bfef63b3691fa8118e38",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/secure_create_client_config_posix.go",
+      "symbols": [
+        "secureCreateClientConfigIfMissingImpl"
+      ],
+      "lines": [
+        41,
+        155
+      ],
+      "role": "POSIX secure-create implementation.",
+      "observed_contract": [
+        "Opens parent with O_NOFOLLOW; creates temp with O_EXCL|O_NOFOLLOW and mode 0600; reasserts mode.",
+        "Writes and fsyncs file before no-replace Linkat publication; reopens and checks file mode/owner."
+      ],
+      "limits": [
+        "No directory fsync was observed; file-byte flushing does not by itself prove power-loss durability of the directory entry.",
+        "Best-effort temp unlink errors are ignored by this existing implementation."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/secure_create_client_config_posix.go#L41-L155",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "598d38f783afebacb166b1cefeb37380a1aaff3d",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/secure_create_client_config_windows.go",
+      "symbols": [
+        "secureCreateClientConfigIfMissingImpl",
+        "ntRenameRelativeNoReplace"
+      ],
+      "lines": [
+        50,
+        191
+      ],
+      "role": "Windows secure-create implementation.",
+      "observed_contract": [
+        "Creates temp with restrictive security descriptor and applies restrictive discretionary access control list (DACL) before writing bytes.",
+        "FlushFileBuffers precedes no-replace handle-relative rename.",
+        "Closes and reopens published file, then rechecks DACL."
+      ],
+      "limits": [
+        "Successful publication can precede a close/reopen/verification error.",
+        "Parent/root and leaf identity are not returned to the caller."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/secure_create_client_config_windows.go#L50-L191",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "c59902ef324c8493f640304791362b46ef663fcb",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/state_file_helper.go",
+      "symbols": [
+        "WriteStateFileBytesAtomic",
+        "WriteStateFileBytesLockHeld",
+        "secureWriteStateFileWithParentRelax"
+      ],
+      "lines": [
+        86,
+        166
+      ],
+      "role": "Existing general state-file byte writer.",
+      "observed_contract": [
+        "Creates parent with MkdirAll(0700), serializes via path+'.lock', then uses hardened secure writer.",
+        "State-specific strict/default-relax parent policy and audit path are already centralized."
+      ],
+      "limits": [
+        "Replacement-capable writer rather than create-only immutable snapshot.",
+        "Per-file flock serializes cooperative writers but is not task-scheduler transaction ownership.",
+        "Unlock result is ignored at line 102; no stronger lock-release guarantee is inferred."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/state_file_helper.go#L86-L166",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "b47ce874f4e106c6874945bbad87dab45cfc4133",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/managed_registration_backup_io.go",
+      "symbols": [
+        "managedRegistrationBackupIO.Create",
+        "managedRegistrationBackupIO.Read"
+      ],
+      "lines": [
+        22,
+        61
+      ],
+      "role": "Existing managed-registration bridge demonstrates reuse of secure creation and hash-bound readback.",
+      "observed_contract": [
+        "Validates SHA-256 before SecureCreateOwnerOnlyFile.",
+        "Reports existing target as ErrManagedRegistrationBackupExists; any create error yields commit-uncertain/cleanup-unconfirmed receipt.",
+        "Reads via ReadClientConfigBackupBeneathRootNoFollow with expected SHA-256."
+      ],
+      "limits": [
+        "Managed-registration receipt vocabulary is client-specific; reuse the lower primitive rather than copying or adopting the entire owner.",
+        "This report inspected delegation; the reader's permission checks were independently analyzed by the contract agent."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/managed_registration_backup_io.go#L22-L61",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "f9d2c9fbc4ca7284c0c1d52ee97f773324221f5f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/managed_registration_journal.go",
+      "symbols": [
+        "managedRegistrationJournalStore",
+        "managedRegistrationJournalStore.write"
+      ],
+      "lines": [
+        214,
+        276
+      ],
+      "role": "Existing client-specific durable artifact index.",
+      "observed_contract": [
+        "Uses managed-registration-reconcile.json under supplied state directory.",
+        "Writes validated marshaled rows through WriteStateFileBytesAtomic; reads via ReadStateFileInodeAnchored.",
+        "Rows bind client IDs, entry snapshots and backup IDs."
+      ],
+      "limits": [
+        "Not a generic scheduler-task recovery schema."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/managed_registration_journal.go#L214-L276",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "a7d844dd55237dca9ba6c922976869ee8b1b77f5",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/backups.go",
+      "symbols": [
+        "API.BackupsList",
+        "API.BackupsListIn"
+      ],
+      "lines": [
+        14,
+        63
+      ],
+      "role": "Existing client backup listing.",
+      "observed_contract": [
+        "Enumerates managed client config directories and names beginning liveName+'.bak-mcp-local-hub-'."
+      ],
+      "limits": [
+        "A scheduler XML snapshot directly under state root will not be found by this listing.",
+        "No global absence of other indexes is inferred from this bounded inspection."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/backups.go#L14-L63",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "0385729bb81f07278a8e96af9d2240860099d52f",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/retained_task_material_windows.go",
+      "symbols": [
+        "RetainedTaskXMLMaterialStore",
+        "RetainedTaskXMLStoreAcquisitionError",
+        "CreateRetainedTaskXMLStore",
+        "ReopenRetainedTaskXMLStore",
+        "Retain",
+        "Load",
+        "Close"
+      ],
+      "lines": [
+        20,
+        333
+      ],
+      "role": "Existing Windows task XML physical storage owner used by Product recovery.",
+      "observed_contract": [
+        "Creates windows-product-pair-task-rollback-* beneath stateDir and captures parent/root native identities.",
+        "Retain writes task-<SHA-256>.xml via WriteStateFileBytesAtomic, then no-follow hash/byte readback; Load requires known ref.",
+        "Acquisition/operation failures wrap and retain the original store.",
+        "Close is selected discard: captures original root, removes attempted XML/.lock leaf paths, then deletes the same retained native root.",
+        "No idle native handles when material is simply retained."
+      ],
+      "limits": [
+        "Windows-only and tied to Product recovery namespace/reopen conventions.",
+        "Captured directory identities do not prove immutable identity of each XML leaf; writer is replace-capable after a pathname existence check.",
+        "Close removes tracked leaf paths, not separately retained leaf handles.",
+        "MkdirTemp plus Chmod(0700) alone does not prove Windows directory DACL privacy; per-file hardened writer is the byte-privacy boundary.",
+        "Storage alone does not persist install task-to-artifact meaning or make installer recovery discoverable after process exit."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/retained_task_material_windows.go#L20-L333",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "72373b617a88152f9fd4c095d6f5a75bcef0833a",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/cli/windows_product_pair_recovery_windows.go",
+      "symbols": [
+        "reconcileWindowsProductRecovery"
+      ],
+      "lines": [
+        128,
+        264
+      ],
+      "role": "Existing restart-time index/consumer for retained Windows task XML.",
+      "observed_contract": [
+        "Selects and validates Product V3/legacy recovery journals and target/receipt identities.",
+        "Reopens or discards retained task stores via journal.Tasks after Product-specific checks."
+      ],
+      "limits": [
+        "Not an installer-generic index; importing it would couple installer recovery to Product/upgrade authority."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/cli/windows_product_pair_recovery_windows.go#L128-L264",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "8aa740e76a6b44276eb1a77c5ea4f6d220ebcf30",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/liveness_task.go",
+      "symbols": [
+        "LivenessTaskPostImportError",
+        "LivenessTaskReceipt"
+      ],
+      "lines": [
+        107,
+        151
+      ],
+      "role": "Existing typed cause-plus-rollback error precedent.",
+      "observed_contract": [
+        "Error retains Cause and Rollback; Unwrap returns both error causes.",
+        "Prior and settled XML are unexported in-memory receipt fields."
+      ],
+      "limits": [
+        "No persistent artifact reference in this error/receipt; not durable install recovery."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/liveness_task.go#L107-L151",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "12ee5d9020756948ca54a3e9c4e4c851c530fde0",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/install.go",
+      "symbols": [
+        "InstallClientRollbackIncompleteError",
+        "InstallForwardCommittedError"
+      ],
+      "lines": [
+        3638,
+        3683
+      ],
+      "role": "Existing install client-state error taxonomy.",
+      "observed_contract": [
+        "Client rollback incomplete carries client names and cause.",
+        "Forward committed error signals client applied with unconfirmed lock release; both unwrap the cause."
+      ],
+      "limits": [
+        "Both are client-domain outcomes; neither is a generic scheduler recovery artifact carrier."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/install.go#L3638-L3683",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "18d246b0288620d1e65e81e5a4ee87e6a68431a5",
+      "open_pr_owners": [
+        659,
+        660
+      ]
+    },
+    {
+      "path": "internal/api/register_transaction.go",
+      "symbols": [
+        "registrationTransaction",
+        "AddCompensation",
+        "RollbackTo",
+        "Fail"
+      ],
+      "lines": [
+        53,
+        217
+      ],
+      "role": "Existing in-memory compensation owner.",
+      "observed_contract": [
+        "Registers active undo steps, performs reverse rollback, joins labeled compensation/finalizer errors."
+      ],
+      "limits": [
+        "No persistent snapshot/index by itself."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/register_transaction.go#L53-L217",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "3abda1d58de46dd0a20f86ebf6b4289aa8b1e2d4",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/state_file_fresh_creation.go",
+      "symbols": [
+        "StateFileFreshNamespaceSource",
+        "StateFileFreshCreationEvidence",
+        "SerenaRecordNamespaceObservation"
+      ],
+      "lines": [
+        10,
+        164
+      ],
+      "role": "Existing sealed fresh-namespace evidence for Serena records.",
+      "observed_contract": [
+        "Binds concrete source validation/borrow/close methods and prepared-ready/prepared-operation identities."
+      ],
+      "limits": [
+        "Not a generic install snapshot cleanup receipt; do not invent a source to satisfy sealed evidence."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/state_file_fresh_creation.go#L10-L164",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "653ad497b5a4d77a0cd5ec8fe14d53637509ad63",
+      "open_pr_owners": []
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "symbols": [
+        "ErrWeeklyRefreshConflict",
+        "ErrWeeklyRefreshSnapshotUnavailable",
+        "weeklyRefreshTransactionResult"
+      ],
+      "lines": [
+        42,
+        78
+      ],
+      "role": "Existing weekly task-specific transaction/error vocabulary.",
+      "observed_contract": [
+        "Separates conflict and unavailable snapshot; holds finalXML in transaction result."
+      ],
+      "limits": [
+        "Specific to weekly-refresh transaction; no generic persistent install artifact index is established here."
+      ],
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/c55d9ca619f6f9301ba1113615370fc6218d608f/internal/api/weekly_refresh.go#L42-L78",
+      "head": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "blob": "7e6be38ab49246f8c38577302b8bfd255ac7409d",
+      "open_pr_owners": []
+    }
+  ],
+  "integration_guidance": [
+    "Extend the existing #660 ownership for scheduler replacement recovery; no competing open PR changes scheduler implementations or the snapshot regression test.",
+    "Keep #659 port-observation work independent. Shared filenames alone do not justify closing or combining PRs.",
+    "Reuse the existing owner-only secure-create/readback primitives if a fresh retained XML file is selected. Treat created=false and post-publication errors distinctly.",
+    "A persistent task-to-artifact descriptor/reference is still required if recovery must survive CLI rendering/process exit; existing client/Product journals are domain-specific.",
+    "RetainedTaskXMLMaterialStore is useful precedent but not automatically a qualified general immutable snapshot/leaf-cleanup owner. Its namespace, Windows-only surface, replacement behavior and leaf custody need an explicit fit decision.",
+    "Do not extend snapshot retention into a new storage framework or claim automatic restart recovery merely because bytes were written."
+  ],
+  "limits": [
+    "Changed-file ownership is not exclusive semantic ownership.",
+    "No direct hunk overlap does not prove runtime/semantic compatibility or merge readiness.",
+    "Only selected helper source ranges and current shared-file patches were inspected; this was not a full-diff or security audit.",
+    "No build/test/native execution was performed; source behavior is not a runtime qualification.",
+    "No prior code was modified and no snapshot material was actually created.",
+    "No account details or PR/review/comment body text were retained."
+  ]
+}
+

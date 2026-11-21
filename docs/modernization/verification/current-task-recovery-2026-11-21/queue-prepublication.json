@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "snapshot": "r21-recovery/queue/prepublication/snapshot.json",
+  "observed_at_utc": "2026-11-20T23:44:31Z",
+  "observed_at_moscow": "2026-11-21T02:44:31+03:00",
+  "status": "EXPECTED_CODE_ADVANCE_ONLY",
+  "summary": "31 open PRs remain Draft. Only #660 advanced to the expected published code head; all other heads, all bases and master are unchanged. Target review/comment metadata is unchanged since the initial R21 snapshot.",
+  "open_pr_count": 31,
+  "draft_pr_count": 31,
+  "changed_heads": [
+    {
+      "number": 660,
+      "before": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+      "after": "ba17867125b3728fb734e90b383639a3ff9175ee"
+    }
+  ],
+  "master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "targets": [
+    {
+      "number": 623,
+      "head": "530a24978f573769ed59088a27300cdcb092a71d",
+      "expected_head": "530a24978f573769ed59088a27300cdcb092a71d",
+      "head_matches_expected": true,
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_unchanged": true,
+      "draft": true
+    },
+    {
+      "number": 658,
+      "head": "f440a5d86a0298d5f8228be3f7701577df0336f3",
+      "expected_head": "f440a5d86a0298d5f8228be3f7701577df0336f3",
+      "head_matches_expected": true,
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_unchanged": true,
+      "draft": true
+    },
+    {
+      "number": 660,
+      "head": "ba17867125b3728fb734e90b383639a3ff9175ee",
+      "expected_head": "ba17867125b3728fb734e90b383639a3ff9175ee",
+      "head_matches_expected": true,
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_unchanged": true,
+      "draft": true
+    }
+  ],
+  "feedback_totals": {
+    "reviews": 14,
+    "commented": 14,
+    "approved": 0,
+    "changes_requested": 0,
+    "current_head_reviews": 0,
+    "issue_comments": 47,
+    "inline_comments": 0,
+    "new_or_updated_since_cutoff": 0
+  },
+  "target_feedback": [
+    {
+      "number": 623,
+      "reviews": 6,
+      "issue_comments": 20,
+      "inline_comments": 0,
+      "current_head_reviews": 0,
+      "metadata_unchanged": true
+    },
+    {
+      "number": 658,
+      "reviews": 7,
+      "issue_comments": 19,
+      "inline_comments": 0,
+      "current_head_reviews": 0,
+      "metadata_unchanged": true
+    },
+    {
+      "number": 660,
+      "reviews": 1,
+      "issue_comments": 8,
+      "inline_comments": 0,
+      "current_head_reviews": 0,
+      "metadata_unchanged": true
+    }
+  ],
+  "unexpected_drift": false,
+  "feedback_changed": false,
+  "current_head_approval_established": false,
+  "limits": [
+    "Read-only observations were sequential, not an atomic repository snapshot.",
+    "All open PRs were checked for Draft/head/base metadata; feedback coverage is limited to #623, #658 and #660.",
+    "PR base_sha values are preserved as returned by GitHub; master was fetched independently.",
+    "Review submissions expose submitted_at and state. No prior review-body hashes exist, so edits to old review text cannot be excluded by unchanged metadata.",
+    "No product, build, test, native operation, installation, CI trigger, GitHub mutation, comment, review or branch integration was performed by this audit."
+  ],
+  "read_only": true
+}

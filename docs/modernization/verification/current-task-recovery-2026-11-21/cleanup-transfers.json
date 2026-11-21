@@ -1,0 +1,485 @@
+{
+  "schema": 1,
+  "operation": "verified_redundant_base64_to_trash",
+  "delete_or_purge_performed": false,
+  "receipts": {
+    "local": {
+      "original_receipt_sha256": "d4cb3742f26bb384ff645c523b1179ec6a64dcc806fcfdd81705b977d663cf47",
+      "original_receipt_bytes": 44725,
+      "script_sha256": "7d70c73903fd094246ddb672c2c4e38f1231d166f0ffc1d51c3e4ca1de682f82",
+      "start_utc": "2026-11-21T00:06:49.408245+00:00",
+      "completed_utc": "2026-11-21T00:06:49.584843+00:00",
+      "completed_moscow": "2026-11-21T03:06:49.584856+03:00",
+      "moved_files": 12,
+      "retained_zip_count": 5,
+      "trash_name": "r21-base64-local-20261121T000649Z-c63facdccc7049bf8fdb7fed0995f26d",
+      "entries": [
+        {
+          "source_relative": "api-format-input.b64",
+          "trash_relative": "api-format-input.b64",
+          "group": "api-format-input",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 95612,
+          "sha256": "ad82ec0bea5f06bb0cc8ee6d2b8099a1b6c52eab9065c65fe031b2bb1196eea5",
+          "destination_bytes": 95612,
+          "destination_sha256": "ad82ec0bea5f06bb0cc8ee6d2b8099a1b6c52eab9065c65fe031b2bb1196eea5",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.424321+00:00",
+          "moscow": "2026-11-21T03:06:49.424331+03:00",
+          "retained_zip": {
+            "name": "api-format-input.zip",
+            "bytes": 71707,
+            "sha256": "2a06de83c88bcef00ca1e8346e006fab953bab95fc48ce5234eee942b9d5707d",
+            "crc_verified": true,
+            "entries": 5,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "scheduler-format-input.b64",
+          "trash_relative": "scheduler-format-input.b64",
+          "group": "scheduler-format-input",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 15972,
+          "sha256": "a18179c46a403067048d5de2c39bc29bc809730ae8c97eeb670624bf17587d7a",
+          "destination_bytes": 15972,
+          "destination_sha256": "a18179c46a403067048d5de2c39bc29bc809730ae8c97eeb670624bf17587d7a",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.437145+00:00",
+          "moscow": "2026-11-21T03:06:49.437154+03:00",
+          "retained_zip": {
+            "name": "scheduler-format-input.zip",
+            "bytes": 11977,
+            "sha256": "d76aa005ea563695f1001bc6ea1637280636e7fb8d1cdd403b3432972a4bb126",
+            "crc_verified": true,
+            "entries": 4,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "qualification-inputs.b64",
+          "trash_relative": "qualification-inputs.b64",
+          "group": "qualification-inputs",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 55104,
+          "sha256": "5103045c4575ccd566cfd3a3171a53f2ce5a5550d9e65f3ca4cfc0ecef737b20",
+          "destination_bytes": 55104,
+          "destination_sha256": "5103045c4575ccd566cfd3a3171a53f2ce5a5550d9e65f3ca4cfc0ecef737b20",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.450681+00:00",
+          "moscow": "2026-11-21T03:06:49.450691+03:00",
+          "retained_zip": {
+            "name": "qualification-inputs.zip",
+            "bytes": 41326,
+            "sha256": "e9cdf219dcd09f900dff3cbf6af35d44a2fad25a0642749d5a5a20f689900a07",
+            "crc_verified": true,
+            "entries": 8,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "qualification-inputs-v2.b64",
+          "trash_relative": "qualification-inputs-v2.b64",
+          "group": "qualification-inputs-v2",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 35472,
+          "sha256": "fdbd4f3dadd439b4906cb82285e945f4eb7613b97fae8c5f1794ff910d98d3ba",
+          "destination_bytes": 35472,
+          "destination_sha256": "fdbd4f3dadd439b4906cb82285e945f4eb7613b97fae8c5f1794ff910d98d3ba",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.462188+00:00",
+          "moscow": "2026-11-21T03:06:49.462197+03:00",
+          "retained_zip": {
+            "name": "qualification-inputs-v2.zip",
+            "bytes": 26603,
+            "sha256": "4c9dd099c7c95903103d7328c91f37c1ff66c434aa83a032428735335fa2608f",
+            "crc_verified": true,
+            "entries": 4,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part00.b64",
+          "trash_relative": "transferred/parts/part00.b64",
+          "group": "public-evidence-parts",
+          "part_index": 0,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "58a1e070672e85cfc0d1484394fd69d43d7f5de3cf7abf725744de2d3543b131",
+          "destination_bytes": 524289,
+          "destination_sha256": "58a1e070672e85cfc0d1484394fd69d43d7f5de3cf7abf725744de2d3543b131",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.478234+00:00",
+          "moscow": "2026-11-21T03:06:49.478244+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part01.b64",
+          "trash_relative": "transferred/parts/part01.b64",
+          "group": "public-evidence-parts",
+          "part_index": 1,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "02100e2498fc3578d025d6be51b9d9eab78d5c3d8d68b0a0be8d8a790cba1e6d",
+          "destination_bytes": 524289,
+          "destination_sha256": "02100e2498fc3578d025d6be51b9d9eab78d5c3d8d68b0a0be8d8a790cba1e6d",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.497186+00:00",
+          "moscow": "2026-11-21T03:06:49.497199+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part02.b64",
+          "trash_relative": "transferred/parts/part02.b64",
+          "group": "public-evidence-parts",
+          "part_index": 2,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "b77947ae24a26dfd22f44df60ccd503429f6299237ef33f78bb870c95459bc8b",
+          "destination_bytes": 524289,
+          "destination_sha256": "b77947ae24a26dfd22f44df60ccd503429f6299237ef33f78bb870c95459bc8b",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.513870+00:00",
+          "moscow": "2026-11-21T03:06:49.513881+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part03.b64",
+          "trash_relative": "transferred/parts/part03.b64",
+          "group": "public-evidence-parts",
+          "part_index": 3,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "c3532d296d0efc255f80e7bf67b47cdf0f255b2fd6b171327e2445e7eb2fced4",
+          "destination_bytes": 524289,
+          "destination_sha256": "c3532d296d0efc255f80e7bf67b47cdf0f255b2fd6b171327e2445e7eb2fced4",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.527624+00:00",
+          "moscow": "2026-11-21T03:06:49.527634+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part04.b64",
+          "trash_relative": "transferred/parts/part04.b64",
+          "group": "public-evidence-parts",
+          "part_index": 4,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "ea8ee277504a3f8f55fc85dba2dca0e5f95fed0675dc5cb7e459d5e42b50ff3b",
+          "destination_bytes": 524289,
+          "destination_sha256": "ea8ee277504a3f8f55fc85dba2dca0e5f95fed0675dc5cb7e459d5e42b50ff3b",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.540282+00:00",
+          "moscow": "2026-11-21T03:06:49.540292+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part05.b64",
+          "trash_relative": "transferred/parts/part05.b64",
+          "group": "public-evidence-parts",
+          "part_index": 5,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "b2651ea29b9502f90e12cffe553bf39e45356c3433876872a355894204f17779",
+          "destination_bytes": 524289,
+          "destination_sha256": "b2651ea29b9502f90e12cffe553bf39e45356c3433876872a355894204f17779",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.551862+00:00",
+          "moscow": "2026-11-21T03:06:49.551871+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part06.b64",
+          "trash_relative": "transferred/parts/part06.b64",
+          "group": "public-evidence-parts",
+          "part_index": 6,
+          "part_count": 8,
+          "bytes": 524289,
+          "sha256": "53f02170375dee8b5a2694d18c859e1974a2b1cd0b1ba74f67e82d29922e7755",
+          "destination_bytes": 524289,
+          "destination_sha256": "53f02170375dee8b5a2694d18c859e1974a2b1cd0b1ba74f67e82d29922e7755",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.563438+00:00",
+          "moscow": "2026-11-21T03:06:49.563447+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "transferred/parts/part07.b64",
+          "trash_relative": "transferred/parts/part07.b64",
+          "group": "public-evidence-parts",
+          "part_index": 7,
+          "part_count": 8,
+          "bytes": 133317,
+          "sha256": "4b32b8ea7743960d2a6c38e5dbf0df46751a3abfa7840f4152a0dbd3efc1dc02",
+          "destination_bytes": 133317,
+          "destination_sha256": "4b32b8ea7743960d2a6c38e5dbf0df46751a3abfa7840f4152a0dbd3efc1dc02",
+          "source_absent": true,
+          "utc": "2026-11-21T00:06:49.573441+00:00",
+          "moscow": "2026-11-21T03:06:49.573450+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        }
+      ]
+    },
+    "remote": {
+      "original_receipt_sha256": "7ad379919496f4d1c7eba92751627a82d820adfa73dd8822ae65bb6c7891eb17",
+      "original_receipt_bytes": 30712,
+      "script_sha256": "eb03dafcdda6aec9e1a01aa61114ba4962661d4659eb5e1e6ae3d19d934cb74c",
+      "start_utc": "2026-11-21T00:09:45.269560+00:00",
+      "completed_utc": "2026-11-21T00:09:46.371479+00:00",
+      "completed_moscow": "2026-11-21T03:09:46.371497+03:00",
+      "moved_files": 6,
+      "retained_zip_count": 5,
+      "trash_name": "r21-base64-remote-20261121T000944Z-a1c61830f67e4fbc9a7b6866f80ca5c5",
+      "entries": [
+        {
+          "source_relative": "api-format-input.b64",
+          "trash_relative": "api-format-input.b64",
+          "group": "api-format-input",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 95612,
+          "sha256": "ad82ec0bea5f06bb0cc8ee6d2b8099a1b6c52eab9065c65fe031b2bb1196eea5",
+          "destination_bytes": 95612,
+          "destination_sha256": "ad82ec0bea5f06bb0cc8ee6d2b8099a1b6c52eab9065c65fe031b2bb1196eea5",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:45.492884+00:00",
+          "moscow": "2026-11-21T03:09:45.492905+03:00",
+          "retained_zip": {
+            "name": "api-format-input.zip",
+            "bytes": 71707,
+            "sha256": "2a06de83c88bcef00ca1e8346e006fab953bab95fc48ce5234eee942b9d5707d",
+            "crc_verified": true,
+            "entries": 5,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "scheduler-format-input.b64",
+          "trash_relative": "scheduler-format-input.b64",
+          "group": "scheduler-format-input",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 15972,
+          "sha256": "a18179c46a403067048d5de2c39bc29bc809730ae8c97eeb670624bf17587d7a",
+          "destination_bytes": 15972,
+          "destination_sha256": "a18179c46a403067048d5de2c39bc29bc809730ae8c97eeb670624bf17587d7a",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:45.646986+00:00",
+          "moscow": "2026-11-21T03:09:45.647004+03:00",
+          "retained_zip": {
+            "name": "scheduler-format-input.zip",
+            "bytes": 11977,
+            "sha256": "d76aa005ea563695f1001bc6ea1637280636e7fb8d1cdd403b3432972a4bb126",
+            "crc_verified": true,
+            "entries": 4,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "qualification-inputs.b64",
+          "trash_relative": "qualification-inputs.b64",
+          "group": "qualification-inputs",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 55104,
+          "sha256": "5103045c4575ccd566cfd3a3171a53f2ce5a5550d9e65f3ca4cfc0ecef737b20",
+          "destination_bytes": 55104,
+          "destination_sha256": "5103045c4575ccd566cfd3a3171a53f2ce5a5550d9e65f3ca4cfc0ecef737b20",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:45.802273+00:00",
+          "moscow": "2026-11-21T03:09:45.802293+03:00",
+          "retained_zip": {
+            "name": "qualification-inputs.zip",
+            "bytes": 41326,
+            "sha256": "e9cdf219dcd09f900dff3cbf6af35d44a2fad25a0642749d5a5a20f689900a07",
+            "crc_verified": true,
+            "entries": 8,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "qualification-inputs-v2.b64",
+          "trash_relative": "qualification-inputs-v2.b64",
+          "group": "qualification-inputs-v2",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 35472,
+          "sha256": "fdbd4f3dadd439b4906cb82285e945f4eb7613b97fae8c5f1794ff910d98d3ba",
+          "destination_bytes": 35472,
+          "destination_sha256": "fdbd4f3dadd439b4906cb82285e945f4eb7613b97fae8c5f1794ff910d98d3ba",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:45.947645+00:00",
+          "moscow": "2026-11-21T03:09:45.947664+03:00",
+          "retained_zip": {
+            "name": "qualification-inputs-v2.zip",
+            "bytes": 26603,
+            "sha256": "4c9dd099c7c95903103d7328c91f37c1ff66c434aa83a032428735335fa2608f",
+            "crc_verified": true,
+            "entries": 4,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "evidence-transfer-lines.b64",
+          "trash_relative": "evidence-transfer-lines.b64",
+          "group": "public-evidence-lines",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 3803797,
+          "sha256": "c02df1835f10990c932d5d1c1357968118f8e131f9ef823b4ef527a53be69e3d",
+          "destination_bytes": 3803797,
+          "destination_sha256": "c02df1835f10990c932d5d1c1357968118f8e131f9ef823b4ef527a53be69e3d",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:46.124606+00:00",
+          "moscow": "2026-11-21T03:09:46.124627+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        },
+        {
+          "source_relative": "public-evidence/evidence-transfer.b64",
+          "trash_relative": "public-evidence/evidence-transfer.b64",
+          "group": "public-evidence-base64",
+          "part_index": 0,
+          "part_count": 1,
+          "bytes": 3803332,
+          "sha256": "e015766e7047525f1c5f56824f963e74d6e1ba48f1ed9758302c986aff96193d",
+          "destination_bytes": 3803332,
+          "destination_sha256": "e015766e7047525f1c5f56824f963e74d6e1ba48f1ed9758302c986aff96193d",
+          "source_absent": true,
+          "utc": "2026-11-21T00:09:46.269788+00:00",
+          "moscow": "2026-11-21T03:09:46.269811+03:00",
+          "retained_zip": {
+            "name": "evidence-redacted.zip",
+            "bytes": 2852497,
+            "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+            "crc_verified": true,
+            "entries": 4204,
+            "decoded_base64_equals_zip": true
+          }
+        }
+      ]
+    }
+  },
+  "total_moved_files": 18,
+  "retained_original_receipts": "Private source receipts retain full path/handle identity metadata; public entries below retain names, times, byte hashes and archive proofs.",
+  "empty_directory": {
+    "source_relative": "transferred/parts",
+    "completed": true,
+    "after_utc": "2026-11-21T00:08:46.840410+00:00",
+    "original_receipt_sha256": "a653a795596c7926748976f299e1fe02c950fb13f273488fec3842a15473b152"
+  },
+  "remote_initial_failure": {
+    "occurred_in_preflight": true,
+    "before_receipt_or_trash_creation": true,
+    "message": "Input changed before read",
+    "observed_mismatches": [
+      {
+        "file": "scheduler-format-input.b64",
+        "lstat_ctime_ns": 1795215874577909200,
+        "fstat_ctime_ns": 1795215874578985200,
+        "both_views_stable": true,
+        "other_fields_equal": true,
+        "bytes": 15972,
+        "sha256": "a18179c46a403067048d5de2c39bc29bc809730ae8c97eeb670624bf17587d7a"
+      },
+      {
+        "file": "qualification-inputs.b64",
+        "lstat_ctime_ns": 1795215999889959700,
+        "fstat_ctime_ns": 1795215999893492700,
+        "both_views_stable": true,
+        "other_fields_equal": true,
+        "bytes": 55104,
+        "sha256": "5103045c4575ccd566cfd3a3171a53f2ce5a5550d9e65f3ca4cfc0ecef737b20"
+      },
+      {
+        "file": "qualification-inputs.zip",
+        "lstat_ctime_ns": 1795216031988835300,
+        "fstat_ctime_ns": 1795216031989354000,
+        "both_views_stable": true,
+        "other_fields_equal": true,
+        "bytes": 41326,
+        "sha256": "e9cdf219dcd09f900dff3cbf6af35d44a2fad25a0642749d5a5a20f689900a07"
+      },
+      {
+        "file": "public-evidence/evidence-transfer.b64",
+        "lstat_ctime_ns": 1795218518326195700,
+        "fstat_ctime_ns": 1795218518327280400,
+        "both_views_stable": true,
+        "other_fields_equal": true,
+        "bytes": 3803332,
+        "sha256": "e015766e7047525f1c5f56824f963e74d6e1ba48f1ed9758302c986aff96193d"
+      }
+    ],
+    "original_script_sha256": "7d70c73903fd094246ddb672c2c4e38f1231d166f0ffc1d51c3e4ca1de682f82",
+    "final_script_sha256": "eb03dafcdda6aec9e1a01aa61114ba4962661d4659eb5e1e6ae3d19d934cb74c",
+    "amendment": "On Windows compare path/handle identity across six equal fields; compare all seven fields before/after within each representation. Both full identities remain in proofs and unchanged checks. Linux keeps all seven cross-view fields. Byte checks, CRC, hashes, no-replace move, and readback remain unchanged.",
+    "private_diagnostics_sha256": "dffe55cf424e369cffcd545989c684411ea750a7dfd09526985bee2e37a662dc",
+    "no_product_or_native_task_rerun": true
+  }
+}

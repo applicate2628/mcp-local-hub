@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "source": "native-harness/main.go",
+      "public_file": "native-original.go",
+      "source_sha256": "7691f5c760e0b024eb1d45c145d2f729efac9fd3e54daae29d3cc88fa4913c27",
+      "saved_sha256": "e994df7ea4e1dc4c3824fe4eb61a3314693ded29eaef624d99f4458a2de03aec",
+      "source_bytes": 14765,
+      "saved_bytes": 14716,
+      "redacted": true
+    },
+    {
+      "source": "native-harness-final/main.go",
+      "public_file": "native-final.go",
+      "source_sha256": "c8549b8b459927ff49dd283c8af27c33c4124c8b15694df316cd6ecde91a82d0",
+      "saved_sha256": "bbace984b18326376677fff4401cf9c013a8b607058de7eeaf653c5cf03aef04",
+      "source_bytes": 15117,
+      "saved_bytes": 15068,
+      "redacted": true
+    },
+    {
+      "source": "native-observer/main.go",
+      "public_file": "native-observer.go",
+      "source_sha256": "2188d225edcc42d8fb8e82502f4e06bb504ebe04e07f7bef628f8b0e3121f6e7",
+      "saved_sha256": "2741513f9b6e26ef4672c57bd565df1cfccbd2725fcae8ea766e51a3e4a39c43",
+      "source_bytes": 12277,
+      "saved_bytes": 12198,
+      "redacted": true
+    },
+    {
+      "source": "native-retained-cleanup/main.go",
+      "public_file": "native-retained-cleanup.go",
+      "source_sha256": "e471a1ebbd12bc4210e6687ad2bc4fb660dea03fcea48ab107b652650b482554",
+      "saved_sha256": "c50dbfdbfe92c564276a2f0a60407d0dca9065dde93ac511838ad8aa7bed166e",
+      "source_bytes": 13928,
+      "saved_bytes": 13849,
+      "redacted": true
+    },
+    {
+      "source": "native_run.py",
+      "public_file": "native_run.py",
+      "source_sha256": "00410026f1d0191c4d614f6e2b92ffd0c228d15815589f9f92ce4b7318b61c9d",
+      "saved_sha256": "00410026f1d0191c4d614f6e2b92ffd0c228d15815589f9f92ce4b7318b61c9d",
+      "source_bytes": 10275,
+      "saved_bytes": 10275,
+      "redacted": false
+    },
+    {
+      "source": "native_final_run.py",
+      "public_file": "native_final_run.py",
+      "source_sha256": "e56aba13445ea3099c328cf3a107de27c8a88de259140d63cee17a15412afd48",
+      "saved_sha256": "e56aba13445ea3099c328cf3a107de27c8a88de259140d63cee17a15412afd48",
+      "source_bytes": 10296,
+      "saved_bytes": 10296,
+      "redacted": false
+    },
+    {
+      "source": "observer_run.py",
+      "public_file": "observer_run.py",
+      "source_sha256": "9b13c4c42b1884c2092214232e4d7e75019f1dbaf529fed7c875fc67b5d20ba2",
+      "saved_sha256": "9b13c4c42b1884c2092214232e4d7e75019f1dbaf529fed7c875fc67b5d20ba2",
+      "source_bytes": 3139,
+      "saved_bytes": 3139,
+      "redacted": false
+    },
+    {
+      "source": "cleanup_run.py",
+      "public_file": "cleanup_run.py",
+      "source_sha256": "b8d94e765b022344868128d57dd0f5600497d5b9bf4f28e58670e9fd59b1190f",
+      "saved_sha256": "b8d94e765b022344868128d57dd0f5600497d5b9bf4f28e58670e9fd59b1190f",
+      "source_bytes": 5127,
+      "saved_bytes": 5127,
+      "redacted": false
+    },
+    {
+      "source": "packaging/prepare_pack_input.py",
+      "public_file": "prepare_pack_input.py",
+      "source_sha256": "15dd8aa09b296f20f58f416bebd42dbccca067505e290e3d1fbcb00a0f30eef4",
+      "saved_sha256": "9d8e101db1f7cbae32f6ed47b7f3b0e694ef68446bdf7e64176542dd457be6de",
+      "source_bytes": 13681,
+      "saved_bytes": 13613,
+      "redacted": true
+    },
+    {
+      "source": "diagnostics/initial/inputs/install_task_recovery_test.go",
+      "public_file": "initial-install_task_recovery_test.go",
+      "source_sha256": "44c7ab0aa8b266b0a9c0e2e5b5590620fdc7ce83c769265bc7a92f31648a9583",
+      "saved_sha256": "44c7ab0aa8b266b0a9c0e2e5b5590620fdc7ce83c769265bc7a92f31648a9583",
+      "source_bytes": 11282,
+      "saved_bytes": 11282,
+      "redacted": false
+    }
+  ],
+  "interpretation": "Redacted audit copies; original hashes identify the executed private inputs. Literal local paths were replaced, so these copies are not ready-to-run qualification inputs. Historical source comments do not override execution receipts."
+}
