@@ -1,0 +1,47 @@
+{
+  "source": {
+    "head": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+    "tree": "79a36a7aca62cd2c08cb6a1a79a1f7d58ad6010c",
+    "status": "",
+    "files": 3216,
+    "aggregate_sha256": "e5e03931462e4e9a981e7ed09637d58b0feb36d67efb38afcdb4cdbe974a33c0"
+  },
+  "full_manifests_retained_outside_trash": [
+    {
+      "retained_not_exported": "prepare/prepared-source-manifest.json",
+      "bytes": 591171,
+      "sha256": "4f91296fc0491957391824d050db8cf8ff5f739fef113446182f1f75859ffadd",
+      "head": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+      "tree": "79a36a7aca62cd2c08cb6a1a79a1f7d58ad6010c",
+      "status": "",
+      "files": 3216,
+      "aggregate_sha256": "e5e03931462e4e9a981e7ed09637d58b0feb36d67efb38afcdb4cdbe974a33c0"
+    },
+    {
+      "retained_not_exported": "inventory/source-before-manifest.json",
+      "bytes": 591171,
+      "sha256": "4f91296fc0491957391824d050db8cf8ff5f739fef113446182f1f75859ffadd",
+      "head": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+      "tree": "79a36a7aca62cd2c08cb6a1a79a1f7d58ad6010c",
+      "status": "",
+      "files": 3216,
+      "aggregate_sha256": "e5e03931462e4e9a981e7ed09637d58b0feb36d67efb38afcdb4cdbe974a33c0"
+    },
+    {
+      "retained_not_exported": "inventory/source-after-manifest.json",
+      "bytes": 591171,
+      "sha256": "4f91296fc0491957391824d050db8cf8ff5f739fef113446182f1f75859ffadd",
+      "head": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+      "tree": "79a36a7aca62cd2c08cb6a1a79a1f7d58ad6010c",
+      "status": "",
+      "files": 3216,
+      "aggregate_sha256": "e5e03931462e4e9a981e7ed09637d58b0feb36d67efb38afcdb4cdbe974a33c0"
+    }
+  ],
+  "tools": {
+    "git.exe": "20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c",
+    "go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "inventory_tool_sha256": "ae1e67c17b422f187f6066748ab77e5492ec86d33b4a33ea7f5da1d44822a1dc"
+}

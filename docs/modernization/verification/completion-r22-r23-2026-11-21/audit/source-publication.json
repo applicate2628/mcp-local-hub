@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "commits": [
+    {
+      "pr": 660,
+      "commit": "47313f0b0dbebc3badb8ef67dd789ef8e6801af5",
+      "parent": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "changed_files": 2,
+      "responsibility": "Literal percent escaping for Linux systemd ExecStart"
+    },
+    {
+      "pr": 660,
+      "commit": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "parent": "47313f0b0dbebc3badb8ef67dd789ef8e6801af5",
+      "changed_files": 4,
+      "responsibility": "Classify current Scheduler mutation failure and preserve recovery information"
+    },
+    {
+      "pr": 631,
+      "commit": "2eb7c114103ef5c60939cd114110ebe667901166",
+      "parent": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "changed_files": 1,
+      "responsibility": "Correct inherited identity protocol documentation; no product code change"
+    }
+  ],
+  "files_read_back_and_matched_prepared_bytes": 7,
+  "branch_integration_performed": false,
+  "new_pull_requests_created": 0,
+  "runtime_qualification_scope": "Pinned source bases plus explicit overlays; a full test of the eventual published head is not claimed."
+}

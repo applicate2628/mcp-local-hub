@@ -1,0 +1,16 @@
+{
+  "archive": "evidence-redacted.zip",
+  "archive_bytes": 4530861,
+  "archive_members": 5539,
+  "archive_sha256": "ab979b12c68d9d311516dec82d0cd65cdfb901bf3de5f106debd2f1b71fec654",
+  "manifest_bytes": 2488969,
+  "manifest_member_hashes": 5538,
+  "manifest_sha256": "fb5792674c25fa4c8a19ef71507473956be5b854ce0f343dd3f442be630d63ff",
+  "schema": 1,
+  "stream_verification": {
+    "all_public_hashes_checked": true,
+    "original_hashes_checked": 2128,
+    "redacted_public_streams": 11,
+    "unchanged_public_streams": 2117
+  }
+}

@@ -1,0 +1,6 @@
+[Unit]
+Description=Literal percent parser probe
+DefaultDependencies=no
+[Service]
+Type=oneshot
+ExecStart="<WORKSPACE_ROOT>/linux-percent-execution/native-parser/release-%Z/probe"

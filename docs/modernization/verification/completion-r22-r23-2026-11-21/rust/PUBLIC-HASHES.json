@@ -1,0 +1,444 @@
+{
+  "schema": 1,
+  "created_utc": "2026-11-21T09:24:18.582702+00:00",
+  "original_selection_sha256": "422f791e6eb81a81ddca27967e4924a6366dc6efa08e7b808fd72d53407e39fb",
+  "original_streams_verified": 32,
+  "public_streams_equal_original": 32,
+  "projection": "Only the local account directory component in selected tool paths is replaced by <local-user>.",
+  "excluded": "All runtime, identity marker, binary, target, source-copy, and vendor contents remain unread by this exporter.",
+  "whole_process_tree_settlement_proven": false,
+  "files": [
+    {
+      "path": "RESULTS.md",
+      "original_bytes": 6268,
+      "original_sha256": "b18174a72d1419ada4a4008b438b625d984efa51e058026fde4ecf8cfa42cf3e",
+      "public_bytes": 6268,
+      "public_sha256": "b18174a72d1419ada4a4008b438b625d984efa51e058026fde4ecf8cfa42cf3e",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "export_public.py",
+      "original_bytes": 9488,
+      "original_sha256": "5818d27623a9f13fb77cb6f12df5e7dc1991c910e6549e44c32bc2d44063bdbe",
+      "public_bytes": 9488,
+      "public_sha256": "5818d27623a9f13fb77cb6f12df5e7dc1991c910e6549e44c32bc2d44063bdbe",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "ffi-go-fixtures-review.md",
+      "original_bytes": 5540,
+      "original_sha256": "1f58d770c3b78b066dfefe7c267655cff66b8b4a1e32bb9e88c55e371f4b5bf5",
+      "public_bytes": 5540,
+      "public_sha256": "1f58d770c3b78b066dfefe7c267655cff66b8b4a1e32bb9e88c55e371f4b5bf5",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "ffi-go-fixtures-runner.diff",
+      "original_bytes": 5870,
+      "original_sha256": "102277fef9d5586e5f51e2ae2c187640d882147a09ac89a99209f5d48460bf01",
+      "public_bytes": 5870,
+      "public_sha256": "102277fef9d5586e5f51e2ae2c187640d882147a09ac89a99209f5d48460bf01",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "manifest.json",
+      "original_bytes": 17681,
+      "original_sha256": "433f1b7767fb592a049ae47ffb175bf8af11a37aebec84c63ca2ec4571c0d4fa",
+      "public_bytes": 17688,
+      "public_sha256": "f729b5015dc19cfa5ca3c0a5dd3c3a440d9d5ca7686c6d99b1c37e7d2a10ca11",
+      "local_account_path_replacements": 1,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "preparation-receipt.json",
+      "original_bytes": 23739,
+      "original_sha256": "4ecea55574109c702ab33e7eb56e37ac50fab4a8fb8af00371f70c2b41c8116f",
+      "public_bytes": 23739,
+      "public_sha256": "4ecea55574109c702ab33e7eb56e37ac50fab4a8fb8af00371f70c2b41c8116f",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "prepare_sources.py",
+      "original_bytes": 5742,
+      "original_sha256": "68fb2f66fd4fcdaa9662202efcbfb56aa056fad7412ce4daf21ec03f602cab16",
+      "public_bytes": 5742,
+      "public_sha256": "68fb2f66fd4fcdaa9662202efcbfb56aa056fad7412ce4daf21ec03f602cab16",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "public-evidence-selection.json",
+      "original_bytes": 7410,
+      "original_sha256": "422f791e6eb81a81ddca27967e4924a6366dc6efa08e7b808fd72d53407e39fb",
+      "public_bytes": 7410,
+      "public_sha256": "422f791e6eb81a81ddca27967e4924a6366dc6efa08e7b808fd72d53407e39fb",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runner-revisions/validate_offline-238e0f3f.py",
+      "original_bytes": 15404,
+      "original_sha256": "238e0f3f095bdc45719020f8ab8ef3d1990655aa2651576920e1642ca5786896",
+      "public_bytes": 15404,
+      "public_sha256": "238e0f3f095bdc45719020f8ab8ef3d1990655aa2651576920e1642ca5786896",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/child-build.stderr.log",
+      "original_bytes": 268,
+      "original_sha256": "f59dc63e5509846b82a4b896f9da9c09e097f1dd81e188ebdcf097c3ec5a721e",
+      "public_bytes": 268,
+      "public_sha256": "f59dc63e5509846b82a4b896f9da9c09e097f1dd81e188ebdcf097c3ec5a721e",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/child-build.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/ffi-dll-build.stderr.log",
+      "original_bytes": 398,
+      "original_sha256": "c90d379b7346d600eb8c46f2bb1be8ac38e789aca51aed9933312e3622bd6c19",
+      "public_bytes": 398,
+      "public_sha256": "c90d379b7346d600eb8c46f2bb1be8ac38e789aca51aed9933312e3622bd6c19",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/ffi-dll-build.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/ffi-rust-tests.stderr.log",
+      "original_bytes": 556,
+      "original_sha256": "abad597984c5d3c8f6e38aae7b3b866b20e4741efb0799e3dbd81fcafeb903fe",
+      "public_bytes": 556,
+      "public_sha256": "abad597984c5d3c8f6e38aae7b3b866b20e4741efb0799e3dbd81fcafeb903fe",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/ffi-rust-tests.stdout.log",
+      "original_bytes": 1849,
+      "original_sha256": "bd34c9c10836a3a6312b003945542281e1f04891749626f839a098a6b4122b9d",
+      "public_bytes": 1849,
+      "public_sha256": "bd34c9c10836a3a6312b003945542281e1f04891749626f839a098a6b4122b9d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/go-consumer-race.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/go-consumer-race.stdout.log",
+      "original_bytes": 114879,
+      "original_sha256": "988da0b8deba6b5d8cbd3238a2ea6fcd9731c3901adb178063f2b2639af12d33",
+      "public_bytes": 114879,
+      "public_sha256": "988da0b8deba6b5d8cbd3238a2ea6fcd9731c3901adb178063f2b2639af12d33",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-debug/receipt.json",
+      "original_bytes": 12472,
+      "original_sha256": "1bef5a11589dc23b104adc47b6d025d83f206e1426dfdaa93739222707cd0c06",
+      "public_bytes": 12493,
+      "public_sha256": "78e60220197fed7c942c094e8c1314700a4a1ecbed48e0f1fef073d1c7a99939",
+      "local_account_path_replacements": 3,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "runs/ffi631-go-fixtures/go-consumer-race.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-go-fixtures/go-consumer-race.stdout.log",
+      "original_bytes": 113662,
+      "original_sha256": "ae92969c8d1441040b9d71a907b6cbaaad1fe316a135b66400c715cbd84f0208",
+      "public_bytes": 113662,
+      "public_sha256": "ae92969c8d1441040b9d71a907b6cbaaad1fe316a135b66400c715cbd84f0208",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/ffi631-go-fixtures/receipt.json",
+      "original_bytes": 39752,
+      "original_sha256": "e426410145165f25ef1bccdc60f8d61332e59b2877bc100577034aa08e546d9e",
+      "public_bytes": 39752,
+      "public_sha256": "e426410145165f25ef1bccdc60f8d61332e59b2877bc100577034aa08e546d9e",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/native625-debug/native-tests.stderr.log",
+      "original_bytes": 1614,
+      "original_sha256": "3f223a1dda313662035a62a560c8e82a8061fbc550b056a7e0fb5bd4b2e4a808",
+      "public_bytes": 1614,
+      "public_sha256": "3f223a1dda313662035a62a560c8e82a8061fbc550b056a7e0fb5bd4b2e4a808",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/native625-debug/native-tests.stdout.log",
+      "original_bytes": 4795,
+      "original_sha256": "c647cdd6f69d699677f3c0e1b650136bc7167a72e9714b55e105beeb2a5b2b2e",
+      "public_bytes": 4795,
+      "public_sha256": "c647cdd6f69d699677f3c0e1b650136bc7167a72e9714b55e105beeb2a5b2b2e",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/native625-debug/receipt.json",
+      "original_bytes": 8077,
+      "original_sha256": "a2e52ae3f9f4633f555390c0ec40e74b7c3683d5a783b61a003cc956687ebca0",
+      "public_bytes": 8084,
+      "public_sha256": "97dce1824e65b9ccf719966fe3239d6b52677bbcb3115fc007f08cf55a10e7fb",
+      "local_account_path_replacements": 1,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "runs/native644-debug/native-tests.stderr.log",
+      "original_bytes": 1614,
+      "original_sha256": "4c17579878e31872ecbf078b0af2315e1b027177061e44097ae451bf59a01b61",
+      "public_bytes": 1614,
+      "public_sha256": "4c17579878e31872ecbf078b0af2315e1b027177061e44097ae451bf59a01b61",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/native644-debug/native-tests.stdout.log",
+      "original_bytes": 6979,
+      "original_sha256": "b023c6adc6408c5ca78a7d10ce2c5f7a4e0e88ebb7ea9e0da079c3f79266232d",
+      "public_bytes": 6979,
+      "public_sha256": "b023c6adc6408c5ca78a7d10ce2c5f7a4e0e88ebb7ea9e0da079c3f79266232d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/native644-debug/receipt.json",
+      "original_bytes": 8326,
+      "original_sha256": "ea1d2a492089f287aeecaffb39d5272e7e66156a6a0203fbbcd3aa2d770e288f",
+      "public_bytes": 8333,
+      "public_sha256": "50199d22d99449bb2516fe5754a5c55719e1c71364e8592149a890b2d2cc51d4",
+      "local_account_path_replacements": 1,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "runs/readiness-debug/cargo-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/cargo-version.stdout.log",
+      "original_bytes": 37,
+      "original_sha256": "d62bac2223cd9bd1a54c0ccd82d4084b7d1d60044855e2f6a1b49f4f77e6f41c",
+      "public_bytes": 37,
+      "public_sha256": "d62bac2223cd9bd1a54c0ccd82d4084b7d1d60044855e2f6a1b49f4f77e6f41c",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/go-version.stderr.log",
+      "original_bytes": 79,
+      "original_sha256": "5e858a8cac400e6d8c8e7ef3b05cdabd5650dbdeb01318bae3f2666042804272",
+      "public_bytes": 79,
+      "public_sha256": "5e858a8cac400e6d8c8e7ef3b05cdabd5650dbdeb01318bae3f2666042804272",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/go-version.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/receipt.json",
+      "original_bytes": 6946,
+      "original_sha256": "96bcabcb76d15b37482ec9365687e9c2fcf5c21058f2d12ccc0a43ed3e66d876",
+      "public_bytes": 6967,
+      "public_sha256": "7f8e02e3766e6eada0f488dcab2457c614df75ffcd18e2cba7b4172bf1f90c07",
+      "local_account_path_replacements": 3,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "runs/readiness-debug/rustc-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/rustc-version.stdout.log",
+      "original_bytes": 196,
+      "original_sha256": "698f45a67e59874026cab3dd64e006568182c32cd41b91ebee512d8ab10c398d",
+      "public_bytes": 196,
+      "public_sha256": "698f45a67e59874026cab3dd64e006568182c32cd41b91ebee512d8ab10c398d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/rustfmt-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-debug/rustfmt-version.stdout.log",
+      "original_bytes": 46,
+      "original_sha256": "3db4b244e4ba9d20ded3488fb3be0c2163fbd7c81d64b4b0348f5ad9c3da3b5d",
+      "public_bytes": 46,
+      "public_sha256": "3db4b244e4ba9d20ded3488fb3be0c2163fbd7c81d64b4b0348f5ad9c3da3b5d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/cargo-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/cargo-version.stdout.log",
+      "original_bytes": 37,
+      "original_sha256": "d62bac2223cd9bd1a54c0ccd82d4084b7d1d60044855e2f6a1b49f4f77e6f41c",
+      "public_bytes": 37,
+      "public_sha256": "d62bac2223cd9bd1a54c0ccd82d4084b7d1d60044855e2f6a1b49f4f77e6f41c",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/gcc-target.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/gcc-target.stdout.log",
+      "original_bytes": 20,
+      "original_sha256": "5a93bd82f1f12e8b275a5cb5df82e8bac02d52c05d53b534913d0bc49ac46b9b",
+      "public_bytes": 20,
+      "public_sha256": "5a93bd82f1f12e8b275a5cb5df82e8bac02d52c05d53b534913d0bc49ac46b9b",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/go-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/go-version.stdout.log",
+      "original_bytes": 34,
+      "original_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "public_bytes": 34,
+      "public_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/receipt.json",
+      "original_bytes": 10105,
+      "original_sha256": "807c2d3545fa671e8a8d2d2153593fddfb2279385ce7e18f8a1b39f0aedbfe69",
+      "public_bytes": 10126,
+      "public_sha256": "047d0dfa02c6ec9fa84ea1110fe265f8db23b4eeae666eb73b019eeefcbe14b6",
+      "local_account_path_replacements": 3,
+      "original_bytes_equal_public": false
+    },
+    {
+      "path": "runs/readiness-goroot/rustc-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/rustc-version.stdout.log",
+      "original_bytes": 196,
+      "original_sha256": "698f45a67e59874026cab3dd64e006568182c32cd41b91ebee512d8ab10c398d",
+      "public_bytes": 196,
+      "public_sha256": "698f45a67e59874026cab3dd64e006568182c32cd41b91ebee512d8ab10c398d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/rustfmt-version.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "runs/readiness-goroot/rustfmt-version.stdout.log",
+      "original_bytes": 46,
+      "original_sha256": "3db4b244e4ba9d20ded3488fb3be0c2163fbd7c81d64b4b0348f5ad9c3da3b5d",
+      "public_bytes": 46,
+      "public_sha256": "3db4b244e4ba9d20ded3488fb3be0c2163fbd7c81d64b4b0348f5ad9c3da3b5d",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    },
+    {
+      "path": "validate_offline.py",
+      "original_bytes": 17531,
+      "original_sha256": "07ddb93fdf84514ce69eb48d2046dfc74f059c6b43c89103c02f076ee59636f2",
+      "public_bytes": 17531,
+      "public_sha256": "07ddb93fdf84514ce69eb48d2046dfc74f059c6b43c89103c02f076ee59636f2",
+      "local_account_path_replacements": 0,
+      "original_bytes_equal_public": true
+    }
+  ]
+}

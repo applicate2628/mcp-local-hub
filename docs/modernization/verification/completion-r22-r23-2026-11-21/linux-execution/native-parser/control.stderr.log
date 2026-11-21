@@ -1,0 +1,3 @@
+<WORKSPACE_ROOT>/linux-percent-execution/native-parser/control.service:6: Failed to resolve unit specifiers in '<WORKSPACE_ROOT>/linux-percent-execution/native-parser/release-%Z/probe': Invalid slot
+control.service: Unit configuration has fatal error, unit will not be started.
+Unit control.service has a bad unit file setting.

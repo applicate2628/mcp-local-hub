@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "completed": true,
+  "finished_utc": "2026-11-21T09:24:18.628958+00:00",
+  "exporter_sha256": "5818d27623a9f13fb77cb6f12df5e7dc1991c910e6549e44c32bc2d44063bdbe",
+  "selection_sha256": "422f791e6eb81a81ddca27967e4924a6366dc6efa08e7b808fd72d53407e39fb",
+  "payload_files_with_hash_rows": 48,
+  "archive_files": 49,
+  "archive_bytes": 84720,
+  "archive_sha256": "73d01303df3c480cad4ffb6db3520f44df7cf83281c7bc8786bbc70eedc3222f",
+  "public_hash_manifest_sha256": "3cf19617874f61cf0a48183091f59d0ce6311d48fe2d90acec2016f84b2b3cb9",
+  "original_streams_verified": 32,
+  "public_streams_equal_original": 32,
+  "changed_public_text_files": 6,
+  "originals_unchanged_after": true,
+  "private_marker_contents_read": false,
+  "runtime_contents_read": false,
+  "tests_run": false,
+  "subprocesses_started": false
+}
