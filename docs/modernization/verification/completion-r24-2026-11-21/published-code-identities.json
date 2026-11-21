@@ -1,0 +1,50 @@
+[
+  {
+    "pr": 631,
+    "head": "412cd353d495a890b47992c0eae672a247862508",
+    "parent": "2eb7c114103ef5c60939cd114110ebe667901166",
+    "tree": "2ab69e593983fc48c12dcf1c837bb688c1b6b5e9",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/412cd353d495a890b47992c0eae672a247862508",
+    "verified_single_parent": true
+  },
+  {
+    "pr": 647,
+    "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+    "parent": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+    "tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+    "verified_single_parent": true
+  },
+  {
+    "pr": 643,
+    "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+    "parent": "527574928335142d95bc073c6ca4459fef9f9f90",
+    "tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+    "verified_single_parent": true
+  },
+  {
+    "pr": 650,
+    "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+    "parent": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+    "tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+    "verified_single_parent": true
+  },
+  {
+    "pr": 635,
+    "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+    "parent": "1c135914c108dda8b63816175347c5da77da26d9",
+    "tree": "0c4cb2acce09b56198865915d2babbc91b67ddf5",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+    "verified_single_parent": true
+  },
+  {
+    "pr": 637,
+    "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+    "parent": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+    "tree": "940dfb102e62d599ac453f0afd41a1c0d3b87351",
+    "url": "https://github.com/applicate2628/mcp-local-hub/commit/1ebe00c5dbac448488d980072e689b1126875dde",
+    "verified_single_parent": true
+  }
+]

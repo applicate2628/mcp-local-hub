@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "closures": [
+    {
+      "source_pr": 639,
+      "source_head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "source_branch": "fix/serena-unbuffered-build-input-20261114",
+      "target_pr": 647,
+      "target_head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "state": "closed",
+      "merged": false,
+      "draft": true,
+      "closed_at": "2026-11-21T11:27:01Z",
+      "updated_at": "2026-11-21T11:27:01Z",
+      "branch_deleted": false,
+      "readback_verified": true
+    },
+    {
+      "source_pr": 645,
+      "source_head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "source_branch": "fix/serena-stream-enumeration-20261114",
+      "target_pr": 643,
+      "target_head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "state": "closed",
+      "merged": false,
+      "draft": true,
+      "closed_at": "2026-11-21T11:27:04Z",
+      "updated_at": "2026-11-21T11:27:04Z",
+      "branch_deleted": false,
+      "readback_verified": true
+    },
+    {
+      "source_pr": 651,
+      "source_head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "source_branch": "fix/serena-readonly-cleanup-20261114",
+      "target_pr": 643,
+      "target_head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "state": "closed",
+      "merged": false,
+      "draft": true,
+      "closed_at": "2026-11-21T11:27:07Z",
+      "updated_at": "2026-11-21T11:27:07Z",
+      "branch_deleted": false,
+      "readback_verified": true
+    },
+    {
+      "source_pr": 656,
+      "source_head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "source_branch": "fix/serena-connection-close-20261115",
+      "target_pr": 650,
+      "target_head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "state": "closed",
+      "merged": false,
+      "draft": true,
+      "closed_at": "2026-11-21T11:27:10Z",
+      "updated_at": "2026-11-21T11:27:10Z",
+      "branch_deleted": false,
+      "readback_verified": true
+    },
+    {
+      "source_pr": 636,
+      "source_head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "source_branch": "fix/serena-qualification-namespace-20261114",
+      "target_pr": 637,
+      "target_head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "state": "closed",
+      "merged": false,
+      "draft": true,
+      "closed_at": "2026-11-21T11:27:12Z",
+      "updated_at": "2026-11-21T11:27:12Z",
+      "branch_deleted": false,
+      "readback_verified": true
+    }
+  ],
+  "merge_calls": 0,
+  "deleted_branches": 0,
+  "retarget": {
+    "pr": 637,
+    "before": "fix/serena-qualification-namespace-20261114",
+    "after": "fix/serena-qualification-publisher-20261114",
+    "head": "1ebe00c5dbac448488d980072e689b1126875dde"
+  }
+}
