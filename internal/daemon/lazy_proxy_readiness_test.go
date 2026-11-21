@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func TestLazyProxyReadinessPublisher_OrganicToolsSuccessPublishesReady(t *testing.T) {
@@ -524,7 +525,7 @@ func TestLazyProxyReadinessPublisher_BackendExitInvalidatesCurrentEpoch(t *testi
 
 func seedReadinessTestRegistry(t *testing.T) string {
 	t.Helper()
-	regPath := t.TempDir() + "/r.yaml"
+	regPath := apitest.HardenedTempDir(t) + "/r.yaml"
 	reg := api.NewRegistry(regPath)
 	reg.Put(api.WorkspaceEntry{
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",

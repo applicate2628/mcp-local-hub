@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
 )
 
@@ -55,7 +56,7 @@ func makeRegistryWithLSP(t *testing.T, dir string, entries []api.WorkspaceEntry)
 }
 
 func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "go-project")
 	writeFile(t, filepath.Join(project, "go.mod"))
 	file := filepath.Join(project, "main.go")
@@ -98,7 +99,7 @@ func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *te
 }
 
 func TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "go-project")
 	writeFile(t, filepath.Join(project, "go.mod"))
 	canon := mustCanonical(t, project)
@@ -157,7 +158,7 @@ func TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups(t 
 }
 
 func TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "go-project")
 	writeFile(t, filepath.Join(project, "go.mod"))
 	canon := mustCanonical(t, project)
@@ -188,7 +189,7 @@ func TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
 }
 
 func TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "go-project")
 	writeFile(t, filepath.Join(project, "go.mod"))
 	file := filepath.Join(project, "cmd", "app", "main.go")
@@ -236,7 +237,7 @@ func TestResolveByPath_NestedLanguageMarkerWins(t *testing.T) {
 }
 
 func TestResolveByPath_RustCargoTomlMatchesExistingRegistration(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "rust-project")
 	writeFile(t, filepath.Join(project, "Cargo.toml"))
 	file := filepath.Join(project, "src", "lib.rs")
@@ -268,7 +269,7 @@ func TestResolveByPath_RustCargoTomlMatchesExistingRegistration(t *testing.T) {
 }
 
 func TestResolveByPath_MatchesLegacySymlinkWorkspaceKey(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	realProject := filepath.Join(root, "real-project")
 	writeFile(t, filepath.Join(realProject, "go.mod"))
 	file := filepath.Join(realProject, "cmd", "app", "main.go")
@@ -323,7 +324,7 @@ func TestResolveByPath_MatchesLegacySymlinkWorkspaceKey(t *testing.T) {
 }
 
 func TestResolveByPath_RegisteredMatchIsLanguageSpecific(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "mixed-project")
 	writeFile(t, filepath.Join(project, "Cargo.toml"))
 	file := filepath.Join(project, "src", "lib.rs")
@@ -386,7 +387,7 @@ func TestResolveByPath_NoMarkerOrGitReturnsWorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveByPath_RefreshesRegistryOnMtimeAdvance(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	project := filepath.Join(root, "reload-project")
 	writeFile(t, filepath.Join(project, "go.mod"))
 	file := filepath.Join(project, "main.go")
@@ -449,7 +450,7 @@ func TestResolveByPath_RefreshesRegistryOnMtimeAdvance(t *testing.T) {
 // behavior — see TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock
 // immediately below for the contrasting, intentional production behavior.
 func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	regPath := filepath.Join(root, "workspaces.yaml")
 	seedReg := api.NewRegistry(regPath)
 	if err := seedReg.Save(); err != nil {
@@ -499,7 +500,7 @@ func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *te
 // registry's exclusive lock for a required content read. Mirrors the
 // serena_routing package's identically-named lock-mode test.
 func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	regPath := filepath.Join(root, "workspaces.yaml")
 	seedReg := api.NewRegistry(regPath)
 	if err := seedReg.Save(); err != nil {

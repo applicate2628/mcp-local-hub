@@ -195,76 +195,90 @@ func TestForce_StuckIncumbent_RevealFlagOpensFolder(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
-	// This scenario uses a seam to bypass the three-part gate's
-	// strict cmdline/image checks (which would reject the test
-	// binary as non-mcphub). Real-process proof is in scenario 8.
+	// Exercise the finite force-kill recovery operation through its acquired
+	// ownership lock. Scenario 4b exercises full command startup and port
+	// publication. The identity seam admits our non-mcphub sleep helper;
+	// TestForce_KillRefusesNonMcphubImage separately tests real-image refusal.
 	prevGate := gui.IdentityGateForTest()
 	defer gui.RestoreIdentityGate(prevGate)
 	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
 
 	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
 	// Spawn a child sleep process so we have a real PID we can kill.
 	var sleepCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		sleepCmd = exec.Command("powershell", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
+		sleepCmd = exec.Command("powershell", "-NoProfile", "-NoExit", "-Command", "Start-Sleep -Seconds 60")
 	} else {
 		sleepCmd = exec.Command("sleep", "60")
 	}
 	if err := sleepCmd.Start(); err != nil {
 		t.Skipf("cannot spawn sleep helper: %v", err)
 	}
+	// The original child has one waiter. Release the fixture lock only
+	// after it exits, and join this waiter before temporary-file cleanup.
+	holderDone := make(chan error, 1)
+	go func() {
+		_, err := sleepCmd.Process.Wait()
+		holderDone <- errors.Join(err, fl.Unlock())
+	}()
 	defer func() {
 		_ = sleepCmd.Process.Kill()
+		if err := <-holderDone; err != nil {
+			t.Errorf("reap sleep helper or release fixture lock: %v", err)
+		}
 	}()
+
 	pid := sleepCmd.Process.Pid
-	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", pid)), 0o600); err != nil {
+	const stalePort = 1
+	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", pid, stalePort)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fl := flock.New(pidport + ".lock")
-	if ok, _ := fl.TryLock(); !ok {
-		t.Fatal("could not pre-lock")
-	}
-	// Release the flock when the child dies — simulate the OS
-	// auto-release so the acquire-poll loop can succeed.
-	go func() {
-		_, _ = sleepCmd.Process.Wait()
-		fl.Unlock()
-	}()
 
-	// Use a delayed cancel: ctx stays active long enough for the
-	// kill+acquire path to complete (so iter-11's pre-kill ctx
-	// check doesn't refuse), then cancels to make startGuiServer
-	// exit via <-ctx.Done() rather than blocking until the test
-	// timeout. Pre-iter-11 used immediate cancel; that legitimately
-	// short-circuits the new cancel-before-kill safety check.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Recovery returns its acquired lock; no normal cancellation is needed.
+	// The timeout is only a watchdog, and reaching it must fail this scenario.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	go func() {
-		// 3s gives runForceKill enough time for: cli Probe (~50ms +
-		// any retry) + KillRecordedHolder's internal probe (~50ms) +
-		// killProcess (instant) + wait-for-exit (~100ms typical) +
-		// acquire-poll (~50ms when flock is released). Then cancel
-		// triggers startGuiServer's <-ctx.Done() path so the test
-		// terminates instead of blocking until the suite timeout.
-		time.Sleep(3 * time.Second)
-		cancel()
-	}()
-
 	c := newGuiCmdRealForTest()
-	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--kill", "--yes"})
-	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
-	err := c.ExecuteContext(ctx)
-	if err != nil {
-		// Acceptable outcomes: context.Canceled (startGuiServer exited
-		// cleanly), forceExitError 0 (healthy-early-exit), or exit 3
-		// (race-lost). Assert it is NOT exit 7 (refused) or exit 4 (failed).
-		var fe interface{ ExitCode() int }
-		if errors.As(err, &fe) {
-			if fe.ExitCode() == 7 || fe.ExitCode() == 4 {
-				t.Errorf("happy path exit code = %d (refused/failed); want 0, 3, or context cancel", fe.ExitCode())
+	recovered, exitCode := runForceKill(ctx, c, pidport, true)
+	contextErr := ctx.Err()
+	if recovered != nil {
+		// Carry the acquisition-bound lifecycle through cleanup. Like the
+		// production owner, never unlock an unsettled active record.
+		defer func() {
+			owner := recovered.OwnerLifecycle()
+			if owner == nil {
+				t.Error("recovered lock has no owner lifecycle")
+				return
 			}
-		}
+			if err := owner.TerminalSettle(); err != nil {
+				t.Errorf("settle recovered owner record: %v", err)
+				return
+			}
+			if err := recovered.ReleaseErr(); err != nil {
+				t.Errorf("release recovered lock: %v", err)
+			}
+		}()
+	}
+	if contextErr != nil {
+		t.Fatalf("force-kill recovery reached watchdog: %v", contextErr)
+	}
+	if exitCode != 0 || recovered == nil {
+		t.Fatalf("force-kill recovery returned exit=%d, acquired lock=%t; want exit 0 and an acquired lock", exitCode, recovered != nil)
+	}
+
+	currentPID, port, err := gui.ReadPidport(pidport)
+	if err != nil {
+		t.Fatalf("read recovered pidport: %v", err)
+	}
+	if currentPID != os.Getpid() || port != stalePort {
+		t.Errorf("recovered pidport = %d:%d; want %d:%d before server startup", currentPID, port, os.Getpid(), stalePort)
 	}
 }
 

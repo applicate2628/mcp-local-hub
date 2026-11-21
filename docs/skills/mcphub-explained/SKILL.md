@@ -32,7 +32,7 @@ description: "Explains mcphub architecture in plain Russian: how supervisor + da
 
 Результат: **~18 процессов вместо ~100**. Меньше памяти, меньше CPU, меньше хаоса.
 
-**Это и есть смысл mcphub**: сокращение копий MCP-серверов через shared-hub архитектуру. Запись от 2026-04-17: [memory/project_mcphub_process_tails_motivation.md](../../../../../C:/Users/<you>/.claude/projects/d--dev-mcp-local-hub/memory/project_mcphub_process_tails_motivation.md).
+**Это и есть смысл mcphub**: сокращение копий MCP-серверов через shared-hub архитектуру. Историческое обоснование датировано 2026-04-17; персональный путь памяти не является переносимым источником репозитория.
 
 ## 3. Архитектура — три слоя
 
@@ -108,7 +108,7 @@ uvx → uv → python serena (порт 19121)
 - Закрывает diagnostic gap
 
 **PR #230** — auto-respawn dispatcher:
-- Channel-based goroutine `runRespawnDispatcher` ([internal/cli/supervise_respawn_dispatcher.go](../../../internal/cli/supervise_respawn_dispatcher.go))
+- Исторический `runRespawnDispatcher` удалён при переносе решений в контроллер; текущий мост событий `runCrashEventBridge` находится в [`internal/cli/supervise.go`](../../../internal/cli/supervise.go).
 - При `daemon-exited` non-clean: запись в sliding window (30 мин) → если < 10 в окне → backoff 1s/2s/4s/8s/16s/32s/60s cap → respawn
 - При >= 10 fails в окне → `MarkQuarantined` + persist supervisor-state.json → авто-respawn останавливается; оператор снимает карантин без полного рестарта через `mcphub daemon recover <task>` (identity-gated reap порт-скваттера + force-respawn) или force-respawn (`POST /api/daemon/respawn {force:true}`); cold restart тоже чистит окно
 - Operator-stop respect: проверяет `daemon-intent.json` IsActiveStop → suppress respawn если оператор сам остановил
@@ -119,7 +119,7 @@ uvx → uv → python serena (порт 19121)
 | Задача | Файл |
 |---|---|
 | Supervisor lifecycle, IPC, state files | [`internal/cli/supervise.go`](../../../internal/cli/supervise.go) |
-| Auto-respawn dispatcher (PR #230) | [`internal/cli/supervise_respawn_dispatcher.go`](../../../internal/cli/supervise_respawn_dispatcher.go) |
+| Текущее наблюдение выхода дочерних процессов | [`internal/cli/supervise.go`](../../../internal/cli/supervise.go) (`runCrashEventBridge`, контроллер жизненного цикла) |
 | Daemon runtime state tracker | [`internal/cli/supervisor_runtime_tracker.go`](../../../internal/cli/supervisor_runtime_tracker.go) |
 | State machine (currently bypassed in production) | [`internal/api/supervisor_state_machine.go`](../../../internal/api/supervisor_state_machine.go) |
 | HTTP daemon host (native-http like serena) | [`internal/daemon/http_host.go`](../../../internal/daemon/http_host.go) |
@@ -134,15 +134,15 @@ uvx → uv → python serena (порт 19121)
 
 ## 8. Workflow PR — golden path
 
-См. [`CLAUDE.md`](../../../CLAUDE.md) §"PR review + merge workflow (MANDATORY)" — это hard gate. Кратко:
+См. [`AGENTS.md`](../../../AGENTS.md) и [подробный порядок ревью](../../agent-runbook.md#pr-review--merge-workflow-mandatory) — это обязательные условия приёмки. Кратко:
 
-1. `go build ./... && go vet ./... && go test ./...` локально (но `./internal/cli/...` + `./internal/daemon/...` чтобы не убить установленных daemon-ов)
+1. Выполнить **обе** точные последовательности сборки, анализа и тестов из [`AGENTS.md`](../../../AGENTS.md); тестовые процессы завершаются только по подтверждённой принадлежности, не по имени исполняемого файла.
 2. `git push -u origin <branch>` + `gh pr create`
 3. **Codex Cloud bot** делает review — wait for PASS на CURRENT HEAD commit (не stale на старом)
 4. Все findings (P0/P1/P2/P3) фиксить ВСЕ перед merge. Не deferer на post-merge без явного разрешения оператора
-5. Deep-review per CLAUDE.md Step 5 — параллельный codex `-c model_reasoning_effort=xhigh` deep-security
+5. Глубокое ревью по [порядку репозитория](../../agent-runbook.md#pr-review--merge-workflow-mandatory), шаг 5; запуск Codex `-c model_reasoning_effort=xhigh` только при отдельном разрешении владельца
 6. CI `workflow_dispatch`-only — НЕ автотриггерить
-7. `gh pr merge <N> --squash --delete-branch` — НЕ `--admin`
+7. Только после всех условий — squash-merge без `--admin`. Удалять базовую ветку лишь когда зависимые PR переназначены и их diff проверен.
 
 ## 9. Glossary
 
@@ -175,12 +175,12 @@ uvx → uv → python serena (порт 19121)
 
 ## 10. Где спросить операатора
 
-Когда что-то не понятно — лучше спросить чем гадать (`AGENTS.md` AXIOM "never guess"). Operator preferences:
+Не угадывай отсутствующие входные данные и полномочия: проверь текущие инструкции в [`AGENTS.md`](../../../AGENTS.md). Прежние памятки не дают разрешений на новые запуски.
 
 - **Russian default**: отвечай на русском по умолчанию (memory: feedback_russian_default)
 - **Никогда без tray**: GUI launch без `--no-tray` (memory: feedback_gui_always_tray)
-- **Subagents always opus + max** (memory: feedback_subagent_opus_max_default)
-- **Codex always xhigh** + file-based prompt only (memory: feedback_codex_xhigh_default, feedback_codex_file_prompt_only)
+- **Субагенты и внешние модели**: запуск только при явном разрешении владельца на конкретный маршрут, задачу и расход; старые настройки модели не являются разрешением.
+- **Codex**: без явного разрешения владельца не запускать; при разрешённом запуске соблюдать текущие настройки и файловую передачу задания.
 - **Build → install order**: commit first, then bash build.sh, then install (memory: feedback_build_then_install_order)
 
 ## 11. Term Recap для не-Russian читателя

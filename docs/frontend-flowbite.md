@@ -134,7 +134,7 @@ npm run build      # succeeds; writes ../assets/{index.html,app.js,style.css}
 ```
 
 Regenerating the committed embedded bundle (`go generate ./internal/gui/...`)
-is a **separate** commit step — see the root `CLAUDE.md` "GUI frontend"
+is a **separate** commit step — see the [project runbook](agent-runbook.md#gui-frontend-phase-3b-ii-onward) "GUI frontend"
 section.
 
 ## Terms and Abbreviations

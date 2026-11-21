@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // --- test doubles -----------------------------------------------------------
@@ -309,7 +310,7 @@ func newTestProxy(t *testing.T, kind string, f *fakeLifecycle) (*LazyProxy, stri
 
 func newTestProxyWithCfg(t *testing.T, kind string, f *fakeLifecycle, retryGap, toolsDebounce time.Duration) (*LazyProxy, string) {
 	t.Helper()
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	// Seed the (workspace_key, language) entry — mirrors production flow
 	// where api.Register creates the entry before the proxy process runs.
 	// PutLifecycle silently no-ops if the entry is missing (to prevent
@@ -1218,7 +1219,7 @@ func TestLazyProxy_LastToolsCallAtDebounced(t *testing.T) {
 
 func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	otherProxy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen other proxy: %v", err)
@@ -1277,7 +1278,7 @@ func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T
 
 func TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
@@ -1349,7 +1350,7 @@ func TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes
 	materializedSlotPortLiveFn = func(int) bool { return false }
 	t.Cleanup(func() { materializedSlotPortLiveFn = origPortLive })
 
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	languages := []string{
 		"python",
@@ -1423,7 +1424,7 @@ func TestLazyProxy_IdleTTLStopsMaterializedBackend(t *testing.T) {
 	// interval. Reconfiguring p.cfg after construction no longer works because
 	// idleStartOnce is already consumed by the watchdog-only ticker.
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
@@ -1506,7 +1507,7 @@ func TestLazyProxy_ConfiguredStateOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pickFreePort: %v", err)
 	}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	// Seed entry with empty Lifecycle; the test asserts the proxy writes
 	// LifecycleConfigured on startup, upgrading the stored state.
 	seed := api.NewRegistry(regPath)
@@ -1613,7 +1614,7 @@ func pickFreePort() (int, error) {
 func newRecordingProxy(t *testing.T) (*LazyProxy, *recordingLifecycle) {
 	t.Helper()
 	f := &recordingLifecycle{}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey:  "abcd1234",
@@ -2220,7 +2221,7 @@ func TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize(t *testing.T)
 	t.Cleanup(func() { materializedSlotPortLiveFn = orig })
 
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9200, Lifecycle: api.LifecycleConfigured})
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "warm0001", WorkspacePath: "D:/test/w1", Language: "go", Backend: "gopls-mcp", TaskName: "mcp-local-hub-lsp-warm0001-go", Port: 9301, Lifecycle: api.LifecycleStarting})
@@ -2259,7 +2260,7 @@ func TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored(t *testing.T) 
 	t.Cleanup(func() { materializedSlotPortLiveFn = orig })
 
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9200, Lifecycle: api.LifecycleConfigured})
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "dead0001", WorkspacePath: "D:/test/d1", Language: "go", Backend: "gopls-mcp", TaskName: "mcp-local-hub-lsp-dead0001-go", Port: 9301, Lifecycle: api.LifecycleStarting})
@@ -2536,7 +2537,7 @@ func TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused(t *testing.T) {
 	t.Cleanup(func() { materializedSlotPortLiveFn = orig })
 
 	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 400 * time.Millisecond}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9200, Lifecycle: api.LifecycleConfigured})
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "warm0001", WorkspacePath: "D:/test/w1", Language: "go", Backend: "gopls-mcp", TaskName: "mcp-local-hub-lsp-warm0001-go", Port: 9301, Lifecycle: api.LifecycleStarting})
@@ -2923,7 +2924,7 @@ func TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows(t *testing.T) 
 	t.Cleanup(func() { materializedSlotPortLiveFn = orig })
 
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9200, Lifecycle: api.LifecycleConfigured})
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "conf0001", WorkspacePath: "D:/test/c", Language: "go", Backend: "gopls-mcp", TaskName: "mcp-local-hub-lsp-conf0001-go", Port: 9301, Lifecycle: api.LifecycleConfigured})
@@ -2972,7 +2973,7 @@ func TestLazyProxy_SlotScan_SkipsPortDialForNonStartingActiveRows(t *testing.T) 
 // MaterializeWaitBudget holds.
 func TestLazyProxy_ColdRequestHoldCeilingInvariantClamped(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: ""})
 	if err := seed.Save(); err != nil {
@@ -3188,7 +3189,7 @@ func TestLazyProxy_ColdForward_HeldEventFires(t *testing.T) {
 // re-armed by the ordering clamp, and the ceiling clamp is skipped too (skip BOTH).
 func TestLazyProxy_NegativeColdStartMaxProbation_NotClamped(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: ""})
 	if err := seed.Save(); err != nil {
@@ -3327,6 +3328,7 @@ func TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext(t *testi
 	if err := os.Remove(blocker); err != nil {
 		t.Fatalf("remove blocker: %v", err)
 	}
+	apitest.HardenedDir(t, blocker)
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
@@ -3497,7 +3499,7 @@ func TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount(t *testin
 // Starting row + live port forever against the MaterializedHardCap.
 func TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: api.LifecycleStarting})
 	if err := seed.Save(); err != nil {
@@ -3715,7 +3717,7 @@ func postRPCCtx(t *testing.T, h http.Handler, method string, id int, ctx context
 // proxies' cold-start gate / hard cap undercount by one).
 func TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting(t *testing.T) {
 	f := &gatedStopLifecycle{stopEntered: make(chan struct{}), releaseStop: make(chan struct{})}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
@@ -3789,7 +3791,7 @@ func TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting(t *testing
 // settles the row to Configured and a fresh cold request finds a clean slate.
 func TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured(t *testing.T) {
 	f := &gatedStopLifecycle{stopEntered: make(chan struct{}), releaseStop: make(chan struct{})}
-	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	regPath := filepath.Join(apitest.HardenedTempDir(t), "r.yaml")
 	seed := api.NewRegistry(regPath)
 	seed.Put(api.WorkspaceEntry{
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
