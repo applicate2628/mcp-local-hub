@@ -32,6 +32,9 @@ type preparedSerenaCommandResult struct {
 	Receipt process.ContainedStreamReceiptV1
 	// Private in-memory data for the bounded receipt/metadata parser only.
 	Stdout, Stderr []byte
+	// Only the original invocation records entry to the contained factory.
+	// This is local resource custody, not a child-settlement receipt.
+	containedAttempted bool
 }
 
 func runPreparedSerenaInvocation(ctx context.Context, r preparedSerenaInvocation) (result preparedSerenaCommandResult, err error) {
@@ -43,6 +46,7 @@ func runPreparedSerenaInvocation(ctx context.Context, r preparedSerenaInvocation
 	}
 	cmd := &exec.Cmd{Path: r.Executable.Path, Args: append([]string{r.Executable.Path}, r.Args...), Env: append([]string(nil), r.Environment...), Dir: r.WorkingDir}
 	var stdout, stderr bytes.Buffer
+	result.containedAttempted = true
 	result.Receipt, err = process.RunContainedStreamObserved(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: r.CleanupLimit, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, StdoutByteLimit: r.StdoutLimit, StderrByteLimit: r.StderrLimit, Stderr: &stderr}, func(reader io.Reader) error { _, e := io.Copy(&stdout, reader); return e })
 	// Do not access a borrowed sink while its worker remains unjoined.
 	if result.Receipt.IOSettlement.Stdout.WorkerComplete {

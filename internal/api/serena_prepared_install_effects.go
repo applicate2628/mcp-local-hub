@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"mcp-local-hub/internal/process"
 )
@@ -32,9 +34,23 @@ func (c *preparedSerenaCombinedClosure) Complete() bool {
 // Installation is one effect of the package owner. uv receives exclusively
 // this generation/attempt's directories; stdout/stderr remain bounded private
 // receipt input. This function neither publishes nor mutates an intent.
-func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, roots PreparedSerenaOwnedRoots) (installed PreparedSerenaInstallation, err error) {
+func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, roots PreparedSerenaOwnedRoots, constraint *preparedSerenaBuildConstraint) (installed PreparedSerenaInstallation, err error) {
 	if err = inputs.execution.networkPolicy.validateExecution(inputs.Environment, inputs.InstallArgs); err != nil {
 		return installed, err
+	}
+	if inputs.execution.buildConstraint != (runtime.GOOS == "windows") || inputs.execution.buildConstraint && constraint == nil {
+		return installed, errors.New("SERENA_BUILD_CONSTRAINT_POLICY_UNAVAILABLE")
+	}
+	for _, item := range inputs.Environment {
+		key, _, _ := strings.Cut(item, "=")
+		if strings.EqualFold(key, "UV_BUILD_CONSTRAINT") {
+			return installed, errors.New("SERENA_BUILD_CONSTRAINT_ENV_OVERRIDE_REFUSED")
+		}
+	}
+	for _, arg := range inputs.InstallArgs {
+		if arg == "--build-constraint" || strings.HasPrefix(arg, "--build-constraint=") || strings.HasPrefix(arg, "-b") {
+			return installed, errors.New("SERENA_BUILD_CONSTRAINT_ARG_OVERRIDE_REFUSED")
+		}
 	}
 	r := inputs.Request
 	if _, err = r.Identity(); err != nil {
@@ -52,7 +68,17 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	invoke := func(file PreparedSerenaFile, args []string) (preparedSerenaCommandResult, error) {
 		return runPreparedSerenaInvocation(work, preparedSerenaInvocation{OperationID: r.OperationID, Executable: file, Args: args, Environment: env, WorkingDir: roots.Generation.Path, PolicySHA256: r.PolicySHA256, CleanupLimit: r.CleanupLimit, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, StdoutLimit: 64 << 20, StderrLimit: 8 << 20})
 	}
-	uv, installErr := invoke(r.UV, inputs.InstallArgs)
+	installArgs := append([]string(nil), inputs.InstallArgs...)
+	if inputs.execution.buildConstraint {
+		if err = beginPreparedSerenaBuildConstraintUse(work, constraint); err != nil {
+			return installed, err
+		}
+		installArgs = append(installArgs, "--build-constraint", constraint.file.Path)
+	}
+	uv, installErr := invoke(r.UV, installArgs)
+	if inputs.execution.buildConstraint {
+		installErr = errors.Join(installErr, finishPreparedSerenaBuildConstraintUse(constraint, uv))
+	}
 	installed.Closure = uv.Closure
 	combined := &preparedSerenaCombinedClosure{receipts: []process.ContainedStreamReceiptV1{uv.Receipt}, commands: []preparedSerenaCommandResult{uv}, commandErrors: []error{installErr}}
 	installed.Closure.nativeEvidence = combined
@@ -75,6 +101,11 @@ func installPreparedSerena(ctx context.Context, inputs SerenaPreparationInputs, 
 	receipt, entryPath, parseErr := parsePreparedSerenaUVReceipt(receiptRaw, r, roots.Generation.Path)
 	if parseErr != nil {
 		return installed, parseErr
+	}
+	if inputs.execution.buildConstraint {
+		if err = validatePreparedSerenaBuildConstraintReceipt(receipt); err != nil {
+			return installed, err
+		}
 	}
 	environmentPython, _, err := qualifyPreparedSerenaFile(work, filepath.Join(toolRoot, "Scripts", "python.exe"), 64<<20)
 	if err != nil {

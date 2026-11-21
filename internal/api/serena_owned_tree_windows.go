@@ -38,17 +38,21 @@ func (h *serenaTreeHandle) closeOnce() (SerenaTreeClose, error) {
 }
 
 type windowsSerenaOwnedTree struct {
-	readExisting                 bool
-	inventoryCloseError          error
-	request                      SerenaOwnedTreeRequest
-	parent, root                 *serenaTreeHandle
-	parentIdentity, rootIdentity SerenaTreeObject
-	rootName                     string
-	closeResult                  SerenaTreeClose
-	removeAttempted              bool
-	removeResult                 SerenaTreeCleanupReceipt
-	parentPolicy                 *ConfigParentPolicyObservation
-	creation                     *StateFileReadObservation
+	readExisting                                   bool
+	inventoryCloseError                            error
+	request                                        SerenaOwnedTreeRequest
+	parent, root                                   *serenaTreeHandle
+	parentIdentity, rootIdentity                   SerenaTreeObject
+	rootName                                       string
+	closeResult                                    SerenaTreeClose
+	removeAttempted                                bool
+	removeResult                                   SerenaTreeCleanupReceipt
+	parentPolicy                                   *ConfigParentPolicyObservation
+	creation                                       *StateFileReadObservation
+	buildConstraint                                *preparedSerenaBuildConstraint
+	buildConstraintWriter, buildConstraintReader   *serenaTreeHandle
+	buildConstraintCreation                        *StateFileReadObservation
+	buildConstraintAttempted, buildConstraintInUse bool
 }
 
 func serenaTreeHandleIdentity(h windows.Handle, relative []string) (SerenaTreeObject, error) {
@@ -589,9 +593,10 @@ func (w *windowsSerenaOwnedTree) close() (SerenaTreeClose, error) {
 		return w.closeResult, w.closeResult.Error
 	}
 	w.closeResult.Attempted = true
+	constraintErr := w.closeBuildConstraint()
 	_, a := w.root.closeOnce()
 	_, b := w.parent.closeOnce()
-	w.closeResult.Error = errors.Join(a, b, w.inventoryCloseError)
+	w.closeResult.Error = errors.Join(a, b, w.inventoryCloseError, constraintErr)
 	if w.creation == nil || !w.creation.finalized || !w.creation.view.OwnedResourcesComplete || !w.creation.view.BorrowedResourcesComplete {
 		w.closeResult.Error = errors.Join(w.closeResult.Error, errors.New("SERENA_TREE_ACQUISITION_RESOURCES_PENDING"))
 	}
