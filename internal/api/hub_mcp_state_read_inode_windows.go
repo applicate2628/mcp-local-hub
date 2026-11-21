@@ -158,8 +158,8 @@ func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func(
 	var parentFallbacks []stateReadParentFallbackObservation
 	if err := verifyWindowsDACLFromHandleMaskedObserved(parentHandle, windowsDACLSignificantBits, b, "parent-policy"); err != nil {
 		if requiresStrict() {
-			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
-				parentDir, err, RequireSingleUserHomeEnv)
+			return nil, fmt.Errorf("parent %s not single-user safe: %w; effective strict policy is active, so the strict parent-dir gate is enforced (tighten the parent's DACL to remove the offending principal, to proceed)",
+				parentDir, err)
 		}
 		if !stateFileParentGateAllowsDefaultRelax(err) {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w", parentDir, err)
@@ -260,8 +260,8 @@ func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func(
 	}
 	if err := verifyWindowsDACLFromHandleMaskedObserved(fileHandle, windowsDACLSignificantBits, b, "leaf-policy"); err != nil {
 		if requiresStrict() {
-			return nil, fmt.Errorf("file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)",
-				path, err, RequireSingleUserHomeEnv)
+			return nil, fmt.Errorf("file %s not single-user safe: %w; effective strict policy is active, so the strict file-DACL gate is enforced (tighten the file's DACL to remove the offending principal, to proceed)",
+				path, err)
 		}
 		if errors.Is(err, ErrWrongOwner) {
 			return nil, err

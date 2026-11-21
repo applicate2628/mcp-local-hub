@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 type asyncTestStore struct {
@@ -532,7 +533,7 @@ func TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output(t *testing.T) {
 		t.Fatalf("capped output lost byte-count/truncation contract: truncated=%v len=%d", captured.truncated, len(wantOutput))
 	}
 
-	statePath := filepath.Join(t.TempDir(), "runs-v1.json")
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "runs-v1.json")
 	first, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
 		StatePath: statePath,
 		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
@@ -585,7 +586,7 @@ func TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output(t *testing.T) {
 // expanded legacy receipt can be recovered without executing a command, then
 // rewritten at the same state path with explicit migration-only provenance.
 func TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "runs-v1.json")
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "runs-v1.json")
 	request := asyncRequest("legacy-text", time.Second)
 	legacyExpanded := strings.Repeat("\uFFFD", maxStreamBytes) + truncationMarker
 	legacy := asyncRunSnapshot{Version: asyncRunSnapshotVersion, TerminalSequence: 1, Runs: []asyncRunRecord{{
@@ -725,7 +726,7 @@ func TestAsyncRun_CloseConcurrentCallersWaitForDeferredWorkerAndRetryLeaseUnlock
 
 	lease := &asyncTestLease{unlockErrs: []error{errors.New("first unlock fails"), nil}}
 	owner, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
-		StatePath: filepath.Join(t.TempDir(), "oneapi-run", "runs-v1.json"),
+		StatePath: filepath.Join(apitest.HardenedDir(t, filepath.Join(t.TempDir(), "oneapi-run")), "runs-v1.json"),
 		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
 			return asyncExecution{Result: runResult{ExitCode: 0}}
 		},
@@ -781,7 +782,7 @@ func TestAsyncRun_CloseWaitsForEvictedTerminalWorker(t *testing.T) {
 	var blockFirst atomic.Bool
 	lease := &asyncTestLease{}
 	owner, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
-		StatePath: filepath.Join(t.TempDir(), "oneapi-run", "runs-v1.json"),
+		StatePath: filepath.Join(apitest.HardenedDir(t, filepath.Join(t.TempDir(), "oneapi-run")), "runs-v1.json"),
 		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
 			return asyncExecution{Result: runResult{ExitCode: 0}}
 		},

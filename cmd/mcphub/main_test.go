@@ -12,6 +12,7 @@ import (
 )
 
 func TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "")
 	previous := launchBareGUIFn
 	t.Cleanup(func() { launchBareGUIFn = previous })
 	calls := 0
@@ -61,6 +62,7 @@ func TestPrepareInvocationPreservesNonBareAndOptOutRoutes(t *testing.T) {
 }
 
 func TestPrepareInvocationBareLaunchFailureRemainsVisible(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "")
 	previous := launchBareGUIFn
 	t.Cleanup(func() { launchBareGUIFn = previous })
 	want := errors.New("bare launch failed")
@@ -73,6 +75,7 @@ func TestPrepareInvocationBareLaunchFailureRemainsVisible(t *testing.T) {
 }
 
 func TestPrepareInvocationNormalizedDebugBareStaysInline(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "")
 	previous := launchBareGUIFn
 	t.Cleanup(func() { launchBareGUIFn = previous })
 	calls := 0
@@ -93,6 +96,7 @@ func TestPrepareInvocationNormalizedDebugBareStaysInline(t *testing.T) {
 }
 
 func TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "")
 	previous := launchBareGUIFn
 	t.Cleanup(func() { launchBareGUIFn = previous })
 	calls := 0
@@ -246,6 +250,7 @@ func TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam(t *testing.T) {
 // Catches a new root command acquiring a console by accident, or an existing
 // GUI/background/protocol command drifting into ordinary CLI handle repair.
 func TestClassifyWindowsEntrypointModeExhaustiveRootCommands(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "")
 	wantSpecial := map[string]windowsEntrypointMode{
 		"gui":                                   windowsEntrypointGUI,
 		"supervise":                             windowsEntrypointBackground,

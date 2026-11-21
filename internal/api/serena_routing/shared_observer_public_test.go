@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/lsp_routing"
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/config"
 )
 
 func TestSharedRegistryObserver_GUILockedWriterAndReadersSettle(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	path := filepath.Join(apitest.HardenedTempDir(t), "workspaces.yaml")
 	save := func(port int) error {
 		reg := api.NewRegistry(path)
 		unlock, err := reg.Lock()
@@ -101,7 +102,7 @@ func TestSharedRegistryObserver_GUILockedWriterAndReadersSettle(t *testing.T) {
 func TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh(t *testing.T) {
 	for _, first := range []string{"serena", "lsp"} {
 		t.Run(first+"-then-other", func(t *testing.T) {
-			root := t.TempDir()
+			root := apitest.HardenedTempDir(t)
 			project := filepath.Join(root, "project")
 			if err := os.MkdirAll(filepath.Join(project, ".serena"), 0o700); err != nil {
 				t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func makeWorkspace(t *testing.T, root, name string) string {
@@ -59,7 +60,7 @@ func setFileModTime(t *testing.T, path string, mtime time.Time) time.Time {
 }
 
 func TestResolveByPath_AbsoluteMatch(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "PaperPane")
 
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
@@ -105,7 +106,7 @@ func TestResolveByPath_AbsoluteMatch(t *testing.T) {
 }
 
 func TestResolveByPath_RelativeMatchFirstWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsAlpha := makeWorkspace(t, root, "Alpha")
 	wsBeta := makeWorkspace(t, root, "Beta")
 	wsGamma := makeWorkspace(t, root, "Gamma")
@@ -147,7 +148,7 @@ func TestResolveByPath_RelativeMatchFirstWorkspace(t *testing.T) {
 }
 
 func TestResolveByPath_RelativePathDotDotEscapeRejected(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsAlpha := makeWorkspace(t, root, "Alpha")
 	wsBeta := makeWorkspace(t, root, "Beta")
 
@@ -198,7 +199,7 @@ func TestResolveByPath_RelativePathDotDotEscapeRejected(t *testing.T) {
 }
 
 func TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "Project")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
 		{
@@ -298,7 +299,7 @@ func TestResolveByPath_EmptyPath_ReturnsErrInvalidPath(t *testing.T) {
 // first-call regression where the router would select an arbitrary workspace,
 // or trust a marker that no longer corresponds to a live Serena registration.
 func TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	alpha := makeWorkspace(t, root, "Alpha")
 	beta := makeWorkspace(t, root, "Beta")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
@@ -332,7 +333,7 @@ func TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow(t *testing
 }
 
 func TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	workspace := makeWorkspace(t, root, "Only")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{{
 		WorkspaceKey: api.WorkspaceKey(workspace), WorkspacePath: workspace, Backend: "serena", Port: 9301,
@@ -374,7 +375,7 @@ func TestResolveByPath_RejectsUNCPath_OnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skipf("UNC rejection is Windows-only; runtime.GOOS = %q", runtime.GOOS)
 	}
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "Alpha")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
 		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
@@ -414,7 +415,7 @@ func TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skipf("double-slash absolute is Unix-only path semantics; runtime.GOOS = %q", runtime.GOOS)
 	}
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "Alpha")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
 		{WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath, Backend: "serena", Port: 9301},
@@ -438,7 +439,7 @@ func TestResolveByPath_AcceptsLocalDoubleSlash_OnNonWindows(t *testing.T) {
 }
 
 func TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	regPath := filepath.Join(root, "workspaces.yaml")
 	reg := api.NewRegistry(regPath)
 	if err := reg.Save(); err != nil {
@@ -456,7 +457,7 @@ func TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveByPath_TransientStatErrorPreservesCache(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "TransientStat")
 	nested := filepath.Join(wsPath, "src", "main.go")
 	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
@@ -493,7 +494,7 @@ func TestResolveByPath_TransientStatErrorPreservesCache(t *testing.T) {
 }
 
 func TestResolveByPath_FileDeletionClearsCache(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "DeletedRegistry")
 	nested := filepath.Join(wsPath, "src", "main.go")
 	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
@@ -529,7 +530,7 @@ func TestResolveByPath_FileDeletionClearsCache(t *testing.T) {
 }
 
 func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "EmptyCached")
 	nested := filepath.Join(wsPath, "src", "main.go")
 	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
@@ -579,7 +580,7 @@ func TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups(t *te
 }
 
 func TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "SameIdentity")
 	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{{
 		WorkspaceKey: api.WorkspaceKey(wsPath), WorkspacePath: wsPath,
@@ -631,7 +632,7 @@ func TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups(t *testi
 }
 
 func TestResolveByPath_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "Selected")
 	file := filepath.Join(wsPath, "main.go")
 	if err := os.WriteFile(file, []byte("package main\n"), 0o600); err != nil {
@@ -650,26 +651,38 @@ func TestResolveByPath_DoesNotCloneUnrelatedNestedRows(t *testing.T) {
 			Languages: []string{"go"},
 		})
 	}
-	regPath := makeRegistryWithSerena(t, root, rows)
-	r := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath)
-	if got, err := r.ResolveByPath(file); err != nil || got.Port != 9301 {
-		t.Fatalf("seed = %+v, err = %v", got, err)
-	}
-	allocs := testing.AllocsPerRun(64, func() {
-		got, err := r.ResolveByPath(file)
-		if err != nil || got.Port != 9301 {
-			panic("selected Serena row changed")
+
+	measureAllocs := func(entries []api.WorkspaceEntry) float64 {
+		regPath := makeRegistryWithSerena(t, root, entries)
+		r := NewReadOnlyWorkspaceResolver(api.NewRegistry(regPath), regPath)
+		if got, err := r.ResolveByPath(file); err != nil || got == nil || got.Port != 9301 {
+			t.Fatalf("seed with %d rows = %+v, err = %v", len(entries), got, err)
 		}
-	})
-	if allocs >= 100 {
-		t.Fatalf("single-row lookup allocated %.0f times with 256 unrelated nested rows", allocs)
+		if got := r.observer.PeekPublishedViewForTest().SerenaCount(); got != len(entries) {
+			t.Fatalf("published Serena rows = %d, want %d", got, len(entries))
+		}
+		// Keep the selected path and registry path identical in both samples.
+		// After the seed, 16 calls plus AllocsPerRun's warm-up stay below the
+		// observer's 32-lookup byte refresh; this measures warm lookup cloning.
+		return testing.AllocsPerRun(16, func() {
+			got, err := r.ResolveByPath(file)
+			if err != nil || got == nil || got.Port != 9301 {
+				panic("selected Serena row changed")
+			}
+		})
+	}
+	baseline := measureAllocs(rows[:1])
+	withUnrelated := measureAllocs(rows)
+	t.Logf("warm lookup allocations: selected-only %.0f; with 256 unrelated nested rows %.0f", baseline, withUnrelated)
+	if withUnrelated > baseline {
+		t.Fatalf("single-row lookup allocations grew from %.0f to %.0f after adding 256 unrelated nested rows", baseline, withUnrelated)
 	}
 }
 
 func TestResolveByPath_IgnoresLSPEntries(t *testing.T) {
 	// SerenaEntries() filters Language == SerenaLanguageSentinel; a row
 	// with Language == "python" must not match the absolute-path branch.
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	wsPath := makeWorkspace(t, root, "OnlyLSP")
 
 	regPath := filepath.Join(root, "workspaces.yaml")
@@ -737,7 +750,7 @@ func TestCanonicalizeWorkspacePath_EmptyReturnsEmpty(t *testing.T) {
 // which pins the CONTRASTING (intentional) production behavior so a change
 // that made BOTH resolvers behave identically would be caught either way.
 func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	regPath := filepath.Join(root, "workspaces.yaml")
 	seedReg := api.NewRegistry(regPath)
 	if err := seedReg.Save(); err != nil {
@@ -795,7 +808,7 @@ func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *te
 // This is the mutation-test counterpart to the read-only mode above: a change
 // that made both observer modes skip locking would be caught here.
 func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
-	root := t.TempDir()
+	root := apitest.HardenedTempDir(t)
 	regPath := filepath.Join(root, "workspaces.yaml")
 	seedReg := api.NewRegistry(regPath)
 	if err := seedReg.Save(); err != nil {
