@@ -1,0 +1,1638 @@
+{
+  "schema_version": 1,
+  "status": "DRAFT_NOT_GREEN_PHYSICAL_MIGRATION_CONFIRMED",
+  "qualification_date_utc": "2026-11-21",
+  "repository": "applicate2628/mcp-local-hub",
+  "source": {
+    "base_commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "candidate_commit": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+    "candidate_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+    "parent_verified_from_git_commit_object": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "commit_url": "https://github.com/applicate2628/mcp-local-hub/commit/8a13085cbae24e18c2d7c2918b0241ab743dc729",
+    "exactly_four_modified_source_paths": true,
+    "physical_candidate_tree": true,
+    "compiler_overlay_replace": {},
+    "overlay_note": "Commands supplied -overlay with empty Replace; AST scan read the materialized candidate cwd/--root.",
+    "shallow_receipt_note": "Local source receipts have parents=[]; parent proof comes from the immutable GitHub commit object.",
+    "candidate_manifest_sha256": "91e6998e7beca9e76bda064cbdcb1891a5d6ea157433757c56c0430352cd54b3",
+    "files": [
+      {
+        "path": "architecture/baseline.yaml",
+        "source_git_blob": "3b0ab8a006ed4e2b211e3e9202c74cca925bb064",
+        "source_sha256": "7b9a60e93c34b43b6664afcf708de1ac8b8871024adf97f5d0ec5fc2ca172312",
+        "candidate_git_blob": "6e1839499fda5207fd2de16e3d151627400df425",
+        "candidate_sha256": "912b62fb68c6666afef240da875e475731934582366e30de7dc87bc0a099e12e",
+        "candidate_bytes": 1441158
+      },
+      {
+        "path": "architecture/owners.yaml",
+        "source_git_blob": "e83618d45e0a16b081a510cb5b350903d7df807f",
+        "source_sha256": "59ac427dd7ef9b8fe02cc613d480d7a45c1ed80158c73ab542adbc4217b2d424",
+        "candidate_git_blob": "acd8ad575f5bb6cf0752fc8d7267379a7de5ecc3",
+        "candidate_sha256": "21bad3b2ec476639e163d11ae00f05141ed267a0dea6c7d32b89228dc157d98e",
+        "candidate_bytes": 3671
+      },
+      {
+        "path": "architecture/policy.yaml",
+        "source_git_blob": "ac7f174afe40e0097d7bc0771acd72547f175d7e",
+        "source_sha256": "0bbddfab2a92dd9f795cb5518be6b1e435ef4055bda95786d417eb99f9e0d961",
+        "candidate_git_blob": "a9ad5fa9c369ef5a3207e1c34221b64f4819d53c",
+        "candidate_sha256": "ec0ea859f554cdbf1bd329106f3a787668a8441f181828eb9da74d6863558a0a",
+        "candidate_bytes": 1627
+      },
+      {
+        "path": "internal/mcproute/serena_router_lifecycle.go",
+        "source_git_blob": "7617d1a5044f94eed6159de350d5a5f7df4612eb",
+        "source_sha256": "a6927853b36b2f8062e2ae9062c34b5740637c1f1d67bf0024c88078a7ebc7cc",
+        "candidate_git_blob": "fa59872c3ced15a1c7a3ca58f51bc4a00093eb51",
+        "candidate_sha256": "ec6fe19cd3043d41c7c3660cc6e59bdda4588d027fa833f20af5d48a6f22f1f1",
+        "candidate_bytes": 84396
+      }
+    ]
+  },
+  "baseline_invariants": {
+    "before_entries": 2411,
+    "after_entries": 2410,
+    "migrated_entries": 102,
+    "deleted_entries": 1,
+    "unrelated_added_entries": 0,
+    "unchanged_entries": 2308,
+    "unchanged_blocks_byte_identical": true,
+    "unchanged_blocks_aggregate_sha256": "22f1016a04375f3a18a396b4187d75d654c4a1e59fd8394b6f12c530c3b1622c",
+    "unchanged_blocks_aggregate_encoding": "UTF-8, sorted fingerprint + ASCII space + block SHA256 + LF, one line per unchanged entry",
+    "header_byte_identical": true,
+    "header_sha256": "70f6aceea00af46c5ffcf57ac1748606dabbadaad962039f34836f8021fd8b03",
+    "generated_from_before_and_after": "1b875e3ad9f0ca7d4bc306edb6c22431b66da6c7",
+    "all_original_remove_by_preserved": true,
+    "all_original_max_metric_preserved": true,
+    "all_migrations_within_original_caps": true,
+    "all_fingerprints_recomputed_valid": true,
+    "baseline_regenerated": false,
+    "migrated_worker_entries": 6,
+    "worker_registry_modified": false,
+    "new_worker_lifecycle_contracts_claimed": false,
+    "migration_pairs": [
+      {
+        "old_fingerprint": "038220c0b9df848f996e032a346fb9afbdf8b6e1d054b69e1c9c8701092994c4",
+        "new_fingerprint": "a0b228eb095f9cf3e018546b96024b62ce7f846dd36e68bc65d6ecd7d7adcd64",
+        "kind": "worker",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "afc23d5598bc9ccdc8dd94dcfaf09d9333d7c8272aedb64c0598329ba7bb2b38",
+        "new_block_sha256": "b0cb8bc9df42e68c6f861a1f460b208a29a3e86b38ab7dabf185d401cd601108"
+      },
+      {
+        "old_fingerprint": "04822571c8de570c7fcae516e55536de07fc1737b6e6dbfb2099bfec9d277a2a",
+        "new_fingerprint": "514cf2d4797ffdf4a5d3512f721f3bf7c9a9cd8ea24cbf473b18d5cc9f4448b6",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "ad33173311e13cf6f8ee6a9c0b04e8d2cdb676db060108d8d0e2d41bffa900ad",
+        "new_block_sha256": "bd4e65f695067d97c57b65d7b2bede7dbeeb101d177770747c67186d1c4db7a6"
+      },
+      {
+        "old_fingerprint": "05852d65d7122ccf4ee565b4001d120afa6a404a5faecb47fa697052630b88a6",
+        "new_fingerprint": "b56423979242f0186a137f24de3097b1bf92f1b570040f47d9ebe3c4cbfa0ff0",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "a79941d9dd3808e462582d474cc8215ea75d51bc6cfe60d8b08fb7d60213ece1",
+        "new_block_sha256": "1010bd78e77068a3bbcf5ccaa4224b64fe09d1cae3883c9c8c7e615751e9aed3"
+      },
+      {
+        "old_fingerprint": "06ae9b79913f11ebfa201b6ac24e76d7144a76c2c9aa8b2f644263a5a0095545",
+        "new_fingerprint": "11b7dd9e021d4a5627844c082569525b8b4c8dbce4607fe7d7e75bd93214e69b",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "8652c83ab02992fa3b8dcd23ee44798720ae320b51294a35273ee37908ccfbad",
+        "new_block_sha256": "2ca1cd2fc8c712412624207676dd7e120b9b74652ba020c1265e64849162d0c1"
+      },
+      {
+        "old_fingerprint": "091c9aa159c9bc3344a741227d45e2752d0e9d7d02323f08ded53eaa8be81cfb",
+        "new_fingerprint": "c6604cbbfe176efbeba2a9b61b676dce9a6eeb13bca8f58e40eb68f2028187de",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router_findings_test.go",
+        "new_path": "internal/mcproute/serena_router_findings_test.go",
+        "max_metric_preserved": 2273,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "d47998f90adf9a67f967ef6742c594949e3214593bf52afecea29a5030cf3c19",
+        "new_block_sha256": "db74e2c2ac732922a6fc5de0605f33067e6caacbf789b0969f1325db86379d1e"
+      },
+      {
+        "old_fingerprint": "09a65ab375836935716de8b57d270b285345d578341ce1194dae7bfd3201945e",
+        "new_fingerprint": "84ee9423ffec5380cee51b3e5afe030a91cb531bdb928a32ab7aaf87b4b3d1e9",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_idle_sweeper.go",
+        "new_path": "internal/mcproute/serena_idle_sweeper.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "5b7e02976c45de75760f9f89efbf8e44e86b712243275812187fece4c83cdf83",
+        "new_block_sha256": "2b7d53f95d2389fab2534d3f01cdcbdceacf1183f1089ce3e47fb0dd87032a0a"
+      },
+      {
+        "old_fingerprint": "0c71f1814009db851ce328361e12bd33ae3e0a6f8904d559136fce8ef1f610de",
+        "new_fingerprint": "9f26b123d2ccd87b402a3cc7db3770f0433fa6f9f283db2a507455e1cc5bec45",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "34fb27dfe0b89bfa4565e0550d0c220eb9f7cbdc42d896bb74fed114abb1b222",
+        "new_block_sha256": "e31d12e5a1e22737e4a351481756b5147e799f0b4e44426909295420886ef630"
+      },
+      {
+        "old_fingerprint": "0e2f308c2f74448b5d8c81eb4869310725e858cf70bc928e5f2ec0d34fc66d11",
+        "new_fingerprint": "9a7710a64745d6f287ef324f8a3b5ba34aabb2547865af22a21a241bdfeb026b",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "76b6592c4fa21df8aa358d8482eed33eca305bb9b81073ac36eca0418cb1b88a",
+        "new_block_sha256": "25d80a74948c14bee457fafe22a13e7b32471d5cc31b0c393659b3b8437d60e6"
+      },
+      {
+        "old_fingerprint": "117581ef3b7d7a447d1c80b07d9396c1d34eb46aa18b0ce4daa868ccbc4f0098",
+        "new_fingerprint": "2e3575cc12ad399a2eaa8f0651d5f0307a375f046e787d9095f220750b2c8084",
+        "kind": "history_comment",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "834d78089de7773b98471a095efbc92ada677789c482dea53945aa092920f328",
+        "new_block_sha256": "92c1f0d5580140e16829756cd5c3f5827d7a93ddcb203a59a9881b26de6818d8"
+      },
+      {
+        "old_fingerprint": "13c24566d4840f663d45ae13b8db3e12ba05517a234f17b5eca14f9e06b40a51",
+        "new_fingerprint": "032ebfa18b56bbe5dfed7adf0167f009b52dac2f7f56f9ad0219547f1fb9c322",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "5e80d5b893df1a0db78397c0fabca48ed161b4bafa1f89b42607a1c7ff837671",
+        "new_block_sha256": "5e1c5b68b74b16b461c3bbac8350cd6a8ed90a46e228485c104f2fd057166960"
+      },
+      {
+        "old_fingerprint": "1c3ca6f910118d58ef6468d6e79a1f03f969b21cee89da8c124938b6016189a6",
+        "new_fingerprint": "bfb2abdb94d5a9910f625cf524bea4cc7f771c19b5c398a2412ce0df5c3f552b",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "976899c49e6c3c6a8fa8e530104a809b68fa435d74b383b8a326091d0124efd7",
+        "new_block_sha256": "40d677d502fb865626904c02ba09ea4dfd76099b241944057f14b90ca712d114"
+      },
+      {
+        "old_fingerprint": "1e7af5ccfe56a5813b81a0cdf97dd8d443de06aa7a1d78ba812dba4546675c1e",
+        "new_fingerprint": "c7aa437803920b6519f7fe13b302acf35c1bc1ba523e2db22fe43fffef40ae7a",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "9c75e016df4a0616966cbf1d3acf93222b10e854dfbcba632cf087461dc84447",
+        "new_block_sha256": "74fb2cf09c8a516e488a6397903380962e4286237f450a36921425369d45981b"
+      },
+      {
+        "old_fingerprint": "1f6bebe02eee1202f8afe520a88291228d6fd4ec44707df7e76ed5aacc1a2ce9",
+        "new_fingerprint": "a1f17687ccafec48893d5a658a708fa4466e8d4200590be0e7509bd768065249",
+        "kind": "production_test_hook",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "000252515d7e4739fe8ef6cd0207f4de31418445aadac600faf50cb2a074adfe",
+        "new_block_sha256": "220a107471c986d8c75f8b72e1f4e9ee879c7e0c2e41043bc7f1938ed2c6a038"
+      },
+      {
+        "old_fingerprint": "25c94ac4b12eab42670a2abe2c526d1ab0ff48f335ef6354e6619b622357adab",
+        "new_fingerprint": "48c88ed1be4e558c606cb380321309fc3426a30d74444c8b254cf544881eb048",
+        "kind": "api_construction",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "f87eadbb5322d24dd201676b6b6fa2157dc35d11bb826c1d64ab8a39c1c74db6",
+        "new_block_sha256": "1f6368fd8e4cbbfc45d1e81f76f3f8cce401bb6ff4ac5e4f0709d502d0d80db9"
+      },
+      {
+        "old_fingerprint": "273b2cb3cc33e7c198c0beed978306dbcbf14f5635b82df9ee195eb7945eb407",
+        "new_fingerprint": "cb25071bd6b1dd2a7c62a1fdafea206c23412e2b912ac85cc916d14248525b69",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "feb6f75b9475dada330a1c8a96ccaa153ace2ef6bdeffe44de23e7f3fdcbca72",
+        "new_block_sha256": "1f9d4ed10f82ea757c75274825802c857afd0570063fdc495bf018b895e154e2"
+      },
+      {
+        "old_fingerprint": "279c5e266f5bb23a8fe4d9288f96c065776843524b27f9844afaf98f41b4cff3",
+        "new_fingerprint": "e9d395266c0fcfc788d2bc393ef9891ffb94fd4a0a6357b156362f2d74407e69",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "d8df30a1c35b9ed4f58f61f83a7f2de8d2e0c5f8edacf0b226918db84e36cd37",
+        "new_block_sha256": "86edcdaf7efb9d4c9fdad6845a554cea7178cf1cb71390d230f640b34f475bd6"
+      },
+      {
+        "old_fingerprint": "2a1a2b57e5b7e9f2a49e5923d535e14bfdb9c2e12bebe4ba099b4407c483b914",
+        "new_fingerprint": "358d36d11914ce89862111878c6e9f98ab9942f4fe8e5ecc73b35a89d385c639",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "c0673057a3505e8b7eb79486efda16e3d83cdbbb9469ce124d2436afe5ce2188",
+        "new_block_sha256": "390da4123fa7685ee24aba5a550fc09a24ce446d39843c5730db240d96ccd988"
+      },
+      {
+        "old_fingerprint": "2ad2b10c22e28c7a16bbdda1419c1780e03f99e1725727eff6caf52dbeb59a43",
+        "new_fingerprint": "4e711dae2032f8329f4efd7bf357c1594df2ca0612c5e0060efc810cfae47a09",
+        "kind": "api_construction",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "05f6a6ccae940ae2eb67bef65be796ccc7d39790cea6744f1c0bd7ffa63a1ec1",
+        "new_block_sha256": "66031a02d36eb7c89bb607059167ef2c8253a34be37b3a7a26aae0a769e4b003"
+      },
+      {
+        "old_fingerprint": "2b5575708b299b2e6a0977e64c48ee27f81b0e36b772b4c2c18ada3270d03aee",
+        "new_fingerprint": "c097211ef9b16e89e40c4b53658c4fc7cda4483b5d00107974ad1408c9f475af",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "372079296016cea8f9063379da257289e3d2bf49abb37c9c0d847a98fdda1eac",
+        "new_block_sha256": "e10f624d337e9081eda33231494226e2c2124d89cb7f621602c820a50d5a854c"
+      },
+      {
+        "old_fingerprint": "2cfd646e2624927cb39d436c21e8799848fa48b728d9a6c35211f22cb282c532",
+        "new_fingerprint": "348f8b66268383a4ac94e78f71d8a63eef3d3faf96b9bde99be7e207b415a627",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "b62a15af2aa41fefdd0fef16da3f4df631aa9f935030ffaebbb757ea800c41a5",
+        "new_block_sha256": "548bf070b945c38e58db2a80b3d5882e43fd460777ecff6df65a34ee39734431"
+      },
+      {
+        "old_fingerprint": "2d4a76031e2e2528644c63d980d7b433f88ff5af6aadc009d8f6ae2ecda39077",
+        "new_fingerprint": "6eab8bd460bd07f58a2a8222aeb1373777459acc0231ff75b3988b3efd4bd130",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "09f846de0574326c501f5fd4fa1e34f14b0dc1588559c3891107e1b899689214",
+        "new_block_sha256": "ce97262290fcad674a48a68092563dc1141c1e2d2c66e828e5dd7db58c387e7e"
+      },
+      {
+        "old_fingerprint": "307e1b4e35da0cbd29423d910103b84f5cfd427377365bc8a5184d11fc538293",
+        "new_fingerprint": "e762eea0ff5bdd0b12b819b241973f767e94e256acc94783c756d7e75ebe6be5",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "93f819305c33146ba3a1bd129bf384c516f4c2df63778e7aaf41c9959f88b7de",
+        "new_block_sha256": "215894297ec025fb05cd592ffab9c1219f4194a3a6ad42c54e72aa8f172eaaf7"
+      },
+      {
+        "old_fingerprint": "3097e48216fcdcd694aa7a640ea17d268e80c7521c73d8bf53cd36014b85f0c3",
+        "new_fingerprint": "dd358b13543c6ba3f0b13e3ec2bf6d54dcef516d3f9bb3cb79724bb1cf5cb473",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "277e9363c75217a2b553e239bf674af32d201c419f97fce848a1b8d8edb9cea4",
+        "new_block_sha256": "e7852a6a54da34c524fbe3a1ac690cda37f892598f13e0b4f44fa2f00d26d4c7"
+      },
+      {
+        "old_fingerprint": "3155318996a4ffb87171a86628a5ec56d2933a5f4ee91f53edf01f0f80176f62",
+        "new_fingerprint": "1b50d9a6fc9ec9ae4410d11c18c50be646e2b4cce312373e87dd98450b03ac19",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "8d8905fce7a9fb5991faa4216c832100276caf27a70b64ce9a02380bfa10e009",
+        "new_block_sha256": "c0a30dbfdc8e3befe66e2d3653b4a5f8b2d92b924576576e390773179ea6c60a"
+      },
+      {
+        "old_fingerprint": "321505133f16a1ea68a0597f870eacf1466692ba8774a32a0f2b45cebabb4a2c",
+        "new_fingerprint": "2c16365d32c33a71df96bfc5a11bca33a75741072c15159fac3e77cc21e7e355",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "c40b3b49a7a1609dd10933836217ad4d8dd87d72b1e20d6bb4c8d07a2ad87271",
+        "new_block_sha256": "fab042173111704a958d4e38ace9e2c153baf34c3149f4d11c60ef432871cb65"
+      },
+      {
+        "old_fingerprint": "345c156c17ed6b119356ce9035191ef505b654dcfafe4b2b43ec3036e624aa80",
+        "new_fingerprint": "fd72d89bd12b970ea0bddca60d6b3ed3f9c4ffed5a48cbe2d91b08c7f7a2b882",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "dc53ada168768978d7928a0e4ba0c8905a62353ed5a510764a6c5a16b7beb01b",
+        "new_block_sha256": "7e0d44fe613c4f854b925a8f2a2471d84b11074c24d0f3296824e74c7d71065e"
+      },
+      {
+        "old_fingerprint": "35174fc4771d08ce3dd96f2fc13a8c3c237d088de7f08b6a38fa14f79c5a901c",
+        "new_fingerprint": "cae2763b4a5bf1b9d06cb1ebc6ce7f72ed59b91f29455553fe242e959d6be4a1",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "9760e2081cf6f1751b72cf1d94d5e21492a8d5690fd36642154c04f35ea18a84",
+        "new_block_sha256": "a20e4c578a51e9ddb281f783f94b734836a070e0dea456b6002b18994e56f19b"
+      },
+      {
+        "old_fingerprint": "36661dd43ca3e8e96f82ebc482b840f07d5c13f65152b8f6bf6b75754cb13dad",
+        "new_fingerprint": "117200aa6ef9a013406db4af6e574d9439d19730da36472ae536d246b172b3f5",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "a679c14da0dc760b748e85f7904d30684cfe66aedc285e83c9bb13fbe844d924",
+        "new_block_sha256": "0bddcc035b17f10995380e564d1a92f90134d7d97bb93bab11d95f119a482f74"
+      },
+      {
+        "old_fingerprint": "3d404bfd14da5447dfe8019179025cdeb2cef02ef98fe7a80356fda79c0b5a8e",
+        "new_fingerprint": "4e327acc89cad2e91fdc689e50103d7912444bb6bfeb2f6f65909e3d049ce964",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "16d574344afc685afff12c71892ac91a99dfa05d0f04bb51f70cb303e9653d88",
+        "new_block_sha256": "26cb2a9159e917e3a8fbd3d825006baafd28d86c4beb9ef659350a721d602fc2"
+      },
+      {
+        "old_fingerprint": "3d6dca33e4d5ec118c26c3c677a51530424a6b20581754a300a13a87139b72d0",
+        "new_fingerprint": "541ae2e807afdee70090029cd9d8b6fc9407b1a4e22d9821c09815562656438a",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "76b1029eef7a2ad2bd6aca4ed0746645554d91bf4a03b3e8e1a9f67987c51963",
+        "new_block_sha256": "207a18781be18aa31d87ae44768bbf1ae5dd39da67562f2bfdd43e215e25e6ad"
+      },
+      {
+        "old_fingerprint": "3daf8b247e49e2adae617945ab4de4e23729c2108005c1c20769a35d78ebdc71",
+        "new_fingerprint": "1758fc7de7d246a13cfa335df474f8c4207354dd668be89050ce0f251128b9c9",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "9fdb543b9b4327bfefd109b5cc93023979340e68162694a2870459eda798aa36",
+        "new_block_sha256": "924a2404dd34a35dbdc0fa4f8a9d5f66ec731d344220008f8d0a5effe953ae4d"
+      },
+      {
+        "old_fingerprint": "41d9c1604d3ec29f1305f830a215d871f9a6a7d76588dc0dc039b30ea276cbe6",
+        "new_fingerprint": "f06db7545e13615dd2db2b4be8ab2ac73eb32e2eff875c9e80c4e28b7518ed8a",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "df380594c2937097faa39a1a395caa98a55f03ce20ca5bef916d19ed8376e4a5",
+        "new_block_sha256": "8271e0f15041948590ec70a3f28043d8230c5bde258d818f14cb199f5a6235d8"
+      },
+      {
+        "old_fingerprint": "49e49501f13b38ecd33b172ff12d10b328d54e18ff303c55777419c48a11b3d7",
+        "new_fingerprint": "51bc251d897916867a4b397fa59fcbaa4513f181a31ef14203be0b63551c738b",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "46e41a3cdc583e305631309e8be0367ee51a27805e67497e02229e9dee434ae6",
+        "new_block_sha256": "317f99349f481adb202d452eaa252dacfbf6808eafbddb7a3beaed6177ecb8c2"
+      },
+      {
+        "old_fingerprint": "4a30775b38937cd1940c9480a8c8a978b4477a413dcfc2b816d6b7e35b1c9db9",
+        "new_fingerprint": "d8a3f26b627c6b3f2bef69411ff341ba1e37906de797c889a8ea0d3895f168e0",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "65a9fcc82a248403e634a6161984fd28fcc074a63088e685a13232795ba85b57",
+        "new_block_sha256": "ab488c656be745d23f68eb883ee74612c2cf8a7d90206afb09c343d1a3834fe2"
+      },
+      {
+        "old_fingerprint": "4aa4b512ee5353da2c3f0ca77dcdcdcbac4ca3abff4017f343e011d4012f983e",
+        "new_fingerprint": "ce16176f9c07a39cc9c10837c115ae2c23d623fe7f4f029f38695ffb91b00b49",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1fc816280d7a3a62a706ce3d5d3d300ab2dcd87a668f23a571d7899691974717",
+        "new_block_sha256": "a9eaf78ca1f8128ac8fa9ac1c8ef9b21ad0ae189a4dd36b21ff724c0021be87f"
+      },
+      {
+        "old_fingerprint": "4d59f9a2d1ad13dcb4c7a970e8810f143315abc226aa62732010f2ed0d7198f5",
+        "new_fingerprint": "0e6049264b9c66f3e344ff9323812dd67420b33ebea1d55e2458e02dc26e4beb",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "696b65e6e624893d455b929c07135c651a3fb3d83547ac1d710a613d5f2076be",
+        "new_block_sha256": "28120c727b76209bed25c9bfc1428a62859c49e68cd629115e1c039b14fb91e3"
+      },
+      {
+        "old_fingerprint": "4e9aa76fe199ae3d2630e63a2dd8e0c296ef3378ea25790172fffa26cd03d8f5",
+        "new_fingerprint": "22283473b323293225d4d6275228828d0a8ffa28a1fa122878ee40a9ed65a679",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 4,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1a3e3a99baa0e656995c19111dea6f4824f79599848bb71f3c61f22335fd9c6b",
+        "new_block_sha256": "eb1fef207276817a1692914ddcf85b32b6ab9f9e33d535a932d6e04400746374"
+      },
+      {
+        "old_fingerprint": "56e44dcdb55e8ee0fe5a26c8efe74bcd637006616725d0e6f052e894511ab0bd",
+        "new_fingerprint": "5db9df1961c9cef4b265c693555163b86e011beec5c472c11e107e7e08ab0830",
+        "kind": "worker",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "e937cab267171280b13521cd47edb26d557a131f04a8f9423ca13411fc83fe1f",
+        "new_block_sha256": "d4ff63dc570ddfb904d1add59fad244f256d59780baadf3b4b8de87055eecdbc"
+      },
+      {
+        "old_fingerprint": "61a83cafcc7cfa285d1f0b4f8cc4e7e0481832fdfd71f8c270c39fee0eac230a",
+        "new_fingerprint": "7219dc938f0effbc5157f728ac561f38e3819f67c8d033ccb079b84172cdfdb1",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "ef887a360e264eca0e6aa451700929bcb7ebada35c7a8bb98d486b0ffaff71f8",
+        "new_block_sha256": "1b1cc492ea9f63899df5d132237a69121058e5bceb1179d3c65fa764991ae80d"
+      },
+      {
+        "old_fingerprint": "6438ddba0f8c3404b2fb1da79716f77a6bc05e768d5287253f98edf0d14f29ba",
+        "new_fingerprint": "56ef7a0b546b43f0676c90f5f2474fb8cb9c2f3b8076236c5395d73038fa0611",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router_test.go",
+        "new_path": "internal/mcproute/serena_router_test.go",
+        "max_metric_preserved": 2257,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "2e80982481c5854fd25e6aa6b28adc3997235ebc6712c72552590561bb77bafe",
+        "new_block_sha256": "21279c6d1cd30fcf3b8a91fe53de501ae94ef9f8dcec940adbbe534c8a6d1f57"
+      },
+      {
+        "old_fingerprint": "690a14beb1fb8cc36ae6426ef7044233ca6fb455dece28c481dc00533cf44f62",
+        "new_fingerprint": "842880caaab8993f89d9d029202fa7f8aa9e2ddc5ed3692c647acf20c4132850",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "cd32ded2a450ad2030b8ba083f434c54d9fc04dfaf8a8779b4e2041c779b9b70",
+        "new_block_sha256": "1b4c160e3b7fe4dbbb43b5bd146d8d393fe5787bdff88f4b03463cac124dbb8a"
+      },
+      {
+        "old_fingerprint": "6cf19db54d2c1e43056faecfde1491df714ce3c34caef5d5e759ca163126dd1e",
+        "new_fingerprint": "e4ca2d26cf71cd37a158905c17697f611aff710d5101a2f53dc8368341e3e0cc",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "cfbc641afa34dc71964f6f50b11b5d48b75af19ba209814258e24ea195588d5a",
+        "new_block_sha256": "846dc8fdc03490f8064d8d84b4a92297e53a4dac31c0ab51dee83edb3b77bb80"
+      },
+      {
+        "old_fingerprint": "6cff90c3386c36eaea2092ade0415faaa6ceaf837d0f92a0105efbf2117c290a",
+        "new_fingerprint": "3077965904c65cdfb9c67cc01f71e17602d825652dffad34d72c6523178fb72f",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1799,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1caa2b70af4ecde4fdb36c8c27f466160ae690fb7abfd1e208ed67bf0dab093a",
+        "new_block_sha256": "28fa8402cb45da75abaed6224f18bda4ec22edc1690b852b7ce7e9d0049b93a9"
+      },
+      {
+        "old_fingerprint": "6dc2caef6f7fddcc6e56262d6e1a118047b3fedfe5b9ce931845c4d75c8714b8",
+        "new_fingerprint": "cd4df0c5fe582f2d14e4c9bbbf76fc7a2c4362c8e1c90e24c8e4782f3afa207f",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "dd0aa6d709583716cfcdf18cd8b96d730438896e9243e5b1157611d1e37322f8",
+        "new_block_sha256": "ba4bebd8c635217efd15ac0be33fcb14dae32297a5ae808ccd0019faadefc9ae"
+      },
+      {
+        "old_fingerprint": "6e5ecf941e054effb9c09ae24288e613ed95874b54b89c3521aacff8aa49bc88",
+        "new_fingerprint": "53324ddeb1b2bf830800cec6f8f08361748ed9475344ffe1b2c6f1238e6c3ff0",
+        "kind": "history_comment",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": 10,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "ec9b1db28b68b788de9f784a0105f4c60804716dfe896c6a1bba34494b033197",
+        "new_block_sha256": "87134e35f7b5ca36b810fa940cc58a082bfde768ab616a9eae11d5599d2f0b5e"
+      },
+      {
+        "old_fingerprint": "7027ba5d4ab44a97f4362c13d722b43e4dfd1c8a797bc56ec20d836ee2e570c8",
+        "new_fingerprint": "03e81c901ce43a0587b8baceb51e27b8d1e360b06a09cbf1e77cdd54af401f8c",
+        "kind": "history_comment",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "ac85a469ef4c6925b2215807b86ead7e4511200a9af73ef89c04ecd7dca54f8c",
+        "new_block_sha256": "4261c26a555ab1531851e927e29f45eb0aa3966b58e99183b53134cd4bd6924e"
+      },
+      {
+        "old_fingerprint": "70c5383c392a615b5187d664c2fef39cdfdf11e8bcbeeb19d1588fb18eac2412",
+        "new_fingerprint": "61bf3dc78016501930cd3af75b0f7ec0011891466eb6349be72d30c912fbe943",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "289fb13bfaba1304cddf4ed6bcfb62bcf4328d924ffaf265b4badcfb6c29c8a2",
+        "new_block_sha256": "fd7109ea6f23b21934c99b134c21ace6b62942dd42fa47f9ac2947e06060028f"
+      },
+      {
+        "old_fingerprint": "7112103a6f90fec193b9fcb3cb6f565bd86e44efbacc80fa9b28519e75153d1e",
+        "new_fingerprint": "38515cc505a1ddbaa7952aa17451f4b9dde1a3ed9e1d00e334298058dd4d3d55",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "205af8718b52f42befe1f6ac7f2fab6bbf6cd758d291f340f7a47a0bf8c85a7a",
+        "new_block_sha256": "1d27653111ac3a8320f76cb7be86f117620d02a7988c45df058ff84b991e8a94"
+      },
+      {
+        "old_fingerprint": "713662d964f022a314cf27c78abdece081e0cf994ad2a0d6e95a572e656fa19c",
+        "new_fingerprint": "391703eaafbd6c8abf159e1f454a5671dada27d3ddd2b8b9d884f5f531156808",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 4,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "2e1b217e17aac4e055ae2aa1d989f214b5cd8eb96f85c226ecf8e7ea04353ab2",
+        "new_block_sha256": "55b4a010f0a856d6b3d973c3b873e986878bf0519e3e6357f8c54d8d2cb6b3e8"
+      },
+      {
+        "old_fingerprint": "7147cdc499ba7743d1c01d04ca687fbda5024201bfe0f071ac31f6c5579f95a3",
+        "new_fingerprint": "00df60c0aeb91d3b3118502831f2bb5d730880c27657d9c116243ceeefc019dc",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "6adde9f6c237fa8f26d87408816f9ee226abf0c814663bc705231d48019a266e",
+        "new_block_sha256": "9e8f0710a2604b3e73b0724c2b7d89270bae88bfffaa75fddfe41c334be43844"
+      },
+      {
+        "old_fingerprint": "7522a9e3ede387d37e5bdc7487d7675696e6521c33b8146a44f42aaa98a0565c",
+        "new_fingerprint": "282f50c0ab1e109439d226f1d4b77e25c55c3ebdd4a6d15d7bafd80451fb8ccb",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "e379a3185257a87da51feb243d7cd641540bbe8f1cd9a6444f7271563a70a315",
+        "new_block_sha256": "801b1ef92542b43b7fa0ea401b0cc394b368eba669e5252dea5dcd367b1e9ea1"
+      },
+      {
+        "old_fingerprint": "77d710fa420b1b2fa69bc1aa7794a9469d2a4dfafd74dceb5d61b055f052916f",
+        "new_fingerprint": "ac98220467e5094ff784bd94b2985a0fb2a1f907930df837541ca784f57055aa",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2456,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "eb7ad6879c119ba1d4e6f4363410f9db6838e08550614a013efff356b1557891",
+        "new_block_sha256": "8c7703787c61e76c9b922d5e5929d009858af4a65dd7e6963f35eacfda07a4a3"
+      },
+      {
+        "old_fingerprint": "7811b76e28318a355e35eda12c66202816eb2d09613b69689c1dbf7befb2b3d1",
+        "new_fingerprint": "3ed749a93960c8ab86fe47e9c57b80998f378b526272ebbed542500053e537d1",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "5c975af683a6e370bd6edaf86136850eb0b0ccbc40b100e4549450816cb2a9b1",
+        "new_block_sha256": "f6f51d3ee9ee7cb8a8fde9f8ae037a4bcaff08ef3649283ff2a375a03b9b864f"
+      },
+      {
+        "old_fingerprint": "7db526f3df0923638fb0cb637f5a25b3bf3530cdeda40b524879ed3fd666ce7f",
+        "new_fingerprint": "c3ed46de8e391dd1510035b75d3e39c83e600762878b97829bec2c2c047b4764",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "3845090968178aa865fcbdcf1ea70d089efce311b3c465fee278a4efb49c657a",
+        "new_block_sha256": "478c728bf8ee49cc98162975595b8274e7a348ccf1cb7d426b9657fdbe361d62"
+      },
+      {
+        "old_fingerprint": "82362e1dd2740fa6bc4cdd525c62d5c369ce014220c71dc4de19bfec62828fd4",
+        "new_fingerprint": "6e584d5c76d714556b66b5def170f47f83e6f00f6b25c69fb23ff18a384f1c1d",
+        "kind": "worker",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "098989d0522c37ef487b32b37e430b319e03200ace0425e0cc4f95eb2b4b2653",
+        "new_block_sha256": "feb514fdf3cd0985d55b48c99a30f963c5db6e13bbf4be67912061ef1db8ac33"
+      },
+      {
+        "old_fingerprint": "8310bed6105d3946ab9f893b4b6e0ed73cd28d5ebf6b6fcac47725116b635f55",
+        "new_fingerprint": "853e79a3b55879f07ce2614b9564d0db7e4c08330f27a0c03f8163aebe94be4d",
+        "kind": "worker",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "25b6ca1e79087f99055f810cfa043488a20a3f1db73654935865cbb13ad5b265",
+        "new_block_sha256": "be9019b5859954d8140064f4f0769fb9a832c932001e3541a8eb9c87f06b642c"
+      },
+      {
+        "old_fingerprint": "86078e02487a4b9853e4fd515ad2fcaaaaa5c72176f0f3fabeaacca4d60bb683",
+        "new_fingerprint": "2aa67a1ef07ce22f2e2d16dc314219dded30e36aec74561dadd7e4779424cbb1",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "9c676c37c802b5abe27fa856dcd8dcc11ad9d0f19a0d527745139c849e6bdecb",
+        "new_block_sha256": "6f7f654a3e993c64605c52b0f8c767a0203a72afe752abc96ec4ba8ceda103cb"
+      },
+      {
+        "old_fingerprint": "860be519da354f55c621c2ce607ab311b3aa74f9640c493abb767e67e85c1884",
+        "new_fingerprint": "27ec233e037390552a02c3bd624eb4095562b76a129c33eb79ab338c575682e7",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "2b34d253f6054e93f9efe6bb14c777ae81c4e2e7aa1aada5702b99037735fca8",
+        "new_block_sha256": "7ceb326935e80ea793a803c54181e4602a6fceb589260e0ba53495b8877093c6"
+      },
+      {
+        "old_fingerprint": "88091a925d4614b9544eb99b15dbde34ac35833655aaadb6b65c97efbb6abe03",
+        "new_fingerprint": "7f48a9fee37c5abf2288db78154fd5626b2237698821e53872bb80bab0481fa9",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router_lifecycle_test.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle_test.go",
+        "max_metric_preserved": 3608,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "efe21072660b52f60990ff4c9127e04b82d78263f49d80ebdfcf580d0ac2ebc7",
+        "new_block_sha256": "1c4c87e2b9706a641f83ac1f99d172373fe17f41344a6953df9e9857e99cd433"
+      },
+      {
+        "old_fingerprint": "8c6efdbde5bf2b482094d91b305f5234bf3206da3464d5c2badb54beca5f12ac",
+        "new_fingerprint": "07976612b0b67d1cedf32df888d803f466efc3c8910786384f9f80575038e191",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "7378be101747d05c52cd366ea4bcb2ed8ab5c130dbe880daa5523c82387430ca",
+        "new_block_sha256": "7bda76c53d356e510ccd67c5dfe00a02175aae2845e24f3a475fafa432c8503d"
+      },
+      {
+        "old_fingerprint": "8d75afa86de48e87caed15b6c4c1adc4295acc22bc89891ab1ac75f031b3a868",
+        "new_fingerprint": "237206f492241744de38870864e0d678a0db730d83d7589a75661faddebfcf41",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "f14b9069d6eb7798946c6087399c8004d3dcc5112efddc1b60414f600becdebb",
+        "new_block_sha256": "c3a286bc70d52f3db36a3a0e3a677d2a5f40b0e55f064a869813abbdb2e84211"
+      },
+      {
+        "old_fingerprint": "8e0c82c87e0e837fcaeb5768e716b04ce599298d696909df1f3c56ef3af9491b",
+        "new_fingerprint": "b37a317c6d16977abb4efa31becde688752315bded666e2344b607b3b3525002",
+        "kind": "api_construction",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1748050000a68b6f91250244249c76bb2bcffea384f8c4fad4e2134eb34b2780",
+        "new_block_sha256": "3c70813ba68b5c805627a95729b975b178d155b780e479849ca3ae7b969d46aa"
+      },
+      {
+        "old_fingerprint": "8e5e99e45daa171889e5ea9436b951be58130aec7cbb89aa1f84a3109bac2bbc",
+        "new_fingerprint": "decb896bdb406a60e504ddd551493070c7eb5edd0ff722c3cae1adca426957f2",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "c210bf980b30668bdb99601feb4266c0ceb69b86f9384741b3d532937b1d7005",
+        "new_block_sha256": "7744d5f250480e0d39ec2b18e026d894e078e72c9a0b34db5f7381cf2c0ffa2a"
+      },
+      {
+        "old_fingerprint": "91d17fd5b238c44223a090f40b619fd3ed52d69d6f91c40f2163f87792f639db",
+        "new_fingerprint": "01e66155c9c9eec9bff989172e38bd8ae378999e64a6e1416e131e078493af80",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "2227258162ab25f524c98aea8444c53dda418b6c84a5698e852e3af62f143180",
+        "new_block_sha256": "ae7b8a29a086f63d2da9c98f9c9f5f8e24403c5442e86b63f154b715cfbaa766"
+      },
+      {
+        "old_fingerprint": "94bafbc9d20ae04c39b7f98ef40971035100982f1008c1a5563c93f52945efc6",
+        "new_fingerprint": "54d9499cf95d7d067900e57d166a017d5b422591bb58b041d2398baf0d68a785",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "a9b4cbc4917a92b4f012b1bb90df782de43a14ec478d3fe50aaa02707d8ed7a3",
+        "new_block_sha256": "2dce22c411e136d6beaff14d7c419b8bf0b2b57c11c2c405186d3b5e630ad3db"
+      },
+      {
+        "old_fingerprint": "97235591b9159db9800269825635bd631532ef3175c9b36f668e6fe208a3bf53",
+        "new_fingerprint": "fd507a7ec8641dc2cbddf536aed0f0f62c87f1d3da754d948aa5954b8a24ab71",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "25a562851fdc5cdc9111ad1ea22bb048aff673a08c5042813f7dc3c3b75b64b2",
+        "new_block_sha256": "81dbc43e9493f6dd75267fdfc71a09c975e34efe166fa8c523fce77c689aea8a"
+      },
+      {
+        "old_fingerprint": "98b1059a29fe21a0f2676401e67d5eff59a375812a9a783403d05c6ce1b33fb2",
+        "new_fingerprint": "4bcd8d596fa33d63e25b1122d7fc3af38a83b65caa021b275cad387e7e2d314d",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "db396a058fb342c289bc14725a5b14eee6cdba724c0425aa438dfc87e8b12d3a",
+        "new_block_sha256": "a7da28d9f67bf45610e4d2851bfbd22d9178b65a73849e456c9d70a8f90141c8"
+      },
+      {
+        "old_fingerprint": "9b92fe3a79c5096f3351b85ed5efa5f1788d1d17716f9ec782a59dd981fab843",
+        "new_fingerprint": "fecced00a878ec494f1a28b25a4bac5482b401ef7f0b2388eb036bc9b3f7444a",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1e216fde072b3b5fa942a7d417cd137d4297d881aff7f9c08e527d3283a8c2c4",
+        "new_block_sha256": "4e55a0df01752e3a77ee8213ebe9e760223662b2b6d14e4a3390d4648f73cfe2"
+      },
+      {
+        "old_fingerprint": "9fda42afd46dd726362514e01c487de46daf65c6f1675f4569e6d99d38d640d1",
+        "new_fingerprint": "cb6fec5bbde86710d142da9f70cfa1cb3418cb627609c141cc14f6a6fd1f4486",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "47b8e155c572569f756e82d0264a2a625b1cda1009a753bab270641921fecf35",
+        "new_block_sha256": "f1a0c32e340b8f62cbe9c3a27dad7c979c025bf10ce866552c9cd376c8911ac2"
+      },
+      {
+        "old_fingerprint": "a23b1c08db0ac98a2965f5fcdcf4674a92e349d1f88c2dc396bdc31b2fc1aa92",
+        "new_fingerprint": "63da3bf3f1a39acfcbf37d0ea85cbf1a1e90f49668efbe712061d3908b5e4bd1",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "24b62b7cfab490e9bf0bbe4a0e884ee85eaf15f70644006f3d4f08a27b0b1f78",
+        "new_block_sha256": "0e60c8434494e3dfede77a9c6c00dc986b3bac007154b96530a42169a85b94d7"
+      },
+      {
+        "old_fingerprint": "a70eb49a24da3c453f65d5481ce574cd0bff683f6b80409d964cea3d268bfaf7",
+        "new_fingerprint": "60074316409bf2aa4ad455c2a9507615010ecbbb1a6ac2a846b42ab3c2d7417b",
+        "kind": "file_budget",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1423,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "57c34058ae9bf37b1e6e4adb3f7327a8fac355864d96e6aefc63712f5eb19185",
+        "new_block_sha256": "bab261dee295995e95b57ff134a6d8583ffed96fcf5835bcc82464438bce31a5"
+      },
+      {
+        "old_fingerprint": "a90729f32d9ffdd85654ce083eaad9bd2e472221494f7edce51c937e89312fa9",
+        "new_fingerprint": "82fb488d0f5b33173e893ec98d20b752cb840bd150a4de5d7fdebe85173b4b75",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "24f4d40480ce90d4c2766a489c5f7a048d5c79fba29f1679a483e0d49767410e",
+        "new_block_sha256": "a1a8005a7fc6f0a64712ced5d33f31101449c0fe44a9b105fc343181e7765afe"
+      },
+      {
+        "old_fingerprint": "af7f22a9bda7008c983231dd219b5882b8891da92a029feecbb63c6f7ba99537",
+        "new_fingerprint": "1f96ca67674f9a5e0e0e11b52e6fca00f36898e032731613a490b449df29826a",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "f76d26c962fcad777e67458b04b722efcdd64cef60ccb4830bed1ed87188a855",
+        "new_block_sha256": "46425c85b9b1566650841b3994352c8d0d0ba3c4df0cd833bb77b40de0a6aaae"
+      },
+      {
+        "old_fingerprint": "b56ea48aee975e74b76d3f9941464a0a96de1cc087f479d0a8555154f5a60c35",
+        "new_fingerprint": "d7f47f84793178efb1e8a9bd88b433b7ce504df88f50818ff3b802e49ed12795",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "dae3f006ed0c136187138849e1cefb4f8a7a726693648421a4242143f25da576",
+        "new_block_sha256": "57695dedd899483dc0b331e204f9ba5864d23515f21656b406a072876e13a7c0"
+      },
+      {
+        "old_fingerprint": "b8d802b41c6e1f166d28deb47d266cd086925e8f3e5e28e01e4630732f78d462",
+        "new_fingerprint": "1b8960fca014e0b0b47f1ccad9eb9ee27251bcdd7b2acfa9debfcdbf91a0369b",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "bda107f9f83d693ccd89aa1969875ec20531e9265fd36c766ddab0a987550fab",
+        "new_block_sha256": "811ef29710c906dbd471666c1cc60aa6e8ae17b4a88635a33987337d8425263e"
+      },
+      {
+        "old_fingerprint": "b99daf2a2694e2dc9065880b405ed33841dabf66001f972b758ff7d90b79b980",
+        "new_fingerprint": "ad3bed425a9ed7fa8591050ad46ed13fba43c426bab1acd8ebfcc0c4412ca845",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "8b26cd360cbdde4208c33d55147abb92398c7ecc1a213a6dbb0100ad39657448",
+        "new_block_sha256": "47add7912925b9f3d07a66aa51f8b62c30f86a7398943a618b910baefad297c6"
+      },
+      {
+        "old_fingerprint": "bb6725c99f2fb68398ebbc3ff76a47c9a3ce907c5466fe5b91f041593270eed2",
+        "new_fingerprint": "80fb36f1e54ab03443b7c9a27fe860e317d416458ea6d2df246cc7243cd9c175",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "6bb61cac0c24839d5aeb00e935b2543d5257f99d0b722e74884c5cce01cb33df",
+        "new_block_sha256": "8ef2d3fd00338400f372cb80de8a47695ef2652e9ba969a8fba878cbfb08b881"
+      },
+      {
+        "old_fingerprint": "bc3e8932fc21c8bce60268f1c231ad5a5b84d0235841af3840578c90582bfe7e",
+        "new_fingerprint": "3727d7c2ebe206b039e613ff5dba10847f5ae487ca80f44953c4c277b0ac6ae1",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "424cb058943943187e9a5449577460dfbf30b5eab12b3bdb65449e462e582564",
+        "new_block_sha256": "b9b516d1b527ff5d460d932d7738a75d5124f1741876d75e3872f436fe5c7afe"
+      },
+      {
+        "old_fingerprint": "bd5eea029c46ff84f2f2fcb1e573307015d102f3bd090914a4c10a8ce4d53351",
+        "new_fingerprint": "4a8925cdee361608a0abb70cfb812fe5b1d8288cf27178c58083fec88b64b25f",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "7bd9df264d743cff091dcd205abce99051448e128af9e88c37d38f9309199c77",
+        "new_block_sha256": "7b8a3ab560bb0a6206a85126dc8b68ecc3a0282e4ae65d19059d220fec7c4761"
+      },
+      {
+        "old_fingerprint": "c021c64b2bbca619a40bf15c921959840504f4d19d7088ef823bf6c6c1951f2a",
+        "new_fingerprint": "f2f14aa4e272f8702a8d595d67b2ad6572e666e878504737424b763f10dc8281",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "41e3e8d3e8269fe8c5c2a5fa4675863b80997271f8eefe24f400b71231ba44a6",
+        "new_block_sha256": "00bed202eb7f114adce01e4e7ac765bcbc2bda9ff01f1f88bded5cc7f1a894d2"
+      },
+      {
+        "old_fingerprint": "c04edaf6fcb75a83fa5b2eec254cf68d33893d6ce1c91dbd871527eec2dda9c8",
+        "new_fingerprint": "f672c99567d4f55f928d0468ba3edfcc2b69755f762c2ada7b52d93b107c742b",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "936e9ad787787ce5cca8f42566737e2d4d0eb80271dd2fc56db43cab3e75aae2",
+        "new_block_sha256": "259b49ecc67704445da21d4a16dcd89f60479a3ba02e5cf9ca603bffdf309cc5"
+      },
+      {
+        "old_fingerprint": "c0e2e16043eb4fb4b28ca8432582003433950d4bf356fd0a5816efafd24b79c7",
+        "new_fingerprint": "ae04ab5bd1835d5f9c95d2ab0620e21af1f3113fe433ef497e3faa875668c3c2",
+        "kind": "worker",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "23abbaf4b1c0c914e32dc1c0abea3002bd3ca2f44722b051b8c06279cbb956d2",
+        "new_block_sha256": "f2fa56ec0376c57bc0436a29bff77d1f9357ae9beec0bc5f290214d560e46346"
+      },
+      {
+        "old_fingerprint": "c20b2e28de384fe90e1cf6dbf0db537c92e203f4670cb88fb955c9050d2d227d",
+        "new_fingerprint": "5191786542ae64455f63de1300e6d07cedada9836fa0ebe98d4e5d6d5089debc",
+        "kind": "history_comment",
+        "old_path": "internal/gui/lsp_router.go",
+        "new_path": "internal/mcproute/lsp_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1a376231d22f59235ddc646540a8148c05a5e1fa31446f2c3239050312f802bc",
+        "new_block_sha256": "6b767584ba9cfdc1a7385527389e893f959048a228198cddb3ae3674101d1f86"
+      },
+      {
+        "old_fingerprint": "c7c90ec28965cdb138538a671fe4631891366c12fdb69af65ea8706bd53ef408",
+        "new_fingerprint": "e45a16c85762ba9dec44ebbc745f8814e4dc3967094fc757019df5aebd9232b1",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_idle_sweeper.go",
+        "new_path": "internal/mcproute/serena_idle_sweeper.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "588c1def9fc846ccb9f198ffc5d42bac85ada5b2e7adf3606e4224597b5080b7",
+        "new_block_sha256": "c696c94d793b0c1c7f4c1d8b262258617f0c71bb286532c97c8b41dbd5a5664e"
+      },
+      {
+        "old_fingerprint": "c9bc6d640b84ceffca33c7cf6b3ffa855547506598297406dbf145b244d554cb",
+        "new_fingerprint": "26e17b7ebb117a65d0d08bc628a77204b825284e1b0bc520f3359bd06434c841",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_idle_sweeper.go",
+        "new_path": "internal/mcproute/serena_idle_sweeper.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "63dca243036ab044c2f977f1251afdb4345cad7ce1550a28a1104a25716ef149",
+        "new_block_sha256": "13afdffb89b361fc66390e45cf705afa4bc416f1c75c4fce6a6620fed8faf082"
+      },
+      {
+        "old_fingerprint": "d142b25f980a410d670ffe6b66ca289eac14b3975b18af45b6a94bcad8264719",
+        "new_fingerprint": "ce376a6dca273becfd65f9420b08c03b40cb35de5044c55689809adc6b7e506d",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "27f54af3e8379643955606fcbafb4a79e24e5f1372e002854941859841df60ba",
+        "new_block_sha256": "105fdd0a418724f962874b8de649f2f0e75460d92d5f55d9f96056ed96b2af00"
+      },
+      {
+        "old_fingerprint": "d6784e57214a3db22b6dee9524001440ddfceb16ab8064322aea4f8d0e53ce16",
+        "new_fingerprint": "9ed9c74040d3269b98081e6352587561984062b7f74fa3f5eecae21fba7729f8",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_handshake.go",
+        "new_path": "internal/mcproute/serena_router_handshake.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1dccba79d42d43ac935922fa2ccd8f7c219f6172a780af84d54561d37cc1199f",
+        "new_block_sha256": "4e107d01fa3606556b82868260e5f903705973a23822315a9f2a9b1f5d77c1dc"
+      },
+      {
+        "old_fingerprint": "db311da06a7a8f000b1b72461247649c574f627067773ee2e8515d18ab253da0",
+        "new_fingerprint": "0f1eb68d0f7b90efcd7bd33294b9129527a544a490913996f010516e9ffe5610",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "4454a227165fbcacda8c72d15cb8dfae5e899535d717827594a4fe36bc57ad9f",
+        "new_block_sha256": "e9771b16604b15696717b460b45c4bacf15911cb8a4df618b696b47a6d85a649"
+      },
+      {
+        "old_fingerprint": "e225190d9fc4d0265b5abc6abc6629606f0795c031d4a486586a4af86479b0de",
+        "new_fingerprint": "b55d8d51a47ee3cce85c570e83981f00f0e2d92bc1628e80875f10b70b72e442",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 3,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "d8a21deabcc5511b337f97d1613d600fd4ef3c434fdd5548e864066f98e75fef",
+        "new_block_sha256": "e661f8f7dd7f950b0ff0f82bb1593b8182ca4ebb83006de67935c1ec7adf7a2f"
+      },
+      {
+        "old_fingerprint": "e7461c3ed68d9af129430ba08887117904d3f7f61886003f419835c387602419",
+        "new_fingerprint": "cf865bd525b8dfdec4b23bfa2b39b76859297b46675a46993a602ab80546856d",
+        "kind": "history_comment",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "ed2c0d3469e8c955d5fa0f6c454c290d176ea5a173dacc2388de722c0eff3e4f",
+        "new_block_sha256": "6f00fdfd92bd1420a6d068be661c9a01a98a78e83bbda7bc63cec186a80395c4"
+      },
+      {
+        "old_fingerprint": "ea895fd6ae28b084f65cb881956b4c66a450a13ec93a7bf15e3bbbcbdd5bbab4",
+        "new_fingerprint": "ef7e958352ecee6dce02f82ae35bec3f65af5ee69082c440dbb172d095cb07f6",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "1c508004b5dfd004aeae1b255877360343aa332269f0ea9e89572738622cd00d",
+        "new_block_sha256": "4aa099851deb961320fb16f52ab8eb920e11f775cd9831eb9c14db1ce11d4318"
+      },
+      {
+        "old_fingerprint": "eacc0fe61a88718493654a700443533b1899ea82229ad29ab7e6f796a8e5f5f4",
+        "new_fingerprint": "b4ab79160c6263455246616a3aff689199687db3e420e479d2de8bb9bea7a349",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 4,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "76711d7f2d5d79bad290da8fb7f7df246ed81c8786514c8d4aa164b12c88924d",
+        "new_block_sha256": "5b537d6296d9f1991e7ea177a61019c0615800253d71b442ff1207b2ad1c9776"
+      },
+      {
+        "old_fingerprint": "ed59728941f13e3e7af691267041f31df6f3d61cded87db6260a425152b9fbba",
+        "new_fingerprint": "c36a98abda4a3afd6c8d054822c6fbd84449bab961dd9817617f6c5cddef5bd9",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "3599886c896d7dc5ab7a6ef64f23d4b7a31a9e0f1dd05af59b11f994c3c811aa",
+        "new_block_sha256": "f57e34ba18e3b50f3098dd8e5b9bb31b45363c6f887cc5f413da67820e0f68ba"
+      },
+      {
+        "old_fingerprint": "edf37180a3bd7b13877abc5183de1189b2c58b206d9c289f6166e786b99d3038",
+        "new_fingerprint": "3f953e2a66c9c929f23ea270f417f5b9b8f95bdeb583de20a2d20d8dd751e7e4",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "50c5a7d01042161893e678b28139da1af150f9779f00b292e058149211f43bfd",
+        "new_block_sha256": "c81a60e7d05cb305d314be79df00c30c9fb9be646c68084203f0f4aa242260d7"
+      },
+      {
+        "old_fingerprint": "ee10b3b1257ae4d3dd04c05ad9cc1f96d872e0ed15297e826debc3e511cdc528",
+        "new_fingerprint": "cf6c271c9d4847d835369fc335adfc5cd4573ca11c2ad855aff51be7be7721b4",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_lifecycle.go",
+        "new_path": "internal/mcproute/serena_router_lifecycle.go",
+        "max_metric_preserved": 2,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "3f7c0f083cc80ff0195c1188ef7971bb25688c18fc80794e9254cbf1b2ce108e",
+        "new_block_sha256": "56b4c5587ed8d0dfcbe910af8bfff71dcfe6b3599b6f15f48dfbe044807b6d05"
+      },
+      {
+        "old_fingerprint": "f031b209021208e2e23f59eec87495186c4b0087a03a6727e9c4e9c76075e7d3",
+        "new_fingerprint": "70a04012bd9b4e6a8dcb911c930b782c759a6cbe5677c7d13358e6f053e3bd57",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "cccf16fb5b98cc284e5acd6365e5ff918c86f41aa82cf98a769fc34d9a73a763",
+        "new_block_sha256": "eb483e88f2c093b1405137914b12ce64cb51ab66f24673b6684d2cb54a9f9df8"
+      },
+      {
+        "old_fingerprint": "f0a133e79bd41d785db5c1b289d8c3da885b57938b8e2b3bcca4dd6cc5a20c15",
+        "new_fingerprint": "4251fc7d3c32bf839738063d9a3554f190a64d76c4157b1cbb26cf303a72a64e",
+        "kind": "history_comment",
+        "old_path": "internal/gui/hub_listener.go",
+        "new_path": "internal/mcproute/hub_listener.go",
+        "max_metric_preserved": 3,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "48d5402985a3c2330b79331440a2a0f0cf405d3c0fd3f03276efaea74d956643",
+        "new_block_sha256": "2a54400754f91011d60ca7218c7d0a9c25ae23f80e3be3a95ba43a9815635556"
+      },
+      {
+        "old_fingerprint": "f43ddb67409e3ed0db2ad23782f105ee2e219a846620a055dcb194ede53af8ad",
+        "new_fingerprint": "b2c529c29189896ee877407136fe54178fc2e51bca066b32f6ffb79f48ccbadc",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "5e2e23230a841a4ecf3717cd0d88612324f3dac4d9c73a2238809c81ff925119",
+        "new_block_sha256": "6e0d6f4e4a42141b638e830199e89bf6c85e62bedf888bf3ff13a3bd2594f536"
+      },
+      {
+        "old_fingerprint": "fa1793521c35e15d4482a103b724df11d855edfe953af8de91a45390548f64ec",
+        "new_fingerprint": "c9adee22a27e49eb5bbec2e28917bac2f7765c980438e98c37475ac0cfc92620",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router_session.go",
+        "new_path": "internal/mcproute/serena_router_session.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "6b26194e69e5dbd932d2a3c03dfed1389533c186cf4491bce47e0b88df084769",
+        "new_block_sha256": "dc154c9cae29596107561b3f2a76de7105ac3a7272ac5aad295f06f78cf433a3"
+      },
+      {
+        "old_fingerprint": "faf116aad5a68ac5a10795c3c76fd5908473d50e6e7d8c3e7ede298b56cca04e",
+        "new_fingerprint": "2dd2a5faa0ea763eee80485c0bca1dac1ee2fff0bd735375af2c6a6e497af99f",
+        "kind": "history_comment",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": 1,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "79b225e23cc23cc8d4aa9cdec59dfb83bdf827041f46f977a15e744985710992",
+        "new_block_sha256": "95e9052da6d2606286a252d9f40aa28e3bf9a138a9d22b72457abff3875be427"
+      },
+      {
+        "old_fingerprint": "ff601247afef6c04d15f0db875c220c53236afaaf5e768b80da026f71fd1279d",
+        "new_fingerprint": "ccfeaf0ea858b663861ad78d193d1fd5d7dc8122d0ce55bf67b48fd2559f0a75",
+        "kind": "mutable_global",
+        "old_path": "internal/gui/serena_idle_sweeper.go",
+        "new_path": "internal/mcproute/serena_idle_sweeper.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "fc1b9b750a0712f2a3a31d6604499c0860f3f3914f3424023b3699c98a5118e2",
+        "new_block_sha256": "78331c65031105fc6f0ba1fd013fe134aa2537153b213049a34cb816242f670b"
+      },
+      {
+        "old_fingerprint": "ffedc0666cc8bacd0ccbb3fa819b139babf1910471b0156e18e371a618ef3f32",
+        "new_fingerprint": "b0d1c5cf01b5677c71a827f17b02998cecfccc235d672a3e02790c8d76706af4",
+        "kind": "worker",
+        "old_path": "internal/gui/serena_router.go",
+        "new_path": "internal/mcproute/serena_router.go",
+        "max_metric_preserved": null,
+        "remove_by_preserved": "2027-03-31",
+        "old_block_sha256": "fc10f75c3ccc928207731514ab5c08690f195ca18f8a277948e6062cd846cbc5",
+        "new_block_sha256": "afdb80196fd2273e7397f87e8bf64303aa9b8d30dea59dc001c2aa9f4a106c51"
+      }
+    ],
+    "deleted": {
+      "entry": {
+        "fingerprint": "01e4b2a59c6e741b82a920b31824c9121d486c2025516d21d383f6b65e4f6e71",
+        "kind": "file_budget",
+        "location": {
+          "path": "internal/gui/hub_listener.go",
+          "symbol": "gui",
+          "line": 1
+        },
+        "evidence": "production_advisory_lines",
+        "metric": 1294,
+        "message": "file has 1294 lines and exceeds production_advisory_lines",
+        "owner": "gui-adapter",
+        "work_package": "WP-11B",
+        "remove_by": "2027-03-31",
+        "reason": "GUI handlers become thin adapters over process-scoped application services.",
+        "max_metric": 1294
+      },
+      "source_block_sha256": "a476b9d631fef92125b71c7af3b857b64bf6b64c1fb0bd906a202c4b9560094d",
+      "proof": {
+        "actual_report_contains_old_identity": false,
+        "remaining_files": [
+          {
+            "path": "internal/gui/hub_listener.go",
+            "git_blob": "8ad65316ba372a58f58f7df247e2c5e73f14c357",
+            "lines": 783
+          },
+          {
+            "path": "internal/mcproute/hub_listener.go",
+            "git_blob": "337351d2de15e9667fb738a1384edb4a90bf49db",
+            "lines": 481
+          }
+        ],
+        "production_advisory_lines": 1000,
+        "actual_report_has_file_budget_for_remaining_files": false
+      }
+    }
+  },
+  "other_changes": {
+    "mcproute_owner": {
+      "owner": "mcp-runtime",
+      "work_package": "WP-11E"
+    },
+    "binaryadmission_owner": {
+      "owner": "lifecycle-runtime",
+      "work_package": "WP-11C"
+    },
+    "new_import_from_globs": [
+      "internal/binaryadmission/**",
+      "internal/mcproute/**"
+    ],
+    "unchanged_import_deny": [
+      "internal/app/**",
+      "internal/cli/**",
+      "internal/gui/**"
+    ],
+    "other_owner_rules_and_policy_unchanged": true,
+    "lifecycle_comment_only": {
+      "path": "internal/mcproute/serena_router_lifecycle.go",
+      "before_lines": 1800,
+      "after_lines": 1799,
+      "runtime_code_unchanged": true,
+      "metric_cap_raised": false
+    }
+  },
+  "scan_comparison": {
+    "base_scan_sha256": "1bd9fd47bef743af6285d0ff07dd41c125c7fc4690fe7eebf9a390864df42ec0",
+    "candidate_scan_sha256": "2c5b6585703ae17ec394fdf7a2713f263cf9e3af83aafacd6a0cadc7001958da",
+    "candidate_scan_bytes": 1207837,
+    "candidate_violation_count": 2671,
+    "same_full_violation_fingerprint_set_as_master": true,
+    "all_2671_actual_records_equal_prediction": true,
+    "only_scan_record_differences": "One lifecycle file-budget metric/message 1800 to 1799 and later line numbers shifted by one; no identity changes.",
+    "before": {
+      "New": 491,
+      "Stale": 231,
+      "Grown": 42,
+      "workers": 78,
+      "expired": 0,
+      "unowned": 0
+    },
+    "after": {
+      "New": 389,
+      "Stale": 128,
+      "Grown": 42,
+      "workers": 72,
+      "expired": 0,
+      "unowned": 0
+    },
+    "exact_residual_fingerprint_sets_match_prediction": true,
+    "all_42_growth_records_unchanged": true,
+    "residual_set_sha256": {
+      "New": "5afb4ade8a8a383509ec352bb57f5a7481d5033ec9cd51188d362eaa47fd4e97",
+      "Stale": "769eb91335735b1a170d0004aee8d375331da7eb74230b2f39acb1199001069a",
+      "Grown": "7ed13ac02a4cef2142f6b44a4ea343ce6fdf03682777f67ed0de8f72772e8cdd",
+      "workers": "ad8f9934dd3659756e4c436d524433230542489b5dd27ffa81cfc0a6bcd39117",
+      "expired": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "unowned": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    "new_by_kind": {
+      "api_construction": 30,
+      "file_budget": 25,
+      "history_comment": 44,
+      "import": 22,
+      "mutable_global": 186,
+      "production_test_hook": 10,
+      "worker": 72
+    },
+    "new_by_package": {
+      "internal/cli": 144,
+      "internal/api": 69,
+      "internal/clients": 31,
+      "internal/process": 28,
+      "internal/daemon": 28,
+      "internal/cbuild": 16,
+      "internal/sonnet": 12,
+      "internal/gui": 11,
+      "internal/binaryadmission": 9,
+      "internal/tray": 9,
+      "internal/e2e": 6,
+      "tools/test-job-entry": 5,
+      "cmd/mcphub": 4,
+      "internal/config": 4,
+      "internal/buildinfo": 4,
+      "internal/kimi": 3,
+      "internal/releasegen": 2,
+      "cmd/mcphub-launcher": 2,
+      "internal/oneapirun": 1,
+      "internal/scheduler": 1
+    },
+    "worker_count_is_subset_of_new_not_additional": true,
+    "verify_exit_code": 1
+  },
+  "evidence": {
+    "archive_filename": "architecture-evidence.zip",
+    "archive_bytes": 770237,
+    "archive_sha256": "ffb6130b84d4e1c5f6ea3a2f91d9442aba3d28cd62fc784ef727d4d2c1db547c",
+    "archive_entries": 662,
+    "manifest_entries": 661,
+    "all_manifest_sizes_and_sha256_verified": true,
+    "manifest_sha256": "358cdbc0375374d2635d8ccb8aaaf1172fc5f6b263fe29e1880b239d31ba79a2",
+    "raw_scans_equal_archive_members": true,
+    "commands": [
+      {
+        "archive_entry": "candidate/gofmt-check.receipt.json",
+        "receipt_sha256": "3ba08a934aeefb08182fbb8729ce7991a4513d83d680550f6184a37347eea865",
+        "label": "gofmt-check",
+        "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+        "args": [
+          "-l",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\manifests\\qualification\\candidate\\internal\\mcproute\\serena_router_lifecycle.go"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:05:15.689722+00:00",
+        "finished_utc": "2026-11-21T20:05:15.722591+00:00",
+        "exit_code": 0,
+        "seconds": 0.03224380000028759,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 60,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:05:15.722856+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:05:15.723066+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      },
+      {
+        "archive_entry": "candidate/full-scan.receipt.json",
+        "receipt_sha256": "ce48d9dcc5b2644d0467daa5fe5a414187a708456dcdaf98ab6a8306061665fc",
+        "label": "full-scan",
+        "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "args": [
+          "run",
+          "-overlay",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\evidence\\arch-qualified\\overlay.json",
+          "./tools/archcheck",
+          "scan",
+          "--root",
+          ".",
+          "--policy",
+          "architecture/policy.yaml"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:05:16.656851+00:00",
+        "finished_utc": "2026-11-21T20:06:05.182139+00:00",
+        "exit_code": 0,
+        "seconds": 48.52512670005672,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 360,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 1207837,
+          "sha256": "2c5b6585703ae17ec394fdf7a2713f263cf9e3af83aafacd6a0cadc7001958da",
+          "captured_utc": "2026-11-21T20:06:05.185121+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:06:05.185294+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      },
+      {
+        "archive_entry": "candidate/full-verify.receipt.json",
+        "receipt_sha256": "ad6b14711da29151798c80024317102407c6c22f88c167a1748668f3ab5417d8",
+        "label": "full-verify",
+        "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "args": [
+          "run",
+          "-overlay",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\evidence\\arch-qualified\\overlay.json",
+          "./tools/archcheck",
+          "verify",
+          "--root",
+          ".",
+          "--policy",
+          "architecture/policy.yaml",
+          "--owners",
+          "architecture/owners.yaml",
+          "--baseline",
+          "architecture/baseline.yaml",
+          "--workers",
+          "architecture/workers.yaml"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:06:06.039312+00:00",
+        "finished_utc": "2026-11-21T20:07:11.753952+00:00",
+        "exit_code": 1,
+        "seconds": 65.71445640001912,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 360,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:07:11.754200+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 99,
+          "sha256": "4991aa171eeee2797c79af9f9cb380b6769c85f19cf2c89b78c75c7504426a33",
+          "captured_utc": "2026-11-21T20:07:11.754363+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      },
+      {
+        "archive_entry": "candidate/arch-package-tests.receipt.json",
+        "receipt_sha256": "316c9a2ba411380e3eaa46c0e275ca8237ed3c64c1c7e892dd243f3f1e332a66",
+        "label": "arch-package-tests",
+        "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "args": [
+          "test",
+          "-overlay",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\evidence\\arch-qualified\\overlay.json",
+          "-race",
+          "-json",
+          "-count=1",
+          "-timeout=180s",
+          "./internal/archguard",
+          "./tools/archcheck"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:07:12.565990+00:00",
+        "finished_utc": "2026-11-21T20:07:26.565600+00:00",
+        "exit_code": 0,
+        "seconds": 13.999357099994086,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 360,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 245444,
+          "sha256": "df380f66a32e78e6f70fd154fe285f00cb9538e8f7e8f62d5e99a9952130a8d3",
+          "captured_utc": "2026-11-21T20:07:26.566382+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:07:26.566498+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      },
+      {
+        "archive_entry": "candidate-build-vet/full-build.receipt.json",
+        "receipt_sha256": "c71d51dc5e16562f73c28b932b6a92aa9cf979c9557c74cecd1d41905068ec92",
+        "label": "full-build",
+        "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "args": [
+          "build",
+          "-overlay",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\evidence\\arch-build-vet\\overlay.json",
+          "./..."
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:09:46.767040+00:00",
+        "finished_utc": "2026-11-21T20:10:05.819821+00:00",
+        "exit_code": 0,
+        "seconds": 19.052526999963447,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 600,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:10:05.820016+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:10:05.820110+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      },
+      {
+        "archive_entry": "candidate-build-vet/full-vet.receipt.json",
+        "receipt_sha256": "731a3fe5593e51db8155b55d86191a802d64680e891144b6e08b7ef81bf5989d",
+        "label": "full-vet",
+        "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "args": [
+          "vet",
+          "-overlay",
+          "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\evidence\\arch-build-vet\\overlay.json",
+          "./..."
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\arch-input\\source-arch",
+        "started_utc": "2026-11-21T20:10:06.598473+00:00",
+        "finished_utc": "2026-11-21T20:10:27.863302+00:00",
+        "exit_code": 0,
+        "seconds": 21.264597599976696,
+        "settled": true,
+        "timed_out": false,
+        "direct_timeout_seconds": 600,
+        "whole_process_tree_deadline_enforced": false,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:10:27.863490+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "captured_utc": "2026-11-21T20:10:27.863588+00:00",
+          "hash_scope": "bytes observed after direct-child exit"
+        },
+        "source_head": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+        "source_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+        "source_clean_before_and_after": true
+      }
+    ],
+    "wrappers": {
+      "architecture_qualification": {
+        "state": "failed",
+        "completed": false,
+        "error_type": "RuntimeError",
+        "error": "Qualification selected a skipped test",
+        "overlay_paths": [],
+        "whole_process_tree_deadline_enforced": false,
+        "direct_child_wait_bounded": true,
+        "process_tree_settlement_observed": false,
+        "native_task_operations": false,
+        "native_task_operations_basis": "Reviewed frozen argv and MCPHUB_E2E_SCHEDULER=none; not syscall enforcement"
+      },
+      "build_vet": {
+        "state": "complete",
+        "completed": true,
+        "error_type": null,
+        "error": null,
+        "overlay_paths": [],
+        "whole_process_tree_deadline_enforced": false,
+        "direct_child_wait_bounded": true,
+        "process_tree_settlement_observed": false,
+        "native_task_operations": false,
+        "native_task_operations_basis": "Reviewed frozen argv and MCPHUB_E2E_SCHEDULER=none; not syscall enforcement"
+      }
+    },
+    "race_tests": {
+      "go_exit_code": 0,
+      "pass_events_total": 280,
+      "test_pass_events": 278,
+      "package_pass_events": 2,
+      "fail_events": 0,
+      "skip_events": 1,
+      "skipped_test": "TestUnixBackslashPathRemainsDistinct",
+      "qualification_wrapper_status": "FAILED",
+      "package_terminal_events": [
+        {
+          "Time": "2026-11-21T23:07:23.3162519+03:00",
+          "Action": "pass",
+          "Package": "mcp-local-hub/internal/archguard",
+          "Elapsed": 3.219
+        },
+        {
+          "Time": "2026-11-21T23:07:26.4523318+03:00",
+          "Action": "pass",
+          "Package": "mcp-local-hub/tools/archcheck",
+          "Elapsed": 4.785
+        }
+      ]
+    }
+  },
+  "claim_limits": [
+    "The full architecture verification remains exit 1; 389 New, 128 Stale, 42 Grown, and 72 unclassified workers remain.",
+    "The architecture qualification wrapper remains FAILED because its selected test set included one SKIP.",
+    "The successful build and vet phase does not replace the failed qualification wrapper or full test gates.",
+    "The Unix-only backslash test did not execute on this Windows run; no Unix or cross-platform execution claim follows.",
+    "The runner bounded direct-child waits but did not enforce a whole-process-tree deadline or observe process-tree settlement.",
+    "Empty worker registry and six legacy baseline migrations do not prove new cancellation/join/timeout ownership contracts.",
+    "Counts apply only to master plus these four source files; preservation checkpoint 858812988833a84368c60fba1540ae601155fa71 and runtime helper changes need separate composed-tree qualification.",
+    "This reviewer inspected stored evidence only and did not run Go, native commands, remote changes, publication, CI, or dependency installation."
+  ]
+}
