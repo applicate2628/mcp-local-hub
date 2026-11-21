@@ -1,0 +1,65 @@
+{
+  "group": "cli",
+  "source_parent": "858812988833a84368c60fba1540ae601155fa71",
+  "source_parent_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "files": [
+    {
+      "path": "internal/cli/daemon_mcpcompat_test.go",
+      "bytes": 4989,
+      "sha256": "863c35b2e567763d855116e0acbea54d8fbafa06f0fa7b9aef3da46b9197f377",
+      "git_blob": "1ae992b21f00bf56b5abef18e45a21c1e207265c"
+    },
+    {
+      "path": "internal/cli/secrets_audit_test.go",
+      "bytes": 21702,
+      "sha256": "c423cccb8fb89ab850c0126fc9aa03a04ec9eaaab1d1314077029827ccfffbdc",
+      "git_blob": "7a5ed33e35b440a6f999d8f3c3a3e8c1dfe428cd"
+    },
+    {
+      "path": "internal/cli/secrets_helper_dispatch_test.go",
+      "bytes": 2170,
+      "sha256": "19445ecbf8eda456dab02a89e464fe2e26f6a83c0ae1c351f4cd890cbcf59bb5",
+      "git_blob": "de5d5db25e4250cf6124907c7d417f24ad032d91"
+    },
+    {
+      "path": "internal/cli/settings_registry_test.go",
+      "bytes": 31661,
+      "sha256": "4b2d439005aab3ca44e7a849d1279d8ef2432f9bd8b44b28bf7afd048c828c35",
+      "git_blob": "c5e33df12c58968756efc7305a01568afbaf5cd4"
+    },
+    {
+      "path": "internal/cli/testmain_dispatch_test.go",
+      "bytes": 16814,
+      "sha256": "a6dea359e9e2549bb0361b4f22f3be7c37a992110fc2e0edfcaa55ec9d43e680",
+      "git_blob": "57faa4775e40360830a8b5ee0cf5bcfb34c782bc"
+    },
+    {
+      "path": "internal/cli/testmain_helpers_test.go",
+      "bytes": 4750,
+      "sha256": "f65df497dbfb923c4db53615e3e56b84c58c2ab13cb643c899374d9e664e9213",
+      "git_blob": "9ed964e645f4ce022a5afde86bfe86df0991adf5"
+    },
+    {
+      "path": "internal/cli/testmain_paths_other_test.go",
+      "bytes": 764,
+      "sha256": "900ebd5091fbe0fc5a8d3a7778645b0af15eafa020740025f1fdfafc300e1772",
+      "git_blob": "9bd5cf27131490c9c96b9a74f1bbfb95a7803f5a"
+    },
+    {
+      "path": "internal/cli/testmain_paths_windows_test.go",
+      "bytes": 1117,
+      "sha256": "ac2cd47de0d212ec5bb05844a6066645fc9277bf2192f88f208f0ffd0d1dbc0b",
+      "git_blob": "e248ed590868ac4a9b08f3763de9e06028de4761"
+    }
+  ],
+  "publication_status": "Code commit is retained as the parent of the containing evidence publication",
+  "code_commit": "9ece512541ef7963660f82a8b5fa54cac8fc97e0",
+  "code_tree": "16ece5ec32837f09431265dda18464b04b8c29d1",
+  "qualification": "Physical source_parent with exact overlays; no standalone published-head test claim",
+  "related_canonical_input": {
+    "code_commit": "97ff6da0c428a8c30f1952da470e3ff033a740e4",
+    "path": "internal/cli/gui_force_test.go",
+    "sha256": "df9944ad7435aa1613bb6353bc45a219d34ab8a683cee2e04edb9d458c51fdc1",
+    "qualified_with_cli_but_not_changed_in_cli_commit": true
+  }
+}
