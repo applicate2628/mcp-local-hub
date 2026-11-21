@@ -1010,7 +1010,7 @@ func startVaultFlockHolder(t *testing.T, vaultPath string) func() {
 	dir := t.TempDir()
 	readyPath := filepath.Join(dir, "ready")
 	releasePath := filepath.Join(dir, "release")
-	cmd := exec.Command(os.Args[0], "-test.run=TestVaultFlockHelperProcess")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestVaultFlockHelperProcess$")
 	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		"MCPHUB_TEST_HOLD_VAULT_LOCK=1",

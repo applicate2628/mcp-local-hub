@@ -80,7 +80,7 @@ func TestIntentAudit_CallerStartTimeAgainstIndependentOracle(t *testing.T) {
 	// The oracle sample. Taken as late as possible before spawn.
 	before := time.Now().UTC()
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestIntentAudit_CallerStartTimeAgainstIndependentOracle")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$")
 	cmd.Env = append(os.Environ(),
 		callerStartTimeChildStateDirEnv+"="+stateDir,
 		callerStartTimeChildDelayEnv+"="+strconv.Itoa(int(childDelay/time.Millisecond)),
