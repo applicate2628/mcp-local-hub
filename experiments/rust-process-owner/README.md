@@ -150,6 +150,8 @@ Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `wi
 
 **41 native integration tests, 28 unit tests and two compile-fail doctests passed: 71 in each of debug and release** for the TokenUser increment. The unit count comprises nine earlier native-failure, eight creation-time/Job/wait, three encoding/validation and eight TokenUser tests. The original 13 lifecycle tests still cover at-create suspension/membership, one-shot admission, retained pending owners, descendants, root outcomes, UTF-16 argument quoting and repeated lifecycle handle counts; the fourteenth compares creation identity with the child and the fifteenth compares its independently queried TokenUser SID. Earlier qualification records retain their original counts and source identities.
 
+The later read-only `process_view()` increment has a separate [query qualification report](verification/query-2026-11-15/RESULTS.md): **30 unit + 43 integration + 3 compile-fail = 76 checks in debug**, with an independent repeat. The complete native release suite was not repeated for that increment. These are preserved results on the report's pinned source, not a new execution triggered by this documentation update.
+
 **Table 6. Ten original native stdio cases (plus explicit-context composition).**
 
 | Tested behavior | Evidence |
