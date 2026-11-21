@@ -1,0 +1,25 @@
+{
+  "schema": "r25-append-publication-v1",
+  "pr": 661,
+  "branch": "test/serena-conflict-validation-oracle-20261121",
+  "before": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "after": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+  "tree": "39f1eae0bf7e11c81a2acc6c9badc470429b5e03",
+  "parents": [
+    "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+  ],
+  "files": [
+    {
+      "path": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+      "status": "modified",
+      "additions": 35,
+      "deletions": 20,
+      "blob": "4768fce28e27a73baf5fc9973b015fc706fbfb6c"
+    }
+  ],
+  "published_file_readback_exact": true,
+  "source_qualification": "Exact master parent plus byte-identical overlay",
+  "published_head_executed": false,
+  "draft": true,
+  "merged": false
+}

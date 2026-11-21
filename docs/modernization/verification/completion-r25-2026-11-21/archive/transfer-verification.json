@@ -1,0 +1,31 @@
+{
+  "schema": "r25-local-public-transfer-v1",
+  "transfer_integrity": "PASS",
+  "raw_zip_transferred": false,
+  "source": "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\publication\\package-20261121T130804Z-a18202cb28444e27b2b0ec2c2f95539d",
+  "remote_transfer_directory": "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\transfer-public-e68035faff1d4a43b9363db99b2983aa",
+  "index_sha256": "5143480a3c9be41a678301c49f60ec251e596f4432058591ecf10401016d39b6",
+  "parts": 75,
+  "files": [
+    {
+      "path": "archives.json",
+      "bytes": 920,
+      "sha256": "aa13912182114e0b1add6f0774044a81c18ed9e442be63c62166b6f22504f682"
+    },
+    {
+      "path": "public.zip",
+      "bytes": 2047483,
+      "sha256": "e4da7afcf31d5310df6fcd3d10e13938c01f5b997d7677c9708583c87a6dcf55"
+    },
+    {
+      "path": "manifest.public.json",
+      "bytes": 1187225,
+      "sha256": "cd49af58398fd05c2abb89f0cd943a16cea66aa1406c8742e228b09d9ec466fd"
+    },
+    {
+      "path": "summary.public.json",
+      "bytes": 11578,
+      "sha256": "a47da3e9ae7c7f446969fbdfcd8c7c85ab78472b05be84dab001ab0b909740c8"
+    }
+  ]
+}

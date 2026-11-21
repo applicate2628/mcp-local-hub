@@ -1,0 +1,136 @@
+{
+  "inputs": 2698,
+  "failures": 684,
+  "cross_api_differences": {
+    "st_ctime_ns": 684
+  },
+  "path_pair_stable": true,
+  "handle_pair_stable": true,
+  "common_identity_stable": true,
+  "examples": [
+    {
+      "name": "evidence/cmake-retention-before-clear/consumer-retention.launched.json",
+      "error": "Input changed while opening",
+      "before": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535931,
+        "st_size": 1399,
+        "st_mtime_ns": 1795264895105777100,
+        "st_ctime_ns": 1795264895105266100,
+        "st_birthtime_ns": 1795264895105266100,
+        "st_file_attributes": 32
+      },
+      "opened": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535931,
+        "st_size": 1399,
+        "st_mtime_ns": 1795264895105777100,
+        "st_ctime_ns": 1795264895105777100,
+        "st_birthtime_ns": 1795264895105266100,
+        "st_file_attributes": 32
+      },
+      "after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535931,
+        "st_size": 1399,
+        "st_mtime_ns": 1795264895105777100,
+        "st_ctime_ns": 1795264895105777100,
+        "st_birthtime_ns": 1795264895105266100,
+        "st_file_attributes": 32
+      },
+      "path_after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535931,
+        "st_size": 1399,
+        "st_mtime_ns": 1795264895105777100,
+        "st_ctime_ns": 1795264895105266100,
+        "st_birthtime_ns": 1795264895105266100,
+        "st_file_attributes": 32
+      },
+      "sha256": "87cdbcef936a54f748426d00237a6d31366126694f70e228243bbe2acdbb7f35"
+    },
+    {
+      "name": "evidence/cmake-retention-before-clear/consumer-retention.receipt.json",
+      "error": "Input changed while opening",
+      "before": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 1125899911246665,
+        "st_size": 3011,
+        "st_mtime_ns": 1795264898163115200,
+        "st_ctime_ns": 1795264898151604100,
+        "st_birthtime_ns": 1795264898151604100,
+        "st_file_attributes": 32
+      },
+      "opened": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 1125899911246665,
+        "st_size": 3011,
+        "st_mtime_ns": 1795264898163115200,
+        "st_ctime_ns": 1795264898163115200,
+        "st_birthtime_ns": 1795264898151604100,
+        "st_file_attributes": 32
+      },
+      "after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 1125899911246665,
+        "st_size": 3011,
+        "st_mtime_ns": 1795264898163115200,
+        "st_ctime_ns": 1795264898163115200,
+        "st_birthtime_ns": 1795264898151604100,
+        "st_file_attributes": 32
+      },
+      "path_after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 1125899911246665,
+        "st_size": 3011,
+        "st_mtime_ns": 1795264898163115200,
+        "st_ctime_ns": 1795264898151604100,
+        "st_birthtime_ns": 1795264898151604100,
+        "st_file_attributes": 32
+      },
+      "sha256": "de075f3339b24c1115bc94ef8fe6516b85fba7fb465135853ea0c6a25c1ed9bc"
+    },
+    {
+      "name": "evidence/cmake-retention-before-clear/consumer-retention.stdout.log",
+      "error": "Input changed while opening",
+      "before": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535926,
+        "st_size": 47952,
+        "st_mtime_ns": 1795264897640541700,
+        "st_ctime_ns": 1795264895100974000,
+        "st_birthtime_ns": 1795264895100974000,
+        "st_file_attributes": 32
+      },
+      "opened": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535926,
+        "st_size": 47952,
+        "st_mtime_ns": 1795264897640541700,
+        "st_ctime_ns": 1795264897640541700,
+        "st_birthtime_ns": 1795264895100974000,
+        "st_file_attributes": 32
+      },
+      "after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535926,
+        "st_size": 47952,
+        "st_mtime_ns": 1795264897640541700,
+        "st_ctime_ns": 1795264897640541700,
+        "st_birthtime_ns": 1795264895100974000,
+        "st_file_attributes": 32
+      },
+      "path_after": {
+        "st_dev": 11865562527820811924,
+        "st_ino": 844424934535926,
+        "st_size": 47952,
+        "st_mtime_ns": 1795264897640541700,
+        "st_ctime_ns": 1795264895100974000,
+        "st_birthtime_ns": 1795264895100974000,
+        "st_file_attributes": 32
+      },
+      "sha256": "0b588dc82813457059169c560ae9972210420bea788b8274540e028d2199e227"
+    }
+  ],
+  "scope": "Exact Python integer parsing of remote text; readback JSON is LF text, original redirected stdout remains on D."
+}

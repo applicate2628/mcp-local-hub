@@ -1,0 +1,5085 @@
+{
+  "schema": "r25-cmake-retention-reduction-v1",
+  "validated": true,
+  "problems": [],
+  "source_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+  "source_tree": "50585004a112d5ca4c8c35b105d129fac5d88c4c",
+  "helper_sha256": "c73994c1e23f1ebdc00f56abae36a1f987ac88e6f8f711e753c889940ff4c13f",
+  "scope_manifest_sha256": "6c7340d211be812e70f88e278ac062c95dbfd1a98bfc0a9c54021d228de070e1",
+  "wrapper_sha256": "610269f4e6841d336c4339abafe94751db8386d49c3fa4a2ce3bb103a794984e",
+  "external_input_pins": {
+    "original_oracle_sha256": "75cfff1d98fbc3ebd1e7d2acafc37d56f6999d0b8112de68ceefe80e634fb381",
+    "original_oracle_bytes": 891803,
+    "original_trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+    "original_trace_bytes": 11827770,
+    "enforcement": "helper checks pinned original oracle digest and all original trace/fixture hashes before and after consumers"
+  },
+  "integrity": {
+    "before-clear": {
+      "stdout_bytes": 47952,
+      "stdout_sha256": "0b588dc82813457059169c560ae9972210420bea788b8274540e028d2199e227",
+      "local_reserialized_receipt_sha256": "769e4c0006bba414ee591de9141ba7d5504580fe9cf1b5eb01bff644a96b73c9",
+      "receipt_hash_scope": "local parsed JSON serialization; original receipt bytes retained by runner"
+    },
+    "current": {
+      "stdout_bytes": 47860,
+      "stdout_sha256": "bf0b212592753716be0a4956cd3433287fea9d6c939c4a2103082ada503a3bda",
+      "local_reserialized_receipt_sha256": "dff5e442990da0e71bef8b3ea0c96b72e746693db2c84f7a326fdb9dbdec2dde",
+      "receipt_hash_scope": "local parsed JSON serialization; original receipt bytes retained by runner"
+    }
+  },
+  "matching_runtime": {
+    "go_version": "go1.27.4",
+    "gomaxprocs": 4
+  },
+  "normalized_equal_environment": {
+    "APPDATA": "<OWNED_PHASE_ROOT>/appdata",
+    "COMSPEC": "C:\\WINDOWS\\system32\\cmd.exe",
+    "LOCALAPPDATA": "<OWNED_PHASE_ROOT>/localappdata",
+    "NUMBER_OF_PROCESSORS": "12",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JSE;.WSF;.WSH;.MSC;.CPL ",
+    "PROCESSOR_ARCHITECTURE": "AMD64",
+    "SYSTEMDRIVE": "C:",
+    "SYSTEMROOT": "C:\\WINDOWS",
+    "TEMP": "<OWNED_PHASE_ROOT>/tmp",
+    "TMP": "<OWNED_PHASE_ROOT>/tmp",
+    "USERPROFILE": "<OWNED_PHASE_ROOT>/profile",
+    "WINDIR": "C:\\WINDOWS",
+    "GOROOT": "C:\\msys64\\ucrt64\\lib\\go",
+    "GOENV": "off",
+    "GOTOOLCHAIN": "local",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOVCS": "*:off",
+    "GOWORK": "off",
+    "GOFLAGS": "-mod=readonly",
+    "GOMODCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gomodcache",
+    "GOPATH": "<OWNED_PHASE_ROOT>/gopath",
+    "CC": "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+    "CGO_ENABLED": "1",
+    "GOMAXPROCS": "4",
+    "GOTELEMETRY": "off",
+    "MCPHUB_NO_AUTO_GUI": "1",
+    "MCPHUB_E2E_SCHEDULER": "none",
+    "TMPDIR": "<OWNED_PHASE_ROOT>/tmp",
+    "GOTMPDIR": "<OWNED_PHASE_ROOT>/tmp",
+    "XDG_CONFIG_HOME": "<OWNED_PHASE_ROOT>/xdg-config",
+    "XDG_CACHE_HOME": "<OWNED_PHASE_ROOT>/xdg-cache",
+    "XDG_DATA_HOME": "<OWNED_PHASE_ROOT>/xdg-data",
+    "PSModuleAnalysisCachePath": "<OWNED_PHASE_ROOT>/localappdata/module-cache",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "<OWNED_PHASE_ROOT>/no-global-config",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GCM_INTERACTIVE": "never",
+    "GOCACHE": "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\gocache",
+    "HOME": "<OWNED_PHASE_ROOT>/profile",
+    "PATH": "C:\\msys64\\ucrt64\\bin;C:\\Program Files\\Git\\cmd;C:\\WINDOWS\\System32;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0",
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "GOAMD64": "v1",
+    "GO111MODULE": "on",
+    "GOEXPERIMENT": "",
+    "GOFIPS140": "off",
+    "GOCACHEPROG": "",
+    "GOPRIVATE": "",
+    "GONOPROXY": "none",
+    "GONOSUMDB": "none",
+    "TEST_TELEMETRY_DIR": "",
+    "GO_TELEMETRY_CHILD": "",
+    "GO_TELEMETRY_CHILD_UPLOAD": "",
+    "MCPHUB_SUPPRESS_BROWSER_LAUNCH": "1",
+    "MIMOCODE_DISABLE_CLAUDE_CODE_MCP": "1",
+    "GIT_LFS_SKIP_SMUDGE": "1"
+  },
+  "gc_settings_in_environment": {
+    "GOGC": "<unset>",
+    "GOMEMLIMIT": "<unset>",
+    "GODEBUG": "<unset>"
+  },
+  "equal_tool_hashes": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\Program Files\\Git\\cmd\\git.exe": "20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "semantics_equal_across_all_rows_by_case": {
+    "selected-32": {
+      "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+      "trace_bytes": 11827770,
+      "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+      "wire_bytes_each": 33720,
+      "wire_records_each": 32,
+      "internal_records_each": 32,
+      "record_capacity_each": 17578
+    },
+    "selected-1000": {
+      "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+      "trace_bytes": 11827770,
+      "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+      "wire_bytes_each": 919,
+      "wire_records_each": 0,
+      "internal_records_each": 1000,
+      "record_capacity_each": 17578
+    },
+    "last-marker": {
+      "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+      "trace_bytes": 11827770,
+      "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+      "wire_bytes_each": 8238,
+      "wire_records_each": 1,
+      "internal_records_each": 1,
+      "record_capacity_each": 17578
+    }
+  },
+  "variants": {
+    "before-clear": {
+      "rows": [
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 49967200,
+          "worker_intervals_ns": [
+            [
+              0,
+              49967200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 967872,
+            "heap_objects": 3139,
+            "heap_inuse_bytes": 1605632,
+            "heap_released_bytes": 1040384,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 25987320,
+            "total_alloc_bytes": 47569944,
+            "mallocs": 105242,
+            "gc_cycles": 12
+          },
+          "after_work": {
+            "heap_alloc_bytes": 15245656,
+            "heap_objects": 41983,
+            "heap_inuse_bytes": 16449536,
+            "heap_released_bytes": 4530176,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 92889688,
+            "mallocs": 205552,
+            "gc_cycles": 21
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12663840,
+            "heap_objects": 35965,
+            "heap_inuse_bytes": 13467648,
+            "heap_released_bytes": 4956160,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 92975112,
+            "mallocs": 205801,
+            "gc_cycles": 23
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1009128,
+            "heap_objects": 3141,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 5840896,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 92975112,
+            "mallocs": 205801,
+            "gc_cycles": 25
+          },
+          "released": {
+            "heap_alloc_bytes": 968120,
+            "heap_objects": 3138,
+            "heap_inuse_bytes": 1630208,
+            "heap_released_bytes": 6758400,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 92975112,
+            "mallocs": 205801,
+            "gc_cycles": 27
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 49409900,
+          "worker_intervals_ns": [
+            [
+              0,
+              49409900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 983016,
+            "heap_objects": 3291,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 7430144,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 93020352,
+            "mallocs": 206077,
+            "gc_cycles": 29
+          },
+          "after_work": {
+            "heap_alloc_bytes": 16339264,
+            "heap_objects": 44710,
+            "heap_inuse_bytes": 17563648,
+            "heap_released_bytes": 4579328,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 138334960,
+            "mallocs": 306377,
+            "gc_cycles": 38
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12679048,
+            "heap_objects": 36115,
+            "heap_inuse_bytes": 13508608,
+            "heap_released_bytes": 4579328,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 138420384,
+            "mallocs": 306626,
+            "gc_cycles": 40
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1024448,
+            "heap_objects": 3293,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 5464064,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 138420384,
+            "mallocs": 306626,
+            "gc_cycles": 42
+          },
+          "released": {
+            "heap_alloc_bytes": 983440,
+            "heap_objects": 3290,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 6348800,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 138420384,
+            "mallocs": 306626,
+            "gc_cycles": 44
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 50319800,
+          "worker_intervals_ns": [
+            [
+              0,
+              50319800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 983720,
+            "heap_objects": 3294,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 7233536,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 138441352,
+            "mallocs": 306673,
+            "gc_cycles": 46
+          },
+          "after_work": {
+            "heap_alloc_bytes": 19178048,
+            "heap_objects": 48289,
+            "heap_inuse_bytes": 20537344,
+            "heap_released_bytes": 4333568,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183748656,
+            "mallocs": 406955,
+            "gc_cycles": 54
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12678936,
+            "heap_objects": 36113,
+            "heap_inuse_bytes": 13524992,
+            "heap_released_bytes": 4186112,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183834080,
+            "mallocs": 407204,
+            "gc_cycles": 56
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1024448,
+            "heap_objects": 3293,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 4972544,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183834080,
+            "mallocs": 407204,
+            "gc_cycles": 58
+          },
+          "released": {
+            "heap_alloc_bytes": 983440,
+            "heap_objects": 3290,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 5890048,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183834080,
+            "mallocs": 407204,
+            "gc_cycles": 60
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 71603200,
+          "worker_intervals_ns": [
+            [
+              527600,
+              71603200
+            ],
+            [
+              527600,
+              68533100
+            ],
+            [
+              527600,
+              70094600
+            ],
+            [
+              0,
+              71603200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 984464,
+            "heap_objects": 3293,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 6782976,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183858760,
+            "mallocs": 407283,
+            "gc_cycles": 62
+          },
+          "after_work": {
+            "heap_alloc_bytes": 58596592,
+            "heap_objects": 159887,
+            "heap_inuse_bytes": 61964288,
+            "heap_released_bytes": 2670592,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 94980344,
+            "total_alloc_bytes": 365036720,
+            "mallocs": 808303,
+            "gc_cycles": 75
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47766536,
+            "heap_objects": 134562,
+            "heap_inuse_bytes": 49430528,
+            "heap_released_bytes": 3129344,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 365375416,
+            "mallocs": 809230,
+            "gc_cycles": 77
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1149656,
+            "heap_objects": 3305,
+            "heap_inuse_bytes": 1835008,
+            "heap_released_bytes": 4046848,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 365375416,
+            "mallocs": 809230,
+            "gc_cycles": 79
+          },
+          "released": {
+            "heap_alloc_bytes": 985696,
+            "heap_objects": 3299,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 4964352,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 365375416,
+            "mallocs": 809230,
+            "gc_cycles": 81
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 66837400,
+          "worker_intervals_ns": [
+            [
+              0,
+              61249300
+            ],
+            [
+              0,
+              57705000
+            ],
+            [
+              511400,
+              61249300
+            ],
+            [
+              0,
+              66837400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 987072,
+            "heap_objects": 3305,
+            "heap_inuse_bytes": 1662976,
+            "heap_released_bytes": 5816320,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 365398072,
+            "mallocs": 809283,
+            "gc_cycles": 83
+          },
+          "after_work": {
+            "heap_alloc_bytes": 63699152,
+            "heap_objects": 168869,
+            "heap_inuse_bytes": 67338240,
+            "heap_released_bytes": 2138112,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 546602312,
+            "mallocs": 1210353,
+            "gc_cycles": 95
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47775336,
+            "heap_objects": 134597,
+            "heap_inuse_bytes": 49463296,
+            "heap_released_bytes": 2596864,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 546941008,
+            "mallocs": 1211280,
+            "gc_cycles": 97
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1157680,
+            "heap_objects": 3327,
+            "heap_inuse_bytes": 1835008,
+            "heap_released_bytes": 3514368,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 546941008,
+            "mallocs": 1211280,
+            "gc_cycles": 99
+          },
+          "released": {
+            "heap_alloc_bytes": 993720,
+            "heap_objects": 3321,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 4431872,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 546941008,
+            "mallocs": 1211280,
+            "gc_cycles": 101
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 68484900,
+          "worker_intervals_ns": [
+            [
+              2543900,
+              66804900
+            ],
+            [
+              2543900,
+              61436200
+            ],
+            [
+              2543900,
+              61436200
+            ],
+            [
+              2543900,
+              68484900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 994840,
+            "heap_objects": 3325,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 5349376,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 95242488,
+            "total_alloc_bytes": 546962912,
+            "mallocs": 1211327,
+            "gc_cycles": 103
+          },
+          "after_work": {
+            "heap_alloc_bytes": 74803208,
+            "heap_objects": 171227,
+            "heap_inuse_bytes": 78798848,
+            "heap_released_bytes": 4472832,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 727998992,
+            "mallocs": 1612324,
+            "gc_cycles": 116
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47775320,
+            "heap_objects": 134587,
+            "heap_inuse_bytes": 49414144,
+            "heap_released_bytes": 4734976,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 728337880,
+            "mallocs": 1613254,
+            "gc_cycles": 118
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1158272,
+            "heap_objects": 3329,
+            "heap_inuse_bytes": 1835008,
+            "heap_released_bytes": 5521408,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 728337880,
+            "mallocs": 1613254,
+            "gc_cycles": 120
+          },
+          "released": {
+            "heap_alloc_bytes": 994312,
+            "heap_objects": 3323,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 6438912,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 728337880,
+            "mallocs": 1613254,
+            "gc_cycles": 122
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 49510600,
+          "worker_intervals_ns": [
+            [
+              0,
+              49510600
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1004192,
+            "heap_objects": 3441,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 15392768,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 773662376,
+            "mallocs": 1714053,
+            "gc_cycles": 134
+          },
+          "after_work": {
+            "heap_alloc_bytes": 14283512,
+            "heap_objects": 40689,
+            "heap_inuse_bytes": 15253504,
+            "heap_released_bytes": 24371200,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 818743664,
+            "mallocs": 1814528,
+            "gc_cycles": 144
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12659136,
+            "heap_objects": 36254,
+            "heap_inuse_bytes": 13500416,
+            "heap_released_bytes": 25288704,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 818937824,
+            "mallocs": 1814595,
+            "gc_cycles": 146
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1004984,
+            "heap_objects": 3440,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 26206208,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 818937824,
+            "mallocs": 1814595,
+            "gc_cycles": 148
+          },
+          "released": {
+            "heap_alloc_bytes": 1003912,
+            "heap_objects": 3437,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 26730496,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 818937824,
+            "mallocs": 1814595,
+            "gc_cycles": 150
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 45658500,
+          "worker_intervals_ns": [
+            [
+              0,
+              45658500
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1004448,
+            "heap_objects": 3443,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 27582464,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 818959544,
+            "mallocs": 1814648,
+            "gc_cycles": 152
+          },
+          "after_work": {
+            "heap_alloc_bytes": 14685976,
+            "heap_objects": 41649,
+            "heap_inuse_bytes": 15671296,
+            "heap_released_bytes": 33218560,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 864060952,
+            "mallocs": 1915148,
+            "gc_cycles": 161
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12659840,
+            "heap_objects": 36264,
+            "heap_inuse_bytes": 13492224,
+            "heap_released_bytes": 34136064,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 864255112,
+            "mallocs": 1915215,
+            "gc_cycles": 163
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1005240,
+            "heap_objects": 3442,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 35053568,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 864255112,
+            "mallocs": 1915215,
+            "gc_cycles": 165
+          },
+          "released": {
+            "heap_alloc_bytes": 1004168,
+            "heap_objects": 3439,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 35643392,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 864255112,
+            "mallocs": 1915215,
+            "gc_cycles": 167
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 47981900,
+          "worker_intervals_ns": [
+            [
+              0,
+              47981900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1004448,
+            "heap_objects": 3443,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 36560896,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 864276080,
+            "mallocs": 1915262,
+            "gc_cycles": 169
+          },
+          "after_work": {
+            "heap_alloc_bytes": 19880104,
+            "heap_objects": 50846,
+            "heap_inuse_bytes": 21086208,
+            "heap_released_bytes": 42983424,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 909372544,
+            "mallocs": 2015759,
+            "gc_cycles": 178
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12659840,
+            "heap_objects": 36263,
+            "heap_inuse_bytes": 13492224,
+            "heap_released_bytes": 43704320,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 909566704,
+            "mallocs": 2015826,
+            "gc_cycles": 180
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1005352,
+            "heap_objects": 3443,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 44621824,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 909566704,
+            "mallocs": 2015826,
+            "gc_cycles": 182
+          },
+          "released": {
+            "heap_alloc_bytes": 1004280,
+            "heap_objects": 3440,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 45539328,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 909566704,
+            "mallocs": 2015826,
+            "gc_cycles": 184
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 71755700,
+          "worker_intervals_ns": [
+            [
+              0,
+              62420200
+            ],
+            [
+              0,
+              62420200
+            ],
+            [
+              0,
+              62420200
+            ],
+            [
+              0,
+              71755700
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1005304,
+            "heap_objects": 3443,
+            "heap_inuse_bytes": 1695744,
+            "heap_released_bytes": 46456832,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 909591384,
+            "mallocs": 2015905,
+            "gc_cycles": 186
+          },
+          "after_work": {
+            "heap_alloc_bytes": 78700760,
+            "heap_objects": 198236,
+            "heap_inuse_bytes": 82296832,
+            "heap_released_bytes": 9273344,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1089919416,
+            "mallocs": 2417721,
+            "gc_cycles": 198
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47627376,
+            "heap_objects": 134712,
+            "heap_inuse_bytes": 49299456,
+            "heap_released_bytes": 8478720,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1090694528,
+            "mallocs": 2417932,
+            "gc_cycles": 200
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1010288,
+            "heap_objects": 3452,
+            "heap_inuse_bytes": 1720320,
+            "heap_released_bytes": 9396224,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1090694528,
+            "mallocs": 2417932,
+            "gc_cycles": 202
+          },
+          "released": {
+            "heap_alloc_bytes": 1006072,
+            "heap_objects": 3446,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 10313728,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1090694528,
+            "mallocs": 2417932,
+            "gc_cycles": 204
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 73752200,
+          "worker_intervals_ns": [
+            [
+              0,
+              64740000
+            ],
+            [
+              0,
+              68389500
+            ],
+            [
+              0,
+              73752200
+            ],
+            [
+              0,
+              69486800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1007448,
+            "heap_objects": 3452,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 11231232,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1090717184,
+            "mallocs": 2417985,
+            "gc_cycles": 206
+          },
+          "after_work": {
+            "heap_alloc_bytes": 63888256,
+            "heap_objects": 172524,
+            "heap_inuse_bytes": 66977792,
+            "heap_released_bytes": 3719168,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1271059208,
+            "mallocs": 2819837,
+            "gc_cycles": 218
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47629352,
+            "heap_objects": 134730,
+            "heap_inuse_bytes": 49324032,
+            "heap_released_bytes": 4014080,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1271834320,
+            "mallocs": 2820048,
+            "gc_cycles": 220
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1011808,
+            "heap_objects": 3462,
+            "heap_inuse_bytes": 1736704,
+            "heap_released_bytes": 4931584,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1271834320,
+            "mallocs": 2820048,
+            "gc_cycles": 222
+          },
+          "released": {
+            "heap_alloc_bytes": 1007592,
+            "heap_objects": 3456,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 5783552,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1271834320,
+            "mallocs": 2820048,
+            "gc_cycles": 224
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 75307900,
+          "worker_intervals_ns": [
+            [
+              0,
+              67557300
+            ],
+            [
+              0,
+              67557300
+            ],
+            [
+              0,
+              70151000
+            ],
+            [
+              0,
+              75307900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1008712,
+            "heap_objects": 3460,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 6701056,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1271856224,
+            "mallocs": 2820095,
+            "gc_cycles": 226
+          },
+          "after_work": {
+            "heap_alloc_bytes": 66674816,
+            "heap_objects": 175971,
+            "heap_inuse_bytes": 69844992,
+            "heap_released_bytes": 6217728,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1452182200,
+            "mallocs": 3221914,
+            "gc_cycles": 238
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47630120,
+            "heap_objects": 134728,
+            "heap_inuse_bytes": 49356800,
+            "heap_released_bytes": 6676480,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1452957688,
+            "mallocs": 3222142,
+            "gc_cycles": 240
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1012992,
+            "heap_objects": 3466,
+            "heap_inuse_bytes": 1736704,
+            "heap_released_bytes": 7462912,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1452957688,
+            "mallocs": 3222142,
+            "gc_cycles": 242
+          },
+          "released": {
+            "heap_alloc_bytes": 1008776,
+            "heap_objects": 3460,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 8249344,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1452957688,
+            "mallocs": 3222142,
+            "gc_cycles": 244
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 42329100,
+          "worker_intervals_ns": [
+            [
+              0,
+              42329100
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1008928,
+            "heap_objects": 3464,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 16769024,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1498141320,
+            "mallocs": 3322624,
+            "gc_cycles": 256
+          },
+          "after_work": {
+            "heap_alloc_bytes": 16460592,
+            "heap_objects": 45495,
+            "heap_inuse_bytes": 17661952,
+            "heap_released_bytes": 21684224,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1543268896,
+            "mallocs": 3422869,
+            "gc_cycles": 265
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12687928,
+            "heap_objects": 36686,
+            "heap_inuse_bytes": 13574144,
+            "heap_released_bytes": 22601728,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1543294656,
+            "mallocs": 3423015,
+            "gc_cycles": 267
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1018168,
+            "heap_objects": 3463,
+            "heap_inuse_bytes": 1769472,
+            "heap_released_bytes": 23519232,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1543294656,
+            "mallocs": 3423015,
+            "gc_cycles": 269
+          },
+          "released": {
+            "heap_alloc_bytes": 1008648,
+            "heap_objects": 3460,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 24436736,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1543294656,
+            "mallocs": 3423015,
+            "gc_cycles": 271
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 44797200,
+          "worker_intervals_ns": [
+            [
+              0,
+              44797200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1009184,
+            "heap_objects": 3466,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 25354240,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1543316376,
+            "mallocs": 3423068,
+            "gc_cycles": 273
+          },
+          "after_work": {
+            "heap_alloc_bytes": 18793488,
+            "heap_objects": 47865,
+            "heap_inuse_bytes": 20037632,
+            "heap_released_bytes": 33611776,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1588438864,
+            "mallocs": 3523310,
+            "gc_cycles": 282
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12688072,
+            "heap_objects": 36686,
+            "heap_inuse_bytes": 13574144,
+            "heap_released_bytes": 34529280,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1588464624,
+            "mallocs": 3523456,
+            "gc_cycles": 284
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1018424,
+            "heap_objects": 3465,
+            "heap_inuse_bytes": 1769472,
+            "heap_released_bytes": 35446784,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1588464624,
+            "mallocs": 3523456,
+            "gc_cycles": 286
+          },
+          "released": {
+            "heap_alloc_bytes": 1008904,
+            "heap_objects": 3462,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 36364288,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1588464624,
+            "mallocs": 3523456,
+            "gc_cycles": 288
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 46833900,
+          "worker_intervals_ns": [
+            [
+              0,
+              46833900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1009184,
+            "heap_objects": 3466,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 37281792,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1588485592,
+            "mallocs": 3523503,
+            "gc_cycles": 290
+          },
+          "after_work": {
+            "heap_alloc_bytes": 13979824,
+            "heap_objects": 39584,
+            "heap_inuse_bytes": 14999552,
+            "heap_released_bytes": 42786816,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1633619720,
+            "mallocs": 3623762,
+            "gc_cycles": 300
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 12688296,
+            "heap_objects": 36690,
+            "heap_inuse_bytes": 13574144,
+            "heap_released_bytes": 43704320,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1633645480,
+            "mallocs": 3623908,
+            "gc_cycles": 302
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1018424,
+            "heap_objects": 3465,
+            "heap_inuse_bytes": 1769472,
+            "heap_released_bytes": 44621824,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1633645480,
+            "mallocs": 3623908,
+            "gc_cycles": 304
+          },
+          "released": {
+            "heap_alloc_bytes": 1008904,
+            "heap_objects": 3462,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 45539328,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1633645480,
+            "mallocs": 3623908,
+            "gc_cycles": 306
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 73146800,
+          "worker_intervals_ns": [
+            [
+              516300,
+              68876500
+            ],
+            [
+              0,
+              69434000
+            ],
+            [
+              516300,
+              69940800
+            ],
+            [
+              0,
+              73146800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1009928,
+            "heap_objects": 3465,
+            "heap_inuse_bytes": 1695744,
+            "heap_released_bytes": 46391296,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1633670160,
+            "mallocs": 3623987,
+            "gc_cycles": 308
+          },
+          "after_work": {
+            "heap_alloc_bytes": 64754632,
+            "heap_objects": 173009,
+            "heap_inuse_bytes": 68214784,
+            "heap_released_bytes": 13410304,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1814187616,
+            "mallocs": 4024939,
+            "gc_cycles": 320
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47732960,
+            "heap_objects": 136376,
+            "heap_inuse_bytes": 49717248,
+            "heap_released_bytes": 13869056,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1814287656,
+            "mallocs": 4025454,
+            "gc_cycles": 322
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1053544,
+            "heap_objects": 3481,
+            "heap_inuse_bytes": 1941504,
+            "heap_released_bytes": 14786560,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1814287768,
+            "mallocs": 4025455,
+            "gc_cycles": 324
+          },
+          "released": {
+            "heap_alloc_bytes": 1015536,
+            "heap_objects": 3475,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 15704064,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1814287768,
+            "mallocs": 4025455,
+            "gc_cycles": 326
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 67383900,
+          "worker_intervals_ns": [
+            [
+              0,
+              63864800
+            ],
+            [
+              0,
+              61847900
+            ],
+            [
+              0,
+              66372700
+            ],
+            [
+              0,
+              67383900
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1016912,
+            "heap_objects": 3481,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 16621568,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1814310424,
+            "mallocs": 4025508,
+            "gc_cycles": 328
+          },
+          "after_work": {
+            "heap_alloc_bytes": 59851344,
+            "heap_objects": 164514,
+            "heap_inuse_bytes": 63029248,
+            "heap_released_bytes": 4767744,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1994795312,
+            "mallocs": 4426393,
+            "gc_cycles": 341
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47733080,
+            "heap_objects": 136363,
+            "heap_inuse_bytes": 49692672,
+            "heap_released_bytes": 5226496,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1994895112,
+            "mallocs": 4426903,
+            "gc_cycles": 343
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1054504,
+            "heap_objects": 3486,
+            "heap_inuse_bytes": 1941504,
+            "heap_released_bytes": 6144000,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1994895112,
+            "mallocs": 4426903,
+            "gc_cycles": 345
+          },
+          "released": {
+            "heap_alloc_bytes": 1016496,
+            "heap_objects": 3480,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 7061504,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1994895112,
+            "mallocs": 4426903,
+            "gc_cycles": 347
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 68391200,
+          "worker_intervals_ns": [
+            [
+              0,
+              65848700
+            ],
+            [
+              0,
+              68391200
+            ],
+            [
+              0,
+              60908700
+            ],
+            [
+              0,
+              61985200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1017616,
+            "heap_objects": 3484,
+            "heap_inuse_bytes": 1703936,
+            "heap_released_bytes": 7782400,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 1994917016,
+            "mallocs": 4426950,
+            "gc_cycles": 349
+          },
+          "after_work": {
+            "heap_alloc_bytes": 72057288,
+            "heap_objects": 187229,
+            "heap_inuse_bytes": 75915264,
+            "heap_released_bytes": 7274496,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 2175405072,
+            "mallocs": 4827840,
+            "gc_cycles": 361
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 47733696,
+            "heap_objects": 136375,
+            "heap_inuse_bytes": 49717248,
+            "heap_released_bytes": 7733248,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 2175505112,
+            "mallocs": 4828355,
+            "gc_cycles": 363
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1054616,
+            "heap_objects": 3487,
+            "heap_inuse_bytes": 1941504,
+            "heap_released_bytes": 8650752,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 2175505112,
+            "mallocs": 4828355,
+            "gc_cycles": 365
+          },
+          "released": {
+            "heap_alloc_bytes": 1016608,
+            "heap_objects": 3481,
+            "heap_inuse_bytes": 1712128,
+            "heap_released_bytes": 9568256,
+            "stack_inuse_bytes": 196608,
+            "runtime_sys_bytes": 99436792,
+            "total_alloc_bytes": 2175505112,
+            "mallocs": 4828355,
+            "gc_cycles": 367
+          }
+        }
+      ],
+      "event_lines": 68,
+      "output_continuations_reassembled": 18,
+      "passing_tests": 7,
+      "passing_packages": 1,
+      "test_events": {
+        "TestCMakeConsumerRetentionLifecycle": {
+          "run": "2026-11-21T15:41:36.182471+03:00",
+          "terminal": "2026-11-21T15:41:37.6325032+03:00",
+          "go_elapsed_seconds": 1.45
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-32/clients-1": {
+          "run": "2026-11-21T15:41:36.2726354+03:00",
+          "terminal": "2026-11-21T15:41:36.4398589+03:00",
+          "go_elapsed_seconds": 0.17
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-32/clients-4": {
+          "run": "2026-11-21T15:41:36.4398589+03:00",
+          "terminal": "2026-11-21T15:41:36.6774417+03:00",
+          "go_elapsed_seconds": 0.24
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-1000/clients-1": {
+          "run": "2026-11-21T15:41:36.7282957+03:00",
+          "terminal": "2026-11-21T15:41:36.8922335+03:00",
+          "go_elapsed_seconds": 0.16
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-1000/clients-4": {
+          "run": "2026-11-21T15:41:36.8922335+03:00",
+          "terminal": "2026-11-21T15:41:37.152043+03:00",
+          "go_elapsed_seconds": 0.26
+        },
+        "TestCMakeConsumerRetentionLifecycle/last-marker/clients-1": {
+          "run": "2026-11-21T15:41:37.1977137+03:00",
+          "terminal": "2026-11-21T15:41:37.3552035+03:00",
+          "go_elapsed_seconds": 0.16
+        },
+        "TestCMakeConsumerRetentionLifecycle/last-marker/clients-4": {
+          "run": "2026-11-21T15:41:37.3552035+03:00",
+          "terminal": "2026-11-21T15:41:37.5974583+03:00",
+          "go_elapsed_seconds": 0.24
+        }
+      },
+      "package_terminal": {
+        "Time": "2026-11-21T15:41:37.6405417+03:00",
+        "Action": "pass",
+        "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+        "Elapsed": 1.471
+      },
+      "external_command_seconds": 2.561441699974239,
+      "recorded_overlay_sha256": "e944917f556e1319ae41835af2d0bb9482044e6eea327e64afe2e93e26901078",
+      "settlement": {
+        "direct_child_wait_bounded": true,
+        "whole_process_tree_deadline_enforced": false,
+        "process_tree_settlement_observed": false,
+        "direct_child_settled": true
+      },
+      "derived_rows": [
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 49967200,
+          "work_total_alloc_delta_bytes": 45319744,
+          "work_mallocs_delta": 100310,
+          "after_work_heap_alloc_delta_bytes": 14277784,
+          "results_and_wire_heap_alloc_delta_bytes": 11695968,
+          "wire_only_heap_alloc_delta_bytes": 41256,
+          "released_heap_alloc_delta_bytes": 248,
+          "held_to_wire_heap_difference_bytes": 11654712,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 49967200
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 49409900,
+          "work_total_alloc_delta_bytes": 45314608,
+          "work_mallocs_delta": 100300,
+          "after_work_heap_alloc_delta_bytes": 15356248,
+          "results_and_wire_heap_alloc_delta_bytes": 11696032,
+          "wire_only_heap_alloc_delta_bytes": 41432,
+          "released_heap_alloc_delta_bytes": 424,
+          "held_to_wire_heap_difference_bytes": 11654600,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 49409900
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 50319800,
+          "work_total_alloc_delta_bytes": 45307304,
+          "work_mallocs_delta": 100282,
+          "after_work_heap_alloc_delta_bytes": 18194328,
+          "results_and_wire_heap_alloc_delta_bytes": 11695216,
+          "wire_only_heap_alloc_delta_bytes": 40728,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11654488,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 8,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 50319800
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 71603200,
+          "work_total_alloc_delta_bytes": 181177960,
+          "work_mallocs_delta": 401020,
+          "after_work_heap_alloc_delta_bytes": 57612128,
+          "results_and_wire_heap_alloc_delta_bytes": 46782072,
+          "wire_only_heap_alloc_delta_bytes": 165192,
+          "released_heap_alloc_delta_bytes": 1232,
+          "held_to_wire_heap_difference_bytes": 46616880,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 68005500
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 66837400,
+          "work_total_alloc_delta_bytes": 181204240,
+          "work_mallocs_delta": 401070,
+          "after_work_heap_alloc_delta_bytes": 62712080,
+          "results_and_wire_heap_alloc_delta_bytes": 46788264,
+          "wire_only_heap_alloc_delta_bytes": 170608,
+          "released_heap_alloc_delta_bytes": 6648,
+          "held_to_wire_heap_difference_bytes": 46617656,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 57193600
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 68484900,
+          "work_total_alloc_delta_bytes": 181036080,
+          "work_mallocs_delta": 400997,
+          "after_work_heap_alloc_delta_bytes": 73808368,
+          "results_and_wire_heap_alloc_delta_bytes": 46780480,
+          "wire_only_heap_alloc_delta_bytes": 163432,
+          "released_heap_alloc_delta_bytes": -528,
+          "held_to_wire_heap_difference_bytes": 46617048,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 58892300
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 49510600,
+          "work_total_alloc_delta_bytes": 45081288,
+          "work_mallocs_delta": 100475,
+          "after_work_heap_alloc_delta_bytes": 13279320,
+          "results_and_wire_heap_alloc_delta_bytes": 11654944,
+          "wire_only_heap_alloc_delta_bytes": 792,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11654152,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 10,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 49510600
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 45658500,
+          "work_total_alloc_delta_bytes": 45101408,
+          "work_mallocs_delta": 100500,
+          "after_work_heap_alloc_delta_bytes": 13681528,
+          "results_and_wire_heap_alloc_delta_bytes": 11655392,
+          "wire_only_heap_alloc_delta_bytes": 792,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11654600,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 45658500
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 47981900,
+          "work_total_alloc_delta_bytes": 45096464,
+          "work_mallocs_delta": 100497,
+          "after_work_heap_alloc_delta_bytes": 18875656,
+          "results_and_wire_heap_alloc_delta_bytes": 11655392,
+          "wire_only_heap_alloc_delta_bytes": 904,
+          "released_heap_alloc_delta_bytes": -168,
+          "held_to_wire_heap_difference_bytes": 11654488,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 47981900
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 71755700,
+          "work_total_alloc_delta_bytes": 180328032,
+          "work_mallocs_delta": 401816,
+          "after_work_heap_alloc_delta_bytes": 77695456,
+          "results_and_wire_heap_alloc_delta_bytes": 46622072,
+          "wire_only_heap_alloc_delta_bytes": 4984,
+          "released_heap_alloc_delta_bytes": 768,
+          "held_to_wire_heap_difference_bytes": 46617088,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 62420200
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 73752200,
+          "work_total_alloc_delta_bytes": 180342024,
+          "work_mallocs_delta": 401852,
+          "after_work_heap_alloc_delta_bytes": 62880808,
+          "results_and_wire_heap_alloc_delta_bytes": 46621904,
+          "wire_only_heap_alloc_delta_bytes": 4360,
+          "released_heap_alloc_delta_bytes": 144,
+          "held_to_wire_heap_difference_bytes": 46617544,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 64740000
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 75307900,
+          "work_total_alloc_delta_bytes": 180325976,
+          "work_mallocs_delta": 401819,
+          "after_work_heap_alloc_delta_bytes": 65666104,
+          "results_and_wire_heap_alloc_delta_bytes": 46621408,
+          "wire_only_heap_alloc_delta_bytes": 4280,
+          "released_heap_alloc_delta_bytes": 64,
+          "held_to_wire_heap_difference_bytes": 46617128,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 67557300
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 42329100,
+          "work_total_alloc_delta_bytes": 45127576,
+          "work_mallocs_delta": 100245,
+          "after_work_heap_alloc_delta_bytes": 15451664,
+          "results_and_wire_heap_alloc_delta_bytes": 11679000,
+          "wire_only_heap_alloc_delta_bytes": 9240,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11669760,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 42329100
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 44797200,
+          "work_total_alloc_delta_bytes": 45122488,
+          "work_mallocs_delta": 100242,
+          "after_work_heap_alloc_delta_bytes": 17784304,
+          "results_and_wire_heap_alloc_delta_bytes": 11678888,
+          "wire_only_heap_alloc_delta_bytes": 9240,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11669648,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 44797200
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 46833900,
+          "work_total_alloc_delta_bytes": 45134128,
+          "work_mallocs_delta": 100259,
+          "after_work_heap_alloc_delta_bytes": 12970640,
+          "results_and_wire_heap_alloc_delta_bytes": 11679112,
+          "wire_only_heap_alloc_delta_bytes": 9240,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 11669872,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 10,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 46833900
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 73146800,
+          "work_total_alloc_delta_bytes": 180517456,
+          "work_mallocs_delta": 400952,
+          "after_work_heap_alloc_delta_bytes": 63744704,
+          "results_and_wire_heap_alloc_delta_bytes": 46723032,
+          "wire_only_heap_alloc_delta_bytes": 43616,
+          "released_heap_alloc_delta_bytes": 5608,
+          "held_to_wire_heap_difference_bytes": 46679416,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 68360200
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 67383900,
+          "work_total_alloc_delta_bytes": 180484888,
+          "work_mallocs_delta": 400885,
+          "after_work_heap_alloc_delta_bytes": 58834432,
+          "results_and_wire_heap_alloc_delta_bytes": 46716168,
+          "wire_only_heap_alloc_delta_bytes": 37592,
+          "released_heap_alloc_delta_bytes": -416,
+          "held_to_wire_heap_difference_bytes": 46678576,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 61847900
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 68391200,
+          "work_total_alloc_delta_bytes": 180488056,
+          "work_mallocs_delta": 400890,
+          "after_work_heap_alloc_delta_bytes": 71039672,
+          "results_and_wire_heap_alloc_delta_bytes": 46716080,
+          "wire_only_heap_alloc_delta_bytes": 37000,
+          "released_heap_alloc_delta_bytes": -1008,
+          "held_to_wire_heap_difference_bytes": 46679080,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 60908700
+        }
+      ]
+    },
+    "current": {
+      "rows": [
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 55564400,
+          "worker_intervals_ns": [
+            [
+              0,
+              55564400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 968032,
+            "heap_objects": 3140,
+            "heap_inuse_bytes": 1458176,
+            "heap_released_bytes": 4603904,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 47574416,
+            "mallocs": 105248,
+            "gc_cycles": 11
+          },
+          "after_work": {
+            "heap_alloc_bytes": 14985120,
+            "heap_objects": 41373,
+            "heap_inuse_bytes": 16031744,
+            "heap_released_bytes": 4849664,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 92888792,
+            "mallocs": 205549,
+            "gc_cycles": 20
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2726544,
+            "heap_objects": 3254,
+            "heap_inuse_bytes": 3244032,
+            "heap_released_bytes": 5111808,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 92974248,
+            "mallocs": 205799,
+            "gc_cycles": 22
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1014608,
+            "heap_objects": 3150,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 5832704,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 92974248,
+            "mallocs": 205799,
+            "gc_cycles": 24
+          },
+          "released": {
+            "heap_alloc_bytes": 973600,
+            "heap_objects": 3147,
+            "heap_inuse_bytes": 1474560,
+            "heap_released_bytes": 6750208,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 92974248,
+            "mallocs": 205799,
+            "gc_cycles": 26
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 54689100,
+          "worker_intervals_ns": [
+            [
+              0,
+              54689100
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 988496,
+            "heap_objects": 3300,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 7929856,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 93019488,
+            "mallocs": 206075,
+            "gc_cycles": 28
+          },
+          "after_work": {
+            "heap_alloc_bytes": 14201128,
+            "heap_objects": 39615,
+            "heap_inuse_bytes": 15196160,
+            "heap_released_bytes": 3932160,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 138329928,
+            "mallocs": 306375,
+            "gc_cycles": 38
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2741848,
+            "heap_objects": 3405,
+            "heap_inuse_bytes": 3284992,
+            "heap_released_bytes": 4390912,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 138415352,
+            "mallocs": 306624,
+            "gc_cycles": 40
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1029928,
+            "heap_objects": 3302,
+            "heap_inuse_bytes": 1556480,
+            "heap_released_bytes": 5308416,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 138415352,
+            "mallocs": 306624,
+            "gc_cycles": 42
+          },
+          "released": {
+            "heap_alloc_bytes": 988920,
+            "heap_objects": 3299,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 6225920,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 138415352,
+            "mallocs": 306624,
+            "gc_cycles": 44
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 61728800,
+          "worker_intervals_ns": [
+            [
+              0,
+              61728800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 989200,
+            "heap_objects": 3303,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 7143424,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 138436320,
+            "mallocs": 306671,
+            "gc_cycles": 46
+          },
+          "after_work": {
+            "heap_alloc_bytes": 18949288,
+            "heap_objects": 47741,
+            "heap_inuse_bytes": 20111360,
+            "heap_released_bytes": 3989504,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 183750224,
+            "mallocs": 406968,
+            "gc_cycles": 55
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2741848,
+            "heap_objects": 3405,
+            "heap_inuse_bytes": 3276800,
+            "heap_released_bytes": 4104192,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 183835648,
+            "mallocs": 407217,
+            "gc_cycles": 57
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1029928,
+            "heap_objects": 3302,
+            "heap_inuse_bytes": 1556480,
+            "heap_released_bytes": 5021696,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 183835648,
+            "mallocs": 407217,
+            "gc_cycles": 59
+          },
+          "released": {
+            "heap_alloc_bytes": 988920,
+            "heap_objects": 3299,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 5939200,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30198008,
+            "total_alloc_bytes": 183835648,
+            "mallocs": 407217,
+            "gc_cycles": 61
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 84106200,
+          "worker_intervals_ns": [
+            [
+              0,
+              75283500
+            ],
+            [
+              0,
+              75805100
+            ],
+            [
+              0,
+              76329500
+            ],
+            [
+              0,
+              84106200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 990056,
+            "heap_objects": 3303,
+            "heap_inuse_bytes": 1507328,
+            "heap_released_bytes": 6856704,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 30460152,
+            "total_alloc_bytes": 183860440,
+            "mallocs": 407297,
+            "gc_cycles": 63
+          },
+          "after_work": {
+            "heap_alloc_bytes": 67170464,
+            "heap_objects": 177469,
+            "heap_inuse_bytes": 70754304,
+            "heap_released_bytes": 5668864,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 90523896,
+            "total_alloc_bytes": 364903896,
+            "mallocs": 808318,
+            "gc_cycles": 76
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 8002056,
+            "heap_objects": 3717,
+            "heap_inuse_bytes": 8863744,
+            "heap_released_bytes": 6127616,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 90523896,
+            "total_alloc_bytes": 365242592,
+            "mallocs": 809245,
+            "gc_cycles": 78
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1154544,
+            "heap_objects": 3312,
+            "heap_inuse_bytes": 1671168,
+            "heap_released_bytes": 7045120,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 90523896,
+            "total_alloc_bytes": 365242592,
+            "mallocs": 809245,
+            "gc_cycles": 80
+          },
+          "released": {
+            "heap_alloc_bytes": 990584,
+            "heap_objects": 3306,
+            "heap_inuse_bytes": 1507328,
+            "heap_released_bytes": 7962624,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 90523896,
+            "total_alloc_bytes": 365242592,
+            "mallocs": 809245,
+            "gc_cycles": 82
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 85716800,
+          "worker_intervals_ns": [
+            [
+              0,
+              74361500
+            ],
+            [
+              507000,
+              84666200
+            ],
+            [
+              507000,
+              80624900
+            ],
+            [
+              0,
+              85716800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 991960,
+            "heap_objects": 3312,
+            "heap_inuse_bytes": 1499136,
+            "heap_released_bytes": 8683520,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 90523896,
+            "total_alloc_bytes": 365265248,
+            "mallocs": 809298,
+            "gc_cycles": 84
+          },
+          "after_work": {
+            "heap_alloc_bytes": 67308480,
+            "heap_objects": 174628,
+            "heap_inuse_bytes": 70778880,
+            "heap_released_bytes": 5144576,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 94718200,
+            "total_alloc_bytes": 546309120,
+            "mallocs": 1210328,
+            "gc_cycles": 97
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 8005000,
+            "heap_objects": 3731,
+            "heap_inuse_bytes": 8871936,
+            "heap_released_bytes": 5537792,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 94718200,
+            "total_alloc_bytes": 546647816,
+            "mallocs": 1211255,
+            "gc_cycles": 99
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1157280,
+            "heap_objects": 3323,
+            "heap_inuse_bytes": 1679360,
+            "heap_released_bytes": 6455296,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 94718200,
+            "total_alloc_bytes": 546647816,
+            "mallocs": 1211255,
+            "gc_cycles": 101
+          },
+          "released": {
+            "heap_alloc_bytes": 993320,
+            "heap_objects": 3317,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 7241728,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 94718200,
+            "total_alloc_bytes": 546647816,
+            "mallocs": 1211255,
+            "gc_cycles": 103
+          }
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "7030931b1aed55479fe629ce2ee5c93486951ef98f00393bb166b96e596e7995",
+          "wire_bytes_each": 33720,
+          "wire_records_each": 32,
+          "internal_records_each": 32,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 87809400,
+          "worker_intervals_ns": [
+            [
+              0,
+              81561100
+            ],
+            [
+              0,
+              74025100
+            ],
+            [
+              0,
+              81561100
+            ],
+            [
+              0,
+              87809400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 994440,
+            "heap_objects": 3321,
+            "heap_inuse_bytes": 1507328,
+            "heap_released_bytes": 8159232,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 94718200,
+            "total_alloc_bytes": 546669720,
+            "mallocs": 1211302,
+            "gc_cycles": 105
+          },
+          "after_work": {
+            "heap_alloc_bytes": 45283368,
+            "heap_objects": 119202,
+            "heap_inuse_bytes": 47611904,
+            "heap_released_bytes": 3661824,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 727847280,
+            "mallocs": 1612305,
+            "gc_cycles": 118
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 8007224,
+            "heap_objects": 3740,
+            "heap_inuse_bytes": 8806400,
+            "heap_released_bytes": 4087808,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 728185976,
+            "mallocs": 1613232,
+            "gc_cycles": 120
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1159616,
+            "heap_objects": 3334,
+            "heap_inuse_bytes": 1679360,
+            "heap_released_bytes": 4972544,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 728185976,
+            "mallocs": 1613232,
+            "gc_cycles": 122
+          },
+          "released": {
+            "heap_alloc_bytes": 995656,
+            "heap_objects": 3328,
+            "heap_inuse_bytes": 1515520,
+            "heap_released_bytes": 5824512,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 728185976,
+            "mallocs": 1613232,
+            "gc_cycles": 124
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 54636400,
+          "worker_intervals_ns": [
+            [
+              0,
+              54636400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1006176,
+            "heap_objects": 3450,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 13860864,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 773516488,
+            "mallocs": 1714044,
+            "gc_cycles": 136
+          },
+          "after_work": {
+            "heap_alloc_bytes": 18759384,
+            "heap_objects": 48166,
+            "heap_inuse_bytes": 19816448,
+            "heap_released_bytes": 19824640,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 818618744,
+            "mallocs": 1814554,
+            "gc_cycles": 145
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 3307768,
+            "heap_objects": 5492,
+            "heap_inuse_bytes": 3883008,
+            "heap_released_bytes": 20545536,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 818812904,
+            "mallocs": 1814621,
+            "gc_cycles": 147
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1007192,
+            "heap_objects": 3451,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 21463040,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 818812904,
+            "mallocs": 1814621,
+            "gc_cycles": 149
+          },
+          "released": {
+            "heap_alloc_bytes": 1006120,
+            "heap_objects": 3448,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 22380544,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 818812904,
+            "mallocs": 1814621,
+            "gc_cycles": 151
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 50323300,
+          "worker_intervals_ns": [
+            [
+              0,
+              50323300
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1006656,
+            "heap_objects": 3454,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 23298048,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 818834624,
+            "mallocs": 1814674,
+            "gc_cycles": 153
+          },
+          "after_work": {
+            "heap_alloc_bytes": 18754200,
+            "heap_objects": 48160,
+            "heap_inuse_bytes": 19775488,
+            "heap_released_bytes": 30703616,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 863926568,
+            "mallocs": 1915165,
+            "gc_cycles": 163
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 3308024,
+            "heap_objects": 5494,
+            "heap_inuse_bytes": 3858432,
+            "heap_released_bytes": 31621120,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 864120728,
+            "mallocs": 1915232,
+            "gc_cycles": 165
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1007448,
+            "heap_objects": 3453,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 32538624,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 864120728,
+            "mallocs": 1915232,
+            "gc_cycles": 167
+          },
+          "released": {
+            "heap_alloc_bytes": 1006376,
+            "heap_objects": 3450,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 33456128,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 864120728,
+            "mallocs": 1915232,
+            "gc_cycles": 169
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 49721100,
+          "worker_intervals_ns": [
+            [
+              0,
+              49721100
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1006656,
+            "heap_objects": 3454,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 34373632,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 864141696,
+            "mallocs": 1915279,
+            "gc_cycles": 171
+          },
+          "after_work": {
+            "heap_alloc_bytes": 15739864,
+            "heap_objects": 44163,
+            "heap_inuse_bytes": 16678912,
+            "heap_released_bytes": 39682048,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 909237984,
+            "mallocs": 2015774,
+            "gc_cycles": 180
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 3308136,
+            "heap_objects": 5495,
+            "heap_inuse_bytes": 3874816,
+            "heap_released_bytes": 40599552,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 909432144,
+            "mallocs": 2015841,
+            "gc_cycles": 182
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1007560,
+            "heap_objects": 3454,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 41517056,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 909432144,
+            "mallocs": 2015841,
+            "gc_cycles": 184
+          },
+          "released": {
+            "heap_alloc_bytes": 1006488,
+            "heap_objects": 3451,
+            "heap_inuse_bytes": 1548288,
+            "heap_released_bytes": 42434560,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 909432144,
+            "mallocs": 2015841,
+            "gc_cycles": 186
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 85543000,
+          "worker_intervals_ns": [
+            [
+              0,
+              83790400
+            ],
+            [
+              0,
+              85543000
+            ],
+            [
+              0,
+              84503400
+            ],
+            [
+              0,
+              84503400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1007672,
+            "heap_objects": 3455,
+            "heap_inuse_bytes": 1531904,
+            "heap_released_bytes": 43810816,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 909456984,
+            "mallocs": 2015921,
+            "gc_cycles": 188
+          },
+          "after_work": {
+            "heap_alloc_bytes": 63819176,
+            "heap_objects": 175510,
+            "heap_inuse_bytes": 67026944,
+            "heap_released_bytes": 10911744,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 1089805584,
+            "mallocs": 2417793,
+            "gc_cycles": 201
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 10218208,
+            "heap_objects": 11620,
+            "heap_inuse_bytes": 11198464,
+            "heap_released_bytes": 11370496,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 1090580696,
+            "mallocs": 2418004,
+            "gc_cycles": 203
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1016200,
+            "heap_objects": 3466,
+            "heap_inuse_bytes": 1564672,
+            "heap_released_bytes": 12091392,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 1090580696,
+            "mallocs": 2418004,
+            "gc_cycles": 205
+          },
+          "released": {
+            "heap_alloc_bytes": 1011984,
+            "heap_objects": 3460,
+            "heap_inuse_bytes": 1540096,
+            "heap_released_bytes": 13008896,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 1090580696,
+            "mallocs": 2418004,
+            "gc_cycles": 207
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 71502900,
+          "worker_intervals_ns": [
+            [
+              0,
+              65820300
+            ],
+            [
+              0,
+              71502900
+            ],
+            [
+              0,
+              65820300
+            ],
+            [
+              0,
+              68344500
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1013360,
+            "heap_objects": 3466,
+            "heap_inuse_bytes": 1531904,
+            "heap_released_bytes": 13926400,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 98912504,
+            "total_alloc_bytes": 1090603352,
+            "mallocs": 2418057,
+            "gc_cycles": 209
+          },
+          "after_work": {
+            "heap_alloc_bytes": 67743768,
+            "heap_objects": 178525,
+            "heap_inuse_bytes": 70934528,
+            "heap_released_bytes": 6193152,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1270955824,
+            "mallocs": 2819928,
+            "gc_cycles": 221
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 10219712,
+            "heap_objects": 11637,
+            "heap_inuse_bytes": 11223040,
+            "heap_released_bytes": 6651904,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1271730936,
+            "mallocs": 2820139,
+            "gc_cycles": 223
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1017352,
+            "heap_objects": 3476,
+            "heap_inuse_bytes": 1564672,
+            "heap_released_bytes": 7438336,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1271730936,
+            "mallocs": 2820139,
+            "gc_cycles": 225
+          },
+          "released": {
+            "heap_alloc_bytes": 1013136,
+            "heap_objects": 3470,
+            "heap_inuse_bytes": 1540096,
+            "heap_released_bytes": 8355840,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1271730936,
+            "mallocs": 2820139,
+            "gc_cycles": 227
+          }
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "a5a616a89a6b098724489d2da4307abec2ab75a2278d93af2820f84fab033147",
+          "wire_bytes_each": 919,
+          "wire_records_each": 0,
+          "internal_records_each": 1000,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 70536000,
+          "worker_intervals_ns": [
+            [
+              0,
+              70536000
+            ],
+            [
+              0,
+              65905700
+            ],
+            [
+              0,
+              65361200
+            ],
+            [
+              0,
+              70536000
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1014256,
+            "heap_objects": 3474,
+            "heap_inuse_bytes": 1540096,
+            "heap_released_bytes": 9273344,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1271752840,
+            "mallocs": 2820186,
+            "gc_cycles": 229
+          },
+          "after_work": {
+            "heap_alloc_bytes": 63510712,
+            "heap_objects": 171618,
+            "heap_inuse_bytes": 66478080,
+            "heap_released_bytes": 6750208,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1452078736,
+            "mallocs": 3222013,
+            "gc_cycles": 241
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 10220192,
+            "heap_objects": 11635,
+            "heap_inuse_bytes": 11247616,
+            "heap_released_bytes": 7208960,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1452853848,
+            "mallocs": 3222224,
+            "gc_cycles": 243
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1018168,
+            "heap_objects": 3480,
+            "heap_inuse_bytes": 1581056,
+            "heap_released_bytes": 7995392,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1452853848,
+            "mallocs": 3222224,
+            "gc_cycles": 245
+          },
+          "released": {
+            "heap_alloc_bytes": 1013952,
+            "heap_objects": 3474,
+            "heap_inuse_bytes": 1556480,
+            "heap_released_bytes": 8781824,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1452853848,
+            "mallocs": 3222224,
+            "gc_cycles": 247
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 44042800,
+          "worker_intervals_ns": [
+            [
+              0,
+              44042800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1013944,
+            "heap_objects": 3477,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 15794176,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1498026616,
+            "mallocs": 3322688,
+            "gc_cycles": 259
+          },
+          "after_work": {
+            "heap_alloc_bytes": 15780440,
+            "heap_objects": 43870,
+            "heap_inuse_bytes": 16809984,
+            "heap_released_bytes": 20971520,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1543154192,
+            "mallocs": 3422933,
+            "gc_cycles": 268
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2715704,
+            "heap_objects": 3517,
+            "heap_inuse_bytes": 3342336,
+            "heap_released_bytes": 21889024,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1543179952,
+            "mallocs": 3423079,
+            "gc_cycles": 270
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1023184,
+            "heap_objects": 3476,
+            "heap_inuse_bytes": 1630208,
+            "heap_released_bytes": 22806528,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1543179952,
+            "mallocs": 3423079,
+            "gc_cycles": 272
+          },
+          "released": {
+            "heap_alloc_bytes": 1013664,
+            "heap_objects": 3473,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 23527424,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1543179952,
+            "mallocs": 3423079,
+            "gc_cycles": 274
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 45828700,
+          "worker_intervals_ns": [
+            [
+              0,
+              45828700
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1014200,
+            "heap_objects": 3479,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 24444928,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1543201672,
+            "mallocs": 3423132,
+            "gc_cycles": 276
+          },
+          "after_work": {
+            "heap_alloc_bytes": 19029048,
+            "heap_objects": 48431,
+            "heap_inuse_bytes": 20160512,
+            "heap_released_bytes": 29491200,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1588318688,
+            "mallocs": 3523363,
+            "gc_cycles": 285
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2715960,
+            "heap_objects": 3519,
+            "heap_inuse_bytes": 3350528,
+            "heap_released_bytes": 30408704,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1588344448,
+            "mallocs": 3523509,
+            "gc_cycles": 287
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1023440,
+            "heap_objects": 3478,
+            "heap_inuse_bytes": 1630208,
+            "heap_released_bytes": 31326208,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1588344448,
+            "mallocs": 3523509,
+            "gc_cycles": 289
+          },
+          "released": {
+            "heap_alloc_bytes": 1013920,
+            "heap_objects": 3475,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 32243712,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1588344448,
+            "mallocs": 3523509,
+            "gc_cycles": 291
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 49739800,
+          "worker_intervals_ns": [
+            [
+              0,
+              49739800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1014200,
+            "heap_objects": 3479,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 33161216,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1588365416,
+            "mallocs": 3523556,
+            "gc_cycles": 293
+          },
+          "after_work": {
+            "heap_alloc_bytes": 13225560,
+            "heap_objects": 37799,
+            "heap_inuse_bytes": 14204928,
+            "heap_released_bytes": 38928384,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1633499944,
+            "mallocs": 3623819,
+            "gc_cycles": 303
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 2716296,
+            "heap_objects": 3522,
+            "heap_inuse_bytes": 3342336,
+            "heap_released_bytes": 39845888,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1633531360,
+            "mallocs": 3623978,
+            "gc_cycles": 305
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1023776,
+            "heap_objects": 3481,
+            "heap_inuse_bytes": 1630208,
+            "heap_released_bytes": 40763392,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1633531360,
+            "mallocs": 3623978,
+            "gc_cycles": 307
+          },
+          "released": {
+            "heap_alloc_bytes": 1014256,
+            "heap_objects": 3478,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 41680896,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1633531360,
+            "mallocs": 3623978,
+            "gc_cycles": 309
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 1,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 75347500,
+          "worker_intervals_ns": [
+            [
+              0,
+              69767200
+            ],
+            [
+              0,
+              69215100
+            ],
+            [
+              0,
+              75347500
+            ],
+            [
+              0,
+              69767200
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1015392,
+            "heap_objects": 3482,
+            "heap_inuse_bytes": 1556480,
+            "heap_released_bytes": 42532864,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1633556152,
+            "mallocs": 3624058,
+            "gc_cycles": 311
+          },
+          "after_work": {
+            "heap_alloc_bytes": 77647624,
+            "heap_objects": 194180,
+            "heap_inuse_bytes": 81649664,
+            "heap_released_bytes": 9551872,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1814017552,
+            "mallocs": 4024896,
+            "gc_cycles": 323
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 7822976,
+            "heap_objects": 3648,
+            "heap_inuse_bytes": 8962048,
+            "heap_released_bytes": 9494528,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1814117592,
+            "mallocs": 4025411,
+            "gc_cycles": 325
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1053064,
+            "heap_objects": 3491,
+            "heap_inuse_bytes": 1802240,
+            "heap_released_bytes": 10412032,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1814117592,
+            "mallocs": 4025411,
+            "gc_cycles": 327
+          },
+          "released": {
+            "heap_alloc_bytes": 1015056,
+            "heap_objects": 3485,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 11329536,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1814117592,
+            "mallocs": 4025411,
+            "gc_cycles": 329
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 2,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 68705800,
+          "worker_intervals_ns": [
+            [
+              0,
+              63886000
+            ],
+            [
+              0,
+              68705800
+            ],
+            [
+              0,
+              63886000
+            ],
+            [
+              0,
+              68705800
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1016432,
+            "heap_objects": 3491,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 12247040,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1814140248,
+            "mallocs": 4025464,
+            "gc_cycles": 331
+          },
+          "after_work": {
+            "heap_alloc_bytes": 30885520,
+            "heap_objects": 76992,
+            "heap_inuse_bytes": 32899072,
+            "heap_released_bytes": 9494528,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1994632336,
+            "mallocs": 4426369,
+            "gc_cycles": 344
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 7825080,
+            "heap_objects": 3654,
+            "heap_inuse_bytes": 8708096,
+            "heap_released_bytes": 9830400,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1994732376,
+            "mallocs": 4426884,
+            "gc_cycles": 346
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1055320,
+            "heap_objects": 3501,
+            "heap_inuse_bytes": 1687552,
+            "heap_released_bytes": 10715136,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1994732376,
+            "mallocs": 4426884,
+            "gc_cycles": 348
+          },
+          "released": {
+            "heap_alloc_bytes": 1017312,
+            "heap_objects": 3495,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 11567104,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1994732376,
+            "mallocs": 4426884,
+            "gc_cycles": 350
+          }
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 3,
+          "go_version": "go1.27.4",
+          "gomaxprocs": 4,
+          "trace_sha256": "755212e57a9318e4945f480d4152e3352053002606f97d20dc3c033055b1a7e8",
+          "trace_bytes": 11827770,
+          "wire_sha256": "67585e67c2232bf7263bba3b4b1f8796dfb88da11294013bf421d3dcaac2cfd6",
+          "wire_bytes_each": 8238,
+          "wire_records_each": 1,
+          "internal_records_each": 1,
+          "record_capacity_each": 17578,
+          "work_ns_instrumented": 71185400,
+          "worker_intervals_ns": [
+            [
+              0,
+              65014000
+            ],
+            [
+              0,
+              63970600
+            ],
+            [
+              0,
+              62422800
+            ],
+            [
+              0,
+              71185400
+            ]
+          ],
+          "before": {
+            "heap_alloc_bytes": 1018432,
+            "heap_objects": 3499,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 12451840,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 1994754280,
+            "mallocs": 4426931,
+            "gc_cycles": 352
+          },
+          "after_work": {
+            "heap_alloc_bytes": 66220824,
+            "heap_objects": 176513,
+            "heap_inuse_bytes": 69713920,
+            "heap_released_bytes": 10436608,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 2175242784,
+            "mallocs": 4827820,
+            "gc_cycles": 364
+          },
+          "results_and_wire": {
+            "heap_alloc_bytes": 7826032,
+            "heap_objects": 3662,
+            "heap_inuse_bytes": 8962048,
+            "heap_released_bytes": 10895360,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 2175342824,
+            "mallocs": 4828335,
+            "gc_cycles": 366
+          },
+          "wire_only": {
+            "heap_alloc_bytes": 1056024,
+            "heap_objects": 3504,
+            "heap_inuse_bytes": 1802240,
+            "heap_released_bytes": 11812864,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 2175342824,
+            "mallocs": 4828335,
+            "gc_cycles": 368
+          },
+          "released": {
+            "heap_alloc_bytes": 1018016,
+            "heap_objects": 3498,
+            "heap_inuse_bytes": 1572864,
+            "heap_released_bytes": 12730368,
+            "stack_inuse_bytes": 163840,
+            "runtime_sys_bytes": 99174648,
+            "total_alloc_bytes": 2175342824,
+            "mallocs": 4828335,
+            "gc_cycles": 370
+          }
+        }
+      ],
+      "event_lines": 68,
+      "output_continuations_reassembled": 18,
+      "passing_tests": 7,
+      "passing_packages": 1,
+      "test_events": {
+        "TestCMakeConsumerRetentionLifecycle": {
+          "run": "2026-11-21T15:46:21.3931933+03:00",
+          "terminal": "2026-11-21T15:46:22.9149137+03:00",
+          "go_elapsed_seconds": 1.52
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-32/clients-1": {
+          "run": "2026-11-21T15:46:21.4843017+03:00",
+          "terminal": "2026-11-21T15:46:21.6756376+03:00",
+          "go_elapsed_seconds": 0.19
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-32/clients-4": {
+          "run": "2026-11-21T15:46:21.6756376+03:00",
+          "terminal": "2026-11-21T15:46:21.9547948+03:00",
+          "go_elapsed_seconds": 0.28
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-1000/clients-1": {
+          "run": "2026-11-21T15:46:22.0090558+03:00",
+          "terminal": "2026-11-21T15:46:22.178299+03:00",
+          "go_elapsed_seconds": 0.17
+        },
+        "TestCMakeConsumerRetentionLifecycle/selected-1000/clients-4": {
+          "run": "2026-11-21T15:46:22.178299+03:00",
+          "terminal": "2026-11-21T15:46:22.4340076+03:00",
+          "go_elapsed_seconds": 0.26
+        },
+        "TestCMakeConsumerRetentionLifecycle/last-marker/clients-1": {
+          "run": "2026-11-21T15:46:22.4813597+03:00",
+          "terminal": "2026-11-21T15:46:22.6446446+03:00",
+          "go_elapsed_seconds": 0.16
+        },
+        "TestCMakeConsumerRetentionLifecycle/last-marker/clients-4": {
+          "run": "2026-11-21T15:46:22.6446446+03:00",
+          "terminal": "2026-11-21T15:46:22.8794502+03:00",
+          "go_elapsed_seconds": 0.23
+        }
+      },
+      "package_terminal": {
+        "Time": "2026-11-21T15:46:22.9251559+03:00",
+        "Action": "pass",
+        "Package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+        "Elapsed": 1.545
+      },
+      "external_command_seconds": 2.604020999977365,
+      "recorded_overlay_sha256": "6169291d7858402052b33a377109af4533f73a1ce4f20f8d5f172fdddaf3614a",
+      "settlement": {
+        "direct_child_wait_bounded": true,
+        "whole_process_tree_deadline_enforced": false,
+        "process_tree_settlement_observed": false,
+        "direct_child_settled": true
+      },
+      "derived_rows": [
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 55564400,
+          "work_total_alloc_delta_bytes": 45314376,
+          "work_mallocs_delta": 100301,
+          "after_work_heap_alloc_delta_bytes": 14017088,
+          "results_and_wire_heap_alloc_delta_bytes": 1758512,
+          "wire_only_heap_alloc_delta_bytes": 46576,
+          "released_heap_alloc_delta_bytes": 5568,
+          "held_to_wire_heap_difference_bytes": 1711936,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 55564400
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 54689100,
+          "work_total_alloc_delta_bytes": 45310440,
+          "work_mallocs_delta": 100300,
+          "after_work_heap_alloc_delta_bytes": 13212632,
+          "results_and_wire_heap_alloc_delta_bytes": 1753352,
+          "wire_only_heap_alloc_delta_bytes": 41432,
+          "released_heap_alloc_delta_bytes": 424,
+          "held_to_wire_heap_difference_bytes": 1711920,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 10,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 54689100
+        },
+        {
+          "case": "selected-32",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 61728800,
+          "work_total_alloc_delta_bytes": 45313904,
+          "work_mallocs_delta": 100297,
+          "after_work_heap_alloc_delta_bytes": 17960088,
+          "results_and_wire_heap_alloc_delta_bytes": 1752648,
+          "wire_only_heap_alloc_delta_bytes": 40728,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 1711920,
+          "wire_to_released_heap_difference_bytes": 41008,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 61728800
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 84106200,
+          "work_total_alloc_delta_bytes": 181043456,
+          "work_mallocs_delta": 401021,
+          "after_work_heap_alloc_delta_bytes": 66180408,
+          "results_and_wire_heap_alloc_delta_bytes": 7012000,
+          "wire_only_heap_alloc_delta_bytes": 164488,
+          "released_heap_alloc_delta_bytes": 528,
+          "held_to_wire_heap_difference_bytes": 6847512,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 75283500
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 85716800,
+          "work_total_alloc_delta_bytes": 181043872,
+          "work_mallocs_delta": 401030,
+          "after_work_heap_alloc_delta_bytes": 66316520,
+          "results_and_wire_heap_alloc_delta_bytes": 7013040,
+          "wire_only_heap_alloc_delta_bytes": 165320,
+          "released_heap_alloc_delta_bytes": 1360,
+          "held_to_wire_heap_difference_bytes": 6847720,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 73854500
+        },
+        {
+          "case": "selected-32",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 87809400,
+          "work_total_alloc_delta_bytes": 181177560,
+          "work_mallocs_delta": 401003,
+          "after_work_heap_alloc_delta_bytes": 44288928,
+          "results_and_wire_heap_alloc_delta_bytes": 7012784,
+          "wire_only_heap_alloc_delta_bytes": 165176,
+          "released_heap_alloc_delta_bytes": 1216,
+          "held_to_wire_heap_difference_bytes": 6847608,
+          "wire_to_released_heap_difference_bytes": 163960,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 74025100
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 54636400,
+          "work_total_alloc_delta_bytes": 45102256,
+          "work_mallocs_delta": 100510,
+          "after_work_heap_alloc_delta_bytes": 17753208,
+          "results_and_wire_heap_alloc_delta_bytes": 2301592,
+          "wire_only_heap_alloc_delta_bytes": 1016,
+          "released_heap_alloc_delta_bytes": -56,
+          "held_to_wire_heap_difference_bytes": 2300576,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 54636400
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 50323300,
+          "work_total_alloc_delta_bytes": 45091944,
+          "work_mallocs_delta": 100491,
+          "after_work_heap_alloc_delta_bytes": 17747544,
+          "results_and_wire_heap_alloc_delta_bytes": 2301368,
+          "wire_only_heap_alloc_delta_bytes": 792,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 2300576,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 10,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 50323300
+        },
+        {
+          "case": "selected-1000",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 49721100,
+          "work_total_alloc_delta_bytes": 45096288,
+          "work_mallocs_delta": 100495,
+          "after_work_heap_alloc_delta_bytes": 14733208,
+          "results_and_wire_heap_alloc_delta_bytes": 2301480,
+          "wire_only_heap_alloc_delta_bytes": 904,
+          "released_heap_alloc_delta_bytes": -168,
+          "held_to_wire_heap_difference_bytes": 2300576,
+          "wire_to_released_heap_difference_bytes": 1072,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 49721100
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 85543000,
+          "work_total_alloc_delta_bytes": 180348600,
+          "work_mallocs_delta": 401872,
+          "after_work_heap_alloc_delta_bytes": 62811504,
+          "results_and_wire_heap_alloc_delta_bytes": 9210536,
+          "wire_only_heap_alloc_delta_bytes": 8528,
+          "released_heap_alloc_delta_bytes": 4312,
+          "held_to_wire_heap_difference_bytes": 9202008,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 83790400
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 71502900,
+          "work_total_alloc_delta_bytes": 180352472,
+          "work_mallocs_delta": 401871,
+          "after_work_heap_alloc_delta_bytes": 66730408,
+          "results_and_wire_heap_alloc_delta_bytes": 9206352,
+          "wire_only_heap_alloc_delta_bytes": 3992,
+          "released_heap_alloc_delta_bytes": -224,
+          "held_to_wire_heap_difference_bytes": 9202360,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 65820300
+        },
+        {
+          "case": "selected-1000",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 70536000,
+          "work_total_alloc_delta_bytes": 180325896,
+          "work_mallocs_delta": 401827,
+          "after_work_heap_alloc_delta_bytes": 62496456,
+          "results_and_wire_heap_alloc_delta_bytes": 9205936,
+          "wire_only_heap_alloc_delta_bytes": 3912,
+          "released_heap_alloc_delta_bytes": -304,
+          "held_to_wire_heap_difference_bytes": 9202024,
+          "wire_to_released_heap_difference_bytes": 4216,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 65361200
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 1,
+          "work_ns_instrumented": 44042800,
+          "work_total_alloc_delta_bytes": 45127576,
+          "work_mallocs_delta": 100245,
+          "after_work_heap_alloc_delta_bytes": 14766496,
+          "results_and_wire_heap_alloc_delta_bytes": 1701760,
+          "wire_only_heap_alloc_delta_bytes": 9240,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 1692520,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 44042800
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 2,
+          "work_ns_instrumented": 45828700,
+          "work_total_alloc_delta_bytes": 45117016,
+          "work_mallocs_delta": 100231,
+          "after_work_heap_alloc_delta_bytes": 18014848,
+          "results_and_wire_heap_alloc_delta_bytes": 1701760,
+          "wire_only_heap_alloc_delta_bytes": 9240,
+          "released_heap_alloc_delta_bytes": -280,
+          "held_to_wire_heap_difference_bytes": 1692520,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 9,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 45828700
+        },
+        {
+          "case": "last-marker",
+          "clients": 1,
+          "sample": 3,
+          "work_ns_instrumented": 49739800,
+          "work_total_alloc_delta_bytes": 45134528,
+          "work_mallocs_delta": 100263,
+          "after_work_heap_alloc_delta_bytes": 12211360,
+          "results_and_wire_heap_alloc_delta_bytes": 1702096,
+          "wire_only_heap_alloc_delta_bytes": 9576,
+          "released_heap_alloc_delta_bytes": 56,
+          "held_to_wire_heap_difference_bytes": 1692520,
+          "wire_to_released_heap_difference_bytes": 9520,
+          "before_to_after_work_gc_delta": 10,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 1,
+          "all_workers_common_overlap_ns": 49739800
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 1,
+          "work_ns_instrumented": 75347500,
+          "work_total_alloc_delta_bytes": 180461400,
+          "work_mallocs_delta": 400838,
+          "after_work_heap_alloc_delta_bytes": 76632232,
+          "results_and_wire_heap_alloc_delta_bytes": 6807584,
+          "wire_only_heap_alloc_delta_bytes": 37672,
+          "released_heap_alloc_delta_bytes": -336,
+          "held_to_wire_heap_difference_bytes": 6769912,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 69215100
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 2,
+          "work_ns_instrumented": 68705800,
+          "work_total_alloc_delta_bytes": 180492088,
+          "work_mallocs_delta": 400905,
+          "after_work_heap_alloc_delta_bytes": 29869088,
+          "results_and_wire_heap_alloc_delta_bytes": 6808648,
+          "wire_only_heap_alloc_delta_bytes": 38888,
+          "released_heap_alloc_delta_bytes": 880,
+          "held_to_wire_heap_difference_bytes": 6769760,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 13,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 63886000
+        },
+        {
+          "case": "last-marker",
+          "clients": 4,
+          "sample": 3,
+          "work_ns_instrumented": 71185400,
+          "work_total_alloc_delta_bytes": 180488504,
+          "work_mallocs_delta": 400889,
+          "after_work_heap_alloc_delta_bytes": 65202392,
+          "results_and_wire_heap_alloc_delta_bytes": 6807600,
+          "wire_only_heap_alloc_delta_bytes": 37592,
+          "released_heap_alloc_delta_bytes": -416,
+          "held_to_wire_heap_difference_bytes": 6770008,
+          "wire_to_released_heap_difference_bytes": 38008,
+          "before_to_after_work_gc_delta": 12,
+          "after_work_to_results_and_wire_gc_delta": 2,
+          "results_and_wire_to_wire_only_gc_delta": 2,
+          "wire_only_to_released_gc_delta": 2,
+          "max_observed_worker_overlap": 4,
+          "all_workers_common_overlap_ns": 62422800
+        }
+      ]
+    }
+  },
+  "cohort_descriptive_statistics": [
+    {
+      "case": "selected-32",
+      "clients": 1,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 49967200,
+          "minimum": 49409900,
+          "maximum": 50319800
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45314608,
+          "minimum": 45307304,
+          "maximum": 45319744
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100300,
+          "minimum": 100282,
+          "maximum": 100310
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 15356248,
+          "minimum": 14277784,
+          "maximum": 18194328
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 11695968,
+          "minimum": 11695216,
+          "maximum": 11696032
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 41256,
+          "minimum": 40728,
+          "maximum": 41432
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 248,
+          "minimum": -280,
+          "maximum": 424
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 11654600,
+          "minimum": 11654488,
+          "maximum": 11654712
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 41008,
+          "minimum": 41008,
+          "maximum": 41008
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 8,
+          "maximum": 9
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 49967200,
+          "minimum": 49409900,
+          "maximum": 50319800
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 55564400,
+          "minimum": 54689100,
+          "maximum": 61728800
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45313904,
+          "minimum": 45310440,
+          "maximum": 45314376
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100300,
+          "minimum": 100297,
+          "maximum": 100301
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 14017088,
+          "minimum": 13212632,
+          "maximum": 17960088
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 1753352,
+          "minimum": 1752648,
+          "maximum": 1758512
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 41432,
+          "minimum": 40728,
+          "maximum": 46576
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 424,
+          "minimum": -280,
+          "maximum": 5568
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 1711920,
+          "minimum": 1711920,
+          "maximum": 1711936
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 41008,
+          "minimum": 41008,
+          "maximum": 41008
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 9,
+          "maximum": 10
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 55564400,
+          "minimum": 54689100,
+          "maximum": 61728800
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 9942616
+    },
+    {
+      "case": "selected-32",
+      "clients": 4,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 68484900,
+          "minimum": 66837400,
+          "maximum": 71603200
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 181177960,
+          "minimum": 181036080,
+          "maximum": 181204240
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 401020,
+          "minimum": 400997,
+          "maximum": 401070
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 62712080,
+          "minimum": 57612128,
+          "maximum": 73808368
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 46782072,
+          "minimum": 46780480,
+          "maximum": 46788264
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 165192,
+          "minimum": 163432,
+          "maximum": 170608
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 1232,
+          "minimum": -528,
+          "maximum": 6648
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 46617048,
+          "minimum": 46616880,
+          "maximum": 46617656
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 163960,
+          "minimum": 163960,
+          "maximum": 163960
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 13,
+          "minimum": 12,
+          "maximum": 13
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 58892300,
+          "minimum": 57193600,
+          "maximum": 68005500
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 85716800,
+          "minimum": 84106200,
+          "maximum": 87809400
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 181043872,
+          "minimum": 181043456,
+          "maximum": 181177560
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 401021,
+          "minimum": 401003,
+          "maximum": 401030
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 66180408,
+          "minimum": 44288928,
+          "maximum": 66316520
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 7012784,
+          "minimum": 7012000,
+          "maximum": 7013040
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 165176,
+          "minimum": 164488,
+          "maximum": 165320
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 1216,
+          "minimum": 528,
+          "maximum": 1360
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 6847608,
+          "minimum": 6847512,
+          "maximum": 6847720
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 163960,
+          "minimum": 163960,
+          "maximum": 163960
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 13,
+          "minimum": 13,
+          "maximum": 13
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 74025100,
+          "minimum": 73854500,
+          "maximum": 75283500
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 39769288
+    },
+    {
+      "case": "selected-1000",
+      "clients": 1,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 47981900,
+          "minimum": 45658500,
+          "maximum": 49510600
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45096464,
+          "minimum": 45081288,
+          "maximum": 45101408
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100497,
+          "minimum": 100475,
+          "maximum": 100500
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 13681528,
+          "minimum": 13279320,
+          "maximum": 18875656
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 11655392,
+          "minimum": 11654944,
+          "maximum": 11655392
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 792,
+          "minimum": 792,
+          "maximum": 904
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -280,
+          "minimum": -280,
+          "maximum": -168
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 11654488,
+          "minimum": 11654152,
+          "maximum": 11654600
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 1072,
+          "minimum": 1072,
+          "maximum": 1072
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 9,
+          "maximum": 10
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 47981900,
+          "minimum": 45658500,
+          "maximum": 49510600
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 50323300,
+          "minimum": 49721100,
+          "maximum": 54636400
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45096288,
+          "minimum": 45091944,
+          "maximum": 45102256
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100495,
+          "minimum": 100491,
+          "maximum": 100510
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 17747544,
+          "minimum": 14733208,
+          "maximum": 17753208
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 2301480,
+          "minimum": 2301368,
+          "maximum": 2301592
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 904,
+          "minimum": 792,
+          "maximum": 1016
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -168,
+          "minimum": -280,
+          "maximum": -56
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 2300576,
+          "minimum": 2300576,
+          "maximum": 2300576
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 1072,
+          "minimum": 1072,
+          "maximum": 1072
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 9,
+          "maximum": 10
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 50323300,
+          "minimum": 49721100,
+          "maximum": 54636400
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 9353912
+    },
+    {
+      "case": "selected-1000",
+      "clients": 4,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 73752200,
+          "minimum": 71755700,
+          "maximum": 75307900
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 180328032,
+          "minimum": 180325976,
+          "maximum": 180342024
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 401819,
+          "minimum": 401816,
+          "maximum": 401852
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 65666104,
+          "minimum": 62880808,
+          "maximum": 77695456
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 46621904,
+          "minimum": 46621408,
+          "maximum": 46622072
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 4360,
+          "minimum": 4280,
+          "maximum": 4984
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 144,
+          "minimum": 64,
+          "maximum": 768
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 46617128,
+          "minimum": 46617088,
+          "maximum": 46617544
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 4216,
+          "minimum": 4216,
+          "maximum": 4216
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 12,
+          "minimum": 12,
+          "maximum": 12
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 64740000,
+          "minimum": 62420200,
+          "maximum": 67557300
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 71502900,
+          "minimum": 70536000,
+          "maximum": 85543000
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 180348600,
+          "minimum": 180325896,
+          "maximum": 180352472
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 401871,
+          "minimum": 401827,
+          "maximum": 401872
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 62811504,
+          "minimum": 62496456,
+          "maximum": 66730408
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 9206352,
+          "minimum": 9205936,
+          "maximum": 9210536
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 3992,
+          "minimum": 3912,
+          "maximum": 8528
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -224,
+          "minimum": -304,
+          "maximum": 4312
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 9202024,
+          "minimum": 9202008,
+          "maximum": 9202360
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 4216,
+          "minimum": 4216,
+          "maximum": 4216
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 12,
+          "minimum": 12,
+          "maximum": 13
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 65820300,
+          "minimum": 65361200,
+          "maximum": 83790400
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 37415552
+    },
+    {
+      "case": "last-marker",
+      "clients": 1,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 44797200,
+          "minimum": 42329100,
+          "maximum": 46833900
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45127576,
+          "minimum": 45122488,
+          "maximum": 45134128
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100245,
+          "minimum": 100242,
+          "maximum": 100259
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 15451664,
+          "minimum": 12970640,
+          "maximum": 17784304
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 11679000,
+          "minimum": 11678888,
+          "maximum": 11679112
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 9240,
+          "minimum": 9240,
+          "maximum": 9240
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -280,
+          "minimum": -280,
+          "maximum": -280
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 11669760,
+          "minimum": 11669648,
+          "maximum": 11669872
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 9520,
+          "minimum": 9520,
+          "maximum": 9520
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 9,
+          "maximum": 10
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 44797200,
+          "minimum": 42329100,
+          "maximum": 46833900
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 45828700,
+          "minimum": 44042800,
+          "maximum": 49739800
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 45127576,
+          "minimum": 45117016,
+          "maximum": 45134528
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 100245,
+          "minimum": 100231,
+          "maximum": 100263
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 14766496,
+          "minimum": 12211360,
+          "maximum": 18014848
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 1701760,
+          "minimum": 1701760,
+          "maximum": 1702096
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 9240,
+          "minimum": 9240,
+          "maximum": 9576
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -280,
+          "minimum": -280,
+          "maximum": 56
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 1692520,
+          "minimum": 1692520,
+          "maximum": 1692520
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 9520,
+          "minimum": 9520,
+          "maximum": 9520
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 9,
+          "minimum": 9,
+          "maximum": 10
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 1,
+          "minimum": 1,
+          "maximum": 1
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 45828700,
+          "minimum": 44042800,
+          "maximum": 49739800
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 9977240
+    },
+    {
+      "case": "last-marker",
+      "clients": 4,
+      "samples_per_variant": 3,
+      "before-clear": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 68391200,
+          "minimum": 67383900,
+          "maximum": 73146800
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 180488056,
+          "minimum": 180484888,
+          "maximum": 180517456
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 400890,
+          "minimum": 400885,
+          "maximum": 400952
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 63744704,
+          "minimum": 58834432,
+          "maximum": 71039672
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 46716168,
+          "minimum": 46716080,
+          "maximum": 46723032
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 37592,
+          "minimum": 37000,
+          "maximum": 43616
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -416,
+          "minimum": -1008,
+          "maximum": 5608
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 46679080,
+          "minimum": 46678576,
+          "maximum": 46679416
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 38008,
+          "minimum": 38008,
+          "maximum": 38008
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 12,
+          "minimum": 12,
+          "maximum": 13
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 61847900,
+          "minimum": 60908700,
+          "maximum": 68360200
+        }
+      },
+      "current": {
+        "work_ns_instrumented": {
+          "n": 3,
+          "median": 71185400,
+          "minimum": 68705800,
+          "maximum": 75347500
+        },
+        "work_total_alloc_delta_bytes": {
+          "n": 3,
+          "median": 180488504,
+          "minimum": 180461400,
+          "maximum": 180492088
+        },
+        "work_mallocs_delta": {
+          "n": 3,
+          "median": 400889,
+          "minimum": 400838,
+          "maximum": 400905
+        },
+        "after_work_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 65202392,
+          "minimum": 29869088,
+          "maximum": 76632232
+        },
+        "results_and_wire_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 6807600,
+          "minimum": 6807584,
+          "maximum": 6808648
+        },
+        "wire_only_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": 37672,
+          "minimum": 37592,
+          "maximum": 38888
+        },
+        "released_heap_alloc_delta_bytes": {
+          "n": 3,
+          "median": -336,
+          "minimum": -416,
+          "maximum": 880
+        },
+        "held_to_wire_heap_difference_bytes": {
+          "n": 3,
+          "median": 6769912,
+          "minimum": 6769760,
+          "maximum": 6770008
+        },
+        "wire_to_released_heap_difference_bytes": {
+          "n": 3,
+          "median": 38008,
+          "minimum": 38008,
+          "maximum": 38008
+        },
+        "before_to_after_work_gc_delta": {
+          "n": 3,
+          "median": 12,
+          "minimum": 12,
+          "maximum": 13
+        },
+        "after_work_to_results_and_wire_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "results_and_wire_to_wire_only_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "wire_only_to_released_gc_delta": {
+          "n": 3,
+          "median": 2,
+          "minimum": 2,
+          "maximum": 2
+        },
+        "max_observed_worker_overlap": {
+          "n": 3,
+          "median": 4,
+          "minimum": 4,
+          "maximum": 4
+        },
+        "all_workers_common_overlap_ns": {
+          "n": 3,
+          "median": 63886000,
+          "minimum": 62422800,
+          "maximum": 69215100
+        }
+      },
+      "held_heap_delta_difference_of_medians_bytes": 39908568
+    }
+  ],
+  "interpretation": [
+    "Three descriptive samples per cohort; no population inference or performance threshold.",
+    "Heap deltas are whole-process observations; not exact Result/body sizes, peak memory or RSS.",
+    "Work includes Trace, encoding and worker orchestration; not ordinary production request latency.",
+    "Allocation deltas use AfterWork-Before, excluding subsequent semantic validator allocations.",
+    "GC gates require at least two cycles at each quiescent boundary; autonomous cycles may add more.",
+    "Observed worker intervals establish overlap; client count alone does not.",
+    "Complete semantic validation and final original-input recheck are supported by the pinned helper's passing root.",
+    "Bodies are compared by their pinned-helper SHA-256 and length, not independently reread by this reducer.",
+    "Receipts confirm direct-child completion; whole-process-tree settlement remains separately reported."
+  ]
+}

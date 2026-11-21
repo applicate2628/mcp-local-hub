@@ -1,0 +1,11 @@
+{
+  "schema": "r25-packager-first-failure-diagnosis-v1",
+  "basis": "root observed full admitted-input read-only probe; index-only probe independently read by reviewer",
+  "failure_preserved": "FAILURE.json",
+  "probe_path": "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\inspect_archive_inputs-result.json",
+  "diagnosis": "Observed Windows Python 3.14.7 lstat/fstat ctime representations differ while same-API pairs and common identity fields remain stable",
+  "ctime_kept_in_same_api_and_final_reread": true,
+  "replacement_packager_sha256": "bd655c27959379e17da702ebc13d47a475b8f7a2e04e923ef5c78bf034d510e9",
+  "local_synthetic_stat_report": "../synthetic-stat-guards-bd655c279593.json",
+  "actual_windows_rerun": "PENDING_ROOT"
+}

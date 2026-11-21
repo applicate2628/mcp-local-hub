@@ -1,0 +1,54 @@
+{
+  "schema": "r25-budget-source-comparison-v1",
+  "refs": {
+    "inventory": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+    "diagnostic_base": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+    "serena_owner": "1ebe00c5dbac448488d980072e689b1126875dde"
+  },
+  "inventory_to_diagnostic_changed_paths": [
+    ".plans/2026-11/open-pr-integration-20261117.md"
+  ],
+  "selected_blobs": {
+    "internal/cli/install_reconcile_mcp_front_v3_test.go": {
+      "by_ref": {
+        "inventory": "8cd1aabdaa136403d37352361092fe612fc14844",
+        "diagnostic_base": "8cd1aabdaa136403d37352361092fe612fc14844",
+        "serena_owner": "8cd1aabdaa136403d37352361092fe612fc14844"
+      },
+      "identical": true
+    },
+    "internal/cli/install_reconcile_mcp_front.go": {
+      "by_ref": {
+        "inventory": "e0025585721cdaf6c01bbcf387e451f4c5eca3f1",
+        "diagnostic_base": "e0025585721cdaf6c01bbcf387e451f4c5eca3f1",
+        "serena_owner": "e0025585721cdaf6c01bbcf387e451f4c5eca3f1"
+      },
+      "identical": true
+    },
+    "internal/cli/install_reconcile_mcp_front_pr588_test.go": {
+      "by_ref": {
+        "inventory": "789b4eaffdaa6fc4e61d0deedfb3b3145d7fb062",
+        "diagnostic_base": "789b4eaffdaa6fc4e61d0deedfb3b3145d7fb062",
+        "serena_owner": "789b4eaffdaa6fc4e61d0deedfb3b3145d7fb062"
+      },
+      "identical": true
+    },
+    "internal/cli/settings_registry_test.go": {
+      "by_ref": {
+        "inventory": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261",
+        "diagnostic_base": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261",
+        "serena_owner": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261"
+      },
+      "identical": true
+    },
+    "internal/api/secure_write_windows.go": {
+      "by_ref": {
+        "inventory": "9459cd42d6389b28c14dfd86727eef493f6aa69f",
+        "diagnostic_base": "9459cd42d6389b28c14dfd86727eef493f6aa69f",
+        "serena_owner": "9459cd42d6389b28c14dfd86727eef493f6aa69f"
+      },
+      "identical": true
+    }
+  },
+  "go_test_or_inventory_execution": false
+}

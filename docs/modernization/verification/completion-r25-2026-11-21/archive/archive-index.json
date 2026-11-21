@@ -1,0 +1,196 @@
+{
+  "schema": "r25-archive-index-v1",
+  "root": "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121",
+  "files": [
+    {
+      "path": "archive-index-v1.json",
+      "sha256": "36697e659091c0c99fbf45105eec03a34c017200623afa9ec1161ed7af3ef8f6"
+    },
+    {
+      "path": "cmake-input-readback.json",
+      "sha256": "6ad855c3e2091a72ca431eb74a6f7052120c39b1d361a3ca2ac8893bba10a06c"
+    },
+    {
+      "path": "format_cmake.py",
+      "sha256": "cfbbc44d9b987b86c8940fb36e866b80a0208909e35776803f4f47b2a54b56a3"
+    },
+    {
+      "path": "go-budget-input-readback.json",
+      "sha256": "a2e7ea012e6f8c17bba550695a925fc462557f20c99330915303d4154bd11d61"
+    },
+    {
+      "path": "inspect_archive_file_identity.py",
+      "sha256": "4a93f539cda4cfaff4dae53c9e2b9d8f70a962696bc8176b30151283bf873048"
+    },
+    {
+      "path": "inspect_archive_inputs-result.json",
+      "sha256": "6493b8d0e0ca65aef5f3a2760dd45a101c9b288cc9db7c4f8ec49aa35aa91128"
+    },
+    {
+      "path": "inspect_archive_inputs-stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "inspect_archive_inputs.py",
+      "sha256": "a5ed6a239336e6924a5967e32bf5c4f0f45b3f12a071d5828a736c680dfb17ef"
+    },
+    {
+      "path": "invalid-fixtures-input-readback.json",
+      "sha256": "f3615b9626da35a575668778033b165df7a2ca39f4f2f3edf862a07cbcd90dfe"
+    },
+    {
+      "path": "invalid-oracle-input-readback.json",
+      "sha256": "1d031a858718096b49133a9da457554eafed87e0797be9129c73045390a1a5d3"
+    },
+    {
+      "path": "package-attempt-v1.json",
+      "sha256": "1ea2c011128ca8105f2695631d55f3f87cb91651a7ffa4b2f76184899b4cdb5c"
+    },
+    {
+      "path": "package_evidence.py",
+      "sha256": "bd655c27959379e17da702ebc13d47a475b8f7a2e04e923ef5c78bf034d510e9"
+    },
+    {
+      "path": "package_evidence_v1.py",
+      "sha256": "80029a94fcc3e70c89d1e0ca16662587db3bb683e0d768fcfac2549241622b60"
+    },
+    {
+      "path": "qualify_scope.py",
+      "sha256": "610269f4e6841d336c4339abafe94751db8386d49c3fa4a2ce3bb103a794984e"
+    },
+    {
+      "path": "unpack_cmake.py",
+      "sha256": "789f6d894ae797af8568b23a3046292f63baf4db19191b5cc3a5bd9136f3b613"
+    },
+    {
+      "path": "unpack_go_budget.py",
+      "sha256": "0ba720765c4a0153abd6f2dfe58bf8791fb275a4d38ff90ebf55733de0912e55"
+    },
+    {
+      "path": "unpack_invalid_fixtures.py",
+      "sha256": "cad06cbc1e6bfee6a6ca641cd559ee6d872ff0bcc6e40881fd8ebd71ba30020a"
+    },
+    {
+      "path": "unpack_invalid_oracle.py",
+      "sha256": "10557aad7eac3584c991307dcac627655da963dcc4b430d93ce9ca501ae07b5d"
+    },
+    {
+      "path": "verify_public_archive.py",
+      "sha256": "7a5361a4eb4a1b802d91d8bfd8276e91487650b650ca5d8d005498852116a539"
+    }
+  ],
+  "scopes": [
+    {
+      "scope": "pr648",
+      "manifest_sha256": "94d5bfb30dceb704cde0bf98b0b2d2abc596adf038e68ba79cddace02ecc451b",
+      "phases": {
+        "prepare": {
+          "status": "PASS"
+        },
+        "qualify": {
+          "status": "REJECTED_BEFORE_RUNTIME"
+        },
+        "build-vet": {
+          "status": "REJECTED_BEFORE_RUNTIME"
+        }
+      }
+    },
+    {
+      "scope": "pr648v2",
+      "manifest_sha256": "40e23d3551828984da73553130885752dced10e67038adaff51bb0cec297ef7a",
+      "phases": {
+        "qualify": {
+          "status": "COMPILE_FAILED_BEFORE_TESTS",
+          "command": "native-pins-default",
+          "required_output": [
+            "undefined: windows.HANDLE_FLAG_PROTECT_FROM_CLOSE"
+          ]
+        },
+        "build-vet": {
+          "status": "NOT_RUN"
+        },
+        "admit": {
+          "status": "PASS"
+        }
+      }
+    },
+    {
+      "scope": "pr648v3",
+      "manifest_sha256": "c1bf5533cf6b94879c18ac9c70ccd006e0ea564c36ab59f46495fe94fdb06996",
+      "phases": {
+        "qualify": {
+          "status": "PASS"
+        },
+        "build-vet": {
+          "status": "PASS"
+        },
+        "admit": {
+          "status": "PASS"
+        }
+      }
+    },
+    {
+      "scope": "go-budget",
+      "manifest_sha256": "0040a688756cfbc5f668ef72afeca2a64fa79a7c4be789ed9156b2d6f854ad5d",
+      "phases": {
+        "prepare": {
+          "status": "PASS"
+        },
+        "measure": {
+          "status": "PASS"
+        }
+      }
+    },
+    {
+      "scope": "cmake-retention",
+      "manifest_sha256": "6c7340d211be812e70f88e278ac062c95dbfd1a98bfc0a9c54021d228de070e1",
+      "phases": {
+        "prepare": {
+          "status": "PASS"
+        },
+        "before-clear": {
+          "status": "PASS"
+        },
+        "current": {
+          "status": "PASS"
+        }
+      }
+    },
+    {
+      "scope": "invalid-fixtures",
+      "manifest_sha256": "6331e97d8c292222f5dd256632b466faab26c68719cdd5d3d4a34bba0f2e85f9",
+      "phases": {
+        "prepare": {
+          "status": "PASS"
+        },
+        "before": {
+          "status": "PASS"
+        },
+        "candidate": {
+          "status": "PASS"
+        },
+        "tag-race": {
+          "status": "PASS"
+        },
+        "build-vet": {
+          "status": "NOT_RUN"
+        }
+      }
+    },
+    {
+      "scope": "invalid-oracle",
+      "manifest_sha256": "cd167a9cda767b2e57e64d29f689a12819d86ca34052ea89e91cbc3078f17dd9",
+      "phases": {
+        "admit": {
+          "status": "PASS"
+        },
+        "qualify": {
+          "status": "PASS"
+        },
+        "build-vet": {
+          "status": "PASS"
+        }
+      }
+    }
+  ]
+}
