@@ -1,0 +1,1863 @@
+{
+  "schema": "mcp-pr-queue-final-readonly-audit-v1",
+  "repository": "applicate2628/mcp-local-hub",
+  "snapshot_boundary": "After the main R22/R23 evidence/plan commits and eight body updates; BEFORE a subsequent audit-only commit on PR #623 that will include this snapshot, publication readback and cleanup. That later commit is outside this snapshot.",
+  "read_interval": {
+    "started_at_utc": "2026-11-21T10:06:03Z",
+    "completed_at_utc": "2026-11-21T10:08:05Z",
+    "started_at_msk": "2026-11-21T13:06:03+03:00",
+    "completed_at_msk": "2026-11-21T13:08:05+03:00",
+    "atomic": false
+  },
+  "mode": "Read-only GitHub queries and local byte comparison; no messages, review submissions, PR/branch mutations, tests or workflow operations.",
+  "initial_snapshot": {
+    "local_file": "pr-queue-audit.json",
+    "bytes": 66903,
+    "sha256": "16098ae73f8258c78d71ce00020902159b0af5ae8638db4e82aa9cf6d10f0dd5",
+    "completed_at_utc": "2026-11-21T08:57:25Z",
+    "published_copy": "https://github.com/applicate2628/mcp-local-hub/blob/b1d932ea8925ef3324d539e5de006daeae65ba2a/docs/modernization/verification/completion-r22-r23-2026-11-21/audit/pr-queue-initial.json"
+  },
+  "expected_heads": {
+    "623": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+    "631": "2eb7c114103ef5c60939cd114110ebe667901166",
+    "658": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+    "660": "610fb30348c10be7b645b6ce43c862397b190f60"
+  },
+  "master": {
+    "sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "initial_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/master"
+  },
+  "summary": {
+    "open_prs": 31,
+    "draft_prs": 31,
+    "open_inventory_unchanged": true,
+    "changed_head_count": 4,
+    "unchanged_head_count": 27,
+    "expected_head_changes_only": true,
+    "head_ref_name_changes": 0,
+    "base_ref_name_changes": 0,
+    "actual_base_refs_checked": 6,
+    "actual_base_refs_unchanged": true,
+    "actual_master_unchanged": true,
+    "actual_head_refs_checked": 31,
+    "all_pr_heads_match_actual_refs": true,
+    "pr_metadata_base_sha_mismatches_actual_ref": 22,
+    "review_submissions": 47,
+    "review_states": {
+      "COMMENTED": 47,
+      "APPROVED": 0,
+      "CHANGES_REQUESTED": 0
+    },
+    "current_head_review_submissions": 22,
+    "prs_with_current_head_review": 22,
+    "prs_without_current_head_review": [
+      623,
+      624,
+      628,
+      629,
+      631,
+      635,
+      637,
+      658,
+      660
+    ],
+    "review_numeric_ids_unchanged": true,
+    "review_submitted_times_unchanged": true,
+    "review_commits_states_authors_unchanged": true,
+    "body_readbacks_verified": 8,
+    "all_eight_bodies_byte_equal": true,
+    "known_placeholders_remaining": [],
+    "created_since_initial_search_matches": 0,
+    "closed_since_initial_search_matches": 0
+  },
+  "changes": {
+    "heads": [
+      {
+        "number": 623,
+        "before": "cf5e71ffd88abe53c611f8ee06b536b3228e60e7",
+        "after": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+        "expected": true
+      },
+      {
+        "number": 631,
+        "before": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+        "after": "2eb7c114103ef5c60939cd114110ebe667901166",
+        "expected": true
+      },
+      {
+        "number": 658,
+        "before": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+        "after": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+        "expected": true
+      },
+      {
+        "number": 660,
+        "before": "a63199628c1689b4b77a50abfc7432396a1893f4",
+        "after": "610fb30348c10be7b645b6ce43c862397b190f60",
+        "expected": true
+      }
+    ],
+    "head_or_base_ref_names": [],
+    "pr_metadata_base_sha": [],
+    "open_pr_numbers_added": [],
+    "open_pr_numbers_removed": [],
+    "review_submissions": {
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "review_current_head_flags": [
+      {
+        "pr_number": 631,
+        "review_id": 5962471640,
+        "review_commit_sha": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+        "initial_current_head": true,
+        "final_current_head": false
+      }
+    ]
+  },
+  "base_refs": [
+    {
+      "ref": "master",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/master",
+      "initial_actual_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "final_actual_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "unchanged": true,
+      "pr_numbers": [
+        623,
+        624,
+        625,
+        626,
+        627,
+        628,
+        629,
+        632,
+        639,
+        643,
+        645,
+        646,
+        647,
+        648,
+        649,
+        650,
+        651,
+        652,
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660
+      ],
+      "pr_reported_base_shas": [
+        "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      ]
+    },
+    {
+      "ref": "spike/rx02-native-identity-20261114",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-identity-20261114",
+      "initial_actual_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "final_actual_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "unchanged": true,
+      "pr_numbers": [
+        631
+      ],
+      "pr_reported_base_shas": [
+        "71891067d0c24387ba873a3e4276b0462ae365ae"
+      ]
+    },
+    {
+      "ref": "fix/serena-qualified-uv-path-20261114",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualified-uv-path-20261114",
+      "initial_actual_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "final_actual_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "unchanged": true,
+      "pr_numbers": [
+        635
+      ],
+      "pr_reported_base_shas": [
+        "8cead428a6cee57c597e2bd3ed7b3877a6445d30"
+      ]
+    },
+    {
+      "ref": "fix/serena-qualification-publisher-20261114",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-publisher-20261114",
+      "initial_actual_sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "final_actual_sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "unchanged": true,
+      "pr_numbers": [
+        636
+      ],
+      "pr_reported_base_shas": [
+        "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109"
+      ]
+    },
+    {
+      "ref": "fix/serena-qualification-namespace-20261114",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-namespace-20261114",
+      "initial_actual_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "final_actual_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "unchanged": true,
+      "pr_numbers": [
+        637
+      ],
+      "pr_reported_base_shas": [
+        "acac454e539a6b951d4b6ee998cc2142ee153069"
+      ]
+    },
+    {
+      "ref": "spike/rx02-native-process-owner-20261112",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-process-owner-20261112",
+      "initial_actual_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "final_actual_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "unchanged": true,
+      "pr_numbers": [
+        644
+      ],
+      "pr_reported_base_shas": [
+        "c5672f49f65713c7555e8841e46de75b045da5f8"
+      ]
+    }
+  ],
+  "actual_refs": [
+    {
+      "ref": "master",
+      "sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/master"
+    },
+    {
+      "ref": "docs/rust-cross-platform-no-com-20261112",
+      "sha": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/docs/rust-cross-platform-no-com-20261112"
+    },
+    {
+      "ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx01-cmaketrace-benchmark-20261112"
+    },
+    {
+      "ref": "spike/rx02-native-process-owner-20261112",
+      "sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-process-owner-20261112"
+    },
+    {
+      "ref": "perf/rx01-relay-baseline-20261112",
+      "sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx01-relay-baseline-20261112"
+    },
+    {
+      "ref": "spike/rx04-anchored-read-20261112",
+      "sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx04-anchored-read-20261112"
+    },
+    {
+      "ref": "perf/rx16-native-observation-20261112",
+      "sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx16-native-observation-20261112"
+    },
+    {
+      "ref": "fix/relay-output-failure-contract-20261113",
+      "sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/relay-output-failure-contract-20261113"
+    },
+    {
+      "ref": "spike/rx02-go-rust-boundary-20261113",
+      "sha": "2eb7c114103ef5c60939cd114110ebe667901166",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-go-rust-boundary-20261113"
+    },
+    {
+      "ref": "spike/rx02-native-identity-20261114",
+      "sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-identity-20261114"
+    },
+    {
+      "ref": "fix/serena-qualified-uv-path-20261114",
+      "sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualified-uv-path-20261114"
+    },
+    {
+      "ref": "fix/serena-qualification-publisher-20261114",
+      "sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-publisher-20261114"
+    },
+    {
+      "ref": "fix/serena-qualification-namespace-20261114",
+      "sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-namespace-20261114"
+    },
+    {
+      "ref": "fix/serena-integration-qualification-20261114",
+      "sha": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-integration-qualification-20261114"
+    },
+    {
+      "ref": "fix/serena-unbuffered-build-input-20261114",
+      "sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-unbuffered-build-input-20261114"
+    },
+    {
+      "ref": "fix/serena-cleanup-parent-observation-20261114",
+      "sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-cleanup-parent-observation-20261114"
+    },
+    {
+      "ref": "fix/serena-stream-enumeration-20261114",
+      "sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-stream-enumeration-20261114"
+    },
+    {
+      "ref": "fix/serena-python-discovery-preference-20261114",
+      "sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-python-discovery-preference-20261114"
+    },
+    {
+      "ref": "fix/serena-executable-discovery-20261114",
+      "sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-executable-discovery-20261114"
+    },
+    {
+      "ref": "fix/serena-build-compatibility-20261114",
+      "sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-build-compatibility-20261114"
+    },
+    {
+      "ref": "fix/serena-qualification-home-20261114",
+      "sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-home-20261114"
+    },
+    {
+      "ref": "fix/serena-protocol-binding-20261114",
+      "sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-protocol-binding-20261114"
+    },
+    {
+      "ref": "fix/serena-readonly-cleanup-20261114",
+      "sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-readonly-cleanup-20261114"
+    },
+    {
+      "ref": "fix/serena-owned-file-reads-20261114",
+      "sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-owned-file-reads-20261114"
+    },
+    {
+      "ref": "fix/serena-tcp-query-budget-20261115",
+      "sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-tcp-query-budget-20261115"
+    },
+    {
+      "ref": "fix/serena-ready-readback-20261115",
+      "sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-ready-readback-20261115"
+    },
+    {
+      "ref": "fix/serena-finalize-context-20261115",
+      "sha": "2defe618259f7db4144824d19927b032300d160d",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-finalize-context-20261115"
+    },
+    {
+      "ref": "fix/serena-connection-close-20261115",
+      "sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-connection-close-20261115"
+    },
+    {
+      "ref": "fix/canonical-command-test-product-20261116",
+      "sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/canonical-command-test-product-20261116"
+    },
+    {
+      "ref": "docs/agents-canonical-plan-20261117",
+      "sha": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/docs/agents-canonical-plan-20261117"
+    },
+    {
+      "ref": "fix/api-port-pid-observation-20261118",
+      "sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/api-port-pid-observation-20261118"
+    },
+    {
+      "ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "sha": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/scheduler-hidden-task-lookup-20261119"
+    }
+  ],
+  "body_readbacks": [
+    {
+      "number": 623,
+      "actual_body_bytes": 50954,
+      "actual_body_sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb",
+      "expected_body_bytes": 50954,
+      "expected_body_sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+      "observed_pr_updated_at": "2026-11-21T10:05:36Z",
+      "expected_file": "pr-description-candidates/final/pr-623.md"
+    },
+    {
+      "number": 624,
+      "actual_body_bytes": 18072,
+      "actual_body_sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13",
+      "expected_body_bytes": 18072,
+      "expected_body_sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "observed_pr_updated_at": "2026-11-21T10:05:19Z",
+      "expected_file": "pr-description-candidates/final/pr-624.md"
+    },
+    {
+      "number": 628,
+      "actual_body_bytes": 12384,
+      "actual_body_sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68",
+      "expected_body_bytes": 12384,
+      "expected_body_sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "observed_pr_updated_at": "2026-11-21T10:05:23Z",
+      "expected_file": "pr-description-candidates/final/pr-628.md"
+    },
+    {
+      "number": 629,
+      "actual_body_bytes": 22586,
+      "actual_body_sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888",
+      "expected_body_bytes": 22586,
+      "expected_body_sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "observed_pr_updated_at": "2026-11-21T10:05:25Z",
+      "expected_file": "pr-description-candidates/final/pr-629.md"
+    },
+    {
+      "number": 631,
+      "actual_body_bytes": 9489,
+      "actual_body_sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9",
+      "expected_body_bytes": 9489,
+      "expected_body_sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "observed_pr_updated_at": "2026-11-21T10:05:27Z",
+      "expected_file": "pr-description-candidates/final/pr-631.md"
+    },
+    {
+      "number": 637,
+      "actual_body_bytes": 11038,
+      "actual_body_sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac",
+      "expected_body_bytes": 11038,
+      "expected_body_sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "observed_pr_updated_at": "2026-11-21T10:05:29Z",
+      "expected_file": "pr-description-candidates/final/pr-637.md"
+    },
+    {
+      "number": 658,
+      "actual_body_bytes": 45725,
+      "actual_body_sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc",
+      "expected_body_bytes": 45725,
+      "expected_body_sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/658",
+      "observed_pr_updated_at": "2026-11-21T10:05:31Z",
+      "expected_file": "pr-description-candidates/final/pr-658.md"
+    },
+    {
+      "number": 660,
+      "actual_body_bytes": 47768,
+      "actual_body_sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb",
+      "expected_body_bytes": 47768,
+      "expected_body_sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb",
+      "bytes_equal": true,
+      "unresolved_known_placeholders": [],
+      "source": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "observed_pr_updated_at": "2026-11-21T10:05:34Z",
+      "expected_file": "pr-description-candidates/final/pr-660.md"
+    }
+  ],
+  "review_comparison": {
+    "initial_identifiers": "Numeric review IDs parsed from initial pullrequestreview-N URL and matched to fresh REST id; same canonical URLs also matched.",
+    "fields_compared": [
+      "id",
+      "url",
+      "state",
+      "commit_sha",
+      "submitted_at",
+      "author"
+    ],
+    "fields_not_compared": [
+      "review body edits",
+      "ordinary issue comments",
+      "inline review comments"
+    ],
+    "rest_per_page": 100,
+    "max_reviews_per_pr": 7,
+    "all_review_pages_complete": true,
+    "rest_counts_match_normalized_review_counts": true,
+    "authors": {
+      "applicate2628": 46,
+      "chatgpt-codex-connector[bot]": 1
+    }
+  },
+  "pull_requests": [
+    {
+      "number": 623,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "head_sha": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+      "head_sha_initial": "cf5e71ffd88abe53c611f8ee06b536b3228e60e7",
+      "head_changed": true,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-21T10:05:36Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 6,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5962468737,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QNgQ",
+          "state": "COMMENTED",
+          "commit_sha": "9e948c92047d5b05419f01983ed743e358a79989",
+          "submitted_at": "2026-11-18T18:14:30Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5962468737",
+          "current_head": false
+        },
+        {
+          "id": 5963809570,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY3iDIg",
+          "state": "COMMENTED",
+          "commit_sha": "385d0ae7a58012001ec06ebddc658bcd90c1fd18",
+          "submitted_at": "2026-11-18T19:43:55Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5963809570",
+          "current_head": false
+        },
+        {
+          "id": 5965331371,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY4-7qw",
+          "state": "COMMENTED",
+          "commit_sha": "7feec21c87760afa3900193974b1d3c71e97dcc1",
+          "submitted_at": "2026-11-18T21:18:28Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5965331371",
+          "current_head": false
+        },
+        {
+          "id": 5966233562,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY51_2g",
+          "state": "COMMENTED",
+          "commit_sha": "1e04fea613edc909b13c19f8dad4db5977b3bd69",
+          "submitted_at": "2026-11-18T22:29:37Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5966233562",
+          "current_head": false
+        },
+        {
+          "id": 5967529814,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY7FHVg",
+          "state": "COMMENTED",
+          "commit_sha": "e8268f067a7fbf797b55352ec601ae8d6b5e41f2",
+          "submitted_at": "2026-11-19T00:41:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5967529814",
+          "current_head": false
+        },
+        {
+          "id": 5969167690,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY8pFSg",
+          "state": "COMMENTED",
+          "commit_sha": "e5df8f9e4002e55b521f509ca363e348e300d8ad",
+          "submitted_at": "2026-11-19T04:07:05Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5969167690",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/623/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/docs/rust-cross-platform-no-com-20261112"
+    },
+    {
+      "number": 624,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "head_sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "head_sha_initial": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-21T10:05:19Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5962469263,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QPjw",
+          "state": "COMMENTED",
+          "commit_sha": "251fb4f03405ba438662976137afec0d9c27105e",
+          "submitted_at": "2026-11-18T18:14:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/624#pullrequestreview-5962469263",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/624/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx01-cmaketrace-benchmark-20261112"
+    },
+    {
+      "number": 625,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "head_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "head_sha_initial": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T18:15:57Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5962469822,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QRvg",
+          "state": "COMMENTED",
+          "commit_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+          "submitted_at": "2026-11-18T18:14:35Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/625#pullrequestreview-5962469822",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/625/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-process-owner-20261112"
+    },
+    {
+      "number": 626,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "head_sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "head_sha_initial": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T19:45:34Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5962690160,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2ducA",
+          "state": "COMMENTED",
+          "commit_sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+          "submitted_at": "2026-11-18T18:28:37Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/626#pullrequestreview-5962690160",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/626/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx01-relay-baseline-20261112"
+    },
+    {
+      "number": 627,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "head_sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "head_sha_initial": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T18:15:59Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 2,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5953798373,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYt_A5Q",
+          "state": "COMMENTED",
+          "commit_sha": "2c13114eabc7ad6cab416788b6e32faaa8c99935",
+          "submitted_at": "2026-11-18T09:25:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/627#pullrequestreview-5953798373",
+          "current_head": false
+        },
+        {
+          "id": 5962470418,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QUEg",
+          "state": "COMMENTED",
+          "commit_sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+          "submitted_at": "2026-11-18T18:14:38Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/627#pullrequestreview-5962470418",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/627/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx04-anchored-read-20261112"
+    },
+    {
+      "number": 628,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "head_sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "head_sha_initial": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-21T10:05:23Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 3,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5962471074,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QWog",
+          "state": "COMMENTED",
+          "commit_sha": "9c2ae02bc1c3a5cf2e1fcd16101043d63bbd6fd9",
+          "submitted_at": "2026-11-18T18:14:40Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5962471074",
+          "current_head": false
+        },
+        {
+          "id": 5966200735,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY5z_nw",
+          "state": "COMMENTED",
+          "commit_sha": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-18T22:27:22Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5966200735",
+          "current_head": false
+        },
+        {
+          "id": 5968784333,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY8RrzQ",
+          "state": "COMMENTED",
+          "commit_sha": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-19T03:12:24Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5968784333",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/628/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/perf/rx16-native-observation-20261112"
+    },
+    {
+      "number": 629,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "head_sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "head_sha_initial": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-21T10:05:25Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5961299828,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY1I3dA",
+          "state": "COMMENTED",
+          "commit_sha": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+          "submitted_at": "2026-11-18T16:58:18Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/629#pullrequestreview-5961299828",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/629/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/relay-output-failure-contract-20261113"
+    },
+    {
+      "number": 631,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "head_sha": "2eb7c114103ef5c60939cd114110ebe667901166",
+      "head_sha_initial": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "head_changed": true,
+      "base_ref": "spike/rx02-native-identity-20261114",
+      "base_sha_reported_by_pr": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "base_sha_actual_ref": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-21T10:05:27Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 2,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5948270182,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYotmZg",
+          "state": "COMMENTED",
+          "commit_sha": "2fd3f017a9e5ccd0460293d71ea34aceb62f245e",
+          "submitted_at": "2026-11-17T23:17:46Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/631#pullrequestreview-5948270182",
+          "current_head": false
+        },
+        {
+          "id": 5962471640,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QY2A",
+          "state": "COMMENTED",
+          "commit_sha": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+          "submitted_at": "2026-11-18T18:14:42Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/631#pullrequestreview-5962471640",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/631/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-go-rust-boundary-20261113"
+    },
+    {
+      "number": 632,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "head_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "head_sha_initial": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T16:56:02Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5961115560,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY09nqA",
+          "state": "COMMENTED",
+          "commit_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+          "submitted_at": "2026-11-18T16:48:00Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/632#pullrequestreview-5961115560",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/632/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualified-uv-path-20261114"
+    },
+    {
+      "number": 635,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "head_sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "head_sha_initial": "1c135914c108dda8b63816175347c5da77da26d9",
+      "head_changed": false,
+      "base_ref": "fix/serena-qualified-uv-path-20261114",
+      "base_sha_reported_by_pr": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "base_sha_actual_ref": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:44:58Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 3,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5906685016,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYBDcWA",
+          "state": "COMMENTED",
+          "commit_sha": "65c0e7388aaa8c1861c1ca83470fe2a537898d09",
+          "submitted_at": "2026-11-14T19:21:00Z",
+          "author": "chatgpt-codex-connector[bot]",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906685016",
+          "current_head": false
+        },
+        {
+          "id": 5906756908,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYBH1LA",
+          "state": "COMMENTED",
+          "commit_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:31Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906756908",
+          "current_head": false
+        },
+        {
+          "id": 5906756996,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYBH1hA",
+          "state": "COMMENTED",
+          "commit_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906756996",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/635/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-publisher-20261114"
+    },
+    {
+      "number": 636,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/636",
+      "title": "test(serena): retain a private native qualification namespace",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-qualification-namespace-20261114",
+      "head_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "head_sha_initial": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "head_changed": false,
+      "base_ref": "fix/serena-qualification-publisher-20261114",
+      "base_sha_reported_by_pr": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "base_sha_actual_ref": "1c135914c108dda8b63816175347c5da77da26d9",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T11:02:23Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5955306325,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYvbDVQ",
+          "state": "COMMENTED",
+          "commit_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+          "submitted_at": "2026-11-18T11:02:23Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/636#pullrequestreview-5955306325",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/636/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-namespace-20261114"
+    },
+    {
+      "number": 637,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "head_sha": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "head_sha_initial": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "head_changed": false,
+      "base_ref": "fix/serena-qualification-namespace-20261114",
+      "base_sha_reported_by_pr": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "base_sha_actual_ref": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-21T10:05:29Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 0,
+      "current_head_review_count": 0,
+      "reviews": [],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/637/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-integration-qualification-20261114"
+    },
+    {
+      "number": 639,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/639",
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-unbuffered-build-input-20261114",
+      "head_sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "head_sha_initial": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:01Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959654251,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzkbaw",
+          "state": "COMMENTED",
+          "commit_sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+          "submitted_at": "2026-11-18T15:29:32Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/639#pullrequestreview-5959654251",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/639/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-unbuffered-build-input-20261114"
+    },
+    {
+      "number": 643,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "head_sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "head_sha_initial": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:02Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5956820088,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYw3ceA",
+          "state": "COMMENTED",
+          "commit_sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+          "submitted_at": "2026-11-18T12:48:26Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/643#pullrequestreview-5956820088",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/643/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-cleanup-parent-observation-20261114"
+    },
+    {
+      "number": 644,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "head_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "head_sha_initial": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "head_changed": false,
+      "base_ref": "spike/rx02-native-process-owner-20261112",
+      "base_sha_reported_by_pr": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "base_sha_actual_ref": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T19:20:50Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5962472237,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY2QbLQ",
+          "state": "COMMENTED",
+          "commit_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+          "submitted_at": "2026-11-18T18:14:44Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/644#pullrequestreview-5962472237",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/644/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/spike/rx02-native-identity-20261114"
+    },
+    {
+      "number": 645,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/645",
+      "title": "fix(serena): accept native empty stream enumeration",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-stream-enumeration-20261114",
+      "head_sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "head_sha_initial": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:04Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959530115,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzc2gw",
+          "state": "COMMENTED",
+          "commit_sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+          "submitted_at": "2026-11-18T15:22:56Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/645#pullrequestreview-5959530115",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/645/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-stream-enumeration-20261114"
+    },
+    {
+      "number": 646,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "head_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "head_sha_initial": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:05Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959654873,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzkd2Q",
+          "state": "COMMENTED",
+          "commit_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+          "submitted_at": "2026-11-18T15:29:34Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/646#pullrequestreview-5959654873",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/646/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-python-discovery-preference-20261114"
+    },
+    {
+      "number": 647,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "head_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "head_sha_initial": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:06Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959655249,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzkfUQ",
+          "state": "COMMENTED",
+          "commit_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+          "submitted_at": "2026-11-18T15:29:35Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/647#pullrequestreview-5959655249",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/647/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-executable-discovery-20261114"
+    },
+    {
+      "number": 648,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/648",
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "head_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "head_sha_initial": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:07Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959530461,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzc33Q",
+          "state": "COMMENTED",
+          "commit_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+          "submitted_at": "2026-11-18T15:22:57Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/648#pullrequestreview-5959530461",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/648/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-build-compatibility-20261114"
+    },
+    {
+      "number": 649,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "head_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "head_sha_initial": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:09Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959655594,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzkgqg",
+          "state": "COMMENTED",
+          "commit_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+          "submitted_at": "2026-11-18T15:29:36Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/649#pullrequestreview-5959655594",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/649/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-qualification-home-20261114"
+    },
+    {
+      "number": 650,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "head_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "head_sha_initial": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:10Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959915031,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYz0WFw",
+          "state": "COMMENTED",
+          "commit_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+          "submitted_at": "2026-11-18T15:43:11Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/650#pullrequestreview-5959915031",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/650/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-protocol-binding-20261114"
+    },
+    {
+      "number": 651,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/651",
+      "title": "fix(serena): unlink owned readonly cache entries",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-readonly-cleanup-20261114",
+      "head_sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "head_sha_initial": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:11Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959530807,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzc5Nw",
+          "state": "COMMENTED",
+          "commit_sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+          "submitted_at": "2026-11-18T15:22:58Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/651#pullrequestreview-5959530807",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/651/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-readonly-cleanup-20261114"
+    },
+    {
+      "number": 652,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/652",
+      "title": "fix(serena): read installed files through original tree",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "head_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "head_sha_initial": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": false,
+      "updated_at": "2026-11-18T15:45:13Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959531154,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYzc6kg",
+          "state": "COMMENTED",
+          "commit_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+          "submitted_at": "2026-11-18T15:22:59Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/652#pullrequestreview-5959531154",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/652/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-owned-file-reads-20261114"
+    },
+    {
+      "number": 653,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "head_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "head_sha_initial": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T15:45:14Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959915445,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYz0XtQ",
+          "state": "COMMENTED",
+          "commit_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+          "submitted_at": "2026-11-18T15:43:12Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/653#pullrequestreview-5959915445",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/653/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-tcp-query-budget-20261115"
+    },
+    {
+      "number": 654,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "head_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "head_sha_initial": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T15:45:15Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959915844,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYz0ZRA",
+          "state": "COMMENTED",
+          "commit_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+          "submitted_at": "2026-11-18T15:43:13Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/654#pullrequestreview-5959915844",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/654/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-ready-readback-20261115"
+    },
+    {
+      "number": 655,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "title": "fix(serena): settle preparation before canceling work context",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "head_sha": "2defe618259f7db4144824d19927b032300d160d",
+      "head_sha_initial": "2defe618259f7db4144824d19927b032300d160d",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T15:45:16Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959916312,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYz0bGA",
+          "state": "COMMENTED",
+          "commit_sha": "2defe618259f7db4144824d19927b032300d160d",
+          "submitted_at": "2026-11-18T15:43:14Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/655#pullrequestreview-5959916312",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/655/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-finalize-context-20261115"
+    },
+    {
+      "number": 656,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/656",
+      "title": "fix: receive the original qualification connection close result",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/serena-connection-close-20261115",
+      "head_sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "head_sha_initial": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T15:45:17Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5959916789,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYz0c9Q",
+          "state": "COMMENTED",
+          "commit_sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+          "submitted_at": "2026-11-18T15:43:16Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/656#pullrequestreview-5959916789",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/656/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/serena-connection-close-20261115"
+    },
+    {
+      "number": 657,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "head_sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "head_sha_initial": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T16:56:03Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5961115872,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY09o4A",
+          "state": "COMMENTED",
+          "commit_sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+          "submitted_at": "2026-11-18T16:48:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/657#pullrequestreview-5961115872",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/657/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/canonical-command-test-product-20261116"
+    },
+    {
+      "number": 658,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/658",
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "head_sha": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "head_sha_initial": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+      "head_changed": true,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-21T10:05:31Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 7,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5955451043,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYvj4ow",
+          "state": "COMMENTED",
+          "commit_sha": "c0ea2b1d4eec3ef35621cb0dfaa309204a475b7a",
+          "submitted_at": "2026-11-18T11:11:07Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5955451043",
+          "current_head": false
+        },
+        {
+          "id": 5956900005,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABYw8UpQ",
+          "state": "COMMENTED",
+          "commit_sha": "56f601712950c99f4f98f0662a1694c2964d5ebf",
+          "submitted_at": "2026-11-18T12:53:04Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5956900005",
+          "current_head": false
+        },
+        {
+          "id": 5963809766,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY3iD5g",
+          "state": "COMMENTED",
+          "commit_sha": "c150ab5cfb59815ce827ad9bfbe46a0b9a405f27",
+          "submitted_at": "2026-11-18T19:43:56Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5963809766",
+          "current_head": false
+        },
+        {
+          "id": 5965365697,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY5BBwQ",
+          "state": "COMMENTED",
+          "commit_sha": "3c6ef9378950f57bb654e80592be7f8e0e4e22de",
+          "submitted_at": "2026-11-18T21:21:09Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5965365697",
+          "current_head": false
+        },
+        {
+          "id": 5966282589,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY54_XQ",
+          "state": "COMMENTED",
+          "commit_sha": "539f984ab97bc3f2d389d337d30caa9f9b52e209",
+          "submitted_at": "2026-11-18T22:33:39Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5966282589",
+          "current_head": false
+        },
+        {
+          "id": 5967545927,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY7GGRw",
+          "state": "COMMENTED",
+          "commit_sha": "bafd67045d6b867709087cff95b7806f0f6d279c",
+          "submitted_at": "2026-11-19T00:43:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5967545927",
+          "current_head": false
+        },
+        {
+          "id": 5969167931,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY8pGOw",
+          "state": "COMMENTED",
+          "commit_sha": "cf7b4b072693ce96b671c1a81e71a6573a0b354c",
+          "submitted_at": "2026-11-19T04:07:07Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5969167931",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/658/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/docs/agents-canonical-plan-20261117"
+    },
+    {
+      "number": 659,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "head_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head_sha_initial": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head_changed": false,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-18T21:13:10Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 1,
+      "reviews": [
+        {
+          "id": 5965249309,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY457HQ",
+          "state": "COMMENTED",
+          "commit_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+          "submitted_at": "2026-11-18T21:12:08Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/659#pullrequestreview-5965249309",
+          "current_head": true
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/659/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/api-port-pid-observation-20261118"
+    },
+    {
+      "number": 660,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "head_sha": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "head_sha_initial": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "head_changed": true,
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "base_sha_actual_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr_base_sha_matches_actual_ref": true,
+      "updated_at": "2026-11-21T10:05:34Z",
+      "closed_at": null,
+      "merged_at": null,
+      "review_count": 1,
+      "current_head_review_count": 0,
+      "reviews": [
+        {
+          "id": 5969075719,
+          "node_id": "PRR_kwDOSJ-2SM8AAAABY8jeBw",
+          "state": "COMMENTED",
+          "commit_sha": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+          "submitted_at": "2026-11-19T03:54:03Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/660#pullrequestreview-5969075719",
+          "current_head": false
+        }
+      ],
+      "review_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/660/reviews?per_page=100",
+      "actual_head_ref_source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/fix/scheduler-hidden-task-lookup-20261119"
+    }
+  ],
+  "queries": [
+    {
+      "operation": "search_prs",
+      "query": "is:pr is:open",
+      "repository": "applicate2628/mcp-local-hub",
+      "topn": 100,
+      "phase": "begin",
+      "numbers": [
+        623,
+        624,
+        625,
+        626,
+        627,
+        628,
+        629,
+        631,
+        632,
+        635,
+        636,
+        637,
+        639,
+        643,
+        644,
+        645,
+        646,
+        647,
+        648,
+        649,
+        650,
+        651,
+        652,
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660
+      ]
+    },
+    {
+      "operation": "search_prs",
+      "query": "is:pr is:open",
+      "repository": "applicate2628/mcp-local-hub",
+      "topn": 100,
+      "phase": "end",
+      "numbers": [
+        623,
+        624,
+        625,
+        626,
+        627,
+        628,
+        629,
+        631,
+        632,
+        635,
+        636,
+        637,
+        639,
+        643,
+        644,
+        645,
+        646,
+        647,
+        648,
+        649,
+        650,
+        651,
+        652,
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660
+      ]
+    },
+    {
+      "operation": "search_prs",
+      "query": "is:pr created:>=2026-11-21T08:57:25Z",
+      "repository": "applicate2628/mcp-local-hub",
+      "state": "all",
+      "topn": 100,
+      "matches": []
+    },
+    {
+      "operation": "search_prs",
+      "query": "is:pr closed:>=2026-11-21T08:57:25Z",
+      "repository": "applicate2628/mcp-local-hub",
+      "state": "closed",
+      "topn": 100,
+      "matches": []
+    }
+  ],
+  "limitations": [
+    "This is a read interval, not an atomic repository transaction.",
+    "The following audit-only PR #623 commit and any state after this interval are not certified by this snapshot.",
+    "GitHub PR base_sha metadata is retained separately from directly observed branch refs; 22 mismatches are not branch changes.",
+    "Initial snapshot did not include ordinary or inline comment inventories or review bodies; this comparison does not certify their edit histories.",
+    "Created/closed searches returned zero matches in the interval; search-index observations are not a complete repository event audit log.",
+    "COMMENTED is not APPROVED; no formal external approval is claimed.",
+    "Duplicate/semantic-absorption proof was not rerun; the initial audit found no fully absorbed open PR."
+  ]
+}
