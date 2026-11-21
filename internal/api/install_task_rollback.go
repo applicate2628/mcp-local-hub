@@ -57,7 +57,9 @@ func installSchedulerRecoveryTasks(err error) []string {
 // never retry, delete an occupant, or restore by name in this classifier.
 // Like the later rollback's checks, this is a definition observation, not an
 // atomic object-generation or whole-process-tree settlement guarantee.
-func installTaskMutationFailure(s scheduler.Scheduler, name string, priorXML []byte, cause error) error {
+func installTaskMutationFailure(s interface {
+	ExportXML(string) ([]byte, error)
+}, name string, priorXML []byte, cause error) error {
 	current, readErr := s.ExportXML(name)
 	if len(priorXML) == 0 {
 		if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
@@ -126,7 +128,29 @@ func (r *installTaskRollback) rollback(s scheduler.Scheduler) error {
 	return r.restore(s)
 }
 
-func (r *installTaskRollback) restore(s scheduler.Scheduler) error {
+// rollbackPruned restores an acknowledged deletion without removing an
+// occupant. This is separate from rollback: missing createdXML there means
+// a failed post-create capture, not a pruned task. The read is not atomic;
+// create-only semantics protect a new occupant after an absence observation.
+func (r *installTaskRollback) rollbackPruned(s interface {
+	ExportXML(string) ([]byte, error)
+}) error {
+	current, readErr := s.ExportXML(r.name)
+	if readErr == nil && bytes.Equal(current, r.priorXML) {
+		return nil
+	}
+	if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
+		return r.restore(s)
+	}
+	if readErr != nil {
+		return r.failure("read pruned task before restoration", readErr)
+	}
+	return r.failure("verify pruned task absence", errors.New("task absence was not confirmed; no restoration attempted"))
+}
+
+func (r *installTaskRollback) restore(s interface {
+	ExportXML(string) ([]byte, error)
+}) error {
 	if r.creator == nil {
 		return r.failure("restore capability", scheduler.ErrNotImplemented)
 	}

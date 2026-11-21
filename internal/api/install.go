@@ -3786,6 +3786,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// failures retain their own incomplete type. Without added rollback errors,
 	// the returned error remains the bare cause.
 	failAfterRollback := func(cause error) error {
+		currentSchedulerTasks := installSchedulerRecoveryTasks(cause)
 		runRollback()
 		if len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors) > 0 {
 			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors))
@@ -3796,7 +3797,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		}
 		if len(rollbackSchedulerTasks) > 0 {
 			// Keep a failed current mutation named alongside earlier compensations.
-			rollbackSchedulerTasks = append(rollbackSchedulerTasks, installSchedulerRecoveryTasks(cause)...)
+			rollbackSchedulerTasks = append(rollbackSchedulerTasks, currentSchedulerTasks...)
 			cause = &InstallSchedulerRollbackIncompleteError{
 				Tasks: append([]string(nil), rollbackSchedulerTasks...),
 				cause: cause,
@@ -3926,13 +3927,23 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			planned[t.Name] = struct{}{}
 		}
 		pruneRollbacks, perr := pruneObsoleteServerTasks(sch, m.Name, planned, w)
+		// Arm completed prunes even when a later deletion has an uncertain
+		// outcome. Their failures belong to the same scheduler recovery owner.
+		for _, restorePruned := range pruneRollbacks {
+			rollback = append(rollback, func() {
+				if err := restorePruned(); err != nil {
+					rollbackSchedulerErrors = append(rollbackSchedulerErrors, err)
+					rollbackSchedulerTasks = append(rollbackSchedulerTasks, installSchedulerRecoveryTasks(err)...)
+					fmt.Fprintf(w, "  rollback: scheduler task recovery unconfirmed: %v\n", err)
+				}
+			})
+		}
 		if perr != nil {
-			// Listing failed — fall through with a warning. Reconciliation
-			// is a nice-to-have; a reinstall that can't enumerate prior
-			// tasks is still strictly better than aborting the install.
+			if len(installSchedulerRecoveryTasks(perr)) > 0 {
+				return failAfterRollback(perr)
+			}
+			// A failed initial enumeration has not changed any task.
 			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", perr)
-		} else {
-			rollback = append(rollback, pruneRollbacks...)
 		}
 	}
 	// 2. Backup + update client configs.
@@ -4246,7 +4257,6 @@ type schedulerLister interface {
 	List(prefix string) ([]scheduler.TaskStatus, error)
 	Delete(name string) error
 	ExportXML(name string) ([]byte, error)
-	ImportXML(name string, xml []byte) error
 }
 
 // buildPruneSetForReconcile derives the set of "planned" task names from a
@@ -4289,18 +4299,19 @@ func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}
 
 // pruneObsoleteServerTasks deletes scheduler tasks whose Name starts with
 // "mcp-local-hub-<server>-" and are absent from `planned`. Returns one
-// rollback closure per successfully-pruned task that restores the task from
-// its pre-delete XML snapshot. Callers must append these to their own
-// rollback stack so a later install-sequence failure undoes the pruning
-// together with the rest of the install.
+// error-returning rollback closure per acknowledged deletion. Each retains a
+// durable pre-delete snapshot and restores only an observed absent name with
+// the backend's create-only operation. Callers must arm all returned closures,
+// including on error, and retain their scheduler recovery failures.
 //
 // Only safe to call for full installs. Partial installs (one daemon) would
 // see sibling-daemon tasks as "not in plan" and incorrectly prune them.
 //
-// Per-task ExportXML errors, empty snapshots, and Delete errors are logged
-// as warnings and skipped. Only an initial List error is returned as fatal
-// because we cannot reason about what to prune without an enumeration.
-func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func(), error) {
+// Pre-delete refusals and failed deletions with the prior definition still
+// observed are warnings. An unconfirmed failed mutation stops further pruning
+// and returns the existing incomplete-recovery error. An acknowledged Delete
+// is not an atomic generation or whole-process-tree settlement guarantee.
+func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func() error, error) {
 	prefix := "mcp-local-hub-" + server + "-"
 	existing, err := sch.List(prefix)
 	if err != nil {
@@ -4313,7 +4324,7 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 	// and skip any task a LONGER installed server name also prefixes — the
 	// longest-installed-prefix disambiguator owns it.
 	installed := installedServerNameSet()
-	var rollbacks []func()
+	var rollbacks []func() error
 	for _, task := range existing {
 		// Windows Task Scheduler prefixes names with a leading backslash
 		// (the task-folder separator). Strip it before prefix/equality
@@ -4340,19 +4351,37 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: cannot snapshot for rollback: %v\n", name, xerr)
 			continue
 		}
+		priorXML = bytes.Clone(priorXML)
+		recovery, ok := sch.(scheduler.XMLCreator)
+		if !ok {
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: restore without replacement: %v\n", name, scheduler.ErrNotImplemented)
+			continue
+		}
+		snapshotPath, snapshotErr := retainInstallTaskSnapshot(name, priorXML)
+		if snapshotErr != nil {
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: retain recovery snapshot at %q: %v\n", name, snapshotPath, snapshotErr)
+			continue
+		}
+		fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
 		if derr := sch.Delete(name); derr != nil {
-			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, derr)
+			cause := fmt.Errorf("delete obsolete task %s (recovery snapshot retained at %q): %w", name, snapshotPath, derr)
+			mutationErr := installTaskMutationFailure(sch, name, priorXML, cause)
+			if len(installSchedulerRecoveryTasks(mutationErr)) > 0 {
+				return rollbacks, mutationErr
+			}
+			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, mutationErr)
 			continue
 		}
 		fmt.Fprintf(w, "\u2713 Scheduler task removed (obsolete): %s\n", name)
-		taskName := name
-		savedXML := priorXML
-		rollbacks = append(rollbacks, func() {
-			if ierr := sch.ImportXML(taskName, savedXML); ierr != nil {
-				fmt.Fprintf(w, "  rollback: restore pruned task %s failed: %v\n", taskName, ierr)
-				return
+		compensation := &installTaskRollback{
+			name: name, priorXML: priorXML, snapshotPath: snapshotPath, creator: recovery,
+		}
+		rollbacks = append(rollbacks, func() error {
+			if err := compensation.rollbackPruned(sch); err != nil {
+				return &InstallSchedulerRollbackIncompleteError{Tasks: []string{compensation.name}, cause: err}
 			}
-			fmt.Fprintf(w, "  rollback: restored obsolete scheduler task %s\n", taskName)
+			fmt.Fprintf(w, "  rollback: prior scheduler definition confirmed: %s\n", compensation.name)
+			return nil
 		})
 	}
 	return rollbacks, nil

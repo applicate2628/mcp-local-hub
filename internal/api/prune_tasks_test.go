@@ -12,8 +12,8 @@ import (
 
 // fakeListScheduler is the narrow schedulerLister used by the
 // pruneObsoleteServerTasks tests. It keeps per-task XML (so
-// ExportXML/Delete/ImportXML round-trips behave like the real
-// Task Scheduler) and records every Delete/ImportXML call so tests
+// ExportXML/Delete/CreateXMLIfAbsent round-trips model the backend) and
+// records every Delete/CreateXMLIfAbsent call so tests
 // can assert rollback semantics without relying on log output.
 type fakeListScheduler struct {
 	tasks        map[string][]byte
@@ -22,10 +22,12 @@ type fakeListScheduler struct {
 	exportXMLFor map[string][]byte
 	deleteErrFor map[string]error
 	deletes      []string
-	imports      []string
+	restores     []string
 }
 
-func newFakeListScheduler(tasks map[string][]byte) *fakeListScheduler {
+func newFakeListScheduler(t *testing.T, tasks map[string][]byte) *fakeListScheduler {
+	t.Helper()
+	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 	return &fakeListScheduler{
 		tasks:        tasks,
 		exportErrFor: map[string]error{},
@@ -90,12 +92,15 @@ func (f *fakeListScheduler) ExportXML(name string) ([]byte, error) {
 	return nil, scheduler.ErrTaskNotFound
 }
 
-func (f *fakeListScheduler) ImportXML(name string, xml []byte) error {
+func (f *fakeListScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
+	f.restores = append(f.restores, name)
+	if _, occupied := f.resolveTaskKey(name); occupied {
+		return scheduler.ErrTaskAlreadyExists
+	}
 	if f.tasks == nil {
 		f.tasks = map[string][]byte{}
 	}
-	f.tasks[name] = xml
-	f.imports = append(f.imports, name)
+	f.tasks[name] = bytes.Clone(xml)
 	return nil
 }
 
@@ -105,7 +110,7 @@ func (f *fakeListScheduler) ImportXML(name string, xml []byte) error {
 // Tasks outside the server prefix are ignored entirely (List only
 // returns prefix matches anyway, but we defensively check in the helper).
 func TestPruneObsoleteServerTasks_RemovesOnlyUnplanned(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
+	sch := newFakeListScheduler(t, map[string][]byte{
 		"mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
 		"mcp-local-hub-serena-codex":          []byte("<xml>codex</xml>"),
 		"mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"), // obsolete
@@ -158,7 +163,7 @@ func TestPruneObsoleteServerTasks_RemovesOnlyUnplanned(t *testing.T) {
 // install step fails and the runRollback stack unwinds, obsolete-task
 // pruning gets undone together with the rest.
 func TestPruneObsoleteServerTasks_RollbackRestoresXML(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
+	sch := newFakeListScheduler(t, map[string][]byte{
 		"mcp-local-hub-s-weekly-refresh": []byte("<xml>weekly-snapshot</xml>"),
 	})
 	planned := map[string]struct{}{} // nothing planned -> weekly gets pruned
@@ -173,7 +178,9 @@ func TestPruneObsoleteServerTasks_RollbackRestoresXML(t *testing.T) {
 
 	// Run rollbacks in LIFO order like executeInstallTo would.
 	for i := len(rollbacks) - 1; i >= 0; i-- {
-		rollbacks[i]()
+		if err := rollbacks[i](); err != nil {
+			t.Fatalf("restore pruned task: %v", err)
+		}
 	}
 
 	got, ok := sch.tasks["mcp-local-hub-s-weekly-refresh"]
@@ -183,8 +190,8 @@ func TestPruneObsoleteServerTasks_RollbackRestoresXML(t *testing.T) {
 	if string(got) != "<xml>weekly-snapshot</xml>" {
 		t.Errorf("rollback restored wrong XML: %q", got)
 	}
-	if len(sch.imports) != 1 || sch.imports[0] != "mcp-local-hub-s-weekly-refresh" {
-		t.Errorf("ImportXML record = %v, want [mcp-local-hub-s-weekly-refresh]", sch.imports)
+	if len(sch.restores) != 1 || sch.restores[0] != "mcp-local-hub-s-weekly-refresh" {
+		t.Errorf("CreateXMLIfAbsent record = %v, want [mcp-local-hub-s-weekly-refresh]", sch.restores)
 	}
 }
 
@@ -207,7 +214,7 @@ func TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot(t *testing.T) {
 			const prunedName = "mcp-local-hub-s-zobsolete"
 			skippedXML := []byte("<xml>preserve-me</xml>")
 			prunedXML := []byte("<xml>restore-me</xml>")
-			sch := newFakeListScheduler(map[string][]byte{
+			sch := newFakeListScheduler(t, map[string][]byte{
 				skippedName: skippedXML,
 				prunedName:  prunedXML,
 			})
@@ -237,9 +244,11 @@ func TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot(t *testing.T) {
 				t.Errorf("warning does not identify the skipped task and snapshot failure: %q", buf.String())
 			}
 
-			rollbacks[0]()
-			if len(sch.imports) != 1 || sch.imports[0] != prunedName {
-				t.Fatalf("ImportXML calls = %v, want only %s", sch.imports, prunedName)
+			if err := rollbacks[0](); err != nil {
+				t.Fatalf("restore pruned task: %v", err)
+			}
+			if len(sch.restores) != 1 || sch.restores[0] != prunedName {
+				t.Fatalf("CreateXMLIfAbsent calls = %v, want only %s", sch.restores, prunedName)
 			}
 			if got, ok := sch.tasks[skippedName]; !ok || !bytes.Equal(got, skippedXML) {
 				t.Errorf("task without a reliable snapshot changed: present=%v XML=%q", ok, got)
@@ -257,7 +266,7 @@ func TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot(t *testing.T) {
 // clear "reconciliation skipped" warning instead of the install
 // appearing to succeed while obsolete tasks keep running.
 func TestPruneObsoleteServerTasks_ListFailureIsFatal(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{})
+	sch := newFakeListScheduler(t, map[string][]byte{})
 	sch.listErr = errors.New("schtasks /Query exploded")
 
 	_, err := pruneObsoleteServerTasks(sch, "s", map[string]struct{}{}, &bytes.Buffer{})
@@ -274,7 +283,7 @@ func TestPruneObsoleteServerTasks_ListFailureIsFatal(t *testing.T) {
 // helper logs the failure and moves on — an install that pruned 1 of 2
 // stale tasks is still an improvement over aborting and pruning 0.
 func TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
+	sch := newFakeListScheduler(t, map[string][]byte{
 		"mcp-local-hub-s-weekly-refresh": []byte("<xml>a</xml>"),
 		"mcp-local-hub-s-z-stale-debug":  []byte("<xml>b</xml>"),
 	})
@@ -309,7 +318,7 @@ func TestPruneObsoleteServerTasks_DeleteFailureContinuesWithOthers(t *testing.T)
 // Without this helper, existing installs would keep running the old weekly
 // restart behavior silently.
 func TestPruneObsoleteServerTasks_SerenaWeeklyRefreshFlip(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
+	sch := newFakeListScheduler(t, map[string][]byte{
 		"mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
 		"mcp-local-hub-serena-codex":          []byte("<xml>codex</xml>"),
 		"mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"),
@@ -338,7 +347,7 @@ func TestPruneObsoleteServerTasks_SerenaWeeklyRefreshFlip(t *testing.T) {
 // "\mcp-local-hub-X-weekly-refresh" matches both the prune prefix and
 // the planned-set key.
 func TestPruneObsoleteServerTasks_WindowsBackslashPrefix(t *testing.T) {
-	sch := newFakeListScheduler(map[string][]byte{
+	sch := newFakeListScheduler(t, map[string][]byte{
 		"\\mcp-local-hub-serena-claude":         []byte("<xml>claude</xml>"),
 		"\\mcp-local-hub-serena-weekly-refresh": []byte("<xml>weekly</xml>"),
 	})
