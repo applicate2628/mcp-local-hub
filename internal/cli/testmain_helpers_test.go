@@ -50,6 +50,13 @@ func withoutCLITestHelperEnvironment(env []string) []string {
 		forensicsSinkChildEnv,
 		forensicsSinkChildModeEnv,
 		cliProductionArgvHelperEnv,
+		"MCPHUB_CODEGRAPH_COMPAT_HELPER",
+		"MCPHUB_TEST_CONCURRENT_SET",
+		"MCPHUB_TEST_CONCURRENT_VAL",
+		"MCPHUB_TEST_VAULT_PATH",
+		"MCPHUB_TEST_KEY_PATH",
+		"MCPHUB_MAPPED_IMAGE_RENAME_HELPER",
+		"MCPHUB_TEST_OWNED_PRECONTROL_CHILD",
 	}
 	result := make([]string, 0, len(env))
 	for _, entry := range env {

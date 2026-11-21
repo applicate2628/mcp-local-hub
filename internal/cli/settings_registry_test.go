@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -290,7 +291,7 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // has no *testing.T: we snapshot the prior values and reinstate them before
 // os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
-	dispatch := classifyCLITestHelperDispatch(os.Args, os.Getenv)
+	dispatch := classifyCLITestHelperDispatch(os.Args, os.LookupEnv, checkCLITestHelperPath)
 	if dispatch.invalid {
 		_, _ = os.Stderr.WriteString("internal/cli: invalid test helper dispatch\n")
 		os.Exit(3)
@@ -314,10 +315,10 @@ func TestMain(m *testing.M) {
 
 	// Env-dump helper fast-path. When the production spawn closure launches THIS
 	// test binary as a child (Command=os.Args[0]) to capture the composed
-	// cmd.Env, the child is gated ONLY by the sentinel env var — its argv may be
-	// ANY shape the descriptor under test carries (e.g. a serena-proxy-shaped
-	// `daemon serena-proxy …` argv, where a `-test.run` flag could not lead the
-	// argv without breaking serena detection). Short-circuiting here, BEFORE
+	// cmd.Env, admission above requires the sentinel and either the exact test
+	// selector argv or the explicit serena-proxy production argv. The latter
+	// cannot lead with `-test.run` without breaking serena detection.
+	// Short-circuiting here, BEFORE
 	// m.Run(), makes the child a pure env-dumper regardless of argv — it writes
 	// its own os.Environ() (the closure's composed cmd.Env) to the dump path and
 	// exits, never running the suite (so no recursion / full-suite re-run in the
@@ -379,9 +380,23 @@ func TestMain(m *testing.M) {
 	// Re-exec helper children deliberately terminate from inside their selected
 	// test (or are terminated by the parent). Run those selected tests before
 	// creating the package-owned state root: their process lifetime cannot reach
-	// TestMain's normal post-m.Run cleanup, and they do not need package state.
+	// TestMain's normal post-m.Run cleanup. A stateful helper uses only its
+	// already-created caller root.
 	if dispatch.runSelectedTest {
-		os.Exit(m.Run())
+		if dispatch.stateRoot != "" {
+			// Vault readers and writers also consult API strict-mode state and
+			// audit sinks. Keep those implicit paths in the caller-owned root.
+			api.SetDaemonStateRootForTest(dispatch.stateRoot)
+			api.ResetStrictModeIntentCacheForTest()
+		}
+		code := m.Run()
+		if dispatch.mustExit {
+			_, _ = os.Stderr.WriteString("internal/cli: test helper returned from m.Run; helper must exit or be reaped by its parent\n")
+			if code == 0 {
+				code = 3
+			}
+		}
+		os.Exit(code)
 	}
 
 	// Package-wide safe default for reconcileSpawnFn (Increment 1b). Before
@@ -518,31 +533,64 @@ type cliTestHelperDispatch struct {
 	forensicsStateDir string
 	productionArgv    bool
 	runSelectedTest   bool
+	mustExit          bool
+	stateRoot         string
 }
 
-func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cliTestHelperDispatch {
-	selector := ""
-	for _, arg := range args[1:] {
-		if strings.HasPrefix(arg, "-test.run=") {
-			if selector != "" {
-				return cliTestHelperDispatch{invalid: true}
-			}
-			selector = strings.TrimPrefix(arg, "-test.run=")
-		}
+type cliTestHelperPathKind uint8
+
+const (
+	cliTestHelperDirectory cliTestHelperPathKind = iota
+	cliTestHelperExistingFile
+	cliTestHelperOptionalFile
+	cliTestHelperAbsentFile
+)
+
+func classifyCLITestHelperDispatch(args []string, lookup func(string) (string, bool), checkPath func(string, cliTestHelperPathKind) error) cliTestHelperDispatch {
+	if len(args) == 0 {
+		return cliTestHelperDispatch{invalid: true}
 	}
+	getenv := func(key string) string {
+		value, _ := lookup(key)
+		return value
+	}
+	selector := ""
+	// Admit complete caller argv, not a partial emulation of flag.Parse:
+	// aliases, split values and later flags must not change the selected helper.
+	if len(args) > 1 && strings.HasPrefix(args[1], "-test.run=") {
+		selector = strings.TrimPrefix(args[1], "-test.run=")
+	}
+	singleSelector := len(args) == 2 && selector != ""
+	staleSelector := singleSelector || len(args) == 4 && args[2] == "-test.count=1" && args[3] == "-test.timeout=15s"
 	type candidate struct{ active, valid bool }
 	exitCodeRaw := getenv("MCPHUB_TEST_CHILD_EXIT_CODE")
 	_, exitCodeErr := strconv.Atoi(exitCodeRaw)
 	productionArgvMarker := getenv(cliProductionArgvHelperEnv)
 	overlayActive := getenv(overlayMarkerHelperSentinelEnv) != ""
+
+	codegraph, codegraphPresent := lookup("MCPHUB_CODEGRAPH_COMPAT_HELPER")
+	concurrentKey, keyPresent := lookup("MCPHUB_TEST_CONCURRENT_SET")
+	_, valuePresent := lookup("MCPHUB_TEST_CONCURRENT_VAL")
+	vaultPath, vaultPresent := lookup("MCPHUB_TEST_VAULT_PATH")
+	keyPath, keyPathPresent := lookup("MCPHUB_TEST_KEY_PATH")
+	markerPath, markerPresent := lookup("MCPHUB_MAPPED_IMAGE_RENAME_HELPER")
+	precontrol, precontrolPresent := lookup("MCPHUB_TEST_OWNED_PRECONTROL_CHILD")
+	vaultRoot := filepath.Dir(vaultPath)
 	candidates := []candidate{
-		{exitCodeRaw != "", exitCodeErr == nil && (selector == "^TestFormatChildExit_LargeExitCodeShowsHex$" || selector == "^TestFormatChildExit_RealProcessShowsExitCode$")},
-		{getenv(staleExitHelperSentinelEnv) != "", getenv(staleExitHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(staleExitHelperReleaseEnv)) && selector == "^TestStaleExitReleaseHelper$"},
-		{getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") != "", getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") == "1" && (selector == "TestProductionTerminateFn_HelperSleep" || selector == "^TestProductionTerminateFn_HelperSleep$")},
-		{getenv("MCPHUB_PID_MATCH_HELPER") != "", getenv("MCPHUB_PID_MATCH_HELPER") == "1" && (selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestPidMatchesMcphub_HelperSleep$")},
-		{overlayActive, getenv(overlayMarkerHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(overlayMarkerHelperDumpPathEnv)) && (selector == "^TestSpawnEnvDumpHelper$" || productionArgvMarker == "1" && validCLIOverlayProductionArgv(args))},
-		{getenv(forensicsSinkChildEnv) != "", filepath.IsAbs(getenv(forensicsSinkChildEnv)) && ((selector == "TestSupervisorStderrSink_CapturesRuntimePanic" && getenv(forensicsSinkChildModeEnv) == "") || (selector == "TestSupervisorStderrSink_CapturesMainGoroutinePanic" && getenv(forensicsSinkChildModeEnv) == "main"))},
+		{exitCodeRaw != "", exitCodeErr == nil && singleSelector && (selector == "^TestFormatChildExit_LargeExitCodeShowsHex$" || selector == "^TestFormatChildExit_RealProcessShowsExitCode$")},
+		{getenv(staleExitHelperSentinelEnv) != "", getenv(staleExitHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(staleExitHelperReleaseEnv)) && staleSelector && selector == "^TestStaleExitReleaseHelper$"},
+		{getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") != "", getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") == "1" && singleSelector && (selector == "TestProductionTerminateFn_HelperSleep" || selector == "^TestProductionTerminateFn_HelperSleep$")},
+		{getenv("MCPHUB_PID_MATCH_HELPER") != "", getenv("MCPHUB_PID_MATCH_HELPER") == "1" && singleSelector && (selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestPidMatchesMcphub_HelperSleep$")},
+		{overlayActive, getenv(overlayMarkerHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(overlayMarkerHelperDumpPathEnv)) && (singleSelector && selector == "^TestSpawnEnvDumpHelper$" || productionArgvMarker == "1" && validCLIOverlayProductionArgv(args))},
+		{getenv(forensicsSinkChildEnv) != "", filepath.IsAbs(getenv(forensicsSinkChildEnv)) && singleSelector && ((selector == "TestSupervisorStderrSink_CapturesRuntimePanic" && getenv(forensicsSinkChildModeEnv) == "") || (selector == "TestSupervisorStderrSink_CapturesMainGoroutinePanic" && getenv(forensicsSinkChildModeEnv) == "main"))},
 		{productionArgvMarker != "" && !overlayActive, productionArgvMarker == "1" && len(args) == 2 && args[1] == "supervise"},
+		{codegraphPresent, codegraph == "1" && len(args) == 3 && args[1] == "-test.run=^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$" && args[2] == "--"},
+		{keyPresent || valuePresent || vaultPresent || keyPathPresent, concurrentKey != "" && valuePresent && len(args) == 2 && args[1] == "-test.run=^TestSecretsConcurrentSetHelperProcess$" &&
+			filepath.IsAbs(vaultPath) && filepath.Clean(vaultPath) == vaultPath && filepath.Base(vaultPath) == "secrets.age" &&
+			filepath.IsAbs(keyPath) && filepath.Clean(keyPath) == keyPath && filepath.Base(keyPath) == ".age-key" && filepath.Dir(keyPath) == vaultRoot},
+		{markerPresent, runtime.GOOS == "windows" && len(args) == 2 && args[1] == "-test.run=^TestWindowsMappedImageRenameRequiresExactGenerationReceipt$" &&
+			filepath.IsAbs(markerPath) && filepath.Clean(markerPath) == markerPath && filepath.Base(markerPath) == "mapped-image-ready"},
+		{precontrolPresent, runtime.GOOS == "windows" && precontrol == "1" && len(args) == 2 && args[1] == "-test.run=^TestSupervisorLaunchChildFixture$"},
 	}
 	active := 0
 	selected := -1
@@ -559,7 +607,10 @@ func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cl
 		return cliTestHelperDispatch{invalid: true}
 	}
 	if active == 0 {
-		if selector == "^TestProductionTerminateFn_HelperSleep$" || selector == "TestProductionTerminateFn_HelperSleep" || selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestStaleExitReleaseHelper$" || selector == "^TestSpawnEnvDumpHelper$" || len(args) > 1 && (args[1] == "route" || args[1] == "supervise") {
+		if selector == "^TestProductionTerminateFn_HelperSleep$" || selector == "TestProductionTerminateFn_HelperSleep" || selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestStaleExitReleaseHelper$" || selector == "^TestSpawnEnvDumpHelper$" ||
+			selector == "^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$" || selector == "TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper" ||
+			selector == "^TestSecretsConcurrentSetHelperProcess$" || selector == "^TestSupervisorLaunchChildFixture$" ||
+			len(args) > 1 && (args[1] == "route" || args[1] == "supervise") {
 			return cliTestHelperDispatch{invalid: true}
 		}
 		return cliTestHelperDispatch{}
@@ -571,6 +622,20 @@ func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cl
 		return cliTestHelperDispatch{forensicsStateDir: getenv(forensicsSinkChildEnv)}
 	case 6:
 		return cliTestHelperDispatch{productionArgv: true}
+	case 7, 10:
+		return cliTestHelperDispatch{runSelectedTest: true, mustExit: true}
+	case 8:
+		if checkPath == nil || checkPath(vaultRoot, cliTestHelperDirectory) != nil ||
+			checkPath(vaultPath, cliTestHelperExistingFile) != nil || checkPath(keyPath, cliTestHelperExistingFile) != nil ||
+			checkPath(vaultPath+".lock", cliTestHelperOptionalFile) != nil {
+			return cliTestHelperDispatch{invalid: true}
+		}
+		return cliTestHelperDispatch{runSelectedTest: true, mustExit: true, stateRoot: vaultRoot}
+	case 9:
+		if checkPath == nil || checkPath(filepath.Dir(markerPath), cliTestHelperDirectory) != nil || checkPath(markerPath, cliTestHelperAbsentFile) != nil {
+			return cliTestHelperDispatch{invalid: true}
+		}
+		return cliTestHelperDispatch{runSelectedTest: true, mustExit: true}
 	default:
 		return cliTestHelperDispatch{runSelectedTest: true}
 	}

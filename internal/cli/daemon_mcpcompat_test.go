@@ -78,7 +78,7 @@ daemons:
   - name: default
     port: %d
     mcp_protocol_compatibility_profile: stdio-http-legacy-2024-11-05
-`, strconv.Quote(executable), strconv.Quote("-test.run=TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper"), port)
+`, strconv.Quote(executable), strconv.Quote("-test.run=^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$"), port)
 	manifestPath := filepath.Join(manifestRoot, "codegraph", "manifest.yaml")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
 		t.Fatal(err)
