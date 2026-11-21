@@ -96,4 +96,28 @@ func TestPreparedSerenaUVDiscovery(t *testing.T) {
 			t.Fatalf("cancelled UV discovery: got path %q, error %v", got, err)
 		}
 	})
+
+	t.Run("empty-path-elements-do-not-search-working-directory", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile(name, []byte("unqualified working-directory fixture\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		qualified := candidate(t.TempDir())
+		hinted := candidate(t.TempDir())
+		for _, tc := range []struct {
+			name, path, want string
+		}{
+			{"leading-empty", string(os.PathListSeparator) + filepath.Dir(qualified), qualified},
+			{"trailing-empty", filepath.Dir(qualified) + string(os.PathListSeparator), qualified},
+			{"empty-falls-back-to-hint", "", hinted},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				execution := SerenaPreparationEnvironment{values: []string{"PATH=" + tc.path}}
+				got, err := discoverPreparedSerenaUV(context.Background(), execution, []string{filepath.Dir(hinted)})
+				if err != nil || got != tc.want {
+					t.Fatalf("PATH %q selected %q, error %v; want %q", tc.path, got, err, tc.want)
+				}
+			})
+		}
+	})
 }
