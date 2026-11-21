@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "scope": "PR #660 prune recovery publication and task-owned workspace closeout",
+  "code_pr": 660,
+  "code_commit": "1cffaab021686a7ae27a5ffc038f280160f96a60",
+  "code_parent": "610fb30348c10be7b645b6ce43c862397b190f60",
+  "code_tree": "b5cfc086f2e98a7f03a35a4a0a38103072ed5bc7",
+  "published_readback": {
+    "all_seven_files_equal": true,
+    "files": [
+      {
+        "path": "internal/api/install.go",
+        "git_blob": "1188ba2d682592150c273d2ebe53d411f7c7ee84"
+      },
+      {
+        "path": "internal/api/install_task_rollback.go",
+        "git_blob": "cb4ffccd0686e0dedabdc9b71580b2d1e76663fb"
+      },
+      {
+        "path": "internal/api/prune_tasks_test.go",
+        "git_blob": "97b42ca8b3c13316e7dd7019e8b627e4ff49b389"
+      },
+      {
+        "path": "internal/api/install_prune_recovery_test.go",
+        "git_blob": "e86ab847ffa74e3b158e464f059678b7a71c5acf"
+      },
+      {
+        "path": "docs/modernization/verification/prune-recovery-2026-11-21/README.md",
+        "git_blob": "2ed7c2362b55584322c0308d0e71501d707e6912"
+      },
+      {
+        "path": "docs/modernization/verification/prune-recovery-2026-11-21/evidence.zip",
+        "git_blob": "155fb524b42ba1c6df22c6f068e2daacba0e2b05"
+      },
+      {
+        "path": "docs/modernization/verification/prune-recovery-2026-11-21/verify_evidence.py",
+        "git_blob": "bd71a9a905c88b2d4d1d982df07e56ba85291c65"
+      }
+    ],
+    "evidence_zip_sha256": "b58362201753892911c53c115ef7c5e329c1f15f5ef9bdb4e8f9b92f7fd6652c"
+  },
+  "windows_cleanup": {
+    "source": "D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5",
+    "destination": "D:\\dev\\ChatGPT\\trash\\mcp-pr660-prune-20261121-247107d5",
+    "process_observation": {
+      "observed_utc": "2026-11-21T19:17:49.7354502Z",
+      "root": "D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5",
+      "criterion": "command line contains exact owned task root; observer ancestors excluded",
+      "matches": []
+    },
+    "inventory_before": {
+      "root": "D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5",
+      "observed_utc": "2026-11-21T19:17:24.918529+00:00",
+      "files": 4128,
+      "directories": 297,
+      "bytes": 69012444,
+      "inventory_sha256": "abb062fee0c52fb349536e6dad85d3a60abce85defb55d5243c55418fadb219f",
+      "reparse_points": 0
+    },
+    "inventory_after": {
+      "root": "D:\\dev\\ChatGPT\\trash\\mcp-pr660-prune-20261121-247107d5",
+      "observed_utc": "2026-11-21T19:18:47.032349+00:00",
+      "files": 4128,
+      "directories": 297,
+      "bytes": 69012444,
+      "inventory_sha256": "abb062fee0c52fb349536e6dad85d3a60abce85defb55d5243c55418fadb219f",
+      "reparse_points": 0
+    },
+    "source_absent_after_move": true,
+    "inventory_equal": true,
+    "reparse_points": 0,
+    "method": "move_file; no preliminary deletion",
+    "inventory_program": "import sys\nsys.dont_write_bytecode = True\nimport datetime, hashlib, json, os, stat\nfrom pathlib import Path\nroot = Path(sys.argv[1])\nallowed = [Path(r\"D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5\"), Path(r\"D:\\dev\\ChatGPT\\trash\\mcp-pr660-prune-20261121-247107d5\")]\nif root not in allowed or not root.is_dir():\n    raise RuntimeError(\"Unexpected inventory root\")\nrows = []\ndirectories = []\ndef visit(folder):\n    for item in sorted(os.scandir(folder), key=lambda e: e.name):\n        data = item.stat(follow_symlinks=False)\n        if getattr(data, \"st_file_attributes\", 0) & 0x400 or item.is_symlink():\n            raise RuntimeError(\"Reparse point refused: \" + item.name)\n        path = Path(item.path)\n        relative = path.relative_to(root).as_posix()\n        if stat.S_ISDIR(data.st_mode):\n            directories.append(relative)\n            visit(path)\n        elif stat.S_ISREG(data.st_mode):\n            digest = hashlib.sha256()\n            with path.open(\"rb\") as stream:\n                for block in iter(lambda: stream.read(1048576), b\"\"):\n                    digest.update(block)\n            rows.append([relative, data.st_size, digest.hexdigest()])\n        else:\n            raise RuntimeError(\"Unexpected file kind: \" + relative)\nvisit(root)\ncanonical = json.dumps({\"files\": sorted(rows), \"directories\": sorted(directories)}, separators=(\",\", \":\"), ensure_ascii=False).encode(\"utf-8\")\nprint(json.dumps({\"root\": str(root), \"observed_utc\": datetime.datetime.now(datetime.timezone.utc).isoformat(), \"files\": len(rows), \"directories\": len(directories), \"bytes\": sum(row[1] for row in rows), \"inventory_sha256\": hashlib.sha256(canonical).hexdigest(), \"reparse_points\": 0}, indent=2))\n",
+    "process_observation_command": "$all = @(Get-CimInstance Win32_Process); $excluded = @{}; $walk = [uint32]$PID; while ($walk -ne 0 -and -not $excluded.ContainsKey($walk)) { $excluded[$walk] = $true; $entry = $all | Where-Object { $_.ProcessId -eq $walk } | Select-Object -First 1; if ($null -eq $entry) { break }; $walk = [uint32]$entry.ParentProcessId }; $matches = @($all | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf('D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and -not $excluded.ContainsKey([uint32]$_.ProcessId) } | Select-Object ProcessId, ParentProcessId, Name, CreationDate); [pscustomobject]@{ observed_utc = [DateTime]::UtcNow.ToString('o'); root = 'D:\\dev\\ChatGPT\\mcp-pr660-prune-20261121-247107d5'; criterion = 'command line contains exact owned task root; observer ancestors excluded'; matches = $matches } | ConvertTo-Json -Depth 4"
+  },
+  "auxiliary_cleanup": {
+    "source": "D:\\dev\\ChatGPT\\mcp-pr660-closeout-20261121-247107d5",
+    "destination": "D:\\dev\\ChatGPT\\trash\\mcp-pr660-closeout-20261121-247107d5",
+    "process_observation": {
+      "observed_utc": "2026-11-21T19:19:18.2382796Z",
+      "root": "D:\\dev\\ChatGPT\\mcp-pr660-closeout-20261121-247107d5",
+      "criterion": "command line contains exact owned task root; observer ancestors excluded",
+      "matches": []
+    },
+    "state": "moved",
+    "source_absent_after_move": true,
+    "receipt_readback_equal": true
+  },
+  "limits": [
+    "Process observation matches the exact owned path in visible command lines and excludes observer ancestors; it is not a whole-process-tree lifetime proof.",
+    "All essential code and primary command evidence were published and read back before the working copy was moved.",
+    "Pre-existing shared Go caches and the frozen capture owner outside this task were not moved."
+  ],
+  "trash_emptied": false,
+  "branches_deleted": false,
+  "prs_merged": false,
+  "force_push": false
+}
