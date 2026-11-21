@@ -70,7 +70,8 @@ _Static_assert(offsetof(mh_io_context,streams)==16, "stdio context offset");
 /* Allow/deny is the caller's decision, not authorization or image validation.
  * A valid deny consumes the same one-shot NativeOwner admission as allow. */
 typedef uint32_t (*mh_admit_fn)(mh_owner*, uint32_t, mh_out*, uint32_t);
-/* Optional additive export mh_admit_checked1, ABI1 layout unchanged.
+/* Additive legacy export mh_admit_checked1, ABI1 layout unchanged.
+ * REQUIRED by the current Go loader; absence rejects the DLL at load time.
  * Called synchronously inside the existing one-shot native admission, BEFORE
  * ResumeThread. pid/image are queried through the ORIGINAL process handle.
  * image is a read-only UTF-16 view valid ONLY until the callback returns.

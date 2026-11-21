@@ -144,6 +144,8 @@ The token is opened with only query access from the retained process handle [18]
 
 The accepted Go contract still requires SID formatting/resource evidence, the original Go capability and real consumer integration. Binary SID bytes provide an observation, not that capability or formatting receipt. A copied timestamp, PID or digest cannot grant process ownership.
 
+This branch contains the additive version-1 [identity protocol](ffi/README.md#additive-identity-protocol), including native image observations alongside the original-process facts above. Product decision rules and complete caller preparation remain separate gates.
+
 ## Evidence and negative controls
 
 Native Windows x86_64, Rust 1.99.1, pinned cached `windows-sys = 0.61.2` and `windows-link = 0.2.1`. FileSystem/Pipes/Globalization features use the same dependency; `Cargo.lock` and dependency versions are unchanged.
@@ -203,7 +205,7 @@ Tests run serially because process handle counts are not meaningful if unrelated
 
 1. Exact accepted Go-contract comparison, including non-inheritable source conversion, caller environment preparation/sorting, required SDK keys, directory identity requirements and selected-activation identity. No production caller is wired here.
 2. Remaining acquisition/setup/allocation/attribute-update failure classes; already-blocked native I/O cancellation; crash timing inside acquisition/native create and broader recovery qualification. The real failure cases and post-create crash points above are exercised, not all native failures/schedules. A successful stdio test is not a complete I/O pump or recovery contract.
-3. Full product admission mapping and qualification of foreign callers. This branch already contains the additive version-1 [identity protocol](ffi/README.md#additive-identity-protocol), including TokenUser SID (security identifier), process creation time, original Job membership, wait state and native image observations. The earlier PID/image-only qualification at #631 source `eb4ca1d40244ba1915638b76c3e30b2a684d9b07` is historical and does not describe the current interface. Product decision rules and complete caller preparation remain separate gates. Safe Rust borrowing does not prove arbitrary foreign callers obey the interface contract.
+3. Full product admission mapping and qualification of foreign callers. The versioned experimental identity admission and independent read-only query are already implemented in [#631 at `2fd3f017`](https://github.com/applicate2628/mcp-local-hub/blob/2fd3f017a9e5ccd0460293d71ea34aceb62f245e/experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md), including creation time, original-Job membership, wait state and binary TokenUser SID. They do not create the product's Go `CreatorIdentity`, SID-formatting/resource receipt or context/custody/retirement contract. The PID/image-only compatibility run against `eb4ca1d40244ba1915638b76c3e30b2a684d9b07` remains historical evidence for that frozen consumer. Safe Rust borrowing does not prove arbitrary foreign callers obey it.
 4. Native Linux/macOS implementations and tests. The borrowed-handle and explicit-context APIs are intentionally Windows-only; non-Windows strict creation remains explicitly unsupported. No Unix runtime or cross-build qualification is claimed by this iteration.
 5. Independent lifecycle/security review and the repository's integration/version/release gates. This branch remains a draft experiment; no installation or merge is included.
 
