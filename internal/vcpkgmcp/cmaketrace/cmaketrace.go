@@ -457,6 +457,11 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		truncated = true
 	}
 
+	// Filtering and the returned-record cap reuse the parsed backing array.
+	// Clear discarded records only after deriving the unfiltered indexes so
+	// a retained Result does not keep their argument payloads reachable.
+	clear(parsed.records[len(records):])
+
 	base := Result{
 		IncludeChain:           includeChain,
 		Records:                records,
