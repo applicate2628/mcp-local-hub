@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 )
 
 type SerenaTreeLimits struct {
@@ -29,6 +30,8 @@ type SerenaOwnedTreeRequest struct {
 	OperationID, GenerationID, Kind string
 	QualificationID                 string
 	Limits                          SerenaTreeLimits
+	// Captured at acquisition from the operation's existing cleanup window.
+	AbsoluteCleanupDeadline time.Time
 	// Only same-attempt opaque generation capabilities qualify surviving links.
 	survivors []*SerenaOwnedTree
 }
@@ -103,8 +106,25 @@ func AcquireSerenaOwnedTree(ctx context.Context, r SerenaOwnedTreeRequest) (*Ser
 	if ctx == nil || !preparedSerenaDigest(r.PackageIdentitySHA256) || !preparedSerenaID(r.OperationID) || !preparedSerenaID(r.GenerationID) || !r.Limits.valid() || (r.Kind != "generation" && r.Kind != "attempt" && r.Kind != "qualification") || (r.Kind == "qualification" && !preparedSerenaID(r.QualificationID)) || (r.Kind != "qualification" && r.QualificationID != "") {
 		return nil, errors.New("SERENA_TREE_REQUEST_INVALID")
 	}
+	if err := validateSerenaTreeCleanupContext(ctx, r.AbsoluteCleanupDeadline); err != nil {
+		return nil, err
+	}
 	return acquireSerenaTreePlatform(ctx, r)
 }
+func validateSerenaTreeCleanupContext(ctx context.Context, bound time.Time) error {
+	if ctx == nil || bound.IsZero() {
+		return errors.New("SERENA_TREE_CLEANUP_DEADLINE_REQUIRED")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, finite := ctx.Deadline()
+	if !finite || deadline.After(bound) {
+		return errors.New("SERENA_TREE_CLEANUP_DEADLINE_RENEWED")
+	}
+	return nil
+}
+
 func (t *SerenaOwnedTree) Inventory(ctx context.Context) (SerenaTreeInventory, error) {
 	if t == nil || t.platform == nil {
 		return SerenaTreeInventory{}, errors.New("SERENA_TREE_CAPABILITY_MISSING")

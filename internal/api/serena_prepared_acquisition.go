@@ -49,7 +49,7 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 		a.mu.Unlock()
 	}()
 	a.generationAttempted=true
-	a.generation, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "generation", Limits: r.OwnedTreeLimits})
+	a.generation, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "generation", Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline})
 	if err != nil {
 		return roots, err
 	}
@@ -62,7 +62,7 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 		return roots, err
 	}
 	a.attemptAttempted=true
-	a.attempt, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "attempt", Limits: r.OwnedTreeLimits, survivors: []*SerenaOwnedTree{a.generation}})
+	a.attempt, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "attempt", Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, survivors: []*SerenaOwnedTree{a.generation}})
 	if err != nil {
 		return roots, err
 	}
@@ -170,7 +170,7 @@ func (a *preparedSerenaAcquisition) qualify(ctx context.Context, r PreparedSeren
 	if err := observation.Validate(cleanupCtx, request); err != nil {
 		return qualification, errors.Join(qualifyErr, err)
 	}
-	inventory, err := a.generation.Inventory(cleanupCtx)
+	inventory, err := inventorySerenaOwnedTreeForCleanup(cleanupCtx, a.generation)
 	if err != nil {
 		return qualification, errors.Join(qualifyErr, err)
 	}

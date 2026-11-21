@@ -161,7 +161,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	result.qualifiedUV = uv
 	// Probe stores are an acquired attempt capability, not ambient UV cache.
 	probeKey := preparedSerenaHash([]byte(rawManifestSHA + policySHA))
-	probe, acquireErr := AcquireSerenaOwnedTree(work, SerenaOwnedTreeRequest{Namespace: namespace, PackageIdentitySHA256: probeKey, OperationID: admission.OperationID, GenerationID: admission.GenerationID, Kind: "attempt", Limits: policy.OwnedTreeLimits})
+	probe, acquireErr := AcquireSerenaOwnedTree(work, SerenaOwnedTreeRequest{Namespace: namespace, PackageIdentitySHA256: probeKey, OperationID: admission.OperationID, GenerationID: admission.GenerationID, Kind: "attempt", Limits: policy.OwnedTreeLimits, AbsoluteCleanupDeadline: result.CleanupDeadline})
 	if acquireErr != nil {
 		if probe != nil {
 			_, closeErr := probe.Close()
