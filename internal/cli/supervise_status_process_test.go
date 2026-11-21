@@ -177,7 +177,7 @@ func TestSupervisorStatusPIDObservationKeepsMissingIdentityGate(t *testing.T) {
 	}
 }
 
-func TestSupervisorStatusPIDObservationKeepsPendingStopRAM(t *testing.T) {
+func TestSupervisorStatusPIDObservationKeepsPendingStopScalarRAMWithoutObserver(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		wantState := "Stopping"
 		if failed {
@@ -194,10 +194,6 @@ func TestSupervisorStatusPIDObservationKeepsPendingStopRAM(t *testing.T) {
 			}
 			restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
 				PIDAlive: func(int) bool { t.Error("pending stop ran liveness"); return false },
-				PIDStatus: func(process.PIDIdentityProof) (process.PIDStatusObservation, error) {
-					t.Error("pending stop acquired a mandatory status observation")
-					return process.PIDStatusObservation{}, errors.New("unexpected observation")
-				},
 			})
 			t.Cleanup(restore)
 			ramCalls := 0

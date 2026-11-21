@@ -462,9 +462,24 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		// RAM is discarded for that row. Unknown or zero bytes omit ram_bytes.
 		// The Windows observation supplies RAM from the same process object
 		// as its required proof; never reopen by PID after that observation,
-		// even if its RAM or required query failed. Pending stop receipts keep
-		// the pre-existing scalar RAM path without adding an identity gate.
+		// even if its RAM or required query failed. A pending stop receipt only
+		// qualifies optional RAM; the controller still owns its durable state.
 		if stateText == "Running" && runtimeState.CurrentPID > 0 {
+			if stopPending && livenessProbe.PIDStatus != nil {
+				usedPIDStatus = true
+				// Snapshot and receipt are separate reads. Never attach RAM from
+				// a replacement runtime to this pending stop, or fall back to a
+				// scalar PID read when the receipt cannot qualify the metric.
+				if sameStopSettlementRuntimeIdentity(runtimeState, stopReceipt) {
+					if expectedExe := daemonExpectedIdentityExe(d.Command); expectedExe != "" {
+						pidStatus, pidStatusErr = livenessProbe.PIDStatus(process.PIDIdentityProof{
+							PID:            stopReceipt.PID,
+							ExecutablePath: expectedExe,
+							StartedAt:      stopReceipt.StartedAt,
+						})
+					}
+				}
+			}
 			if usedPIDStatus {
 				if pidStatusErr == nil && pidStatus.State == process.PIDStateAlive && pidStatus.ResidentBytesKnown && pidStatus.ResidentBytes > 0 {
 					row["ram_bytes"] = pidStatus.ResidentBytes
