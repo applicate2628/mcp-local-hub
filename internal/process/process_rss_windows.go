@@ -46,11 +46,11 @@ type processMemoryCounters struct {
 
 // ResidentSetSizeByPID returns the resident set size (working-set bytes)
 // of pid via OpenProcess + GetProcessMemoryInfo. It is the Windows
-// implementation of the per-daemon RAM lookup the supervisor IPC status
-// producer uses (internal/cli/supervise_status.go).
+// implementation of the optional per-PID RAM lookup. It does not verify a PID
+// generation; identity-qualified status uses ObservePIDStatus instead.
 //
 // Returns (0, false) on any failure — invalid pid, OpenProcess denied
-// (PID recycled / insufficient rights), or the GetProcessMemoryInfo
+// (insufficient rights or the process no longer exists), or the GetProcessMemoryInfo
 // syscall failing. RAM is a best-effort diagnostic, so a miss renders no
 // RAM row rather than surfacing an error; callers MUST treat ok=false as
 // "unknown" and omit the metric.
@@ -66,7 +66,12 @@ func ResidentSetSizeByPID(pid int) (uint64, bool) {
 		return 0, false
 	}
 	defer windows.CloseHandle(h)
+	return residentSetSizeFromHandle(h)
+}
 
+// residentSetSizeFromHandle borrows a query-capable handle for this synchronous
+// read only. The caller retains ownership and decides when to close it.
+func residentSetSizeFromHandle(h windows.Handle) (uint64, bool) {
 	var counters processMemoryCounters
 	counters.CB = uint32(unsafe.Sizeof(counters))
 	r1, _, _ := procGetProcessMemoryInfo.Call(
