@@ -3621,9 +3621,10 @@ type intentWriteStep func() (rollback func(), err error)
 // — intent write is step 6 of the inner rollback). It returns a compensating
 // undo that is pushed onto the same rollback stack as the scheduler-task and
 // client-config undos; if it returns an error, the whole stack runs and
-// executeInstallTo returns that error with every side effect undone. Legacy
-// api.Install callers pass nil and observe bit-for-bit identical behavior
-// (they record intent via recordInstallIntentPostSuccess AFTER this returns).
+// executeInstallTo returns that error together with unconfirmed scheduler or
+// client compensations. Legacy api.Install callers pass nil and add no
+// intermediate step; they record intent via recordInstallIntentPostSuccess
+// after this function succeeds.
 //
 // skipPrune suppresses the full-install obsolete-task reconcile (step 1b). It
 // is true only for workspace-scoped (DaemonTemplate) installs through
@@ -3767,6 +3768,10 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// reconciled, not rollback-incomplete, but the lifecycle failure must remain
 	// visible at the composition boundary.
 	var rollbackClientLifecycleErrors []error
+	// Scheduler failures have their own error owner. They must not be reported
+	// as client failures or lost inside the shared []func() rollback stack.
+	var rollbackSchedulerErrors []error
+	var rollbackSchedulerTasks []string
 	runRollback := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
@@ -3777,15 +3782,23 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// wraps the cause in a typed *InstallClientRollbackIncompleteError naming those
 	// clients so ExecuteAdoptWithOpts can PRESERVE the pre-adopt provenance instead
 	// of deleting it (bug 2026-07-12). A restore that applied but could not confirm
-	// lock release contributes only its lifecycle error. With neither class, the
-	// returned error remains the bare cause.
+	// lock release contributes only its lifecycle error. Scheduler compensation
+	// failures retain their own incomplete type. Without added rollback errors,
+	// the returned error remains the bare cause.
 	failAfterRollback := func(cause error) error {
 		runRollback()
-		if len(rollbackClientLifecycleErrors) > 0 {
-			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors))
+		if len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors) > 0 {
+			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors)+len(rollbackSchedulerErrors))
 			joined = append(joined, cause)
 			joined = append(joined, rollbackClientLifecycleErrors...)
+			joined = append(joined, rollbackSchedulerErrors...)
 			cause = errors.Join(joined...)
+		}
+		if len(rollbackSchedulerTasks) > 0 {
+			cause = &InstallSchedulerRollbackIncompleteError{
+				Tasks: append([]string(nil), rollbackSchedulerTasks...),
+				cause: cause,
+			}
 		}
 		if len(rollbackClientRestoreFailures) == 0 {
 			return cause
@@ -3838,6 +3851,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			if len(priorXML) == 0 {
 				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
 			}
+			priorXML = bytes.Clone(priorXML)
 			var ok bool
 			recovery, ok = sch.(scheduler.XMLCreator)
 			if !ok {
@@ -3862,18 +3876,32 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			}
 			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
 		}
-		taskName := spec.Name
-		savedXML := priorXML // capture for closure
+		compensation := &installTaskRollback{
+			name: spec.Name, priorXML: priorXML, snapshotPath: snapshotPath, creator: recovery,
+		}
+		// Arm before the fallible post-create export. Without that observation,
+		// compensation reports an incomplete rollback and never deletes by name.
 		rollback = append(rollback, func() {
-			_ = sch.Delete(taskName)
-			if len(savedXML) > 0 {
-				if err := sch.ImportXML(taskName, savedXML); err == nil {
-					fmt.Fprintf(w, "  rollback: restored prior scheduler task %s\n", taskName)
-					return
-				}
+			if err := compensation.rollback(sch); err != nil {
+				rollbackSchedulerErrors = append(rollbackSchedulerErrors, err)
+				rollbackSchedulerTasks = append(rollbackSchedulerTasks, compensation.name)
+				fmt.Fprintf(w, "  rollback: scheduler task recovery unconfirmed: %v\n", err)
+				return
 			}
-			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", taskName)
+			if len(compensation.priorXML) > 0 {
+				fmt.Fprintf(w, "  rollback: prior scheduler definition confirmed: %s\n", compensation.name)
+			} else {
+				fmt.Fprintf(w, "  rollback: scheduler task absence confirmed: %s\n", compensation.name)
+			}
 		})
+		createdXML, createdExportErr := sch.ExportXML(spec.Name)
+		if createdExportErr != nil {
+			return failAfterRollback(fmt.Errorf("capture task %s after acknowledged creation: %w", spec.Name, createdExportErr))
+		}
+		if len(createdXML) == 0 {
+			return failAfterRollback(fmt.Errorf("capture task %s after acknowledged creation: empty XML snapshot", spec.Name))
+		}
+		compensation.createdXML = bytes.Clone(createdXML)
 		createdTasks = append(createdTasks, createdTask{spec: spec, trigger: t.Trigger})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}

@@ -19,13 +19,24 @@ type installSnapshotScheduler struct {
 	snapshot  []byte
 	exportErr error
 	deleteErr error
+	created   bool
 }
 
 func (s *installSnapshotScheduler) ExportXML(name string) ([]byte, error) {
-	if name == s.name {
+	if name == s.name && !s.created {
 		return s.snapshot, s.exportErr
 	}
 	return s.fakeScheduler.ExportXML(name)
+}
+
+func (s *installSnapshotScheduler) Create(spec scheduler.TaskSpec) error {
+	if err := s.fakeScheduler.Create(spec); err != nil {
+		return err
+	}
+	if spec.Name == s.name {
+		s.created = true
+	}
+	return nil
 }
 
 func (s *installSnapshotScheduler) Delete(name string) error {
@@ -164,7 +175,7 @@ func TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask(t *testing.T) {
 			if !errors.Is(err, cause) {
 				t.Errorf("blocked replacement = %v, want original cause", err)
 			}
-			if !f.tasks[first] || !bytes.Equal(f.xml[first], priorXML) || !f.tasks[blocked] || !bytes.Equal(f.xml[blocked], blockedXML) || f.createCount != 1 || len(f.importNames) != 1 || f.importNames[0] != first || f.runCount != 0 {
+			if !f.tasks[first] || !bytes.Equal(f.xml[first], priorXML) || !f.tasks[blocked] || !bytes.Equal(f.xml[blocked], blockedXML) || f.createCount != 1 || len(f.importNames) != 0 || f.runCount != 0 {
 				t.Errorf("earlier task not restored or blocked task changed: tasks=%v xml=%q create=%d import=%v run=%d", f.tasks, f.xml, f.createCount, f.importNames, f.runCount)
 			}
 		})

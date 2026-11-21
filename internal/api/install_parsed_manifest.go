@@ -1048,6 +1048,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 					var forward *InstallForwardCommittedError
 					if invocation == nil && freshProviderInstall && !intentWriteAttempted &&
 						!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
+						len(installSchedulerRecoveryTasks(err)) == 0 &&
 						!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
 						!errors.Is(err, ErrClientConfigSettlementInvalid) &&
 						!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
