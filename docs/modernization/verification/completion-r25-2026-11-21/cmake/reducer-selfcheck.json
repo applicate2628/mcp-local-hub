@@ -1,0 +1,31 @@
+{
+  "schema": "r25-cmake-reducer-selfcheck-v1",
+  "checks": [
+    "actual-split-output-reassembles-18-rows",
+    "whole-and-fragmented-line-equivalence",
+    "missing-row",
+    "duplicate-row",
+    "wrong-trace-pin",
+    "wrong-wire-semantic-count",
+    "boolean-sample",
+    "insufficient-quiescent-gc",
+    "decreased-allocation-counter",
+    "worker-count-mismatch",
+    "worker-outside-work",
+    "worker-reversed-interval",
+    "boolean-memory-counter",
+    "missing-root-pass",
+    "duplicate-test-pass",
+    "unexpected-skip",
+    "foreign-package",
+    "duplicate-json-key",
+    "cross-variant-body-change",
+    "negative-released-baseline-delta-is-allowed",
+    "additional-autonomous-gc-is-allowed"
+  ],
+  "check_count": 21,
+  "source_sha256": "1549f696afceded5d8e94aa7add32e6ac985c079063b54b7c002ce83734d4522",
+  "actual_logs_read_only": true,
+  "negative_mutations_in_memory_only": true,
+  "go_or_remote_execution": false
+}

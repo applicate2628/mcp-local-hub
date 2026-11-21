@@ -1,0 +1,293 @@
+{
+  "observed_utc": "2026-11-21 11:30:34 UTC",
+  "phase": "after-five-closures-before-document-publication",
+  "open": [
+    {
+      "pr": 660,
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 659,
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 658,
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "head": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 657,
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 655,
+      "title": "fix(serena): settle preparation before canceling work context",
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 654,
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 653,
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "base": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 652,
+      "title": "fix(serena): read installed files through original tree",
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 650,
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 649,
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 648,
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "head": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "base_sha_reported": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 643,
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "base_sha_reported": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "base_sha_reported": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 631,
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "head": "412cd353d495a890b47992c0eae672a247862508",
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "base": "spike/rx02-native-identity-20261114",
+      "base_sha_reported": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 628,
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "head": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    },
+    {
+      "pr": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "head": "0fac6a5e992ec8b4937bad9fa7d71e64d711b3af",
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "base": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged_at": null
+    }
+  ],
+  "master_expected": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+}

@@ -1,0 +1,37 @@
+{
+  "observed_utc": "2026-11-21T09:04:13.822968+00:00",
+  "systemd_version": "systemd 257 (257.13-1~deb13u1)\n+PAM +AUDIT +SELINUX +APPARMOR +IMA +IPE +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +IPTC +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF -XKBCOMMON -UTMP +SYSVINIT +LIBARCHIVE\n",
+  "service_registration": false,
+  "service_start": false,
+  "scope": "literal percent ExecStart parser contract",
+  "results": [
+    {
+      "mode": "control",
+      "args": [
+        "--generators=no",
+        "--man=no",
+        "verify",
+        "<WORKSPACE_ROOT>/linux-percent-execution/native-parser/control.service"
+      ],
+      "exit_code": 1,
+      "unit_sha256": "8e639e017a7f8725d259c7eb3343a6efca183a0bd8cc473b5e3cfbb6311078db",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "3edf956c85d7067621aff28f210c01d9ff0daf507251520b1568e5b64bb0708d",
+      "stderr": "<WORKSPACE_ROOT>/linux-percent-execution/native-parser/control.service:6: Failed to resolve unit specifiers in '<WORKSPACE_ROOT>/linux-percent-execution/native-parser/release-%Z/probe': Invalid slot\ncontrol.service: Unit configuration has fatal error, unit will not be started.\nUnit control.service has a bad unit file setting.\n"
+    },
+    {
+      "mode": "candidate",
+      "args": [
+        "--generators=no",
+        "--man=no",
+        "verify",
+        "<WORKSPACE_ROOT>/linux-percent-execution/native-parser/candidate.service"
+      ],
+      "exit_code": 0,
+      "unit_sha256": "b374c5205c828e678306546fd382997faa7f785e57959af522296310ecfe6936",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr": ""
+    }
+  ]
+}

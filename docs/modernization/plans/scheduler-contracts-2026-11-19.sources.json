@@ -1,0 +1,211 @@
+{
+  "repository": "applicate2628/mcp-local-hub",
+  "ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "files": [
+    {
+      "path": "go.mod",
+      "blob": "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt.go",
+      "blob": "e1b4e4a1d48185bd27ebc4defedab338dff54cfb"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_test.go",
+      "blob": "715c9920805c5e18c56500fc4633a210e4e0133b"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_validation_test.go",
+      "blob": "dee982a2006cb6a78f8ba932ef8a79ee1e85e62f"
+    },
+    {
+      "path": "internal/api/scheduler_swap.go",
+      "blob": "91f6808364b974a8260abeb6da4223d519c66ed9"
+    },
+    {
+      "path": "internal/api/scheduler_swap_test.go",
+      "blob": "840e736a7fc239107d370e24533ea066ce7aa150"
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "blob": "7e6be38ab49246f8c38577302b8bfd255ac7409d"
+    },
+    {
+      "path": "internal/api/weekly_refresh_atomic_test.go",
+      "blob": "c5f3ea22dd616cf12dddba7638925262bd07f7ed"
+    },
+    {
+      "path": "internal/api/weekly_refresh_test.go",
+      "blob": "4520dc6ac50885cbc66587a45ab33bd4433de748"
+    },
+    {
+      "path": "internal/autostart/autostart.go",
+      "blob": "bf5e0d1d9bf734d5848de82f9e08b3abd1792a99"
+    },
+    {
+      "path": "internal/autostart/autostart_test.go",
+      "blob": "a38c0e57d9d2c18922a110a4f2dd729f331d4af2"
+    },
+    {
+      "path": "internal/autostart/darwin.go",
+      "blob": "ab9b4278f67e005665116f1e6414c5fe68a87b00"
+    },
+    {
+      "path": "internal/autostart/darwin_test.go",
+      "blob": "c1bf67aeb1a282dc65f09a94a564d466b1cfb786"
+    },
+    {
+      "path": "internal/autostart/linux.go",
+      "blob": "a85e0c1dda468ec8594101c0b33a1fb1ad234575"
+    },
+    {
+      "path": "internal/autostart/linux_test.go",
+      "blob": "fe7a382229ab489d9d64923e056fb25e8eb0f0a8"
+    },
+    {
+      "path": "internal/autostart/start_darwin.go",
+      "blob": "8d1a0bd20dd3aacdbb8aeec2fa76a9e47d83a7b0"
+    },
+    {
+      "path": "internal/autostart/start_linux.go",
+      "blob": "969acdf9da30286d6202467d054891b304a75a3a"
+    },
+    {
+      "path": "internal/autostart/start_windows.go",
+      "blob": "663a5039d5ffefbb56b4bb66c69ade5c66f6c8fc"
+    },
+    {
+      "path": "internal/autostart/start_windows_test.go",
+      "blob": "d58d9f460f422e558b9cf9cf6cdc48077cb0385f"
+    },
+    {
+      "path": "internal/autostart/windows.go",
+      "blob": "23a69f5e2598dbf9bed2286b66da4c0bce7e2f90"
+    },
+    {
+      "path": "internal/autostart/windows_status_observation_test.go",
+      "blob": "080c32f3e9846ec95cce98564f3deff8d7b9e23b"
+    },
+    {
+      "path": "internal/autostart/windows_test.go",
+      "blob": "125ba00eb945ab0426d9f4a45572326ec47f921f"
+    },
+    {
+      "path": "internal/cli/scheduler_cmd.go",
+      "blob": "3065d08f8f9338633bafb73a31e1e5888fc0b627"
+    },
+    {
+      "path": "internal/cli/weekly_refresh.go",
+      "blob": "d97e8e1afaa3c1f4a9b07ef67b55990597b613f7"
+    },
+    {
+      "path": "internal/cli/weekly_refresh_test.go",
+      "blob": "59de662e5a605244c7f223e6b3aa6c30bcd242a9"
+    },
+    {
+      "path": "internal/scheduler/entrypoint_canonical_entry_set_windows_test.go",
+      "blob": "87d41ed888db4a3fa131edd59848bdd22fa405e4"
+    },
+    {
+      "path": "internal/scheduler/entrypoint_inventory_windows_test.go",
+      "blob": "2c4ae6b5d83a1012045f37b45cf1c15bfcdc75cd"
+    },
+    {
+      "path": "internal/scheduler/entrypoint_migration_windows.go",
+      "blob": "ebc2e755f3623c57e499d09b1ee48e8173323382"
+    },
+    {
+      "path": "internal/scheduler/entrypoint_migration_windows_test.go",
+      "blob": "03aa14765ad8a72866f0dda01f632fdf0b7d6773"
+    },
+    {
+      "path": "internal/scheduler/enumerate_all_windows.go",
+      "blob": "23d258300738aa461330b5e35d0026362f7bcbd0"
+    },
+    {
+      "path": "internal/scheduler/enumerate_all_windows_test.go",
+      "blob": "a07b4fcd41278af844772618e8a92fa8ac9313cc"
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "blob": "79d7af80bf0ebe67e5f5b3aba083a541694b160d"
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_target_windows_test.go",
+      "blob": "d4db12298243a7f88ff8e489c5ac7092021b1822"
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "blob": "d3e19c517345c85965e38c83a69e11a3adbc662b"
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows_test.go",
+      "blob": "c6a1d0cf93f262f0c802da2aff21924b5666cc81"
+    },
+    {
+      "path": "internal/scheduler/scheduler_darwin.go",
+      "blob": "f8802bbeece131647ede6587139f12c8a6d74eb7"
+    },
+    {
+      "path": "internal/scheduler/scheduler_linux.go",
+      "blob": "a0cc4c7f0171e6db60651356fb06ff721234a7ba"
+    },
+    {
+      "path": "internal/scheduler/scheduler_liveness_xml.go",
+      "blob": "e45ec163ac7827d5810c6d082c080343d43edd49"
+    },
+    {
+      "path": "internal/scheduler/scheduler_liveness_xml_test.go",
+      "blob": "123ddd7dc790e146403533990f09be66ee1f946e"
+    },
+    {
+      "path": "internal/scheduler/scheduler_noop.go",
+      "blob": "01996d16a20d45bab36f2ee3c52520550aabd8bc"
+    },
+    {
+      "path": "internal/scheduler/scheduler_noop_test.go",
+      "blob": "bfc8552f2385ea3d7a13be01cb4db2beaf2feb5f"
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_darwin_test.go",
+      "blob": "c4d5c783c25145e194ccd6605f8fe8488b49a0f9"
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_linux_test.go",
+      "blob": "9a5a6e8db151ba6b360a57e4374fc487b4a281f4"
+    },
+    {
+      "path": "internal/scheduler/scheduler_notimplemented_unix_test.go",
+      "blob": "0588caa91186e1b9f02087c75b63d18e2cb49ff4"
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows.go",
+      "blob": "6f85544228f33ab66645a93aafefc36bc0d75c66"
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+      "blob": "747de6435d6c9802e45ab4a2df37849ea1196521"
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows.go",
+      "blob": "ab2062d3bcf707380fb7240c4729aefacd1007e5"
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows_test.go",
+      "blob": "4fe9b21ce7f11234dab87d7fd2c1774447ce4450"
+    },
+    {
+      "path": "internal/scheduler/xml_encoding.go",
+      "blob": "9b68455ae4d16648ac76602fa1e94e136931ee82"
+    },
+    {
+      "path": "internal/scheduler/xml_import_windows_test.go",
+      "blob": "73ee17c3cf8b245d48042aff37913507ef09db2a"
+    }
+  ],
+  "comparison": {
+    "ref": "1e04fea613edc909b13c19f8dad4db5977b3bd69",
+    "equal_blob_count": 50
+  },
+  "scope_note": "Captured source set; selected production paths and relevant tests reviewed. Long call-graph test implementation not audited in full. No test execution in this R17 audit."
+}

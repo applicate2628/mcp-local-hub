@@ -1,0 +1,54 @@
+{
+  "run/intent.json": {
+    "bytes": 856,
+    "sha256": "f82f6ef06dfdb41cfb90ad84cbd0abed19e68b0e885ed3a2f6ded5e441d50832"
+  },
+  "run/go-manifest.json": {
+    "bytes": 4300,
+    "sha256": "de2950bd13bf531672d637036c1c465cee02585cbd8cb84cfa204a425af3c3e3"
+  },
+  "run/go-child-start.json": {
+    "bytes": 441,
+    "sha256": "f73ccfcb54f8c362abaae862041fd7ad89652c7ca26c2924cb132885e3ca4451"
+  },
+  "run/result.json": {
+    "bytes": 6042,
+    "sha256": "a788ded4305a1603070f6384fba76caab50a3995a33c93ae96a111815b37f062"
+  },
+  "run/positive-go.jsonl": {
+    "bytes": 1882,
+    "sha256": "b3baa880df91b16b02cf5f2b5dbf0205619acdbe29ef1d4e70b569133db71b93"
+  },
+  "run/positive-go.stderr.txt": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run/mcp-r17-027ca2dd03624a318f469ad87b259bff-visible.xml": {
+    "bytes": 1262,
+    "sha256": "f6d69017190841e2bd671ee3358ac424cfaf2a7e781124731c61a1647b0e7cd8"
+  },
+  "run/mcp-r17-027ca2dd03624a318f469ad87b259bff-hidden.xml": {
+    "bytes": 1288,
+    "sha256": "dba11cbad453e2b9d2c62eb80a5e6fe694b6bc76fc3646253982618dccd74f7a"
+  },
+  "preparation/launch-intent.json": {
+    "bytes": 989,
+    "sha256": "eb7cad1e5049bee340d95f3fa1079e4d3d0458749f07747af773a9a12a293c00"
+  },
+  "preparation/launch-result.json": {
+    "bytes": 413,
+    "sha256": "af0552e437ac9b9faa718ad1cac4214681a15637351c1c9321ec7ebc621ec655"
+  },
+  "preparation/launch.stdout.log": {
+    "bytes": 209,
+    "sha256": "17f9cd73d96afb7527a99ed95bb2e88f881d04dbe9ea46f7c80a5009d4967887"
+  },
+  "preparation/launch.stderr.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "preparation/execution-preflight.json": {
+    "bytes": 1697,
+    "sha256": "616bdcd45534bb10b7d6945253df8feee113332376bd174cc1f48fb85690ae21"
+  }
+}

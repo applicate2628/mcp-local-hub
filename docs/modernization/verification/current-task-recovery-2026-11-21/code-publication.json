@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "observed_at_utc": "2026-11-20T23:39:16Z",
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 660,
+  "draft": true,
+  "base": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "tree": "1c803a8ef8227fe6c289be69c7897aee1549372b",
+  "parents": [
+    "c55d9ca619f6f9301ba1113615370fc6218d608f"
+  ],
+  "changed_files": 9,
+  "additions": 786,
+  "deletions": 8,
+  "single_parent_verified": true,
+  "exact_path_set_verified": true,
+  "github_content_readback": [
+    {
+      "path": "internal/api/install.go",
+      "sha": "f04512a5ec85cb568e6df855cf3fd3f3109163b7",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/api/install_scheduler_snapshot_test.go",
+      "sha": "219e2543e386d6723f21884dc94a3b6de406a109",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/api/install_task_recovery.go",
+      "sha": "68455083e0e9bed1d1c186a2d1589ea8109584b3",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/api/install_task_recovery_storage_test.go",
+      "sha": "113fa8084dc2d9f6f542ae47ffd1f4307e9a82da",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/api/install_task_recovery_test.go",
+      "sha": "ae8314806bd0d263ff4e2f54c29d823b233e49d4",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "sha": "5361056de3b60b0402c0253ea6157616029075a1",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "sha": "bd5d7ffc1ea1d7917165488ea570a277ff5f8307",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/scheduler/scheduler_xml_create_windows.go",
+      "sha": "defe27d609f964e80bdf40f400f8b99052cf682c",
+      "content_equal": true,
+      "encoding": "utf-8"
+    },
+    {
+      "path": "internal/scheduler/scheduler_xml_create_windows_test.go",
+      "sha": "0061f8411f04c093cc3386fd74d67ad90ea46e7b",
+      "content_equal": true,
+      "encoding": "utf-8"
+    }
+  ],
+  "source_manifest_sha256": "f3e12a0bed9f4024e4e00734eb35da859c23defc86c8b0963ac9469d80890534",
+  "reference_update": {
+    "expected_sha": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+    "force": false
+  },
+  "merges": false,
+  "comments_or_reviews_sent": false
+}

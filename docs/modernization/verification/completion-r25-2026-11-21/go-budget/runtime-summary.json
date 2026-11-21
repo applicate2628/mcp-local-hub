@@ -1,0 +1,183 @@
+{
+  "schema": "r25-go-budget-runtime-summary-v1",
+  "scope": "One instrumented root, 34 cases including 30 individual durable malformed-input fixtures; no full-suite qualification",
+  "actual_execution_supplied_by_parent": true,
+  "additional_go_runtime_executed_by_reducer_agent": false,
+  "source_ref": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+  "source_tree": "4fee59085fcd4fb48434bde0291c6e7edc9cbaec",
+  "integrity_checks": {
+    "stdout_bytes_match_original_receipt": true,
+    "stdout_sha256_match_original_receipt": true,
+    "reducer_input_matches_original_stdout": true,
+    "scope_manifest_sha256_matches_receipt": true,
+    "wrapper_sha256_matches_manifest_and_receipt": true,
+    "candidate_sha256_matches_manifest_and_selection": true,
+    "candidate_git_blob_matches_manifest": true,
+    "candidate_bytes_match_prepared_candidate": true,
+    "original_blob_matches_selection": true,
+    "source_commit_consistent": true,
+    "source_tree_consistent": true,
+    "source_clean_before_and_after": true,
+    "original_source_hash_unchanged": true,
+    "selection_complete_190_phases": true,
+    "recorded_command_settled_successfully": true
+  },
+  "input_files": {
+    "r25-audit/runtime/go-budget.stdout.jsonl": {
+      "bytes": 95183,
+      "sha256": "40ff84d212a73788f1ab8e9d4c31040c451a708f3bf50756fa85a61acf1c54d3"
+    },
+    "r25-audit/runtime/go-budget-measure-receipt-readback.json": {
+      "bytes": 60426,
+      "sha256": "92b416deecd23ef09afa8a692e79d0b4a5b2c2be3ffd50e8f8b94d1cc5da04df"
+    },
+    "r25-audit/runtime/payload/scopes/go-budget/manifest.json": {
+      "bytes": 5442,
+      "sha256": "0040a688756cfbc5f668ef72afeca2a64fa79a7c4be789ed9156b2d6f854ad5d"
+    },
+    "r25-audit/runtime/qualify_scope.py": {
+      "bytes": 13541,
+      "sha256": "610269f4e6841d336c4339abafe94751db8386d49c3fa4a2ce3bb103a794984e"
+    },
+    "r25-audit/runtime/payload/scopes/go-budget/candidate/internal/cli/install_reconcile_mcp_front_v3_test.go": {
+      "bytes": 113455,
+      "sha256": "fc620b87ff343e075b7419e2dc2bf91e8e8a09da2a7e3634962630a5d97a30ce"
+    },
+    "r25-audit/go-budget/runtime-result.json": {
+      "bytes": 43682,
+      "sha256": "48ca3c0b5931cab02fee7c97e5580a9339460cb13c10d95d138f96b64dd025fe"
+    },
+    "r25-audit/go-budget/diagnostic-selection.json": {
+      "bytes": 6110,
+      "sha256": "da347903ee3c3295c16a007df0e3bfbf3f5bee7c38ca756adc4dd6c119d7e4c9"
+    },
+    "r25-audit/go-budget/summarize_diagnostic.py": {
+      "bytes": 6709,
+      "sha256": "26f0c4ac7ada74c1409125dc4b62ce648b558651463d5a4ba52510187c7ce50a"
+    }
+  },
+  "recorded_overlay_json_sha256": "09d0167825753be3bff7e1646378b031cad545c6e75325fae953cb107e18b743",
+  "recorded_command_args": [
+    "test",
+    "-overlay",
+    "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\go-budget-measure\\overlay.json",
+    "-json",
+    "-count=1",
+    "-p=1",
+    "-timeout=5m",
+    "-run",
+    "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+    "./internal/cli"
+  ],
+  "selection": {
+    "roots": 1,
+    "cases": 34,
+    "individual_durable_cases": 30,
+    "expected_phase_records": 190,
+    "observed_phase_records": 190,
+    "complete": true
+  },
+  "event_counts": {
+    "lines": 334,
+    "pass_including_package": 36,
+    "test_pass": 35,
+    "package_pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "timings_seconds": {
+    "external_command_wall": 94.15899709996302,
+    "go_package_elapsed": 5.054,
+    "go_root_elapsed": 4.78
+  },
+  "phase_aggregates": {
+    "journal-fixture": {
+      "count": 1,
+      "sum_ns": 374749300,
+      "minimum_ns": 374749300,
+      "median_ns": 374749300,
+      "maximum_ns": 374749300
+    },
+    "initial-attempt": {
+      "count": 1,
+      "sum_ns": 108890800,
+      "minimum_ns": 108890800,
+      "median_ns": 108890800,
+      "maximum_ns": 108890800
+    },
+    "case-setup": {
+      "count": 34,
+      "sum_ns": 531300,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 531300
+    },
+    "classifier": {
+      "count": 34,
+      "sum_ns": 0,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 0
+    },
+    "fixture-directory": {
+      "count": 30,
+      "sum_ns": 17727200,
+      "minimum_ns": 0,
+      "median_ns": 535700.0,
+      "maximum_ns": 1576200
+    },
+    "fixture-write": {
+      "count": 30,
+      "sum_ns": 4234713400,
+      "minimum_ns": 33114000,
+      "median_ns": 51946250.0,
+      "maximum_ns": 2139695500
+    },
+    "read-validation": {
+      "count": 30,
+      "sum_ns": 10808200,
+      "minimum_ns": 0,
+      "median_ns": 505400.0,
+      "maximum_ns": 809200
+    },
+    "rollback-refusal": {
+      "count": 30,
+      "sum_ns": 2797100,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 624500
+    }
+  },
+  "phase_total_ns": 4750217300,
+  "fixture_write_share_of_phase_sum": 0.8914778277616899,
+  "largest_fixture_write": {
+    "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+    "phase": "fixture-write",
+    "elapsed_ns": 2139695500
+  },
+  "largest_fixture_write_share_of_fixture_write_sum": 0.5052751621868908,
+  "zero_duration_counts": {
+    "journal-fixture": 0,
+    "initial-attempt": 0,
+    "case-setup": 33,
+    "classifier": 34,
+    "fixture-directory": 1,
+    "fixture-write": 0,
+    "read-validation": 10,
+    "rollback-refusal": 24
+  },
+  "settlement": {
+    "direct_child_settled": true,
+    "direct_child_wait_bounded": true,
+    "whole_process_tree_deadline_enforced": false,
+    "process_tree_settlement_observed": false
+  },
+  "limits": [
+    "No attribution of external/package/root time differences to compilation or any other unmeasured stage.",
+    "Fixture-write measures all of WriteStateFileAtomic, not FlushFileBuffers alone.",
+    "All classifier measurements are zero at this timer resolution; they do not establish zero work or zero CPU cost.",
+    "One sample with one large write does not establish stable latency, an optimization speedup or the cause of historical full-suite timeouts.",
+    "The recorder confirms direct-child completion; it does not claim whole-process-tree settlement.",
+    "The reducer validates supplied events; source binding above additionally compares saved receipts, the pinned wrapper, scope manifest and candidate bytes."
+  ]
+}

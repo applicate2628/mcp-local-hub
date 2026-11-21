@@ -1,0 +1,30 @@
+{
+  "archive": "evidence-redacted.zip",
+  "bytes": 2852497,
+  "crc_and_manifest_verified": true,
+  "entries": 4204,
+  "manifest_files": 4203,
+  "metadata_self_hash_omitted_to_avoid_self_reference": true,
+  "original_hashes_distinct_from_saved_hashes": true,
+  "raw_command_streams_verified": 1250,
+  "saved_files": {
+    "MANIFEST.json": {
+      "bytes": 1592554,
+      "sha256": "927744c1bc7209816e01074c2619cf03750c6813d3167e8dcc3f6b150bc82df2"
+    },
+    "evidence-redacted.zip": {
+      "bytes": 2852497,
+      "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795"
+    },
+    "evidence-transfer.b64": {
+      "bytes": 3803332,
+      "sha256": "e015766e7047525f1c5f56824f963e74d6e1ba48f1ed9758302c986aff96193d"
+    },
+    "execution-summary.json": {
+      "bytes": 340705,
+      "sha256": "b223cbd74e031a0d553af737a3462ab84714f972fbeae08cb33d54760e3440be"
+    }
+  },
+  "schema": 2,
+  "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795"
+}

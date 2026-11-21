@@ -1,0 +1,1473 @@
+{
+  "schema": "r24-original-pr-description-archive-v1",
+  "created_at_utc": "2026-11-21T11:04:46.995305+00:00",
+  "repository": "applicate2628/mcp-local-hub",
+  "pr_count": 31,
+  "pr_numbers": [
+    623,
+    624,
+    625,
+    626,
+    627,
+    628,
+    629,
+    631,
+    632,
+    635,
+    636,
+    637,
+    639,
+    643,
+    644,
+    645,
+    646,
+    647,
+    648,
+    649,
+    650,
+    651,
+    652,
+    653,
+    654,
+    655,
+    656,
+    657,
+    658,
+    659,
+    660
+  ],
+  "source_retrieval": "Only already saved complete metadata snapshots; no new network retrieval for this archive.",
+  "exactness": "Body UTF-8 bytes preserve captured API text exactly, including existing line endings and terminal newlines.",
+  "metadata_base_semantics": "API-reported snapshot, not proof of live target branch ancestry.",
+  "prs": [
+    {
+      "number": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "head_sha": "0fac6a5e992ec8b4937bad9fa7d71e64d711b3af",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:14:03Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/0",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-623.md",
+      "body_bytes": 50954,
+      "body_sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb",
+      "metadata_path": "metadata/pr-623.json",
+      "metadata_bytes": 848,
+      "metadata_sha256": "2dac1fbb8184dafc76d0bbf9677534ef25198e3633f68a6e53398fa1b7d3117e"
+    },
+    {
+      "number": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "head_sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:19Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/1",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-624.md",
+      "body_bytes": 18072,
+      "body_sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13",
+      "metadata_path": "metadata/pr-624.json",
+      "metadata_bytes": 839,
+      "metadata_sha256": "d6ecd7027b15e7496cc58ca21a991bc7a693801601904f07693838549c986cb6"
+    },
+    {
+      "number": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "head_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T18:15:57Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+      "source_snapshot_path": "r24-audit/rust/meta/pr-snapshots.json",
+      "source_snapshot_sha256": "915673b3c741729f6b0a1a4e9004a98698550defee2461bd14cbee99760da6a4",
+      "source_json_pointer": "/prs/625",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-625.md",
+      "body_bytes": 15544,
+      "body_sha256": "799951045bc84f7318642f71e4c4f0979cbaa0be4aa7eeb5a4d65b06d832eb1d",
+      "metadata_path": "metadata/pr-625.json",
+      "metadata_bytes": 910,
+      "metadata_sha256": "e00c0498563241d764dd344b572ca06d5975bec026dd24074ca107975a186bf0"
+    },
+    {
+      "number": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "head_sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T19:45:34Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/2",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-626.md",
+      "body_bytes": 13379,
+      "body_sha256": "5ceeed0f8b0edcde362516e7b31e862b2ad53be53757208040e202829d898790",
+      "metadata_path": "metadata/pr-626.json",
+      "metadata_bytes": 838,
+      "metadata_sha256": "53e58545d3cc7121aace9022c2d01e90864b7cd08f39242d443b740eb4aec98e"
+    },
+    {
+      "number": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "head_sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T18:15:59Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+      "source_snapshot_path": "r24-audit/rust/meta/pr-snapshots.json",
+      "source_snapshot_sha256": "915673b3c741729f6b0a1a4e9004a98698550defee2461bd14cbee99760da6a4",
+      "source_json_pointer": "/prs/627",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-627.md",
+      "body_bytes": 7561,
+      "body_sha256": "9ae41bec3622ab0d4be5eb1d6c3edbffb63f01cadd57d74f673be06aa1a09f63",
+      "metadata_path": "metadata/pr-627.json",
+      "metadata_bytes": 902,
+      "metadata_sha256": "727c485bf133e53e0e8c39dce606a37377e16ebaf25d5fd06953da851bf826b9"
+    },
+    {
+      "number": 628,
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "head_sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:23Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/3",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-628.md",
+      "body_bytes": 12384,
+      "body_sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68",
+      "metadata_path": "metadata/pr-628.json",
+      "metadata_bytes": 838,
+      "metadata_sha256": "758f63a6f5a713847136e1d23302ca4c2698e9715c7dc330a4d6050335404898"
+    },
+    {
+      "number": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "head_sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:25Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/4",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-629.md",
+      "body_bytes": 22586,
+      "body_sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888",
+      "metadata_path": "metadata/pr-629.json",
+      "metadata_bytes": 850,
+      "metadata_sha256": "e086a413b57f220c03178bcb7cda6778704a660c3b275656f03a8abf5420051a"
+    },
+    {
+      "number": 631,
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "head_sha": "2eb7c114103ef5c60939cd114110ebe667901166",
+      "base_ref": "spike/rx02-native-identity-20261114",
+      "base_sha_reported": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:27Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "source_snapshot_path": "r24-audit/rust/meta/pr-snapshots.json",
+      "source_snapshot_sha256": "915673b3c741729f6b0a1a4e9004a98698550defee2461bd14cbee99760da6a4",
+      "source_json_pointer": "/prs/631",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-631.md",
+      "body_bytes": 9489,
+      "body_sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9",
+      "metadata_path": "metadata/pr-631.json",
+      "metadata_bytes": 928,
+      "metadata_sha256": "ccf9117bb58b56267eb2ebdb128395254a50b038972181a258b124a78febb099"
+    },
+    {
+      "number": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "head_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T16:56:02Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-632.json",
+      "source_snapshot_sha256": "a8928c32e75951d329009c040a65360da7e50b3a4c1b40c1f52cf40bd65cde25",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-632.md",
+      "body_bytes": 3559,
+      "body_sha256": "1fbc02c8ac7c71e0c148bc57f676790b03984e9715665e86bc85f1e12ad9514b",
+      "metadata_path": "metadata/pr-632.json",
+      "metadata_bytes": 896,
+      "metadata_sha256": "6d06f250cf5d1be2cfb76fe1b19eb0c2ec19083b077faf09e3174271ba53f9c0"
+    },
+    {
+      "number": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "head_sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "base_ref": "fix/serena-qualified-uv-path-20261114",
+      "base_sha_reported": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:44:58Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-635.json",
+      "source_snapshot_sha256": "9fd19b549d0bb89f3f24f55a294d19393aff8cedba358e47607c30b4ba624b32",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-635.md",
+      "body_bytes": 7358,
+      "body_sha256": "87aba22d3d3197c3855c056d5e7b00c7ca9ab29ceeb1c929b3d905040815dcad",
+      "metadata_path": "metadata/pr-635.json",
+      "metadata_bytes": 941,
+      "metadata_sha256": "180b535a286aad120cc11dfcf45fc0f16a160ed14833934e3ae3741d4e3719e7"
+    },
+    {
+      "number": 636,
+      "title": "test(serena): retain a private native qualification namespace",
+      "head_ref": "fix/serena-qualification-namespace-20261114",
+      "head_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "base_ref": "fix/serena-qualification-publisher-20261114",
+      "base_sha_reported": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T11:02:23Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/636",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-636.json",
+      "source_snapshot_sha256": "6310495b595a253d6a449d3f124ce208f66f1b4ac5e01030c9be4db1d2e48920",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-636.md",
+      "body_bytes": 3231,
+      "body_sha256": "0926bafafe8afd72d889e86398c043087597e816f6f297a4981984b8444af8ff",
+      "metadata_path": "metadata/pr-636.json",
+      "metadata_bytes": 942,
+      "metadata_sha256": "5ce3e31e69e09fe43a0e910cfbdcbb338620b554c7e2f371ac6080554b4a99d9"
+    },
+    {
+      "number": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "head_sha": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "base_ref": "fix/serena-qualification-namespace-20261114",
+      "base_sha_reported": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:29Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-637.json",
+      "source_snapshot_sha256": "db356c8adc8a985f08db731268a15904be67074ca81e224221cd1fac43149396",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-637.md",
+      "body_bytes": 11038,
+      "body_sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac",
+      "metadata_path": "metadata/pr-637.json",
+      "metadata_bytes": 954,
+      "metadata_sha256": "e6cd12eb1e9a2a9c3ec408c87d4048034323e8bf51b536f5566e17ee52d846d3"
+    },
+    {
+      "number": 639,
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "head_ref": "fix/serena-unbuffered-build-input-20261114",
+      "head_sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:01Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/639",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/0/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-639.md",
+      "body_bytes": 4831,
+      "body_sha256": "bd32e23526dafaf846544d427b958a9e9e4f23fb5e3efa0b2485f1fc5b229973",
+      "metadata_path": "metadata/pr-639.json",
+      "metadata_bytes": 904,
+      "metadata_sha256": "738315f5b0c6def40e8e8dfe58c49c8dfc2d3c617edc7826a00dbbde727ce75c"
+    },
+    {
+      "number": 643,
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "head_sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:02Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/1/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-643.md",
+      "body_bytes": 6366,
+      "body_sha256": "f41b55ea3b2d6b7f895e47ae6724968ff88f6541fcbb6d9c6eee35c2cf45455a",
+      "metadata_path": "metadata/pr-643.json",
+      "metadata_bytes": 907,
+      "metadata_sha256": "a09f297e652423dcb0d6c2ef3768be6a6944503a7a2ea65296f6ec833681de18"
+    },
+    {
+      "number": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "head_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "base_ref": "spike/rx02-native-process-owner-20261112",
+      "base_sha_reported": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T19:20:50Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+      "source_snapshot_path": "r24-audit/rust/meta/pr-snapshots.json",
+      "source_snapshot_sha256": "915673b3c741729f6b0a1a4e9004a98698550defee2461bd14cbee99760da6a4",
+      "source_json_pointer": "/prs/644",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-644.md",
+      "body_bytes": 4609,
+      "body_sha256": "647a68d68aece4e6a02597ee554fd23b071364f15536363b5ce9f388a9ad046f",
+      "metadata_path": "metadata/pr-644.json",
+      "metadata_bytes": 930,
+      "metadata_sha256": "77e9af1f44eaf9c385d0629ab5544ab91973d7242592effae11730d9ac1021af"
+    },
+    {
+      "number": 645,
+      "title": "fix(serena): accept native empty stream enumeration",
+      "head_ref": "fix/serena-stream-enumeration-20261114",
+      "head_sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:04Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/645",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/2/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-645.md",
+      "body_bytes": 5193,
+      "body_sha256": "139c621a24287a51e15665e54de1ce49228ea376c5f777e745ad96ef956507af",
+      "metadata_path": "metadata/pr-645.json",
+      "metadata_bytes": 889,
+      "metadata_sha256": "8cfb45e5cfd4ce1ba0859ea5f7323ea89a21765c0ebe182c5456edbb491d0658"
+    },
+    {
+      "number": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "head_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:05Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/3/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-646.md",
+      "body_bytes": 5875,
+      "body_sha256": "3e3fcb90322780a0cae360a73c9a2a870f357e2d00cac36ddac96ff3cf945f05",
+      "metadata_path": "metadata/pr-646.json",
+      "metadata_bytes": 900,
+      "metadata_sha256": "c9475f024c48447ae78518020ee2dfcc4ce9fc43ccd827d4b7ca249354c9805c"
+    },
+    {
+      "number": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "head_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:06Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/4/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-647.md",
+      "body_bytes": 6854,
+      "body_sha256": "1c4f807ea61bb0cc5c21ba2922ebba341ef0775a9604320fea488196865d5c85",
+      "metadata_path": "metadata/pr-647.json",
+      "metadata_bytes": 891,
+      "metadata_sha256": "36abc5011d1277b22bf7c2ad7c76e0177e19b4616308de588d052fef4a19d1a9"
+    },
+    {
+      "number": 648,
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "head_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:07Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/648",
+      "source_snapshot_path": "r24-audit/serena-build/fresh-pr-metadata.json",
+      "source_snapshot_sha256": "00e2720d8d5ca6aaaa6740d86c3e73bf90ce89b91a84a13377d8cc8a41694a16",
+      "source_json_pointer": "/prs/5/info",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-648.md",
+      "body_bytes": 6706,
+      "body_sha256": "6dd05e4e1965cee97ca44d7ad29a7a43fae42393f9a4cc209b16be5ceb61649d",
+      "metadata_path": "metadata/pr-648.json",
+      "metadata_bytes": 892,
+      "metadata_sha256": "4b99fc8492260d580ff9dbf9bc845a58e67acf387987d62953fef9eefc66d711"
+    },
+    {
+      "number": 649,
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "head_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:09Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-649.json",
+      "source_snapshot_sha256": "a313df6befcefd1a27edfd884cb3aa7fd38fb946605ff64a6e4f3443bb76e08b",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-649.md",
+      "body_bytes": 5469,
+      "body_sha256": "6465bc52c4bed8e7e383264e680bbe62ba50fd776c7268eb43d63c620cb02779",
+      "metadata_path": "metadata/pr-649.json",
+      "metadata_bytes": 898,
+      "metadata_sha256": "43df2152e6375d22b8104d560d623a6a374d7b835c050b5f330763a2a478cdcf"
+    },
+    {
+      "number": 650,
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "head_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:10Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-650.json",
+      "source_snapshot_sha256": "b48f6952da963c1ddf93f4ac6d5f036bb594f2f86fb57e04953e727debfbc8a3",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-650.md",
+      "body_bytes": 9262,
+      "body_sha256": "3c64946dcd97274235ac4fcda59145efc46864a0afc7744e21ca3d481179a573",
+      "metadata_path": "metadata/pr-650.json",
+      "metadata_bytes": 901,
+      "metadata_sha256": "2e96119d3a8de5240ee0103e0129effda0515617b86c6a2aca15ec5df739d37e"
+    },
+    {
+      "number": 651,
+      "title": "fix(serena): unlink owned readonly cache entries",
+      "head_ref": "fix/serena-readonly-cleanup-20261114",
+      "head_sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:11Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/651",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-651.json",
+      "source_snapshot_sha256": "3777ef1bc11b98ac2a9651b3e5d81922742b05187234520eb4d9930d75fb2cc0",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-651.md",
+      "body_bytes": 5057,
+      "body_sha256": "90a86fd382069a567a1e8fb27b95a5e1aac536ab47a5d3906d003984dfe19566",
+      "metadata_path": "metadata/pr-651.json",
+      "metadata_bytes": 885,
+      "metadata_sha256": "154711bf977709476e748e4ef727eb7cb3991c4087357d6e72c8e35564048ae1"
+    },
+    {
+      "number": 652,
+      "title": "fix(serena): read installed files through original tree",
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "head_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "base_ref": "master",
+      "base_sha_reported": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:13Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/652",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-652.json",
+      "source_snapshot_sha256": "c3d054557144c5de393a221138a1723121c8a14bd615d12d357de632fbc511d3",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-652.md",
+      "body_bytes": 8560,
+      "body_sha256": "f9f1f6bda2a9a904a8946b7204760bd9dcc49a63847bfa045da71772fb862749",
+      "metadata_path": "metadata/pr-652.json",
+      "metadata_bytes": 892,
+      "metadata_sha256": "9ab8902e244097ecbaed2b4cf800f2b77bfb5b3cc68f577aaad03ee5d252ca47"
+    },
+    {
+      "number": 653,
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "head_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:14Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-653.json",
+      "source_snapshot_sha256": "776d531ac0f2aa46e39bdcc74da6f4a07ca9d5b0467ed9019a1e46d07901fc14",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-653.md",
+      "body_bytes": 7909,
+      "body_sha256": "eee39143efff09dfc682b3b79a7522da5e4060c169e6eac69ebf288f6a46e26a",
+      "metadata_path": "metadata/pr-653.json",
+      "metadata_bytes": 908,
+      "metadata_sha256": "e520b377167a543c6746da6076496695eecebcb94bad3aa8187f544649ab67cc"
+    },
+    {
+      "number": 654,
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "head_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:15Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-654.json",
+      "source_snapshot_sha256": "f51e880f81e16e3dede973d9bd57d096d14a8a3c7bc7af08c59dc4b6532c5401",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-654.md",
+      "body_bytes": 5389,
+      "body_sha256": "caaf15ede9d356f690f49a3a699938ed4c8017b0cfbb5d975986a363bab6e3c4",
+      "metadata_path": "metadata/pr-654.json",
+      "metadata_bytes": 899,
+      "metadata_sha256": "308dd5802b415a44c3bd7f079511214e1874357c9b4963dc95e2a949c9489fad"
+    },
+    {
+      "number": 655,
+      "title": "fix(serena): settle preparation before canceling work context",
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "head_sha": "2defe618259f7db4144824d19927b032300d160d",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:16Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-655.json",
+      "source_snapshot_sha256": "8d5150e6efa5c961d4073d457c447089612186f90f49a473157b2cfe65d15321",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-655.md",
+      "body_bytes": 6084,
+      "body_sha256": "f9aac3227af695fb2834d6e3c51156fe1c9b9907402b33eebccde6c74b21a34d",
+      "metadata_path": "metadata/pr-655.json",
+      "metadata_bytes": 898,
+      "metadata_sha256": "02827f1adf766559186539dc355aa3b45d84b126a7d83371ded7ad918cd13ca4"
+    },
+    {
+      "number": 656,
+      "title": "fix: receive the original qualification connection close result",
+      "head_ref": "fix/serena-connection-close-20261115",
+      "head_sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T15:45:17Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/656",
+      "source_snapshot_path": "r24-audit/serena-qualification/metadata-final/pr-656.json",
+      "source_snapshot_sha256": "4f1b7f62225fb85bfee79bc73b8e1431c79bc0cce0806d43b15901782f37818b",
+      "source_json_pointer": "",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-656.md",
+      "body_bytes": 5384,
+      "body_sha256": "7802945ec8465129e1eeba3c599a41512506212d5c94184a12907f72756a37c9",
+      "metadata_path": "metadata/pr-656.json",
+      "metadata_bytes": 900,
+      "metadata_sha256": "e8cb6e69371de70ee0d58db60b5c851947fc0a23fbf9d442a957ca0a77b9b3c3"
+    },
+    {
+      "number": 657,
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "head_sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T16:56:03Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/5",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-657.md",
+      "body_bytes": 6335,
+      "body_sha256": "d45acbbc64751234810827ded51f289006a46dd4b5ee90d802564b0957d2f559",
+      "metadata_path": "metadata/pr-657.json",
+      "metadata_bytes": 844,
+      "metadata_sha256": "9526075d64fe888295a42f5b0eb699bfeb000054d2dad11adeea108b2b1b5f97"
+    },
+    {
+      "number": 658,
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "head_sha": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:31Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/6",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-658.md",
+      "body_bytes": 45725,
+      "body_sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc",
+      "metadata_path": "metadata/pr-658.json",
+      "metadata_bytes": 831,
+      "metadata_sha256": "97b106c3bfab06913f2a299f91849a333368de0a686c730ea818c8a4839f7a04"
+    },
+    {
+      "number": 659,
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "head_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-18T21:13:10Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/7",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-659.md",
+      "body_bytes": 7893,
+      "body_sha256": "60100d052b43af3c45b1668f786e909be6125e8d4f2fe346d391c5fe138c5ac6",
+      "metadata_path": "metadata/pr-659.json",
+      "metadata_bytes": 827,
+      "metadata_sha256": "22486bf1ff8688ccf4875b7f8948e03f9983bd15c4ae29d34a010e84e8afd212"
+    },
+    {
+      "number": 660,
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "head_sha": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "base_ref": "master",
+      "base_sha_reported": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "draft": true,
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-11-21T10:05:34Z",
+      "url": null,
+      "source_snapshot_path": "r24-audit/root/initial-prs.json",
+      "source_snapshot_sha256": "c743fd2afc1fd86ad7886cc6d4e3a675b980db2d7c97490d7eb496c3de3b1bf0",
+      "source_json_pointer": "/prs/8",
+      "body_encoding": "UTF-8, exact API string bytes; no added newline or headings",
+      "body_path": "bodies/pr-660.md",
+      "body_bytes": 47768,
+      "body_sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb",
+      "metadata_path": "metadata/pr-660.json",
+      "metadata_bytes": 832,
+      "metadata_sha256": "d32e16ebc1652ab0933ac64af340338c4021716bf283a9b3b0609aafc2536a0f"
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 758,
+      "sha256": "cb0f06be7ed7bac23080eb34b61a4e3e0719b185176875cd5aa06adeb6c4b87c"
+    },
+    {
+      "path": "bodies/pr-623.md",
+      "bytes": 50954,
+      "sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb"
+    },
+    {
+      "path": "bodies/pr-624.md",
+      "bytes": 18072,
+      "sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13"
+    },
+    {
+      "path": "bodies/pr-625.md",
+      "bytes": 15544,
+      "sha256": "799951045bc84f7318642f71e4c4f0979cbaa0be4aa7eeb5a4d65b06d832eb1d"
+    },
+    {
+      "path": "bodies/pr-626.md",
+      "bytes": 13379,
+      "sha256": "5ceeed0f8b0edcde362516e7b31e862b2ad53be53757208040e202829d898790"
+    },
+    {
+      "path": "bodies/pr-627.md",
+      "bytes": 7561,
+      "sha256": "9ae41bec3622ab0d4be5eb1d6c3edbffb63f01cadd57d74f673be06aa1a09f63"
+    },
+    {
+      "path": "bodies/pr-628.md",
+      "bytes": 12384,
+      "sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68"
+    },
+    {
+      "path": "bodies/pr-629.md",
+      "bytes": 22586,
+      "sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888"
+    },
+    {
+      "path": "bodies/pr-631.md",
+      "bytes": 9489,
+      "sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9"
+    },
+    {
+      "path": "bodies/pr-632.md",
+      "bytes": 3559,
+      "sha256": "1fbc02c8ac7c71e0c148bc57f676790b03984e9715665e86bc85f1e12ad9514b"
+    },
+    {
+      "path": "bodies/pr-635.md",
+      "bytes": 7358,
+      "sha256": "87aba22d3d3197c3855c056d5e7b00c7ca9ab29ceeb1c929b3d905040815dcad"
+    },
+    {
+      "path": "bodies/pr-636.md",
+      "bytes": 3231,
+      "sha256": "0926bafafe8afd72d889e86398c043087597e816f6f297a4981984b8444af8ff"
+    },
+    {
+      "path": "bodies/pr-637.md",
+      "bytes": 11038,
+      "sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac"
+    },
+    {
+      "path": "bodies/pr-639.md",
+      "bytes": 4831,
+      "sha256": "bd32e23526dafaf846544d427b958a9e9e4f23fb5e3efa0b2485f1fc5b229973"
+    },
+    {
+      "path": "bodies/pr-643.md",
+      "bytes": 6366,
+      "sha256": "f41b55ea3b2d6b7f895e47ae6724968ff88f6541fcbb6d9c6eee35c2cf45455a"
+    },
+    {
+      "path": "bodies/pr-644.md",
+      "bytes": 4609,
+      "sha256": "647a68d68aece4e6a02597ee554fd23b071364f15536363b5ce9f388a9ad046f"
+    },
+    {
+      "path": "bodies/pr-645.md",
+      "bytes": 5193,
+      "sha256": "139c621a24287a51e15665e54de1ce49228ea376c5f777e745ad96ef956507af"
+    },
+    {
+      "path": "bodies/pr-646.md",
+      "bytes": 5875,
+      "sha256": "3e3fcb90322780a0cae360a73c9a2a870f357e2d00cac36ddac96ff3cf945f05"
+    },
+    {
+      "path": "bodies/pr-647.md",
+      "bytes": 6854,
+      "sha256": "1c4f807ea61bb0cc5c21ba2922ebba341ef0775a9604320fea488196865d5c85"
+    },
+    {
+      "path": "bodies/pr-648.md",
+      "bytes": 6706,
+      "sha256": "6dd05e4e1965cee97ca44d7ad29a7a43fae42393f9a4cc209b16be5ceb61649d"
+    },
+    {
+      "path": "bodies/pr-649.md",
+      "bytes": 5469,
+      "sha256": "6465bc52c4bed8e7e383264e680bbe62ba50fd776c7268eb43d63c620cb02779"
+    },
+    {
+      "path": "bodies/pr-650.md",
+      "bytes": 9262,
+      "sha256": "3c64946dcd97274235ac4fcda59145efc46864a0afc7744e21ca3d481179a573"
+    },
+    {
+      "path": "bodies/pr-651.md",
+      "bytes": 5057,
+      "sha256": "90a86fd382069a567a1e8fb27b95a5e1aac536ab47a5d3906d003984dfe19566"
+    },
+    {
+      "path": "bodies/pr-652.md",
+      "bytes": 8560,
+      "sha256": "f9f1f6bda2a9a904a8946b7204760bd9dcc49a63847bfa045da71772fb862749"
+    },
+    {
+      "path": "bodies/pr-653.md",
+      "bytes": 7909,
+      "sha256": "eee39143efff09dfc682b3b79a7522da5e4060c169e6eac69ebf288f6a46e26a"
+    },
+    {
+      "path": "bodies/pr-654.md",
+      "bytes": 5389,
+      "sha256": "caaf15ede9d356f690f49a3a699938ed4c8017b0cfbb5d975986a363bab6e3c4"
+    },
+    {
+      "path": "bodies/pr-655.md",
+      "bytes": 6084,
+      "sha256": "f9aac3227af695fb2834d6e3c51156fe1c9b9907402b33eebccde6c74b21a34d"
+    },
+    {
+      "path": "bodies/pr-656.md",
+      "bytes": 5384,
+      "sha256": "7802945ec8465129e1eeba3c599a41512506212d5c94184a12907f72756a37c9"
+    },
+    {
+      "path": "bodies/pr-657.md",
+      "bytes": 6335,
+      "sha256": "d45acbbc64751234810827ded51f289006a46dd4b5ee90d802564b0957d2f559"
+    },
+    {
+      "path": "bodies/pr-658.md",
+      "bytes": 45725,
+      "sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc"
+    },
+    {
+      "path": "bodies/pr-659.md",
+      "bytes": 7893,
+      "sha256": "60100d052b43af3c45b1668f786e909be6125e8d4f2fe346d391c5fe138c5ac6"
+    },
+    {
+      "path": "bodies/pr-660.md",
+      "bytes": 47768,
+      "sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb"
+    },
+    {
+      "path": "metadata/pr-623.json",
+      "bytes": 848,
+      "sha256": "2dac1fbb8184dafc76d0bbf9677534ef25198e3633f68a6e53398fa1b7d3117e"
+    },
+    {
+      "path": "metadata/pr-624.json",
+      "bytes": 839,
+      "sha256": "d6ecd7027b15e7496cc58ca21a991bc7a693801601904f07693838549c986cb6"
+    },
+    {
+      "path": "metadata/pr-625.json",
+      "bytes": 910,
+      "sha256": "e00c0498563241d764dd344b572ca06d5975bec026dd24074ca107975a186bf0"
+    },
+    {
+      "path": "metadata/pr-626.json",
+      "bytes": 838,
+      "sha256": "53e58545d3cc7121aace9022c2d01e90864b7cd08f39242d443b740eb4aec98e"
+    },
+    {
+      "path": "metadata/pr-627.json",
+      "bytes": 902,
+      "sha256": "727c485bf133e53e0e8c39dce606a37377e16ebaf25d5fd06953da851bf826b9"
+    },
+    {
+      "path": "metadata/pr-628.json",
+      "bytes": 838,
+      "sha256": "758f63a6f5a713847136e1d23302ca4c2698e9715c7dc330a4d6050335404898"
+    },
+    {
+      "path": "metadata/pr-629.json",
+      "bytes": 850,
+      "sha256": "e086a413b57f220c03178bcb7cda6778704a660c3b275656f03a8abf5420051a"
+    },
+    {
+      "path": "metadata/pr-631.json",
+      "bytes": 928,
+      "sha256": "ccf9117bb58b56267eb2ebdb128395254a50b038972181a258b124a78febb099"
+    },
+    {
+      "path": "metadata/pr-632.json",
+      "bytes": 896,
+      "sha256": "6d06f250cf5d1be2cfb76fe1b19eb0c2ec19083b077faf09e3174271ba53f9c0"
+    },
+    {
+      "path": "metadata/pr-635.json",
+      "bytes": 941,
+      "sha256": "180b535a286aad120cc11dfcf45fc0f16a160ed14833934e3ae3741d4e3719e7"
+    },
+    {
+      "path": "metadata/pr-636.json",
+      "bytes": 942,
+      "sha256": "5ce3e31e69e09fe43a0e910cfbdcbb338620b554c7e2f371ac6080554b4a99d9"
+    },
+    {
+      "path": "metadata/pr-637.json",
+      "bytes": 954,
+      "sha256": "e6cd12eb1e9a2a9c3ec408c87d4048034323e8bf51b536f5566e17ee52d846d3"
+    },
+    {
+      "path": "metadata/pr-639.json",
+      "bytes": 904,
+      "sha256": "738315f5b0c6def40e8e8dfe58c49c8dfc2d3c617edc7826a00dbbde727ce75c"
+    },
+    {
+      "path": "metadata/pr-643.json",
+      "bytes": 907,
+      "sha256": "a09f297e652423dcb0d6c2ef3768be6a6944503a7a2ea65296f6ec833681de18"
+    },
+    {
+      "path": "metadata/pr-644.json",
+      "bytes": 930,
+      "sha256": "77e9af1f44eaf9c385d0629ab5544ab91973d7242592effae11730d9ac1021af"
+    },
+    {
+      "path": "metadata/pr-645.json",
+      "bytes": 889,
+      "sha256": "8cfb45e5cfd4ce1ba0859ea5f7323ea89a21765c0ebe182c5456edbb491d0658"
+    },
+    {
+      "path": "metadata/pr-646.json",
+      "bytes": 900,
+      "sha256": "c9475f024c48447ae78518020ee2dfcc4ce9fc43ccd827d4b7ca249354c9805c"
+    },
+    {
+      "path": "metadata/pr-647.json",
+      "bytes": 891,
+      "sha256": "36abc5011d1277b22bf7c2ad7c76e0177e19b4616308de588d052fef4a19d1a9"
+    },
+    {
+      "path": "metadata/pr-648.json",
+      "bytes": 892,
+      "sha256": "4b99fc8492260d580ff9dbf9bc845a58e67acf387987d62953fef9eefc66d711"
+    },
+    {
+      "path": "metadata/pr-649.json",
+      "bytes": 898,
+      "sha256": "43df2152e6375d22b8104d560d623a6a374d7b835c050b5f330763a2a478cdcf"
+    },
+    {
+      "path": "metadata/pr-650.json",
+      "bytes": 901,
+      "sha256": "2e96119d3a8de5240ee0103e0129effda0515617b86c6a2aca15ec5df739d37e"
+    },
+    {
+      "path": "metadata/pr-651.json",
+      "bytes": 885,
+      "sha256": "154711bf977709476e748e4ef727eb7cb3991c4087357d6e72c8e35564048ae1"
+    },
+    {
+      "path": "metadata/pr-652.json",
+      "bytes": 892,
+      "sha256": "9ab8902e244097ecbaed2b4cf800f2b77bfb5b3cc68f577aaad03ee5d252ca47"
+    },
+    {
+      "path": "metadata/pr-653.json",
+      "bytes": 908,
+      "sha256": "e520b377167a543c6746da6076496695eecebcb94bad3aa8187f544649ab67cc"
+    },
+    {
+      "path": "metadata/pr-654.json",
+      "bytes": 899,
+      "sha256": "308dd5802b415a44c3bd7f079511214e1874357c9b4963dc95e2a949c9489fad"
+    },
+    {
+      "path": "metadata/pr-655.json",
+      "bytes": 898,
+      "sha256": "02827f1adf766559186539dc355aa3b45d84b126a7d83371ded7ad918cd13ca4"
+    },
+    {
+      "path": "metadata/pr-656.json",
+      "bytes": 900,
+      "sha256": "e8cb6e69371de70ee0d58db60b5c851947fc0a23fbf9d442a957ca0a77b9b3c3"
+    },
+    {
+      "path": "metadata/pr-657.json",
+      "bytes": 844,
+      "sha256": "9526075d64fe888295a42f5b0eb699bfeb000054d2dad11adeea108b2b1b5f97"
+    },
+    {
+      "path": "metadata/pr-658.json",
+      "bytes": 831,
+      "sha256": "97b106c3bfab06913f2a299f91849a333368de0a686c730ea818c8a4839f7a04"
+    },
+    {
+      "path": "metadata/pr-659.json",
+      "bytes": 827,
+      "sha256": "22486bf1ff8688ccf4875b7f8948e03f9983bd15c4ae29d34a010e84e8afd212"
+    },
+    {
+      "path": "metadata/pr-660.json",
+      "bytes": 832,
+      "sha256": "d32e16ebc1652ab0933ac64af340338c4021716bf283a9b3b0609aafc2536a0f"
+    }
+  ],
+  "archive": {
+    "path": "original-pr-descriptions.zip",
+    "bytes": 170300,
+    "sha256": "04a0d6774544db13eb04bd5607a4f36ed9baba54d3bd94ffc74e27ae0fbf1e68",
+    "entry_count": 64,
+    "manifest_entry_sha256": "dc87d9db23f101ffe0bc57a06ddc4b2843ab07078e91f78d806139e4b3f1f98e"
+  },
+  "readback": {
+    "all_entries_match": true,
+    "all_body_strings_match": true,
+    "crc_valid": true,
+    "checked_entry_count": 64,
+    "checks": [
+      {
+        "path": "README.md",
+        "bytes": 758,
+        "sha256": "cb0f06be7ed7bac23080eb34b61a4e3e0719b185176875cd5aa06adeb6c4b87c",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-623.md",
+        "bytes": 50954,
+        "sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-624.md",
+        "bytes": 18072,
+        "sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-625.md",
+        "bytes": 15544,
+        "sha256": "799951045bc84f7318642f71e4c4f0979cbaa0be4aa7eeb5a4d65b06d832eb1d",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-626.md",
+        "bytes": 13379,
+        "sha256": "5ceeed0f8b0edcde362516e7b31e862b2ad53be53757208040e202829d898790",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-627.md",
+        "bytes": 7561,
+        "sha256": "9ae41bec3622ab0d4be5eb1d6c3edbffb63f01cadd57d74f673be06aa1a09f63",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-628.md",
+        "bytes": 12384,
+        "sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-629.md",
+        "bytes": 22586,
+        "sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-631.md",
+        "bytes": 9489,
+        "sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-632.md",
+        "bytes": 3559,
+        "sha256": "1fbc02c8ac7c71e0c148bc57f676790b03984e9715665e86bc85f1e12ad9514b",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-635.md",
+        "bytes": 7358,
+        "sha256": "87aba22d3d3197c3855c056d5e7b00c7ca9ab29ceeb1c929b3d905040815dcad",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-636.md",
+        "bytes": 3231,
+        "sha256": "0926bafafe8afd72d889e86398c043087597e816f6f297a4981984b8444af8ff",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-637.md",
+        "bytes": 11038,
+        "sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-639.md",
+        "bytes": 4831,
+        "sha256": "bd32e23526dafaf846544d427b958a9e9e4f23fb5e3efa0b2485f1fc5b229973",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-643.md",
+        "bytes": 6366,
+        "sha256": "f41b55ea3b2d6b7f895e47ae6724968ff88f6541fcbb6d9c6eee35c2cf45455a",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-644.md",
+        "bytes": 4609,
+        "sha256": "647a68d68aece4e6a02597ee554fd23b071364f15536363b5ce9f388a9ad046f",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-645.md",
+        "bytes": 5193,
+        "sha256": "139c621a24287a51e15665e54de1ce49228ea376c5f777e745ad96ef956507af",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-646.md",
+        "bytes": 5875,
+        "sha256": "3e3fcb90322780a0cae360a73c9a2a870f357e2d00cac36ddac96ff3cf945f05",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-647.md",
+        "bytes": 6854,
+        "sha256": "1c4f807ea61bb0cc5c21ba2922ebba341ef0775a9604320fea488196865d5c85",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-648.md",
+        "bytes": 6706,
+        "sha256": "6dd05e4e1965cee97ca44d7ad29a7a43fae42393f9a4cc209b16be5ceb61649d",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-649.md",
+        "bytes": 5469,
+        "sha256": "6465bc52c4bed8e7e383264e680bbe62ba50fd776c7268eb43d63c620cb02779",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-650.md",
+        "bytes": 9262,
+        "sha256": "3c64946dcd97274235ac4fcda59145efc46864a0afc7744e21ca3d481179a573",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-651.md",
+        "bytes": 5057,
+        "sha256": "90a86fd382069a567a1e8fb27b95a5e1aac536ab47a5d3906d003984dfe19566",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-652.md",
+        "bytes": 8560,
+        "sha256": "f9f1f6bda2a9a904a8946b7204760bd9dcc49a63847bfa045da71772fb862749",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-653.md",
+        "bytes": 7909,
+        "sha256": "eee39143efff09dfc682b3b79a7522da5e4060c169e6eac69ebf288f6a46e26a",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-654.md",
+        "bytes": 5389,
+        "sha256": "caaf15ede9d356f690f49a3a699938ed4c8017b0cfbb5d975986a363bab6e3c4",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-655.md",
+        "bytes": 6084,
+        "sha256": "f9aac3227af695fb2834d6e3c51156fe1c9b9907402b33eebccde6c74b21a34d",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-656.md",
+        "bytes": 5384,
+        "sha256": "7802945ec8465129e1eeba3c599a41512506212d5c94184a12907f72756a37c9",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-657.md",
+        "bytes": 6335,
+        "sha256": "d45acbbc64751234810827ded51f289006a46dd4b5ee90d802564b0957d2f559",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-658.md",
+        "bytes": 45725,
+        "sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-659.md",
+        "bytes": 7893,
+        "sha256": "60100d052b43af3c45b1668f786e909be6125e8d4f2fe346d391c5fe138c5ac6",
+        "exact_match": true
+      },
+      {
+        "path": "bodies/pr-660.md",
+        "bytes": 47768,
+        "sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb",
+        "exact_match": true
+      },
+      {
+        "path": "manifest.json",
+        "bytes": 45721,
+        "sha256": "dc87d9db23f101ffe0bc57a06ddc4b2843ab07078e91f78d806139e4b3f1f98e",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-623.json",
+        "bytes": 848,
+        "sha256": "2dac1fbb8184dafc76d0bbf9677534ef25198e3633f68a6e53398fa1b7d3117e",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-624.json",
+        "bytes": 839,
+        "sha256": "d6ecd7027b15e7496cc58ca21a991bc7a693801601904f07693838549c986cb6",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-625.json",
+        "bytes": 910,
+        "sha256": "e00c0498563241d764dd344b572ca06d5975bec026dd24074ca107975a186bf0",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-626.json",
+        "bytes": 838,
+        "sha256": "53e58545d3cc7121aace9022c2d01e90864b7cd08f39242d443b740eb4aec98e",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-627.json",
+        "bytes": 902,
+        "sha256": "727c485bf133e53e0e8c39dce606a37377e16ebaf25d5fd06953da851bf826b9",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-628.json",
+        "bytes": 838,
+        "sha256": "758f63a6f5a713847136e1d23302ca4c2698e9715c7dc330a4d6050335404898",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-629.json",
+        "bytes": 850,
+        "sha256": "e086a413b57f220c03178bcb7cda6778704a660c3b275656f03a8abf5420051a",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-631.json",
+        "bytes": 928,
+        "sha256": "ccf9117bb58b56267eb2ebdb128395254a50b038972181a258b124a78febb099",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-632.json",
+        "bytes": 896,
+        "sha256": "6d06f250cf5d1be2cfb76fe1b19eb0c2ec19083b077faf09e3174271ba53f9c0",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-635.json",
+        "bytes": 941,
+        "sha256": "180b535a286aad120cc11dfcf45fc0f16a160ed14833934e3ae3741d4e3719e7",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-636.json",
+        "bytes": 942,
+        "sha256": "5ce3e31e69e09fe43a0e910cfbdcbb338620b554c7e2f371ac6080554b4a99d9",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-637.json",
+        "bytes": 954,
+        "sha256": "e6cd12eb1e9a2a9c3ec408c87d4048034323e8bf51b536f5566e17ee52d846d3",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-639.json",
+        "bytes": 904,
+        "sha256": "738315f5b0c6def40e8e8dfe58c49c8dfc2d3c617edc7826a00dbbde727ce75c",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-643.json",
+        "bytes": 907,
+        "sha256": "a09f297e652423dcb0d6c2ef3768be6a6944503a7a2ea65296f6ec833681de18",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-644.json",
+        "bytes": 930,
+        "sha256": "77e9af1f44eaf9c385d0629ab5544ab91973d7242592effae11730d9ac1021af",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-645.json",
+        "bytes": 889,
+        "sha256": "8cfb45e5cfd4ce1ba0859ea5f7323ea89a21765c0ebe182c5456edbb491d0658",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-646.json",
+        "bytes": 900,
+        "sha256": "c9475f024c48447ae78518020ee2dfcc4ce9fc43ccd827d4b7ca249354c9805c",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-647.json",
+        "bytes": 891,
+        "sha256": "36abc5011d1277b22bf7c2ad7c76e0177e19b4616308de588d052fef4a19d1a9",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-648.json",
+        "bytes": 892,
+        "sha256": "4b99fc8492260d580ff9dbf9bc845a58e67acf387987d62953fef9eefc66d711",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-649.json",
+        "bytes": 898,
+        "sha256": "43df2152e6375d22b8104d560d623a6a374d7b835c050b5f330763a2a478cdcf",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-650.json",
+        "bytes": 901,
+        "sha256": "2e96119d3a8de5240ee0103e0129effda0515617b86c6a2aca15ec5df739d37e",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-651.json",
+        "bytes": 885,
+        "sha256": "154711bf977709476e748e4ef727eb7cb3991c4087357d6e72c8e35564048ae1",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-652.json",
+        "bytes": 892,
+        "sha256": "9ab8902e244097ecbaed2b4cf800f2b77bfb5b3cc68f577aaad03ee5d252ca47",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-653.json",
+        "bytes": 908,
+        "sha256": "e520b377167a543c6746da6076496695eecebcb94bad3aa8187f544649ab67cc",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-654.json",
+        "bytes": 899,
+        "sha256": "308dd5802b415a44c3bd7f079511214e1874357c9b4963dc95e2a949c9489fad",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-655.json",
+        "bytes": 898,
+        "sha256": "02827f1adf766559186539dc355aa3b45d84b126a7d83371ded7ad918cd13ca4",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-656.json",
+        "bytes": 900,
+        "sha256": "e8cb6e69371de70ee0d58db60b5c851947fc0a23fbf9d442a957ca0a77b9b3c3",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-657.json",
+        "bytes": 844,
+        "sha256": "9526075d64fe888295a42f5b0eb699bfeb000054d2dad11adeea108b2b1b5f97",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-658.json",
+        "bytes": 831,
+        "sha256": "97b106c3bfab06913f2a299f91849a333368de0a686c730ea818c8a4839f7a04",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-659.json",
+        "bytes": 827,
+        "sha256": "22486bf1ff8688ccf4875b7f8948e03f9983bd15c4ae29d34a010e84e8afd212",
+        "exact_match": true
+      },
+      {
+        "path": "metadata/pr-660.json",
+        "bytes": 832,
+        "sha256": "d32e16ebc1652ab0933ac64af340338c4021716bf283a9b3b0609aafc2536a0f",
+        "exact_match": true
+      }
+    ]
+  }
+}

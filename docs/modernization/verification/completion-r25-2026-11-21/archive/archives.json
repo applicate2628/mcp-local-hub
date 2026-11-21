@@ -1,0 +1,32 @@
+{
+  "schema": "r25-package-completion-v1",
+  "state": "COMPLETE",
+  "index_sha256": "5143480a3c9be41a678301c49f60ec251e596f4432058591ecf10401016d39b6",
+  "qualification_state": "BOUNDED_RESULTS_ONLY",
+  "files": [
+    {
+      "path": "raw.zip",
+      "bytes": 2047507,
+      "sha256": "696d9eb531ab670e157b87a1233cbd82e0bad073f322843ab157708913288d27",
+      "private": true
+    },
+    {
+      "path": "public.zip",
+      "bytes": 2047483,
+      "sha256": "e4da7afcf31d5310df6fcd3d10e13938c01f5b997d7677c9708583c87a6dcf55",
+      "private": false
+    },
+    {
+      "path": "manifest.public.json",
+      "bytes": 1187225,
+      "sha256": "cd49af58398fd05c2abb89f0cd943a16cea66aa1406c8742e228b09d9ec466fd",
+      "private": false
+    },
+    {
+      "path": "summary.public.json",
+      "bytes": 11578,
+      "sha256": "a47da3e9ae7c7f446969fbdfcd8c7c85ab78472b05be84dab001ab0b909740c8",
+      "private": false
+    }
+  ]
+}

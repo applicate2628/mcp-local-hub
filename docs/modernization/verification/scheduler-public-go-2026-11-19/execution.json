@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "started_utc": "2026-11-19T18:08:42.390396+00:00",
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "source_tree": "f4b20c7ff7c0e0224f056cd9d8ec6b15013dff2a",
+  "source_sha256_before": {
+    "internal/scheduler/scheduler.go": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825",
+    "internal/scheduler/scheduler_windows.go": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c",
+    "internal/scheduler/scheduler_com_windows.go": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+  },
+  "source_clean_before": true,
+  "probe_sha256": "53cc177b05e508eb403b93bff272a70b7c05621992d034db8ee5e5941d94eac2",
+  "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1",
+  "windows_version": [
+    10,
+    0,
+    22631
+  ],
+  "executables": {
+    "go_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "gofmt_sha256": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8"
+  },
+  "environment": {
+    "GOENV": "off",
+    "GOTOOLCHAIN": "local",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOVCS": "*:off",
+    "GOWORK": "off",
+    "GOFLAGS": "-mod=readonly",
+    "GOTELEMETRY": "off",
+    "CGO_ENABLED": "0",
+    "GOMAXPROCS": "4"
+  },
+  "scheduler_override_present": false,
+  "all_working_paths_inside_approved_root": true,
+  "commands": [
+    {
+      "name": "go-version",
+      "arguments": [
+        "go",
+        "version"
+      ],
+      "started_utc": "2026-11-19T18:08:42.443685+00:00",
+      "process_start_attempted": true,
+      "settled": true,
+      "exit_code": 0,
+      "finished_utc": "2026-11-19T18:08:42.695896+00:00",
+      "seconds": 0.251787,
+      "stdout_bytes": 34,
+      "stderr_bytes": 0,
+      "stdout_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "gofmt",
+      "arguments": [
+        "gofmt",
+        "-d",
+        "<source>/docs/modernization/verification/scheduler-public-go-2026-11-19/probe.go"
+      ],
+      "started_utc": "2026-11-19T18:08:42.697239+00:00",
+      "process_start_attempted": true,
+      "settled": true,
+      "exit_code": 0,
+      "finished_utc": "2026-11-19T18:08:42.750148+00:00",
+      "seconds": 0.052495,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "build",
+      "arguments": [
+        "go",
+        "build",
+        "-mod=readonly",
+        "-trimpath",
+        "-tags=r17_public_scheduler_probe",
+        "-o",
+        "<evidence>/probe.exe",
+        "<source>/docs/modernization/verification/scheduler-public-go-2026-11-19/probe.go"
+      ],
+      "started_utc": "2026-11-19T18:08:42.751137+00:00",
+      "process_start_attempted": true,
+      "settled": true,
+      "exit_code": 0,
+      "finished_utc": "2026-11-19T18:09:40.677932+00:00",
+      "seconds": 57.926376,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "probe",
+      "arguments": [
+        "<evidence>/probe.exe"
+      ],
+      "started_utc": "2026-11-19T18:09:40.847124+00:00",
+      "process_start_attempted": true,
+      "settled": true,
+      "exit_code": 0,
+      "finished_utc": "2026-11-19T18:09:43.134722+00:00",
+      "seconds": 2.28698,
+      "stdout_bytes": 3074,
+      "stderr_bytes": 0,
+      "stdout_sha256": "0a7f730d0d08715b189d82b23a78b0c38159543111984129772dd4de75589780",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "staging_disposition": "moved_to_trash_with_verified_retained_copy",
+  "error": null,
+  "whole_process_tree_deadline_enforced": false,
+  "go_version": "go version go1.27.4 windows/amd64",
+  "probe_executable_sha256": "0a6828a3402b4c59f8113fd9f297580a065877e99b4d8b2fd0024a236ef9beee",
+  "staging_absent_after_move": true,
+  "trash_copy_sha256": "53cc177b05e508eb403b93bff272a70b7c05621992d034db8ee5e5941d94eac2",
+  "source_clean_before_probe": true,
+  "source_unchanged": true,
+  "source_head_after": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "source_tree_after": "f4b20c7ff7c0e0224f056cd9d8ec6b15013dff2a",
+  "source_clean_after": true,
+  "source_sha256_after": {
+    "internal/scheduler/scheduler.go": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825",
+    "internal/scheduler/scheduler_windows.go": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c",
+    "internal/scheduler/scheduler_com_windows.go": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+  },
+  "finished_utc": "2026-11-19T18:09:43.258625+00:00"
+}

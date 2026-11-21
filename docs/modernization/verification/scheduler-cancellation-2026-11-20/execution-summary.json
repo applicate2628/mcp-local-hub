@@ -1,0 +1,1244 @@
+{
+  "schema": 1,
+  "identities": {
+    "scheduler": {
+      "commit": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "tree": "ba769a5cbed3e05d3071a0cfb846127019500b49",
+      "parent": "f5fb00370a833255eacb992a7cd32f2e68da7399",
+      "source_sha256": {
+        "internal/scheduler/scheduler_com_windows.go": "bddbb11722e1c1ac3a50edd85bb1acfef7278010ce4497aae87d22cb4a16442d",
+        "internal/scheduler/scheduler_com_windows_test.go": "5352797d1adb396ff006683b64ec63fe8490883e52c3967b30c243fa4accc2d6"
+      }
+    },
+    "cli": {
+      "commit": "47c50527b051e3c40a426171eef42703155fc7f4",
+      "tree": "3c8c83de08f650d2489e645d2e0ac28e6a8da774",
+      "parent": "4f3513d886e301d7a358884a34896402f99e8002",
+      "source_sha256": {
+        "internal/cli/supervise_reconcile_ipc_test.go": "e41e7500eb6e60b2abef2f590ad676810f46b90983bf7811cb4a248234e008d4"
+      }
+    }
+  },
+  "phases": {
+    "scheduler/control": {
+      "completed": true,
+      "runner_sha256": "818b4e940a2510fcd5516cd2fbe8992e9ed4b3f7a83883edd3ded1c176753f6e",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.control.py"
+      ],
+      "receipt_source_sha256": "fb39ed0b4ae64d76b36bfc55eae5a4b5d4608312967e70a0f55a42ef01835a57"
+    },
+    "scheduler/candidate": {
+      "completed": true,
+      "runner_sha256": "bb41ce97ba8626ba77fede81eeb86b4108321fcd8959e3117969cd4948a99584",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.positive.py"
+      ],
+      "receipt_source_sha256": "f555e1f4f9b8c25b8b7804b941eae854b65140df5b9434609659a34fe725134d"
+    },
+    "scheduler/focused": {
+      "completed": true,
+      "runner_sha256": "bb41ce97ba8626ba77fede81eeb86b4108321fcd8959e3117969cd4948a99584",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.positive.py"
+      ],
+      "receipt_source_sha256": "69df916d49b70f4fb85abd362470e3ff04581835f81e646d1cc5c29f46e50101"
+    },
+    "scheduler/adjacent": {
+      "completed": false,
+      "runner_sha256": "bb41ce97ba8626ba77fede81eeb86b4108321fcd8959e3117969cd4948a99584",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.positive.py"
+      ],
+      "receipt_source_sha256": "d817f1cc19db3dd863fe69038bad40de1b0a6e0d18359e5fb861148897ab3721",
+      "error": "reconcile-timeout-race failed"
+    },
+    "scheduler/adjacent-baseline": {
+      "completed": true,
+      "runner_sha256": "fb9cc704e9f0f4a01c338a70e00b03d236de56a7a2fbc7ab62ab6b0b61472fcf",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.baseline.py"
+      ],
+      "receipt_source_sha256": "54d56f879fe3e2613ccc6fefb53e0b3bd6cab386015be51c7c0a3de2cbd9d249"
+    },
+    "scheduler/build-vet": {
+      "completed": true,
+      "runner_sha256": "fb9cc704e9f0f4a01c338a70e00b03d236de56a7a2fbc7ab62ab6b0b61472fcf",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.baseline.py"
+      ],
+      "receipt_source_sha256": "c133489b2a7108be75aa69b3037d181deaf30c0644a1148d141e520c64cd6a79"
+    },
+    "scheduler/published-checkout": {
+      "completed": true,
+      "runner_sha256": "56b74be6ebb4a18df92b4bda89022f8f318019b062398013f7dd3d5f213ea247",
+      "runner_members": [
+        "scheduler/scripts/checkout_published.py"
+      ],
+      "receipt_source_sha256": "5d6e036458473b8325b6ed70d59fceedc67a8aeeb0035ec557eb30df8ed16371"
+    },
+    "scheduler/published": {
+      "completed": true,
+      "runner_sha256": "3754e6139e84fcf8b7b3a05af8bb80096cd325da5ba4ef058ad3a3105aadc982",
+      "runner_members": [
+        "scheduler/scripts/check_cancellation.py"
+      ],
+      "receipt_source_sha256": "935b778966a81659579cdb0da4babb6bdd22ff88fd27fc8eb403b04d322ae69e"
+    },
+    "cli/baseline": {
+      "completed": true,
+      "runner_sha256": "06cb0f648dd8137919247fe5dd4c23e91c884a2ac73d799f073a9ad01f24fe55",
+      "runner_members": [
+        "cli/scripts/check_cli.py"
+      ],
+      "receipt_source_sha256": "becc6eb66c9d7ff004a0fc5cd98892514effa1b0b370853b948f5bc297101474"
+    },
+    "cli/candidate": {
+      "completed": true,
+      "runner_sha256": "06cb0f648dd8137919247fe5dd4c23e91c884a2ac73d799f073a9ad01f24fe55",
+      "runner_members": [
+        "cli/scripts/check_cli.py"
+      ],
+      "receipt_source_sha256": "d2ab5af0a6094b858cc08c934a357decda372db7fc6dcc3e162fc8b58d0375d0"
+    },
+    "cli/build-vet": {
+      "completed": true,
+      "runner_sha256": "06cb0f648dd8137919247fe5dd4c23e91c884a2ac73d799f073a9ad01f24fe55",
+      "runner_members": [
+        "cli/scripts/check_cli.py"
+      ],
+      "receipt_source_sha256": "74e7029177acd4782442d09613871b304b6faefb0d204ac5db15a0c332d44ca6"
+    },
+    "cli/published-checkout": {
+      "completed": true,
+      "runner_sha256": "cc213c911110e7589493924ed3a7daa70aa1466f5cf3c3fd8db69f45b5f93eea",
+      "runner_members": [
+        "cli/scripts/checkout_published.py"
+      ],
+      "receipt_source_sha256": "7cb6517f29eb60f7fae2ee56a5d8424ac2116f618a504b4f8e6bb496a3a23964"
+    },
+    "cli/published": {
+      "completed": true,
+      "runner_sha256": "06cb0f648dd8137919247fe5dd4c23e91c884a2ac73d799f073a9ad01f24fe55",
+      "runner_members": [
+        "cli/scripts/check_cli.py"
+      ],
+      "receipt_source_sha256": "8e5d5ba95909c25753e0f3d358d32241075ff8571611c56a51d551db01f7e0ac"
+    }
+  },
+  "manifests": [
+    {
+      "lane": "scheduler",
+      "path": "scheduler/inputs/hashes.json",
+      "source_sha256": "4e07c72cb30ffcf0bcc0f199248a28a4ab00ca81e4dc2c82caac61ba03a3e146",
+      "role": "execution manifest"
+    },
+    {
+      "lane": "cli",
+      "path": "cli/inputs/MANIFEST.json",
+      "source_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "role": "execution manifest"
+    },
+    {
+      "lane": "cli",
+      "path": "cli/inputs/execution-MANIFEST.json",
+      "source_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "role": "execution manifest"
+    },
+    {
+      "lane": "cli",
+      "path": "cli/inputs/review-MANIFEST.json",
+      "source_sha256": "693b3123ef67e900e996668032c2352805956eff737a9fecc439812010fbf709",
+      "role": "final review manifest, not execution input"
+    }
+  ],
+  "commands": [
+    {
+      "label": "clone",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\source",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\source"
+      ],
+      "exit_code": 0,
+      "seconds": 1.0799243999645114,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 154,
+        "sha256": "ae499e5b53412b71f7ef61c12bfe0c85b5d8103c5ce2dc214f1515d6a46ebc08"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "apply-control",
+      "args": [
+        "apply",
+        "--check",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\negative-control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.0449284000787884,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "write-control",
+      "args": [
+        "apply",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\negative-control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.04223329992964864,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "format-tests",
+      "args": [
+        "-w",
+        "internal/scheduler/scheduler_com_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01451090001501143,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "go-version",
+      "args": [
+        "version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.028748500044457614,
+      "stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "original-cancellation-control",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout=120s",
+        "-run",
+        "^(TestSchedulerCOMPreservesRunnerErrors|TestWindowsListContextPreservesStoppedContext)$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 1,
+      "seconds": 2.360752400010824,
+      "stdout": {
+        "bytes": 8489,
+        "sha256": "1b4f32cda505b70f3ed12bd9b74d09b6085372d633b7294424079236f844e283"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "observed failure",
+      "classification": "negative",
+      "events": {
+        "pass": {
+          "test": 0,
+          "package": 0
+        },
+        "fail": {
+          "test": 7,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.10375289991497993,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "control",
+      "outcome": "pass"
+    },
+    {
+      "label": "apply-product",
+      "args": [
+        "apply",
+        "--check",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.04809599998407066,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "write-product",
+      "args": [
+        "apply",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.056688800104893744,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "format-candidate",
+      "args": [
+        "-w",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01600620010867715,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11572250002063811,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "scheduler-contract-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMPreservesRunnerErrors|TestWindowsListContextPreservesStoppedContext|TestTaskStatusFromCOMUsesNumericStateOnly|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON)$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 7.6751944000134245,
+      "stdout": {
+        "bytes": 27331,
+        "sha256": "f05581977d1f2b5252ebf649c8f8888d5983e47b6f57bb25a6b3d91ab4d30290"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "focused",
+      "outcome": "pass",
+      "classification": "scheduler-positive",
+      "events": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11218619998544455,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "focused",
+      "outcome": "pass"
+    },
+    {
+      "label": "reconcile-timeout-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestReconcileIPC_HandlerTimeoutCancelsSchedulerList|TestReconcileIPC_HandlerTimeout)$",
+        "./internal/cli"
+      ],
+      "exit_code": 1,
+      "seconds": 56.84942800004501,
+      "stdout": {
+        "bytes": 4357,
+        "sha256": "d2e452e58b4991d19bc52cfb6ffc4efed19d2cb26d5f96af4a40ed8c073a2aad"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "adjacent",
+      "outcome": "observed failure",
+      "classification": "old-cli-failure",
+      "events": {
+        "pass": {
+          "test": 2,
+          "package": 0
+        },
+        "fail": {
+          "test": 2,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "clone-baseline",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\source",
+        "<WORK_ROOT>\\mcp-r17-cancellation-20261120\\baseline"
+      ],
+      "exit_code": 0,
+      "seconds": 2.025463900063187,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 156,
+        "sha256": "2abdba63477a89e2c5c09b89399e99fa6e4647d5f62a01688d3b835c49b07bdf"
+      },
+      "lane": "scheduler",
+      "phase": "adjacent-baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "reconcile-timeout-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestReconcileIPC_HandlerTimeoutCancelsSchedulerList|TestReconcileIPC_HandlerTimeout)$",
+        "./internal/cli"
+      ],
+      "exit_code": 1,
+      "seconds": 71.51927000004798,
+      "stdout": {
+        "bytes": 4369,
+        "sha256": "6a953216c26eb4aa9b5f22ec1963cecc631cd3f3ded626fc143e42bf48507f7b"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "adjacent-baseline",
+      "outcome": "observed failure",
+      "classification": "old-cli-failure",
+      "events": {
+        "pass": {
+          "test": 2,
+          "package": 0
+        },
+        "fail": {
+          "test": 2,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11214519990608096,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "adjacent-baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 23.00772639992647,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 10.94472099991981,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.31279520003590733,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "stage-exact-files",
+      "args": [
+        "add",
+        "--",
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_com_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.32353920000605285,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "fetch-exact-commit",
+      "args": [
+        "fetch",
+        "--no-tags",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "11c286fb634cc63d2c6019a790ff376a1d834af9"
+      ],
+      "exit_code": 0,
+      "seconds": 10.412273299996741,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "357e8c86710a4903ea82181b90de2c6569eab05d5de9784da6e8f06ead05f0bd"
+      },
+      "lane": "scheduler",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "checkout-detached",
+      "args": [
+        "checkout",
+        "--detach",
+        "11c286fb634cc63d2c6019a790ff376a1d834af9"
+      ],
+      "exit_code": 0,
+      "seconds": 0.0856966000283137,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 198,
+        "sha256": "3f5951731f8f87c71364ff3fc7c1fc9a6d6b867c248e3c3c33b64225136e4d30"
+      },
+      "lane": "scheduler",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "scheduler-contract-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMPreservesRunnerErrors|TestWindowsListContextPreservesStoppedContext|TestTaskStatusFromCOMUsesNumericStateOnly|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON)$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 4.569615600048564,
+      "stdout": {
+        "bytes": 27301,
+        "sha256": "9e260b0e60a1e6ccc5bcdb16ef6e42164817600cb3f38da94b58de0cf28a6b32"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "published",
+      "outcome": "pass",
+      "classification": "scheduler-positive",
+      "events": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07403989997692406,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "scheduler",
+      "phase": "published",
+      "outcome": "pass"
+    },
+    {
+      "label": "init-exact-source",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "init",
+        "<WORK_ROOT>\\mcp-go-reconcile-fixture-20261120\\source"
+      ],
+      "exit_code": 0,
+      "seconds": 0.05601850000675768,
+      "stdout": {
+        "bytes": 98,
+        "sha256": "b5a8baede017780ce8632fb7995beebdd2d9b46d9cec3722cb99daa80e8ce692"
+      },
+      "stderr": {
+        "bytes": 586,
+        "sha256": "3e70934f1909b0f5a846d62237fcc1509d733b9fb0321187024723dfc67176d3"
+      },
+      "lane": "cli",
+      "phase": "baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "fetch-exact-base",
+      "args": [
+        "-c",
+        "credential.helper=",
+        "-c",
+        "core.askPass=",
+        "fetch",
+        "--no-tags",
+        "--depth=1",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "4f3513d886e301d7a358884a34896402f99e8002"
+      ],
+      "exit_code": 0,
+      "seconds": 11.017235899926163,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "622ebb620de20f770602a4085d11a3cecc0195987883edb88fd1eb392fae2722"
+      },
+      "lane": "cli",
+      "phase": "baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "go-version",
+      "args": [
+        "version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.13215760001912713,
+      "stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "baseline-timeout-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestReconcileIPC_HandlerTimeoutCancelsSchedulerList|TestReconcileIPC_HandlerTimeout)$",
+        "./internal/cli"
+      ],
+      "exit_code": 1,
+      "seconds": 64.06597890006378,
+      "stdout": {
+        "bytes": 4353,
+        "sha256": "29952a0bd1480a200bc05e1c0a987e6f1c5d4ec3ce23213b469b4c1aebab21e8"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "baseline",
+      "outcome": "observed failure",
+      "classification": "old-cli-failure",
+      "events": {
+        "pass": {
+          "test": 2,
+          "package": 0
+        },
+        "fail": {
+          "test": 2,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.19709839997813106,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "baseline",
+      "outcome": "pass"
+    },
+    {
+      "label": "check-test-patch",
+      "args": [
+        "apply",
+        "--check",
+        "<WORK_ROOT>\\mcp-go-reconcile-fixture-20261120\\candidate.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03997270006220788,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "apply-test-patch",
+      "args": [
+        "apply",
+        "<WORK_ROOT>\\mcp-go-reconcile-fixture-20261120\\candidate.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.046613499987870455,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "format-test",
+      "args": [
+        "-w",
+        "internal/cli/supervise_reconcile_ipc_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.02345079998485744,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "parent-cancellation-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestReconcileIPC_ParentCancellationReachesSchedulerList|TestReconcileIPC_HandlerTimeout)$",
+        "./internal/cli"
+      ],
+      "exit_code": 0,
+      "seconds": 30.10354489996098,
+      "stdout": {
+        "bytes": 3769,
+        "sha256": "12e1f39d66bb75f93cf824c85be883606077be38635653faa83c5577bc2755cc"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "candidate",
+      "outcome": "pass",
+      "classification": "cli-positive",
+      "events": {
+        "pass": {
+          "test": 4,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.19715999998152256,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "candidate",
+      "outcome": "pass"
+    },
+    {
+      "label": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 19.21136010007467,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 11.555999999982305,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.19838029996026307,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "build-vet",
+      "outcome": "pass"
+    },
+    {
+      "label": "stage-exact-files",
+      "args": [
+        "add",
+        "--",
+        "internal/cli/supervise_reconcile_ipc_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.1628361000912264,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "fetch-exact-commit",
+      "args": [
+        "fetch",
+        "--no-tags",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "47c50527b051e3c40a426171eef42703155fc7f4"
+      ],
+      "exit_code": 0,
+      "seconds": 10.382700200076215,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "cc50e38315dccdd14116f48395d06b4fb83b80122917fe1b0c1ceef41aefa0f0"
+      },
+      "lane": "cli",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "checkout-detached",
+      "args": [
+        "checkout",
+        "--detach",
+        "47c50527b051e3c40a426171eef42703155fc7f4"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07868070004042238,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 183,
+        "sha256": "ccf64b8e4b90b988d19dcbf1aca6d9edaed17dd0e7f94a88f0b80b3a70021258"
+      },
+      "lane": "cli",
+      "phase": "published-checkout",
+      "outcome": "pass"
+    },
+    {
+      "label": "parent-cancellation-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestReconcileIPC_ParentCancellationReachesSchedulerList|TestReconcileIPC_HandlerTimeout)$",
+        "./internal/cli"
+      ],
+      "exit_code": 0,
+      "seconds": 8.338773499941453,
+      "stdout": {
+        "bytes": 3770,
+        "sha256": "d84efaccfda33b529c1b21bfb3664bad4c928c8721a4f6b47ff397ff7acf5a80"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "published",
+      "outcome": "pass",
+      "classification": "cli-positive",
+      "events": {
+        "pass": {
+          "test": 4,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.06481890007853508,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "lane": "cli",
+      "phase": "published",
+      "outcome": "pass"
+    }
+  ],
+  "raw_command_streams_verified": 86,
+  "all_per_command_receipts_verified_where_runner_emits_them": true,
+  "expected_failures_retained": true,
+  "negative_control_rerun": false,
+  "qualification_scope": {
+    "scheduler": "injected runner causes plus pre-stopped public ListContext with production runner",
+    "cli": "live fake ListContext entry followed by parent cancellation; separate configured 25-second budget check"
+  },
+  "historical_cli_timeout": "The old fixture returned RECONCILE_TIMEOUT and then failed to observe scheduler ListContext cancellation. The observed timeout and real failures are retained; they do not qualify timer expiry after scheduler entry.",
+  "limits": {
+    "actual_in_flight_COM_cancellation": false,
+    "actual_handler_deadline_expiry_after_scheduler_entry_qualified": false,
+    "whole_process_tree_deadline_enforced": false,
+    "native_task_operations": false,
+    "full_test_suites_run": false,
+    "semantic_source_analysis": false,
+    "source_scan_of_CLI_branch": false
+  },
+  "source_identity_evidence": "Published checkout receipts bind parent, exact full Git tree and clean state; published test receipts independently bind the same head/tree and source hashes. Packaging verifies changed/matched source files read-only; the archive retains patches, hashes and scan excerpts rather than duplicate whole source files.",
+  "generated_utc": "2026-11-20T16:12:29.848613+00:00"
+}

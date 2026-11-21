@@ -1,0 +1,1747 @@
+[
+  {
+    "sha": "d689d63e676f78e0a2cdbd4dd2cdec5b3e4442cc",
+    "name": "arch/wp11a-archcheck-core",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 224,
+    "tree": "f31d685f8b3c473ae60fb0e77b54ad4bfdfec4d7",
+    "contained_in_master": false,
+    "latest_pr": 602,
+    "related_prs": [
+      {
+        "number": 602,
+        "state": "closed",
+        "merged_at": "2026-09-04T08:49:17Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-04T11:37:05+03:00"
+  },
+  {
+    "sha": "5d7b9e3980da0c894243177d639a21e970013830",
+    "name": "arch/wp11a-repository-ratchet",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 10,
+    "behind": 223,
+    "tree": "657427763a928b4d44bca61da20e14907ad6ef8d",
+    "contained_in_master": false,
+    "latest_pr": 612,
+    "related_prs": [
+      {
+        "number": 612,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-05T01:15:50+03:00"
+  },
+  {
+    "sha": "af7e346f70a49f1f1b264a4e2caf17a6be3851e0",
+    "name": "chore/refresh-go-dependencies",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 338,
+    "tree": "d77511316f54412ab37c7849252122ed2605b1c5",
+    "contained_in_master": false,
+    "latest_pr": 593,
+    "related_prs": [
+      {
+        "number": 593,
+        "state": "closed",
+        "merged_at": "2026-08-08T16:36:35Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-08T15:15:02+03:00"
+  },
+  {
+    "sha": "cc11d5e6d564d0522baaa265641ee4956a0cd454",
+    "name": "chore/remove-github-ci",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 312,
+    "tree": "55308860131d5b44893ba99a9d98e8090201e4f4",
+    "contained_in_master": false,
+    "latest_pr": 603,
+    "related_prs": [
+      {
+        "number": 603,
+        "state": "closed",
+        "merged_at": "2026-08-25T12:29:01Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-25T15:28:26+03:00"
+  },
+  {
+    "sha": "1d2fe917cf02577ce2fb95d6b7939f119cbe2214",
+    "name": "codex/fix-hub-auto-rebind-token-leak-vulnerability",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 365,
+    "tree": "ce76bab23b4ce692b362678fea5d36aeb0b86474",
+    "contained_in_master": false,
+    "latest_pr": 561,
+    "related_prs": [
+      {
+        "number": 561,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-18T00:19:35+03:00"
+  },
+  {
+    "sha": "23e39f10f06ec7ea63dddaef2949e97ae35dc12d",
+    "name": "codex/fix-initialize-cache-poisoning-issue",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 318,
+    "tree": "f96fd83bf67bbbd2460122b5bcecaf9cd51d834b",
+    "contained_in_master": false,
+    "latest_pr": 599,
+    "related_prs": [
+      {
+        "number": 599,
+        "state": "closed",
+        "merged_at": "2026-08-11T12:30:17Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-10T16:49:33+03:00"
+  },
+  {
+    "sha": "0fd9ec35e28108c2df8af3081b78a8ac5a2ad18a",
+    "name": "codex/fix-npm-postinstall-vulnerability",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 340,
+    "tree": "8da8cce72e26577a212b59461b054a229f257d8e",
+    "contained_in_master": false,
+    "latest_pr": 585,
+    "related_prs": [
+      {
+        "number": 585,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-23T01:49:55+03:00"
+  },
+  {
+    "sha": "f6d9aba694a57cf869e7e007100124ea6a9c4ddb",
+    "name": "codex/fix-posix-sigkill-race-condition",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 329,
+    "tree": "dc5a1ebf7bb31d5fd864f4a73f39bd8e955b8071",
+    "contained_in_master": false,
+    "latest_pr": 595,
+    "related_prs": [
+      {
+        "number": 595,
+        "state": "closed",
+        "merged_at": "2026-08-09T19:45:50Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T22:45:34+03:00"
+  },
+  {
+    "sha": "5c8c995c08bf773752c31d9266cde45f76d1efa2",
+    "name": "codex/fix-provider-recovery-after-pre-install-crash",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 56,
+    "tree": "195b19f8eb0894369f6cdeeae19af32c5f19f357",
+    "contained_in_master": true,
+    "latest_pr": 615,
+    "related_prs": [
+      {
+        "number": 615,
+        "state": "closed",
+        "merged_at": "2026-09-21T21:35:07Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-16T02:19:42+03:00"
+  },
+  {
+    "sha": "602f8e883d4cdc16ddc47672ec05cecc15f69027",
+    "name": "codex/fix-unbounded-durable-vtune-runs",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 2,
+    "behind": 225,
+    "tree": "8a0c9fe1e2b96aeaf2b34f7127d613a479768eaf",
+    "contained_in_master": false,
+    "latest_pr": 608,
+    "related_prs": [
+      {
+        "number": 608,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-05T01:49:42+03:00"
+  },
+  {
+    "sha": "8dc3338f98204515045081df329ec2f736eabf07",
+    "name": "codex/fix-vcpkg-pin-status-vulnerability",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 318,
+    "tree": "f1820d0ff9aabc82d299ddceaee2212d8d3683d3",
+    "contained_in_master": false,
+    "latest_pr": 600,
+    "related_prs": [
+      {
+        "number": 600,
+        "state": "closed",
+        "merged_at": "2026-08-11T10:53:53Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-11T12:44:46+03:00"
+  },
+  {
+    "sha": "2740cee5d5ff3916d7b97e15254426d33be4bfc3",
+    "name": "codex/fix-vulnerability-in-default-marker-read",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 222,
+    "tree": "a034b7d6e8b8fee0c6ccc4b8ca4bf06939ae508a",
+    "contained_in_master": true,
+    "latest_pr": 609,
+    "related_prs": [
+      {
+        "number": 609,
+        "state": "closed",
+        "merged_at": "2026-09-07T17:17:56Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-05T02:43:08+03:00"
+  },
+  {
+    "sha": "abd8ed6ecf1b83f69b72e0905503cd09c19660db",
+    "name": "codex/fix-vulnerability-in-hfss/cst-output-root-validation",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 323,
+    "tree": "52cf2572d6d9235b4135b7be6c0d41e791aa73e9",
+    "contained_in_master": false,
+    "latest_pr": 598,
+    "related_prs": [
+      {
+        "number": 598,
+        "state": "closed",
+        "merged_at": "2026-08-11T10:48:10Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-11T12:44:30+03:00"
+  },
+  {
+    "sha": "9b207e8a9e91b81522eeaf81bbddb3deea2370bf",
+    "name": "codex/fix-windows-upgrade-rejection-of-prior-binary",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 313,
+    "tree": "f2506b921dbcc71cde36f5ba10b99def878ca48e",
+    "contained_in_master": false,
+    "latest_pr": 601,
+    "related_prs": [
+      {
+        "number": 601,
+        "state": "closed",
+        "merged_at": "2026-08-12T07:24:11Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-12T01:33:28+03:00"
+  },
+  {
+    "sha": "12db7429a0c3233eb02d8be6d17f2a49a298b3b8",
+    "name": "codex/propose-fix-for-attacker-controlled-output-root-vulnerabilit",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 323,
+    "tree": "42c2f3f5118e5c5846945ac3f4a2d66c95486648",
+    "contained_in_master": false,
+    "latest_pr": 597,
+    "related_prs": [
+      {
+        "number": 597,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-10T16:22:56+03:00"
+  },
+  {
+    "sha": "f8d4b9cf91bc4830060ad2169430dfc416c4a329",
+    "name": "codex/propose-fix-for-respawn-handling-issue",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 224,
+    "tree": "8b3251cf27caa9a5fb26e30092567194c565e6bd",
+    "contained_in_master": true,
+    "latest_pr": 610,
+    "related_prs": [
+      {
+        "number": 610,
+        "state": "closed",
+        "merged_at": "2026-09-07T17:17:59Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-01T21:45:35+03:00"
+  },
+  {
+    "sha": "920f0374ec037f081f81f992427f5cc28da09185",
+    "name": "codex/propose-fix-for-scheduler-failure-handling",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 276,
+    "tree": "77317c018e9b99f84fbd2658cd9b0cb1a3ba9364",
+    "contained_in_master": false,
+    "latest_pr": 607,
+    "related_prs": [
+      {
+        "number": 607,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-31T03:16:48+03:00"
+  },
+  {
+    "sha": "38e31c8d3e4bb29291e6263927ece73b521bc5e6",
+    "name": "docs/canonical-modernization-roadmap",
+    "state": "merged-pr-retained-ref",
+    "ahead": 10,
+    "behind": 284,
+    "tree": "cf29880e2bd8e672a28df875e5541189eff7c139",
+    "contained_in_master": false,
+    "latest_pr": 605,
+    "related_prs": [
+      {
+        "number": 605,
+        "state": "closed",
+        "merged_at": "2026-09-04T08:31:40Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-28T03:01:05+03:00"
+  },
+  {
+    "sha": "db7b806b54b0b9d6380365f32d2b39903ca7ddb8",
+    "name": "docs/rust-cross-platform-no-com-20261112",
+    "state": "open-pr",
+    "ahead": 4,
+    "behind": 53,
+    "tree": "22c6ea01bcdcca7d7c1498756105185f099df95e",
+    "contained_in_master": false,
+    "latest_pr": 623,
+    "related_prs": [
+      {
+        "number": 623,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-12T20:28:25+03:00"
+  },
+  {
+    "sha": "7bf57914960569e1dea9431b48c8028ca15fb450",
+    "name": "feat/adopt-provenance",
+    "state": "merged-pr-retained-ref",
+    "ahead": 12,
+    "behind": 442,
+    "tree": "159ecb5559a9d8918d78a5fe80cb76f48aa927ff",
+    "contained_in_master": false,
+    "latest_pr": 528,
+    "related_prs": [
+      {
+        "number": 528,
+        "state": "closed",
+        "merged_at": "2026-07-10T10:24:56Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-10T13:05:11+03:00"
+  },
+  {
+    "sha": "4385b27bb61a00ef72ba391d241f5c1860dd5be2",
+    "name": "feat/adopt-provenance-forget",
+    "state": "merged-pr-retained-ref",
+    "ahead": 3,
+    "behind": 393,
+    "tree": "152ba9ce1d8307788d8e4bc98a146367c4a4b2b9",
+    "contained_in_master": false,
+    "latest_pr": 553,
+    "related_prs": [
+      {
+        "number": 553,
+        "state": "closed",
+        "merged_at": "2026-07-15T18:42:07Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-15T21:05:59+03:00"
+  },
+  {
+    "sha": "20952b431c10d7ffbf937dbc97c48bac08a12874",
+    "name": "feat/adopt-reap-predicate-entry-shape",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 393,
+    "tree": "4ee2e76337acf51b95f627afccebd942cd05db68",
+    "contained_in_master": false,
+    "latest_pr": 551,
+    "related_prs": [
+      {
+        "number": 551,
+        "state": "closed",
+        "merged_at": "2026-07-15T17:25:22Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-15T20:01:32+03:00"
+  },
+  {
+    "sha": "c2548d49d3f20e9fa5d1b449ca06e8ee276df124",
+    "name": "feat/anti-drift-unmanaged-signal",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 472,
+    "tree": "5c9537060551570174b3e234d255e8282c271d2d",
+    "contained_in_master": false,
+    "latest_pr": 523,
+    "related_prs": [
+      {
+        "number": 523,
+        "state": "closed",
+        "merged_at": "2026-07-09T02:34:02Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-09T04:57:19+03:00"
+  },
+  {
+    "sha": "d521aad303abca18eef196e7cba5aaf6241f78e1",
+    "name": "feat/cbuild-mcp",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 6,
+    "behind": 411,
+    "tree": "8426dd2d9559e24d6f3d4de168b48e3d4e0bd7a2",
+    "contained_in_master": false,
+    "latest_pr": 541,
+    "related_prs": [
+      {
+        "number": 541,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-14T23:21:28+03:00"
+  },
+  {
+    "sha": "b0de9ea8ffb7c1ff9b98efdcd01b3489599a7619",
+    "name": "feat/deadopt-phase1-manifest-delete-hash",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 415,
+    "tree": "c440d293db9fb64abe36a7956ae2697279285e23",
+    "contained_in_master": false,
+    "latest_pr": 539,
+    "related_prs": [
+      {
+        "number": 539,
+        "state": "closed",
+        "merged_at": "2026-07-14T06:51:57Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-14T09:13:11+03:00"
+  },
+  {
+    "sha": "122160a8c35ed74d094cb09e3f04edd4d790ba55",
+    "name": "feat/deadopt-phase5-snapshot-cap",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 407,
+    "tree": "f307501306d4a514be8c1bea3f1f930ff2da80b2",
+    "contained_in_master": false,
+    "latest_pr": 543,
+    "related_prs": [
+      {
+        "number": 543,
+        "state": "closed",
+        "merged_at": "2026-07-14T23:07:12Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-15T00:51:41+03:00"
+  },
+  {
+    "sha": "27a622ac9c3620883bd9f2ea960a808ffacaa42c",
+    "name": "feat/deadopt-phase6-prov-v2",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 407,
+    "tree": "3ea76eedc7be66a5152c4d6a16f793c8ffaa1cba",
+    "contained_in_master": false,
+    "latest_pr": 545,
+    "related_prs": [
+      {
+        "number": 545,
+        "state": "closed",
+        "merged_at": "2026-07-15T00:14:12Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-15T02:48:19+03:00"
+  },
+  {
+    "sha": "6119295e1a73c299aa152570da8326157510f4d9",
+    "name": "feat/gui-daemon-recovery",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 375,
+    "tree": "18daa729d77b72f6025c5b1771787d19fbdfbeaa",
+    "contained_in_master": false,
+    "latest_pr": 557,
+    "related_prs": [
+      {
+        "number": 557,
+        "state": "closed",
+        "merged_at": "2026-07-17T09:57:08Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-17T12:33:00+03:00"
+  },
+  {
+    "sha": "ab0810fc162f835cc0b60b8576157009ccdb097e",
+    "name": "feat/gui-restart-unitb-foundations",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 367,
+    "tree": "c781e031277353a81903f65d782301f3f9ba924b",
+    "contained_in_master": false,
+    "latest_pr": 560,
+    "related_prs": [
+      {
+        "number": 560,
+        "state": "closed",
+        "merged_at": "2026-07-17T18:43:47Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-17T21:17:08+03:00"
+  },
+  {
+    "sha": "4424d4a3ea4fd49ceb844d366ef704dd9b1fd9a4",
+    "name": "feat/gui-restart-unitb-gated",
+    "state": "merged-pr-retained-ref",
+    "ahead": 12,
+    "behind": 363,
+    "tree": "311b8749e0eae00eee304931fdcd4a4d8eadd25b",
+    "contained_in_master": false,
+    "latest_pr": 563,
+    "related_prs": [
+      {
+        "number": 563,
+        "state": "closed",
+        "merged_at": "2026-07-19T11:52:59Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-19T12:40:29+03:00"
+  },
+  {
+    "sha": "4cf1497f6025dbb5b1823ccc8c1b5322b16f6d2c",
+    "name": "feat/liveness-headless-gui-recovery",
+    "state": "merged-pr-retained-ref",
+    "ahead": 50,
+    "behind": 332,
+    "tree": "0df2b52a4bd548a5e35841a4560fc80eb1fd45ce",
+    "contained_in_master": false,
+    "latest_pr": 589,
+    "related_prs": [
+      {
+        "number": 589,
+        "state": "closed",
+        "merged_at": "2026-08-09T18:10:20Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T21:09:51+03:00"
+  },
+  {
+    "sha": "d18783189548234d2676b99de6e30a4dbd186768",
+    "name": "feat/mathcad-mcp",
+    "state": "unassociated-not-proven",
+    "ahead": 4,
+    "behind": 481,
+    "tree": "d6c52f7f9a79a163a2fce729de568d56462131fd",
+    "contained_in_master": false,
+    "latest_pr": null,
+    "related_prs": [],
+    "last_commit": "2026-07-08T16:31:55+03:00"
+  },
+  {
+    "sha": "5bd3f64f431cd1d2b43d1e261eb9a095443989bc",
+    "name": "feat/mcp-front-daemon",
+    "state": "merged-pr-retained-ref",
+    "ahead": 64,
+    "behind": 333,
+    "tree": "7444e38bf0c4f0b3214041c784ebf34b00375b66",
+    "contained_in_master": false,
+    "latest_pr": 588,
+    "related_prs": [
+      {
+        "number": 588,
+        "state": "closed",
+        "merged_at": "2026-08-09T17:50:54Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T20:44:21+03:00"
+  },
+  {
+    "sha": "4c3dc86b48859ed5f4ee096824562ec796e441ee",
+    "name": "feat/mcphub-adopt",
+    "state": "merged-pr-retained-ref",
+    "ahead": 8,
+    "behind": 498,
+    "tree": "43d8676754bfc290fe0186acdd3507f3764dbd50",
+    "contained_in_master": false,
+    "latest_pr": 513,
+    "related_prs": [
+      {
+        "number": 513,
+        "state": "closed",
+        "merged_at": "2026-07-08T01:21:50Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-08T04:03:37+03:00"
+  },
+  {
+    "sha": "95d0b804934168fd4a85eef397f6bd5e80ad990e",
+    "name": "feat/reaper-v1-preview",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 448,
+    "tree": "451074609e26ae81ec4ad2d4da336f11f095cdd1",
+    "contained_in_master": false,
+    "latest_pr": 527,
+    "related_prs": [
+      {
+        "number": 527,
+        "state": "closed",
+        "merged_at": "2026-07-10T02:27:54Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-10T05:13:27+03:00"
+  },
+  {
+    "sha": "ee6d0bb4b06cd77726afebbb67b2efb5912916b1",
+    "name": "feat/supervisor-death-forensics",
+    "state": "merged-pr-retained-ref",
+    "ahead": 7,
+    "behind": 357,
+    "tree": "7e88b17579e5a2f489cfdd80bfe283175e1b31f8",
+    "contained_in_master": false,
+    "latest_pr": 570,
+    "related_prs": [
+      {
+        "number": 570,
+        "state": "closed",
+        "merged_at": "2026-07-21T08:58:54Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T11:13:26+03:00"
+  },
+  {
+    "sha": "e2ba671f5d4a0417193f8f4fe1fd4ffb0a5f9385",
+    "name": "feat/supervisor-stall-dump-trigger",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 352,
+    "tree": "b48a5e0631c6752eda462a11bd6cbadd7e8eea2e",
+    "contained_in_master": false,
+    "latest_pr": 574,
+    "related_prs": [
+      {
+        "number": 574,
+        "state": "closed",
+        "merged_at": "2026-07-21T09:54:25Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T12:32:58+03:00"
+  },
+  {
+    "sha": "70a472770cffde41bedb6a4927ee9dc1da48a0f4",
+    "name": "feat/vcpkg-mcp",
+    "state": "merged-pr-retained-ref",
+    "ahead": 77,
+    "behind": 330,
+    "tree": "dad73ad2d1a809b227c8ba6bca835e7ab711d836",
+    "contained_in_master": false,
+    "latest_pr": 591,
+    "related_prs": [
+      {
+        "number": 591,
+        "state": "closed",
+        "merged_at": "2026-08-09T19:35:25Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T22:34:55+03:00"
+  },
+  {
+    "sha": "4c20cc5bbdcdf5c860845f0b9ad06d8f52e4e798",
+    "name": "fix/archcheck-filename-constraints",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 223,
+    "tree": "9ef9645e5877e437e17b4c3d72b379bdca43cdb2",
+    "contained_in_master": false,
+    "latest_pr": 613,
+    "related_prs": [
+      {
+        "number": 613,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-05T01:12:52+03:00"
+  },
+  {
+    "sha": "8234331fcc49f72f6828fcf7b5565b47f09d83d5",
+    "name": "fix/auto-reaper-client-direct",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 1,
+    "behind": 361,
+    "tree": "ae2003144d4f8f65c0d05933d602328491b5ee38",
+    "contained_in_master": false,
+    "latest_pr": 565,
+    "related_prs": [
+      {
+        "number": 565,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-19T19:57:48+03:00"
+  },
+  {
+    "sha": "235302c8acceed450af0efe84aa284997acf3755",
+    "name": "fix/cleanup-aggressive-exe-ext-panic",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 340,
+    "tree": "2739c0fbc6b3753569743f9bc68904f8fe647dd8",
+    "contained_in_master": false,
+    "latest_pr": 587,
+    "related_prs": [
+      {
+        "number": 587,
+        "state": "closed",
+        "merged_at": "2026-07-25T23:46:32Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-26T01:31:12+03:00"
+  },
+  {
+    "sha": "448b07f538553e51ace3efec98df4e5b0eba46a3",
+    "name": "fix/cleanuporphans-identity-reverify",
+    "state": "merged-pr-retained-ref",
+    "ahead": 6,
+    "behind": 498,
+    "tree": "15bce739e9de46e6902d5ddb5061aad30de16ec6",
+    "contained_in_master": false,
+    "latest_pr": 511,
+    "related_prs": [
+      {
+        "number": 511,
+        "state": "closed",
+        "merged_at": "2026-07-07T23:35:12Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-08T01:45:11+03:00"
+  },
+  {
+    "sha": "ffceded105240651df76ca592f7a21e951ca2b78",
+    "name": "fix/cli-first-run-ux",
+    "state": "merged-pr-retained-ref",
+    "ahead": 4,
+    "behind": 357,
+    "tree": "6a58ae35c40e866815c7250b5edd9d35d04815b6",
+    "contained_in_master": false,
+    "latest_pr": 575,
+    "related_prs": [
+      {
+        "number": 575,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      },
+      {
+        "number": 571,
+        "state": "closed",
+        "merged_at": "2026-07-21T08:58:48Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-20T18:14:00+03:00"
+  },
+  {
+    "sha": "fcbea4994d3365b6c2d324d25906d0ce0b76d78e",
+    "name": "fix/cursor-not-default-install",
+    "state": "merged-pr-retained-ref",
+    "ahead": 24,
+    "behind": 335,
+    "tree": "3fedc05094e0e812212f62be766255e70f7ed930",
+    "contained_in_master": false,
+    "latest_pr": 583,
+    "related_prs": [
+      {
+        "number": 583,
+        "state": "closed",
+        "merged_at": "2026-08-09T17:31:46Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T05:43:42+03:00"
+  },
+  {
+    "sha": "1f7ca3a3e8bb22afc7764f1d4302ec1897d7e8bd",
+    "name": "fix/e2e-status-seam",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 456,
+    "tree": "716f78e27b038003571095af3aacd585c0da5ee7",
+    "contained_in_master": false,
+    "latest_pr": 526,
+    "related_prs": [
+      {
+        "number": 526,
+        "state": "closed",
+        "merged_at": "2026-07-09T21:12:14Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-09T23:08:23+03:00"
+  },
+  {
+    "sha": "5cf1b0145585c9c348f0278c30446fb9319e8895",
+    "name": "fix/gate-gui-spawning-cli-tests",
+    "state": "merged-pr-retained-ref",
+    "ahead": 7,
+    "behind": 383,
+    "tree": "cd33d0b4c0e0fa94c526360dcd3a56d1ec008d26",
+    "contained_in_master": false,
+    "latest_pr": 556,
+    "related_prs": [
+      {
+        "number": 556,
+        "state": "closed",
+        "merged_at": "2026-07-16T18:30:21Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-16T19:13:43+03:00"
+  },
+  {
+    "sha": "4c31b4d6fe34658d20ce275ae955cde59e14dcb2",
+    "name": "fix/gate-on-classify-reap",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 389,
+    "tree": "a34c9b5f7baaec6599da6318dd93a1afe67798c2",
+    "contained_in_master": false,
+    "latest_pr": 554,
+    "related_prs": [
+      {
+        "number": 554,
+        "state": "closed",
+        "merged_at": "2026-07-15T22:06:24Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-16T00:29:56+03:00"
+  },
+  {
+    "sha": "008fc676121abdcdd03d0529c2060507d807c65f",
+    "name": "fix/gui-diagnostics-stderr-misrouting",
+    "state": "merged-pr-retained-ref",
+    "ahead": 3,
+    "behind": 352,
+    "tree": "43f30d2209e13820502cb4ce8ef03313a7435936",
+    "contained_in_master": false,
+    "latest_pr": 576,
+    "related_prs": [
+      {
+        "number": 576,
+        "state": "closed",
+        "merged_at": "2026-07-21T16:40:02Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T19:33:28+03:00"
+  },
+  {
+    "sha": "87b9090ce410aaab2995f4fb81ad6300861d3a1f",
+    "name": "fix/gui-state-dir-path-leak",
+    "state": "merged-pr-retained-ref",
+    "ahead": 4,
+    "behind": 393,
+    "tree": "98e4be0aeea9051af46e97ec2a3a90c70bbf4c36",
+    "contained_in_master": false,
+    "latest_pr": 552,
+    "related_prs": [
+      {
+        "number": 552,
+        "state": "closed",
+        "merged_at": "2026-07-15T17:34:00Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-15T20:23:18+03:00"
+  },
+  {
+    "sha": "aafa1604764da4f0053a16452af4690f114e1dd6",
+    "name": "fix/intent-collapse-stop-resurrection",
+    "state": "merged-pr-retained-ref",
+    "ahead": 3,
+    "behind": 469,
+    "tree": "fa171c260f7da99e5c5fd69feb2a58631cdc6313",
+    "contained_in_master": false,
+    "latest_pr": 525,
+    "related_prs": [
+      {
+        "number": 525,
+        "state": "closed",
+        "merged_at": "2026-07-09T09:35:46Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-09T12:10:22+03:00"
+  },
+  {
+    "sha": "e405898965db527a889aca77c27335cf17642e1e",
+    "name": "fix/lsp-relay-per-client-disable-gui",
+    "state": "merged-pr-retained-ref",
+    "ahead": 9,
+    "behind": 469,
+    "tree": "a6d193bb68f5289c4215a77e253b9a529d20b1f3",
+    "contained_in_master": false,
+    "latest_pr": 524,
+    "related_prs": [
+      {
+        "number": 524,
+        "state": "closed",
+        "merged_at": "2026-07-09T18:39:51Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-09T20:40:17+03:00"
+  },
+  {
+    "sha": "c419b7e460570d0a30eab060929b57d610e17c4d",
+    "name": "fix/lsp-router-per-client-disable",
+    "state": "merged-pr-retained-ref",
+    "ahead": 7,
+    "behind": 498,
+    "tree": "ce351d4978a08617b3203e4507952ab75369b169",
+    "contained_in_master": false,
+    "latest_pr": 512,
+    "related_prs": [
+      {
+        "number": 512,
+        "state": "closed",
+        "merged_at": "2026-07-08T00:20:17Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-08T02:36:48+03:00"
+  },
+  {
+    "sha": "10f75b402232d7cda72fb8bb36b5f2e074fe09e4",
+    "name": "fix/npm-canonicalize-local-bin",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 341,
+    "tree": "cdbd64975016e1ebc60ab2fb87a3a7f2aac3957b",
+    "contained_in_master": false,
+    "latest_pr": 584,
+    "related_prs": [
+      {
+        "number": 584,
+        "state": "closed",
+        "merged_at": "2026-07-22T11:36:30Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-22T12:48:19+03:00"
+  },
+  {
+    "sha": "951c51c6aa200d9ee2d5c7b46bfd4b916fcb1cb5",
+    "name": "fix/npm-postinstall-global-guard",
+    "state": "merged-pr-retained-ref",
+    "ahead": 3,
+    "behind": 340,
+    "tree": "3cd8e7c21c466c7e38f35419a645fef93e8eb02e",
+    "contained_in_master": false,
+    "latest_pr": 586,
+    "related_prs": [
+      {
+        "number": 586,
+        "state": "closed",
+        "merged_at": "2026-07-25T23:46:35Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-26T01:48:32+03:00"
+  },
+  {
+    "sha": "382eb450fe5bdd410c3e21b9be88f4fa53f6aa6e",
+    "name": "fix/npm-release-windowsgui-subsystem",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 343,
+    "tree": "b9483c856219e94382ff81b938627618857895a1",
+    "contained_in_master": false,
+    "latest_pr": 582,
+    "related_prs": [
+      {
+        "number": 582,
+        "state": "closed",
+        "merged_at": "2026-07-22T08:27:14Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-22T11:20:29+03:00"
+  },
+  {
+    "sha": "93cf926a56b724581ed2222e65fc41839bcb68d5",
+    "name": "fix/pr616-client-config-read",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 52,
+    "tree": "1bb26f0d3546b01e6d9a3a9cdeb9d695a9769436",
+    "contained_in_master": true,
+    "latest_pr": 618,
+    "related_prs": [
+      {
+        "number": 618,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-11T16:42:23+03:00"
+  },
+  {
+    "sha": "e30e492db6e07c04ee8c508ae66109b73c48d6d1",
+    "name": "fix/pr616-daemon-launch",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 51,
+    "tree": "545856819081d2ccdeb0348745e02826913e07ae",
+    "contained_in_master": true,
+    "latest_pr": 619,
+    "related_prs": [
+      {
+        "number": 619,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-11T18:01:02+03:00"
+  },
+  {
+    "sha": "62a7b0dc1028fe0545bcf678b50598d4be59a22a",
+    "name": "fix/pr616-native-test-custody",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 26,
+    "tree": "967354f4d437eaa486ce17b246c48d58ce45a766",
+    "contained_in_master": true,
+    "latest_pr": 620,
+    "related_prs": [
+      {
+        "number": 620,
+        "state": "closed",
+        "merged_at": "2026-11-11T21:38:58Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-11T18:22:02+03:00"
+  },
+  {
+    "sha": "64b0eddb3a86369a107b03596f795b84882b6b07",
+    "name": "fix/pr616-portable-test-fixtures",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 52,
+    "tree": "60f7d84a47522e461145255a2c39735e2f33cb12",
+    "contained_in_master": true,
+    "latest_pr": 621,
+    "related_prs": [
+      {
+        "number": 621,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-11T18:01:33+03:00"
+  },
+  {
+    "sha": "9034a661a1ddfafb575fcb73026a487973512309",
+    "name": "fix/pr616-serena-invocation",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 52,
+    "tree": "23be40f0fa6209ce38c6e0e0dfc5e4d2134de7cf",
+    "contained_in_master": true,
+    "latest_pr": 622,
+    "related_prs": [
+      {
+        "number": 622,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-11T18:03:10+03:00"
+  },
+  {
+    "sha": "a05f32834444fddad0519a87207fd8472e5bf5c9",
+    "name": "fix/prespawn-missing-binary-hold-gate",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 357,
+    "tree": "4844d504caf689c854a5654a0b6b143cb8d06f8f",
+    "contained_in_master": false,
+    "latest_pr": 573,
+    "related_prs": [
+      {
+        "number": 573,
+        "state": "closed",
+        "merged_at": "2026-07-21T08:58:58Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T10:28:43+03:00"
+  },
+  {
+    "sha": "06c0d25995b3063f54f45c7c58d0ad085666349f",
+    "name": "fix/process-terminal-admission-fixture-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "23cbcb121cc1064f545c1c4988b91bc4d063a110",
+    "contained_in_master": false,
+    "latest_pr": 634,
+    "related_prs": [
+      {
+        "number": 634,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:15:56+03:00"
+  },
+  {
+    "sha": "641fc5aeb68e32f022c55a1e8b9a15f7348a8911",
+    "name": "fix/readiness-handler-unbounded-probe",
+    "state": "merged-pr-retained-ref",
+    "ahead": 3,
+    "behind": 357,
+    "tree": "6288fab248a843eeb05239b19f90ea27d9904f88",
+    "contained_in_master": false,
+    "latest_pr": 572,
+    "related_prs": [
+      {
+        "number": 572,
+        "state": "closed",
+        "merged_at": "2026-07-21T08:58:25Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-20T18:25:03+03:00"
+  },
+  {
+    "sha": "7e0b89f987e1a7fb26c9e78b705df56b95110420",
+    "name": "fix/recovery-audit-deadline-fixture-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "0de9e9b145a53c08000cc6a92c017d531c959de5",
+    "contained_in_master": false,
+    "latest_pr": 641,
+    "related_prs": [
+      {
+        "number": 641,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:54:54+03:00"
+  },
+  {
+    "sha": "fb00f95d0c37f1a8d07ec3e7da0e380c07b2c5ea",
+    "name": "fix/relay-output-failure-contract-20261113",
+    "state": "open-pr",
+    "ahead": 3,
+    "behind": 53,
+    "tree": "46c205253a8c67322e5cdb2c22bcb01f7ccab805",
+    "contained_in_master": false,
+    "latest_pr": 629,
+    "related_prs": [
+      {
+        "number": 629,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-13T11:29:20+03:00"
+  },
+  {
+    "sha": "1326779cd9b26c5462063d360fe70ea4c8c1c3ce",
+    "name": "fix/relay-process-input-owner-20261113",
+    "state": "open-pr",
+    "ahead": 4,
+    "behind": 53,
+    "tree": "b041998967b888d10299c597d49ea58029da6104",
+    "contained_in_master": false,
+    "latest_pr": 630,
+    "related_prs": [
+      {
+        "number": 630,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-13T11:45:00+03:00"
+  },
+  {
+    "sha": "6b888eaba4c4f9d473048e6198f995148cb394e1",
+    "name": "fix/serena-integration-qualification-20261114",
+    "state": "protected-active-session",
+    "ahead": 9,
+    "behind": 0,
+    "tree": "77d8becc1def42c2f1a46dd1c1bba8795dd6c334",
+    "contained_in_master": false,
+    "latest_pr": 637,
+    "related_prs": [
+      {
+        "number": 637,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T23:00:03+03:00"
+  },
+  {
+    "sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+    "name": "fix/serena-qualification-namespace-20261114",
+    "state": "protected-active-session",
+    "ahead": 5,
+    "behind": 0,
+    "tree": "6aa7a6c7ced43a8c14c1086d2a11ed4be131bd98",
+    "contained_in_master": false,
+    "latest_pr": 636,
+    "related_prs": [
+      {
+        "number": 636,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:41:04+03:00"
+  },
+  {
+    "sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+    "name": "fix/serena-qualification-publisher-20261114",
+    "state": "protected-active-session",
+    "ahead": 3,
+    "behind": 0,
+    "tree": "843b6710009b88ed57432025369e4739ca95db5b",
+    "contained_in_master": false,
+    "latest_pr": 635,
+    "related_prs": [
+      {
+        "number": 635,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:39:37+03:00"
+  },
+  {
+    "sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+    "name": "fix/serena-qualified-uv-path-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "db22b843cbdae4286c58bf866fc5c07578c76783",
+    "contained_in_master": false,
+    "latest_pr": 632,
+    "related_prs": [
+      {
+        "number": 632,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T21:42:44+03:00"
+  },
+  {
+    "sha": "8c18c35ac1efe37ee7a5cdc23d82bc2b649db167",
+    "name": "fix/serena-readiness-timeout-inversion",
+    "state": "merged-pr-retained-ref",
+    "ahead": 2,
+    "behind": 357,
+    "tree": "6725080e419cf6a3f2690783124a9c91c99214ef",
+    "contained_in_master": false,
+    "latest_pr": 569,
+    "related_prs": [
+      {
+        "number": 569,
+        "state": "closed",
+        "merged_at": "2026-07-21T08:58:30Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T10:10:33+03:00"
+  },
+  {
+    "sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+    "name": "fix/serena-unbuffered-build-input-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "5e2284ba9ec3bba8f60d466a39a464bd2f89f038",
+    "contained_in_master": false,
+    "latest_pr": 639,
+    "related_prs": [
+      {
+        "number": 639,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:40:58+03:00"
+  },
+  {
+    "sha": "886faa44e3f9d993637935afb84ac01ac0e5cdf3",
+    "name": "fix/status-identity-path-memo",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 349,
+    "tree": "ef741a4e7b97402c7f03f47f86100970456cb6ac",
+    "contained_in_master": false,
+    "latest_pr": 578,
+    "related_prs": [
+      {
+        "number": 578,
+        "state": "closed",
+        "merged_at": "2026-07-21T17:00:07Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T19:52:10+03:00"
+  },
+  {
+    "sha": "0abf739a488335011183d6ae8c73d9e4e20898c2",
+    "name": "fix/strict-mode-intent-fixtures-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "ad197e287f08a0c8a58826e1bed965d1e82b96ba",
+    "contained_in_master": false,
+    "latest_pr": 633,
+    "related_prs": [
+      {
+        "number": 633,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:11:04+03:00"
+  },
+  {
+    "sha": "581dd80e698f71a57e4060d80d91ac1f65ae4a31",
+    "name": "fix/supervisor-ipc-poll-flood",
+    "state": "closed-pr-not-ancestry-proven",
+    "ahead": 2,
+    "behind": 361,
+    "tree": "a212c464e2808524d4d025ea1dba5b8072d6fb86",
+    "contained_in_master": false,
+    "latest_pr": 564,
+    "related_prs": [
+      {
+        "number": 564,
+        "state": "closed",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-19T20:01:10+03:00"
+  },
+  {
+    "sha": "8ac3cd40b6d55441b9e3da57b1b553dd3869fb37",
+    "name": "fix/supervisor-priority-class",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 350,
+    "tree": "8962ca18b52237a5fd87ef7f55e608ba488ad0bf",
+    "contained_in_master": false,
+    "latest_pr": 577,
+    "related_prs": [
+      {
+        "number": 577,
+        "state": "closed",
+        "merged_at": "2026-07-21T16:51:28Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-21T19:40:42+03:00"
+  },
+  {
+    "sha": "6e6ed8b09b909a4581012b679ae9f08da9dfbe1c",
+    "name": "fix/supervisor-priority-normal",
+    "state": "merged-pr-retained-ref",
+    "ahead": 1,
+    "behind": 345,
+    "tree": "e33fabd21fcd7dd36b9289de19d5ed84e7656293",
+    "contained_in_master": false,
+    "latest_pr": 581,
+    "related_prs": [
+      {
+        "number": 581,
+        "state": "closed",
+        "merged_at": "2026-07-21T21:10:21Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-07-22T00:05:27+03:00"
+  },
+  {
+    "sha": "94804bd37d6bf1a546c86116ac3d2d38f45d6dc9",
+    "name": "fix/tray-protocol-cancel-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "fe2fd8efc0e00eeb57d2afb738fcef27102db0a5",
+    "contained_in_master": false,
+    "latest_pr": 638,
+    "related_prs": [
+      {
+        "number": 638,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:31:49+03:00"
+  },
+  {
+    "sha": "5883fbb5d517bf891c2ce7006cf618d3d826c45d",
+    "name": "fix/vtune-shutdown-budget-fixture-20261114",
+    "state": "protected-active-session",
+    "ahead": 1,
+    "behind": 0,
+    "tree": "52736b9cee11cd9e5e25000c4038c27128595561",
+    "contained_in_master": false,
+    "latest_pr": 640,
+    "related_prs": [
+      {
+        "number": 640,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:45:44+03:00"
+  },
+  {
+    "sha": "02a64c0329c4247633983b24ce50c71e077522f7",
+    "name": "fix/workspace-register-materializes-intent",
+    "state": "merged-pr-retained-ref",
+    "ahead": 19,
+    "behind": 331,
+    "tree": "5b006dd594d148d7910fdb2a22d61e7df766810f",
+    "contained_in_master": false,
+    "latest_pr": 590,
+    "related_prs": [
+      {
+        "number": 590,
+        "state": "closed",
+        "merged_at": "2026-08-09T18:40:18Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T21:39:31+03:00"
+  },
+  {
+    "sha": "c88be8a81313c2976348284bc5f3e53da37631a5",
+    "name": "hotfix/0.4.36-wolfram-legacy",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 162,
+    "tree": "0ff363ec62ef9cd36afbef8340658d76ea2ae10f",
+    "contained_in_master": true,
+    "latest_pr": 614,
+    "related_prs": [
+      {
+        "number": 614,
+        "state": "closed",
+        "merged_at": "2026-09-10T00:38:58Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-09-10T03:07:31+03:00"
+  },
+  {
+    "sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+    "name": "master",
+    "state": "default",
+    "ahead": 0,
+    "behind": 0,
+    "tree": "dca478794d2b91050606848d5bfe7fb98627b6ad",
+    "contained_in_master": true,
+    "latest_pr": null,
+    "related_prs": [],
+    "last_commit": "2026-11-14T19:09:17+03:00"
+  },
+  {
+    "sha": "98527f37d432d5b6ad1ffbc60e51959e106fd671",
+    "name": "perf/rx01-cmaketrace-benchmark-20261112",
+    "state": "open-pr",
+    "ahead": 3,
+    "behind": 53,
+    "tree": "e352904937ac459ed65c86097019ff48deefd918",
+    "contained_in_master": false,
+    "latest_pr": 624,
+    "related_prs": [
+      {
+        "number": 624,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-12T20:36:19+03:00"
+  },
+  {
+    "sha": "7dad295acb3e4583e248a761667aea47cb0b0cf1",
+    "name": "perf/rx01-relay-baseline-20261112",
+    "state": "open-pr",
+    "ahead": 3,
+    "behind": 53,
+    "tree": "9096fcac949fda8d536c7b9add5f02d528319932",
+    "contained_in_master": false,
+    "latest_pr": 626,
+    "related_prs": [
+      {
+        "number": 626,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-12T22:53:32+03:00"
+  },
+  {
+    "sha": "30dc96ded0110984bd66e149d125c3d1178bf1da",
+    "name": "perf/rx16-native-observation-20261112",
+    "state": "open-pr",
+    "ahead": 1,
+    "behind": 53,
+    "tree": "6fd0c5d8306e06445765b154bff73c110d1bb0b2",
+    "contained_in_master": false,
+    "latest_pr": 628,
+    "related_prs": [
+      {
+        "number": 628,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-12T22:34:59+03:00"
+  },
+  {
+    "sha": "32fab6d20cfeaad4a4f09ac3e718a63f53b028d2",
+    "name": "release/0.4.29-non-em",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 308,
+    "tree": "eaa7512b4e3e1f815fe4e00ee308401cb80dcdb0",
+    "contained_in_master": true,
+    "latest_pr": null,
+    "related_prs": [],
+    "last_commit": "2026-08-24T21:05:34+03:00"
+  },
+  {
+    "sha": "ed6859d68990b12c428d38ad5fd4d8b95ae68afc",
+    "name": "release/0.4.37-win32-x64-observable-final",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 1,
+    "tree": "dca478794d2b91050606848d5bfe7fb98627b6ad",
+    "contained_in_master": true,
+    "latest_pr": 616,
+    "related_prs": [
+      {
+        "number": 616,
+        "state": "closed",
+        "merged_at": "2026-11-14T16:09:17Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T18:39:08+03:00"
+  },
+  {
+    "sha": "0e75dcda7e1f5669e9d1c2657a9f53dce555f8ea",
+    "name": "release/0.4.41-portable-fixtures",
+    "state": "contained-in-master",
+    "ahead": 0,
+    "behind": 54,
+    "tree": "45ac99788498497d1bdc955605c082b3fc7dcde7",
+    "contained_in_master": true,
+    "latest_pr": 617,
+    "related_prs": [
+      {
+        "number": 617,
+        "state": "closed",
+        "merged_at": "2026-10-18T04:39:26Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-10-18T07:15:04+03:00"
+  },
+  {
+    "sha": "a7a4c2d19c5a572ae771ab9b9a1511ae2cf9a718",
+    "name": "spike/rx02-go-rust-boundary-20261113",
+    "state": "open-pr",
+    "ahead": 22,
+    "behind": 53,
+    "tree": "37a058315476d4825d2bf6d911a5f55f43778597",
+    "contained_in_master": false,
+    "latest_pr": 631,
+    "related_prs": [
+      {
+        "number": 631,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-14T22:29:25+03:00"
+  },
+  {
+    "sha": "7ce04f7ef2f96680ed94db1edaf77cf0358421c4",
+    "name": "spike/rx02-native-process-owner-20261112",
+    "state": "open-pr",
+    "ahead": 5,
+    "behind": 53,
+    "tree": "7fc50bbaaecd85732865db30b7581a636dd6b416",
+    "contained_in_master": false,
+    "latest_pr": 625,
+    "related_prs": [
+      {
+        "number": 625,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-13T22:03:33+03:00"
+  },
+  {
+    "sha": "57f69575bbe2276f14e330ecd80249872d690f9a",
+    "name": "spike/rx04-anchored-read-20261112",
+    "state": "open-pr",
+    "ahead": 1,
+    "behind": 53,
+    "tree": "12db5e8ecb43bb3cd695cfe837605e764aa10986",
+    "contained_in_master": false,
+    "latest_pr": 627,
+    "related_prs": [
+      {
+        "number": 627,
+        "state": "open",
+        "merged_at": null,
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-11-12T22:26:32+03:00"
+  },
+  {
+    "sha": "381cbe9361480a3e194abac78a65ddfa725f48c8",
+    "name": "test/console-tray-default-bare-launch",
+    "state": "merged-pr-retained-ref",
+    "ahead": 4,
+    "behind": 338,
+    "tree": "0b1ca96aee51f1d26a6810e9731402e621daf93a",
+    "contained_in_master": false,
+    "latest_pr": 592,
+    "related_prs": [
+      {
+        "number": 592,
+        "state": "closed",
+        "merged_at": "2026-08-09T17:33:12Z",
+        "exact_head": true
+      }
+    ],
+    "last_commit": "2026-08-09T05:49:36+03:00"
+  },
+  {
+    "sha": "03be8fe0280368c72fa9ce31244123eb969d122c",
+    "name": "verify/serena-postmerge-20261114",
+    "state": "protected-active-session",
+    "ahead": 10,
+    "behind": 0,
+    "tree": "2e15e738c7698fe0d6eb3d94d94b429a1aaf9dfa",
+    "contained_in_master": false,
+    "latest_pr": null,
+    "related_prs": [],
+    "last_commit": "2026-11-14T22:42:14+03:00"
+  }
+]

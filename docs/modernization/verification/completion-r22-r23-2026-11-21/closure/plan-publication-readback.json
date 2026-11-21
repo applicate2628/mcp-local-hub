@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "original_commit": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+  "evidence_commit": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+  "original_git_blob": "9fe38814fa16323330d7e34172e37701aee3a771",
+  "final_bytes": 374010,
+  "final_sha256": "3de35745ff6abae3fd1e3b0f2f56c1095b8096e752a6f84b44747209409f70c4",
+  "final_git_blob": "cec172bc4e7cae90bbd410cc8c87811ce5dcc21b",
+  "historical_prefix_preserved_except_declared_toc_and_pointer": true,
+  "original_anchors_preserved": true,
+  "existing_glossary_preserved_byte_for_byte": true,
+  "active_remaining_directions": 8,
+  "unresolved_placeholders": 0,
+  "whitespace_diagnostics": [],
+  "inventory_test_bodies_run": false,
+  "own_review": "Requirements, correctness, compatibility, evidence boundaries and minimal documentation scope reviewed.",
+  "published_commit": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+  "published_blob": "cec172bc4e7cae90bbd410cc8c87811ce5dcc21b",
+  "exact_content_readback": true,
+  "readback_method": "GitHub fetch_file on the immutable published commit; exact content string and blob compared before this record.",
+  "recorded_utc": "2026-11-21T10:09:32.228164+00:00"
+}

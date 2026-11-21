@@ -1,0 +1,683 @@
+{
+  "schema": 1,
+  "code_commit": "f5fb00370a833255eacb992a7cd32f2e68da7399",
+  "code_tree": "91ea0a635cbeeae0849b328c2b6064d48f95bdfc",
+  "parent": "b7831aabdb7162b3a39c78e73c3ab67558236d1d",
+  "candidate_identity": "parent tree plus three exact source hashes, verified against the full published tree",
+  "source_sha256": {
+    "internal/api/install.go": "5cde143347a42b59a15eb31d1570e652db2fa8377e8fde6e485bdb969cff5267",
+    "internal/api/prune_tasks_test.go": "31259b02f1a627c757ba4e03181046bcf930fff8f2010a4d524b8a843dad103d",
+    "internal/api/install_hyphen_family_ownership_test.go": "4edc4ccded09b44639a5e74d379462df4733e570a004e5188cb042df902a7b26"
+  },
+  "commands": [
+    {
+      "label": "clone",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "<WORK_ROOT>\\mcp-r17-create-conflict-20261120\\source",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\source"
+      ],
+      "exit_code": 0,
+      "seconds": 1.3456655000336468,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 156,
+        "sha256": "d0cdca4ff0951fe70b45e21ca0373c148cf8119221524d836e3dd138100e3d99"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "apply-control",
+      "args": [
+        "apply",
+        "--check",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\negative-control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.038708100095391273,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "write-control",
+      "args": [
+        "apply",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\negative-control.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.039246800006367266,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "format-tests",
+      "args": [
+        "-w",
+        "internal/api/prune_tasks_test.go",
+        "internal/api/install_hyphen_family_ownership_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2537815000396222,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "go-version",
+      "args": [
+        "version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.14506400004029274,
+      "stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "original-prune-control",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-count=1",
+        "-timeout=120s",
+        "-run",
+        "^TestPruneObsoleteServerTasks_SkipsUnavailableSnapshot$",
+        "./internal/api"
+      ],
+      "exit_code": 1,
+      "seconds": 28.917791199986823,
+      "stdout": {
+        "bytes": 8069,
+        "sha256": "0e659a8a210caa09e3341cffdb1e78fdefeb962ab0fc6ea0da3754b2b00c3bb4"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control",
+      "events": {
+        "pass": {
+          "test": 0,
+          "package": 0
+        },
+        "fail": {
+          "test": 6,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.21530909999273717,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "control"
+    },
+    {
+      "label": "apply-product",
+      "args": [
+        "apply",
+        "--check",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.04003480006940663,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate"
+    },
+    {
+      "label": "write-product",
+      "args": [
+        "apply",
+        "<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\product.patch"
+      ],
+      "exit_code": 0,
+      "seconds": 0.043782300082966685,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate"
+    },
+    {
+      "label": "format-candidate",
+      "args": [
+        "-w",
+        "internal/api/install.go",
+        "internal/api/prune_tasks_test.go",
+        "internal/api/install_hyphen_family_ownership_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.027631200035102665,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2116373999742791,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "candidate"
+    },
+    {
+      "label": "prune-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^TestPruneObsoleteServerTasks_",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 54.60492859990336,
+      "stdout": {
+        "bytes": 24559,
+        "sha256": "0c3a90a5c6dad14ede21716be405e868a1ccfd2e4555f04752099345fed8ecda"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused",
+      "events": {
+        "pass": {
+          "test": 26,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "adjacent-ownership-intent-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestSupervisorIntent_ReconcilePrune(BareKey|NilIntent|AlreadyBareKey)|TestUninstallSchedulerTasksForServer_(KeepsSiblingTask|ReclaimsWhenNoSibling)|TestListTasksForServer_FiltersSiblingTask)$",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 6.869273400050588,
+      "stdout": {
+        "bytes": 10623,
+        "sha256": "94d5962465b5ad37c13c5c12719390523170e821b1dbed0c93bf048eec47930e"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused",
+      "events": {
+        "pass": {
+          "test": 12,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.20851070003118366,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused"
+    },
+    {
+      "label": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 21.087320199934766,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 10.67699890001677,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.2315484998980537,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "stage-exact-files",
+      "args": [
+        "add",
+        "--",
+        "internal/api/install.go",
+        "internal/api/prune_tasks_test.go",
+        "internal/api/install_hyphen_family_ownership_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.38088940002489835,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "fetch-exact-commit",
+      "args": [
+        "fetch",
+        "--no-tags",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "f5fb00370a833255eacb992a7cd32f2e68da7399"
+      ],
+      "exit_code": 0,
+      "seconds": 10.65641030005645,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "81a994a5ff5be83e32b9a5d9834eb9ed5e7246be9e0dba4d25c865c7746e5082"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "checkout-detached",
+      "args": [
+        "checkout",
+        "--detach",
+        "f5fb00370a833255eacb992a7cd32f2e68da7399"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07707749994006008,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 195,
+        "sha256": "0486b1d5f6c5968fb1d82bf8404c7524b04744640b27a0e68881ef2267c3ea33"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "prune-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^TestPruneObsoleteServerTasks_",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 7.152724399929866,
+      "stdout": {
+        "bytes": 24542,
+        "sha256": "924d3e8aa0b416b8871ca5d20be7318e9556a043d13c971a932a56942183aef4"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "events": {
+        "pass": {
+          "test": 26,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "adjacent-ownership-intent-race",
+      "args": [
+        "test",
+        "-json",
+        "-tags=test_state_path_env",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "-run",
+        "^(TestSupervisorIntent_ReconcilePrune(BareKey|NilIntent|AlreadyBareKey)|TestUninstallSchedulerTasksForServer_(KeepsSiblingTask|ReclaimsWhenNoSibling)|TestListTasksForServer_FiltersSiblingTask)$",
+        "./internal/api"
+      ],
+      "exit_code": 0,
+      "seconds": 7.233671099995263,
+      "stdout": {
+        "bytes": 10601,
+        "sha256": "c7b91a21bae343dbaa333796c95bff0c2c8230fc3673a4e69c2ef59f7d5d4d38"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "events": {
+        "pass": {
+          "test": 12,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.06063720001839101,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published"
+    }
+  ],
+  "native": {
+    "schema": 1,
+    "started_utc": "2026-11-20T15:07:51.137838+00:00",
+    "runner_sha256": "c1eb1a4172bf89a308e06c65c0134aed404ae66e54d2b61907676917da4b7cce",
+    "powershell_script_sha256": "fbf2f3cb65e40ab64115f815397ff64e786fde43aed961ae26027a965628c128",
+    "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+    "source_commit": "b7831aabdb7162b3a39c78e73c3ab67558236d1d",
+    "source_executed": false,
+    "product_changed": false,
+    "task_mutations": [],
+    "filesystem_acl_writes": 0,
+    "raw_task_identifiers_retained": false,
+    "raw_definitions_retained": false,
+    "raw_error_streams_retained": false,
+    "actual_product_consumer_exercised": false,
+    "direct_child_deadline_seconds": 45,
+    "post_kill_drain_seconds": 5,
+    "whole_process_tree_deadline_enforced": false,
+    "completed": true,
+    "outcome": "RESOLVER_OBSERVATION_COMPLETE",
+    "pid": 32200,
+    "streams_complete": true,
+    "returncode": 0,
+    "direct_child_settled": true,
+    "stdout": {
+      "bytes": 895,
+      "sha256": "b81cae4cdb98fa245b030cc60999030d35df2817660066968224e096b274e52f"
+    },
+    "stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "result": {
+      "schema": 1,
+      "outcome": "RESOLVER_OBSERVATION_COMPLETE",
+      "phase": "com-after",
+      "completed": true,
+      "classification": "ERROR_OBSERVED",
+      "semantic_absence_verdict": null,
+      "atomicity_claim": false,
+      "source_executed": false,
+      "product_changed": false,
+      "task_mutations": [],
+      "selector_kind": "generated-literal-root-leaf",
+      "powershell_version": "5.1.22621.6133",
+      "module_version": "1.0.0.0",
+      "before": {
+        "outcome": "MISSING_HRESULT_OBSERVED",
+        "fault": {
+          "error_category": 14,
+          "chain": [
+            {
+              "type": "System.IO.FileNotFoundException",
+              "hresult": 2147942402
+            }
+          ],
+          "chain_truncated": false
+        }
+      },
+      "resolver": {
+        "outcome": "ERROR",
+        "fault": {
+          "error_category": 13,
+          "chain": [
+            {
+              "type": "Microsoft.PowerShell.Cmdletization.Cim.CimJobException",
+              "hresult": 2148734209
+            }
+          ],
+          "chain_truncated": false
+        }
+      },
+      "after": {
+        "outcome": "MISSING_HRESULT_OBSERVED",
+        "fault": {
+          "error_category": 14,
+          "chain": [
+            {
+              "type": "System.IO.FileNotFoundException",
+              "hresult": 2147942402
+            }
+          ],
+          "chain_truncated": false
+        }
+      }
+    },
+    "seconds": 1.4817944000242278,
+    "finished_utc": "2026-11-20T15:07:52.621091+00:00"
+  },
+  "native_parser": {
+    "schema": 1,
+    "observer_sha256": "c1eb1a4172bf89a308e06c65c0134aed404ae66e54d2b61907676917da4b7cce",
+    "script_sha256": "fbf2f3cb65e40ab64115f815397ff64e786fde43aed961ae26027a965628c128",
+    "runner_sha256": "1150cc8f20e4f083d19edbacf1569402668e868e8c23627b9ba0e880bd5cd65d",
+    "returncode": 0,
+    "seconds": 0.5695463999873027,
+    "stdout_bytes": 51,
+    "stdout_sha256": "e91124c2c5ee0988af2bd80625dd5996e70d7fe3012b21a46f107c3a2b1d6de7",
+    "stderr_bytes": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "script_executed": false,
+    "finished_utc": "2026-11-20T15:05:16.802452+00:00",
+    "completed": true,
+    "result": {
+      "errors": 0,
+      "tokens": 936,
+      "script_executed": false
+    }
+  },
+  "negative_control_confirmed": true,
+  "negative_control_rerun": false,
+  "raw_command_streams_verified": 46,
+  "raw_native_streams_retained": false,
+  "full_gates": {
+    "untagged": {
+      "status": "NOT_RUN",
+      "reason": "D-only state isolation is unqualified on this branch; four TestMain fences remain in separate PR658"
+    },
+    "tagged_api_cli": {
+      "status": "NOT_RUN",
+      "reason": "Has state isolation; known unqualified Product/entrypoint inputs and historical blockers remain. The changed prune/ownership contracts were selected directly."
+    }
+  },
+  "historical_full_97216816": {
+    "untagged_status": "FAIL",
+    "untagged_seconds": 400.641,
+    "tagged_api_cli_status": "FAIL",
+    "tagged_api_cli_seconds": 322.436
+  },
+  "whole_process_tree_deadline_enforced": false,
+  "native_task_mutations": [],
+  "native_product_prune_exercised": false,
+  "product_export_changed": false,
+  "general_absence_classifier_qualified": false,
+  "generated_utc": "2026-11-20T15:12:27.144718+00:00"
+}

@@ -1,0 +1,614 @@
+--- a/internal/api/install.go
++++ b/internal/api/install.go
+@@ -3692,6 +3692,18 @@
+ 	// Pass B / needsScheduler conditions keeps the client-config block + the
+ 	// intermediate supervisor-intent write inside the SAME rollback scope.
+ 	actions := selectedInstallActions(p, startTasks, skipPrune, skipTasks)
++	if actions.createEligible {
++		// A prior rollback must never refer to the current failed replacement.
++		// Windows root task names are case insensitive and may start with '\'.
++		for i, task := range p.SchedulerTasks {
++			name := strings.TrimPrefix(task.Name, `\`)
++			for _, prior := range p.SchedulerTasks[:i] {
++				if strings.EqualFold(name, strings.TrimPrefix(prior.Name, `\`)) {
++					return fmt.Errorf("duplicate scheduler task name %q in install plan", task.Name)
++				}
++			}
++		}
++	}
+ 	for _, notice := range p.Notices {
+ 		fmt.Fprintf(w, "  notice: %s\n", notice)
+ 	}
+@@ -3812,12 +3824,11 @@
+ 		} else if t.Trigger == "Weekly Sun 03:00" {
+ 			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
+ 		}
+-		// Snapshot any existing task before replacing it so rollback can
+-		// put it back. Prior to this, Delete-before-Create made install
+-		// idempotent but a mid-sequence failure left the user with
+-		// NOTHING — the old task was gone and the new one never got
+-		// created. ExportXML gives us the full Task Scheduler XML of
+-		// whatever was there; rollback feeds it to ImportXML to restore.
++		// Keep the prior definition before any deletion. Recovery of a failed
++		// Create must be conditional at the scheduler: an error can follow an
++		// applied creation, or another writer can occupy the name meanwhile.
++		var recovery scheduler.XMLCreator
++		var snapshotPath string
+ 		priorXML, exportErr := sch.ExportXML(spec.Name)
+ 		if exportErr != nil {
+ 			if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(priorXML) != 0 {
+@@ -3827,11 +3838,28 @@
+ 			if len(priorXML) == 0 {
+ 				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
+ 			}
++			var ok bool
++			recovery, ok = sch.(scheduler.XMLCreator)
++			if !ok {
++				return failAfterRollback(fmt.Errorf("restore task %s without replacement: %w", spec.Name, scheduler.ErrNotImplemented))
++			}
++			var err error
++			snapshotPath, err = retainInstallTaskSnapshot(spec.Name, priorXML)
++			if err != nil {
++				return failAfterRollback(fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err))
++			}
++			fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
+ 			if err := sch.Delete(spec.Name); err != nil {
+-				return failAfterRollback(fmt.Errorf("delete task %s before replacement: %w", spec.Name, err))
++				return failAfterRollback(fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err))
+ 			}
+ 		}
+ 		if err := sch.Create(spec); err != nil {
++			if recovery != nil {
++				return failAfterRollback(&InstallTaskRecoveryError{
++					TaskName: spec.Name, SnapshotPath: snapshotPath, Cause: err,
++					Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
++				})
++			}
+ 			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
+ 		}
+ 		taskName := spec.Name
+--- /dev/null
++++ b/internal/api/install_task_recovery.go
+@@ -0,0 +1,96 @@
++package api
++
++import (
++	"context"
++	"crypto/rand"
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"time"
++)
++
++// InstallTaskRecoveryError reports a failed replacement even when the prior
++// definition was registered again. A recovery error may follow an applied
++// registration; it is not proof of absence. SnapshotPath names retained private
++// recovery material, never XML or credentials in the diagnostic itself.
++type InstallTaskRecoveryError struct {
++	TaskName     string
++	SnapshotPath string
++	Cause        error
++	Recovery     error
++}
++
++func (e *InstallTaskRecoveryError) Error() string {
++	if e.Recovery != nil {
++		return fmt.Sprintf("create task %s: %v; restore prior definition without replacement: %v; recovery snapshot retained at %q", e.TaskName, e.Cause, e.Recovery, e.SnapshotPath)
++	}
++	return fmt.Sprintf("create task %s: %v; prior definition registered again; recovery snapshot retained at %q", e.TaskName, e.Cause, e.SnapshotPath)
++}
++
++func (e *InstallTaskRecoveryError) Unwrap() []error {
++	if e.Recovery == nil {
++		return []error{e.Cause}
++	}
++	return []error{e.Cause, e.Recovery}
++}
++
++// installTaskRecoverySnapshot records provenance, not a transaction outcome.
++// XML is base64 in JSON so its original encoding and bytes survive unchanged.
++// It does not contain separately stored scheduler credentials or object ACLs.
++type installTaskRecoverySnapshot struct {
++	Version       int    `json:"version"`
++	TaskName      string `json:"task_name"`
++	CapturedAtUTC string `json:"captured_at_utc"`
++	XML           []byte `json:"xml"`
++	XMLSHA256     string `json:"xml_sha256"`
++}
++
++func retainInstallTaskSnapshot(name string, xml []byte) (string, error) {
++	dir, err := DaemonStateDir()
++	if err != nil {
++		return "", err
++	}
++	return saveInstallTaskSnapshot(dir, "scheduler-recovery-"+rand.Text()+".json", name, xml)
++}
++
++// saveInstallTaskSnapshot deliberately retains every admitted snapshot, even
++// after successful replacement. Later install steps can still fail. There is
++// no automatic pruning or path-based cleanup of these recovery files.
++func saveInstallTaskSnapshot(dir, leaf, name string, xml []byte) (string, error) {
++	if err := validateStateFileName(leaf); err != nil {
++		return "", err
++	}
++	path := filepath.Join(dir, leaf)
++	if len(xml) == 0 || len(xml) > maxStateFileBytes || len(name) > maxStateFileBytes {
++		return path, fmt.Errorf("recovery snapshot input is empty or exceeds the state-file limit")
++	}
++	xmlHash := sha256.Sum256(xml)
++	raw, err := json.MarshalIndent(installTaskRecoverySnapshot{
++		Version: 1, TaskName: name, CapturedAtUTC: time.Now().UTC().Format(time.RFC3339Nano),
++		XML: xml, XMLSHA256: hex.EncodeToString(xmlHash[:]),
++	}, "", "  ")
++	if err != nil {
++		return path, err
++	}
++	raw = append(raw, '\n')
++	if len(raw) > maxStateFileBytes {
++		return path, fmt.Errorf("serialized recovery snapshot exceeds the %d-byte state-file limit", maxStateFileBytes)
++	}
++	// This generic byte writer creates a protected owner-only file and enforces
++	// the parent permission gate. Do not relax it for sensitive task arguments.
++	created, err := SecureCreateClientConfigIfMissing(path, raw)
++	if err != nil {
++		return path, err
++	}
++	if !created {
++		return path, fmt.Errorf("recovery snapshot path is already occupied: %w", os.ErrExist)
++	}
++	fileHash := sha256.Sum256(raw)
++	if _, err := ReadStateFileBeneathRootNoFollow(context.Background(), dir, []string{leaf}, hex.EncodeToString(fileHash[:])); err != nil {
++		return path, fmt.Errorf("verify newly created recovery snapshot: %w", err)
++	}
++	return path, nil
++}
+--- /dev/null
++++ b/internal/api/install_task_recovery_storage_test.go
+@@ -0,0 +1,61 @@
++package api
++
++import (
++	"bytes"
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestSaveInstallTaskSnapshotExactBytes(t *testing.T) {
++	for _, tc := range []struct {
++		name string
++		xml  []byte
++	}{
++		{"utf8", []byte("<Task>Привет-🙂</Task>")},
++		{"utf16le", []byte{0xff, 0xfe, 0x3c, 0, 0x54, 0, 0x3e, 0}},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			root := hardenedTempDir(t)
++			path, err := saveInstallTaskSnapshot(root, "scheduler-recovery-fixed.json", "literal task", tc.xml)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if path != readInstallRecoverySnapshot(t, root, "literal task", tc.xml) {
++				t.Fatal("returned path differs from saved snapshot")
++			}
++		})
++	}
++}
++
++func TestSaveInstallTaskSnapshotRefusesExistingFile(t *testing.T) {
++	root := hardenedTempDir(t)
++	const leaf = "scheduler-recovery-existing.json"
++	want := []byte("existing recovery material")
++	path := filepath.Join(root, leaf)
++	if err := os.WriteFile(path, want, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	gotPath, err := saveInstallTaskSnapshot(root, leaf, "task", []byte("<Task/>"))
++	if gotPath != path || !errors.Is(err, os.ErrExist) {
++		t.Fatalf("existing file = %q, %v; want occupied-path refusal", gotPath, err)
++	}
++	got, err := os.ReadFile(path)
++	if err != nil || !bytes.Equal(got, want) {
++		t.Fatal("existing recovery material was replaced")
++	}
++}
++
++func TestSaveInstallTaskSnapshotSizeLimitBeforeWrite(t *testing.T) {
++	for _, size := range []int{0, maxStateFileBytes * 3 / 4, maxStateFileBytes + 1} {
++		root := hardenedTempDir(t)
++		path, err := saveInstallTaskSnapshot(root, "scheduler-recovery-large.json", "task", bytes.Repeat([]byte{'x'}, size))
++		if err == nil {
++			t.Fatalf("snapshot size %d unexpectedly accepted", size)
++		}
++		if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
++			t.Fatalf("snapshot size %d wrote a file: %v", size, statErr)
++		}
++	}
++}
+--- a/internal/scheduler/scheduler.go
++++ b/internal/scheduler/scheduler.go
+@@ -76,6 +76,7 @@
+ // distinguish absent-but-expected tasks from schtasks communication
+ // failures.
+ var ErrTaskNotFound = errors.New("scheduler: task not found")
++var ErrTaskAlreadyExists = errors.New("scheduler: task already exists")
+ var ErrTaskNotRunning = errors.New("scheduler: task not running")
+ var ErrPermissionDenied = errors.New("scheduler: permission denied")
+ var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
+@@ -148,6 +149,15 @@
+ 	ListContext(ctx context.Context, prefix string) ([]TaskStatus, error)
+ }
+ 
++// XMLCreator optionally supports registering native XML without replacing an
++// occupied task name. A conflict returns ErrTaskAlreadyExists. XML alone does
++// not restore stored passwords or independently captured task permissions.
++// Registration is not proof of execution or readiness; ErrUnavailable leaves
++// the mutation outcome uncertain and must not prompt destructive compensation.
++type XMLCreator interface {
++	CreateXMLIfAbsent(name string, rawXML []byte) error
++}
++
+ // e2eSchedulerEnv, when set to "none", swaps scheduler.New()'s return
+ // value for a noop scheduler that records no tasks and reports empty
+ // results. Used exclusively by the Playwright E2E fixture so tests
+--- a/internal/scheduler/scheduler_com_windows.go
++++ b/internal/scheduler/scheduler_com_windows.go
+@@ -24,6 +24,7 @@
+ 	ExpectedCommand string `json:"expected_command,omitempty"`
+ 	ExpectedRole    string `json:"expected_role,omitempty"`
+ 	ExpectedOwner   string `json:"expected_owner,omitempty"`
++	XMLUTF16LE      []byte `json:"xml_utf16le,omitempty"`
+ }
+ 
+ type schedulerCOMTask struct {
+@@ -51,6 +52,16 @@
+  $result=$task.LastTaskResult
+  if($null -eq $result){throw 'task result unavailable'}
+  return [int]$result
++}
++function Get-NativeHRESULT($exception){
++ $native=$null;$last=$exception
++ while($null -ne $exception){
++  $last=$exception
++  if($exception -is [System.Runtime.InteropServices.COMException]){$native=$exception.HResult}
++  $exception=$exception.InnerException
++ }
++ if($null -eq $native){$native=$last.HResult}
++ return [uint32]([int64]$native -band 0xffffffffL)
+ }
+ function Get-OwnerSID([string]$owner){
+  if([string]::IsNullOrWhiteSpace($owner)){return ''}
+@@ -95,6 +106,21 @@
+  }catch{return $false}
+ }
+ $s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');
++if($r.operation -eq 'create_xml_if_absent'){
++ $phase='xml_decode'
++ if([string]::IsNullOrWhiteSpace([string]$r.name)){throw [System.FormatException]::new('empty task name')}
++ $raw=[Convert]::FromBase64String([string]$r.xml_utf16le)
++ if($raw.Length -le 2 -or $raw[0] -ne 255 -or $raw[1] -ne 254){throw [System.FormatException]::new('expected UTF-16LE XML with BOM')}
++ $decoder=[System.Text.UnicodeEncoding]::new($false,$false,$true);$xml=$decoder.GetString($raw,2,$raw.Length-2)
++ if([string]::IsNullOrWhiteSpace($xml)){throw [System.FormatException]::new('empty task XML')}
++ $phase='xml_register'
++ # TASK_CREATE | TASK_IGNORE_REGISTRATION_TRIGGERS. Never update an occupant.
++ # TASK_LOGON_NONE and empty credential overrides preserve the XML principal.
++ # https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_creation
++ $created=$f.RegisterTask([string]$r.name,$xml,34,$null,$null,0,$null)
++ if($null -eq $created){[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='xml_register_unconfirmed'}|ConvertTo-Json -Compress;exit}
++ [pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit
++};
+ # Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
+ $flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
+ if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId;last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
+@@ -118,7 +144,23 @@
+ $row=[ordered]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}
+ if($r.operation -eq 'status'){$row['last_result']=Get-TaskLastResult $t}
+ [pscustomobject]@{ok=$true;task=[pscustomobject]$row}|ConvertTo-Json -Compress -Depth 4
+-}catch{[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress}`
++}catch{
++ if($r.operation -eq 'create_xml_if_absent'){
++  $h=Get-NativeHRESULT $_.Exception;$code='{0:X8}' -f $h;$kind='scheduler_unavailable'
++  if($phase -eq 'xml_decode'){$kind='task_corrupt'}
++  elseif($code -eq '80070005'){$kind='permission_denied'}
++  elseif($phase -eq 'xml_register'){
++   switch($code){
++    '800700B7' {$kind='task_already_exists'}
++    {$_ -in @('80070057','80041316','80041317','80041318','80041319','8004131A','8004131D')} {$kind='task_corrupt'}
++   }
++  }
++  if([string]::IsNullOrEmpty($phase)){$phase='com'}
++  [pscustomobject]@{ok=$false;kind=$kind;phase=$phase;hresult=$h}|ConvertTo-Json -Compress
++ }else{
++  [pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress
++ }
++}`
+ 
+ var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (schedulerCOMResponse, error) {
+ 	raw, err := json.Marshal(request)
+@@ -156,6 +198,8 @@
+ 		return response, nil
+ 	}
+ 	switch response.Kind {
++	case "task_already_exists":
++		return response, ErrTaskAlreadyExists
+ 	case "task_absent":
+ 		return response, ErrTaskNotFound
+ 	case "task_not_running":
+--- /dev/null
++++ b/internal/scheduler/scheduler_xml_create_windows.go
+@@ -0,0 +1,66 @@
++//go:build windows
++
++package scheduler
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"strings"
++	"unicode"
++	"unicode/utf8"
++)
++
++// CreateXMLIfAbsent submits the complete XML with native TASK_CREATE semantics.
++// Registration triggers are suppressed, but an enabled task's other triggers
++// may still fire. Credentials and task-object permissions are not backed up by
++// XML alone. The operation never replaces, deletes, enables, or runs a task.
++func (w *windowsScheduler) CreateXMLIfAbsent(name string, rawXML []byte) error {
++	if !validRootTaskName(name) {
++		return fmt.Errorf("%w: invalid root task name", ErrTaskCorrupt)
++	}
++	prepared, err := prepareTaskXMLForImport(rawXML)
++	if err != nil {
++		return fmt.Errorf("%w: prepare task XML: %v", ErrTaskCorrupt, err)
++	}
++	hasContent := false
++	for i := 2; i < len(prepared); i += 2 {
++		unit := rune(prepared[i]) | rune(prepared[i+1])<<8
++		if !unicode.IsSpace(unit) {
++			hasContent = true
++			break
++		}
++	}
++	if !hasContent {
++		return fmt.Errorf("%w: empty task XML", ErrTaskCorrupt)
++	}
++	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{
++		Operation:  "create_xml_if_absent",
++		Name:       name,
++		XMLUTF16LE: prepared,
++	})
++	if err != nil {
++		if errors.Is(err, ErrUnavailable) {
++			return fmt.Errorf("create task XML: outcome uncertain: %w (phase %s, HRESULT 0x%08X)", err, response.Phase, response.HRESULT)
++		}
++		return fmt.Errorf("create task XML: %w (phase %s, HRESULT 0x%08X)", err, response.Phase, response.HRESULT)
++	}
++	return nil
++}
++
++// Accept a literal root name with at most one leading backslash. No cleanup or
++// wildcard/path normalization is performed before sending the name to COM.
++func validRootTaskName(name string) bool {
++	leaf := strings.TrimPrefix(name, `\`)
++	if !utf8.ValidString(name) || leaf == "" || leaf != strings.TrimSpace(leaf) || leaf == "." || leaf == ".." || strings.ContainsAny(leaf, `\/:*?"<>|`) {
++		return false
++	}
++	for _, r := range leaf {
++		if r < 0x20 {
++			return false
++		}
++	}
++	return true
++}
++
++var _ XMLCreator = (*windowsScheduler)(nil)
+--- /dev/null
++++ b/internal/scheduler/scheduler_xml_create_windows_test.go
+@@ -0,0 +1,201 @@
++//go:build windows
++
++package scheduler
++
++import (
++	"bytes"
++	"context"
++	"encoding/base64"
++	"encoding/binary"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"os/exec"
++	"strings"
++	"testing"
++	"unicode/utf16"
++
++	"mcp-local-hub/internal/process"
++)
++
++const xmlCreateFixture = `<?xml version="1.0" encoding="UTF-16"?><Task><RegistrationInfo><Description>§-Привет-🙂 &amp; $(throw 'data')</Description></RegistrationInfo><Principals><Principal id="P"><UserId>S-1-5-21-fixture</UserId><LogonType>Password</LogonType></Principal></Principals><Settings><Enabled>false</Enabled><Hidden>true</Hidden></Settings><Actions Context="P"><Exec><Command>D:\fixture\never.exe</Command><Arguments>&quot;literal\value&quot;</Arguments></Exec></Actions></Task>`
++
++func xmlCreateUTF16Fixture(text string) []byte {
++	units := utf16.Encode([]rune(text))
++	raw := make([]byte, 2+2*len(units))
++	raw[0], raw[1] = 0xff, 0xfe
++	for i, unit := range units {
++		binary.LittleEndian.PutUint16(raw[2+2*i:], unit)
++	}
++	return raw
++}
++
++func TestCreateXMLIfAbsentPreservesDefinitionInBase64Request(t *testing.T) {
++	want := xmlCreateUTF16Fixture(xmlCreateFixture)
++	for _, raw := range [][]byte{[]byte(xmlCreateFixture), append([]byte{0xef, 0xbb, 0xbf}, []byte(xmlCreateFixture)...), want} {
++		calls := 0
++		withCOMRunner(t, func(ctx context.Context, request schedulerCOMRequest) (schedulerCOMResponse, error) {
++			calls++
++			if _, ok := ctx.Deadline(); !ok {
++				t.Fatal("registration request has no deadline")
++			}
++			if request.Operation != "create_xml_if_absent" || request.Name != `\fixture-$('literal')` || !bytes.Equal(request.XMLUTF16LE, want) {
++				t.Fatalf("definition or literal name changed: %+v", request)
++			}
++			encoded, err := json.Marshal(request)
++			if err != nil {
++				t.Fatal(err)
++			}
++			var wire struct {
++				XML string `json:"xml_utf16le"`
++			}
++			if err := json.Unmarshal(encoded, &wire); err != nil {
++				t.Fatal(err)
++			}
++			decoded, err := base64.StdEncoding.DecodeString(wire.XML)
++			if err != nil || !bytes.Equal(decoded, want) {
++				t.Fatalf("wire XML differs: %v", err)
++			}
++			return schedulerCOMResponse{OK: true}, nil
++		})
++		if err := (&windowsScheduler{}).CreateXMLIfAbsent(`\fixture-$('literal')`, raw); err != nil {
++			t.Fatal(err)
++		}
++		if calls != 1 {
++			t.Fatalf("registration calls=%d, want one", calls)
++		}
++	}
++}
++
++func TestCreateXMLIfAbsentRejectsInputBeforeDispatch(t *testing.T) {
++	withCOMRunner(t, func(context.Context, schedulerCOMRequest) (schedulerCOMResponse, error) {
++		t.Fatal("invalid input reached scheduler bridge")
++		return schedulerCOMResponse{}, nil
++	})
++	for _, name := range []string{"", " ", `\`, `\\name`, `\folder\name`, "folder/name", ".", "..", " name", "name ", "name*", "name?", "name\x00", "name\n", string([]byte{0xff})} {
++		if err := (&windowsScheduler{}).CreateXMLIfAbsent(name, []byte(xmlCreateFixture)); !errors.Is(err, ErrTaskCorrupt) {
++			t.Fatalf("name=%q error=%v", name, err)
++		}
++	}
++	for _, raw := range [][]byte{nil, {}, {0xef, 0xbb, 0xbf}, {0xff, 0xfe}, {0xff, 0xfe, 0x41}, {0xff, 0xfe, 0x00, 0xd8}, {0xff}, {0xfe, 0xff, 0x00, 0x41}, []byte(" \t\r\n"), xmlCreateUTF16Fixture(" \t\r\n")} {
++		if err := (&windowsScheduler{}).CreateXMLIfAbsent(`\fixture`, raw); !errors.Is(err, ErrTaskCorrupt) {
++			t.Fatalf("XML=%x error=%v", raw, err)
++		}
++	}
++}
++
++func TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry(t *testing.T) {
++	for _, tc := range []struct {
++		name     string
++		response schedulerCOMResponse
++		cause    error
++		want     error
++	}{
++		{"conflict", schedulerCOMResponse{Kind: "task_already_exists", Phase: "xml_register", HRESULT: 0x800700b7}, nil, ErrTaskAlreadyExists},
++		{"permission", schedulerCOMResponse{Kind: "permission_denied", HRESULT: 0x80070005}, nil, ErrPermissionDenied},
++		{"corrupt", schedulerCOMResponse{Kind: "task_corrupt", HRESULT: 0x8004131a}, nil, ErrTaskCorrupt},
++		{"unconfirmed", schedulerCOMResponse{Kind: "scheduler_unavailable", Phase: "xml_register_unconfirmed"}, nil, ErrUnavailable},
++		{"lost reply", schedulerCOMResponse{OK: true}, context.DeadlineExceeded, ErrUnavailable},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			calls := 0
++			withCOMRunner(t, func(context.Context, schedulerCOMRequest) (schedulerCOMResponse, error) {
++				calls++
++				return tc.response, tc.cause
++			})
++			err := (&windowsScheduler{}).CreateXMLIfAbsent(`\fixture`, []byte(xmlCreateFixture))
++			if !errors.Is(err, tc.want) || calls != 1 {
++				t.Fatalf("error=%v calls=%d", err, calls)
++			}
++			if tc.cause != nil && !errors.Is(err, tc.cause) {
++				t.Fatalf("transport cause lost: %v", err)
++			}
++			if tc.want == ErrUnavailable && !strings.Contains(err.Error(), "outcome uncertain") {
++				t.Fatalf("mutation uncertainty omitted: %v", err)
++			}
++		})
++	}
++}
++
++// Replace the entire connection statement with a fake object before executing
++// the production script. These tests exercise PowerShell/JSON/exception behavior
++// but never connect to or mutate Windows Task Scheduler.
++func runXMLCreateScriptFixture(t *testing.T, request schedulerCOMRequest, registerBody string) schedulerCOMResponse {
++	t.Helper()
++	const connect = `$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');`
++	if strings.Count(schedulerCOMScript, connect) != 1 {
++		t.Fatal("COM connection fixture boundary changed")
++	}
++	fake := `$f=[pscustomobject]@{};$f|Add-Member ScriptMethod GetTasks {throw 'enumeration forbidden'};$f|Add-Member ScriptMethod RegisterTask {param($name,$xml,$flags,$userId,$password,$logonType,$sddl);` + registerBody + `};`
++	script := schedulerCOMUTF8Preamble + strings.Replace(schedulerCOMScript, connect, fake, 1)
++	raw, err := json.Marshal(request)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), schedulerCOMDeadline)
++	defer cancel()
++	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
++	process.NoConsole(cmd)
++	cmd.Stdin = bytes.NewReader(raw)
++	out, err := cmd.Output()
++	if err != nil {
++		t.Fatalf("script fixture failed: %v", err)
++	}
++	var response schedulerCOMResponse
++	if err := json.Unmarshal(out, &response); err != nil {
++		t.Fatalf("script fixture JSON=%q: %v", out, err)
++	}
++	return response
++}
++
++func TestXMLCreateCOMScriptPassesExactDataAndCreateOnlyFlags(t *testing.T) {
++	encoded := base64.StdEncoding.EncodeToString([]byte(xmlCreateFixture))
++	body := `$expected=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('` + encoded + `'));if($xml -cne $expected -or $name -cne [string]$r.name){throw 'data changed'};if($flags -ne 34 -or $logonType -ne 0 -or $null -ne $userId -or $null -ne $password -or $null -ne $sddl){throw 'registration policy changed'};return [pscustomobject]@{Path=$name}`
++	response := runXMLCreateScriptFixture(t, schedulerCOMRequest{
++		Operation: "create_xml_if_absent", Name: `\fixture-$('literal')`, XMLUTF16LE: xmlCreateUTF16Fixture(xmlCreateFixture),
++	}, body)
++	if !response.OK {
++		t.Fatalf("create-only request failed: %+v", response)
++	}
++}
++
++func TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT(t *testing.T) {
++	for _, tc := range []struct {
++		hresult uint32
++		kind    string
++	}{
++		{0x800700b7, "task_already_exists"},
++		{0x80070005, "permission_denied"},
++		{0x80070057, "task_corrupt"},
++		{0x80041316, "task_corrupt"},
++		{0x80041317, "task_corrupt"},
++		{0x80041318, "task_corrupt"},
++		{0x80041319, "task_corrupt"},
++		{0x8004131a, "task_corrupt"},
++		{0x8004131d, "task_corrupt"},
++		{0x80041322, "scheduler_unavailable"},
++	} {
++		t.Run(fmt.Sprintf("%08x", tc.hresult), func(t *testing.T) {
++			body := fmt.Sprintf(`$native=[System.Runtime.InteropServices.COMException]::new('ОШИБКА: file not found — untrusted message',%d);throw [System.Management.Automation.MethodInvocationException]::new('outer wrapper',$native)`, int32(tc.hresult))
++			response := runXMLCreateScriptFixture(t, schedulerCOMRequest{
++				Operation: "create_xml_if_absent", Name: `\fixture`, XMLUTF16LE: xmlCreateUTF16Fixture(xmlCreateFixture),
++			}, body)
++			if response.OK || response.Kind != tc.kind || response.HRESULT != tc.hresult || response.Phase != "xml_register" {
++				t.Fatalf("wrapped native result=%+v", response)
++			}
++		})
++	}
++}
++
++func TestXMLCreateCOMScriptRejectsMalformedEncodingAndUnconfirmedRegistration(t *testing.T) {
++	request := schedulerCOMRequest{Operation: "create_xml_if_absent", Name: `\fixture`, XMLUTF16LE: []byte{0xff, 0xfe, 0x00, 0xd8}}
++	response := runXMLCreateScriptFixture(t, request, `throw 'registration must not be called'`)
++	if response.OK || response.Kind != "task_corrupt" || response.Phase != "xml_decode" {
++		t.Fatalf("malformed input result=%+v", response)
++	}
++	request.XMLUTF16LE = xmlCreateUTF16Fixture(xmlCreateFixture)
++	response = runXMLCreateScriptFixture(t, request, `return $null`)
++	if response.OK || response.Kind != "scheduler_unavailable" || response.Phase != "xml_register_unconfirmed" {
++		t.Fatalf("unconfirmed mutation result=%+v", response)
++	}
++}

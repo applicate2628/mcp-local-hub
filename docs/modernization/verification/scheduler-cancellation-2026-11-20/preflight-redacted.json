@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "original_sha256": "fe34d29c9ce19ac9e51d002ab3cc21aa484a9c3c7f97e8bcff3efa8c2d77b8ea",
+  "scope": "Read-only initial source inspection failed on implicit cp1251 decoding; explicit UTF-8 inspection then succeeded. No product command was repeated to correct this preflight failure. Local paths and device identifiers are redacted.",
+  "records": {
+    "initial": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Process started with PID 29480 (shell: cmd)\nInitial output:\nTraceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\n    from pathlib import Path; import json,hashlib,re; r=Path.cwd(); rows=json.loads((r/'transfer-manifest.json').read_text()); assert all(len((r/f['name']).read_bytes())==f['bytes'] and hashlib.sha256((r/f['name']).read_bytes()).hexdigest()==f['sha256'] for f in rows); src=Path(r'<WORK_ROOT>\\mcp-r17-prune-snapshot-20261120\\source'); hits=[{'path':str(p.relative_to(src)),'line':i,'text':line.strip()} for p in (src/'internal/scheduler').glob('*.go') for i,line in enumerate(p.read_text(encoding='utf-8').splitlines(),1) if re.search(r'func (TestMain|init)\\(|t\\.Parallel\\(',line)]; print(json.dumps({'transfer_verified':len(rows),'package_initializers_parallel_tests':hits})); text=Path(r'C:\\msys64\\ucrt64\\lib\\go\\src\\os\\exec\\exec.go').read_text(); marker=text.find('case <-c.ctx.Done()'); print(text[max(0,marker-120):marker+180])\r\n                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^\r\n  File \"<USER_PROFILE>\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\pathlib\\__init__.py\", line 788, in read_text\r\n    return f.read()\r\n           ~~~~~~^^\r\n  File \"<USER_PROFILE>\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\encodings\\cp1251.py\", line 23, in decode\r\n    return codecs.charmap_decode(input,self.errors,decoding_table)[0]\r\n           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nUnicodeDecodeError: 'charmap' codec can't decode byte 0x98 in position 44474: character maps to <undefined>\r\n{\"transfer_verified\": 5, \"package_initializers_parallel_tests\": [{\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 19, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 112, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 188, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 224, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 283, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 427, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 461, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\entrypoint_migration_windows_test.go\", \"line\": 492, \"text\": \"t.Parallel()\"}, {\"path\": \"internal\\\\scheduler\\\\scheduler_create_conflict_windows_test.go\", \"line\": 23, \"text\": \"func TestMain(m *testing.M) {\"}]}\r\n\n✅ Process 29480 has finished execution"
+        },
+        {
+          "type": "text",
+          "text": "\n[executed on authorized device]"
+        }
+      ],
+      "structuredContent": null,
+      "isError": false
+    },
+    "explicit_utf8_followup": {
+      "status": "fulfilled",
+      "value": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Process started with PID 3800 (shell: cmd)\nInitial output:\nrrors.New(\"exec: command with a non-nil Cancel was not created with CommandContext\")\r\n\t}\r\n\tif c.ctx != nil {\r\n\t\tselect {\r\n\t\tcase <-c.ctx.Done():\r\n\t\t\treturn c.ctx.Err()\r\n\t\tdefault:\r\n\t\t}\r\n\t}\r\n\r\n\tchildFiles := make([]*os.File, 0, 3+len(c.ExtraFiles))\r\n\tstdin, err := c.childStdin()\r\n\tif err != nil {\r\n\t\treturn err\r\n\t}\r\n\n✅ Process 3800 has finished execution"
+          },
+          {
+            "type": "text",
+            "text": "\n[executed on authorized device]"
+          }
+        ],
+        "structuredContent": null,
+        "isError": false
+      }
+    }
+  }
+}

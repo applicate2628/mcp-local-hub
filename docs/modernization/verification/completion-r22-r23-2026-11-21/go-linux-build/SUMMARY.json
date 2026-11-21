@@ -1,0 +1,530 @@
+{
+  "adjacent_interpretation": "Original wrapper FAILED is retained: all 20 Windows roots passed; one Linux/macOS-only subtest skipped on Windows. No rerun or relabel of original receipt.",
+  "binaries_published": false,
+  "linux_execution_included": false,
+  "linux_execution_location": "Separate local Linux execution evidence",
+  "phases": [
+    {
+      "base": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_tree": "286c1579823bc14fd989ee037119f3826b307ab1",
+      "commands": [
+        {
+          "args": [
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.hooksPath=<SCHEDULER_R23_ROOT>\\runtime\\current-outcome-prepare\\empty-hooks",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            "-C",
+            "<SCHEDULER_R23_ROOT>",
+            "init",
+            "--template=",
+            "<SCHEDULER_R23_ROOT>\\source-pr660"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:09:47.093562+00:00",
+          "label": "init",
+          "scope_oracle_matched": null,
+          "seconds": 0.04948620009236038,
+          "started_utc": "2026-11-21T09:09:47.043736+00:00",
+          "tests": {}
+        },
+        {
+          "args": [
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.hooksPath=<SCHEDULER_R23_ROOT>\\runtime\\current-outcome-prepare\\empty-hooks",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            "-C",
+            "<SCHEDULER_R23_ROOT>\\source-pr660",
+            "fetch",
+            "--no-tags",
+            "--depth=1",
+            "https://github.com/applicate2628/mcp-local-hub.git",
+            "a63199628c1689b4b77a50abfc7432396a1893f4"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:10:02.585750+00:00",
+          "label": "fetch-exact",
+          "scope_oracle_matched": null,
+          "seconds": 15.488864700077102,
+          "started_utc": "2026-11-21T09:09:47.096639+00:00",
+          "tests": {}
+        },
+        {
+          "args": [
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.hooksPath=<SCHEDULER_R23_ROOT>\\runtime\\current-outcome-prepare\\empty-hooks",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
+            "-C",
+            "<SCHEDULER_R23_ROOT>\\source-pr660",
+            "checkout",
+            "--detach",
+            "a63199628c1689b4b77a50abfc7432396a1893f4"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:10:04.202482+00:00",
+          "label": "checkout-exact",
+          "scope_oracle_matched": null,
+          "seconds": 1.6156546999700367,
+          "started_utc": "2026-11-21T09:10:02.586508+00:00",
+          "tests": {}
+        },
+        {
+          "args": [
+            "-l",
+            "<SCHEDULER_R23_ROOT>\\scopes\\current-outcome\\candidate\\internal\\api\\install_task_rollback.go",
+            "<SCHEDULER_R23_ROOT>\\scopes\\current-outcome\\candidate\\internal\\api\\install_task_mutation_failure_test.go",
+            "<SCHEDULER_R23_ROOT>\\scopes\\current-outcome\\candidate\\internal\\api\\install_scheduler_snapshot_test.go",
+            "<SCHEDULER_R23_ROOT>\\scopes\\current-outcome\\candidate\\internal\\api\\install.go"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:10:04.867793+00:00",
+          "label": "gofmt-check",
+          "scope_oracle_matched": null,
+          "seconds": 0.03338759997859597,
+          "started_utc": "2026-11-21T09:10:04.834060+00:00",
+          "tests": {}
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 25,
+      "phase": "current-outcome-prepare",
+      "receipt_original_sha256": "16506fbd5bf47b1914bfbb83fdaf26b052a260071e1d92b51e156b0b71654dd0",
+      "state": "complete"
+    },
+    {
+      "base": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_tree": "286c1579823bc14fd989ee037119f3826b307ab1",
+      "commands": [
+        {
+          "args": [
+            "test",
+            "-overlay",
+            "<SCHEDULER_R23_ROOT>\\evidence\\current-outcome-control\\overlay.json",
+            "-json",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-p=1",
+            "-timeout=180s",
+            "-run=^(TestExecuteInstallToCurrentMutationFailureObservation|TestExecuteInstallToCurrentAndEarlierRecoveryNames|TestExecuteAdoptCurrentMutationFailurePreservesRecovery)$",
+            "./internal/api"
+          ],
+          "exit_code": 1,
+          "finished_utc": "2026-11-21T09:12:34.299412+00:00",
+          "label": "control",
+          "scope_oracle_matched": true,
+          "seconds": 40.379655500059016,
+          "started_utc": "2026-11-21T09:11:53.919547+00:00",
+          "tests": {
+            "fail": [
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_rejected_prior_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_external_definition",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_partial_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_rejected_absence_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_wrapped_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_partial_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation",
+              "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/delete",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/create",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "pass": [],
+            "skip": []
+          }
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 25,
+      "phase": "current-outcome-control",
+      "receipt_original_sha256": "a7374b03e7adf94878fe3d3e8b2dbdd280ab5cedac65b39dad44b7a1c72ffa5e",
+      "state": "complete"
+    },
+    {
+      "base": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_tree": "286c1579823bc14fd989ee037119f3826b307ab1",
+      "commands": [
+        {
+          "args": [
+            "test",
+            "-overlay",
+            "<SCHEDULER_R23_ROOT>\\evidence\\current-outcome-candidate\\overlay.json",
+            "-json",
+            "-race",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-p=1",
+            "-timeout=180s",
+            "-run=^(TestExecuteInstallToCurrentMutationFailureObservation|TestExecuteInstallToCurrentAndEarlierRecoveryNames|TestExecuteAdoptCurrentMutationFailurePreservesRecovery)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:13:42.237298+00:00",
+          "label": "candidate",
+          "scope_oracle_matched": true,
+          "seconds": 54.90742900001351,
+          "started_utc": "2026-11-21T09:12:47.329712+00:00",
+          "tests": {
+            "fail": [],
+            "pass": [
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_rejected_prior_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_external_definition",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_partial_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/delete_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_rejected_absence_confirmed",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_wrapped_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_observation_error",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_partial_absence",
+              "TestExecuteInstallToCurrentMutationFailureObservation/create_empty_success",
+              "TestExecuteInstallToCurrentMutationFailureObservation",
+              "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/delete",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery/create",
+              "TestExecuteAdoptCurrentMutationFailurePreservesRecovery",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          }
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 25,
+      "phase": "current-outcome-candidate",
+      "receipt_original_sha256": "133d01b5a913f647c6379b3ec30095554da2372ef47bcdb2c72f14af373c05d8",
+      "state": "complete"
+    },
+    {
+      "base": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_tree": "286c1579823bc14fd989ee037119f3826b307ab1",
+      "commands": [
+        {
+          "args": [
+            "test",
+            "-overlay",
+            "<SCHEDULER_R23_ROOT>\\evidence\\current-outcome-adjacent\\overlay.json",
+            "-json",
+            "-race",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-p=1",
+            "-timeout=180s",
+            "-run=^(TestExecuteInstallTo(CurrentTaskRecovery|RecoveryCapabilityRequired|RecoverySnapshotBeforeDelete|RecoverySnapshotFailureStopsReplacement|AbsentFailureHasNoRecovery|RejectsAliasedRecoveryNames|EarlierTaskRollback|RollbackCaptureFailureRetainsCreatedTask|RollbackOwnsCapturedBytes|RollbackContinuesAndPreservesEveryCause|RollbackPreservesClientErrorDomains|RollbackBackendCompatibility|SnapshotFailurePreservesTask|AbsentSnapshotCreatesWithoutDelete|AbsentSnapshotCreateConflictPreservesTask|DeleteFailurePreservesTask|SnapshotRefusalRollsBackEarlierTask)|TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater|TestExecuteAdoptSchedulerRecoveryPreservesProvenance|TestProviderInstallSchedulerRecoveryIsNotUnpublishedRollback)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:14:39.313423+00:00",
+          "label": "adjacent",
+          "scope_oracle_matched": null,
+          "seconds": 18.86736999999266,
+          "started_utc": "2026-11-21T09:14:20.445786+00:00",
+          "tests": {
+            "fail": [],
+            "pass": [
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance/later",
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance/current_uncertain",
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance/current_acknowledged",
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance/client_and_scheduler",
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance/lease_release_failure",
+              "TestExecuteAdoptSchedulerRecoveryPreservesProvenance",
+              "TestProviderInstallSchedulerRecoveryIsNotUnpublishedRollback/later",
+              "TestProviderInstallSchedulerRecoveryIsNotUnpublishedRollback/current",
+              "TestProviderInstallSchedulerRecoveryIsNotUnpublishedRollback",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/unavailable",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/partial_permission_error",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/unsupported",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/nil_success",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/empty_success",
+              "TestExecuteInstallToSnapshotFailurePreservesTask/conflicting_absence",
+              "TestExecuteInstallToSnapshotFailurePreservesTask",
+              "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete/direct",
+              "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete/wrapped",
+              "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete",
+              "TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask",
+              "TestExecuteInstallToDeleteFailurePreservesTask",
+              "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask/export",
+              "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask/delete",
+              "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask",
+              "TestExecuteInstallToCurrentTaskRecovery/restored",
+              "TestExecuteInstallToCurrentTaskRecovery/external_occupant",
+              "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_rejected",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery",
+              "TestExecuteInstallToRecoveryCapabilityRequired",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails",
+              "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+              "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+              "TestExecuteInstallToAbsentFailureHasNoRecovery",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/exact",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/case",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix",
+              "TestExecuteInstallToRejectsAliasedRecoveryNames",
+              "TestExecuteInstallToEarlierTaskRollback/restore_prior",
+              "TestExecuteInstallToEarlierTaskRollback/remove_new",
+              "TestExecuteInstallToEarlierTaskRollback/already_absent",
+              "TestExecuteInstallToEarlierTaskRollback/already_prior",
+              "TestExecuteInstallToEarlierTaskRollback/external_replacement",
+              "TestExecuteInstallToEarlierTaskRollback/read_error",
+              "TestExecuteInstallToEarlierTaskRollback/partial_read_error",
+              "TestExecuteInstallToEarlierTaskRollback/empty_read",
+              "TestExecuteInstallToEarlierTaskRollback/delete_rejected",
+              "TestExecuteInstallToEarlierTaskRollback/delete_applied_reply_lost",
+              "TestExecuteInstallToEarlierTaskRollback/delete_ack_without_effect",
+              "TestExecuteInstallToEarlierTaskRollback/absence_read_error",
+              "TestExecuteInstallToEarlierTaskRollback/restore_conflict",
+              "TestExecuteInstallToEarlierTaskRollback/restore_rejected",
+              "TestExecuteInstallToEarlierTaskRollback/restore_applied_reply_lost",
+              "TestExecuteInstallToEarlierTaskRollback/restore_ack_wrong_definition",
+              "TestExecuteInstallToEarlierTaskRollback/restored_read_error",
+              "TestExecuteInstallToEarlierTaskRollback",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/unavailable",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/partial_error",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/empty_success",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask/not_found",
+              "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask",
+              "TestExecuteInstallToRollbackOwnsCapturedBytes",
+              "TestExecuteInstallToRollbackContinuesAndPreservesEveryCause",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains/client_incomplete",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains/client_release_unconfirmed",
+              "TestExecuteInstallToRollbackPreservesClientErrorDomains",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/plain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_acknowledged",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_uncertain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/later_and_current",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater",
+              "TestExecuteInstallToRollbackBackendCompatibility/fresh_task_without_xml_creator",
+              "TestExecuteInstallToRollbackBackendCompatibility/skipped_scheduler",
+              "TestExecuteInstallToRollbackBackendCompatibility/noop_rejects_before_capture",
+              "TestExecuteInstallToRollbackBackendCompatibility",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": [
+              "TestExecuteInstallToRollbackBackendCompatibility/unsupported_platform"
+            ]
+          }
+        }
+      ],
+      "completed": false,
+      "error": "Qualification selected an unexpected skipped test: adjacent",
+      "observations": 20,
+      "phase": "current-outcome-adjacent",
+      "receipt_original_sha256": "a815f5cd1acdea287daff9e365c64cedf519f3b258f59082be2c0dca68d6f45f",
+      "state": "failed"
+    },
+    {
+      "base": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_tree": "286c1579823bc14fd989ee037119f3826b307ab1",
+      "commands": [
+        {
+          "args": [
+            "build",
+            "-overlay",
+            "<SCHEDULER_R23_ROOT>\\evidence\\current-outcome-build-vet\\overlay.json",
+            "./..."
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:15:54.135500+00:00",
+          "label": "build",
+          "scope_oracle_matched": true,
+          "seconds": 20.889258899958804,
+          "started_utc": "2026-11-21T09:15:33.245979+00:00",
+          "tests": {}
+        },
+        {
+          "args": [
+            "vet",
+            "-overlay",
+            "<SCHEDULER_R23_ROOT>\\evidence\\current-outcome-build-vet\\overlay.json",
+            "./..."
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:16:08.563478+00:00",
+          "label": "vet",
+          "scope_oracle_matched": true,
+          "seconds": 13.681089399964549,
+          "started_utc": "2026-11-21T09:15:54.882067+00:00",
+          "tests": {}
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 35,
+      "phase": "current-outcome-build-vet",
+      "receipt_original_sha256": "af3e9557ba515f1712f8de5b934c0b816b8fd06e077b23ac4d7f411daebb2abd",
+      "state": "complete"
+    },
+    {
+      "base": "ba17867125b3728fb734e90b383639a3ff9175ee",
+      "base_tree": "1c803a8ef8227fe6c289be69c7897aee1549372b",
+      "commands": [
+        {
+          "args": [
+            "-w",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\formatted\\linux.go",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\formatted\\linux_exec_percent_test.go"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T08:59:53.374404+00:00",
+          "label": "gofmt",
+          "scope_oracle_matched": null,
+          "seconds": 0.13226230000145733,
+          "started_utc": "2026-11-21T08:59:53.241791+00:00",
+          "tests": {}
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 25,
+      "phase": "linux-percent-prepare",
+      "receipt_original_sha256": "15f6da1a7e66445c45ea1c4e8b304b7b1b06a8fee7eceed47101ec7fea0e7074",
+      "state": "complete"
+    },
+    {
+      "base": "ba17867125b3728fb734e90b383639a3ff9175ee",
+      "base_tree": "1c803a8ef8227fe6c289be69c7897aee1549372b",
+      "binary": {
+        "bytes": 4941662,
+        "path": "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-control\\autostart.test",
+        "sha256": "34304a1abcc27a252c266e09122a2c5646da517c9814a132dcf07635767d6471"
+      },
+      "commands": [
+        {
+          "args": [
+            "test",
+            "-c",
+            "-p=1",
+            "-overlay",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-control\\overlay.json",
+            "-o",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-control\\autostart.test",
+            "./internal/autostart"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:00:24.680487+00:00",
+          "label": "compile",
+          "scope_oracle_matched": null,
+          "seconds": 17.077656300039962,
+          "started_utc": "2026-11-21T09:00:07.602558+00:00",
+          "tests": {}
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 25,
+      "overlay_sha256": "076729f5edb5ecf7e6fa5d8818a7e02b61b277156b5a676e236bcdc0c6d3b4b8",
+      "packed_binary": {
+        "bytes": 2844288,
+        "path": "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-control\\autostart.test.gz",
+        "sha256": "a9ab05baf559e6298c1f494c93023cea7c530596f3d523d6f34fd61561205f65"
+      },
+      "phase": "linux-percent-compile-control",
+      "receipt_original_sha256": "d9c617a8f7b74d107b5f64366594d956da3a6664ad0e7dd1c29c2b6a3bc22101",
+      "state": "complete"
+    },
+    {
+      "base": "ba17867125b3728fb734e90b383639a3ff9175ee",
+      "base_tree": "1c803a8ef8227fe6c289be69c7897aee1549372b",
+      "binary": {
+        "bytes": 4941998,
+        "path": "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-candidate\\autostart.test",
+        "sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182"
+      },
+      "commands": [
+        {
+          "args": [
+            "test",
+            "-c",
+            "-p=1",
+            "-overlay",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-candidate\\overlay.json",
+            "-o",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-candidate\\autostart.test",
+            "./internal/autostart"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:00:51.717400+00:00",
+          "label": "compile",
+          "scope_oracle_matched": null,
+          "seconds": 0.9931835000170395,
+          "started_utc": "2026-11-21T09:00:50.723911+00:00",
+          "tests": {}
+        },
+        {
+          "args": [
+            "vet",
+            "-overlay",
+            "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-candidate\\overlay.json",
+            "./internal/autostart"
+          ],
+          "exit_code": 0,
+          "finished_utc": "2026-11-21T09:00:57.349741+00:00",
+          "label": "vet",
+          "scope_oracle_matched": null,
+          "seconds": 5.008180300006643,
+          "started_utc": "2026-11-21T09:00:52.341121+00:00",
+          "tests": {}
+        }
+      ],
+      "completed": true,
+      "error": null,
+      "observations": 35,
+      "overlay_sha256": "a2b8e1c32b4c8f0144c31893351f62613f731683771ee7bdc10fc287a7b92a79",
+      "packed_binary": {
+        "bytes": 2844366,
+        "path": "<LINUX_BUILD_ROOT>\\linux-percent-work\\compile-candidate\\autostart.test.gz",
+        "sha256": "cea9de2836227bc791c98a36b489e10a77cfdd5da5a4ca4cc8414582bdcd64a0"
+      },
+      "phase": "linux-percent-compile-candidate",
+      "receipt_original_sha256": "425dbed22275e47de6d2a410788873aa1deeac99c969e9d59c2c61029547972b",
+      "state": "complete"
+    }
+  ],
+  "process_tree_deadline_enforced": false,
+  "process_tree_settlement_proven": false,
+  "schema": 1,
+  "source_interpretation": "Pinned base plus explicit overlay, not a whole published-head rerun",
+  "tests_rerun": false
+}

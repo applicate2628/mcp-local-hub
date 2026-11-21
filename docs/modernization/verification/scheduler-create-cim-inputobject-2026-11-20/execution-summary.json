@@ -1,0 +1,888 @@
+{
+  "schema": 1,
+  "code_commit": "b7831aabdb7162b3a39c78e73c3ab67558236d1d",
+  "code_tree": "b55002a0255e8cd226c84afa00499c12c2906c0e",
+  "parent": "9721681633440d3593d37ffb8f580e5d98440da2",
+  "candidate_identity": "parent tree plus two exact source hashes; candidate HEAD alone is not the changed tree",
+  "source_sha256": {
+    "internal/scheduler/scheduler_windows.go": "c812e1b25e1b2f80c1d95f94bcae36cb6752a6e3320d0e856f8193036d1f2409",
+    "internal/scheduler/scheduler_create_conflict_windows_test.go": "3e5d9d1d77ffcf36ba1b4335854b16d2120a2c73f26c67a5400bf768e0af2621"
+  },
+  "commands": [
+    {
+      "label": "clone",
+      "args": [
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "<WORK_ROOT>\\mcp-r17-last-result-20261120\\source",
+        "<WORK_ROOT>\\mcp-r17-create-conflict-20261120\\source"
+      ],
+      "exit_code": 0,
+      "seconds": 2.6593222999945283,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 157,
+        "sha256": "e028e90618c9863bb483c427e688d3b4cfb9e6b04f9fb8187b17ca2ba489c57c"
+      },
+      "phase": "prepare"
+    },
+    {
+      "label": "go-version",
+      "args": [
+        "version"
+      ],
+      "exit_code": 0,
+      "seconds": 0.14576210000086576,
+      "stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "prepare"
+    },
+    {
+      "label": "format-test",
+      "args": [
+        "-w",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07945489999838173,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "prepare"
+    },
+    {
+      "label": "original-create-control",
+      "args": [
+        "test",
+        "-json",
+        "-count=1",
+        "-timeout=60s",
+        "-run",
+        "^TestSchedulerCreateConflictPreservesDefinitionAndImportReplaces$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 1,
+      "seconds": 8.094631399959326,
+      "stdout": {
+        "bytes": 1857,
+        "sha256": "42927dc51b39f5a3021d93fb3558b460f44b8fb2256c9cdca1025cbfe8c21cab"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "prepare",
+      "events": {
+        "pass": {
+          "test": 0,
+          "package": 0
+        },
+        "fail": {
+          "test": 1,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      },
+      "skips": []
+    },
+    {
+      "label": "format-candidate",
+      "args": [
+        "-w",
+        "internal/scheduler/scheduler_windows.go",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11577320005744696,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "recover-prepare"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07803700002841651,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "recover-prepare"
+    },
+    {
+      "label": "create-conflict-race",
+      "args": [
+        "test",
+        "-json",
+        "-race",
+        "-count=2",
+        "-timeout=120s",
+        "-run",
+        "^TestSchedulerCreateConflictPreservesDefinitionAndImportReplaces$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 15.352171799982898,
+      "stdout": {
+        "bytes": 2459,
+        "sha256": "3ba39d2923056a1109003743a81ef1a68384e499b2bf3ebb5c08cdbc1e4ca39f"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused",
+      "events": {
+        "pass": {
+          "test": 2,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      },
+      "skips": []
+    },
+    {
+      "label": "scheduler-race",
+      "args": [
+        "test",
+        "-json",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 56.495373300043866,
+      "stdout": {
+        "bytes": 412924,
+        "sha256": "5b274a5faa5f72d7ab41c2e57c7840414b80d6564151ed113022aa9001990eb9"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused",
+      "events": {
+        "pass": {
+          "test": 444,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 2,
+          "package": 0
+        }
+      },
+      "skips": [
+        "TestSchedulerCOMTargetLifecycle",
+        "TestSchedulerCOMTargetLifecycle"
+      ]
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07504569995217025,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "focused"
+    },
+    {
+      "label": "build",
+      "args": [
+        "build",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 22.797491800040007,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "vet",
+      "args": [
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 11.585894999909215,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07546019996516407,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "build-vet"
+    },
+    {
+      "label": "stage-exact-files",
+      "args": [
+        "add",
+        "--",
+        "internal/scheduler/scheduler_windows.go",
+        "internal/scheduler/scheduler_create_conflict_windows_test.go"
+      ],
+      "exit_code": 0,
+      "seconds": 0.19976150000002235,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "fetch-exact-commit",
+      "args": [
+        "fetch",
+        "--no-tags",
+        "https://github.com/applicate2628/mcp-local-hub.git",
+        "b7831aabdb7162b3a39c78e73c3ab67558236d1d"
+      ],
+      "exit_code": 0,
+      "seconds": 12.099398299935274,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 128,
+        "sha256": "6b40ca0a70a6ea5e3c39201739fadeb90e6009378adb299c59756fcce79f333e"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "checkout-detached",
+      "args": [
+        "checkout",
+        "--detach",
+        "b7831aabdb7162b3a39c78e73c3ab67558236d1d"
+      ],
+      "exit_code": 0,
+      "seconds": 0.07724449993111193,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 192,
+        "sha256": "1a9c54fffd7f9f137375f9875a4d57acdada779687a2afb03f3dd0a68699a1ab"
+      },
+      "phase": "published-checkout"
+    },
+    {
+      "label": "create-conflict-race",
+      "args": [
+        "test",
+        "-json",
+        "-race",
+        "-count=2",
+        "-timeout=120s",
+        "-run",
+        "^TestSchedulerCreateConflictPreservesDefinitionAndImportReplaces$",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 7.10953530005645,
+      "stdout": {
+        "bytes": 2458,
+        "sha256": "e9376658b610448167ec7324aa734129898304d412eb60b533732ba1382f7eff"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "events": {
+        "pass": {
+          "test": 2,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      },
+      "skips": []
+    },
+    {
+      "label": "scheduler-race",
+      "args": [
+        "test",
+        "-json",
+        "-race",
+        "-count=2",
+        "-timeout=180s",
+        "./internal/scheduler"
+      ],
+      "exit_code": 0,
+      "seconds": 53.06255239993334,
+      "stdout": {
+        "bytes": 413040,
+        "sha256": "b9f3110875cab4fb2e8ff3b8d68915e4832a92ceff6dec5983ae7f0f8a0f7fd1"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published",
+      "events": {
+        "pass": {
+          "test": 444,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 2,
+          "package": 0
+        }
+      },
+      "skips": [
+        "TestSchedulerCOMTargetLifecycle",
+        "TestSchedulerCOMTargetLifecycle"
+      ]
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.060541000100784004,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "phase": "published"
+    }
+  ],
+  "native": {
+    "initial_protection_failure": {
+      "schema": 1,
+      "started_utc": "2026-11-20T13:08:05.932518+00:00",
+      "runner_sha256": "810e4e4ab0bc39a9b74a93f4911e0b502ddbaf8a049ab7d412f82b62687d39e6",
+      "powershell_script_sha256": "4274bfd3a74396851299cac9b64c2e4308d71cf291c5405ed95db7beac77ec20",
+      "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+      "deadline_seconds": 45,
+      "whole_process_tree_deadline_enforced": false,
+      "source_commit": "9721681633440d3593d37ffb8f580e5d98440da2",
+      "source_executed": false,
+      "task_mutations": [],
+      "completed": false,
+      "passed": false,
+      "pid": 13788,
+      "returncode": 0,
+      "direct_child_settled": true,
+      "stdout": {
+        "bytes": 239,
+        "sha256": "644940a77de7b7d13997726d91705c5d679e126b03153bb14ca6f5696967ade6"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": {
+        "schema": 1,
+        "outcome": "INCOMPLETE",
+        "phase": "protect",
+        "task_mutations": [],
+        "atomicity_claim": false,
+        "product_changed": false,
+        "completed": false,
+        "error_type": "System.Management.Automation.MethodInvocationException",
+        "error_hresult": -2146233087
+      },
+      "seconds": 1.2163605000823736,
+      "finished_utc": "2026-11-20T13:08:07.150305+00:00"
+    },
+    "inputobject": {
+      "schema": 1,
+      "started_utc": "2026-11-20T13:17:14.607390+00:00",
+      "runner_sha256": "2733d9b6b8817c14e1169d82f6843ebc8a7752dbb87bda27bfee54fc6ad2235b",
+      "powershell_script_sha256": "960496a00e38367eb967eefe09d1aff873a2c348ac07c9fcccc7a5c708f8ea6e",
+      "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+      "deadline_seconds": 45,
+      "whole_process_tree_deadline_enforced": false,
+      "source_commit": "9721681633440d3593d37ffb8f580e5d98440da2",
+      "source_executed": false,
+      "task_mutations": [],
+      "completed": true,
+      "passed": false,
+      "raw_definitions_retained": false,
+      "raw_error_streams_retained": false,
+      "filesystem_acl_writes": 0,
+      "pid": 16688,
+      "returncode": 0,
+      "direct_child_settled": true,
+      "stdout": {
+        "bytes": 1093,
+        "sha256": "75eeeb9c855c5382d01ec6e6b7e891453de5a288c7793c6a1765273da3d35871"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": {
+        "schema": 1,
+        "outcome": "MISMATCH",
+        "phase": "consumer",
+        "task_mutations": [],
+        "atomicity_claim": false,
+        "product_changed": false,
+        "module_versions": [
+          {
+            "name": "ScheduledTasks",
+            "version": "1.0.0.0"
+          }
+        ],
+        "powershell_version": "5.1.22621.6133",
+        "com_before": {
+          "bytes": 1427,
+          "sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+          "non_ascii_code_units": 1
+        },
+        "hidden": false,
+        "cim_type": "Microsoft.Management.Infrastructure.CimInstance",
+        "cim_class": "MSFT_ScheduledTask",
+        "selector_case_variant": true,
+        "cim_name_matches_com_ordinal": true,
+        "exact_selection": true,
+        "cim_export": {
+          "bytes": 2023,
+          "sha256": "c8db5b364d923253b251cf25729a36b7bed1376c1538785b51c1ca07d436c692",
+          "non_ascii_code_units": 1
+        },
+        "export_seconds": 0.0657045,
+        "output_count": 1,
+        "com_after": {
+          "bytes": 1427,
+          "sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+          "non_ascii_code_units": 1
+        },
+        "definition_stable": true,
+        "equal_to_com_before": false,
+        "equal_to_com_after": false,
+        "task_xml_namespace": "http://schemas.microsoft.com/windows/2004/02/mit/task",
+        "xml_parse_passed": true,
+        "actual_product_consumer_exercised": false,
+        "completed": true
+      },
+      "seconds": 3.1715571000240743,
+      "finished_utc": "2026-11-20T13:17:17.780302+00:00"
+    },
+    "structure": {
+      "schema": 1,
+      "started_utc": "2026-11-20T13:25:06.351854+00:00",
+      "runner_sha256": "c1f5dfaac5795ca957bd82da195b53d6765da0028adbc5fa6794ae8374c61eb5",
+      "powershell_script_sha256": "2998fc72b8f8ee030ee529f0bb715be99e814ae5e8a8f9f66b44b8dfba8c637c",
+      "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+      "deadline_seconds": 45,
+      "whole_process_tree_deadline_enforced": false,
+      "source_commit": "9721681633440d3593d37ffb8f580e5d98440da2",
+      "source_executed": false,
+      "task_mutations": [],
+      "completed": true,
+      "passed": true,
+      "raw_definitions_retained": false,
+      "raw_error_streams_retained": false,
+      "filesystem_acl_writes": 0,
+      "pid": 46208,
+      "returncode": 0,
+      "direct_child_settled": true,
+      "stdout": {
+        "bytes": 5397,
+        "sha256": "77f903c565401976b903845c13277a61d7b3009b9980e49ad849417df872d36d"
+      },
+      "stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": {
+        "schema": 1,
+        "outcome": "COMPARISON_COMPLETE",
+        "phase": "structural-comparison",
+        "task_mutations": [],
+        "atomicity_claim": false,
+        "product_changed": false,
+        "module_versions": [
+          {
+            "name": "ScheduledTasks",
+            "version": "1.0.0.0"
+          }
+        ],
+        "powershell_version": "5.1.22621.6133",
+        "com_before": {
+          "bytes": 1427,
+          "sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+          "non_ascii_code_units": 1
+        },
+        "hidden": false,
+        "cim_type": "Microsoft.Management.Infrastructure.CimInstance",
+        "cim_class": "MSFT_ScheduledTask",
+        "selector_case_variant": true,
+        "cim_name_matches_com_ordinal": true,
+        "exact_selection": true,
+        "cim_export": {
+          "bytes": 2023,
+          "sha256": "c8db5b364d923253b251cf25729a36b7bed1376c1538785b51c1ca07d436c692",
+          "non_ascii_code_units": 1
+        },
+        "export_seconds": 0.066646,
+        "output_count": 1,
+        "canonical_name_export": {
+          "bytes": 1427,
+          "sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+          "non_ascii_code_units": 1
+        },
+        "inputobject_equals_canonical_bytes": false,
+        "com_after": {
+          "bytes": 1427,
+          "sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+          "non_ascii_code_units": 1
+        },
+        "definition_stable": true,
+        "equal_to_com_before": false,
+        "equal_to_com_after": false,
+        "structural_comparisons": {
+          "com_to_inputobject": {
+            "equal": false,
+            "before_elements": 26,
+            "after_elements": 41,
+            "difference_count": 23,
+            "truncated": false,
+            "differences": [
+              {
+                "path": "/Task[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Actions[1]/@Context",
+                "kind": "removed-attribute"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]/RunLevel[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]/UserId[1]/text()",
+                "kind": "changed-text"
+              },
+              {
+                "path": "/Task[1]/RegistrationInfo[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/RegistrationInfo[1]/SecurityDescriptor[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/AllowHardTerminate[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/AllowStartOnDemand[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/DisallowStartOnRemoteAppSession[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Enabled[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Hidden[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]/Duration[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]/WaitTimeout[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Priority[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/RunOnlyIfIdle[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/RunOnlyIfNetworkAvailable[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/StartWhenAvailable[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/WakeToRun[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Triggers[1]/LogonTrigger[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Triggers[1]/LogonTrigger[1]/Enabled[1]",
+                "kind": "added-element"
+              }
+            ]
+          },
+          "com_to_canonical_name": {
+            "equal": true,
+            "before_elements": 26,
+            "after_elements": 26,
+            "difference_count": 0,
+            "truncated": false,
+            "differences": []
+          },
+          "canonical_name_to_inputobject": {
+            "equal": false,
+            "before_elements": 26,
+            "after_elements": 41,
+            "difference_count": 23,
+            "truncated": false,
+            "differences": [
+              {
+                "path": "/Task[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Actions[1]/@Context",
+                "kind": "removed-attribute"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]/RunLevel[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Principals[1]/Principal[1]/UserId[1]/text()",
+                "kind": "changed-text"
+              },
+              {
+                "path": "/Task[1]/RegistrationInfo[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/RegistrationInfo[1]/SecurityDescriptor[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/AllowHardTerminate[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/AllowStartOnDemand[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/DisallowStartOnRemoteAppSession[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Enabled[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Hidden[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]/Duration[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/IdleSettings[1]/WaitTimeout[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/Priority[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/RunOnlyIfIdle[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/RunOnlyIfNetworkAvailable[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/StartWhenAvailable[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Settings[1]/WakeToRun[1]",
+                "kind": "added-element"
+              },
+              {
+                "path": "/Task[1]/Triggers[1]/LogonTrigger[1]",
+                "kind": "changed-child-sequence"
+              },
+              {
+                "path": "/Task[1]/Triggers[1]/LogonTrigger[1]/Enabled[1]",
+                "kind": "added-element"
+              }
+            ]
+          }
+        },
+        "canonical_name_equals_com_before": true,
+        "normalization": "Ignore declaration, namespace prefixes and whitespace between element-only children; preserve element order, leaf text and attributes; reject comments, mixed content and xml:space",
+        "semantic_equivalence_claimed": false,
+        "actual_product_consumer_exercised": false,
+        "completed": true
+      },
+      "seconds": 1.768256300012581,
+      "finished_utc": "2026-11-20T13:25:08.121752+00:00"
+    }
+  },
+  "recovered_control_rerun": false,
+  "raw_command_streams_verified": 38,
+  "full_gates": {
+    "untagged": {
+      "status": "NOT_RUN",
+      "reason": "D-only state isolation not qualified on this branch; four TestMain fences belong to separate PR658"
+    },
+    "tagged_api_cli": {
+      "status": "NOT_RUN",
+      "reason": "Has state isolation; unchanged unqualified Product/entrypoint inputs and historical blockers; no new discriminating hypothesis"
+    }
+  },
+  "historical_full_97216816": {
+    "untagged_status": "FAIL",
+    "untagged_seconds": 400.641,
+    "tagged_api_cli_status": "FAIL",
+    "tagged_api_cli_seconds": 322.436
+  },
+  "whole_process_tree_deadline_enforced": false,
+  "native_task_mutations": [],
+  "raw_native_xml_retained": false,
+  "raw_hashes_probe_streams_retained": false,
+  "semantic_equivalence_claimed": false,
+  "product_export_changed": false,
+  "generated_utc": "2026-11-20T13:31:55.244939+00:00"
+}

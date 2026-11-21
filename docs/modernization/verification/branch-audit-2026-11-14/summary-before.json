@@ -1,0 +1,17 @@
+{
+  "snapshot": "before",
+  "master": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+  "branches": 93,
+  "open_prs": 19,
+  "all_pr_records": 637,
+  "branch_classes": {
+    "merged-pr-retained-ref": 49,
+    "closed-pr-not-ancestry-proven": 10,
+    "contained-in-master": 12,
+    "open-pr": 9,
+    "unassociated-not-proven": 1,
+    "protected-active-session": 11,
+    "default": 1
+  },
+  "exact_duplicate_open_pairs": 0
+}

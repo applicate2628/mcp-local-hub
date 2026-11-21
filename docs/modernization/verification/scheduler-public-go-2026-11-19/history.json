@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "format_check_failure": {
+    "schema": 1,
+    "started_utc": "2026-11-19T18:05:53.091019+00:00",
+    "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+    "source_tree": "f4b20c7ff7c0e0224f056cd9d8ec6b15013dff2a",
+    "source_sha256_before": {
+      "internal/scheduler/scheduler.go": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825",
+      "internal/scheduler/scheduler_windows.go": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c",
+      "internal/scheduler/scheduler_com_windows.go": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+    },
+    "source_clean_before": true,
+    "probe_sha256": "c5573cef70c77c1ccb9cb050ee5cd19747dacf6aed2abde4cb90bc6bca175d9c",
+    "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1",
+    "windows_version": [
+      10,
+      0,
+      22631
+    ],
+    "executables": {
+      "go_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+      "gofmt_sha256": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+      "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8"
+    },
+    "environment": {
+      "GOENV": "off",
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "GOVCS": "*:off",
+      "GOWORK": "off",
+      "GOFLAGS": "-mod=readonly",
+      "GOTELEMETRY": "off",
+      "CGO_ENABLED": "0",
+      "GOMAXPROCS": "4"
+    },
+    "scheduler_override_present": false,
+    "all_working_paths_inside_approved_root": true,
+    "commands": [
+      {
+        "name": "go-version",
+        "arguments": [
+          "go",
+          "version"
+        ],
+        "started_utc": "2026-11-19T18:05:53.354221+00:00",
+        "process_start_attempted": true,
+        "settled": true,
+        "exit_code": 0,
+        "finished_utc": "2026-11-19T18:05:53.377482+00:00",
+        "seconds": 0.02283,
+        "stdout_bytes": 34,
+        "stderr_bytes": 0,
+        "stdout_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "gofmt",
+        "arguments": [
+          "gofmt",
+          "-d",
+          "<source>/docs/modernization/verification/scheduler-public-go-2026-11-19/probe.go"
+        ],
+        "started_utc": "2026-11-19T18:05:53.378824+00:00",
+        "process_start_attempted": true,
+        "settled": true,
+        "exit_code": 1,
+        "finished_utc": "2026-11-19T18:05:53.769219+00:00",
+        "seconds": 0.389995,
+        "stdout_bytes": 1245,
+        "stderr_bytes": 0,
+        "stdout_sha256": "93cdfe1898c890787f3cd49dad5ef1af8478122ae0b19c4838622278ad77123d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "staging_disposition": "moved_to_trash_with_verified_retained_copy",
+    "error": "gofmt returned a nonzero exit code",
+    "whole_process_tree_deadline_enforced": false,
+    "go_version": "go version go1.27.4 windows/amd64",
+    "staging_absent_after_move": true,
+    "trash_copy_sha256": "c5573cef70c77c1ccb9cb050ee5cd19747dacf6aed2abde4cb90bc6bca175d9c",
+    "source_unchanged": true,
+    "source_head_after": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+    "source_tree_after": "f4b20c7ff7c0e0224f056cd9d8ec6b15013dff2a",
+    "source_clean_after": true,
+    "source_sha256_after": {
+      "internal/scheduler/scheduler.go": "f13244c94d13ab424e55a8fee74669c17790a83ef93e7f10e0b954813001a825",
+      "internal/scheduler/scheduler_windows.go": "d2d286ea3c43ea1337dbf1ec7125557d58539f7868410ad1edf38fdcde35588c",
+      "internal/scheduler/scheduler_com_windows.go": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+    },
+    "finished_utc": "2026-11-19T18:05:53.897680+00:00"
+  },
+  "format_launcher": {
+    "runner_exit_code": 1,
+    "completed_utc": "2026-11-19T18:05:53.908906+00:00",
+    "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1"
+  },
+  "successful_launcher": {
+    "runner_exit_code": 0,
+    "completed_utc": "2026-11-19T18:09:43.270069+00:00",
+    "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1"
+  },
+  "remote_source_files": {
+    "execution": {
+      "bytes": 5098,
+      "sha256": "fbac5ba3273ecaff173446870c9666616de470cbf0b9a304ef433edd38f55105"
+    },
+    "probe_stdout": {
+      "bytes": 3074,
+      "sha256": "0a7f730d0d08715b189d82b23a78b0c38159543111984129772dd4de75589780"
+    },
+    "launcher": {
+      "bytes": 170,
+      "sha256": "422376498617cb45e79951a5a12e2f574879a66c29c40ff5f70f2543e1bb885f"
+    },
+    "format_failure": {
+      "bytes": 3660,
+      "sha256": "1d265029670a14276ce306259759710b29d24d1602ffe5ab9924a5f8fb28984c"
+    },
+    "format_launcher": {
+      "bytes": 170,
+      "sha256": "fe1b1d0cf3ddc11066444bf9c8310c7852ea2d71ab34dbbfceffdc7ae7bb2907"
+    },
+    "format_diff": {
+      "bytes": 1245,
+      "sha256": "93cdfe1898c890787f3cd49dad5ef1af8478122ae0b19c4838622278ad77123d"
+    }
+  },
+  "notes": [
+    "The first attempt stopped at gofmt before build or Scheduler API calls.",
+    "Only whitespace alignment changed between the two probe source hashes.",
+    "Numeric child and runner exit codes are observed; this does not assert a process-tree deadline."
+  ],
+  "saved_principal_form_inspection": {
+    "source_files_verified": {
+      "status-visible.json": "9d80a5c9d9be48988cc50b703687d9f652e92a1855f165f3c5f8662a56b50ad3",
+      "export-visible.json": "9d80a5c9d9be48988cc50b703687d9f652e92a1855f165f3c5f8662a56b50ad3",
+      "status-hidden.json": "23d2b3f52fe7409b23258de32c4169fec5f09152901ad047b1ad93fd2eb700dc",
+      "export-hidden.json": "23d2b3f52fe7409b23258de32c4169fec5f09152901ad047b1ad93fd2eb700dc",
+      "list-visible-only.json": "0dbdd20752c9dfd2ed9a667eec94befda1340b605ee04e875d05228e77282204"
+    },
+    "saved_principal_forms": [
+      {
+        "file": "status-visible.json",
+        "owner_is_sid": false,
+        "owner_has_domain_separator": false
+      },
+      {
+        "file": "export-visible.json",
+        "owner_is_sid": false,
+        "owner_has_domain_separator": false
+      },
+      {
+        "file": "status-hidden.json",
+        "owner_is_sid": false,
+        "owner_has_domain_separator": false
+      },
+      {
+        "file": "export-hidden.json",
+        "owner_is_sid": false,
+        "owner_has_domain_separator": false
+      },
+      {
+        "file": "list-visible-only.json",
+        "owner_is_sid": false,
+        "owner_has_domain_separator": false
+      }
+    ],
+    "new_scheduler_calls": 0
+  }
+}

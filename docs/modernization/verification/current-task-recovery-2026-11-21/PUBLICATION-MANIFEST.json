@@ -1,0 +1,315 @@
+{
+  "schema": 1,
+  "description": "Exact publication inputs; this manifest excludes itself and includes the amended board. Commit identity is recorded after publication.",
+  "code_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "evidence_parent": "530a24978f573769ed59088a27300cdcb092a71d",
+  "created_at_moscow": "2026-11-21T03:11:06.281554+03:00",
+  "files": [
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/ACCEPTANCE.md",
+      "bytes": 4658,
+      "sha256": "a98e3ef7136c2c106cae8e4b8788ad637c7013d490734bce8ba93184ff2f2ced",
+      "git_blob": "52bdcf657abd5c56696105b72586e9c47dbb5932"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/AUDIT.md",
+      "bytes": 19036,
+      "sha256": "2156636f4b025814f4f0b280d9fba48af6af8a6109b553fbe8ffd8eb5cc1499c",
+      "git_blob": "b866c3d529495e35df8af01683051cbf7cfa8893"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/EVIDENCE-REVIEW.md",
+      "bytes": 22338,
+      "sha256": "745ee6f7e4fe07b54a5c1b0ea9ddd857b572662e0fa9ebaacf0d36ab24b49eb5",
+      "git_blob": "5e4362285bcc18decca4f18434cc15c487a66784"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/INDEPENDENT-REVIEW.md",
+      "bytes": 97767,
+      "sha256": "f5070718c63c74536beab7667b2519c9a131f91c0f66ca51dfcd14f692073bfd",
+      "git_blob": "e85f567f8fb8d5cb7d97934e4d817c46f73169c3"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/MANIFEST.json",
+      "bytes": 1592554,
+      "sha256": "927744c1bc7209816e01074c2619cf03750c6813d3167e8dcc3f6b150bc82df2",
+      "git_blob": "756517e0e918a59d95a852a1f26a8e66278ecd14"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/NATIVE-DESIGN.md",
+      "bytes": 31078,
+      "sha256": "d8a345beee3c7606d3b58f656b2af237ad72ae1551c3f17c694c419bcdd8f378",
+      "git_blob": "de1ec68fa63a433e6050a8c4d7344044218d4b2d"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/NATIVE-DIAGNOSIS.md",
+      "bytes": 18876,
+      "sha256": "cba8fe29a93ba6bdac516dfce6005b64a124cfe9fa05d02cca2024eb54be0ae8",
+      "git_blob": "8bf26666a6f55bec7953eb5bd3ee140a19277815"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/NATIVE-FAILURE-REVIEW.md",
+      "bytes": 45546,
+      "sha256": "e5ea93ce8600a9a486cda16a78aa25c876b5475e3f36762e2976d8823759383e",
+      "git_blob": "88a94d2b269e6a935ef21c6761aaa4460acafd43"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/PACKAGING-REVIEW.md",
+      "bytes": 32971,
+      "sha256": "d6e0251426e03c000a1c45d9675c89c86dd16b831dfff80fa6382a3dddeea05e",
+      "git_blob": "b8a2a5bba3bb08f9891d7c2be24d4037fd05ef26"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/QUEUE.md",
+      "bytes": 22997,
+      "sha256": "47b17bc6149a81e6574add9fb8d2bfe1c098701a7397e35f9cb3b129eb31f70c",
+      "git_blob": "c9282ce186e81c29dfb878c1959278a74fbd0402"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/README.md",
+      "bytes": 5615,
+      "sha256": "dfb4935283ee652d9055c0f67c97635863a316f79686a6b044d34e8d9c75f359",
+      "git_blob": "a3962179224c88d27a416471bbc15d8720735e5e"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/RESULTS.md",
+      "bytes": 22198,
+      "sha256": "fecf64296f0fbe8cd70d04520d31bf16d89dc44171b85d903746b97dce6bae69",
+      "git_blob": "15e133580d6ac26da816e3ac5a700e39f74c9b78"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/SCOPE-NEXT.md",
+      "bytes": 5210,
+      "sha256": "2e05dfd6620dafebaf34904b53077e9a12a990d687149f0b689c9393c6e09e64",
+      "git_blob": "38a4b8871f23cf3846e04ed9f8381f396e2fb950"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/archive-metadata.json",
+      "bytes": 989,
+      "sha256": "b938f662f80719230bd4eec8d40a69f1a0359f41ea895e199f9a2adbd45e4208",
+      "git_blob": "fee69fa1499384e69ff508710b4c77684d74f57a"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/board-amendment-audit.json",
+      "bytes": 3140,
+      "sha256": "f6d54a42f0a2d8da9da64b77e0f844c52a0e34ab5c9395d37ae37c20655029ef",
+      "git_blob": "115d3b3d659e8c7ecb581b2b8013d820b932a8c6"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/candidate.patch",
+      "bytes": 38332,
+      "sha256": "c0d88845076887b04d4a55da35c57dc6df49511f68575fad776f0a2dbfed4c2d",
+      "git_blob": "ef98876d5976d3525310f05109b786ab613c17d5"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/check_recovery.py",
+      "bytes": 32127,
+      "sha256": "65e59ab4cc861677fa5f514c6fcc1e9b4ff503c4bc4dc3a6796a8f8704b14995",
+      "git_blob": "677568303b7d3dc755ca5658d3db3cd041741950"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/checkout_published.py",
+      "bytes": 3291,
+      "sha256": "7dd36a8c3daaf38729bd39a47f5ee2feafca259561a79d58d9ec0c2461a35e98",
+      "git_blob": "f95e89aa39cda28930360b3fd33cd28fdc120b85"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/cleanup-transfers.json",
+      "bytes": 21023,
+      "sha256": "7368b49afe4432ab908262e61ccd4f71395b8b77679a992fa50fb6eec8a7e803",
+      "git_blob": "846972162dcffc063f24e167c52ace0c23958be3"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/cleanup_run.py",
+      "bytes": 5127,
+      "sha256": "b8d94e765b022344868128d57dd0f5600497d5b9bf4f28e58670e9fd59b1190f",
+      "git_blob": "15dba1c139e3bb2bdd3e8949c7a00f888571b458"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/code-publication.json",
+      "bytes": 2464,
+      "sha256": "a6a029cb7f3e101e26bbdbc0b255817aef697494735d0f7ed4a13b8dd2c9b975",
+      "git_blob": "ed698bd3edf02476a769c498b8dfccf4abbaf52a"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/control.patch",
+      "bytes": 12127,
+      "sha256": "38af6db6234bad8eff83283b4044614027cc490aa8e6d5537615c5a3ecd1448b",
+      "git_blob": "fe228a0d717cff619476fee0df932519b8aa6f43"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/evidence-redacted.zip",
+      "bytes": 2852497,
+      "sha256": "053a27ad38d8957259079208d01fd5c3aad6056ec2490d2afdbc5584a1efb795",
+      "git_blob": "d8b94971fe9f5d7649febcae4fa9ee10c93bed92"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/execution-summary.json",
+      "bytes": 340705,
+      "sha256": "b223cbd74e031a0d553af737a3462ab84714f972fbeae08cb33d54760e3440be",
+      "git_blob": "249d39641ade8bb8c8b12412dc7f645202f2ebcc"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/initial-install_task_recovery_test.go",
+      "bytes": 11282,
+      "sha256": "44c7ab0aa8b266b0a9c0e2e5b5590620fdc7ce83c769265bc7a92f31648a9583",
+      "git_blob": "01a562f318f2696a11d6dac3ff77ddc899730e13"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/initial-product.patch",
+      "bytes": 26205,
+      "sha256": "13a064fecffb545388a9fdbaa054283f59d4b3cb5bc74c430b2b81c2c908e7e0",
+      "git_blob": "fbc51079e71a8483800a8ec8e91ab872794085b4"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/initial-source-manifest.json",
+      "bytes": 21360,
+      "sha256": "058dc4461898c2b6301b372cf630778e3e57fa63dddd125f2f801b271a7da95b",
+      "git_blob": "b0dc9cc5556015879f6f0d17f9cfb4187c37ea2d"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native-final.go",
+      "bytes": 15068,
+      "sha256": "bbace984b18326376677fff4401cf9c013a8b607058de7eeaf653c5cf03aef04",
+      "git_blob": "779d031198f0a7b0ca8fa228f53287a2c5d42332"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native-observer.go",
+      "bytes": 12198,
+      "sha256": "2741513f9b6e26ef4672c57bd565df1cfccbd2725fcae8ea766e51a3e4a39c43",
+      "git_blob": "f284b784e86a257831978763a9138f51a54f002b"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native-original.go",
+      "bytes": 14716,
+      "sha256": "e994df7ea4e1dc4c3824fe4eb61a3314693ded29eaef624d99f4458a2de03aec",
+      "git_blob": "3c863dc5d2b40b58e38c1e6db27447638523715b"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native-retained-cleanup.go",
+      "bytes": 13849,
+      "sha256": "c50dbfdbfe92c564276a2f0a60407d0dca9065dde93ac511838ad8aa7bed166e",
+      "git_blob": "14b1daf96690aebd01aac8b7cdcbe38ca2c4d783"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native_final_run.py",
+      "bytes": 10296,
+      "sha256": "e56aba13445ea3099c328cf3a107de27c8a88de259140d63cee17a15412afd48",
+      "git_blob": "67ad9a60a404588f8ef36656196907200c78aa9e"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/native_run.py",
+      "bytes": 10275,
+      "sha256": "00410026f1d0191c4d614f6e2b92ffd0c228d15815589f9f92ce4b7318b61c9d",
+      "git_blob": "b1a463b9e041d0ba2189698a9eaaba0a5ae09569"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/observer_run.py",
+      "bytes": 3139,
+      "sha256": "9b13c4c42b1884c2092214232e4d7e75019f1dbaf529fed7c875fc67b5d20ba2",
+      "git_blob": "b84f3d4507f3e39f6698dd1bd1c5bb86f7ee6a00"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/pack_public.py",
+      "bytes": 49355,
+      "sha256": "d1beddd43ced88e0ad59d81cc9dd974466340232e83f5f58213d5e809a5204db",
+      "git_blob": "ffcea5f5198418a0e1c62d12c52ae885606ee69b"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/packaging-final-receipt.json",
+      "bytes": 756,
+      "sha256": "95061dcd5f1e1aa54ccb463a776f09fce085254e581251366c84ddc78e045c84",
+      "git_blob": "9802f7a468eaf0f741bf4d2069b31d506a8c8e21"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/packaging-replay-receipt.json",
+      "bytes": 626,
+      "sha256": "7a691ad9206eb8e8eec7f821acd32391e87f249ac9de29fa6246a664d6c45504",
+      "git_blob": "924806fbaff61e5fe692a1c48b5ee37167c397cd"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/packaging-replay-stderr.log",
+      "bytes": 1479,
+      "sha256": "ad189180c899eb822cc1919641790925209c28cc1ddad5913a4e18c2a81ba7e4",
+      "git_blob": "8a9942c2bed0f46c9e5f83c33c510560ba4bbc63"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/prepare_pack_input.py",
+      "bytes": 13613,
+      "sha256": "9d8e101db1f7cbae32f6ed47b7f3b0e694ef68446bdf7e64176542dd457be6de",
+      "git_blob": "85db2f60a9961b9109a9ea6f61481bb339423472"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/prepare_source.py",
+      "bytes": 5848,
+      "sha256": "bdbfc30cc3554d792e5b09df5fd9912cbe62a6a46b5651e9b55fdefb37f1831f",
+      "git_blob": "e7ee36a26aa3a70096dc13d4420cc578ee4c1fc6"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/product.patch",
+      "bytes": 26205,
+      "sha256": "13a064fecffb545388a9fdbaa054283f59d4b3cb5bc74c430b2b81c2c908e7e0",
+      "git_blob": "fbc51079e71a8483800a8ec8e91ab872794085b4"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/publication-input.json",
+      "bytes": 538,
+      "sha256": "fbf08c312c7acb3a65c6d3897e322056b04aec063be1012da40568a8d635ccbc",
+      "git_blob": "601ed42436e73475c49484f4b3e7ded6a89dc106"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/queue-initial-snapshot.json",
+      "bytes": 45870,
+      "sha256": "a99dcd48ebc31eaceca6e811d42303575258a40c63eea83a8682d79de40af08a",
+      "git_blob": "2c4b77725fbc10137124bd83f1338f3cd891c092"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/queue-ownership.json",
+      "bytes": 75365,
+      "sha256": "3f5284ab181d2f3e67a20aa14cc9aaeb4b82d34530635a5e1ac53bbda1c5cfbc",
+      "git_blob": "7306fa6c5a04e5b42cd4ceb62d58dc5d7575888d"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/queue-prepublication-snapshot.json",
+      "bytes": 28292,
+      "sha256": "c27e92d25af48736bec102ae81c822521d628a484ad8cd74319ca3918d3c5c88",
+      "git_blob": "a67d816dc5585c3baa5eaeec626df08ac13beb32"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/queue-prepublication.json",
+      "bytes": 3341,
+      "sha256": "eb5f7dffffc5947f050edd88e2b939ef2fa82f836a1aa3f057299386b1c2e4df",
+      "git_blob": "b6cbd0f2b439e8efabf3df8da3c1d37fbb871dd0"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/source-audit-identities.json",
+      "bytes": 3931,
+      "sha256": "f2d834015931766bb5fc27b9656817f6140e2e7dc37f21837c56d3420d7a6f13",
+      "git_blob": "05b7258355fcd2759763c57b5bac39c6f6c67d76"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/source-manifest.json",
+      "bytes": 21360,
+      "sha256": "f3e12a0bed9f4024e4e00734eb35da859c23defc86c8b0963ac9469d80890534",
+      "git_blob": "badf1601e3fc6f1b328d39bb3b77c22970796471"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/source-plan.json",
+      "bytes": 18145,
+      "sha256": "9d40c8e4ecf23d11653acf13a677fb147d75291d25ca5aac8677b413175e8238",
+      "git_blob": "ed4358501394838684303d083227f74fb0becb2d"
+    },
+    {
+      "path": "docs/modernization/verification/current-task-recovery-2026-11-21/test-assertion-amendment.json",
+      "bytes": 553,
+      "sha256": "a50a31c74877e177991286476206de69e19f551f9dec66e22da04b1b2e06f6e6",
+      "git_blob": "eb5a01d2ff4eb2e111382421476b37cca431f555"
+    },
+    {
+      "path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "bytes": 178829,
+      "sha256": "6f66a18eb37fd87499f291476bc4db7947e77c62616339097b5cb1c072e21f40",
+      "git_blob": "0983a8762b7e7b9d88a54e8cea31f928dcb6ff4e"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema": "r25-cmake-retention-artifacts-v1",
+  "actual_stdout_reduction": true,
+  "additional_go_cmake_remote_execution": false,
+  "candidate_or_runner_modified": false,
+  "files": {
+    "reduce_retention.py": {
+      "bytes": 24705,
+      "sha256": "1549f696afceded5d8e94aa7add32e6ac985c079063b54b7c002ce83734d4522"
+    },
+    "retention-result.json": {
+      "bytes": 171392,
+      "sha256": "9a29e3d73baa7188b1e3ee8d280cb596548c544ce5c15f3bc2adaec72da0afab"
+    },
+    "retention-cohorts.csv": {
+      "bytes": 14017,
+      "sha256": "522e9c9936f65b8221b7c77ce4c948fd8aeabcde1b6302c24172a2dd5a4f5af0"
+    },
+    "reducer-selfcheck.json": {
+      "bytes": 936,
+      "sha256": "4363e56f896cb61a680f42a6cfea314a2061019a34c9957710307ae41ab3f048"
+    },
+    "RUNTIME.md": {
+      "bytes": 23701,
+      "sha256": "7c11fd86cfa11d976d79fa74938fb9a84928fb0e80850ed79fb00219d699e085"
+    },
+    "REVIEW.md": {
+      "bytes": 18627,
+      "sha256": "777a7d050a7f9c403dab836dccc19f7f95a90d4ec1db5306badd040699bdbb4b"
+    },
+    "candidate/internal/vcpkgmcp/cmaketrace/cmake_retention_diagnostic_test.go": {
+      "bytes": 12122,
+      "sha256": "c73994c1e23f1ebdc00f56abae36a1f987ac88e6f8f711e753c889940ff4c13f"
+    }
+  }
+}

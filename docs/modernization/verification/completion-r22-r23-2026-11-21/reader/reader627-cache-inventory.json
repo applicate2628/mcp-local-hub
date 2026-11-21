@@ -1,0 +1,414 @@
+{
+  "schema": 2,
+  "mode": "targeted existing Cargo storage inventory",
+  "observed_utc": "2026-11-21T09:25:22.478129+00:00",
+  "cwd": "<WORK_ROOT>",
+  "python": "<USER_PROFILE>\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+  "limits": {
+    "entries_per_storage": 50000,
+    "directory_depth": 32,
+    "seconds_total": 30
+  },
+  "discovery": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-host-recovery-work-20261119",
+      "entries": 3,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-20261118",
+      "entries": 31,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118",
+      "entries": 18,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-20261118",
+      "entries": 31,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118",
+      "entries": 18,
+      "storage_directories": [
+        "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives",
+        "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\cargo-home",
+        "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\vendor"
+      ],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-20261118",
+      "entries": 31,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118",
+      "entries": 14,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust100-recovery-work-20261119",
+      "entries": 2,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-r23-rust-20261121",
+      "entries": 20,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-rust-receiving-followup-recovery-work-20261120",
+      "entries": 9,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-rust-supervisor-recovery-work-20261119",
+      "entries": 4,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-20261118\\.scratch",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-20261118\\.scratch\\member-ffi-20261118",
+      "entries": 57,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-20261118\\.scratch",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-20261118\\.scratch\\native-job-members-20261118",
+      "entries": 49,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-20261118\\.scratch",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-20261118\\.scratch\\root-wait-20261118",
+      "entries": 22,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118\\profile",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118\\appdata",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118\\localappdata",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\profile",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\profile\\AppData",
+      "entries": 2,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\appdata",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\localappdata",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\profile",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\appdata",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\localappdata",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\job-profile",
+      "entries": 17,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\job-profile\\profile",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\job-profile\\appdata",
+      "entries": 1,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118\\job-profile\\localappdata",
+      "entries": 0,
+      "storage_directories": [],
+      "reparse_skipped": [],
+      "complete": true
+    }
+  ],
+  "storages": [
+    {
+      "path": "<USER_PROFILE>\\.cargo\\registry\\cache",
+      "directories": 0,
+      "entries": 0,
+      "files": 0,
+      "reparse_skipped": 0,
+      "excluded_directories": 0,
+      "limits_hit": [],
+      "errors": [],
+      "complete": false,
+      "status": "not_found",
+      "detail": "[WinError 2] Не удается найти указанный файл: 'C:\\\\Users\\\\<local-user>\\\\.cargo\\\\registry'"
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\vendor",
+      "directories": 252,
+      "entries": 518,
+      "files": 267,
+      "reparse_skipped": 0,
+      "excluded_directories": 0,
+      "limits_hit": [],
+      "errors": [],
+      "complete": true,
+      "status": "complete"
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives",
+      "directories": 1,
+      "entries": 2,
+      "files": 2,
+      "reparse_skipped": 0,
+      "excluded_directories": 0,
+      "limits_hit": [],
+      "errors": [],
+      "complete": true,
+      "status": "complete"
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\cargo-home",
+      "directories": 2,
+      "entries": 6,
+      "files": 5,
+      "reparse_skipped": 0,
+      "excluded_directories": 0,
+      "limits_hit": [],
+      "errors": [],
+      "complete": true,
+      "status": "complete"
+    }
+  ],
+  "archives": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives\\windows-link-0.2.1.crate",
+      "bytes": 6133,
+      "lock_name_match": true,
+      "needed": false,
+      "expected_sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
+      "sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
+      "lock_checksum_matches": true
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives\\windows-sys-0.61.2.crate",
+      "bytes": 2517186,
+      "lock_name_match": true,
+      "needed": false,
+      "expected_sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+      "sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+      "lock_checksum_matches": true
+    }
+  ],
+  "package_directories": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\vendor\\windows-link-0.2.1",
+      "name": "windows-link",
+      "version": "0.2.1",
+      "needed": false,
+      "qualified": false
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\vendor\\windows-sys-0.61.2",
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "needed": false,
+      "qualified": false
+    }
+  ],
+  "needed_candidates": [],
+  "configuration": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\cargo-home\\config.toml",
+      "sha256": "5f5612d58595ca82e7ca390540a03a6f14312285a4cd49a5413285f78a82edd7",
+      "source": {
+        "crates-io": {
+          "replace-with": "existing-archives"
+        },
+        "existing-archives": {
+          "directory": "D:/dev/ChatGPT/mcp-product-rust-native-members-work-20261118/vendor"
+        }
+      },
+      "net": {
+        "offline": true
+      }
+    }
+  ],
+  "tests_build_cargo_install_downloads": false,
+  "remote_files_written": false,
+  "global_absence_claimed": false,
+  "lock": {
+    "path": "<WORK_ROOT>\\mcp-r23-rust-20261121\\source-pr627\\experiments\\rust-anchored-read\\Cargo.lock",
+    "git_blob": "bf195e14a3b725f5a64c8e577de56e2b605018a3",
+    "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+    "needed": [
+      {
+        "name": "block-buffer",
+        "version": "0.10.4",
+        "checksum": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+      },
+      {
+        "name": "cfg-if",
+        "version": "1.0.4",
+        "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+      },
+      {
+        "name": "cpufeatures",
+        "version": "0.2.17",
+        "checksum": "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+      },
+      {
+        "name": "crypto-common",
+        "version": "0.1.7",
+        "checksum": "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+      },
+      {
+        "name": "digest",
+        "version": "0.10.7",
+        "checksum": "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+      },
+      {
+        "name": "generic-array",
+        "version": "0.14.7",
+        "checksum": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+      },
+      {
+        "name": "libc",
+        "version": "0.2.186",
+        "checksum": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+      },
+      {
+        "name": "sha2",
+        "version": "0.10.9",
+        "checksum": "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+      },
+      {
+        "name": "typenum",
+        "version": "1.20.1",
+        "checksum": "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+      },
+      {
+        "name": "version_check",
+        "version": "0.9.5",
+        "checksum": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+      },
+      {
+        "name": "zeroize",
+        "version": "1.9.0",
+        "checksum": "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+      }
+    ]
+  },
+  "selected_storages": [
+    "<USER_PROFILE>\\.cargo\\registry\\cache",
+    "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\vendor",
+    "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives",
+    "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\cargo-home"
+  ],
+  "elapsed_seconds": 0.03855599998496473,
+  "discovery_entries": 336,
+  "storage_entries": 526
+}

@@ -1,0 +1,48 @@
+{
+  "label": "adjacent-run",
+  "binary_sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182",
+  "args": [
+    "-test.v",
+    "-test.run=^(TestRenderLinuxUnit_QuotesExecStartPathWithSpaces|TestLinuxBackend_EnableWritesUnit|TestLinuxBackend_EnableStrictMode|TestLinuxBackend_StatusSnapshotSpecFingerprintTracksUnitAndEnabledButNotLiveness)$",
+    "-test.count=1",
+    "-test.timeout=30s"
+  ],
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "started_utc": "2026-11-21T09:03:33.127686+00:00",
+  "direct_timeout_seconds": 45,
+  "source_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "format": "Go verbose test protocol; no package JSON events",
+  "native_service_operations": false,
+  "race_detector": false,
+  "pid": 15,
+  "exit_code": 0,
+  "settled": true,
+  "seconds": 0.015951422989019193,
+  "stdout": {
+    "bytes": 515,
+    "sha256": "229cd9181a1df8c7cb651e8debf5660f533c92ef1849e9999af1c1475e3030a7"
+  },
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "test_events": [
+    {
+      "action": "PASS",
+      "name": "TestLinuxBackend_EnableWritesUnit"
+    },
+    {
+      "action": "PASS",
+      "name": "TestLinuxBackend_EnableStrictMode"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_QuotesExecStartPathWithSpaces"
+    },
+    {
+      "action": "PASS",
+      "name": "TestLinuxBackend_StatusSnapshotSpecFingerprintTracksUnitAndEnabledButNotLiveness"
+    }
+  ],
+  "oracle_matched": true
+}

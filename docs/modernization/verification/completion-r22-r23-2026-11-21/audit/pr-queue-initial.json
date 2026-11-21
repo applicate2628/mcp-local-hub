@@ -1,0 +1,1555 @@
+{
+  "schema": "mcp-pr-queue-readonly-audit-v1",
+  "repository": "applicate2628/mcp-local-hub",
+  "completed_at_utc": "2026-11-21 08:57:25 UTC",
+  "mode": "read-only; no comments, reviews, merges, branch integration or workflow operations",
+  "master": {
+    "sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/master"
+  },
+  "summary": {
+    "open_prs": 31,
+    "draft_prs": 31,
+    "review_submissions": 47,
+    "review_states": {
+      "COMMENTED": 47,
+      "APPROVED": 0,
+      "CHANGES_REQUESTED": 0
+    },
+    "heads_without_review_submission": [
+      623,
+      624,
+      628,
+      629,
+      635,
+      637,
+      658,
+      660
+    ],
+    "closure_candidates_proved": [],
+    "limits": [
+      "No patch-equivalence proof across all PR pairs was attempted.",
+      "COMMENTED is not approval. Ordinary issue-comment bot responses were not audited.",
+      "Dependency graph is distinct from semantic/code-content inclusion.",
+      "Snapshot is a read interval, not an atomic repository transaction."
+    ]
+  },
+  "pull_requests": [
+    {
+      "number": 623,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "state": "open",
+      "draft": true,
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "head_sha": "cf5e71ffd88abe53c611f8ee06b536b3228e60e7",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 242,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 34,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/cf5e71ffd88abe53c611f8ee06b536b3228e60e7...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "9e948c92047d5b05419f01983ed743e358a79989",
+          "submitted_at": "2026-11-18T18:14:30Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5962468737",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "385d0ae7a58012001ec06ebddc658bcd90c1fd18",
+          "submitted_at": "2026-11-18T19:43:55Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5963809570",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "7feec21c87760afa3900193974b1d3c71e97dcc1",
+          "submitted_at": "2026-11-18T21:18:28Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5965331371",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "1e04fea613edc909b13c19f8dad4db5977b3bd69",
+          "submitted_at": "2026-11-18T22:29:37Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5966233562",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "e8268f067a7fbf797b55352ec601ae8d6b5e41f2",
+          "submitted_at": "2026-11-19T00:41:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5967529814",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "e5df8f9e4002e55b521f509ca363e348e300d8ad",
+          "submitted_at": "2026-11-19T04:07:05Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5969167690",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 624,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "state": "open",
+      "draft": true,
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "head_sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 9,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 7,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/81dcf67db013ba2879878c2ee6fe07aa0bb4aec3...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "251fb4f03405ba438662976137afec0d9c27105e",
+          "submitted_at": "2026-11-18T18:14:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/624#pullrequestreview-5962469263",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 625,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "state": "open",
+      "draft": true,
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "head_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 14,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 7,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/287a7772a4be75ed9fb2f9ba1feb68cf035ed907...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+          "submitted_at": "2026-11-18T18:14:35Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/625#pullrequestreview-5962469822",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 626,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "state": "open",
+      "draft": true,
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "head_sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 9,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 6,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/04e1e19650318725850225ebadc521cbf97dadd9...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+          "submitted_at": "2026-11-18T18:28:37Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/626#pullrequestreview-5962690160",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 627,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "state": "open",
+      "draft": true,
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "head_sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 7,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 3,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/b827398ef127a1556b7b2bdcdcec7fe03fa6651d...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "2c13114eabc7ad6cab416788b6e32faaa8c99935",
+          "submitted_at": "2026-11-18T09:25:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/627#pullrequestreview-5953798373",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+          "submitted_at": "2026-11-18T18:14:38Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/627#pullrequestreview-5962470418",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 628,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "state": "open",
+      "draft": true,
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "head_sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 18,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 6,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/00f120a533f0e0e4bc7b6a56871528ff6dd9fde4...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "9c2ae02bc1c3a5cf2e1fcd16101043d63bbd6fd9",
+          "submitted_at": "2026-11-18T18:14:40Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5962471074",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-18T22:27:22Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5966200735",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-19T03:12:24Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/628#pullrequestreview-5968784333",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 629,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "head_sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 13,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 7,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/b3646f19706d795a8b0c0dafb2193d7dc6f4c584...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+          "submitted_at": "2026-11-18T16:58:18Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/629#pullrequestreview-5961299828",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 631,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "state": "open",
+      "draft": true,
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "head_sha": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "base_ref": "spike/rx02-native-identity-20261114",
+      "base_sha_reported_by_pr": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "changed_files_count": 60,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 41,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "2fd3f017a9e5ccd0460293d71ea34aceb62f245e",
+          "submitted_at": "2026-11-17T23:17:46Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/631#pullrequestreview-5948270182",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+          "submitted_at": "2026-11-18T18:14:42Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/631#pullrequestreview-5962471640",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 632,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "head_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/ff4ba7f85fef35e19b39dced17d9df47bb9237a0...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+          "submitted_at": "2026-11-18T16:48:00Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/632#pullrequestreview-5961115560",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 635,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "head_sha": "1c135914c108dda8b63816175347c5da77da26d9",
+      "base_ref": "fix/serena-qualified-uv-path-20261114",
+      "base_sha_reported_by_pr": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "changed_files_count": 14,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 4,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/1c135914c108dda8b63816175347c5da77da26d9...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "65c0e7388aaa8c1861c1ca83470fe2a537898d09",
+          "submitted_at": "2026-11-14T19:21:00Z",
+          "author": "chatgpt-codex-connector[bot]",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906685016",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:31Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906756908",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:33Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#pullrequestreview-5906756996",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 636,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/636",
+      "title": "test(serena): retain a private native qualification namespace",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-qualification-namespace-20261114",
+      "head_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "base_ref": "fix/serena-qualification-publisher-20261114",
+      "base_sha_reported_by_pr": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "changed_files_count": 14,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 5,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/acac454e539a6b951d4b6ee998cc2142ee153069...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+          "submitted_at": "2026-11-18T11:02:23Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/636#pullrequestreview-5955306325",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 637,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "head_sha": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "base_ref": "fix/serena-qualification-namespace-20261114",
+      "base_sha_reported_by_pr": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "changed_files_count": 12,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 11,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/2542d63d2f917dc414a387e0ed2ceb494d118cfe...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": []
+    },
+    {
+      "number": 639,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/639",
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-unbuffered-build-input-20261114",
+      "head_sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/98c4b54a69f2776fdabc2b8b8d19f09110e02a74...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+          "submitted_at": "2026-11-18T15:29:32Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/639#pullrequestreview-5959654251",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 643,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "head_sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 7,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/527574928335142d95bc073c6ca4459fef9f9f90...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "527574928335142d95bc073c6ca4459fef9f9f90",
+          "submitted_at": "2026-11-18T12:48:26Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/643#pullrequestreview-5956820088",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 644,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "state": "open",
+      "draft": true,
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "head_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "base_ref": "spike/rx02-native-process-owner-20261112",
+      "base_sha_reported_by_pr": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "changed_files_count": 28,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 14,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/1cf5754b81c850a3569be269642b49605895eeb2...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+          "submitted_at": "2026-11-18T18:14:44Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/644#pullrequestreview-5962472237",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 645,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/645",
+      "title": "fix(serena): accept native empty stream enumeration",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-stream-enumeration-20261114",
+      "head_sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/98511ab9ea633b7e47e825396f002dc783c51d9f...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+          "submitted_at": "2026-11-18T15:22:56Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/645#pullrequestreview-5959530115",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 646,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "head_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/1df32782e7ade719e1d7f8c6153b4455a6ea740a...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+          "submitted_at": "2026-11-18T15:29:34Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/646#pullrequestreview-5959654873",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 647,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "head_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/6de482cdd09034f71b5e091cc9e385e229cd96a2...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+          "submitted_at": "2026-11-18T15:29:35Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/647#pullrequestreview-5959655249",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 648,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/648",
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "head_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 10,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+          "submitted_at": "2026-11-18T15:22:57Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/648#pullrequestreview-5959530461",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 649,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "head_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 1,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/73caa97a860f1eaec205ec84c1502c47ce05cdc0...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+          "submitted_at": "2026-11-18T15:29:36Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/649#pullrequestreview-5959655594",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 650,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "head_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 3,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/686a54c0efbe9f99cb6ffa8d6480b289c6f465bf...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+          "submitted_at": "2026-11-18T15:43:11Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/650#pullrequestreview-5959915031",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 651,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/651",
+      "title": "fix(serena): unlink owned readonly cache entries",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-readonly-cleanup-20261114",
+      "head_sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+          "submitted_at": "2026-11-18T15:22:58Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/651#pullrequestreview-5959530807",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 652,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/652",
+      "title": "fix(serena): read installed files through original tree",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "head_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "changed_files_count": 10,
+      "head_to_master_comparison": {
+        "status": "diverged",
+        "master_ahead_of_head": 12,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/b079e4c9503f080d8ab09742270c89a3bf88d7d5...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+          "submitted_at": "2026-11-18T15:22:59Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/652#pullrequestreview-5959531154",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 653,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "head_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 4,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/90fd6f69ea4a59856375e29b34cebf4953cb2ff4...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+          "submitted_at": "2026-11-18T15:43:12Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/653#pullrequestreview-5959915445",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 654,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "head_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+          "submitted_at": "2026-11-18T15:43:13Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/654#pullrequestreview-5959915844",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 655,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "title": "fix(serena): settle preparation before canceling work context",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "head_sha": "2defe618259f7db4144824d19927b032300d160d",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/2defe618259f7db4144824d19927b032300d160d...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "2defe618259f7db4144824d19927b032300d160d",
+          "submitted_at": "2026-11-18T15:43:14Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/655#pullrequestreview-5959916312",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 656,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/656",
+      "title": "fix: receive the original qualification connection close result",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/serena-connection-close-20261115",
+      "head_sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/5efac36d1e2b4be998fadfa4ccfed1a5da098cff...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+          "submitted_at": "2026-11-18T15:43:16Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/656#pullrequestreview-5959916789",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 657,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "head_sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 2,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 2,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/4fa52b60b719664ede441be339e196a8b9766c50...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+          "submitted_at": "2026-11-18T16:48:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/657#pullrequestreview-5961115872",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 658,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/658",
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "state": "open",
+      "draft": true,
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "head_sha": "f12932bcca6c288d062f9affd32ea58a7c9eb74f",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 27,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 39,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/f12932bcca6c288d062f9affd32ea58a7c9eb74f...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "c0ea2b1d4eec3ef35621cb0dfaa309204a475b7a",
+          "submitted_at": "2026-11-18T11:11:07Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5955451043",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "56f601712950c99f4f98f0662a1694c2964d5ebf",
+          "submitted_at": "2026-11-18T12:53:04Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5956900005",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "c150ab5cfb59815ce827ad9bfbe46a0b9a405f27",
+          "submitted_at": "2026-11-18T19:43:56Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5963809766",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "3c6ef9378950f57bb654e80592be7f8e0e4e22de",
+          "submitted_at": "2026-11-18T21:21:09Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5965365697",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "539f984ab97bc3f2d389d337d30caa9f9b52e209",
+          "submitted_at": "2026-11-18T22:33:39Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5966282589",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "bafd67045d6b867709087cff95b7806f0f6d279c",
+          "submitted_at": "2026-11-19T00:43:01Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5967545927",
+          "current_head": false
+        },
+        {
+          "state": "COMMENTED",
+          "commit_sha": "cf7b4b072693ce96b671c1a81e71a6573a0b354c",
+          "submitted_at": "2026-11-19T04:07:07Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5969167931",
+          "current_head": false
+        }
+      ]
+    },
+    {
+      "number": 659,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "head_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 23,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 1,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/a3568dfe3426afaca4176d57a2310097e5214e77...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+          "submitted_at": "2026-11-18T21:12:08Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/659#pullrequestreview-5965249309",
+          "current_head": true
+        }
+      ]
+    },
+    {
+      "number": 660,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "state": "open",
+      "draft": true,
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "head_sha": "a63199628c1689b4b77a50abfc7432396a1893f4",
+      "base_ref": "master",
+      "base_sha_reported_by_pr": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "changed_files_count": 25,
+      "head_to_master_comparison": {
+        "status": "behind",
+        "master_ahead_of_head": 0,
+        "head_ahead_of_master": 8,
+        "merge_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+        "source": "https://github.com/applicate2628/mcp-local-hub/compare/a63199628c1689b4b77a50abfc7432396a1893f4...a7d92d2852c4f6eb8afb0569ef76a545e38aacf7"
+      },
+      "reviews": [
+        {
+          "state": "COMMENTED",
+          "commit_sha": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+          "submitted_at": "2026-11-19T03:54:03Z",
+          "author": "applicate2628",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/660#pullrequestreview-5969075719",
+          "current_head": false
+        }
+      ]
+    }
+  ],
+  "dependency_deltas": [
+    {
+      "parent_pr": 625,
+      "child_pr": 644,
+      "parent_head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "child_head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "status": "diverged",
+      "child_ahead": 8,
+      "parent_commits_missing": 1,
+      "merge_base_sha": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "changed_paths": [
+        "experiments/rust-process-owner/README.md",
+        "experiments/rust-process-owner/src/bin/owner_child.rs",
+        "experiments/rust-process-owner/src/lib.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/src/token_user.rs",
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/SHA256SUMS.txt",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/consumer.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/identity-2026-11-14/verification.json",
+        "experiments/rust-process-owner/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/verification/query-2026-11-15/manifest.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/RESULTS.md",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/SHA256SUMS",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/consumer-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/disposition.json",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/history.zip",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/native-final.log",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/run.ps1",
+        "experiments/rust-process-owner/verification/sid-2026-11-14/verification.json"
+      ],
+      "note": "Missing commit identity does not mean missing README correction: the corrected sentence was independently found in #644."
+    },
+    {
+      "parent_pr": 644,
+      "child_pr": 631,
+      "parent_head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "child_head": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "status": "diverged",
+      "child_ahead": 28,
+      "parent_commits_missing": 1,
+      "merge_base_sha": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "changed_paths": [
+        "experiments/rust-process-owner/ffi/Cargo.lock",
+        "experiments/rust-process-owner/ffi/Cargo.toml",
+        "experiments/rust-process-owner/ffi/README.md",
+        "experiments/rust-process-owner/ffi/go/admission_windows.go",
+        "experiments/rust-process-owner/ffi/go/admission_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows.go",
+        "experiments/rust-process-owner/ffi/go/bridge_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows.go",
+        "experiments/rust-process-owner/ffi/go/environment_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows.go",
+        "experiments/rust-process-owner/ffi/go/finish_context_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/go.mod",
+        "experiments/rust-process-owner/ffi/go/identity_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_legacy_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_query_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows.go",
+        "experiments/rust-process-owner/ffi/go/identity_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/io_lifecycle_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/loader_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/native_cleanup_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_faults_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows.go",
+        "experiments/rust-process-owner/ffi/go/outcome_windows_test.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows.go",
+        "experiments/rust-process-owner/ffi/go/stdio_windows_test.go",
+        "experiments/rust-process-owner/ffi/include/identity_v1.h",
+        "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "experiments/rust-process-owner/ffi/src/identity.rs",
+        "experiments/rust-process-owner/ffi/src/lib.rs",
+        "experiments/rust-process-owner/ffi/src/tests.rs",
+        "experiments/rust-process-owner/ffi/verification/README.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/AUDIT.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/artifacts.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/audit.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/controls.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/disposition.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/log-manifest.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/pr-audit.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/qualification.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/repository-gates.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/run.ps1",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-hashes.json",
+        "experiments/rust-process-owner/ffi/verification/identity-2026-11-15/source-identity.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/legacy/compaction.json",
+        "experiments/rust-process-owner/ffi/verification/legacy/history.zip",
+        "experiments/rust-process-owner/ffi/verification/legacy/manifest.tsv",
+        "experiments/rust-process-owner/ffi/verification/legacy/receipt.json",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/RESULTS.md",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/SHA256SUMS",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/logs.zip",
+        "experiments/rust-process-owner/ffi/verification/query-2026-11-15/manifest.json"
+      ],
+      "note": "Missing parent delta is a README correction."
+    },
+    {
+      "parent_pr": 632,
+      "child_pr": 635,
+      "parent_head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "child_head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "status": "diverged",
+      "child_ahead": 3,
+      "parent_commits_missing": 1,
+      "merge_base_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "changed_paths": [
+        "docs/modernization/verification/serena-publisher-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-publisher-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-publisher-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-publisher-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-publisher-2026-11-18/manifest.json",
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/source_prepare_test.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_pe_test.go",
+        "internal/binaryadmission/windows_serena_qualification_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "tools/test-serena-publisher/README.md",
+        "tools/test-serena-publisher/main_windows.go",
+        "tools/test-serena-publisher/main_windows_test.go"
+      ],
+      "note": "Missing parent delta is the empty-PATH helper guard."
+    },
+    {
+      "parent_pr": 635,
+      "child_pr": 636,
+      "parent_head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "child_head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "status": "diverged",
+      "child_ahead": 2,
+      "parent_commits_missing": 1,
+      "merge_base_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "changed_paths": [
+        "internal/api/serena_publisher_image.go",
+        "internal/api/serena_publisher_role.go",
+        "internal/api/serena_publisher_role_qualification_windows.go",
+        "internal/api/serena_publisher_role_qualification_windows_test.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_qualification_namespace_unavailable_test.go",
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_windows_test.go",
+        "internal/api/state_dir_resolution_observed.go",
+        "internal/api/state_dir_resolution_observed_production_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+        "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+        "internal/api/state_dir_resolution_observed_windows.go"
+      ],
+      "note": "Missing parent delta is builder environment handling."
+    },
+    {
+      "parent_pr": 636,
+      "child_pr": 637,
+      "parent_head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "child_head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "status": "ahead",
+      "child_ahead": 6,
+      "parent_commits_missing": 0,
+      "merge_base_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "changed_paths": [
+        "docs/modernization/verification/serena-namespace-2026-11-18/.gitattributes",
+        "docs/modernization/verification/serena-namespace-2026-11-18/RESULTS.md",
+        "docs/modernization/verification/serena-namespace-2026-11-18/SHA256SUMS",
+        "docs/modernization/verification/serena-namespace-2026-11-18/logs.zip",
+        "docs/modernization/verification/serena-namespace-2026-11-18/manifest.json",
+        "docs/testing/serena-qualification.md",
+        "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go"
+      ],
+      "note": "The child contains the exact current parent, plus six commits and its own 12-file delta."
+    }
+  ],
+  "overlaps": [
+    {
+      "path": "experiments/rust-process-owner/README.md",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/bin/owner_child.rs",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/lib.rs",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/native_failure_tests.rs",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/src/windows.rs",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "experiments/rust-process-owner/tests/lifecycle.rs",
+      "prs": [
+        625,
+        644
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "prs": [
+        632,
+        643
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "prs": [
+        639,
+        647,
+        648
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "prs": [
+        643,
+        645,
+        648,
+        651
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "prs": [
+        643,
+        648,
+        652
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "prs": [
+        643,
+        649
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "prs": [
+        648,
+        652
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "prs": [
+        648,
+        652
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification.go",
+      "prs": [
+        650,
+        656
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "prs": [
+        652,
+        655
+      ]
+    },
+    {
+      "path": "internal/api/install.go",
+      "prs": [
+        659,
+        660
+      ]
+    },
+    {
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "prs": [
+        659,
+        660
+      ]
+    }
+  ],
+  "source_findings": [
+    {
+      "id": "stale-description-624",
+      "pr": 624,
+      "path": "PR description",
+      "claim": "Current HEAD and no-production-change statements still name 251fb4f; current 81dcf67d changes record-tail retention and adds regression tests.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/624",
+        "https://github.com/applicate2628/mcp-local-hub/commit/81dcf67db013ba2879878c2ee6fe07aa0bb4aec3"
+      ]
+    },
+    {
+      "id": "stale-description-628",
+      "pr": 628,
+      "path": "PR description",
+      "claim": "Current HEAD still names 453e856 and states stopPending remains separate; current 00f120a5 also changes pending-stop memory observations.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/628",
+        "https://github.com/applicate2628/mcp-local-hub/commit/00f120a533f0e0e4bc7b6a56871528ff6dd9fde4"
+      ]
+    },
+    {
+      "id": "stale-description-629",
+      "pr": 629,
+      "path": "PR description",
+      "claim": "Current review summary still names e07dc80f; current b3646f19 additionally corrects SSE retry accounting.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/629",
+        "https://github.com/applicate2628/mcp-local-hub/commit/b3646f19706d795a8b0c0dafb2193d7dc6f4c584"
+      ]
+    },
+    {
+      "id": "stale-description-658",
+      "pr": 658,
+      "path": "PR description",
+      "claim": "Current HEAD summary still names R21 2ee7b19c and a Markdown-only last change; current f12932bc changes the LSP resolver benchmark fixture.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/658",
+        "https://github.com/applicate2628/mcp-local-hub/commit/f12932bcca6c288d062f9affd32ea58a7c9eb74f"
+      ]
+    },
+    {
+      "id": "stale-description-660",
+      "pr": 660,
+      "path": "PR description",
+      "claim": "Current HEAD summary still names R21 ba178671; current a6319962 changes earlier-task compensation and retention of uncertain adoption recovery.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/660",
+        "https://github.com/applicate2628/mcp-local-hub/commit/a63199628c1689b4b77a50abfc7432396a1893f4"
+      ]
+    },
+    {
+      "id": "stale-parent-readme-631",
+      "pr": 631,
+      "path": "experiments/rust-process-owner/README.md",
+      "line": 204,
+      "claim": "The inherited remaining-gates paragraph still says the FFI consumer exports only PID/image. The independent parent documentation correction is absent, although the FFI implementation is already present in this PR.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/blob/ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6/experiments/rust-process-owner/README.md#L204",
+        "https://github.com/applicate2628/mcp-local-hub/commit/1cf5754b81c850a3569be269642b49605895eeb2"
+      ]
+    },
+    {
+      "id": "stale-dependency-status-637",
+      "pr": 637,
+      "path": "PR description / Review boundaries",
+      "claim": "The text still calls #633 and #634 independent master-based requests without noting that both were already merged on 2026-11-15. They are not remaining open dependencies.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/pull/637",
+        "https://github.com/applicate2628/mcp-local-hub/pull/633",
+        "https://github.com/applicate2628/mcp-local-hub/pull/634"
+      ]
+    },
+    {
+      "id": "missing-parent-runtime-fix-635",
+      "pr": 635,
+      "path": "internal/api/serena_prepared_inputs.go",
+      "line": 270,
+      "claim": "The qualified UV helper lacks the empty-PATH-entry guard already present in parent #632. This is a dependency delta; no new runtime reproduction was performed in this audit.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/blob/1c135914c108dda8b63816175347c5da77da26d9/internal/api/serena_prepared_inputs.go#L270",
+        "https://github.com/applicate2628/mcp-local-hub/commit/ff4ba7f85fef35e19b39dced17d9df47bb9237a0"
+      ]
+    },
+    {
+      "id": "missing-parent-runtime-fix-636-637",
+      "prs": [
+        636,
+        637
+      ],
+      "path": "tools/test-serena-publisher/main_windows.go",
+      "line": 324,
+      "claim": "The builder environment in both child trees lacks the three control resets added in parent #635. This is explicitly disclosed in #635 and remains a source-bound dependency delta, not new test evidence.",
+      "sources": [
+        "https://github.com/applicate2628/mcp-local-hub/blob/acac454e539a6b951d4b6ee998cc2142ee153069/tools/test-serena-publisher/main_windows.go#L324",
+        "https://github.com/applicate2628/mcp-local-hub/blob/2542d63d2f917dc414a387e0ed2ceb494d118cfe/tools/test-serena-publisher/main_windows.go#L324",
+        "https://github.com/applicate2628/mcp-local-hub/commit/1c135914c108dda8b63816175347c5da77da26d9"
+      ]
+    }
+  ],
+  "already_closed_related": [
+    {
+      "number": 630,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "1326779cd9b26c5462063d360fe70ea4c8c1c3ce",
+      "base_ref": "fix/relay-output-failure-contract-20261113",
+      "merged_at": "2026-11-14T20:29:07Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/630"
+    },
+    {
+      "number": 633,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "0abf739a488335011183d6ae8c73d9e4e20898c2",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:10:47Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/633"
+    },
+    {
+      "number": 634,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "06c0d25995b3063f54f45c7c58d0ad085666349f",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:12:19Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/634"
+    },
+    {
+      "number": 638,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "94804bd37d6bf1a546c86116ac3d2d38f45d6dc9",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:16:05Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/638"
+    },
+    {
+      "number": 640,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "5883fbb5d517bf891c2ce7006cf618d3d826c45d",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:16:12Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/640"
+    },
+    {
+      "number": 641,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "7e0b89f987e1a7fb26c9e78b705df56b95110420",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:16:20Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/641"
+    },
+    {
+      "number": 642,
+      "state": "closed",
+      "merged": true,
+      "head_sha": "f11cc3312b02cb3fd6da5e32f3a785a73f03f3a4",
+      "base_ref": "master",
+      "merged_at": "2026-11-15T09:16:27Z",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/642"
+    }
+  ],
+  "skills_applied": [
+    "code-review-and-quality: distinguish confirmed source/documentation deltas from untested runtime hypotheses",
+    "git-workflow-and-versioning: exact heads, parent topology and no cross-branch mutation",
+    "ponytail: no new PRs or speculative consolidation; preserve unique responsibilities"
+  ]
+}

@@ -1,0 +1,598 @@
+{
+  "schema": 1,
+  "mode": "local",
+  "started_utc": "2026-11-21T10:04:04.141798+00:00",
+  "published_evidence_commit": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+  "publication_readback_sha256": "f9c1ddc8876257299717062157f0143eafc616791ad5b748334f127ce43f1942",
+  "trash_relative": "trash/r22-r23-transfers-20261121T100404Z",
+  "status": "complete",
+  "moved": [
+    {
+      "source": "go-linux-package/part-0.b64",
+      "bytes": 524416,
+      "sha256": "be5f5fada6fb2f2b869505b588cfd056443b833301529c09bbefd4b477ac73e5",
+      "reason": "Combined Base64 equals retained and independently published Go/Linux archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/go-linux-package/part-0.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "go-linux-package/part-128.b64",
+      "bytes": 524416,
+      "sha256": "e30fa1f27abbdea8446c162e662d0682b481d27e23a2b3b6b33d04992606c954",
+      "reason": "Combined Base64 equals retained and independently published Go/Linux archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/go-linux-package/part-128.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "go-linux-package/part-256.b64",
+      "bytes": 296097,
+      "sha256": "f31a1e8765e91508c260bac017245ce70fa88bff3a067d5a5f63bdb6aadcec5e",
+      "reason": "Combined Base64 equals retained and independently published Go/Linux archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/go-linux-package/part-256.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-0.b64",
+      "bytes": 524416,
+      "sha256": "9b328398da8406d4c3c4344c0b2dd3ad13071b18323435846ceef37f97aa70fb",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-0.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-128.b64",
+      "bytes": 524416,
+      "sha256": "3e1ed14570252f0f34883c391db350074146fc9993767292aa64f8d5d04aec3a",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-128.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-256.b64",
+      "bytes": 524416,
+      "sha256": "80c2454e091937f82bf0d5158e89036198d06e67c5f83e216d4b0dc0d243362d",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-256.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-384.b64",
+      "bytes": 524416,
+      "sha256": "178cbc4df9fba62015635edbbf131923b7fcd08f75336e58089e9f361a0b2a0f",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-384.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-512.b64",
+      "bytes": 524416,
+      "sha256": "047fb6e6647bbdd26e42f3feb7b7aa87db61cac781a0d9656c72de3621766173",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-512.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-640.b64",
+      "bytes": 524416,
+      "sha256": "02c67976dfbd406c189f1ac758410866bf42f110442aa0a589ed1c856ce36ba4",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-640.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-768.b64",
+      "bytes": 524416,
+      "sha256": "d442e886d321f1c3373c87def4e55be5c906f4b3a3bcf0a5eec8442266e5f305",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-768.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/control-896.b64",
+      "bytes": 122398,
+      "sha256": "9863a578b0d947ba39e6bdaa2e49216f12ceadd97abf202077987159dfb7d141",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/control-896.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-0.b64",
+      "bytes": 524416,
+      "sha256": "8fb4f5f87147ca72c103839452ea5f46c8a2f0f28d0f2caa62b585d3fc2c996c",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-0.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-128.b64",
+      "bytes": 524416,
+      "sha256": "570f33cd968e8652efd1cd391685eafd7cd616030afedcb6384000f7cff32179",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-128.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-256.b64",
+      "bytes": 524416,
+      "sha256": "55026a5f612c93852b690b1b267874d485b6f183e833f105384050200e002662",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-256.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-384.b64",
+      "bytes": 524416,
+      "sha256": "8ab40a3f3ba9b48f6a5f3c2747abff75a58d4b1c933f70f87e91721947e69c79",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-384.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-512.b64",
+      "bytes": 524416,
+      "sha256": "a328fc1f8b86a0eca6a9333f3ac42b1fc075cd38d569add2152e78a9e7c0b30c",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-512.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-640.b64",
+      "bytes": 524416,
+      "sha256": "66acc76d5a5a19e006ab970d59a11686b910ab427ea7fb4dad85a23d0986ea2f",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-640.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-768.b64",
+      "bytes": 524416,
+      "sha256": "7982ca2ba7d22afef52f85910096ca5670df101e87cef1cb0aeb34ba300b5145",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-768.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "linux-percent-execution/candidate-896.b64",
+      "bytes": 122502,
+      "sha256": "54e3790af45f239dcfb742d6a0061e3dce6c3f5a81031f2770bade071164cb78",
+      "reason": "Combined Base64 equals retained gzip and test executable",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/linux-percent-execution/candidate-896.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0000.b64",
+      "bytes": 174807,
+      "sha256": "4b6b27d81acf9092dab5ac82f083b2080de97e341a17f2f70b49afcaf1f11e80",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0000.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0001.b64",
+      "bytes": 174807,
+      "sha256": "fba783ff44321cb3fdc1c8f06c43fe28a6858b76f6bb5c045dbb34f71ed99ea8",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0001.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0002.b64",
+      "bytes": 174807,
+      "sha256": "c5ec57c924a386860f5e69f52446e3c426a8e2fad31df5a5a0b00dba13083fad",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0002.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0003.b64",
+      "bytes": 174807,
+      "sha256": "89e166c93e39350aa3161800d37457bb1c6b5950f40193f02e69a65b20d998f5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0003.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0004.b64",
+      "bytes": 174807,
+      "sha256": "5267006cf291b98c094525917b546cdb4e0be19454058e6f17aa0069dfd676b5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0004.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0005.b64",
+      "bytes": 174807,
+      "sha256": "53b4c08115301c8a74ec76b9b7d315a85142eeeadea2b591a45a4ad5d5f63f90",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0005.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0006.b64",
+      "bytes": 174807,
+      "sha256": "16857cc2e3c6ac680e8e6eb9fa1221abc258f1cbbc385b450ef8e215eb295e8b",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0006.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0007.b64",
+      "bytes": 174807,
+      "sha256": "05378466e5abecfcf5a52d303a2823b513b1edb7a22ce2bdc035a4b0ab315a9b",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0007.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0008.b64",
+      "bytes": 174807,
+      "sha256": "d974563bcc71536b0c181cc580a41531e4d6e778219b1a7e2de348d82c3f8719",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0008.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0009.b64",
+      "bytes": 174807,
+      "sha256": "1c5614d90e1a5cecc3b575c8441baf74f69fc80f6823b20af4ad311c4173f1c2",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0009.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0010.b64",
+      "bytes": 174807,
+      "sha256": "afdf613d4a74cfbe673aa59d8969596b08b5699cc81f958bc83e83d800ba4d00",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0010.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0011.b64",
+      "bytes": 174807,
+      "sha256": "2b438a4b93904978fb64caaf87e229bae7570c32691e7345322a340119ea9325",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0011.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0012.b64",
+      "bytes": 174807,
+      "sha256": "79bd751efc7263ae88d0593e447f30b137582c1bd2bb7b8ee9ef2cac2112590d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0012.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0013.b64",
+      "bytes": 174807,
+      "sha256": "2b3786228bb960f4564246946f70807bd4644498357a3beedf2bb5cb567ff60a",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0013.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0014.b64",
+      "bytes": 174807,
+      "sha256": "d0e4e0df0b2dd5a6f3e789d220d6e13f1be1b16f70219e00301dbab83091c37d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0014.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0015.b64",
+      "bytes": 174807,
+      "sha256": "f9b844d5323bed978fb1c0494f7c4aa7439ec83d8ab7455b7a05b1f1261362e5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0015.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0016.b64",
+      "bytes": 174807,
+      "sha256": "3f4a989d8943e1322343a90dd09f82bb81468de775d8b0d827145b60eabee26e",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0016.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0017.b64",
+      "bytes": 174807,
+      "sha256": "b4be53327b4780fe0c83c3d76df7f58fa46543eed9057dcee37ea1e9f0a55c35",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0017.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0018.b64",
+      "bytes": 174807,
+      "sha256": "2212ed73e298168058eb9322f1c732d22a4c2fbdfbcfbddc5d9751b2532f015f",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0018.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0019.b64",
+      "bytes": 174807,
+      "sha256": "5df09a5e6b429dfd4ec0684d653294b053adaf65c1b3d24450706c969b7ace0c",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0019.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0020.b64",
+      "bytes": 174807,
+      "sha256": "3c130dd39979ae159fa096ef9f3f2f4e8feacdd2a05e8faffbdbedaa6ba36a4d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0020.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0021.b64",
+      "bytes": 174807,
+      "sha256": "21486f7cbf1ec5032a9214bd121c0d3665862b23865c30db6a494860cfc85b03",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0021.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0022.b64",
+      "bytes": 174807,
+      "sha256": "da48e18013a2bb91d355f1a7f5ed39954d8215101a1cc6cafb2850abf2454900",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0022.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0023.b64",
+      "bytes": 174807,
+      "sha256": "54620ca3687a81ae8a3277668c3bc331eaa0713be411eae84a0e4c869a12b517",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0023.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0024.b64",
+      "bytes": 174807,
+      "sha256": "1726bdf1ab555c83b67d1a3a00985de6bf1d294f38fc9864b1fa498bce6edd62",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0024.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0025.b64",
+      "bytes": 174807,
+      "sha256": "b454699cdbd4016bb1bc38b690513939c94d396152507d05823c85ba8f7f9b07",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0025.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0026.b64",
+      "bytes": 174807,
+      "sha256": "799c5293ae70609c5f2f39f9344e5f764db488c14929a5dec1664df90075b321",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0026.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0027.b64",
+      "bytes": 174807,
+      "sha256": "92da36bdd699cd1be8900902caf63dacfe1285f481437a2eb2efa6a741174f79",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0027.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0028.b64",
+      "bytes": 174807,
+      "sha256": "7951ee039b9560726a6e3cff230a569b34eb7b2f0013bea6e8e3fbef6d4f3675",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0028.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0029.b64",
+      "bytes": 174807,
+      "sha256": "c66f4d49c36f4878543e9a87cb561f4c4356f150141760730e32959a6a28d292",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0029.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0030.b64",
+      "bytes": 174807,
+      "sha256": "fbaee1c218674ed8c4fbe5e14c911d38646a0d51f5f6d7e4e9fc8eb98d44b1ef",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0030.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0031.b64",
+      "bytes": 174807,
+      "sha256": "4b49ee0051f79b8af581b4b4117cb4cf0f3138a393196cd7735ff63cee701503",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0031.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0032.b64",
+      "bytes": 174807,
+      "sha256": "9a19bfa35c07b3bfa5ad3b30775deffd32a43d0b0a0bd1e9a57f314a6a8636a0",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0032.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0033.b64",
+      "bytes": 174807,
+      "sha256": "aee73e34f6bcb9dfa126f293a5ecaebd4a1153b28e0ba9b882817b04f8debc52",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0033.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r22-packaging/download/zip.part-0034.b64",
+      "bytes": 99245,
+      "sha256": "0e60fc051eff6d87444b65447db668d47bbdd0596b3b8c374711ad92b56aaee9",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r22-packaging/download/zip.part-0034.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "formatted-transfer.json",
+      "bytes": 38633,
+      "sha256": "b8af6d8d52dfedcbb7797f3ae447cb7c8860a4d5889dd620e7fd287a2ec0c6e4",
+      "reason": "All three decoded formatted sources retained byte-for-byte in verified public archive",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/formatted-transfer.json",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "r23-scheduler/candidate-payload.json.gz.b64",
+      "bytes": 94225,
+      "sha256": "96c32b2289e76a45797347c4bc5fd8576775f439540e1b9c33949c92612afe76",
+      "reason": "All four original pre-format source files preserved exactly outside trash",
+      "target": "trash/r22-r23-transfers-20261121T100404Z/r23-scheduler/candidate-payload.json.gz.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    }
+  ],
+  "preserved_checks": [
+    {
+      "path": "r22-packaging/public-r22/evidence-redacted.zip",
+      "bytes": 4530861,
+      "sha256": "ab979b12c68d9d311516dec82d0cd65cdfb901bf3de5f106debd2f1b71fec654"
+    },
+    {
+      "path": "go-linux-package/evidence-redacted.zip",
+      "bytes": 1008450,
+      "sha256": "e2dce14e2374c37c9be44281af2b1d1397d48d58b61cd00740038e07c8680f61"
+    },
+    {
+      "path": "consumer-rust-review/public-rust.zip",
+      "bytes": 84720,
+      "sha256": "73d01303df3c480cad4ffb6db3520f44df7cf83281c7bc8786bbc70eedc3222f"
+    },
+    {
+      "path": "linux-percent-execution/control.test.gz",
+      "bytes": 2844288,
+      "sha256": "a9ab05baf559e6298c1f494c93023cea7c530596f3d523d6f34fd61561205f65"
+    },
+    {
+      "path": "linux-percent-execution/control.test",
+      "bytes": 4941662,
+      "sha256": "34304a1abcc27a252c266e09122a2c5646da517c9814a132dcf07635767d6471"
+    },
+    {
+      "path": "linux-percent-execution/candidate.test.gz",
+      "bytes": 2844366,
+      "sha256": "cea9de2836227bc791c98a36b489e10a77cfdd5da5a4ca4cc8414582bdcd64a0"
+    },
+    {
+      "path": "linux-percent-execution/candidate.test",
+      "bytes": 4941998,
+      "sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182"
+    },
+    {
+      "path": "r22-packaging/download/transfer-manifest.json",
+      "bytes": 10455,
+      "sha256": "04bf31026af77197757c5bb1bc42a1ec229c8edfedb059385a9bbd97ddb6c59a"
+    },
+    {
+      "path": "linux-percent-execution/source/linux.go",
+      "bytes": 14296,
+      "sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c"
+    },
+    {
+      "path": "linux-percent-execution/source/linux_exec_percent_test.go",
+      "bytes": 2809,
+      "sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60"
+    },
+    {
+      "path": "r23-scheduler/formatted-readback/internal/api/install_task_mutation_failure_test.go",
+      "bytes": 11556,
+      "sha256": "7496583080e79d2f531ab85c5c4b4a9b50884f82bd729493df59edfc873a2ed5"
+    },
+    {
+      "path": "r23-scheduler/candidate/internal/api/install_task_rollback.go",
+      "bytes": 5855,
+      "sha256": "41bb89ca491cbf2f10dd7eb70d42cc39d1044eb43a049f134f220e3e9c70d79c"
+    },
+    {
+      "path": "r23-scheduler/candidate/internal/api/install_task_mutation_failure_test.go",
+      "bytes": 11496,
+      "sha256": "de285f683c0db9e4b46e2a5222cd35439e088ae029ba0c97ffef9139e6264fe1"
+    },
+    {
+      "path": "r23-scheduler/candidate/internal/api/install_scheduler_snapshot_test.go",
+      "bytes": 7703,
+      "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1"
+    },
+    {
+      "path": "r23-scheduler/candidate/internal/api/install.go",
+      "bytes": 215960,
+      "sha256": "4d1e92fbb7490911b41e20989fa38f2b1854c591c59b8b9bb80f73d6f5054153"
+    }
+  ],
+  "trash_emptied": false,
+  "delete_calls": 0,
+  "planned_files": 56,
+  "preserved_rechecked_after_moves": true,
+  "finished_utc": "2026-11-21T10:04:04.576320+00:00",
+  "runner_sha256": "967495833dcdfecf460250558531fab1be4ceffed32fca4f89e460cecb9ed341"
+}

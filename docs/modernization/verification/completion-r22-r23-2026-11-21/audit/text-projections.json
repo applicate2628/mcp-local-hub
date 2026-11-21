@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "coverage": "Path projections outside the separately manifested archives; documentation edits are not counted as redactions.",
+  "files": [
+    {
+      "path": "reader/reader627-dependency-inventory.md",
+      "original_bytes": 8748,
+      "original_sha256": "98a0bcd949c71b0229a382d4625e0274a46c085f98a18416574279f4d00ce84d",
+      "public_bytes": 8749,
+      "public_sha256": "b5dc039e5a16922a3624e7d0f98bbd0bb1eb7a7f7d3bf2d4bbde2bc1ee340fc7",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "reader/reader627-dependency-inventory.json",
+      "original_bytes": 7146,
+      "original_sha256": "8dd15dbe9b1189a656c5f46f4118361bfceae908bdb9ba2e31c9131e86597afc",
+      "public_bytes": 7049,
+      "public_sha256": "1b2ac0d8af6c60584ffd38d83f5dfba3c8955f2797523d0a60778c41133f52f9",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "reader/reader627-dependency-inventory.py",
+      "original_bytes": 6312,
+      "original_sha256": "ad6875e3e6957eb57faa7fe3e3c4908e512d83bcd0c371b6fc8be7d44fe2609c",
+      "public_bytes": 6309,
+      "public_sha256": "68f706d0601ad31063f17e7223c86decb5a12644d3c0446cf3fde9749179f83b",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "reader/reader627-cache-inventory.md",
+      "original_bytes": 7531,
+      "original_sha256": "dd417da3b1dd74b265231dc38223a53078438665d87fb88f6c1e971ce4f8b307",
+      "public_bytes": 7528,
+      "public_sha256": "17dde2dd4f0efc91837b7ca011a74ae0e5ddace30ab985c3abaceb7255dbec73",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "reader/reader627-cache-inventory.json",
+      "original_bytes": 12901,
+      "original_sha256": "013326dafb191945712f1835eb3893b3107b3f6dcf93fa97ef288aaba469ab7f",
+      "public_bytes": 12667,
+      "public_sha256": "c98a2131c1adbdbe5db9afe76bf22e224ed15dcd3b835cf59d4cdc258ed7f410",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "reader/reader627-cache-inventory.py",
+      "original_bytes": 9829,
+      "original_sha256": "bf185dbe9757041f66ea082908a36df2633d257ef24dcaaceac1b60b7be3981e",
+      "public_bytes": 9671,
+      "public_sha256": "61e1146b2a06fd76df9ababfb19f5304b19babd1422e7ce904bdfd3e1bcbe6d1",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "linux-execution/native-parser/receipt.json",
+      "original_bytes": 2003,
+      "original_sha256": "8269e1e953d2e9eb371a3050aba57b14b53278bebf5b31d39b0c55c8dee20190",
+      "public_bytes": 1943,
+      "public_sha256": "731ca4691dcc1961169fbf71b683cd6fb2ce56cc5fcfc5ae28cbd98c642baf53",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "linux-execution/native-parser/control.service",
+      "original_bytes": 193,
+      "original_sha256": "8e639e017a7f8725d259c7eb3343a6efca183a0bd8cc473b5e3cfbb6311078db",
+      "public_bytes": 178,
+      "public_sha256": "7ac015e20d1109a4cbcaffbc1266a21160a80ff03bc610ba8f6702bad62ceaca",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "linux-execution/native-parser/control.stderr.log",
+      "original_bytes": 358,
+      "original_sha256": "3edf956c85d7067621aff28f210c01d9ff0daf507251520b1568e5b64bb0708d",
+      "public_bytes": 328,
+      "public_sha256": "fc4f70d0d8c69f637e88f332d081fbdf5dc44592516da33459faf0707c28b12e",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    },
+    {
+      "path": "linux-execution/native-parser/candidate.service",
+      "original_bytes": 194,
+      "original_sha256": "b374c5205c828e678306546fd382997faa7f785e57959af522296310ecfe6936",
+      "public_bytes": 179,
+      "public_sha256": "07712a493b1bd0ec8a6380d9744ba486d36272c3b09167dff73ac53a7d0bf993",
+      "scope": "Selected text copy: local workspace/account/device paths replaced; original retained outside trash."
+    }
+  ]
+}

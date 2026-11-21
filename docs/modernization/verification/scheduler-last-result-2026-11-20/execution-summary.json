@@ -1,0 +1,491 @@
+{
+  "schema": 1,
+  "base": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "code_tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+  "mode": "final",
+  "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+  "source_sha256": {
+    "internal/scheduler/scheduler.go": "abd4c9fc66e0bcf97b2d8413bec922b00ca72dbd0df472b7c0e531ff958c7256",
+    "internal/scheduler/scheduler_com_windows.go": "673388c2a825bf2ec424e56f1e8a7e929e73e9966deb66d13f9f3d539939f61b",
+    "internal/scheduler/scheduler_com_windows_test.go": "b411a72144af929ecd668e845d00c93e97d47d998d4ca68403239b32a4a6820f",
+    "internal/scheduler/scheduler_hidden_task_windows_test.go": "33a50b53f006374dd8aa79f00f099d17696164e70487b1d75b737ea8125fe689",
+    "internal/scheduler/scheduler_last_result_windows_test.go": "87667feb08f6403b18c05db068f532233091a909738ca0299de510c0d8fd7b4b"
+  },
+  "source_manifest_sha256": "cb87f05b3a996362f81bf8877b413c3c3ac0629d5dfa3a102e8c6bcb616ee49c",
+  "diff_numstat": "6\t3\tinternal/scheduler/scheduler.go\n24\t7\tinternal/scheduler/scheduler_com_windows.go\n2\t1\tinternal/scheduler/scheduler_com_windows_test.go\n2\t2\tinternal/scheduler/scheduler_hidden_task_windows_test.go\n326\t0\tinternal/scheduler/scheduler_last_result_windows_test.go",
+  "verified_utc": "2026-11-19T21:52:12.867712+00:00",
+  "phases": {
+    "bootstrap": {
+      "source_stable": null,
+      "commands": [
+        {
+          "name": "clone",
+          "arguments": [
+            "-c",
+            "core.autocrlf=false",
+            "clone",
+            "--local",
+            "--no-hardlinks",
+            "--no-checkout",
+            "<PREVIOUS_SOURCE>",
+            "<SOURCE>"
+          ],
+          "exit_code": 0,
+          "seconds": 3.922,
+          "stderr_bytes": 153,
+          "settled": true,
+          "started_utc": "2026-11-19T21:26:59.551256+00:00",
+          "finished_utc": "2026-11-19T21:27:03.473967+00:00"
+        },
+        {
+          "name": "go-version",
+          "arguments": [
+            "version"
+          ],
+          "exit_code": 0,
+          "seconds": 0.094,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:27:04.908630+00:00",
+          "finished_utc": "2026-11-19T21:27:05.003458+00:00"
+        }
+      ]
+    },
+    "control": {
+      "source_stable": null,
+      "commands": [
+        {
+          "name": "gofmt-control",
+          "arguments": [
+            "-w",
+            "internal/scheduler/scheduler_last_result_windows_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.39,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:27:16.575125+00:00",
+          "finished_utc": "2026-11-19T21:27:16.965961+00:00"
+        },
+        {
+          "name": "old-code-last-result",
+          "arguments": [
+            "test",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-run",
+            "^TestSchedulerCOMLastResult",
+            "./internal/scheduler"
+          ],
+          "exit_code": 1,
+          "seconds": 207.401,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:27:16.967669+00:00",
+          "finished_utc": "2026-11-19T21:30:44.374003+00:00",
+          "counts": {
+            "pass": 3,
+            "fail": 35,
+            "skip": 0
+          },
+          "failures": [
+            "TestSchedulerCOMLastResultMapping/application-error-while-running",
+            "TestSchedulerCOMLastResultMapping/scheduler-running-code",
+            "TestSchedulerCOMLastResultMapping/scheduler-disabled-code",
+            "TestSchedulerCOMLastResultMapping/scheduler-never-run-code",
+            "TestSchedulerCOMLastResultMapping/signed-hresult",
+            "TestSchedulerCOMLastResultMapping/signed-minimum",
+            "TestSchedulerCOMLastResultMapping/signed-maximum",
+            "TestSchedulerCOMLastResultMapping/minus-one",
+            "TestSchedulerCOMLastResultMapping",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown/missing-result",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown/null-result",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/numeric-string",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/boolean",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/object",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/fraction",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/above-signed-maximum",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON/below-signed-minimum",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON",
+            "TestSchedulerCOMLastResultPublicQueries/status-preserves-signed-result",
+            "TestSchedulerCOMLastResultPublicQueries/list-preserves-each-result",
+            "TestSchedulerCOMLastResultPublicQueries/status-rejects-missing-result",
+            "TestSchedulerCOMLastResultPublicQueries/list-rejects-null-without-partial-results",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultScript/status-zero",
+            "TestSchedulerCOMLastResultScript/status-signed-result",
+            "TestSchedulerCOMLastResultScript/list-results",
+            "TestSchedulerCOMLastResultScript/status-null",
+            "TestSchedulerCOMLastResultScript/status-missing",
+            "TestSchedulerCOMLastResultScript/status-getter-error",
+            "TestSchedulerCOMLastResultScript/list-null-after-result",
+            "TestSchedulerCOMLastResultScript/list-missing-after-result",
+            "TestSchedulerCOMLastResultScript/list-getter-error-after-result",
+            "TestSchedulerCOMLastResultScript",
+            "PACKAGE:mcp-local-hub/internal/scheduler"
+          ],
+          "skips": [],
+          "top_level_functions": []
+        }
+      ]
+    },
+    "candidate": {
+      "source_stable": null,
+      "commands": [
+        {
+          "name": "gofmt-candidate",
+          "arguments": [
+            "-w",
+            "internal/scheduler/scheduler.go",
+            "internal/scheduler/scheduler_com_windows.go",
+            "internal/scheduler/scheduler_com_windows_test.go",
+            "internal/scheduler/scheduler_hidden_task_windows_test.go",
+            "internal/scheduler/scheduler_last_result_windows_test.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.021,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:31:04.684008+00:00",
+          "finished_utc": "2026-11-19T21:31:04.705129+00:00"
+        },
+        {
+          "name": "diff-check",
+          "arguments": [
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "seconds": 0.253,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:31:04.748459+00:00",
+          "finished_utc": "2026-11-19T21:31:05.001363+00:00"
+        }
+      ]
+    },
+    "focused": {
+      "source_stable": true,
+      "commands": [
+        {
+          "name": "contract-race",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^(TestSchedulerCOMLastResult.*|TestSchedulerCOMHiddenTaskLookup|TestSchedulerCOMGuardedRunDefinition|TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON|TestSchedulerRunOwnedAdmissionAndPositiveReply|TestTaskStatusFromCOMUsesNumericStateOnly)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 0,
+          "seconds": 61.135,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:31:13.341176+00:00",
+          "finished_utc": "2026-11-19T21:32:14.478301+00:00",
+          "counts": {
+            "pass": 177,
+            "fail": 0,
+            "skip": 0
+          },
+          "failures": [],
+          "skips": [],
+          "top_level_functions": [
+            "TestSchedulerCOMGuardedRunDefinition",
+            "TestSchedulerCOMHiddenTaskLookup",
+            "TestSchedulerCOMLastResultMapping",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown",
+            "TestSchedulerCOMLastResultScript",
+            "TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable",
+            "TestSchedulerCOMScriptSerializesNegativeHRESULT",
+            "TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON",
+            "TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText",
+            "TestSchedulerRunOwnedAdmissionAndPositiveReply",
+            "TestTaskStatusFromCOMUsesNumericStateOnly"
+          ]
+        },
+        {
+          "name": "contract-tagged-race",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-timeout=180s",
+            "-run",
+            "^(TestSchedulerCOMLastResult.*|TestSchedulerCOMHiddenTaskLookup|TestSchedulerCOMGuardedRunDefinition|TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON|TestSchedulerRunOwnedAdmissionAndPositiveReply|TestTaskStatusFromCOMUsesNumericStateOnly)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 0,
+          "seconds": 26.718,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:32:14.485563+00:00",
+          "finished_utc": "2026-11-19T21:32:41.204526+00:00",
+          "counts": {
+            "pass": 89,
+            "fail": 0,
+            "skip": 0
+          },
+          "failures": [],
+          "skips": [],
+          "top_level_functions": [
+            "TestSchedulerCOMGuardedRunDefinition",
+            "TestSchedulerCOMHiddenTaskLookup",
+            "TestSchedulerCOMLastResultMapping",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown",
+            "TestSchedulerCOMLastResultScript",
+            "TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable",
+            "TestSchedulerCOMScriptSerializesNegativeHRESULT",
+            "TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON",
+            "TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText",
+            "TestSchedulerRunOwnedAdmissionAndPositiveReply",
+            "TestTaskStatusFromCOMUsesNumericStateOnly"
+          ]
+        }
+      ]
+    },
+    "gates": {
+      "source_stable": true,
+      "commands": [
+        {
+          "name": "build",
+          "arguments": [
+            "build",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 30.089,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:33:03.309328+00:00",
+          "finished_utc": "2026-11-19T21:33:33.399810+00:00"
+        },
+        {
+          "name": "vet",
+          "arguments": [
+            "vet",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 11.936,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:33:33.401275+00:00",
+          "finished_utc": "2026-11-19T21:33:45.338393+00:00"
+        },
+        {
+          "name": "full-test",
+          "arguments": [
+            "test",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "./..."
+          ],
+          "exit_code": 1,
+          "seconds": 400.641,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:33:45.340000+00:00",
+          "finished_utc": "2026-11-19T21:40:25.990630+00:00",
+          "failed_packages": [
+            "mcp-local-hub/cmd/mcphub",
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/api/lsp_routing",
+            "mcp-local-hub/internal/api/serena_routing",
+            "mcp-local-hub/internal/cli",
+            "mcp-local-hub/internal/process"
+          ],
+          "failed_tests": [
+            "TestPrepareInvocationWindowsBareLaunchReturnsWithoutInlineCobra",
+            "TestPrepareInvocationBareLaunchFailureRemainsVisible",
+            "TestPrepareInvocationNormalizedDebugBareStaysInline",
+            "TestPrepareInvocationNormalizedPlainBareCallsDetachedCoordinator",
+            "TestClassifyWindowsEntrypointModeExhaustiveRootCommands",
+            "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+            "TestRegisteredWorkspace_SameIdentitySizeMtimeEditObservedWithin32Lookups",
+            "TestRegisteredWorkspace_DoesNotCloneUnrelatedNestedRows",
+            "TestResolveByPath_GoMarkerReturnsCanonicalRootWithoutRegistration",
+            "TestResolveByPath_RustCargoTomlMatchesExistingRegistration",
+            "TestResolveByPath_MatchesLegacySymlinkWorkspaceKey",
+            "TestResolveByPath_RegisteredMatchIsLanguageSpecific",
+            "TestResolveByPath_RefreshesRegistryOnMtimeAdvance",
+            "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock",
+            "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock",
+            "TestResolveByPath_AbsoluteMatch",
+            "TestResolveByPath_RelativeMatchFirstWorkspace",
+            "TestResolveByPath_RelativePathDotDotEscapeRejected",
+            "TestResolveByPath_NoMatch_ReturnsErrWorkspaceNotFound",
+            "TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow",
+            "TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker",
+            "TestResolveByPath_RejectsUNCPath_OnWindows",
+            "TestResolveByPath_EmptyRegistry_ReturnsErrWorkspaceNotFound",
+            "TestResolveByPath_TransientStatErrorPreservesCache",
+            "TestResolveByPath_FileDeletionClearsCache",
+            "TestResolveByPath_SameMtimeRegistryReplacementObservedWithin32Lookups",
+            "TestResolveByPath_SameIdentitySizeMtimeEditObservedWithin32Lookups",
+            "TestResolveByPath_DoesNotCloneUnrelatedNestedRows",
+            "TestResolveByPath_IgnoresLSPEntries",
+            "TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock",
+            "TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock",
+            "TestSharedRegistryObserver_GUILockedWriterAndReadersSettle",
+            "TestSharedRegistryObserver_PublicResolversDoNotRegressOnOverlappingRefresh",
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestJob_BreakawayEnabledDescendantEscapesClose",
+            "TestJobInformationTransportPreparationBoundary"
+          ],
+          "timed_out": [
+            "5m0s",
+            "5m0s"
+          ],
+          "diagnostics_source": "Reparsed original stdout line by line; original runner failed_packages may join a bare FAIL with the next line."
+        },
+        {
+          "name": "state-tag-full",
+          "arguments": [
+            "test",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-timeout",
+            "5m",
+            "./internal/api/",
+            "./internal/cli/"
+          ],
+          "exit_code": 1,
+          "seconds": 322.436,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:40:25.994190+00:00",
+          "finished_utc": "2026-11-19T21:45:48.437996+00:00",
+          "failed_packages": [
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/cli"
+          ],
+          "failed_tests": [
+            "TestAttachExisting_PublicCLIReceiving",
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+            "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+            "TestMigrateSerena_DrivesSupervisorRestart",
+            "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+            "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+            "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+            "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+            "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+            "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+            "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+            "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+            "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+            "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+            "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+          ],
+          "timed_out": [
+            "5m0s",
+            "5m0s"
+          ],
+          "diagnostics_source": "Reparsed original stdout line by line; original runner failed_packages may join a bare FAIL with the next line."
+        }
+      ]
+    },
+    "published": {
+      "source_stable": true,
+      "commands": [
+        {
+          "name": "contract-race",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-count=2",
+            "-timeout=180s",
+            "-run",
+            "^(TestSchedulerCOMLastResult.*|TestSchedulerCOMHiddenTaskLookup|TestSchedulerCOMGuardedRunDefinition|TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON|TestSchedulerRunOwnedAdmissionAndPositiveReply|TestTaskStatusFromCOMUsesNumericStateOnly)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 0,
+          "seconds": 64.463,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:48:39.644800+00:00",
+          "finished_utc": "2026-11-19T21:49:44.109740+00:00",
+          "counts": {
+            "pass": 177,
+            "fail": 0,
+            "skip": 0
+          },
+          "failures": [],
+          "skips": [],
+          "top_level_functions": [
+            "TestSchedulerCOMGuardedRunDefinition",
+            "TestSchedulerCOMHiddenTaskLookup",
+            "TestSchedulerCOMLastResultMapping",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown",
+            "TestSchedulerCOMLastResultScript",
+            "TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable",
+            "TestSchedulerCOMScriptSerializesNegativeHRESULT",
+            "TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON",
+            "TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText",
+            "TestSchedulerRunOwnedAdmissionAndPositiveReply",
+            "TestTaskStatusFromCOMUsesNumericStateOnly"
+          ]
+        },
+        {
+          "name": "contract-tagged-race",
+          "arguments": [
+            "test",
+            "-json",
+            "-race",
+            "-tags=test_state_path_env",
+            "-count=1",
+            "-timeout=180s",
+            "-run",
+            "^(TestSchedulerCOMLastResult.*|TestSchedulerCOMHiddenTaskLookup|TestSchedulerCOMGuardedRunDefinition|TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText|TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable|TestSchedulerCOMScriptSerializesNegativeHRESULT|TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON|TestSchedulerRunOwnedAdmissionAndPositiveReply|TestTaskStatusFromCOMUsesNumericStateOnly)$",
+            "./internal/scheduler"
+          ],
+          "exit_code": 0,
+          "seconds": 29.821,
+          "stderr_bytes": 0,
+          "settled": true,
+          "started_utc": "2026-11-19T21:49:44.114307+00:00",
+          "finished_utc": "2026-11-19T21:50:13.936574+00:00",
+          "counts": {
+            "pass": 89,
+            "fail": 0,
+            "skip": 0
+          },
+          "failures": [],
+          "skips": [],
+          "top_level_functions": [
+            "TestSchedulerCOMGuardedRunDefinition",
+            "TestSchedulerCOMHiddenTaskLookup",
+            "TestSchedulerCOMLastResultMapping",
+            "TestSchedulerCOMLastResultPublicQueries",
+            "TestSchedulerCOMLastResultRejectsInvalidJSON",
+            "TestSchedulerCOMLastResultRejectsMissingOrUnknown",
+            "TestSchedulerCOMLastResultScript",
+            "TestSchedulerCOMMapsTypedAccessCorruptAndUnavailable",
+            "TestSchedulerCOMScriptSerializesNegativeHRESULT",
+            "TestSchedulerCOMScriptUTF8ConsoleRoundTripsUnicodeTaskJSON",
+            "TestSchedulerCOMTypedOutcomesIgnoreHostileLocalizedText",
+            "TestSchedulerRunOwnedAdmissionAndPositiveReply",
+            "TestTaskStatusFromCOMUsesNumericStateOnly"
+          ]
+        }
+      ]
+    }
+  },
+  "qualification": "Object PowerShell fixtures and Go checks; no new native Scheduler fixture or Product qualification.",
+  "whole_process_tree_deadline_enforced": false
+}

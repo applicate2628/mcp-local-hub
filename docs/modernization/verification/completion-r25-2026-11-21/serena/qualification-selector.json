@@ -1,0 +1,179 @@
+{
+  "schema": "serena-r25-pin-qualification-handoff-v1",
+  "target_pr": 648,
+  "target_head": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+  "target_tree": "47a6d86501573cb96e45b469365d8f54c18ea22d",
+  "other_reviewed_head": {
+    "pr": 652,
+    "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+    "tree": "4d4e3a0d44b23b383d0db17e06101017e541934b",
+    "candidate": false
+  },
+  "candidate": {
+    "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+    "git_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+    "sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68",
+    "bytes": 9418,
+    "lines": 200,
+    "old_path_absent_at_exact_head": true
+  },
+  "patch": {
+    "path": "pr648-target-relative.patch",
+    "sha256": "d527850e5370c952bbf8630587ec7e30ebc7fa0fedc57588c8cabde5a0efe38e"
+  },
+  "selected_roots": [
+    "TestPreparedSerenaBuildConstraintPinSettlementNative",
+    "TestPreparedSerenaBuildConstraintPinCloseFailureNative"
+  ],
+  "selector": "^(TestPreparedSerenaBuildConstraintPinSettlementNative|TestPreparedSerenaBuildConstraintPinCloseFailureNative)$",
+  "package": "./internal/api",
+  "platform": "windows",
+  "build_tags": [],
+  "required_root_count": 2,
+  "expected_leaf_count": 5,
+  "expected_test_pass_events": 6,
+  "expected_package_pass_events": 1,
+  "forbidden_outcomes": [
+    "FAIL",
+    "SKIP",
+    "unfinished selected root"
+  ],
+  "suggested_command": "go test -race -count=1 -timeout 90s -run \"^(TestPreparedSerenaBuildConstraintPinSettlementNative|TestPreparedSerenaBuildConstraintPinCloseFailureNative)$\" -json ./internal/api",
+  "clear_environment": [
+    "MCPHUB_TEST_CALLER_START_TIME_CHILD_STATEDIR",
+    "MCPHUB_TEST_CALLER_START_TIME_CHILD_DELAY_MS"
+  ],
+  "build_controls": {
+    "GOTOOLCHAIN": "local",
+    "GOPROXY": "off",
+    "GOSUMDB": "off",
+    "GOTELEMETRY": "off"
+  },
+  "work_bound_seconds": 10,
+  "cleanup_bound_seconds": 1,
+  "absolute_cleanup_deadline": "same original context deadline + 1 second",
+  "native_effects": [
+    "5 test-owned temporary constraint files",
+    "read-only native file handles",
+    "nonmutating write/delete access requests",
+    "one actual empty Windows Job",
+    "one null-device stdin handle",
+    "two anonymous pipes / four pipe handles",
+    "actual protected-handle CloseHandle refusal",
+    "test-owned handle flag restored on every unfinished fixture cleanup"
+  ],
+  "process_launch": "No executable or child process is created: empty cmd.Path is rejected before CreateProcess; test checks exact start-stage empty-command refusal, no known root identity/wait, original native no-child receipt, and all five acquired stream handles closed.",
+  "synthetic_inputs": [
+    "private owner pointer association and in-use state, without namespace/creation/policy authority",
+    "containedAttempted=true with missing native receipt for negative receiver case",
+    "copy of original settled receipt with only Stdout I/O projection made incomplete for negative receiver case"
+  ],
+  "not_exercised": [
+    "AcquireSerenaOwnedTree",
+    "acquirePreparedSerenaBuildConstraint",
+    "beginPreparedSerenaBuildConstraintUse",
+    "full successful constraint acquisition/identity/read-hash lifecycle",
+    "successful child launch",
+    "Serena install",
+    "Product admission",
+    "source-issued namespace/publisher qualification",
+    "full Go suite",
+    "formal current-head external review"
+  ],
+  "qualification_status": "NOT_RUN revision 3. Revision 1 rejected by root before runtime. Revision 2 root compile failed (undefined x/sys constant) before test bodies; original failed receipt retained.",
+  "source_evidence": [
+    {
+      "path": "internal/api/serena_prepared_build_constraint_windows.go",
+      "git_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+      "sha256": "0e5a2642b1d916a5903ceeb4608faf0587442fd687f9ebf8f70d1ed61206a5c6"
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "git_blob": "ea77c1f3b142758c23a34ea812b87d400e9b5be9",
+      "sha256": "6c9d2e8831d4a95f2de0a73a57c23979901cc671528fd9c8b0ab6c2c21ecb438"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "git_blob": "65c639124e6d830c0386c6a86cde6039fac4c5a6",
+      "sha256": "34e4c1f0aec1028b228ee0e0642c6688798904c5e085974ffdc7546d31262055"
+    },
+    {
+      "path": "internal/api/serena_owned_tree.go",
+      "git_blob": "c69b1943fd64c2459038e43cca0d36db1b6e79ed",
+      "sha256": "25bad5f5e4c3914c62429875ad17c3d7b698f169893f1946f87d06f52d1e0d5f"
+    },
+    {
+      "path": "internal/api/main_test.go",
+      "git_blob": "0aebe605b377efd27cbcf8b57d4c417b151ce298",
+      "sha256": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869"
+    },
+    {
+      "path": "internal/api/intent_audit_caller_oracle_test.go",
+      "git_blob": "267856a46c7ad7553b1d0bdf3d9a824c06ec02cd",
+      "sha256": "af54e4ba30d9fcff4093d2820e9a8b630189cd976fcee83ed9391d663e20882b"
+    },
+    {
+      "path": "internal/process/contained_stream_observed.go",
+      "git_blob": "3a416c8abf2dc235bbfc11dd0488806333f23c2f",
+      "sha256": "f3cf8d99b0157ac87af8a1bf2282da41afaad22c11a58ebc9f2e27585b28e0da"
+    },
+    {
+      "path": "internal/process/contained_stream.go",
+      "git_blob": "6f8594dfd4cc0ab0a2750246800fcf6f19aa49c7",
+      "sha256": "b98c23476c0f8c7373537feab956c6687127270992af930568594984b660a2dd"
+    },
+    {
+      "path": "internal/process/contained_stream_windows.go",
+      "git_blob": "66173e5fae0ce530a50454c89b5ea79442beda74",
+      "sha256": "48c849039cbf73c26b27438f2145ff36fa06cb1237c3f9ef423c605c83d66346"
+    },
+    {
+      "path": "internal/process/jobobject_windows.go",
+      "git_blob": "6ba482701b3aebf65aa58946d9ae3754d15b77cb",
+      "sha256": "809e691ef55c59552dcf79a461b677302e43f34536286e4100d3a6d42fc114ce"
+    }
+  ],
+  "instructions": {
+    "repository_instruction_ref": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+    "paths": [
+      "AGENTS.md",
+      "docs/agent-runbook.md"
+    ]
+  },
+  "official_reference": "https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation",
+  "revision": 3,
+  "root_execution_scope": "pr648v3",
+  "previous_rejected_candidate": {
+    "revision": 1,
+    "status": "REJECTED_BEFORE_RUNTIME",
+    "directory": "rejected-before-runtime-v1",
+    "candidate_sha256": "8fe16495a376389f03cb1977aeef27d53dec6b6776bc106588a1b12711f9b4fa",
+    "patch_sha256": "99b57ae43c36d22e429ec8c068451791ecd47ff0cf2dac8ed84a9ac877121882",
+    "reason": "outer error is safe fixed text; exact empty-command cause lives in receipt.PrimaryError",
+    "runtime_tests_executed": false
+  },
+  "revision_2_change": "Only the original empty-command assertion: require receipt.PrimaryError != nil, then inspect receipt.PrimaryError.Error(); do not search the fixed safe outer runErr.Error().",
+  "review": {
+    "path": "REVIEW.md",
+    "sha256": "10690ecc06937d386e656e959917488710f39b7a88c12d475d80472882ae1700"
+  },
+  "static_checks": {
+    "git_apply_check_whitespace_error_all": "PASS revision 3 on exact target checkout fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+    "existing_worktrees": "unchanged and clean",
+    "revision_1_archive": "source and patch SHA-256 verified against original manifest",
+    "gofmt": "NOT_RUN revision 3 in this lane",
+    "compile": "NOT_RUN revision 3; revision 2 compilation failed before test bodies in root-owned Windows execution",
+    "tests": "NOT_RUN revision 3; no revision-2 native test bodies executed",
+    "revision_2_archive": "source and patch SHA-256 verified against original revision-2 manifest; compile receipt identity recorded"
+  },
+  "previous_compile_failure": {
+    "revision": 2,
+    "status": "COMPILE_FAILED_BEFORE_TESTS",
+    "directory": "compile-failed-before-tests-v2",
+    "candidate_sha256": "a8ec902dcede24706c091c4636ad0116e62dc6f268227cb436b02008b12badcf",
+    "patch_sha256": "8360bbc8b6af5b2d321c2355a05878252faa7f39e9d8e04c0436d308bbadae15",
+    "reason": "pinned x/sys/windows v0.47.0 does not export HANDLE_FLAG_PROTECT_FROM_CLOSE",
+    "runtime_test_bodies_executed": false
+  },
+  "revision_3_change": "Add one test-local uint32 constant for Windows SDK HANDLE_FLAG_PROTECT_FROM_CLOSE (0x00000002) and replace its four package-qualified references at the three SetHandleInformation call sites. No production/dependency/API change."
+}

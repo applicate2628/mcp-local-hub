@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "archive": "evidence-redacted.zip",
+  "bytes": 123465,
+  "sha256": "4b476b650f531b9e74de1faa39f60cfd1eafb18f3daab7c4e271f1cb77cb2d0c",
+  "entries": 77,
+  "manifest_files": 76,
+  "raw_command_streams_verified": 38,
+  "original_hashes_distinct_from_saved_hashes": true,
+  "crc_and_manifest_verified": true
+}

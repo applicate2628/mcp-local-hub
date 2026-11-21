@@ -1,0 +1,57 @@
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict
+--- PASS: TestRenderLinuxUnit_PreservesLiteralPercent (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/single-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/single-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/double-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/double-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict (0.00s)
+=== RUN   TestLinuxBackend_PercentPathRoundTripAndLegacyDrift
+--- PASS: TestLinuxBackend_PercentPathRoundTripAndLegacyDrift (0.00s)
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict
+--- PASS: TestRenderLinuxUnit_PreservesLiteralPercent (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/single-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/single-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/double-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/double-strict (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict (0.00s)
+=== RUN   TestLinuxBackend_PercentPathRoundTripAndLegacyDrift
+--- PASS: TestLinuxBackend_PercentPathRoundTripAndLegacyDrift (0.00s)
+PASS

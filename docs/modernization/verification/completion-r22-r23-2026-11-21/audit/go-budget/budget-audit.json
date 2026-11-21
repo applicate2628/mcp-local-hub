@@ -1,0 +1,1825 @@
+{
+  "schema": 1,
+  "source_commit": "cf5e71ffd88abe53c611f8ee06b536b3228e60e7",
+  "source_url": "https://github.com/applicate2628/mcp-local-hub/blob/cf5e71ffd88abe53c611f8ee06b536b3228e60e7/docs/modernization/verification/go-recovery-qualified-inputs-2026-11-20/",
+  "archive_bytes": 298833,
+  "archive_sha256": "d12ca2b81b815d18e4a49c659516e8f29c05709542aefb86919b9b5101b178ab",
+  "archive_git_blob": "ab3794334d3ff2087515444acdcda770de877466",
+  "archive_crc_verified": true,
+  "archive_member_hashes_verified": 274,
+  "source_before": {
+    "head": "f755d374fab317e1037deecd5dac8ffabbcdde36",
+    "tree": "19056c7b39ed2f625cb7f0b5282343c92b3b3a48",
+    "status": " M internal/cli/gui_force_test.go"
+  },
+  "runner_member": "runners/run_candidate.py",
+  "runner_source_sha256": "bf2fada5ae70bed5975db2117bee561c2a8d1ff7fed3324322d01a89a1821b2c",
+  "receipt_saved_sha256": "ca1da3c4a28f11becc4e74f9661f7b5872e413bc59ac32c8fc17eb38f245549e",
+  "new_tests_run": false,
+  "original_bytes_modified": false,
+  "runs": [
+    {
+      "run": "full-test",
+      "member": "evidence/gates/full-test.stdout.log",
+      "saved_bytes": 56270,
+      "saved_sha256": "1363a8c85dd5b9939865f7374ac1966454eecc2d082e5355dbd5fe5574ce5c47",
+      "source_private_hash_binding": {
+        "source_bytes": 58947,
+        "source_sha256": "747b23260811425f3ce67d587e431ec438737ef06f12efb0ea503996e7348ca6"
+      },
+      "private_original_rehashed": false,
+      "source_mapping_matches_receipt": true,
+      "line_count": 793,
+      "undecodable_utf8_bytes": 86,
+      "format": "plain go test output, not JSON events",
+      "go_json_event_count": 0,
+      "last_json_event_time": null,
+      "last_text_line_time": null,
+      "run_to_terminal_intervals": null,
+      "dangling_from_start_events": null,
+      "command": {
+        "arguments": [
+          "test",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "./..."
+        ],
+        "started_utc": "2026-11-20T08:49:38.698525+00:00",
+        "seconds": 402.220887,
+        "exit_code": 1,
+        "settled": true,
+        "direct_child_deadline_seconds": 900
+      },
+      "started_msk": "2026-11-20T11:49:38.698525+03:00",
+      "observed_process_exit_timestamp": null,
+      "nominal_start_plus_elapsed_utc_not_observed_exit": "2026-11-20T08:56:20.919412+00:00",
+      "next_command": {
+        "name": "tagged-api-cli",
+        "started_utc": "2026-11-20T08:56:20.920509+00:00",
+        "started_msk": "2026-11-20T11:56:20.920509+03:00"
+      },
+      "package_status_counts": {
+        "?": 11,
+        "ok": 58,
+        "FAIL": 4
+      },
+      "packages": [
+        {
+          "package": "mcp-local-hub/cmd/godbolt",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 1,
+          "block_first_line": 1,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/cmd/lldb-bridge",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 2,
+          "block_first_line": 2,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/cmd/mcphub",
+          "status": "ok",
+          "reported_seconds": "0.108",
+          "note": null,
+          "summary_line": 3,
+          "block_first_line": 3,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/cmd/mcphub-launcher",
+          "status": "ok",
+          "reported_seconds": "0.020",
+          "note": null,
+          "summary_line": 4,
+          "block_first_line": 4,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/cmd/perftools",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 5,
+          "block_first_line": 5,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api",
+          "status": "FAIL",
+          "reported_seconds": "300.047",
+          "note": null,
+          "summary_line": 189,
+          "block_first_line": 6,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/apitest",
+          "status": "ok",
+          "reported_seconds": "0.016",
+          "note": null,
+          "summary_line": 190,
+          "block_first_line": 190,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/binary_discovery",
+          "status": "ok",
+          "reported_seconds": "0.091",
+          "note": null,
+          "summary_line": 191,
+          "block_first_line": 191,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/daemon_env_overlay",
+          "status": "ok",
+          "reported_seconds": "97.414",
+          "note": null,
+          "summary_line": 192,
+          "block_first_line": 192,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/lsp_routing",
+          "status": "ok",
+          "reported_seconds": "6.300",
+          "note": null,
+          "summary_line": 193,
+          "block_first_line": 193,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/serena_routing",
+          "status": "ok",
+          "reported_seconds": "20.083",
+          "note": null,
+          "summary_line": 194,
+          "block_first_line": 194,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/archguard",
+          "status": "ok",
+          "reported_seconds": "1.906",
+          "note": null,
+          "summary_line": 195,
+          "block_first_line": 195,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/autostart",
+          "status": "ok",
+          "reported_seconds": "0.021",
+          "note": null,
+          "summary_line": 196,
+          "block_first_line": 196,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/binaryadmission",
+          "status": "ok",
+          "reported_seconds": "23.774",
+          "note": null,
+          "summary_line": 197,
+          "block_first_line": 197,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/branding",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 198,
+          "block_first_line": 198,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/buildinfo",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 199,
+          "block_first_line": 199,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cbuild",
+          "status": "ok",
+          "reported_seconds": "19.236",
+          "note": null,
+          "summary_line": 200,
+          "block_first_line": 200,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cbuild/mcp",
+          "status": "ok",
+          "reported_seconds": "0.117",
+          "note": null,
+          "summary_line": 201,
+          "block_first_line": 201,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "status": "FAIL",
+          "reported_seconds": "300.103",
+          "note": null,
+          "summary_line": 724,
+          "block_first_line": 202,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/clients",
+          "status": "ok",
+          "reported_seconds": "35.042",
+          "note": null,
+          "summary_line": 725,
+          "block_first_line": 725,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cmakegraph",
+          "status": "ok",
+          "reported_seconds": "11.755",
+          "note": null,
+          "summary_line": 726,
+          "block_first_line": 726,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/config",
+          "status": "ok",
+          "reported_seconds": "0.040",
+          "note": null,
+          "summary_line": 727,
+          "block_first_line": 727,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "status": "FAIL",
+          "reported_seconds": "188.065",
+          "note": null,
+          "summary_line": 736,
+          "block_first_line": 728,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/daemonrecovery",
+          "status": "ok",
+          "reported_seconds": "4.088",
+          "note": null,
+          "summary_line": 737,
+          "block_first_line": 737,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/drmemory",
+          "status": "ok",
+          "reported_seconds": "0.096",
+          "note": null,
+          "summary_line": 738,
+          "block_first_line": 738,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e",
+          "status": "ok",
+          "reported_seconds": "5.344",
+          "note": null,
+          "summary_line": 739,
+          "block_first_line": 739,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e/scan_readiness_fixture/driver",
+          "status": "ok",
+          "reported_seconds": "0.550",
+          "note": null,
+          "summary_line": 740,
+          "block_first_line": 740,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/e2e/scan_readiness_fixture/fixture",
+          "status": "ok",
+          "reported_seconds": "0.051",
+          "note": null,
+          "summary_line": 741,
+          "block_first_line": 741,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/gdb",
+          "status": "ok",
+          "reported_seconds": "0.018",
+          "note": null,
+          "summary_line": 742,
+          "block_first_line": 742,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/godbolt",
+          "status": "ok",
+          "reported_seconds": "0.038",
+          "note": null,
+          "summary_line": 743,
+          "block_first_line": 743,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/gui",
+          "status": "ok",
+          "reported_seconds": "240.305",
+          "note": null,
+          "summary_line": 744,
+          "block_first_line": 744,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/hubtemp",
+          "status": "ok",
+          "reported_seconds": "0.041",
+          "note": null,
+          "summary_line": 745,
+          "block_first_line": 745,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/kimi",
+          "status": "ok",
+          "reported_seconds": "3.235",
+          "note": null,
+          "summary_line": 746,
+          "block_first_line": 746,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/lldb",
+          "status": "ok",
+          "reported_seconds": "0.032",
+          "note": null,
+          "summary_line": 747,
+          "block_first_line": 747,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/mcpcompat",
+          "status": "ok",
+          "reported_seconds": "0.096",
+          "note": null,
+          "summary_line": 748,
+          "block_first_line": 748,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/mcpcompat/readinesswire",
+          "status": "ok",
+          "reported_seconds": "0.058",
+          "note": null,
+          "summary_line": 749,
+          "block_first_line": 749,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/mcproute",
+          "status": "ok",
+          "reported_seconds": "0.096",
+          "note": null,
+          "summary_line": 750,
+          "block_first_line": 750,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/oneapi",
+          "status": "ok",
+          "reported_seconds": "4.529",
+          "note": null,
+          "summary_line": 751,
+          "block_first_line": 751,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/oneapirun",
+          "status": "ok",
+          "reported_seconds": "24.944",
+          "note": null,
+          "summary_line": 752,
+          "block_first_line": 752,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/perftools",
+          "status": "ok",
+          "reported_seconds": "9.267",
+          "note": null,
+          "summary_line": 753,
+          "block_first_line": 753,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "status": "FAIL",
+          "reported_seconds": "26.958",
+          "note": null,
+          "summary_line": 760,
+          "block_first_line": 754,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/releasegen/serena",
+          "status": "ok",
+          "reported_seconds": "3.367",
+          "note": null,
+          "summary_line": 761,
+          "block_first_line": 761,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/scheduler",
+          "status": "ok",
+          "reported_seconds": "15.604",
+          "note": null,
+          "summary_line": 762,
+          "block_first_line": 762,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/secrets",
+          "status": "ok",
+          "reported_seconds": "19.731",
+          "note": null,
+          "summary_line": 763,
+          "block_first_line": 763,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/sonnet",
+          "status": "ok",
+          "reported_seconds": "16.905",
+          "note": null,
+          "summary_line": 764,
+          "block_first_line": 764,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/supervisorowner",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 765,
+          "block_first_line": 765,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/testkit",
+          "status": "ok",
+          "reported_seconds": "0.219",
+          "note": null,
+          "summary_line": 766,
+          "block_first_line": 766,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/toolchain",
+          "status": "ok",
+          "reported_seconds": "0.272",
+          "note": null,
+          "summary_line": 767,
+          "block_first_line": 767,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/tray",
+          "status": "ok",
+          "reported_seconds": "0.067",
+          "note": null,
+          "summary_line": 768,
+          "block_first_line": 768,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/unsafegate",
+          "status": "ok",
+          "reported_seconds": "0.056",
+          "note": null,
+          "summary_line": 769,
+          "block_first_line": 769,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/urlredact",
+          "status": "ok",
+          "reported_seconds": "0.057",
+          "note": null,
+          "summary_line": 770,
+          "block_first_line": 770,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 771,
+          "block_first_line": 771,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/boundedio",
+          "status": "ok",
+          "reported_seconds": "0.226",
+          "note": null,
+          "summary_line": 772,
+          "block_first_line": 772,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/cmaketrace",
+          "status": "ok",
+          "reported_seconds": "0.237",
+          "note": null,
+          "summary_line": 773,
+          "block_first_line": 773,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/cmakewrap",
+          "status": "ok",
+          "reported_seconds": "0.138",
+          "note": null,
+          "summary_line": 774,
+          "block_first_line": 774,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/discovery",
+          "status": "ok",
+          "reported_seconds": "0.066",
+          "note": null,
+          "summary_line": 775,
+          "block_first_line": 775,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/evidence",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 776,
+          "block_first_line": 776,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/lastfailure",
+          "status": "ok",
+          "reported_seconds": "14.394",
+          "note": null,
+          "summary_line": 777,
+          "block_first_line": 777,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/patchesapply",
+          "status": "ok",
+          "reported_seconds": "2.597",
+          "note": null,
+          "summary_line": 778,
+          "block_first_line": 778,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/pinstatus",
+          "status": "ok",
+          "reported_seconds": "2.667",
+          "note": null,
+          "summary_line": 779,
+          "block_first_line": 779,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/portname",
+          "status": "ok",
+          "reported_seconds": "0.019",
+          "note": null,
+          "summary_line": 780,
+          "block_first_line": 780,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/portresolution",
+          "status": "ok",
+          "reported_seconds": "0.394",
+          "note": null,
+          "summary_line": 781,
+          "block_first_line": 781,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/publicresult",
+          "status": "ok",
+          "reported_seconds": "0.042",
+          "note": null,
+          "summary_line": 782,
+          "block_first_line": 782,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/reversedepgraph",
+          "status": "ok",
+          "reported_seconds": "2.339",
+          "note": null,
+          "summary_line": 783,
+          "block_first_line": 783,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vcpkgmcp/vcpkgserver",
+          "status": "ok",
+          "reported_seconds": "1.511",
+          "note": null,
+          "summary_line": 784,
+          "block_first_line": 784,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/vtune",
+          "status": "ok",
+          "reported_seconds": "14.762",
+          "note": null,
+          "summary_line": 785,
+          "block_first_line": 785,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/servers",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 786,
+          "block_first_line": 786,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/archcheck",
+          "status": "ok",
+          "reported_seconds": "0.162",
+          "note": null,
+          "summary_line": 787,
+          "block_first_line": 787,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/genicon",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 788,
+          "block_first_line": 788,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/test-job-entry",
+          "status": "ok",
+          "reported_seconds": "0.152",
+          "note": null,
+          "summary_line": 789,
+          "block_first_line": 789,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/test-recovery-namespace",
+          "status": "?",
+          "reported_seconds": null,
+          "note": "no test files",
+          "summary_line": 790,
+          "block_first_line": 790,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/testshards",
+          "status": "ok",
+          "reported_seconds": "0.106",
+          "note": null,
+          "summary_line": 791,
+          "block_first_line": 791,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/tools/windows-product-validate",
+          "status": "ok",
+          "reported_seconds": "0.044",
+          "note": null,
+          "summary_line": 792,
+          "block_first_line": 792,
+          "start_time": null,
+          "finish_time": null
+        }
+      ],
+      "sum_package_seconds_not_walltime": "1420.018",
+      "largest_package_seconds": "300.103",
+      "outer_minus_largest_package_not_compile_time": "102.117887",
+      "slowest_ten_packages": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "status": "FAIL",
+          "reported_seconds": "300.103",
+          "note": null,
+          "summary_line": 724,
+          "block_first_line": 202,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api",
+          "status": "FAIL",
+          "reported_seconds": "300.047",
+          "note": null,
+          "summary_line": 189,
+          "block_first_line": 6,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/gui",
+          "status": "ok",
+          "reported_seconds": "240.305",
+          "note": null,
+          "summary_line": 744,
+          "block_first_line": 744,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "status": "FAIL",
+          "reported_seconds": "188.065",
+          "note": null,
+          "summary_line": 736,
+          "block_first_line": 728,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/daemon_env_overlay",
+          "status": "ok",
+          "reported_seconds": "97.414",
+          "note": null,
+          "summary_line": 192,
+          "block_first_line": 192,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/clients",
+          "status": "ok",
+          "reported_seconds": "35.042",
+          "note": null,
+          "summary_line": 725,
+          "block_first_line": 725,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "status": "FAIL",
+          "reported_seconds": "26.958",
+          "note": null,
+          "summary_line": 760,
+          "block_first_line": 754,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/oneapirun",
+          "status": "ok",
+          "reported_seconds": "24.944",
+          "note": null,
+          "summary_line": 752,
+          "block_first_line": 752,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/binaryadmission",
+          "status": "ok",
+          "reported_seconds": "23.774",
+          "note": null,
+          "summary_line": 197,
+          "block_first_line": 197,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/api/serena_routing",
+          "status": "ok",
+          "reported_seconds": "20.083",
+          "note": null,
+          "summary_line": 194,
+          "block_first_line": 194,
+          "start_time": null,
+          "finish_time": null
+        }
+      ],
+      "printed_completed_roots": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 634,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "test": "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+          "status": "FAIL",
+          "reported_seconds": "0.31",
+          "line": 728,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "test": "TestJob_BreakawayEnabledDescendantEscapesClose",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 754,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "test": "TestJobInformationTransportPreparationBoundary",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 756,
+          "start_event_time": null,
+          "terminal_event_time": null
+        }
+      ],
+      "root_durations_by_package": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "printed_completed_roots": 1,
+          "status_counts": {
+            "FAIL": 1
+          },
+          "sum_printed_root_seconds_not_walltime": "0.00"
+        },
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "printed_completed_roots": 1,
+          "status_counts": {
+            "FAIL": 1
+          },
+          "sum_printed_root_seconds_not_walltime": "0.31"
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "printed_completed_roots": 2,
+          "status_counts": {
+            "FAIL": 2
+          },
+          "sum_printed_root_seconds_not_walltime": "0.00"
+        }
+      ],
+      "slowest_ten_printed_roots_only": [
+        {
+          "package": "mcp-local-hub/internal/daemon",
+          "test": "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+          "status": "FAIL",
+          "reported_seconds": "0.31",
+          "line": 728,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 634,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "test": "TestJob_BreakawayEnabledDescendantEscapesClose",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 754,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/process",
+          "test": "TestJobInformationTransportPreparationBoundary",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 756,
+          "start_event_time": null,
+          "terminal_event_time": null
+        }
+      ],
+      "timeouts": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "line": 70,
+          "printed_timeout": "5m0s",
+          "running_tests_at_snapshot": [
+            {
+              "test": "TestAttachExisting_FreshCommittedPlanApplyRefusesDrift",
+              "printed_age": "0s",
+              "is_root": true,
+              "line": 72
+            }
+          ],
+          "snapshot_time": null,
+          "complete_started_test_inventory": false
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "line": 636,
+          "printed_timeout": "5m0s",
+          "running_tests_at_snapshot": [
+            {
+              "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+              "printed_age": "3s",
+              "is_root": true,
+              "line": 638
+            },
+            {
+              "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+              "printed_age": "0s",
+              "is_root": false,
+              "line": 639
+            }
+          ],
+          "snapshot_time": null,
+          "complete_started_test_inventory": false
+        }
+      ],
+      "timeout_stack_observations": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "first_line": 96,
+          "last_line": 124,
+          "observations": [
+            "readSupervisorIPCLine"
+          ],
+          "selected_frames": [
+            {
+              "line": 101,
+              "frame": "mcp-local-hub/internal/api.readSupervisorIPCLine({0x7ff766adc760, 0x16a043138270}, 0x1000)"
+            },
+            {
+              "line": 102,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:452 +0xca"
+            },
+            {
+              "line": 103,
+              "frame": "mcp-local-hub/internal/api.validateSupervisorIPCHello({0x7ff766adc760?, 0x16a043138270?}, {0x7ff7649b27f1?, {0x16a042dd44a0?, 0x1a04301aaf0?}})"
+            },
+            {
+              "line": 104,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:407 +0x51"
+            },
+            {
+              "line": 105,
+              "frame": "mcp-local-hub/internal/api.exchangeSupervisorIPCStatusResult({0x7ff766ada300, 0x16a043062a10}, {0x7ff766adc760, 0x16a043138270}, {0x5?, {0x16a042dd44a0?, 0x8?}}, 0x0)"
+            },
+            {
+              "line": 106,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:283 +0x330"
+            },
+            {
+              "line": 107,
+              "frame": "mcp-local-hub/internal/api.dialSupervisorIPCStatusResult({0x7ff766ada300, 0x16a043062a10}, {0x16a042cb6a20?, 0x5?}, {0x8?, {0x16a042dd44a0?, 0x0?}}, 0x0)"
+            },
+            {
+              "line": 108,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:258 +0x33c"
+            },
+            {
+              "line": 109,
+              "frame": "mcp-local-hub/internal/api.dialSupervisorIPCStatusResultForOwner(...)"
+            },
+            {
+              "line": 110,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:246"
+            },
+            {
+              "line": 111,
+              "frame": "mcp-local-hub/internal/api.dialSupervisorIPCStatusForOwner({0x7ff766ada300?, 0x16a043062a10?}, {0x16a042cb6a20?, 0x7ff765b77fd0?}, {0x7?, {0x16a042dd44a0?, 0x8?}})"
+            },
+            {
+              "line": 112,
+              "frame": "\t<WORK_ROOT>/source/internal/api/supervisor_ipc_status_client.go:241 +0x5b"
+            },
+            {
+              "line": 113,
+              "frame": "mcp-local-hub/internal/api.(*API).buildAttachClientPlan(0x16a042db0288, {0x7ff766ad9f48?, 0x7ff766bde000?}, {{0x7ff765b7aeee, 0x9}, {0x7ff765b77fd0, 0x7}, {0x7ff765b7928f, 0x8}, {0x0, ...}}, ...)"
+            },
+            {
+              "line": 114,
+              "frame": "\t<WORK_ROOT>/source/internal/api/attach_client_plan.go:291 +0x55a"
+            },
+            {
+              "line": 115,
+              "frame": "mcp-local-hub/internal/api.(*API).BuildAttachClientPlan(0x7ff766bdf800?, {0x7ff766ad9f48?, 0x7ff766bde000?}, {{0x7ff765b7aeee, 0x9}, {0x7ff765b77fd0, 0x7}, {0x7ff765b7928f, 0x8}, {0x0, ...}})"
+            },
+            {
+              "line": 116,
+              "frame": "\t<WORK_ROOT>/source/internal/api/attach_client_plan.go:241 +0x53"
+            },
+            {
+              "line": 117,
+              "frame": "mcp-local-hub/internal/api.runAttachExistingOccupiedPortFixtureMode(0x16a04308c400, 0x0, 0x1, 0x0, {0x7ff765bd0a31, 0x22})"
+            },
+            {
+              "line": 118,
+              "frame": "\t<WORK_ROOT>/source/internal/api/attach_client_plan_windows_test.go:370 +0x2067"
+            },
+            {
+              "line": 119,
+              "frame": "mcp-local-hub/internal/api.TestAttachExisting_FreshCommittedPlanApplyRefusesDrift(0x16a04308c400?)"
+            },
+            {
+              "line": 120,
+              "frame": "\t<WORK_ROOT>/source/internal/api/attach_client_plan_windows_test.go:79 +0x29"
+            }
+          ]
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "first_line": 681,
+          "last_line": 711,
+          "observations": [
+            "FlushFileBuffers"
+          ],
+          "selected_frames": [
+            {
+              "line": 686,
+              "frame": "golang.org/x/sys/windows.FlushFileBuffers(0x550)"
+            },
+            {
+              "line": 688,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigToResolvedParentObserved(0x568, {0x28fe9cf12dc0, 0xa3}, {0x28fe9cf12e64, 0xd}, {0x28fe9cf14f00, 0x492, 0x500}, 0x0, 0x0, ...)"
+            },
+            {
+              "line": 689,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:330 +0x87f"
+            },
+            {
+              "line": 690,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImplObserved({0x28fe9cf12dc0, 0xb1}, {0x28fe9cf14f00, 0x492, 0x500}, 0x0, 0x0)"
+            },
+            {
+              "line": 691,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:165 +0x277"
+            },
+            {
+              "line": 692,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImpl(...)"
+            },
+            {
+              "line": 693,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:131"
+            },
+            {
+              "line": 694,
+              "frame": "mcp-local-hub/internal/api.SecureWriteClientConfig(...)"
+            },
+            {
+              "line": 695,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_client_config.go:95"
+            },
+            {
+              "line": 696,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithParentRelax({0x28fe9cf12dc0, 0xb1}, {0x28fe9cf14f00, 0x492, 0x500}, {0x28fe9d218dd0, 0xc9}, 0x7ff6d77820a8)"
+            },
+            {
+              "line": 697,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:146 +0x67"
+            },
+            {
+              "line": 698,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithOperatorOpt({0x28fe9cf12dc0, 0xb1}, {0x28fe9cf14f00, 0x492, 0x500})"
+            },
+            {
+              "line": 699,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:183 +0x95"
+            },
+            {
+              "line": 700,
+              "frame": "mcp-local-hub/internal/api.WriteStateFileBytesLockHeld({0x28fe9cf12dc0, 0xb1}, {0x28fe9cf14f00, 0x492, 0x500})"
+            },
+            {
+              "line": 701,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:115 +0xce"
+            },
+            {
+              "line": 702,
+              "frame": "mcp-local-hub/internal/api.WriteStateFileBytesAtomic({0x28fe9cf12dc0, 0xb1}, {0x28fe9cf14f00, 0x492, 0x500})"
+            },
+            {
+              "line": 703,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:104 +0x270"
+            },
+            {
+              "line": 704,
+              "frame": "mcp-local-hub/internal/api.WriteStateFileAtomic({0x28fe9cf12dc0, 0xb1}, {0x7ff6d74a3ef0?, 0x28fe9d40e340?})"
+            },
+            {
+              "line": 705,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:77 +0xd6"
+            },
+            {
+              "line": 706,
+              "frame": "mcp-local-hub/internal/cli.TestMCPFrontV3_SerenaConflictClassifierMutationTable.func35(0x28fe9d3f9c00)"
+            },
+            {
+              "line": 707,
+              "frame": "\t<WORK_ROOT>/source/internal/cli/install_reconcile_mcp_front_v3_test.go:840 +0x509"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "tagged-api-cli",
+      "member": "evidence/gates/tagged-api-cli.stdout.log",
+      "saved_bytes": 58278,
+      "saved_sha256": "a09e065d4ef9abfabdc0c03a5d159e5f76b0540df31ed8dbd8ec3d9d63e03af2",
+      "source_private_hash_binding": {
+        "source_bytes": 61682,
+        "source_sha256": "528d9ac1ae4521678a241d46daa5dfcdabe08fdec893c67fdb56268910abad61"
+      },
+      "private_original_rehashed": false,
+      "source_mapping_matches_receipt": true,
+      "line_count": 727,
+      "undecodable_utf8_bytes": 0,
+      "format": "plain go test output, not JSON events",
+      "go_json_event_count": 0,
+      "last_json_event_time": null,
+      "last_text_line_time": null,
+      "run_to_terminal_intervals": null,
+      "dangling_from_start_events": null,
+      "command": {
+        "arguments": [
+          "test",
+          "-tags=test_state_path_env",
+          "-count=1",
+          "-timeout",
+          "5m",
+          "./internal/api/",
+          "./internal/cli/"
+        ],
+        "started_utc": "2026-11-20T08:56:20.920509+00:00",
+        "seconds": 313.08449,
+        "exit_code": 1,
+        "settled": true,
+        "direct_child_deadline_seconds": 900
+      },
+      "started_msk": "2026-11-20T11:56:20.920509+03:00",
+      "observed_process_exit_timestamp": null,
+      "nominal_start_plus_elapsed_utc_not_observed_exit": "2026-11-20T09:01:34.004999+00:00",
+      "next_command": {
+        "name": "after-head",
+        "started_utc": "2026-11-20T09:01:34.006715+00:00",
+        "started_msk": "2026-11-20T12:01:34.006715+03:00"
+      },
+      "package_status_counts": {
+        "FAIL": 2
+      },
+      "packages": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "status": "FAIL",
+          "reported_seconds": "300.069",
+          "note": null,
+          "summary_line": 142,
+          "block_first_line": 1,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "status": "FAIL",
+          "reported_seconds": "300.063",
+          "note": null,
+          "summary_line": 726,
+          "block_first_line": 143,
+          "start_time": null,
+          "finish_time": null
+        }
+      ],
+      "sum_package_seconds_not_walltime": "600.132",
+      "largest_package_seconds": "300.069",
+      "outer_minus_largest_package_not_compile_time": "13.01549",
+      "slowest_ten_packages": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "status": "FAIL",
+          "reported_seconds": "300.069",
+          "note": null,
+          "summary_line": 142,
+          "block_first_line": 1,
+          "start_time": null,
+          "finish_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "status": "FAIL",
+          "reported_seconds": "300.063",
+          "note": null,
+          "summary_line": 726,
+          "block_first_line": 143,
+          "start_time": null,
+          "finish_time": null
+        }
+      ],
+      "printed_completed_roots": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+          "status": "FAIL",
+          "reported_seconds": "0.00",
+          "line": 575,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+          "status": "FAIL",
+          "reported_seconds": "0.60",
+          "line": 577,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+          "status": "FAIL",
+          "reported_seconds": "0.45",
+          "line": 580,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_DrivesSupervisorRestart",
+          "status": "FAIL",
+          "reported_seconds": "0.55",
+          "line": 582,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+          "status": "FAIL",
+          "reported_seconds": "0.57",
+          "line": 586,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+          "status": "FAIL",
+          "reported_seconds": "0.81",
+          "line": 589,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+          "status": "FAIL",
+          "reported_seconds": "0.41",
+          "line": 592,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+          "status": "FAIL",
+          "reported_seconds": "0.33",
+          "line": 599,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+          "status": "FAIL",
+          "reported_seconds": "0.89",
+          "line": 602,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+          "status": "FAIL",
+          "reported_seconds": "0.47",
+          "line": 617,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+          "status": "FAIL",
+          "reported_seconds": "0.58",
+          "line": 620,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+          "status": "FAIL",
+          "reported_seconds": "0.62",
+          "line": 623,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+          "status": "FAIL",
+          "reported_seconds": "0.57",
+          "line": 626,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+          "status": "FAIL",
+          "reported_seconds": "0.79",
+          "line": 630,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow",
+          "status": "FAIL",
+          "reported_seconds": "0.39",
+          "line": 633,
+          "start_event_time": null,
+          "terminal_event_time": null
+        }
+      ],
+      "root_durations_by_package": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "printed_completed_roots": 15,
+          "status_counts": {
+            "FAIL": 15
+          },
+          "sum_printed_root_seconds_not_walltime": "8.03"
+        }
+      ],
+      "slowest_ten_printed_roots_only": [
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+          "status": "FAIL",
+          "reported_seconds": "0.89",
+          "line": 602,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+          "status": "FAIL",
+          "reported_seconds": "0.81",
+          "line": 589,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+          "status": "FAIL",
+          "reported_seconds": "0.79",
+          "line": 630,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+          "status": "FAIL",
+          "reported_seconds": "0.62",
+          "line": 623,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+          "status": "FAIL",
+          "reported_seconds": "0.60",
+          "line": 577,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+          "status": "FAIL",
+          "reported_seconds": "0.58",
+          "line": 620,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+          "status": "FAIL",
+          "reported_seconds": "0.57",
+          "line": 586,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+          "status": "FAIL",
+          "reported_seconds": "0.57",
+          "line": 626,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_DrivesSupervisorRestart",
+          "status": "FAIL",
+          "reported_seconds": "0.55",
+          "line": 582,
+          "start_event_time": null,
+          "terminal_event_time": null
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "test": "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+          "status": "FAIL",
+          "reported_seconds": "0.47",
+          "line": 617,
+          "start_event_time": null,
+          "terminal_event_time": null
+        }
+      ],
+      "timeouts": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "line": 67,
+          "printed_timeout": "5m0s",
+          "running_tests_at_snapshot": [
+            {
+              "test": "TestExecuteDeAdoptT8RoutedSecretPrefilterSharedSkipAndClose",
+              "printed_age": "1s",
+              "is_root": true,
+              "line": 69
+            }
+          ],
+          "snapshot_time": null,
+          "complete_started_test_inventory": false
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "line": 636,
+          "printed_timeout": "5m0s",
+          "running_tests_at_snapshot": [
+            {
+              "test": "TestMigrateSerena_AppliedInstallContinuationMatrix",
+              "printed_age": "4s",
+              "is_root": true,
+              "line": 638
+            },
+            {
+              "test": "TestMigrateSerena_AppliedInstallContinuationMatrix/timeout-probe-error-hard",
+              "printed_age": "0s",
+              "is_root": false,
+              "line": 639
+            }
+          ],
+          "snapshot_time": null,
+          "complete_started_test_inventory": false
+        }
+      ],
+      "timeout_stack_observations": [
+        {
+          "package": "mcp-local-hub/internal/api",
+          "first_line": 105,
+          "last_line": 141,
+          "observations": [
+            "FlushFileBuffers"
+          ],
+          "selected_frames": [
+            {
+              "line": 110,
+              "frame": "golang.org/x/sys/windows.FlushFileBuffers(0x67c)"
+            },
+            {
+              "line": 112,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigToResolvedParentObserved(0x730, {0x1491295dd40, 0xb1}, {0x1491295ddf2, 0xb}, {0x14917106000, 0xf4, 0x100}, 0x0, 0x0, ...)"
+            },
+            {
+              "line": 113,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:330 +0x87f"
+            },
+            {
+              "line": 114,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImplObserved({0x1491295dd40, 0xbd}, {0x14917106000, 0xf4, 0x100}, 0x0, 0x0)"
+            },
+            {
+              "line": 115,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:165 +0x277"
+            },
+            {
+              "line": 116,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImpl(...)"
+            },
+            {
+              "line": 117,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:131"
+            },
+            {
+              "line": 118,
+              "frame": "mcp-local-hub/internal/api.SecureWriteClientConfig(...)"
+            },
+            {
+              "line": 119,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_client_config.go:95"
+            },
+            {
+              "line": 120,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithParentRelax({0x1491295dd40, 0xbd}, {0x14917106000, 0xf4, 0x100}, {0x1491263c000, 0xd5}, 0x7ff6fc5059b8)"
+            },
+            {
+              "line": 121,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:146 +0x67"
+            },
+            {
+              "line": 122,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithOperatorOpt({0x1491295dd40, 0xbd}, {0x14917106000, 0xf4, 0x100})"
+            },
+            {
+              "line": 123,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:183 +0x95"
+            },
+            {
+              "line": 124,
+              "frame": "mcp-local-hub/internal/api.WriteStateFileBytesLockHeld({0x1491295dd40, 0xbd}, {0x14917106000, 0xf4, 0x100})"
+            },
+            {
+              "line": 125,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:115 +0xce"
+            },
+            {
+              "line": 126,
+              "frame": "mcp-local-hub/internal/api.init.5.func1({0x1491295dd40?, 0x7ff6fa6170d1?}, {0x14917106000?, 0x7ff6fc3fc7e0?, 0x149128b42d0?}, 0x12778240?)"
+            },
+            {
+              "line": 127,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_read_inode_anchor.go:19 +0x1d"
+            },
+            {
+              "line": 128,
+              "frame": "mcp-local-hub/internal/secrets.writeVaultFile({0x1491295dd40, 0xbd}, {0x14917106000, 0xf4, 0x100}, 0x180)"
+            },
+            {
+              "line": 129,
+              "frame": "\t<WORK_ROOT>/source/internal/secrets/vault.go:271 +0x5b"
+            },
+            {
+              "line": 130,
+              "frame": "mcp-local-hub/internal/secrets.(*Vault).save(0x1491282e0c0)"
+            },
+            {
+              "line": 131,
+              "frame": "\t<WORK_ROOT>/source/internal/secrets/vault.go:215 +0x35e"
+            },
+            {
+              "line": 132,
+              "frame": "mcp-local-hub/internal/secrets.(*Vault).Set(...)"
+            },
+            {
+              "line": 133,
+              "frame": "\t<WORK_ROOT>/source/internal/secrets/vault.go:167"
+            },
+            {
+              "line": 134,
+              "frame": "mcp-local-hub/internal/api.seedDeAdoptVault(0x149127a3600, 0x14912a1da50)"
+            },
+            {
+              "line": 135,
+              "frame": "\t<WORK_ROOT>/source/internal/api/deadopt_execute_test.go:2515 +0x314"
+            },
+            {
+              "line": 136,
+              "frame": "mcp-local-hub/internal/api.TestExecuteDeAdoptT8RoutedSecretPrefilterSharedSkipAndClose(0x149127a3600)"
+            },
+            {
+              "line": 137,
+              "frame": "\t<WORK_ROOT>/source/internal/api/deadopt_execute_test.go:1627 +0x4a5"
+            }
+          ]
+        },
+        {
+          "package": "mcp-local-hub/internal/cli",
+          "first_line": 693,
+          "last_line": 725,
+          "observations": [
+            "FlushFileBuffers"
+          ],
+          "selected_frames": [
+            {
+              "line": 698,
+              "frame": "golang.org/x/sys/windows.FlushFileBuffers(0x6b8)"
+            },
+            {
+              "line": 700,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigToResolvedParentObserved(0x688, {0x2913857d2160, 0xb5}, {0x2913857d2216, 0xf}, {0x2913859bc600, 0x179, 0x200}, 0x0, 0x0, ...)"
+            },
+            {
+              "line": 701,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:330 +0x87f"
+            },
+            {
+              "line": 702,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImplObserved({0x2913857d2160, 0xc5}, {0x2913859bc600, 0x179, 0x200}, 0x0, 0x0)"
+            },
+            {
+              "line": 703,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:165 +0x277"
+            },
+            {
+              "line": 704,
+              "frame": "mcp-local-hub/internal/api.secureWriteClientConfigImpl(...)"
+            },
+            {
+              "line": 705,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_windows.go:131"
+            },
+            {
+              "line": 706,
+              "frame": "mcp-local-hub/internal/api.SecureWriteClientConfig(...)"
+            },
+            {
+              "line": 707,
+              "frame": "\t<WORK_ROOT>/source/internal/api/secure_write_client_config.go:95"
+            },
+            {
+              "line": 708,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithParentRelax({0x2913857d2160, 0xc5}, {0x2913859bc600, 0x179, 0x200}, {0x29138580e1c0, 0xdd}, 0x7ff647e905b8)"
+            },
+            {
+              "line": 709,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:146 +0x67"
+            },
+            {
+              "line": 710,
+              "frame": "mcp-local-hub/internal/api.secureWriteStateFileWithOperatorOpt({0x2913857d2160, 0xc5}, {0x2913859bc600, 0x179, 0x200})"
+            },
+            {
+              "line": 711,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:183 +0x95"
+            },
+            {
+              "line": 712,
+              "frame": "mcp-local-hub/internal/api.WriteStateFileBytesLockHeld({0x2913857d2160, 0xc5}, {0x2913859bc600, 0x179, 0x200})"
+            },
+            {
+              "line": 713,
+              "frame": "\t<WORK_ROOT>/source/internal/api/state_file_helper.go:115 +0xce"
+            },
+            {
+              "line": 714,
+              "frame": "mcp-local-hub/internal/api.(*Registry).Save(0x2913858a9c38)"
+            },
+            {
+              "line": 715,
+              "frame": "\t<WORK_ROOT>/source/internal/api/workspace_registry.go:255 +0x1ae"
+            },
+            {
+              "line": 716,
+              "frame": "mcp-local-hub/internal/cli.seedSerenaWorkspaceWithPort(0x2913857de600, {0x2913856bc280, 0xa6}, 0x0)"
+            },
+            {
+              "line": 717,
+              "frame": "\t<WORK_ROOT>/source/internal/cli/migrate_serena_test.go:714 +0x2d2"
+            },
+            {
+              "line": 718,
+              "frame": "mcp-local-hub/internal/cli.seedSerenaWorkspaceNoPort(0x2913857de600, {0x2913856bc280, 0xa6})"
+            },
+            {
+              "line": 719,
+              "frame": "\t<WORK_ROOT>/source/internal/cli/migrate_serena_test.go:692 +0x3b"
+            },
+            {
+              "line": 720,
+              "frame": "mcp-local-hub/internal/cli.TestMigrateSerena_AppliedInstallContinuationMatrix.func1(0x2913857de600)"
+            },
+            {
+              "line": 721,
+              "frame": "\t<WORK_ROOT>/source/internal/cli/migrate_serena_test.go:4072 +0x128"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

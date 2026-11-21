@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "analyzed_utc": "2026-11-19T17:11:20.836780+00:00",
+  "old_run_id": "d55a6763eb064445a46ef592d52a9e6f",
+  "run_id": "68c2db3e983a41f9bded8e068e88bab8",
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+  "recovery_sha256": "3e0f68e2858d6a214a2ecd14db26a973d92149c553275df2e3a323b06a1a0c89",
+  "v2_fixture_sha256": "8118e1c02937dbf27a9aaa12f63f4e34a91b0ce3e7ad675b4e1758960c9cb010",
+  "recovery": {
+    "task_path": "\\mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible",
+    "state": "ABSENCE_OBSERVED",
+    "delete_attempted": true,
+    "absence_observed": true,
+    "completed_utc": "2026-11-19T17:01:56.2017613Z",
+    "error": null
+  },
+  "original_failure_unchanged": true,
+  "original_checks": [],
+  "native_script_checks_passed": true,
+  "cleanup_complete": true,
+  "accepted_checks": [
+    "status-visible",
+    "export-visible",
+    "status-hidden",
+    "export-hidden",
+    "list-visible-only",
+    "status-absent",
+    "export-absent"
+  ],
+  "responses": [
+    {
+      "check": "status-visible",
+      "ok": true,
+      "exact_name_state_xml": true,
+      "marker_preserved": true
+    },
+    {
+      "check": "export-visible",
+      "ok": true,
+      "exact_name_state_xml": true,
+      "marker_preserved": true
+    },
+    {
+      "check": "status-hidden",
+      "ok": true,
+      "exact_name_state_xml": true,
+      "marker_preserved": true
+    },
+    {
+      "check": "export-hidden",
+      "ok": true,
+      "exact_name_state_xml": true,
+      "marker_preserved": true
+    },
+    {
+      "check": "list-visible-only",
+      "ok": true,
+      "exact_name_state_xml": true,
+      "marker_preserved": true
+    },
+    {
+      "check": "status-absent",
+      "ok": false,
+      "kind": "task_absent"
+    },
+    {
+      "check": "export-absent",
+      "ok": false,
+      "kind": "task_absent"
+    }
+  ],
+  "children": [
+    {
+      "check": "status-visible",
+      "started_utc": "2026-11-19T17:02:45.9371105Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "export-visible",
+      "started_utc": "2026-11-19T17:02:46.3196922Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "status-hidden",
+      "started_utc": "2026-11-19T17:02:46.6156081Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "export-hidden",
+      "started_utc": "2026-11-19T17:02:46.9196478Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "list-visible-only",
+      "started_utc": "2026-11-19T17:02:47.2308350Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "status-absent",
+      "started_utc": "2026-11-19T17:02:47.5778514Z",
+      "settled": true,
+      "exit_code": 0
+    },
+    {
+      "check": "export-absent",
+      "started_utc": "2026-11-19T17:02:47.8507336Z",
+      "settled": true,
+      "exit_code": 0
+    }
+  ],
+  "tasks": [
+    {
+      "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-visible",
+      "hidden": false,
+      "attempted": true,
+      "created": true,
+      "confirmed": true,
+      "cleanup": "removed"
+    },
+    {
+      "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-hidden",
+      "hidden": true,
+      "attempted": true,
+      "created": true,
+      "confirmed": true,
+      "cleanup": "removed"
+    }
+  ],
+  "stderr": {
+    "files": 7,
+    "each_bytes": 441,
+    "each_sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7",
+    "same_as_original": true,
+    "format": "CLIXML",
+    "header_line_ending": "CRLF",
+    "records_per_file": 1,
+    "stream": "progress",
+    "state": "Completed"
+  },
+  "read_only_observation": {
+    "observed_utc": "2026-11-19T17:05:58.7262160Z",
+    "scheduler_query": "GetTasks(1)",
+    "mutates_scheduler": false,
+    "names": [
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible",
+        "count": 0
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden",
+        "count": 0
+      },
+      {
+        "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-visible",
+        "count": 0
+      },
+      {
+        "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-hidden",
+        "count": 0
+      }
+    ],
+    "all_four_absent": true,
+    "current_principal_matches_old_intent": true,
+    "current_principal_matches_new_intent": true,
+    "response_principals": [
+      {
+        "check": "status-visible",
+        "principal_matches_intent": true
+      },
+      {
+        "check": "export-visible",
+        "principal_matches_intent": true
+      },
+      {
+        "check": "status-hidden",
+        "principal_matches_intent": true
+      },
+      {
+        "check": "export-hidden",
+        "principal_matches_intent": true
+      },
+      {
+        "check": "list-visible-only",
+        "principal_matches_intent": true
+      }
+    ]
+  },
+  "files": {
+    "preparation": [
+      {
+        "name": "Recover-R17VisibleFixture.ps1",
+        "bytes": 8480,
+        "sha256": "3e0f68e2858d6a214a2ecd14db26a973d92149c553275df2e3a323b06a1a0c89"
+      },
+      {
+        "name": "Invoke-R17HiddenFixture-v2.ps1",
+        "bytes": 13579,
+        "sha256": "8118e1c02937dbf27a9aaa12f63f4e34a91b0ce3e7ad675b4e1758960c9cb010"
+      },
+      {
+        "name": "Invoke-R17HiddenFixture.ps1",
+        "bytes": 13619,
+        "sha256": "6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c"
+      },
+      {
+        "name": "scheduler_com_windows-1b870e04.go",
+        "bytes": 10040,
+        "sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa"
+      }
+    ],
+    "history_and_recovery": [
+      {
+        "name": "intent.json",
+        "bytes": 734,
+        "sha256": "eab630c66d1c377d7201f204c6b29f2fd6933a462e856936af4de5e2e5eb2d8d"
+      },
+      {
+        "name": "result.json",
+        "bytes": 5367,
+        "sha256": "c151564a1c5d873aa4f3197b91124289235b8d73e4d1d472f6f778afe0971833"
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-visible.xml",
+        "bytes": 1262,
+        "sha256": "28affda1fe9d55a47e7bc5cbd9add47a041bc7e28c0e7d1da2b10f988b853c97"
+      },
+      {
+        "name": "mcp-r17-d55a6763eb064445a46ef592d52a9e6f-hidden.xml",
+        "bytes": 1288,
+        "sha256": "09348cba1f2219e842d78bab9c9d94bb8a46bd27e81cb37587900acdbdbbfd53"
+      },
+      {
+        "name": "status-visible.json",
+        "bytes": 1918,
+        "sha256": "7f1acf1e4659982ec7992fb4868fc476707d160bb9e9d25998a30a4bdefcc13b"
+      },
+      {
+        "name": "status-visible.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "recovery-visible-intent.json",
+        "bytes": 1231,
+        "sha256": "12ef4dcc3619a7672ffeb9d184c1de71821ee1f11bdbcedfca99d7e1d8ebc1e6"
+      },
+      {
+        "name": "recovery-visible-result.json",
+        "bytes": 501,
+        "sha256": "144796b7bb6c8666a3449b7389b0b891df296796ce5178eeecacba3f823b4f56"
+      }
+    ],
+    "v2": [
+      {
+        "name": "intent.json",
+        "bytes": 734,
+        "sha256": "52274ba812a9736ec186d7b71200a03bb9226be456bd5a5769b204436f83be74"
+      },
+      {
+        "name": "result.json",
+        "bytes": 7316,
+        "sha256": "e7bd76b95ac98b1548162529a06ee4d5674c4cd5449b0ea2a11f5df452b95136"
+      },
+      {
+        "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-visible.xml",
+        "bytes": 1262,
+        "sha256": "893942a4df7f409c9c65b7b739006ccb40ab1b7eb03bdfa455433242d556c0f2"
+      },
+      {
+        "name": "mcp-r17-68c2db3e983a41f9bded8e068e88bab8-hidden.xml",
+        "bytes": 1288,
+        "sha256": "369a2f938a41480f89faf3f6e3fd5f9592714f26e25e192754adc4defd670795"
+      },
+      {
+        "name": "status-visible.json",
+        "bytes": 1918,
+        "sha256": "9d80a5c9d9be48988cc50b703687d9f652e92a1855f165f3c5f8662a56b50ad3"
+      },
+      {
+        "name": "export-visible.json",
+        "bytes": 1918,
+        "sha256": "9d80a5c9d9be48988cc50b703687d9f652e92a1855f165f3c5f8662a56b50ad3"
+      },
+      {
+        "name": "status-hidden.json",
+        "bytes": 1965,
+        "sha256": "23d2b3f52fe7409b23258de32c4169fec5f09152901ad047b1ad93fd2eb700dc"
+      },
+      {
+        "name": "export-hidden.json",
+        "bytes": 1965,
+        "sha256": "23d2b3f52fe7409b23258de32c4169fec5f09152901ad047b1ad93fd2eb700dc"
+      },
+      {
+        "name": "list-visible-only.json",
+        "bytes": 1921,
+        "sha256": "0dbdd20752c9dfd2ed9a667eec94befda1340b605ee04e875d05228e77282204"
+      },
+      {
+        "name": "status-absent.json",
+        "bytes": 35,
+        "sha256": "13b6bdc9a30f4989a7fc5a2928381ed08210b2d6d332c5355f9e90fd7c3906e2"
+      },
+      {
+        "name": "export-absent.json",
+        "bytes": 35,
+        "sha256": "13b6bdc9a30f4989a7fc5a2928381ed08210b2d6d332c5355f9e90fd7c3906e2"
+      },
+      {
+        "name": "native-v2-observation.json",
+        "bytes": 2044,
+        "sha256": "e148779f337234e2f7b57c77f5e8ab32e57a151783dc0a01ff0bcfda77107078"
+      },
+      {
+        "name": "status-visible.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "export-visible.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "status-hidden.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "export-hidden.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "list-visible-only.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "status-absent.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      },
+      {
+        "name": "export-absent.stderr.txt",
+        "bytes": 441,
+        "sha256": "2370f40cd9e212d09714414f67c671a9f624d59210af1cadae4922f5df21bba7"
+      }
+    ]
+  },
+  "analyzer_sha256": "b83792b064f9a368c582d9252d4a27783e70af76e520275b1bab4bf64489bbcf",
+  "limits": [
+    "Only the unchanged extracted PowerShell script from #660, via EncodedCommand",
+    "Public Go backend and full R17 qualification remain open",
+    "Outer commands finished; numeric outer shell exit codes were not exposed by the tool",
+    "Only seven child exit codes are recorded as zero",
+    "Approval, one-shot invocation counts and receipt-read ordering come from executor records",
+    "Saved UTF-8 text follows .NET decoding; this is not a raw pipe-byte capture",
+    "Private XML and principal values remain local; published data cannot fully reconstruct them",
+    "No task actions, RunOwned, Stop or production Delete were qualified",
+    "Absence is observed at the recorded time; compare and delete are not atomic",
+    "Full Go tests retain their earlier FAIL results; no new Go test run"
+  ]
+}

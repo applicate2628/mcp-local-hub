@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "original_commit": "cf5e71ffd88abe53c611f8ee06b536b3228e60e7",
+  "original_git_blob": "0983a8762b7e7b9d88a54e8cea31f928dcb6ff4e",
+  "candidate_git_blob": "4fcc341a07226a1263bf44ba2ed6248c40139c47",
+  "original_bytes": 178829,
+  "candidate_bytes": 176354,
+  "original_sha256": "6f66a18eb37fd87499f291476bc4db7947e77c62616339097b5cb1c072e21f40",
+  "candidate_sha256": "2f14d7fdb5c11f8809051ba64dc55bc0bad652d053725dba4b0b0ed3911bf0a2",
+  "protected_rows": {
+    "1": {
+      "bytes": 1501,
+      "sha256": "92f84cf3133296071b9dddc6402ced0731f690236f8cf1357090d774c862f3ee",
+      "unchanged": true
+    },
+    "2": {
+      "bytes": 916,
+      "sha256": "329f9b54119c5371cd0c70d1318bea3649421f12cb6ff807b72056c0f4e4fcba",
+      "unchanged": true
+    },
+    "3": {
+      "bytes": 1153,
+      "sha256": "75520b41b47fc86c071071a4dff048bf03647647f5c1e8141dc34852e93fa0a2",
+      "unchanged": true
+    },
+    "5": {
+      "bytes": 1725,
+      "sha256": "7878cd6c5f96124fbb9ceed407da91a75f71514a67f64e383d4ba3056305febc",
+      "unchanged": true
+    },
+    "6": {
+      "bytes": 1138,
+      "sha256": "06f5552925b175d7c3d76eb734d935158111f022fb7bc8505ea1660efd3fdf9f",
+      "unchanged": true
+    }
+  },
+  "change_scope": [
+    "edition date",
+    "table of contents",
+    "row 4",
+    "new R22/R23 section",
+    "reference 38"
+  ],
+  "other_rows_changed": false
+}

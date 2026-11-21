@@ -1,0 +1,75 @@
+--- a/internal/cli/install_reconcile_mcp_front_v3_test.go
++++ b/internal/cli/install_reconcile_mcp_front_v3_test.go
+@@ -10,6 +10,7 @@
+ 	"strconv"
+ 	"strings"
+ 	"testing"
++	"time"
+ 
+ 	"mcp-local-hub/internal/api"
+ 	"mcp-local-hub/internal/api/apitest"
+@@ -648,12 +649,16 @@
+ }
+ 
+ func TestMCPFrontV3_SerenaConflictClassifierMutationTable(t *testing.T) {
++	phaseStart := time.Now()
+ 	journal := v3Journal(t, 9137, nil)
++	t.Logf("R25_GO_BUDGET phase=journal-fixture elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++	phaseStart = time.Now()
+ 	if err := journal.finishSerenaAttempt(api.SerenaReconcileAttemptResult{
+ 		Client: "claude-code", PreFingerprint: "", IntendedFingerprint: "front", ObservedFingerprint: "operator", PreconditionConflict: true,
+ 	}); err != nil {
+ 		t.Fatal(err)
+ 	}
++	t.Logf("R25_GO_BUDGET phase=initial-attempt elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
+ 	key := v3SerenaRowKeyFor("claude-code")
+ 	base := journal.record.Rows[key]
+ 	clone := func() (*mcpFrontReconcileReport, mcpFrontReconcileRow) {
+@@ -822,6 +827,7 @@
+ 	}
+ 	for _, test := range tests {
+ 		t.Run(test.name, func(t *testing.T) {
++			phaseStart := time.Now()
+ 			report, row := clone()
+ 			if test.prepare != nil {
+ 				test.prepare(report, &row)
+@@ -830,24 +836,37 @@
+ 				test.mutate(report, &row)
+ 			}
+ 			report.Rows[key] = row
+-			if got := classifyMCPFrontSerenaConflict(report, key, row); got != test.want {
++			t.Logf("R25_GO_BUDGET phase=case-setup elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++			phaseStart = time.Now()
++			got := classifyMCPFrontSerenaConflict(report, key, row)
++			t.Logf("R25_GO_BUDGET phase=classifier elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++			if got != test.want {
+ 				t.Fatalf("class=%q, want %q; row=%+v", got, test.want, row)
+ 			}
+ 			if test.want != mcpFrontSerenaConflictInvalid {
+ 				return
+ 			}
++			phaseStart = time.Now()
+ 			reportPath := filepath.Join(apitest.HardenedTempDir(t), "recovery.json")
++			t.Logf("R25_GO_BUDGET phase=fixture-directory elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++			phaseStart = time.Now()
+ 			if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+ 				t.Fatal(err)
+ 			}
+-			if _, err := readMCPFrontReconcileReport(reportPath); err == nil {
++			t.Logf("R25_GO_BUDGET phase=fixture-write elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++			phaseStart = time.Now()
++			_, readErr := readMCPFrontReconcileReport(reportPath)
++			t.Logf("R25_GO_BUDGET phase=read-validation elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
++			if readErr == nil {
+ 				t.Fatal("invalid Serena conflict shape passed durable validation")
+ 			}
+ 			readerCalls := 0
++			phaseStart = time.Now()
+ 			err := runRollbackMCPFrontWithReader(newMCPFrontTestCmd(), api.NewAPI(), reportPath, func(context.Context, string, []string, string) ([]byte, error) {
+ 				readerCalls++
+ 				return nil, errors.New("invalid conflict shape reached pin reader")
+ 			})
++			t.Logf("R25_GO_BUDGET phase=rollback-refusal elapsed_ns=%d", time.Since(phaseStart).Nanoseconds())
+ 			if err == nil {
+ 				t.Fatal("invalid Serena conflict shape reached rollback")
+ 			}

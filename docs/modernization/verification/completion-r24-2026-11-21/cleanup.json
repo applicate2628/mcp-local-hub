@@ -1,0 +1,392 @@
+{
+  "state": "COMPLETE_FOR_CONFIRMED_UNUSED_R24_TRANSFERS_AND_TWO_FIXTURES",
+  "input_transfer": {
+    "source": "r24-audit/runtime/payload.b64",
+    "trash": "r24-audit/trash/transfers/payload.b64",
+    "sha256": "ef939325845fad40b80745eae6510f32fb77e8e4378b5dd4488e430ace8328a5",
+    "verified_archive_retained": "r24-audit/runtime/payload.zip",
+    "remote_copy_transferred_to": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\transfers\\upload.payload.b64",
+    "remote_reason": "All20 payload files and archive CRC/SHA verified by unpack_payload.py; no consumer reads this base64 after extraction",
+    "trash_purged": false
+  },
+  "output_transfer": {
+    "utc": "2026-11-21T11:32:57.855392+00:00",
+    "local_source": "r24-audit/runtime/download-parts",
+    "local_destination": "r24-audit/trash/transfers/runtime-export-113020",
+    "file_count": 19,
+    "source_absent": true,
+    "archive_retained": true,
+    "archive_sha256": "099f6b1a26cb99e87fc765ad9ef54370510e06d5c951e91ac4a3472dddc7500d",
+    "remote_destination": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\transfers\\runtime-export-113020"
+  },
+  "readonly_fixtures": {
+    "schema": "r24-readonly-fixtures-final-v1",
+    "state": "COMPLETE",
+    "utc": "2026-11-21T11:43:41.336786+00:00",
+    "method": "Remote Desktop Commander move_file after all helper-owned handles closed; readback through fresh read-only native handles",
+    "moves": [
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427",
+        "destination": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-1953920427",
+        "source_absent": true,
+        "same_directory_identity": true,
+        "same_survivor_identity_bytes_attributes_timestamp": true,
+        "before": {
+          "source": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427",
+          "target": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\serena-readonly-unlink-1953920427",
+          "directory": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "37604200000006000000000000000000",
+            "attributes": 16,
+            "bytes": 0,
+            "links": 1,
+            "modified": 134397331761804880
+          },
+          "survivor": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "3a604200000004000000000000000000",
+            "attributes": 33,
+            "bytes": 32,
+            "links": 1,
+            "modified": 134397331761794110
+          },
+          "payload_sha256": "eef6497d87b13ee3885d474915c8c8c33dbb760e4679f826230b897a52a3b9ff",
+          "members": [
+            "survivor.bin"
+          ],
+          "remove_bin_absent": true,
+          "alternate_streams_absent": true
+        },
+        "after": {
+          "directory": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "37604200000006000000000000000000",
+            "attributes": 16,
+            "bytes": 0,
+            "links": 1,
+            "modified": 134397331761804880
+          },
+          "survivor": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "3a604200000004000000000000000000",
+            "attributes": 33,
+            "bytes": 32,
+            "links": 1,
+            "modified": 134397331761794110
+          },
+          "payload_sha256": "eef6497d87b13ee3885d474915c8c8c33dbb760e4679f826230b897a52a3b9ff",
+          "members": [
+            "survivor.bin"
+          ],
+          "remove_bin_absent": true,
+          "alternate_streams_absent": true
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262",
+        "destination": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-3501788262",
+        "source_absent": true,
+        "same_directory_identity": true,
+        "same_survivor_identity_bytes_attributes_timestamp": true,
+        "before": {
+          "source": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262",
+          "target": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\serena-readonly-unlink-3501788262",
+          "directory": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "c55f4200000007000000000000000000",
+            "attributes": 16,
+            "bytes": 0,
+            "links": 1,
+            "modified": 134397332162483090
+          },
+          "survivor": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "d05f4200000005000000000000000000",
+            "attributes": 33,
+            "bytes": 32,
+            "links": 1,
+            "modified": 134397332162477580
+          },
+          "payload_sha256": "eef6497d87b13ee3885d474915c8c8c33dbb760e4679f826230b897a52a3b9ff",
+          "members": [
+            "survivor.bin"
+          ],
+          "remove_bin_absent": true,
+          "alternate_streams_absent": true
+        },
+        "after": {
+          "directory": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "c55f4200000007000000000000000000",
+            "attributes": 16,
+            "bytes": 0,
+            "links": 1,
+            "modified": 134397332162483090
+          },
+          "survivor": {
+            "volume": "a4aaf240aaf20e94",
+            "file_id": "d05f4200000005000000000000000000",
+            "attributes": 33,
+            "bytes": 32,
+            "links": 1,
+            "modified": 134397332162477580
+          },
+          "payload_sha256": "eef6497d87b13ee3885d474915c8c8c33dbb760e4679f826230b897a52a3b9ff",
+          "members": [
+            "survivor.bin"
+          ],
+          "remove_bin_absent": true,
+          "alternate_streams_absent": true
+        }
+      }
+    ],
+    "readback_handles": [
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-1953920427",
+        "closed": true
+      },
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-1953920427\\survivor.bin",
+        "closed": true
+      },
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-3501788262",
+        "closed": true
+      },
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-transfer-1143\\serena-readonly-unlink-3501788262\\survivor.bin",
+        "closed": true
+      }
+    ],
+    "initial_native_rename_failures": [
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532\\receipt.json",
+        "bytes": 4425,
+        "sha256": "7bed53692d204cef183bde3b21def626ec1c03fe3bf19665b969c91d5ed78ccc",
+        "receipt": {
+          "schema": "r24-readonly-fixture-cleanup-v2",
+          "state": "STOPPED_REQUIRES_REVIEW",
+          "started_utc": "2026-11-21T11:42:22.137489+00:00",
+          "script_sha256": "8ff602989511a2a65afa743420af2af6b00229284b1f13c5871ac42e3e2ccd17",
+          "verifier_sha256": "0f70808e97484b1c8530b764ce7901609cd9af208b5209fa8d5b39810917a4b9",
+          "proof_directory": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532",
+          "trash_directory": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532",
+          "moves": [],
+          "prior_failure": {
+            "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\receipt.json",
+            "bytes": 3165,
+            "sha256": "b33f2c0e783c454c688b66a50adc5a2801f2586da5c1397c55e88eca191f6be5",
+            "original_script_sha256": "3cd2c78f79bf5abc5ed4a2d623aa10443607e4d54f8831da67dfd77624aa6127",
+            "state": "STOPPED_REQUIRES_REVIEW",
+            "moves": 0,
+            "closed_handles": 13,
+            "failure": {
+              "error_type": "OSError",
+              "error": "[Errno 87] ORIGINAL_DIRECTORY_MOVE_FAILED"
+            },
+            "retained_proofs": [
+              {
+                "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\inputs.json",
+                "bytes": 4134,
+                "sha256": "385bce3c6e2f5ac52d418d9f9f9e6335c35246ccc64dacde8a477d7e1bec89e1"
+              },
+              {
+                "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\before.json",
+                "bytes": 2012,
+                "sha256": "ead49e47cf72a4b91ab11e4b5b43310250c24023d80669b4543ef75e82e06f5c"
+              }
+            ],
+            "interpretation": "Observed parameter rejection, not a proven diagnosis; V2 changes only the rename name format."
+          },
+          "policy": "Move entire verified original directories only; no overwrite, deletion, chmod, or process execution.",
+          "input_proof": {
+            "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532\\inputs.json",
+            "bytes": 5395,
+            "sha256": "fab9d14672d1fedb9b0cdee7ff66066955d5bcc41e0b1678b48ecbcb44df7ae1"
+          },
+          "before_proof": {
+            "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532\\before.json",
+            "bytes": 2012,
+            "sha256": "7414ca87d40c7908d2abfc6dce443f79ef11ddf5d62ceae958d5c5ad1f028e5f"
+          },
+          "handles": [
+            {
+              "path": "D:\\dev\\ChatGPT",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-6bca20a2564a41fa81726ac0230a8532",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427\\survivor.bin",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262\\survivor.bin",
+              "closed": true
+            }
+          ],
+          "finished_utc": "2026-11-21T11:42:22.395728+00:00",
+          "failure": {
+            "error_type": "OSError",
+            "error": "[Errno 5] ORIGINAL_DIRECTORY_MOVE_FAILED"
+          }
+        }
+      },
+      {
+        "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\receipt.json",
+        "bytes": 3165,
+        "sha256": "b33f2c0e783c454c688b66a50adc5a2801f2586da5c1397c55e88eca191f6be5",
+        "receipt": {
+          "schema": "r24-readonly-fixture-cleanup-v1",
+          "state": "STOPPED_REQUIRES_REVIEW",
+          "started_utc": "2026-11-21T11:38:41.432414+00:00",
+          "script_sha256": "3cd2c78f79bf5abc5ed4a2d623aa10443607e4d54f8831da67dfd77624aa6127",
+          "verifier_sha256": "0f70808e97484b1c8530b764ce7901609cd9af208b5209fa8d5b39810917a4b9",
+          "proof_directory": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f",
+          "trash_directory": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f",
+          "moves": [],
+          "policy": "Move entire verified original directories only; no overwrite, deletion, chmod, or process execution.",
+          "input_proof": {
+            "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\inputs.json",
+            "bytes": 4134,
+            "sha256": "385bce3c6e2f5ac52d418d9f9f9e6335c35246ccc64dacde8a477d7e1bec89e1"
+          },
+          "before_proof": {
+            "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\before.json",
+            "bytes": 2012,
+            "sha256": "ead49e47cf72a4b91ab11e4b5b43310250c24023d80669b4543ef75e82e06f5c"
+          },
+          "handles": [
+            {
+              "path": "D:\\dev\\ChatGPT",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\trash\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-1953920427\\survivor.bin",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262",
+              "closed": true
+            },
+            {
+              "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\runtime\\pr643-qualify\\tmp\\serena-readonly-unlink-3501788262\\survivor.bin",
+              "closed": true
+            }
+          ],
+          "finished_utc": "2026-11-21T11:38:41.630928+00:00",
+          "failure": {
+            "error_type": "OSError",
+            "error": "[Errno 87] ORIGINAL_DIRECTORY_MOVE_FAILED"
+          }
+        }
+      }
+    ],
+    "prior_failure_bound": {
+      "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\receipt.json",
+      "bytes": 3165,
+      "sha256": "b33f2c0e783c454c688b66a50adc5a2801f2586da5c1397c55e88eca191f6be5",
+      "original_script_sha256": "3cd2c78f79bf5abc5ed4a2d623aa10443607e4d54f8831da67dfd77624aa6127",
+      "state": "STOPPED_REQUIRES_REVIEW",
+      "moves": 0,
+      "closed_handles": 13,
+      "failure": {
+        "error_type": "OSError",
+        "error": "[Errno 87] ORIGINAL_DIRECTORY_MOVE_FAILED"
+      },
+      "retained_proofs": [
+        {
+          "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\inputs.json",
+          "bytes": 4134,
+          "sha256": "385bce3c6e2f5ac52d418d9f9f9e6335c35246ccc64dacde8a477d7e1bec89e1"
+        },
+        {
+          "path": "D:\\dev\\ChatGPT\\mcp-r24-pr-quality-20261121\\cleanup-readonly\\readonly-fixtures-b2d7b2e846db4f96b5b2a061b076ab1f\\before.json",
+          "bytes": 2012,
+          "sha256": "ead49e47cf72a4b91ab11e4b5b43310250c24023d80669b4543ef75e82e06f5c"
+        }
+      ],
+      "interpretation": "Observed parameter rejection, not a proven diagnosis; V2 changes only the rename name format."
+    },
+    "limits": [
+      "No attribute change or deletion; entire two known quiescent test directories moved.",
+      "Separate pre/post observations do not establish atomic protection against hostile concurrent replacement.",
+      "Win32 errors 87 and 5 are retained observations, not proven diagnoses."
+    ]
+  },
+  "preservation": "Original payload and raw/public archives, all source/stream/proof files, snapshots and recovery stay outside trash. Trash not emptied; active/uncertain runtime directories untouched."
+}

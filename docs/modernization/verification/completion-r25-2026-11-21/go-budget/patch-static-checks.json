@@ -1,0 +1,6 @@
+{
+  "patch_apply_check": true,
+  "patch_roundtrip_matches_candidate": true,
+  "source_hash_preserved": true,
+  "go_compile_or_test_executed": false
+}

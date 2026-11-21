@@ -1,0 +1,1184 @@
+{
+  "base_commit": "f755d374fab317e1037deecd5dac8ffabbcdde36",
+  "base_tree": "19056c7b39ed2f625cb7f0b5282343c92b3b3a48",
+  "published_code_commit": "231c80e547816781ed2d77b34dd476f4400f8221",
+  "published_code_tree": "ec8f3d481b4d0df50a61924db8d6e6a8fcaa54f0",
+  "candidate_file_sha256": "db019916c49da6c5be02298559690b368e431e0c01feb95a786add30b875eba8",
+  "candidate_blob_sha1": "06ec8f6d6a624dce040390532bda824b2553b46a",
+  "validated_saved_files_only": true,
+  "no_commands_executed_by_packager": true,
+  "gates_completed": true,
+  "all_gates_pass": false,
+  "focused_candidate_and_published_passed": true,
+  "phase_results": {
+    "prepare": {
+      "completed": false,
+      "error": "command failed: powershell-policy",
+      "seconds": 20.824019,
+      "classification": "prior pre-test failure",
+      "commands": [
+        {
+          "name": "old-root",
+          "exit_code": 0,
+          "seconds": 0.048853,
+          "settled": true
+        },
+        {
+          "name": "old-head",
+          "exit_code": 0,
+          "seconds": 0.049724,
+          "settled": true
+        },
+        {
+          "name": "old-status",
+          "exit_code": 0,
+          "seconds": 0.12077,
+          "settled": true
+        },
+        {
+          "name": "clone",
+          "exit_code": 0,
+          "seconds": 1.058796,
+          "settled": true
+        },
+        {
+          "name": "fetch",
+          "exit_code": 0,
+          "seconds": 17.402422,
+          "settled": true
+        },
+        {
+          "name": "fetched-tree",
+          "exit_code": 0,
+          "seconds": 0.04973,
+          "settled": true
+        },
+        {
+          "name": "checkout",
+          "exit_code": 0,
+          "seconds": 1.313401,
+          "settled": true
+        },
+        {
+          "name": "head",
+          "exit_code": 0,
+          "seconds": 0.04925,
+          "settled": true
+        },
+        {
+          "name": "tree",
+          "exit_code": 0,
+          "seconds": 0.049289,
+          "settled": true
+        },
+        {
+          "name": "status",
+          "exit_code": 0,
+          "seconds": 0.152054,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.091732,
+          "settled": true
+        },
+        {
+          "name": "powershell-policy",
+          "exit_code": 1,
+          "seconds": 0.41898,
+          "settled": true
+        }
+      ]
+    },
+    "intent-trace": {
+      "completed": false,
+      "error": "'utf-16' codec can't decode bytes in position 0-1: Stream does not start with BOM",
+      "seconds": 0.663709,
+      "classification": "prior pre-test failure",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.052772,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.050346,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.154188,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.027759,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.044177,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.021047,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.048318,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.048317,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.152291,
+          "settled": true
+        }
+      ]
+    },
+    "intent-trace-01": {
+      "completed": true,
+      "error": null,
+      "seconds": 90.02996,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.052642,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.050191,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.155751,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.026368,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.02218,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.021506,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.025924,
+          "settled": true
+        },
+        {
+          "name": "intent-concurrent-trace",
+          "exit_code": 0,
+          "seconds": 76.384408,
+          "settled": true
+        },
+        {
+          "name": "syscall-profile",
+          "exit_code": 0,
+          "seconds": 4.516321,
+          "settled": true
+        },
+        {
+          "name": "syscall-top",
+          "exit_code": 0,
+          "seconds": 6.709062,
+          "settled": true
+        },
+        {
+          "name": "sync-profile",
+          "exit_code": 0,
+          "seconds": 0.761875,
+          "settled": true
+        },
+        {
+          "name": "sync-top",
+          "exit_code": 0,
+          "seconds": 0.838525,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.052351,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.049852,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.163374,
+          "settled": true
+        }
+      ],
+      "test_runs": {
+        "intent-concurrent-trace": [
+          {
+            "Time": "2026-11-20T11:39:42.3413451+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/api",
+            "Test": "TestDaemonIntent_ConcurrentWrite",
+            "Elapsed": 18.1
+          },
+          {
+            "Time": "2026-11-20T11:39:42.3449748+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/api",
+            "Elapsed": 18.228
+          }
+        ]
+      }
+    },
+    "api-receiving": {
+      "completed": true,
+      "error": null,
+      "seconds": 25.932742,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.055728,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.050829,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.160145,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.026503,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.022201,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.022072,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.026296,
+          "settled": true
+        },
+        {
+          "name": "build-receiving-cli",
+          "exit_code": 0,
+          "seconds": 17.646174,
+          "settled": true
+        },
+        {
+          "name": "build-receiving-test",
+          "exit_code": 0,
+          "seconds": 3.130363,
+          "settled": true
+        },
+        {
+          "name": "public-cli-receiving",
+          "exit_code": 0,
+          "seconds": 4.160731,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.047308,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.047825,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.147996,
+          "settled": true
+        }
+      ]
+    },
+    "job-entry": {
+      "completed": true,
+      "error": null,
+      "seconds": 6.419654,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.052097,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.051461,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.160244,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.027,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.023331,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.022059,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.025982,
+          "settled": true
+        },
+        {
+          "name": "build-job-controller",
+          "exit_code": 0,
+          "seconds": 1.104703,
+          "settled": true
+        },
+        {
+          "name": "build-job-test",
+          "exit_code": 0,
+          "seconds": 2.408222,
+          "settled": true
+        },
+        {
+          "name": "qualified-job-entry",
+          "exit_code": 0,
+          "seconds": 2.162777,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.054961,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.054952,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.170193,
+          "settled": true
+        }
+      ],
+      "native_result": {
+        "success": true,
+        "originalWaitKnown": true,
+        "originalExitCode": 0,
+        "settlementComplete": true,
+        "stdoutEOF": true,
+        "stderrEOF": true,
+        "passed": [
+          "TestJob_BreakawayEnabledDescendantEscapesClose",
+          "TestJobInformationTransportPreparationBoundary",
+          "TestJobInformationTransportPreparationBoundary/real-native-typed-gc-and-creator"
+        ]
+      },
+      "native_settlement": {
+        "RootIdentity": {
+          "Known": true,
+          "PID": 49824,
+          "StartedAt": "2026-11-20T08:41:54.0252459Z",
+          "NativeBirthFILETIME": 134396377140252459
+        },
+        "NoChildKnown": false,
+        "RootWaitKnown": true,
+        "RootExitCode": 0,
+        "TerminalAction": "not-requested",
+        "MembersExited": true,
+        "AccountingKnown": true,
+        "InitialTotal": 5,
+        "FinalActive": 0,
+        "CapturedMemberPIDs": null,
+        "HandlesClosed": true,
+        "Error": null
+      }
+    },
+    "forcekill-controls": {
+      "completed": true,
+      "error": null,
+      "seconds": 46.606789,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.055638,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.050692,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.15795,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.02621,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.022474,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.021063,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.026007,
+          "settled": true
+        },
+        {
+          "name": "delayed-baseline-gofmt",
+          "exit_code": 0,
+          "seconds": 0.227011,
+          "settled": true
+        },
+        {
+          "name": "delayed-baseline",
+          "exit_code": 1,
+          "seconds": 27.623032,
+          "settled": true
+        },
+        {
+          "name": "delayed-candidate-gofmt",
+          "exit_code": 0,
+          "seconds": 0.025167,
+          "settled": true
+        },
+        {
+          "name": "delayed-candidate",
+          "exit_code": 0,
+          "seconds": 18.044218,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.053673,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.049198,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.147474,
+          "settled": true
+        }
+      ],
+      "test_runs": {
+        "delayed-baseline": [
+          {
+            "Time": "2026-11-20T11:46:28.1925955+03:00",
+            "Action": "fail",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 5.28
+          },
+          {
+            "Time": "2026-11-20T11:46:28.19815+03:00",
+            "Action": "fail",
+            "Package": "mcp-local-hub/internal/cli",
+            "Elapsed": 5.316
+          }
+        ],
+        "delayed-candidate": [
+          {
+            "Time": "2026-11-20T11:46:46.2884604+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 5.22
+          },
+          {
+            "Time": "2026-11-20T11:46:46.2938373+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Elapsed": 5.253
+          }
+        ]
+      },
+      "markers": {
+        "delayed-baseline": [
+          "gui_force_test.go:265: FORCE_KILL_CONTROL gate_enter delay=4s pid=38528 ctx=<nil>",
+          "gui_force_test.go:267: FORCE_KILL_CONTROL gate_exit elapsed=4.0003012s pid=38528 ctx=context canceled",
+          "gui_force_test.go:293: FORCE_KILL_CONTROL command_return ctx=context canceled exit_code=4 err=force exit 4 gate_entered=true",
+          "gui_force_test.go:231: FORCE_KILL_CONTROL helper_settled pid=38528 wait_unlock_error=<nil>"
+        ],
+        "delayed-candidate": [
+          "gui_force_test.go:254: FORCE_KILL_CONTROL gate_enter delay=4s pid=45448 ctx=<nil>",
+          "gui_force_test.go:256: FORCE_KILL_CONTROL gate_exit elapsed=4.0007128s pid=45448 ctx=<nil>",
+          "gui_force_test.go:264: FORCE_KILL_CONTROL recovery_return ctx=<nil> exit_code=0 acquired_lock=true gate_entered=true",
+          "gui_force_test.go:299: FORCE_KILL_CONTROL recovered_record pid=30700 port=1",
+          "gui_force_test.go:281: FORCE_KILL_CONTROL recovered_lock_settled",
+          "gui_force_test.go:233: FORCE_KILL_CONTROL helper_settled pid=45448 wait_unlock_error=<nil>"
+        ]
+      }
+    },
+    "forcekill-candidate": {
+      "completed": true,
+      "error": null,
+      "seconds": 79.303833,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.058345,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.055815,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.177344,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.027346,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.022705,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.02144,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.026115,
+          "settled": true
+        },
+        {
+          "name": "candidate-applied-head",
+          "exit_code": 0,
+          "seconds": 0.048528,
+          "settled": true
+        },
+        {
+          "name": "candidate-applied-tree",
+          "exit_code": 0,
+          "seconds": 0.057251,
+          "settled": true
+        },
+        {
+          "name": "candidate-applied-status",
+          "exit_code": 0,
+          "seconds": 0.160418,
+          "settled": true
+        },
+        {
+          "name": "candidate-applied-index",
+          "exit_code": 0,
+          "seconds": 0.053229,
+          "settled": true
+        },
+        {
+          "name": "candidate-gofmt",
+          "exit_code": 0,
+          "seconds": 0.03053,
+          "settled": true
+        },
+        {
+          "name": "candidate-diff-check",
+          "exit_code": 0,
+          "seconds": 0.15698,
+          "settled": true
+        },
+        {
+          "name": "candidate-race",
+          "exit_code": 0,
+          "seconds": 78.019253,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.054078,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.050095,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.155806,
+          "settled": true
+        },
+        {
+          "name": "after-index",
+          "exit_code": 0,
+          "seconds": 0.050508,
+          "settled": true
+        }
+      ],
+      "test_runs": {
+        "candidate-race": [
+          {
+            "Time": "2026-11-20T11:48:31.3755663+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Test": "TestKillRecordedHolder_CancelledContextRefusesKill",
+            "Elapsed": 0.13
+          },
+          {
+            "Time": "2026-11-20T11:48:31.6580679+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Test": "TestKillRecordedHolder_CancelledContextRefusesKill",
+            "Elapsed": 0.29
+          },
+          {
+            "Time": "2026-11-20T11:48:32.6814206+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Elapsed": 1.488
+          },
+          {
+            "Time": "2026-11-20T11:48:34.9763638+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 2.68
+          },
+          {
+            "Time": "2026-11-20T11:48:35.7622993+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillRefusesNonMcphubImage",
+            "Elapsed": 0.79
+          },
+          {
+            "Time": "2026-11-20T11:48:37.4732533+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 1.71
+          },
+          {
+            "Time": "2026-11-20T11:48:38.3323181+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillRefusesNonMcphubImage",
+            "Elapsed": 0.86
+          },
+          {
+            "Time": "2026-11-20T11:48:39.3560103+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Elapsed": 8.163
+          }
+        ]
+      }
+    },
+    "gates": {
+      "completed": true,
+      "error": null,
+      "seconds": 736.750549,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.055401,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.054382,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.164037,
+          "settled": true
+        },
+        {
+          "name": "before-index",
+          "exit_code": 0,
+          "seconds": 0.054746,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.026709,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.02356,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.021313,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.02677,
+          "settled": true
+        },
+        {
+          "name": "build",
+          "exit_code": 0,
+          "seconds": 9.33089,
+          "settled": true
+        },
+        {
+          "name": "vet",
+          "exit_code": 0,
+          "seconds": 11.204094,
+          "settled": true
+        },
+        {
+          "name": "full-test",
+          "exit_code": 1,
+          "seconds": 402.220887,
+          "settled": true
+        },
+        {
+          "name": "tagged-api-cli",
+          "exit_code": 1,
+          "seconds": 313.08449,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.053065,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.049122,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.150809,
+          "settled": true
+        },
+        {
+          "name": "after-index",
+          "exit_code": 0,
+          "seconds": 0.051048,
+          "settled": true
+        }
+      ],
+      "gates": {
+        "build": {
+          "failed_packages": [],
+          "failed_tests": [],
+          "timeouts": [],
+          "exit_code": 0,
+          "seconds": 9.33089
+        },
+        "vet": {
+          "failed_packages": [],
+          "failed_tests": [],
+          "timeouts": [],
+          "exit_code": 0,
+          "seconds": 11.204094
+        },
+        "full-test": {
+          "failed_packages": [
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/cli",
+            "mcp-local-hub/internal/daemon",
+            "mcp-local-hub/internal/process"
+          ],
+          "failed_tests": [
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestCstDirectFrontendCrossesGoCapabilityAndFixedLocalPipe",
+            "TestJob_BreakawayEnabledDescendantEscapesClose",
+            "TestJobInformationTransportPreparationBoundary"
+          ],
+          "timeouts": [
+            "5m0s",
+            "5m0s"
+          ],
+          "exit_code": 1,
+          "seconds": 402.220887
+        },
+        "tagged-api-cli": {
+          "failed_packages": [
+            "mcp-local-hub/internal/api",
+            "mcp-local-hub/internal/cli"
+          ],
+          "failed_tests": [
+            "TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade",
+            "TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds",
+            "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite",
+            "TestMigrateSerena_DrivesSupervisorRestart",
+            "TestMigrateSerena_NilSpecRowsHealedBeforeSpawn",
+            "TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite",
+            "TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry",
+            "TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning",
+            "TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud",
+            "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts",
+            "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent",
+            "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart",
+            "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut",
+            "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate",
+            "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow"
+          ],
+          "timeouts": [
+            "5m0s",
+            "5m0s"
+          ],
+          "exit_code": 1,
+          "seconds": 313.08449
+        }
+      },
+      "all_gates_pass": false
+    },
+    "published": {
+      "completed": true,
+      "error": null,
+      "seconds": 28.870901,
+      "classification": "completed",
+      "commands": [
+        {
+          "name": "before-head",
+          "exit_code": 0,
+          "seconds": 0.054458,
+          "settled": true
+        },
+        {
+          "name": "before-tree",
+          "exit_code": 0,
+          "seconds": 0.051172,
+          "settled": true
+        },
+        {
+          "name": "before-status",
+          "exit_code": 0,
+          "seconds": 0.160984,
+          "settled": true
+        },
+        {
+          "name": "before-index",
+          "exit_code": 0,
+          "seconds": 0.051693,
+          "settled": true
+        },
+        {
+          "name": "output-owner",
+          "exit_code": 0,
+          "seconds": 0.041694,
+          "settled": true
+        },
+        {
+          "name": "output-protect",
+          "exit_code": 0,
+          "seconds": 0.025469,
+          "settled": true
+        },
+        {
+          "name": "output-acl-save",
+          "exit_code": 0,
+          "seconds": 0.022984,
+          "settled": true
+        },
+        {
+          "name": "go-version",
+          "exit_code": 0,
+          "seconds": 0.0296,
+          "settled": true
+        },
+        {
+          "name": "fetch-published",
+          "exit_code": 0,
+          "seconds": 10.834585,
+          "settled": true
+        },
+        {
+          "name": "published-parents",
+          "exit_code": 0,
+          "seconds": 0.052782,
+          "settled": true
+        },
+        {
+          "name": "published-paths",
+          "exit_code": 0,
+          "seconds": 0.053134,
+          "settled": true
+        },
+        {
+          "name": "published-target-tree",
+          "exit_code": 0,
+          "seconds": 0.051313,
+          "settled": true
+        },
+        {
+          "name": "published-blob",
+          "exit_code": 0,
+          "seconds": 0.051251,
+          "settled": true
+        },
+        {
+          "name": "stage-candidate",
+          "exit_code": 0,
+          "seconds": 0.311722,
+          "settled": true
+        },
+        {
+          "name": "prepared-tree",
+          "exit_code": 0,
+          "seconds": 0.169557,
+          "settled": true
+        },
+        {
+          "name": "checkout-published",
+          "exit_code": 0,
+          "seconds": 0.095812,
+          "settled": true
+        },
+        {
+          "name": "published-head",
+          "exit_code": 0,
+          "seconds": 0.048764,
+          "settled": true
+        },
+        {
+          "name": "published-tree",
+          "exit_code": 0,
+          "seconds": 0.049557,
+          "settled": true
+        },
+        {
+          "name": "published-status",
+          "exit_code": 0,
+          "seconds": 0.085178,
+          "settled": true
+        },
+        {
+          "name": "published-race",
+          "exit_code": 0,
+          "seconds": 16.364898,
+          "settled": true
+        },
+        {
+          "name": "after-head",
+          "exit_code": 0,
+          "seconds": 0.049703,
+          "settled": true
+        },
+        {
+          "name": "after-tree",
+          "exit_code": 0,
+          "seconds": 0.049148,
+          "settled": true
+        },
+        {
+          "name": "after-status",
+          "exit_code": 0,
+          "seconds": 0.085136,
+          "settled": true
+        }
+      ],
+      "test_runs": {
+        "published-race": [
+          {
+            "Time": "2026-11-20T12:04:50.1293302+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Test": "TestKillRecordedHolder_CancelledContextRefusesKill",
+            "Elapsed": 0.17
+          },
+          {
+            "Time": "2026-11-20T12:04:50.316035+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Test": "TestKillRecordedHolder_CancelledContextRefusesKill",
+            "Elapsed": 0.18
+          },
+          {
+            "Time": "2026-11-20T12:04:51.3313437+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/gui",
+            "Elapsed": 2.549
+          },
+          {
+            "Time": "2026-11-20T12:04:51.970431+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 2
+          },
+          {
+            "Time": "2026-11-20T12:04:52.7567396+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillRefusesNonMcphubImage",
+            "Elapsed": 0.79
+          },
+          {
+            "Time": "2026-11-20T12:04:54.5459138+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillHappyPath_SeamMocked",
+            "Elapsed": 1.78
+          },
+          {
+            "Time": "2026-11-20T12:04:55.3327682+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Test": "TestForce_KillRefusesNonMcphubImage",
+            "Elapsed": 0.79
+          },
+          {
+            "Time": "2026-11-20T12:04:56.3617456+03:00",
+            "Action": "pass",
+            "Package": "mcp-local-hub/internal/cli",
+            "Elapsed": 7.58
+          }
+        ]
+      }
+    },
+    "post-verify": {
+      "completed": true,
+      "overall": "ABSENCE_OBSERVED",
+      "settled": true,
+      "exit_code": 0,
+      "seconds": 0.556566,
+      "scoped_absence_observed": true,
+      "whole_process_tree_proven": false,
+      "observed_processes_modified": false
+    }
+  },
+  "limitations": [
+    "The two earlier preparation failures and expected old-control FAIL remain failures.",
+    "Completed gate execution does not imply all gates passed.",
+    "General Go subprocess deadlines do not establish a whole-process-tree deadline.",
+    "Native Job settlement qualifies the selected original fixture; terminal action was not requested.",
+    "The final process observation covers the saved owned-root marker only, not complete ancestry or the whole process tree.",
+    "Raw traces, binaries, protobuf profiles, token-owner/ACL data and native protocol logs remain private.",
+    "Identity/path redaction and credential-shape scans are bounded checks, not a proof against every possible secret.",
+    "Unstructured logs retain undecodable UTF-8 bytes via surrogateescape; their origin is not established."
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "schema": "r24-review-materials-v1",
+  "scope": "Original static-review snapshots; later runtime/publication/closures are separately recorded. No raw packager or working Git repository included.",
+  "files": [
+    {
+      "path": "docs/plan.compaction-audit.json",
+      "bytes": 17111,
+      "sha256": "1aeaf3c313aa97d5af3ae2d18d544b74ffeda1ec07c6ca7e73d552d15c266efe"
+    },
+    {
+      "path": "docs/plan.self-review.md",
+      "bytes": 6104,
+      "sha256": "a4bb4224b833909063af736315f5e4aaade975422cba8cb12f38984d63032fd3"
+    },
+    {
+      "path": "runtime/package-preimage-pins.json",
+      "bytes": 5399,
+      "sha256": "f93614a369bfef7e2ba497a4cb6a1cc56a178ee21abfdddd29b3eab46316b68f"
+    },
+    {
+      "path": "runtime/package_evidence.peer-review.json",
+      "bytes": 1363,
+      "sha256": "1cbd45da50b37dac9fce103c2a5cecdb91fa1eaf54a31f67854233b266882472"
+    },
+    {
+      "path": "runtime/package_evidence.self-review.md",
+      "bytes": 12449,
+      "sha256": "aa3dd9a6474e3235cf3fd96e51d6cfff19b9e890a61a5f96f465876445799ecd"
+    },
+    {
+      "path": "runtime/package_evidence.static-review.json",
+      "bytes": 3479,
+      "sha256": "a5e0639175a425d140bd82c36a8144abb2f0359c94bb75adabb3338697b59779"
+    },
+    {
+      "path": "runtime/verify_public_archive.README.md",
+      "bytes": 6190,
+      "sha256": "b57a21fbd293d41fb1bd6a0da5498b9ea74b5e60e9906ff6b6dfd80c8c50d0bc"
+    },
+    {
+      "path": "runtime/verify_public_archive.review.json",
+      "bytes": 820,
+      "sha256": "777a5bfd78ce9ccd6431c3ad81d9a4816a368dab589470c6b7ae34d69cf5f85e"
+    },
+    {
+      "path": "rust/AUDIT.json",
+      "bytes": 16094,
+      "sha256": "afc40dc9d56dfee86b5d61fb269c0a134c2ba3aa92178ab953279a73750c8c7e"
+    },
+    {
+      "path": "rust/AUDIT.md",
+      "bytes": 11664,
+      "sha256": "ace54c719eff04fe53a828f94784f08e443f167009454fbe406a5030fe7e1611"
+    },
+    {
+      "path": "rust/runtime-consolidation-review.md",
+      "bytes": 8250,
+      "sha256": "5882c0099a0b25e821c6d3a23fd363a553f3673952640019ea0e202bfab55e66"
+    },
+    {
+      "path": "serena-build/audit-and-candidates.md",
+      "bytes": 15120,
+      "sha256": "c6891ea1e8f68377135cfd7955b12d112d493f4147106d25da3871f3261ae41d"
+    },
+    {
+      "path": "serena-build/candidate-643-target-relative.patch",
+      "bytes": 15469,
+      "sha256": "b9c412404a6161fc8ad34faac96378f7842576442b80a273d9fa0221ecfdd7e9"
+    },
+    {
+      "path": "serena-build/candidate-647-target-relative.patch",
+      "bytes": 4221,
+      "sha256": "eafdf620d006023b8c6398aa92916b695cd4245f08d32af40f16daaae4172d5a"
+    },
+    {
+      "path": "serena-build/inclusion-evidence.json",
+      "bytes": 26480,
+      "sha256": "25dfb5fa6b3da5dce5abee60697881c6b7c4bbbe06b36ae265ee9a1491c4fc7a"
+    },
+    {
+      "path": "serena-build/peer-review.json",
+      "bytes": 1069,
+      "sha256": "b0c43859482566cba9ec68b357d42142b60dedaf0ecd1d8082fa9caa8a6ad239"
+    },
+    {
+      "path": "serena-build/windows-verification-manifest.json",
+      "bytes": 11322,
+      "sha256": "6ef4aa8fa09070e6d1e2e8f19df4532462a97ddd310405a84a5a0f4ec9b54777"
+    },
+    {
+      "path": "serena-qualification/RECOMMENDATIONS.md",
+      "bytes": 13280,
+      "sha256": "1b512afedb699e26edb1e5658daf4382688b687dc0404841a0d8b2e186654352"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-635/candidate-manifest.json",
+      "bytes": 1485,
+      "sha256": "a4cabe6747ac22e778c89e78dd01aca38ab0984f5684cc2fadedcc7b55c41724"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-635/candidate.patch",
+      "bytes": 2192,
+      "sha256": "55a58892cf01ed4e695d77d8286874f72afc2380954aa41bcb141bdd485bd95a"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-637/candidate-manifest.json",
+      "bytes": 2297,
+      "sha256": "5c6a6021f6e63f2516a049611600383e7c4bcd7aa60ae75463ab6c1597d6de2a"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-637/candidate.patch",
+      "bytes": 4511,
+      "sha256": "fa605eddaad1940becff1669ade35b64e98c0381735f4f6f42956d78ac61e0ca"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-650/candidate-manifest.json",
+      "bytes": 2256,
+      "sha256": "170d7bf9761e98aa8ba465bb0ac4cd91d1aa2f7f8fe1e2cbc76fc6934c8141a3"
+    },
+    {
+      "path": "serena-qualification/candidate-pr-650/candidate.patch",
+      "bytes": 12725,
+      "sha256": "b25e1b1f8fca3ea6a38e7849f4d83290025edb655e4a2efeb1bc5723627919fb"
+    },
+    {
+      "path": "serena-qualification/chain-inclusion-proof.json",
+      "bytes": 8708,
+      "sha256": "4e6958b028c8eec33e967ddc269fb18f443d2541b09e080a6e6f073adfcc17a1"
+    },
+    {
+      "path": "serena-qualification/focused-test-selection.json",
+      "bytes": 9500,
+      "sha256": "13e01f1646ec665d428fb8b5cdf28f7af44a11848c8f6cf14b05306ccda67b65"
+    },
+    {
+      "path": "serena-qualification/missing-parent-content-proof.json",
+      "bytes": 3210,
+      "sha256": "b34fd1e575ab57cc06d61eaf48cee932c526d517173ac0ded58b6ac232379828"
+    },
+    {
+      "path": "serena-qualification/recommendations.json",
+      "bytes": 38001,
+      "sha256": "38798ebeab7423704dbef884224cca41c1bf3fae4c4532f60acf2664c2921975"
+    },
+    {
+      "path": "serena-qualification/retarget-637-comparison.json",
+      "bytes": 28264,
+      "sha256": "8913b807361924fbe84d1b334268ab919c05d6598862dfcd7254e0a14dd96cef"
+    }
+  ]
+}

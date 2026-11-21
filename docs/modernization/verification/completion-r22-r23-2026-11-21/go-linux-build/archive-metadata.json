@@ -1,0 +1,12 @@
+{
+  "archive": "evidence-redacted.zip",
+  "archive_bytes": 1008450,
+  "archive_members": 1188,
+  "archive_sha256": "e2dce14e2374c37c9be44281af2b1d1397d48d58b61cd00740038e07c8680f61",
+  "manifest_member_hashes": 1187,
+  "manifest_sha256": "cb34df188709eca2a3f853c8e938bfaf9a208ef70f0e92a5008d1b400c61e13e",
+  "original_streams_checked": 456,
+  "redacted_public_streams": 0,
+  "schema": 1,
+  "unchanged_public_streams": 456
+}

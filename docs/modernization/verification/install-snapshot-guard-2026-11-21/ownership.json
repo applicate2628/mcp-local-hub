@@ -1,0 +1,292 @@
+{
+  "repository": "applicate2628/mcp-local-hub",
+  "observed_at_utc": "2026-11-20T21:35:30Z",
+  "candidate": {
+    "path": "internal/api/install.go",
+    "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+    "start_line": 3821,
+    "end_line": 3827,
+    "selected_by_parent": true,
+    "no_prior_pr660_hunks": true,
+    "pr659_hunk_intersections": []
+  },
+  "method": {
+    "current_queue": "snapshot.json",
+    "reused_filename_lists": 28,
+    "basis": "Both head and base SHA for these 28 PRs match r19-cancellation/queue/snapshot.json. Refetched #623/#658/#660 plus independent owner #659.",
+    "fresh_filename_lists": [
+      623,
+      658,
+      660,
+      659
+    ],
+    "fresh_patches": [
+      {
+        "pr": 660,
+        "path": "internal/api/install.go"
+      },
+      {
+        "pr": 660,
+        "path": "internal/api/install_hyphen_family_ownership_test.go"
+      },
+      {
+        "pr": 659,
+        "path": "internal/api/install.go"
+      },
+      {
+        "pr": 659,
+        "path": "internal/api/install_hyphen_family_ownership_test.go"
+      }
+    ],
+    "no_branch_integration": true,
+    "no_github_mutation": true
+  },
+  "ownership": [
+    {
+      "path": "docs/modernization/plans/scheduler-contracts-2026-11-19.md",
+      "owners": [
+        623
+      ]
+    },
+    {
+      "path": "docs/modernization/plans/scheduler-contracts-2026-11-19.sources.json",
+      "owners": [
+        623
+      ]
+    },
+    {
+      "path": "internal/api/install.go",
+      "owners": [
+        660,
+        659
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_com_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_create_conflict_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_hidden_task_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_last_result_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_owned_run_windows_test.go",
+      "owners": [
+        660
+      ]
+    },
+    {
+      "path": "internal/scheduler/scheduler_windows.go",
+      "owners": [
+        660
+      ]
+    }
+  ],
+  "shared_files": [
+    "internal/api/install.go",
+    "internal/api/install_hyphen_family_ownership_test.go"
+  ],
+  "diff_hunks": [
+    {
+      "pr": 660,
+      "path": "internal/api/install.go",
+      "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 4229,
+          "old_count": 10,
+          "new_start": 4229,
+          "new_count": 9,
+          "context": "func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}"
+        },
+        {
+          "old_start": 4263,
+          "old_count": 12,
+          "new_start": 4262,
+          "new_count": 15,
+          "context": "func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st"
+        },
+        {
+          "old_start": 4278,
+          "old_count": 10,
+          "new_start": 4280,
+          "new_count": 6,
+          "context": "func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st"
+        }
+      ]
+    },
+    {
+      "pr": 660,
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 190,
+          "old_count": 6,
+          "new_start": 190,
+          "new_count": 9,
+          "context": "func TestPruneObsoleteServerTasks_KeepsSiblingPrunesOwnObsolete(t *testing.T) {"
+        }
+      ]
+    },
+    {
+      "pr": 659,
+      "path": "internal/api/install.go",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 2850,
+          "old_count": 7,
+          "new_start": 2850,
+          "new_count": 7,
+          "context": "func checkSecretRefs(env map[string]string) error {"
+        },
+        {
+          "old_start": 2863,
+          "old_count": 11,
+          "new_start": 2863,
+          "new_count": 11,
+          "context": "func portHeldByOurDaemonForPortArm(port int, server, daemon string, allowSupervi"
+        },
+        {
+          "old_start": 3132,
+          "old_count": 16,
+          "new_start": 3132,
+          "new_count": 16,
+          "context": "const ("
+        },
+        {
+          "old_start": 4898,
+          "old_count": 6,
+          "new_start": 4898,
+          "new_count": 7,
+          "context": "const ("
+        },
+        {
+          "old_start": 4931,
+          "old_count": 17,
+          "new_start": 4932,
+          "new_count": 20,
+          "context": "func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome,"
+        },
+        {
+          "old_start": 4958,
+          "old_count": 7,
+          "new_start": 4962,
+          "new_count": 11,
+          "context": "func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome,"
+        }
+      ]
+    },
+    {
+      "pr": 659,
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "hunks": [
+        {
+          "old_start": 311,
+          "old_count": 7,
+          "new_start": 311,
+          "new_count": 7,
+          "context": "func TestStop_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {"
+        },
+        {
+          "old_start": 334,
+          "old_count": 12,
+          "new_start": 334,
+          "new_count": 12,
+          "context": "func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {"
+        },
+        {
+          "old_start": 386,
+          "old_count": 12,
+          "new_start": 386,
+          "new_count": 12,
+          "context": "func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {"
+        }
+      ]
+    }
+  ],
+  "intersections": [
+    {
+      "path": "internal/api/install.go",
+      "common_base": true,
+      "intersections": []
+    },
+    {
+      "path": "internal/api/install_hyphen_family_ownership_test.go",
+      "common_base": true,
+      "intersections": []
+    }
+  ],
+  "no_direct_hunk_overlap": true,
+  "observations": [
+    {
+      "classification": "existing_adjacent_behavior",
+      "path": "internal/api/install.go",
+      "lines": "3824–3843",
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/11c286fb634cc63d2c6019a790ff376a1d834af9/internal/api/install.go",
+      "finding": "The prior snapshot error and Delete error are ignored before Create; rollback registration follows successful Create. A guard alone does not restore the current task after successful Delete followed by failed Create.",
+      "scope": "No code modification; parent notified."
+    },
+    {
+      "classification": "contract_qualification",
+      "path": "internal/scheduler/scheduler.go",
+      "lines": "134–138",
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/11c286fb634cc63d2c6019a790ff376a1d834af9/internal/scheduler/scheduler.go",
+      "finding": "Interface comment describes errors for unsupported Linux/macOS export. Common install guard requires separate platform applicability analysis; comment alone does not prove actual backend behavior.",
+      "scope": "Linux/macOS implementations not read in this ownership task."
+    },
+    {
+      "classification": "implemented_windows_contract",
+      "path": "internal/scheduler/scheduler_windows.go",
+      "lines": "231–251",
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/11c286fb634cc63d2c6019a790ff376a1d834af9/internal/scheduler/scheduler_windows.go",
+      "finding": "Windows ExportXML forwards COM error, reports ErrTaskCorrupt for absent or empty XML in a successful response, and returns bytes on success. Windows Delete maps ErrTaskNotFound to nil."
+    },
+    {
+      "classification": "implemented_error_mapping",
+      "path": "internal/scheduler/scheduler_com_windows.go",
+      "lines": "158–170",
+      "source": "https://github.com/applicate2628/mcp-local-hub/blob/11c286fb634cc63d2c6019a790ff376a1d834af9/internal/scheduler/scheduler_com_windows.go",
+      "finding": "COM response task_absent maps to ErrTaskNotFound; permission_denied/task_corrupt/other kinds remain distinct errors."
+    }
+  ],
+  "limits": [
+    "Changed-file ownership is not exclusive semantic ownership.",
+    "No textual hunk overlap does not prove behavior compatibility.",
+    "No patches were applied, branches merged, builds or tests run."
+  ]
+}
