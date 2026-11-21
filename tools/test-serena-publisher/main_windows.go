@@ -331,6 +331,8 @@ func buildEnvironment(o options) []string {
 		"TEMP": filepath.Join(o.root, "temp"), "TMP": filepath.Join(o.root, "temp"), "TMPDIR": filepath.Join(o.root, "temp"),
 		"GOTMPDIR": filepath.Join(o.root, "temp"),
 		"APPDATA":  filepath.Join(o.root, "appdata"), "LOCALAPPDATA": filepath.Join(o.root, "localappdata"),
+		// Inherited telemetry test/child controls can bypass private telemetry-off.
+		"TEST_TELEMETRY_DIR": "", "GO_TELEMETRY_CHILD": "", "GO_TELEMETRY_CHILD_UPLOAD": "",
 	}
 	env := make([]string, 0, len(os.Environ())+len(values))
 	for _, entry := range os.Environ() {
