@@ -34,13 +34,14 @@ const (
 )
 
 var (
-	commitPattern        = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	calverPattern        = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$`)
-	sha256Pattern        = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	semverPattern        = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-	npmIntegrityPattern  = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
-	nodeEnginePattern    = regexp.MustCompile(`^>=[1-9][0-9]*$`)
-	pinnedCommentPattern = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
+	commitPattern                   = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	calverPattern                   = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$`)
+	sha256Pattern                   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	semverPattern                   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	serenaDevelopmentVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.dev(0|[1-9][0-9]*)$`)
+	npmIntegrityPattern             = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
+	nodeEnginePattern               = regexp.MustCompile(`^>=[1-9][0-9]*$`)
+	pinnedCommentPattern            = regexp.MustCompile(`pinned serena commit [0-9a-f]{40}`)
 )
 
 var sequentialV2VersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -408,8 +409,8 @@ func (d Descriptor) validate() error {
 	if d.UpstreamRepository != repositoryURL {
 		return fmt.Errorf("upstream_repository = %q, want %q", d.UpstreamRepository, repositoryURL)
 	}
-	if !semverPattern.MatchString(d.Version) {
-		return fmt.Errorf("version = %q, want an exact semantic version", d.Version)
+	if !semverPattern.MatchString(d.Version) && !serenaDevelopmentVersionPattern.MatchString(d.Version) {
+		return fmt.Errorf("version = %q, want a numeric Serena version with an optional .devN suffix", d.Version)
 	}
 	if !commitPattern.MatchString(d.Commit) {
 		return fmt.Errorf("commit must be a 40-character lower-case revision")
@@ -508,9 +509,13 @@ type publishOps struct {
 	remove     func(string) error
 }
 
+// V3 is checked and generated when a checkout carries that catalog.
+const optionalReleaseCatalogPath = "marketplace/v3/catalog.json"
+
 var releaseCatalogPaths = [...]string{
 	"marketplace/v1/catalog.json",
 	"marketplace/v2/catalog.json",
+	optionalReleaseCatalogPath,
 }
 
 type projectionPathError struct {
@@ -585,19 +590,33 @@ func loadDeclaredProjections(root string) ([]loadedProjection, error) {
 	return loaded, nil
 }
 
-func readReleaseCatalogs(root string) ([len(releaseCatalogPaths)][]byte, error) {
-	var catalogs [len(releaseCatalogPaths)][]byte
-	for index, relative := range releaseCatalogPaths {
+func readReleaseCatalogs(root string) ([]target, error) {
+	catalogs := make([]target, 0, len(releaseCatalogPaths))
+	for _, relative := range releaseCatalogPaths {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
-		if err != nil {
-			return catalogs, atProjectionPath(relative, err)
+		if relative == optionalReleaseCatalogPath && errors.Is(err, os.ErrNotExist) {
+			continue
 		}
-		catalogs[index] = data
+		if err != nil {
+			return nil, atProjectionPath(relative, err)
+		}
+		if relative == optionalReleaseCatalogPath {
+			var header struct {
+				SchemaVersion string `json:"schema_version"`
+			}
+			if err := json.Unmarshal(data, &header); err != nil {
+				return nil, atProjectionPath(relative, err)
+			}
+			if header.SchemaVersion != "3" {
+				return nil, atProjectionPath(relative, errors.New("V3 catalog must declare schema_version 3"))
+			}
+		}
+		catalogs = append(catalogs, target{path: relative, data: data})
 	}
 	return catalogs, nil
 }
 
-func checkDeclaredProjection(root string, projection loadedProjection, catalogs [len(releaseCatalogPaths)][]byte) error {
+func checkDeclaredProjection(root string, projection loadedProjection, catalogs []target) error {
 	if err := projection.checkManifest(projection.manifest); err != nil {
 		return atProjectionPath(projection.registration.manifestPath, err)
 	}
@@ -610,24 +629,24 @@ func checkDeclaredProjection(root string, projection loadedProjection, catalogs 
 			return atProjectionPath(projection.registration.readmePath, errors.New("README does not equal descriptor-derived release metadata"))
 		}
 	}
-	for index, data := range catalogs {
-		if err := projection.checkCatalog(data); err != nil {
-			return atProjectionPath(releaseCatalogPaths[index], err)
+	for _, catalog := range catalogs {
+		if err := projection.checkCatalog(catalog.data); err != nil {
+			return atProjectionPath(catalog.path, err)
 		}
 	}
 	return nil
 }
 
-func generateDeclaredProjection(projection loadedProjection, catalogs [len(releaseCatalogPaths)][]byte) ([]target, [len(releaseCatalogPaths)][]byte, error) {
+func generateDeclaredProjection(projection loadedProjection, catalogs []target) ([]target, []target, error) {
 	generatedManifest, err := projection.generateManifest(projection.manifest)
 	if err != nil {
 		return nil, catalogs, atProjectionPath(projection.registration.manifestPath, err)
 	}
-	generatedCatalogs := catalogs
-	for index, data := range catalogs {
-		generatedCatalogs[index], err = projection.generateCatalog(data)
+	generatedCatalogs := slices.Clone(catalogs)
+	for index, catalog := range catalogs {
+		generatedCatalogs[index].data, err = projection.generateCatalog(catalog.data)
 		if err != nil {
-			return nil, catalogs, atProjectionPath(releaseCatalogPaths[index], err)
+			return nil, catalogs, atProjectionPath(catalog.path, err)
 		}
 	}
 	if err := projection.checkManifest(generatedManifest); err != nil {
@@ -737,7 +756,7 @@ func Generate(root string) error {
 	if err != nil {
 		return wrapProjectionPath(err, generationError)
 	}
-	targets := make([]target, 0, len(projections)*2+len(releaseCatalogPaths))
+	targets := make([]target, 0, len(projections)*2+len(catalogs))
 	for _, projection := range projections {
 		projectionTargets, generatedCatalogs, generateErr := generateDeclaredProjection(projection, catalogs)
 		if generateErr != nil {
@@ -750,17 +769,15 @@ func Generate(root string) error {
 		catalogs = generatedCatalogs
 	}
 	for _, projection := range projections {
-		for index, data := range catalogs {
-			if err := projection.checkCatalog(data); err != nil {
-				return generationError(releaseCatalogPaths[index], fmt.Errorf("generated output invalid: %w", err))
+		for _, catalog := range catalogs {
+			if err := projection.checkCatalog(catalog.data); err != nil {
+				return generationError(catalog.path, fmt.Errorf("generated output invalid: %w", err))
 			}
 		}
 	}
-	for index, relative := range releaseCatalogPaths {
-		targets = append(targets, target{
-			path: filepath.Join(root, filepath.FromSlash(relative)),
-			data: catalogs[index],
-		})
+	for _, catalog := range catalogs {
+		catalog.path = filepath.Join(root, filepath.FromSlash(catalog.path))
+		targets = append(targets, catalog)
 	}
 	return publishTargets(targets)
 }
