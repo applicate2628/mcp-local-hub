@@ -405,6 +405,11 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 
 	limits := deps.Limits.normalized()
 	parsed, parseErr := parseTraceStream(ctx, f, limits)
+	if parseErr == nil {
+		// A final read can return EOF after the request was canceled. Check
+		// the phase handoff before deriving indexes or publishing evidence.
+		parseErr = ctx.Err()
+	}
 	if parseErr != nil {
 		reason := ReasonTraceUnreadable
 		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
