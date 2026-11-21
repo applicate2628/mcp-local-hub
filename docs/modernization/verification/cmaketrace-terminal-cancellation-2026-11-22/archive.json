@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/evidence.zip",
+  "bytes": 647455,
+  "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+  "git_blob": "e7e2e6e5f736259e89b0c966ebac1319f7f50768",
+  "entries": 21,
+  "inner_archive": {
+    "archive": "cmake-evidence.zip",
+    "bytes": 825432,
+    "chunk_characters": 24000,
+    "chunks": 46,
+    "encoding": "zip+base64",
+    "entries": 1148,
+    "family": "cmake",
+    "manifest_bytes": 236087,
+    "manifest_sha256": "1b75da1ff556914f4e2216b6e9f4f125c320b4c55540bccf54c8c9d85242d19c",
+    "python_version": "3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]",
+    "schema": 1,
+    "sha256": "b224a0ab9423d47e91c3fe3f39660c6ad6c15b2ad361b67cff4c6ff4c7c02bc4",
+    "zlib_version": "1.3.1.zlib-ng"
+  },
+  "manifest_sha256": "8d6e0f886949cb6f6e12d39447cb7bbbb1b80c9d2e6ef8916c0fa4a07e1a3cd6",
+  "manifest_bytes": 4191,
+  "crc_and_all_member_bytes_verified_locally": true,
+  "binary_publication_verification": "Local Git blob identity, create_blob result and published tree; no second binary download is claimed."
+}

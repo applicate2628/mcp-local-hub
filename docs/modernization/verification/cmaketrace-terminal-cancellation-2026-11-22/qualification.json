@@ -1,0 +1,369 @@
+{
+  "schema": 1,
+  "date_moscow": "2026-11-22",
+  "code_commit": "074f8232731cffa7fb39e7defbaf7e20ee5e5be6",
+  "code_tree": "e4ef93c843ec3342c4a6d564e7f5ad88e9b3b021",
+  "physical_base": {
+    "head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+    "package_go_files": 17
+  },
+  "overlay_count": 5,
+  "phases": [
+    {
+      "phase": "cmake-stage-format",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "gofmt-write",
+          "exit_code": 0,
+          "seconds": 0.017658700002357364,
+          "tests": null,
+          "oracle": null,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:08:08.661399+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:08:08.661506+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-format",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 0.02578739996533841,
+          "tests": null,
+          "oracle": {
+            "label": "go-version",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "captured_utc": "2026-11-21T22:09:14.111494+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:09:14.111608+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.013426100020296872,
+          "tests": null,
+          "oracle": {
+            "label": "gofmt-check",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:09:15.019808+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:09:15.019919+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-compile-control",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-control-compile",
+          "exit_code": 0,
+          "seconds": 2.721380400005728,
+          "tests": null,
+          "oracle": {
+            "label": "cmake-control-compile",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true,
+            "binary": {
+              "path": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\cmake-compile-control\\cmake-control-compile.exe",
+              "bytes": 10001587,
+              "sha256": "38937a13296428d84e6da277295e8d9aa79f8882465cee3517b7e7fab4c11a81"
+            }
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:10:28.418874+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:10:28.418974+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-compile-candidate",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-candidate-compile",
+          "exit_code": 0,
+          "seconds": 9.152785300044343,
+          "tests": null,
+          "oracle": {
+            "label": "cmake-candidate-compile",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true,
+            "binary": {
+              "path": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\cmake-compile-candidate\\cmake-candidate-compile.exe",
+              "bytes": 10001587,
+              "sha256": "5c84b54b7c7da4f288d2db6f93eac498e3984609b237b148d27d3a19d21ba2f9"
+            }
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:12:17.796624+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:12:17.796719+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-negative-control",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-terminal-negative",
+          "exit_code": 1,
+          "seconds": 1.6599729999434203,
+          "tests": {
+            "pass": [
+              "TestTraceCancellationAtTerminalRead/valid_record/live",
+              "TestTraceCancellationAtTerminalRead/header_only/live",
+              "TestTraceCancellationAtTerminalRead/malformed_tail/live",
+              "TestTraceCancellationAtTerminalRead/oversized_tail/live"
+            ],
+            "fail": [
+              "TestTraceCancellationAtTerminalRead/valid_record/canceled",
+              "TestTraceCancellationAtTerminalRead/header_only/canceled",
+              "TestTraceCancellationAtTerminalRead/malformed_tail/canceled",
+              "TestTraceCancellationAtTerminalRead/oversized_tail/canceled",
+              "TestTraceCancellationAtTerminalRead",
+              "PACKAGE:mcp-local-hub/internal/vcpkgmcp/cmaketrace"
+            ],
+            "skip": []
+          },
+          "oracle": {
+            "label": "cmake-terminal-negative",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 14733,
+            "sha256": "60e95f4286c8a27d66f886932d9bea0e9a9d5235383362378f660fc67daa6c60",
+            "captured_utc": "2026-11-21T22:13:40.199938+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:13:40.200042+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-candidate-targeted",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-targeted",
+          "exit_code": 0,
+          "seconds": 3.1634943999815732,
+          "tests": {
+            "pass": [
+              "TestF26_CancellationDuringTheParseStopsReadingMidStream",
+              "TestF26_CanceledRequestFailsClosedAndStopsReading",
+              "TestR32OversizedLineDrainStopsOnCancellation",
+              "TestTraceReturnedRecordsClearDiscardedReferences/unchanged",
+              "TestTraceReturnedRecordsClearDiscardedReferences/cap_only",
+              "TestTraceReturnedRecordsClearDiscardedReferences/file_filter",
+              "TestTraceReturnedRecordsClearDiscardedReferences/command_filter",
+              "TestTraceReturnedRecordsClearDiscardedReferences/filter_and_cap",
+              "TestTraceReturnedRecordsClearDiscardedReferences/no_matches",
+              "TestTraceReturnedRecordsClearDiscardedReferences",
+              "TestTraceCancellationAtTerminalRead/valid_record/live",
+              "TestTraceCancellationAtTerminalRead/valid_record/canceled",
+              "TestTraceCancellationAtTerminalRead/header_only/live",
+              "TestTraceCancellationAtTerminalRead/header_only/canceled",
+              "TestTraceCancellationAtTerminalRead/malformed_tail/live",
+              "TestTraceCancellationAtTerminalRead/malformed_tail/canceled",
+              "TestTraceCancellationAtTerminalRead/oversized_tail/live",
+              "TestTraceCancellationAtTerminalRead/oversized_tail/canceled",
+              "TestTraceCancellationAtTerminalRead",
+              "PACKAGE:mcp-local-hub/internal/vcpkgmcp/cmaketrace"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "cmake-targeted",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 18561,
+            "sha256": "22f95d4cfcb2139945efce9a52c89c04c1df8ef90f1713d3cd42a44c6bb5d053",
+            "captured_utc": "2026-11-21T22:14:41.273400+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:14:41.273521+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-build",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-build",
+          "exit_code": 0,
+          "seconds": 0.2664893000619486,
+          "tests": null,
+          "oracle": {
+            "label": "cmake-build",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:18:30.967723+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:18:30.967867+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "cmake-vet",
+      "state": "complete",
+      "commands": [
+        {
+          "label": "cmake-vet",
+          "exit_code": 0,
+          "seconds": 0.2594354000175372,
+          "tests": null,
+          "oracle": {
+            "label": "cmake-vet",
+            "manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:18:52.099695+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T22:18:52.099792+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          }
+        }
+      ]
+    }
+  ],
+  "raw_failures_remain_failures": true,
+  "candidate_totals": {
+    "roots": 5,
+    "test_and_subtest_pass": 19,
+    "package_pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "negative_totals": {
+    "go_exit": 1,
+    "pass": 4,
+    "fail": 6,
+    "skip": 0
+  },
+  "build_and_vet_scope": "./internal/vcpkgmcp/cmaketrace",
+  "full_go_suite": "NOT_RUN",
+  "real_mcp_consumer": "NOT_RUN",
+  "performance_measurements": "NOT_RUN",
+  "external_cmake": "NOT_RUN",
+  "whole_process_tree_settlement_proved": false,
+  "local_serialization_failure": {
+    "expected_native_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+    "bad_local_copy_sha256": "cb9d5fb1db5ca27cc4b949b828eff7d5ae416ba548f5de82e5e7d0cfed95b85c",
+    "classification": "local readback serialization/hash failure; not Go or remote qualification failure",
+    "remote_manifest_modified": false
+  },
+  "archive": {
+    "schema": 1,
+    "path": "docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/evidence.zip",
+    "bytes": 647455,
+    "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+    "git_blob": "e7e2e6e5f736259e89b0c966ebac1319f7f50768",
+    "entries": 21,
+    "inner_archive": {
+      "archive": "cmake-evidence.zip",
+      "bytes": 825432,
+      "chunk_characters": 24000,
+      "chunks": 46,
+      "encoding": "zip+base64",
+      "entries": 1148,
+      "family": "cmake",
+      "manifest_bytes": 236087,
+      "manifest_sha256": "1b75da1ff556914f4e2216b6e9f4f125c320b4c55540bccf54c8c9d85242d19c",
+      "python_version": "3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]",
+      "schema": 1,
+      "sha256": "b224a0ab9423d47e91c3fe3f39660c6ad6c15b2ad361b67cff4c6ff4c7c02bc4",
+      "zlib_version": "1.3.1.zlib-ng"
+    },
+    "manifest_sha256": "8d6e0f886949cb6f6e12d39447cb7bbbb1b80c9d2e6ef8916c0fa4a07e1a3cd6",
+    "manifest_bytes": 4191,
+    "crc_and_all_member_bytes_verified_locally": true,
+    "binary_publication_verification": "Local Git blob identity, create_blob result and published tree; no second binary download is claimed."
+  }
+}

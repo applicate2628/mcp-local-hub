@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "code_commit": {
+    "code_commit": "074f8232731cffa7fb39e7defbaf7e20ee5e5be6",
+    "code_tree": "e4ef93c843ec3342c4a6d564e7f5ad88e9b3b021",
+    "parent": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+    "parent_tree": "50585004a112d5ca4c8c35b105d129fac5d88c4c",
+    "files": [
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+        "bytes": 24631,
+        "sha256": "d51adc76972be45cb36cf1a436c8a94a61ba1ed6e571e070697d9882601daa2a",
+        "git_blob": "d85745df93fbbb285960adf7cb248a8ec3846eb4"
+      },
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/trace_terminal_cancellation_test.go",
+        "bytes": 3683,
+        "sha256": "0e9336b2a583646935766d7c1dd0082ae33cef69d566f3e0267a7397b6e4b383",
+        "git_blob": "8da0a111d3453b033423931ce78f859b9ee0179a"
+      }
+    ]
+  },
+  "qualification_input": {
+    "schema": "cmake-five-overlay-composition-v1",
+    "status": "source-only; no runner, formatter, Go or native execution",
+    "master": {
+      "head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "package_go_files": 17
+    },
+    "donor": {
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "tree": "50585004a112d5ca4c8c35b105d129fac5d88c4c",
+      "package_go_files": 20
+    },
+    "candidate_paths": [
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+        "source_sha256": "d6418595218992d1b285705829f4375b54068bdafcdc643d56ec054a28aef9b0",
+        "source_git_blob": "1818f4b69224b8c4839709a79244aa2d6f3dfae5",
+        "candidate_sha256": "d51adc76972be45cb36cf1a436c8a94a61ba1ed6e571e070697d9882601daa2a",
+        "candidate_git_blob": "d85745df93fbbb285960adf7cb248a8ec3846eb4",
+        "candidate_bytes": 24631,
+        "donor_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+        "donor_sha256": "53a704edffffdd7ee7c8de95584f20f46ac7e6cad405446c05b56ed7c5c396b0",
+        "donor_git_blob": "d4a988c65d2dc4738d6a6a87973db310baf8b6ac",
+        "candidate_equals_donor": false,
+        "origin": "master plus retained #624 clear-tail plus new terminal-cancel guard"
+      },
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+        "source_sha256": null,
+        "source_git_blob": null,
+        "candidate_sha256": "2537a50dd350a416746d6499ea8590be409d2a7dc49d65b063c3cb8c775750d9",
+        "candidate_git_blob": "622e4769f63e6577062a9edb9e7614dffc571358",
+        "candidate_bytes": 6208,
+        "donor_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+        "donor_sha256": "2537a50dd350a416746d6499ea8590be409d2a7dc49d65b063c3cb8c775750d9",
+        "donor_git_blob": "622e4769f63e6577062a9edb9e7614dffc571358",
+        "candidate_equals_donor": true,
+        "origin": "exact #624 donor test"
+      },
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go",
+        "source_sha256": null,
+        "source_git_blob": null,
+        "candidate_sha256": "e350d2b99622db990f029c941407f8f4e243d925ee89b57b3be2651311812659",
+        "candidate_git_blob": "fd0291bfa558ef7562f315d9a2412296e86aaef4",
+        "candidate_bytes": 4813,
+        "donor_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+        "donor_sha256": "e350d2b99622db990f029c941407f8f4e243d925ee89b57b3be2651311812659",
+        "donor_git_blob": "fd0291bfa558ef7562f315d9a2412296e86aaef4",
+        "candidate_equals_donor": true,
+        "origin": "exact #624 donor test"
+      },
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/trace_retained_records_test.go",
+        "source_sha256": null,
+        "source_git_blob": null,
+        "candidate_sha256": "c58aea2aa4fd6953dd5db007bf63ecfc858020f4b32238a22cb58e15e000719a",
+        "candidate_git_blob": "07cd515ba4edb7d88d48db871742bf65e784c757",
+        "candidate_bytes": 4302,
+        "donor_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+        "donor_sha256": "c58aea2aa4fd6953dd5db007bf63ecfc858020f4b32238a22cb58e15e000719a",
+        "donor_git_blob": "07cd515ba4edb7d88d48db871742bf65e784c757",
+        "candidate_equals_donor": true,
+        "origin": "exact #624 donor test"
+      },
+      {
+        "path": "internal/vcpkgmcp/cmaketrace/trace_terminal_cancellation_test.go",
+        "source_sha256": null,
+        "source_git_blob": null,
+        "candidate_sha256": "0e9336b2a583646935766d7c1dd0082ae33cef69d566f3e0267a7397b6e4b383",
+        "candidate_git_blob": "8da0a111d3453b033423931ce78f859b9ee0179a",
+        "candidate_bytes": 3683,
+        "donor_head": null,
+        "donor_sha256": null,
+        "donor_git_blob": null,
+        "candidate_equals_donor": null,
+        "origin": "new eight-case terminal-cancellation regression"
+      }
+    ],
+    "control": {
+      "path": "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "bytes": 24441,
+      "sha256": "53a704edffffdd7ee7c8de95584f20f46ac7e6cad405446c05b56ed7c5c396b0",
+      "git_blob": "d4a988c65d2dc4738d6a6a87973db310baf8b6ac"
+    },
+    "subtraction": {
+      "candidate_minus_exact_terminal_guard_equals_donor": true,
+      "terminal_guard_bytes": 190,
+      "terminal_guard_lines": 5,
+      "donor_minus_exact_clear_tail_equals_master": true,
+      "clear_tail_bytes": 258,
+      "clear_tail_lines": 5,
+      "three_donor_test_files_exact": true,
+      "new_regression_absent_in_master_and_donor": true,
+      "negative_and_candidate_differ_only_in_production_overlay": true
+    },
+    "input_pins": {
+      "candidate_audit_manifest_sha256": "d34c9b89af721dfeb76f2b24b16b854e2585235394a96afeee8000a101957149",
+      "candidate_audit_plan_sha256": "f1359618ca8b4f57d2630e1d64788f46a5cff4495fd99f2bf0f80b3fb93595a3",
+      "independent_master_inventory_sha256": "e3ff10004f4c9ca48f126831330c9b5b656ac209a98ddaa568c158fc0bce9c83",
+      "peer_review_sha256": "1e78f460428ebcb897f4a53965f9facabe471ace5d864bb0a3fa6d9ec901a848"
+    },
+    "excluded": [
+      "master wholesale merge into #624",
+      "unrelated PR code",
+      "full package test execution",
+      "consumer benchmark execution",
+      "CMake or external process fixtures",
+      "dependency/tool installation or download"
+    ]
+  },
+  "formatted_manifest_sha256": "a249d8c6673a59d0c166f2bfb64fc15106eeaf6a6e08823ab084bb8e1944b30e",
+  "native_original_and_formatted_candidates_equal": true,
+  "claim_scope": "Code bytes bind to the five-overlay composition on physical master75; no execution of the full standalone PR624 head is claimed."
+}
