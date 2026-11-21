@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
 )
 
@@ -24,6 +25,9 @@ func BenchmarkWorkspaceResolverResolveByPath(b *testing.B) {
 	} {
 		b.Run(fixture.name, func(b *testing.B) {
 			root := b.TempDir()
+			if err := apitest.HardenedDirForTestMain(root); err != nil {
+				b.Fatal(err)
+			}
 			project := filepath.Join(root, "registered-project")
 			if err := os.MkdirAll(project, 0o700); err != nil {
 				b.Fatal(err)
