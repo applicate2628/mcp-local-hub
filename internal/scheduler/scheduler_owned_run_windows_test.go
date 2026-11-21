@@ -53,7 +53,7 @@ func TestSchedulerRunOwnedAdmissionAndPositiveReply(t *testing.T) {
 	}
 }
 
-// Execute the production JSON consumer and validator against in-process native
+// Execute the production JSON consumer and validator against PowerShell
 // object fixtures. The fixture never creates, queries, or runs an OS task.
 func TestSchedulerCOMGuardedRunDefinition(t *testing.T) {
 	systemRoot := os.Getenv("SystemRoot")
@@ -63,6 +63,10 @@ func TestSchedulerCOMGuardedRunDefinition(t *testing.T) {
 	powerShell := filepath.Join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 	if info, err := os.Stat(powerShell); err != nil || !info.Mode().IsRegular() {
 		t.Fatalf("qualified PowerShell executable %q: %v", powerShell, err)
+	}
+	const serviceConnection = `$s=New-Object -ComObject 'Schedule.Service';$s.Connect();`
+	if strings.Count(schedulerCOMScript, serviceConnection) != 1 {
+		t.Fatal("scheduler COM script must have exactly one service connection to replace")
 	}
 	const valid = `<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><URI>\fixture</URI></RegistrationInfo><Principals><Principal id="Owner"><UserId>S-1-5-21-1</UserId></Principal></Principals><Settings><Enabled>true</Enabled></Settings><Actions Context="Owner"><Exec><Command>C:\private\mcphub.exe</Command><Arguments>gui --no-browser</Arguments></Exec></Actions></Task>`
 	creatorXML := buildCreateXML(TaskSpec{Name: `\fixture`, Command: `C:\private\mcphub.exe`, Args: []string{"gui", "--no-browser"}, LogonTrigger: true}, "S-1-5-21-1")
@@ -74,6 +78,8 @@ func TestSchedulerCOMGuardedRunDefinition(t *testing.T) {
 		drift, started   bool
 	}{
 		{"matching", valid, "S-1-5-21-1", 3, false, true},
+		{"hidden-matching", strings.Replace(valid, "<Settings>", "<Settings><Hidden>true</Hidden>", 1), "S-1-5-21-1", 3, false, true},
+		{"hidden-wrong-owner", strings.Replace(valid, "<Settings>", "<Settings><Hidden>true</Hidden>", 1), "S-1-5-21-2", 3, false, false},
 		{"omitted-enabled-defaults-true", strings.Replace(valid, "<Enabled>true</Enabled>", "", 1), "S-1-5-21-1", 3, false, true},
 		{"numeric-true", strings.Replace(valid, "<Enabled>true</Enabled>", "<Enabled>1</Enabled>", 1), "S-1-5-21-1", 3, false, true},
 		{"xml-disabled", strings.Replace(valid, "<Enabled>true</Enabled>", "<Enabled>false</Enabled>", 1), "S-1-5-21-1", 3, false, false},
@@ -101,11 +107,11 @@ func TestSchedulerCOMGuardedRunDefinition(t *testing.T) {
 		{"definition-drift", valid, "S-1-5-21-1", 3, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixtureJSON, _ := json.Marshal(map[string]any{"xml": tc.xml, "owner": tc.owner, "state": tc.state, "drift": tc.drift, "enabled": tc.name != "native-disabled"})
+			fixtureJSON, _ := json.Marshal(map[string]any{"xml": tc.xml, "owner": tc.owner, "state": tc.state, "drift": tc.drift, "enabled": tc.name != "native-disabled", "hidden": strings.HasPrefix(tc.name, "hidden-")})
 			// Definition/Xml reads and Run share the same retained object. A
 			// second Xml read deterministically exposes publication drift.
-			fixture := `$fixture='` + strings.ReplaceAll(string(fixtureJSON), "'", "''") + `'|ConvertFrom-Json;$script:reads=0;$script:runs=0;$task=[pscustomobject]@{Name='fixture';State=[int]$fixture.state;Enabled=[bool]$fixture.enabled;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId=$fixture.owner}}};$task|Add-Member ScriptProperty Xml {$script:reads++;if($fixture.drift -and $script:reads -gt 1){return '<changed/>'};return [string]$fixture.xml};$task|Add-Member ScriptMethod Run {param($args);$script:runs++;[Console]::Error.WriteLine('fixture-run');return [pscustomobject]@{InstanceGuid='fixture'}};$folder=[pscustomobject]@{};$folder|Add-Member ScriptMethod GetTasks {param($flags);return @($task)};$folder|Add-Member ScriptMethod GetTask {param($name);return $task};$s=[pscustomobject]@{};$s|Add-Member ScriptMethod GetFolder {param($name);return $folder};`
-			code := strings.Replace(schedulerCOMUTF8Preamble+schedulerCOMScript, `$s=New-Object -ComObject 'Schedule.Service';$s.Connect();`, fixture, 1)
+			fixture := `$fixture='` + strings.ReplaceAll(string(fixtureJSON), "'", "''") + `'|ConvertFrom-Json;$script:reads=0;$script:runs=0;$task=[pscustomobject]@{Name='fixture';State=[int]$fixture.state;Enabled=[bool]$fixture.enabled;Hidden=[bool]$fixture.hidden;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId=$fixture.owner}}};$task|Add-Member ScriptProperty Xml {$script:reads++;if($fixture.drift -and $script:reads -gt 1){return '<changed/>'};return [string]$fixture.xml};$task|Add-Member ScriptMethod Run {param($args);$script:runs++;[Console]::Error.WriteLine('fixture-run');return [pscustomobject]@{InstanceGuid='fixture'}};$folder=[pscustomobject]@{};$folder|Add-Member ScriptMethod GetTasks {param($flags);if(!$task.Hidden -or ($flags -band 1) -ne 0){return @($task)};return @()};$folder|Add-Member ScriptMethod GetTask {param($name);return $task};$s=[pscustomobject]@{};$s|Add-Member ScriptMethod GetFolder {param($name);return $folder};`
+			code := strings.Replace(schedulerCOMUTF8Preamble+schedulerCOMScript, serviceConnection, fixture, 1)
 			request := schedulerCOMRequest{Operation: "run_owned", Name: `\fixture`, ExpectedCommand: `C:\private\mcphub.exe`, ExpectedRole: "gui", ExpectedOwner: "S-1-5-21-1"}
 			switch tc.name {
 			case "missing-expectation":
@@ -132,7 +138,7 @@ func TestSchedulerCOMGuardedRunDefinition(t *testing.T) {
 				t.Fatalf("JSON=%q err=%v", out, err)
 			}
 			if got := strings.Count(runEvidence.String(), "fixture-run"); got != map[bool]int{false: 0, true: 1}[tc.started] {
-				t.Fatalf("native Run count=%d stderr=%q", got, runEvidence.String())
+				t.Fatalf("fixture Run count=%d stderr=%q", got, runEvidence.String())
 			}
 			if tc.started {
 				if !result.OK || !result.Started {

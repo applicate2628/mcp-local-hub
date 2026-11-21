@@ -190,6 +190,9 @@ func TestPruneObsoleteServerTasks_KeepsSiblingPrunesOwnObsolete(t *testing.T) {
 		{Name: `\mcp-local-hub-demo-obsolete`},   // demo's OWN obsolete task → must be pruned
 		{Name: `\mcp-local-hub-demo-alpha-beta`}, // sibling demo-alpha / beta → must survive
 	}
+	for _, task := range f.listSeed {
+		f.xml[strings.TrimPrefix(task.Name, "\\")] = []byte("<Task/>")
+	}
 
 	// planned = demo's own current task set (only demo-alpha).
 	planned := map[string]struct{}{
