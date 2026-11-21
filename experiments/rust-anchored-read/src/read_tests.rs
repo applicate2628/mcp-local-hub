@@ -298,6 +298,95 @@ fn injected_native_phase_error_preserves_category_and_closes_handles() {
     assert!(err.cleanup_failures.is_empty())
 }
 #[test]
+fn native_read_failure_after_partial_read_preserves_error_and_releases_lock() {
+    use windows_sys::Win32::{
+        Foundation::ERROR_LOCK_VIOLATION,
+        Storage::FileSystem::{LockFile, UnlockFile},
+    };
+
+    // This guard owns only the fixture's independent handle and one byte lock.
+    // File closes the handle on every path, including a panic during the hook.
+    struct LockedByte {
+        file: fs::File,
+        locked: bool,
+    }
+    impl LockedByte {
+        fn unlock(&mut self) -> std::io::Result<()> {
+            if self.locked {
+                // SAFETY: the same live fixture handle and exact locked range.
+                if unsafe { UnlockFile(self.file.as_raw_handle(), 4096, 0, 1, 0) } == 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                self.locked = false;
+            }
+            Ok(())
+        }
+    }
+    impl Drop for LockedByte {
+        fn drop(&mut self) {
+            // Never replace the reader's result or a panic with a cleanup panic.
+            // Closing the owned File also releases any remaining byte-range lock.
+            let _ = self.unlock();
+        }
+    }
+
+    let f = Fixture::new();
+    let payload = vec![b'x'; 4097];
+    f.file("data", &payload);
+    let mut locked = LockedByte {
+        file: fs::File::open(f.root.join("data")).unwrap(),
+        locked: false,
+    };
+    let mut requests = Vec::new();
+    let result = read_with_hook(
+        &f.root,
+        &["data".into()],
+        payload.len(),
+        &digest(&payload),
+        &AtomicBool::new(false),
+        |event| {
+            if let Step::BeforeRead { requested } = event {
+                requests.push(requested);
+                if requests.len() == 2 {
+                    // LockFile is nonblocking. Its exclusive byte lock denies
+                    // the reader's separate handle even in this same process.
+                    // https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-lockfile
+                    // SAFETY: live read-capable fixture handle, fixed valid range.
+                    let ok = unsafe { LockFile(locked.file.as_raw_handle(), 4096, 0, 1, 0) };
+                    locked.locked = ok != 0;
+                    assert_ne!(
+                        ok,
+                        0,
+                        "lock fixture byte: {}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            Ok(())
+        },
+    );
+    // Restore the fixture before any result assertion; preserve both outcomes.
+    let unlock_result = locked.unlock();
+    drop(locked);
+    let err = result.unwrap_err();
+    // The second request proves 4096 bytes were already buffered: 4097-4096+1.
+    assert_eq!(requests, vec![4096, 2]);
+    assert_eq!(err.category, Category::UnsafeObjectOrIo);
+    assert_eq!(err.operation, "read-final");
+    assert_eq!(
+        err.native,
+        Some(NativeCode::Win32(ERROR_LOCK_VIOLATION as i32))
+    );
+    assert!(err.cleanup_failures.is_empty());
+    unlock_result.expect("unlock fixture byte");
+    assert_eq!(
+        read(&f, &["data"], payload.len(), &payload)
+            .unwrap()
+            .as_slice(),
+        payload
+    );
+}
+#[test]
 fn repeated_success_and_failure_do_not_leak_handles() {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
     fn handles() -> u32 {

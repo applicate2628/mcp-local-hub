@@ -42,6 +42,8 @@ Outside Windows the function returns `Unsupported` before side effects. That is 
 
 ## Native evidence
 
+**Current qualification — 2026-11-21:** the candidate based on `b827398ef127a1556b7b2bdcdcec7fe03fa6651d`, with the additional native-read-error test, passed **16 library tests, 0 failed/ignored/measured/filtered**, serially on Windows x64. The formatter check passed. The [execution record and source identities](evidence/README.md) distinguish this run from the historical 15-test evidence, retain the first failed formatting attempt, and explain the later documentation-only update. No Clippy rerun or product qualification is claimed.
+
 **Historical evidence, not a rerun for the 2026-11-18 source comparison.** Windows 11 build 26100, x86_64, Rust 1.99.1. Dependencies were already cached and used offline: `windows-sys=0.61.2`, `sha2=0.10.9`, `zeroize=1.9.0`; lockfile included. No dependencies were installed or added to the Hub product.
 
 **15 native tests passed without skips**, covering:
@@ -54,7 +56,9 @@ Outside Windows the function returns `Unsupported` before side effects. That is 
 - File growth after stat, one-byte over-cap detection, and exact-cap EOF.
 - Preservation of injected operation failure and stable handle count over repeated successful and unsuccessful reads.
 
-The [injected-error test](src/read_tests.rs#L278-L299) returns `Win32(123)` from the first component hook after the root handle is acquired; it does not force a native stat, read or close failure. Actual post-acquisition stat/read failures, parent/final close failures, and an independent primary error combined with cleanup failures remain qualification gaps. They require explicitly owned native fixtures; the existing 15 passes do not establish those paths.
+The [injected-error test](src/read_tests.rs#L278-L299) returns `Win32(123)` from the first component hook after the root handle is acquired; it does not force a native stat, read or close failure. Actual post-acquisition stat failures, parent/final close failures, and an independent primary error combined with cleanup failures remain qualification gaps. They require explicitly owned native fixtures; neither the historical 15 passes nor the current 16-test run establishes those paths.
+
+The new `native_read_failure_after_partial_read_preserves_error_and_releases_lock` test uses the existing read hook to acquire an exclusive one-byte lock at offset 4096 through an independent fixture handle. After 4096 bytes have been read, the next native `ReadFile` fails with `ERROR_LOCK_VIOLATION` (Win32 code 33), without returning the partial buffer. The test explicitly unlocks the range, preserves the read error separately from cleanup, and requires a subsequent complete verified read. Its local fixture guard also attempts explicit unlocking during unwinding before dropping its owned `File`. [Microsoft documents the separate-handle lock behavior][win-lock] and [exact-range unlocking][win-unlock]. This schedule passed in the current 16-test run. Other read-failure modes and the remaining stat/close/combined-failure cases are not inferred from it.
 
 The symlink tests used the host's existing capability; no privilege elevation or machine settings were performed. Test data are explicitly owned fixtures, not real Hub files or secrets.
 
@@ -81,7 +85,7 @@ Tests run serially for meaningful process handle counts. Each run receives a fre
 
 - Product integration beyond the completed narrow source comparison: preserve caller policies, typed absence, cancellation errors, caps and hash modes; review any required adapter before substitution.
 - Performance and whole-process memory comparison; no speedup or reduced resource claim is made here.
-- Actual native stat/read/close-failure qualification described above and more filesystem/version coverage; stable source identity under concurrent writes is not an atomic file snapshot.
+- Remaining native stat/close/combined-failure qualification, other read-failure modes, and more filesystem/version coverage; stable source identity under concurrent writes is not an atomic file snapshot.
 - Reviewed FFI and foreign-caller memory/cancellation behavior before any integration.
 - Product lifecycle/security review and applicable repository gates; source review alone does not qualify product integration.
 - Native Linux/macOS implementation and tests if admitted. No platform support is inferred from this source comparison.
@@ -95,3 +99,5 @@ Integration must re-check owner and transaction changes accepted after the exact
 [go-observed]: https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/internal/api/state_read_observation.go
 [go-inverse]: https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/internal/api/managed_backend_install.go#L65-L90
 [go-pin]: https://github.com/applicate2628/mcp-local-hub/blob/a7d92d2852c4f6eb8afb0569ef76a545e38aacf7/internal/cli/install_reconcile_mcp_front.go#L3464-L3490
+[win-lock]: https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-lockfile
+[win-unlock]: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-unlockfile
