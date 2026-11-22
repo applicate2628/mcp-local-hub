@@ -660,6 +660,7 @@ type Server struct {
 	hubHealth          *hubHealthTracker
 	secrets            secretsAPI
 	settings           settingsAPI
+	clientInstallPrefs clientInstallPrefsAPI
 	backups            backupsAPI
 	backupActions      backupActionsAPI
 	cleanup            cleanupAPI
@@ -840,6 +841,7 @@ func NewServer(cfg Config) *Server {
 	})
 	s.secrets = realSecretsAPI{}
 	s.settings = realSettingsAPI{}
+	s.clientInstallPrefs = s.api
 	s.backups = realBackupsAPI{}
 	s.backupActions = realBackupActionsAPI{}
 	s.cleanup = realCleanupAPI{}

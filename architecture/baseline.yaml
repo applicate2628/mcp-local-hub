@@ -4331,18 +4331,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 1
-    - fingerprint: 24d9c30a73077273cecb80e7e46f46eb1e787d5d4579b9e25488b8f661056a9d
-      kind: mutable_global
-      location:
-        path: internal/gui/client_install_prefs.go
-        symbol: clientInstallPrefsViewFn
-        line: 47
-      evidence: var clientInstallPrefsViewFn
-      message: production package-level var clientInstallPrefsViewFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: 24e0441870386439361e43ada0d04500a788decc4813c830c54c43f8a79108dd
       kind: production_test_hook
       location:
@@ -5162,20 +5150,6 @@ entries:
       evidence: 'PR #26'
       metric: 1
       message: 'production comment contains review history marker "PR #26"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: 2b533332b231b11e1941ec5d908bd5b5961849a9243135a0d222411590c436fd
-      kind: api_construction
-      location:
-        path: internal/gui/client_install_prefs.go
-        symbol: clientInstallPrefsSetNames
-        line: 62
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
       owner: gui-adapter
       work_package: WP-11B
       remove_by: "2027-03-31"
@@ -7325,20 +7299,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 2
-    - fingerprint: 3c49a37917a4fa67c001fbf39954303f9f54f3ea27af7c6ae38d8180b4198846
-      kind: api_construction
-      location:
-        path: internal/gui/client_install_prefs.go
-        symbol: clientInstallPrefsView
-        line: 55
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 3c646e89024058ae0e9b189aa7a48dba624ed9b7a992642a81e705dd1bf67726
       kind: mutable_global
       location:
@@ -22877,18 +22837,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: bc262b12501bc20b069a110fa95df448fe5019a08dd3daa01959b28664eb9c15
-      kind: mutable_global
-      location:
-        path: internal/gui/client_install_prefs.go
-        symbol: clientInstallPrefsSetFn
-        line: 48
-      evidence: var clientInstallPrefsSetFn
-      message: production package-level var clientInstallPrefsSetFn requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: bc3aa03b89ea2e66c18258782a0112084d764da80b2d4c2f7014f8efcd116e5f
       kind: history_comment
       location:
