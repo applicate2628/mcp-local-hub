@@ -127,9 +127,59 @@
     }
   },
   "publication664": {
-    "status": "pending_primary_publication",
-    "expected_parent": "19732eb7f58d1381a5cd042975a3ecfd32256669",
-    "scope": "Canonical residual plan plus source-only Serena/Product candidates; no product issued"
+    "status": "primary_publication_verified",
+    "commit": "27e9dbc53f49e0c65e6eef85cae147d1dafb2c04",
+    "tree": "b748b2ad7e534d0e8a57e2e03de066b1ecbd74ae",
+    "parents": [
+      "19732eb7f58d1381a5cd042975a3ecfd32256669"
+    ],
+    "all_7_files_byte_exact": true,
+    "files": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 156856,
+        "sha256": "ee0a650d93b8c4ba731848edbbc0b4afe3ffc0b38839c0c7b4f4a60316fa0d33",
+        "git_blob": "9eace7c546d172aa41fe15ed1bc98477f096d540"
+      },
+      {
+        "path": ".plans/2026-11/residual-closeout-20261122.json",
+        "bytes": 24361,
+        "sha256": "bc69d41a699fabb3b2140f49441d3e853411c557ff4c7cf2cebe608124cefa5f",
+        "git_blob": "edb253fe6246d6146aaeb2dc7cecc57a170b5dbe"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/README.md",
+        "bytes": 24388,
+        "sha256": "78ba1be258e6dd5132d9326b586ee9bf7ce3cbcd46a09acad129793808409974",
+        "git_blob": "732dc8624da7e5284cd14a9cedc124a21c9a4291"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/candidate-inputs.zip",
+        "bytes": 367262,
+        "sha256": "9da4b677c1ed02af71bb949005c4c06411400530079ede5938d6b6a3c67c35fe",
+        "git_blob": "3c13230a665d7dac1d5717fa33602265cb51045a"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/compose.py",
+        "bytes": 13083,
+        "sha256": "225f34c1ad448e2ac74fc473f82761957221b642a2f6879cd3f5fce71e7729f2",
+        "git_blob": "b223a83c300272c817d9bcacdb7bccf852089f80"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/composition-evidence.json",
+        "bytes": 1351,
+        "sha256": "9101b0bcbf88e262b775ae186907596af36eaa3ebbd4975460179a59d34444b6",
+        "git_blob": "bc9154d73054133621884a035eb429601a9b868b"
+      },
+      {
+        "path": "docs/modernization/verification/serena-product-composition-20261122/manifest.json",
+        "bytes": 65015,
+        "sha256": "44df5301051dae725f3c32ebb62c186c5dfc8205b8c93863f4229a49766e4c32",
+        "git_blob": "1943a6cccc16c76b351f87149c49a4856be17ea3"
+      }
+    ],
+    "scope": "Canonical residual plan plus source-only Serena/Product candidates; no product issued",
+    "receipt_note": "This subsequent receipt records readback and cleanup after the primary publication."
   },
   "qualification": {
     "upgrade_recovery": "PASS on listed composition",
@@ -556,10 +606,38 @@
     "donor_absorption_claimed": false
   },
   "cleanup": {
-    "status": "pending_after_all_publication_readbacks",
-    "owned_remote_root": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba",
-    "borrowed_source_and_shared_caches": "retained unchanged",
-    "trash_purged": false
+    "status": "moved_to_trash_and_read_back",
+    "observed_utc": "2026-11-22 19:16:21 UTC",
+    "source": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba",
+    "destination": "D:\\dev\\ChatGPT\\trash\\mcp-residual-20261122-dcb40fba",
+    "files_before_receipt": 6749,
+    "bytes_before_receipt": 114514818,
+    "reparse_points": 0,
+    "phases": {
+      "upgrade-recovery": {
+        "completed": true,
+        "direct_children_settled": true,
+        "commands": 3
+      },
+      "weekly-behavior": {
+        "completed": true,
+        "direct_children_settled": true,
+        "commands": 4
+      },
+      "weekly-lock-order": {
+        "completed": false,
+        "direct_children_settled": true,
+        "commands": 1
+      }
+    },
+    "scheduler_archive_published_and_read_back": true,
+    "source_and_shared_cache_owners_outside_root": true,
+    "trash_purged": false,
+    "source_absent_after_move": true,
+    "destination_preflight_and_pack_receipt_read_back": true,
+    "remote_active_sessions_reported": 0,
+    "required_results_preserved_in_publications": true,
+    "borrowed_source_and_shared_caches": "retained unchanged"
   },
   "affected_dependencies": {
     "scope": "Twelve changed Go paths only; path intersection is not merge or behavioral qualification",
