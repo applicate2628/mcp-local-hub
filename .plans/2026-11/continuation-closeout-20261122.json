@@ -1045,7 +1045,7 @@
     "Scheduler v1 stopped before move on directory metadata drift. The observed change was only own TMP mtime around the process query; attribution to the query is an inference.",
     "Scheduler v2 stopped before backup/move because a normalized LF receipt hash differed from exact CRLF bytes. Both bytes and the preflight failure are preserved.",
     "Scheduler v3 verified exact raw prerequisites, then two strict inventories and file/directory stamps after the last query, and performed the single actual move.",
-    "Small standalone Windows receipt files remain outside trash until this publication is read back; their source evidence is already complete in this archive."
+    "At plan publication a239d318a47d8247aa76e8338859f45f1326e8dc the five standalone Windows receipt copies remained outside trash until byte readback. The subsequent confirmed moves and recovered transport observation are recorded in continuation-final-readback-20261122.json."
   ],
   "archive": {
     "path": "continuation-closeout-evidence-20261122.tar.xz",
@@ -1174,5 +1174,7 @@
         "sha256": "81e26d05fa2e3eda0b3a68572e684fdb9a2bc72b45b3456519113bd17bb8d03d"
       }
     ]
-  }
+  },
+  "plan_publication_commit": "a239d318a47d8247aa76e8338859f45f1326e8dc",
+  "post_publication_final_readback": "continuation-final-readback-20261122.json"
 }

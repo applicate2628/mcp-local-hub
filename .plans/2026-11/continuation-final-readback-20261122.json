@@ -1,0 +1,371 @@
+{
+  "schema": "mcp-continuation-final-readback-20261122-v1",
+  "observed_utc": "2026-11-22 09:24:41 UTC",
+  "canonical_publication": {
+    "commit": "a239d318a47d8247aa76e8338859f45f1326e8dc",
+    "parent": "a908f98a9d55e25cb16f9062608b888280fc47be",
+    "tree": "ff8c1c108478d56ebe74e5fd3ebc83df247cbc60",
+    "files": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 92242,
+        "sha256": "4c389f361994dcfec97ed8d684f71dfda8dc6fefd9ee84e16069789b5c685a0f",
+        "git_blob": "29239b843899a80102ae0bdb18dc7bdea45c74ae",
+        "byte_readback_equal": true
+      },
+      {
+        "path": ".plans/2026-11/continuation-closeout-20261122.json",
+        "bytes": 43018,
+        "sha256": "7cdc5a5546195e9b1eea77cb67c8f4f1152a8942ff358d8dff512afb91e0388f",
+        "git_blob": "c1dfa31beb9257df3e068ef51df4471717e72301",
+        "byte_readback_equal": true
+      },
+      {
+        "path": ".plans/2026-11/continuation-closeout-evidence-20261122.tar.xz",
+        "bytes": 27692,
+        "sha256": "4152e635d9b380e267c4140521390eb4597b73457aaad2ed790bc2e9602d6e09",
+        "git_blob": "d46294b4a2644f09e1d5b0cb90c23b37200856f7",
+        "byte_readback_equal": true
+      }
+    ],
+    "own_git_fetch_readback": true,
+    "independent_exact_ref_readback": true
+  },
+  "small_receipts": {
+    "before": {
+      "phase": "before",
+      "verified": true,
+      "files": [
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "bytes": 7332,
+          "sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c",
+          "source_is_regular": true,
+          "destination_exists": false,
+          "expected_bytes": 7332,
+          "expected_sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json",
+          "bytes": 3251,
+          "sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3",
+          "source_is_regular": true,
+          "destination_exists": false,
+          "expected_bytes": 3251,
+          "expected_sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "bytes": 5151,
+          "sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b",
+          "source_is_regular": true,
+          "destination_exists": false,
+          "expected_bytes": 5151,
+          "expected_sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "bytes": 2580,
+          "sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac",
+          "source_is_regular": true,
+          "destination_exists": false,
+          "expected_bytes": 2580,
+          "expected_sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "bytes": 143089,
+          "sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9",
+          "source_is_regular": true,
+          "destination_exists": false,
+          "expected_bytes": 143089,
+          "expected_sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9"
+        }
+      ]
+    },
+    "move_tool_results": [
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-perftools-closeout-20261122-e21a1792.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully moved D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json to D:\\dev\\ChatGPT\\trash\\mcp-perftools-closeout-20261122-e21a1792.json"
+            },
+            {
+              "type": "text",
+              "text": "\n[executed on device: Comet (9cf41183-4a92-4bca-a51b-528ca8ea98d7)]"
+            }
+          ],
+          "structuredContent": null,
+          "isError": false
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "McpServerError: Connection failed."
+            }
+          ],
+          "structuredContent": {
+            "error": "McpServerError: Connection failed.",
+            "error_code": "UNAVAILABLE",
+            "error_data": {
+              "type": "mcp_network_error",
+              "code": "network_error",
+              "message": "Connection failed.",
+              "url": "https://mcp.desktopcommander.app/mcp"
+            }
+          },
+          "isError": true
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully moved D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json to D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json"
+            },
+            {
+              "type": "text",
+              "text": "\n[executed on device: Comet (9cf41183-4a92-4bca-a51b-528ca8ea98d7)]"
+            }
+          ],
+          "structuredContent": null,
+          "isError": false
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully moved D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792.json to D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792.json"
+            },
+            {
+              "type": "text",
+              "text": "\n[executed on device: Comet (9cf41183-4a92-4bca-a51b-528ca8ea98d7)]"
+            }
+          ],
+          "structuredContent": null,
+          "isError": false
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully moved D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json to D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json"
+            },
+            {
+              "type": "text",
+              "text": "\n[executed on device: Comet (9cf41183-4a92-4bca-a51b-528ca8ea98d7)]"
+            }
+          ],
+          "structuredContent": null,
+          "isError": false
+        }
+      },
+      {
+        "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Successfully moved D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json to D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json"
+            },
+            {
+              "type": "text",
+              "text": "\n[executed on device: Comet (9cf41183-4a92-4bca-a51b-528ca8ea98d7)]"
+            }
+          ],
+          "structuredContent": null,
+          "isError": false
+        }
+      }
+    ],
+    "first_followup_read": {
+      "content": [
+        {
+          "type": "text",
+          "text": "McpServerError: Connection failed."
+        }
+      ],
+      "structuredContent": {
+        "error": "McpServerError: Connection failed.",
+        "error_code": "UNAVAILABLE",
+        "error_data": {
+          "type": "mcp_network_error",
+          "code": "network_error",
+          "message": "Connection failed.",
+          "url": "https://mcp.desktopcommander.app/mcp"
+        }
+      },
+      "isError": true
+    },
+    "recovered_read": {
+      "phase": "final_read_only_retry",
+      "files": [
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "source_exists": false,
+          "destination_exists": true,
+          "source_sha256": null,
+          "destination_sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c",
+          "expected_sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json",
+          "source_exists": true,
+          "destination_exists": false,
+          "source_sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3",
+          "destination_sha256": null,
+          "expected_sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "source_exists": true,
+          "destination_exists": false,
+          "source_sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b",
+          "destination_sha256": null,
+          "expected_sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "source_exists": true,
+          "destination_exists": false,
+          "source_sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac",
+          "destination_sha256": null,
+          "expected_sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "source_exists": true,
+          "destination_exists": false,
+          "source_sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9",
+          "destination_sha256": null,
+          "expected_sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9"
+        }
+      ]
+    },
+    "after": {
+      "phase": "after",
+      "verified": true,
+      "files": [
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-perftools-closeout-20261122-e21a1792.json",
+          "source_absent": true,
+          "bytes": 7332,
+          "sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c",
+          "expected_bytes": 7332,
+          "expected_sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-closeout-20261122-e21a1792.json",
+          "source_absent": true,
+          "bytes": 3251,
+          "sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3",
+          "expected_bytes": 3251,
+          "expected_sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792.json",
+          "source_absent": true,
+          "bytes": 5151,
+          "sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b",
+          "expected_bytes": 5151,
+          "expected_sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "source_absent": true,
+          "bytes": 2580,
+          "sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac",
+          "expected_bytes": 2580,
+          "expected_sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "source_absent": true,
+          "bytes": 143089,
+          "sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9",
+          "expected_bytes": 143089,
+          "expected_sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9"
+        }
+      ]
+    },
+    "state": "COMPLETE",
+    "moved_files": 5,
+    "moved_bytes": 161403,
+    "first_move_repeated": false,
+    "transport_failure_interpretation": "The first move returned an unavailable/connection-failed response. A later read proved it had completed with source absent and exact destination hash; it was not repeated. Only the four observed unmoved files received subsequent move requests.",
+    "source_evidence_preserved_in": "a239d318a47d8247aa76e8338859f45f1326e8dc:.plans/2026-11/continuation-closeout-evidence-20261122.tar.xz",
+    "deletion_attempted": false,
+    "trash_emptied": false
+  },
+  "core_windows_workspaces": {
+    "complete": 3,
+    "total_files": 12977,
+    "total_directories_including_roots": 845,
+    "total_bytes": 812386316,
+    "evidence": "continuation-closeout-20261122.json"
+  },
+  "external_exact_head_review": "PENDING",
+  "local_published_working_copies": [
+    {
+      "source": "/workspace/scratch/e21a17927f63/perftools",
+      "destination": "/workspace/scratch/e21a17927f63/trash/perftools-published-work-20261122-e21a1792",
+      "source_absent": true,
+      "same_directory_device_inode": true,
+      "deletion_attempted": false,
+      "basis": "Published qualification artifacts and exact closeout archive were read back before this atomic same-filesystem rename; all agents completed"
+    },
+    {
+      "source": "/workspace/scratch/e21a17927f63/relay",
+      "destination": "/workspace/scratch/e21a17927f63/trash/relay-published-work-20261122-e21a1792",
+      "source_absent": true,
+      "same_directory_device_inode": true,
+      "deletion_attempted": false,
+      "basis": "Published qualification artifacts and exact closeout archive were read back before this atomic same-filesystem rename; all agents completed"
+    },
+    {
+      "source": "/workspace/scratch/e21a17927f63/scheduler",
+      "destination": "/workspace/scratch/e21a17927f63/trash/scheduler-published-work-20261122-e21a1792",
+      "source_absent": true,
+      "same_directory_device_inode": true,
+      "deletion_attempted": false,
+      "basis": "Published qualification artifacts and exact closeout archive were read back before this atomic same-filesystem rename; all agents completed"
+    }
+  ],
+  "new_go_tests_run_after_recorded_qualification": false,
+  "production_code_changed_after_qualification": false
+}
