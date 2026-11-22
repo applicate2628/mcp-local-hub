@@ -182,7 +182,7 @@ func TestRelay_SessionHeaderEchoedOnSubsequentPOSTs(t *testing.T) {
 		observed = append(observed, sid)
 		if fake.postCount.Load() == 1 {
 			return 200, "application/json",
-				[]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)
+				[]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25"}}`)
 		}
 		return 202, "", nil
 	}
@@ -276,7 +276,7 @@ func TestRelay_GracefulShutdownSendsDELETE(t *testing.T) {
 	fake.onPOST = func(body []byte, sid string) (int, string, []byte) {
 		if fake.postCount.Load() == 1 {
 			return 200, "application/json",
-				[]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)
+				[]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25"}}`)
 		}
 		return 202, "", nil
 	}

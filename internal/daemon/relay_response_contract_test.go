@@ -363,14 +363,14 @@ func TestRelayResponseGETCleanEOFStillResumes(t *testing.T) {
 func TestRelayResponseParserPreservesObservedCauses(t *testing.T) {
 	readCause, outputCause := errors.New("scanner read failed"), errors.New("receiver failed")
 	reader := &relayResponseReadFailure{data: []byte("data: {}\n\n"), cause: readCause}
-	_, err := readRelaySSE(context.Background(), reader, "", 8, func([]byte) (bool, error) { return false, outputCause })
+	_, err := readRelaySSE(context.Background(), reader, "", 8, func([]byte) (bool, error) { return false, outputCause }, nil)
 	if !errors.Is(err, readCause) || !errors.Is(err, outputCause) {
 		t.Fatalf("scanner and receiver errors must remain visible: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reader = &relayResponseReadFailure{data: []byte("data: {}\n\n"), cause: readCause, cancel: cancel}
-	_, err = readRelaySSE(ctx, reader, "", 8, func([]byte) (bool, error) { t.Error("canceled receiver called"); return false, nil })
+	_, err = readRelaySSE(ctx, reader, "", 8, func([]byte) (bool, error) { t.Error("canceled receiver called"); return false, nil }, nil)
 	if !errors.Is(err, readCause) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("scanner and cancellation errors must remain visible: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestRelayResponseParserFiniteReceiverContract(t *testing.T) {
 				calls++
 				delivered = string(payload)
 				return true, nil
-			})
+			}, nil)
 			if tc.want == "" {
 				if !errors.Is(err, errStdinLineTooLong) || calls != 0 {
 					t.Fatalf("finite overflow: error=%v calls=%d", err, calls)
@@ -556,7 +556,7 @@ func TestRelayResponseSSEUnterminatedEventDoesNotDispatch(t *testing.T) {
 	id, err := readRelaySSE(context.Background(), strings.NewReader("id: committed\n\nid: pending\n"), "old", 8, func([]byte) (bool, error) {
 		t.Error("id-only blocks must not deliver a data payload")
 		return false, nil
-	})
+	}, nil)
 	if err != nil || id != "committed" {
 		t.Fatalf("uncommitted id escaped EOF: id=%q error=%v", id, err)
 	}
@@ -594,7 +594,7 @@ func TestRelayResponseSSESelectsMCPMessages(t *testing.T) {
 			id, err := readRelaySSE(context.Background(), strings.NewReader(tc.prefix+"data: "+message+"\n\n"+tc.suffix), "before", 128, func(payload []byte) (bool, error) {
 				calls++
 				return tc.stop, r.writeLine(payload)
-			})
+			}, nil)
 			if err != nil || calls != 1 || id != tc.wantID || out.String() != message+"\n" {
 				t.Fatalf("SSE message selection: error=%v calls=%d id=%q output=%q", err, calls, id, out.String())
 			}
@@ -628,7 +628,7 @@ func TestRelayResponseSSEControlCursorBoundaries(t *testing.T) {
 			id, err := readRelaySSE(context.Background(), strings.NewReader(tc.input), "before", 128, func([]byte) (bool, error) {
 				calls++
 				return false, nil
-			})
+			}, nil)
 			if errors.Is(err, io.ErrUnexpectedEOF) != tc.wantEOF || (!tc.wantEOF && err != nil) || calls != 0 || id != tc.wantID {
 				t.Fatalf("SSE control cursor: error=%v calls=%d id=%q; want EOF=%t id=%q", err, calls, id, tc.wantEOF, tc.wantID)
 			}
@@ -663,7 +663,7 @@ func TestRelayResponseSSEControlSelectionPreservesFailures(t *testing.T) {
 			id, err := readRelaySSE(context.Background(), reader, "before", 128, func(payload []byte) (bool, error) {
 				calls++
 				return false, r.writeLine(payload)
-			})
+			}, nil)
 			var syntax *json.SyntaxError
 			if err == nil || !errors.Is(err, readCause) || calls != 1 || id != "committed" || out.Len() != 0 {
 				t.Fatalf("SSE selected-message failure/cursor: error=%v calls=%d id=%q output=%q", err, calls, id, out.String())
@@ -695,7 +695,7 @@ func TestRelayResponseSSEControlEventsRemainBounded(t *testing.T) {
 			id, err := readRelaySSE(context.Background(), strings.NewReader("event: control\nid: control-1\n"+tc.payload), "before", 8, func([]byte) (bool, error) {
 				calls++
 				return false, nil
-			})
+			}, nil)
 			wantID := "control-1"
 			if tc.overflow {
 				wantID = "before"

@@ -1,0 +1,834 @@
+{
+  "schema": "relay-runtime-independent-review-v1",
+  "status": "SAVED_RUNTIME_EVIDENCE_REVIEWED_NO_MANDATORY_FINDINGS",
+  "reviewer": "/root/scheduler_residual",
+  "reviewed_utc": "2026-11-22T11:04:17.926100+00:00",
+  "review_kind": "Internal independent review of saved local evidence and pinned inputs, not external review of an exact published commit.",
+  "execution_by_reviewer": {
+    "remote_commands": false,
+    "Go_or_gofmt": false,
+    "test_or_runner": false,
+    "source_or_raw_mutation": false,
+    "local_read_only_Git": "ls-tree, cat-file and exact-object identity reads only",
+    "only_output": "qualification/relay-runtime-independent-review.json"
+  },
+  "mandatory_findings": [],
+  "qualification_scope": {
+    "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+    "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "go_version": "go version go1.27.4 windows/amd64",
+    "overlay_paths_per_composition": 20,
+    "local_input_files_hashed": 40,
+    "windows_target": "GOOS=windows GOARCH=amd64 CGO_ENABLED=1",
+    "candidate": {
+      "pass_including_package": 255,
+      "test_pass": 250,
+      "root_pass": 64,
+      "subtest_pass": 186,
+      "package_pass": 5
+    },
+    "control": {
+      "pass": 13,
+      "fail_including_package": 61,
+      "test_fail": 57,
+      "package_fail": 4,
+      "skip": 0
+    },
+    "consumer": {
+      "root": "TestRelayConsumerGETSSEResume",
+      "exact_root_and_package_pass": true,
+      "observed_marker": "real SDK GET-SSE consumer: sent=32 delivered=32 GETs=2",
+      "scope": "Declared real SDK GET-origin resumption consumer; no POST-origin or general transport performance claim."
+    },
+    "build_and_vet": "Exact candidate overlay with go build/vet -p=2 ./...: exit 0 and empty stdout/stderr. This is not a full test regression.",
+    "source_admission": {
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "matched_files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+      "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+    }
+  },
+  "artifact_sha256_relative_to_qualification": {
+    "relay_runner.py": "719122c74e1347c1aa952067717c0f00222051eac7ca7e0650c158effd1a9047",
+    "reader_runner.py": "1008740b5420f9a85b1ae2aa9e62ab1691d12f228eec0cbcaaba7d1e32fa7560",
+    "relay-runner-scope.json": "436c594e1c5e2da5cac8178826e45617d07a118062678abecb793e418feca099",
+    "relay_runner.delta.patch": "1c6bd7cb04413f3742b235bd191c4dc58960a25d5ff809f0d048e23807331130",
+    "../reader/relay-runner-independent-review.json": "09b24bec71dd12377b3dde6dcbed845fc891dd51502c92e940ed8ee596d46664",
+    "../relay/control-oracles.json": "5e177f7a2409b22222d5977400d379bd8d4617273446e4db24a962ceccee64e0",
+    "relay-qualification/candidate/manifest.json": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+    "relay-qualification/control/manifest.json": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23"
+  },
+  "tool_pins_observed_before_and_after_every_phase": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\Program Files\\Git\\cmd\\git.exe": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "integrity_totals": {
+    "phases": 12,
+    "raw_files": 2400,
+    "raw_bytes": 11347749,
+    "selected_command_rows": 24,
+    "Git_observation_rows": 444,
+    "direct_child_rows": 468,
+    "stdout_stderr_logs_hashed": 936,
+    "full_tree_admissions": 24,
+    "local_input_files_hashed": 40
+  },
+  "raw_inventory_encoding": "For each phase: sorted immediate regular files, JSON compact ASCII rows [filename, byte_length, sha256], UTF-8 with no trailing newline.",
+  "checks": [
+    "All 12 final receipts are complete, without error, identity drift, unresolved-process, capture or termination fallback fields; initial, started, launched, command, oracle and final records agree.",
+    "All 468 retained direct-child rows settled without timeout. Recorded monotonic durations are within the fixed direct-child deadlines; UTC start/launch/finish/capture ordering is consistent. This is not a descendant-tree guarantee.",
+    "Every one of 936 stdout/stderr logs matches its recorded length and SHA-256. Each phase contains exactly the expected 200 files, with no extra command or oracle records.",
+    "Both exact 20-file candidate/control compositions match source SHA-256/Git blob identities, local candidate bytes and reviewed manifest paths, commands, deadlines and oracles. Runner, parent, manifests and four installed tool pins agree before/after.",
+    "All concrete argv arrays equal fixed runner commands after placeholder resolution. No Go run or arbitrary executor/selection is present. Every gofmt -l gate returned exit 0 with empty output; version is exactly the pinned Go version.",
+    "All 444 Git observation argv arrays equal the prescribed read-only snapshot/list-tree sequence. HEAD, tree, parents, clean index/status and source snapshots agree. All 24 retained ls-tree streams exactly match the independently read exact local Git tree.",
+    "The 3281-file, 50583217-byte inventory was independently reconstructed from exact local Git tree and blob lengths; its digest equals all 24 reported full materialized-source admissions. Every per-command and phase-final source snapshot is unchanged.",
+    "Raw test JSON was independently parsed. Each selected test/subtest has exactly one run and one terminal event. Candidate has exactly 64 distinct selected roots passing once, 186 passing subtests and five package PASS events, with no FAIL/SKIP.",
+    "The four controls match exact frozen terminal-event multisets and every required header/session/retry diagnostic. Aggregate: 13 PASS test/subtest events, 57 FAIL test/subtest events and four package FAIL events. Exit 1 is accompanied by the selected assertions; no build-failure, panic, timeout or reported data-race marker was found.",
+    "The real SDK consumer has exactly its root and package PASS events and the required sent=32 delivered=32 GETs=2 marker in retained output.",
+    "Build and vet both have exit 0 and empty retained stdout/stderr with exact candidate overlays. Recorded toolchain/network-disabled Go settings, owned D profile/temp paths and scheduler-none mode agree with reviewed scope; this is not syscall enforcement."
+  ],
+  "phases": [
+    {
+      "phase": "relay-build",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "1d0e9ba7fddb8e68e27e25447500cc98c93dedde0d2c401afcd424d78ddccfed",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 913663,
+      "raw_inventory_sha256": "ee6df51651e750e216f030326fceed57a6502e0c3081e6bc992e4813f426bd17",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:59:18.918392+00:00",
+      "finished_utc": "2026-11-22T10:59:44.410420+00:00",
+      "commands": [
+        {
+          "label": "relay-build-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02315459994133562,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-build",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 17.428269899915904,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "relay-format",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "d81af4d2c6e686cc46422d17f8e70ca76004fd1eb3b510598322bb3ff2a0260c",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 913294,
+      "raw_inventory_sha256": "f3485338ee7a16209450b2b102bea62cba53d01be71a4b2def8aaefd11808552",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:52:03.606870+00:00",
+      "finished_utc": "2026-11-22T10:52:11.419060+00:00",
+      "commands": [
+        {
+          "label": "relay-version",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.025961400009691715,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.0245311000617221,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-consumer",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "b263d08c0faa41afeb1a6e4371216df5fda11fdaad7dcf7d23596249d303e8bb",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 917246,
+      "raw_inventory_sha256": "c2d57739b5f35971e4528d9d3243a29673f586845cc9c80adf105455659b05f5",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:58:49.095087+00:00",
+      "finished_utc": "2026-11-22T10:59:01.949965+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-consumer-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02265189995523542,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-consumer",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 4.498494499945082,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 1610,
+            "sha256": "e9777f1a382a8243ed60df4b1092992c3ba32eaf805e18836b087187db10e1b5"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 2,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 1,
+          "root_test_count": 1,
+          "subtest_count": 0,
+          "terminal_multiset_sha256": "49a6cb9ad933b44b83aa97f0319e4ec8585d396bae0d81c5361219d0ba539806",
+          "required_output_markers": [
+            "real SDK GET-SSE consumer: sent=32 delivered=32 GETs=2"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-contract",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "3b009d02ea9b97746cd34ea69190f4dca4289c6988c305aef6acf693c3a1e7e4",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 996528,
+      "raw_inventory_sha256": "db1568cf1e599d3ff144fa9ff6fca422028818d2709ae7bf855fd0cf62972a72",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:55:43.218759+00:00",
+      "finished_utc": "2026-11-22T10:56:00.882273+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-contract-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02356330002658069,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-contract",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 9.215712899924256,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 69324,
+            "sha256": "0fbb155b3d500cd9c5844946977aed81db91106cc1fd1ae5620e38b10da91d1e"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 80,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 79,
+          "root_test_count": 11,
+          "subtest_count": 68,
+          "terminal_multiset_sha256": "31f5d6910eaf6b268814476ee4b1d4aea1aa7893fc70851da08d3c1372f705a6",
+          "required_output_markers": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-gating",
+      "composition": "control",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "275da413f7686a1b533fff608b37703c8e3f956c9f83d17afbf516b20d4fd3cb",
+      "manifest_sha256": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+      "overlay_sha256": "04bd9b8321f8a5be5b227b558000c2c3b58bcb3e84c2ca11e8a6fd0e9352db94",
+      "raw_files": 200,
+      "raw_bytes": 926604,
+      "raw_inventory_sha256": "4ea9ae6de43f8c6e96c510c6fc6b29021c8fdf9be8d9da1a11461a9085bc5f78",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:53:18.403455+00:00",
+      "finished_utc": "2026-11-22T10:53:30.009526+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-control-gating-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.0313359999563545,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-control-gating",
+          "exit_code": 1,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 3.582472199923359,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 8729,
+            "sha256": "9a4f02eef3053f488284c5d20e84588d1ee16be9028e0f0fab2163af44f64cc8"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 1,
+            "fail": 7,
+            "skip": 0
+          },
+          "test_terminal_count": 7,
+          "root_test_count": 2,
+          "subtest_count": 5,
+          "terminal_multiset_sha256": "6c4ef1537fae28681104e870d740f0bd46af4b9a9c553636707f3ff2dc151c03",
+          "required_output_markers": [
+            "GET before body=1 before complete stdout=1 total=1 version=\"\" error=<nil>",
+            "failed initialize: session=\"session\" error=relay stdout: initialize newline rejected DELETE=0 cleanup version=\"\""
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-overflow",
+      "composition": "control",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "15ebd8f26e679ecb49cebcbb8aee703fa57a1bafe8f5a4dade32d36fe2b2dacc",
+      "manifest_sha256": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+      "overlay_sha256": "04bd9b8321f8a5be5b227b558000c2c3b58bcb3e84c2ca11e8a6fd0e9352db94",
+      "raw_files": 200,
+      "raw_bytes": 922012,
+      "raw_inventory_sha256": "97805c988640655dfae63086cbf8e2c43aef96fab6f751b6ae5b60fc2de8a354",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:54:54.746181+00:00",
+      "finished_utc": "2026-11-22T10:55:05.944480+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-control-overflow-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02390569995623082,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-control-overflow",
+          "exit_code": 1,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 3.3076068999944255,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 4744,
+            "sha256": "8dc498bc93b80f94c4bbbc2e4d5f96cd5046537028c881725f2c431db6eebe53"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 0,
+            "fail": 5,
+            "skip": 0
+          },
+          "test_terminal_count": 4,
+          "root_test_count": 1,
+          "subtest_count": 3,
+          "terminal_multiset_sha256": "4c991090227296cb116abeafb437a1e2bad1a0356f9e7f5993d84c429473a0b0",
+          "required_output_markers": [
+            "overflow must settle before reconnect: error=<nil> attempts=2 elapsed=1s"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-retry",
+      "composition": "control",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "2795537c0fb166e318d19f61e7835509c6cadb79a2d39b35e5e144e757f24ba3",
+      "manifest_sha256": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+      "overlay_sha256": "04bd9b8321f8a5be5b227b558000c2c3b58bcb3e84c2ca11e8a6fd0e9352db94",
+      "raw_files": 200,
+      "raw_bytes": 940478,
+      "raw_inventory_sha256": "fde50a3eb400a4a69c66929fff9bb819325f7b63262a259781edf53548bb6c37",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:54:06.287086+00:00",
+      "finished_utc": "2026-11-22T10:54:17.578556+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-control-retry-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.023778699920512736,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-control-retry",
+          "exit_code": 1,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 3.4215942999580875,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 21835,
+            "sha256": "1db01cbd0910abeefefcdc5e230865aede31173758d7b83f398c77b3811666dd"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 12,
+            "fail": 11,
+            "skip": 0
+          },
+          "test_terminal_count": 22,
+          "root_test_count": 2,
+          "subtest_count": 20,
+          "terminal_multiset_sha256": "eeba82a655b952d15c45c97a2e972e74baeac40303547f0b2515babedd48cfc1",
+          "required_output_markers": [
+            "cursor=\"committed\"; want delay=37ms and committed cursor",
+            "retry 1 waited 1s"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-control-version",
+      "composition": "control",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "8312a12cb1356608f7a8b6351b0d6fb6e2823a38c920bbd40ea227ed02776e82",
+      "manifest_sha256": "71be55158cc7f8fda7c42fc7bbc59d9efc63b7495bfc92adf9819259c9ba0c23",
+      "overlay_sha256": "04bd9b8321f8a5be5b227b558000c2c3b58bcb3e84c2ca11e8a6fd0e9352db94",
+      "raw_files": 200,
+      "raw_bytes": 969945,
+      "raw_inventory_sha256": "a6ea115b17a464ee7e36e1b260360c71dd6028c934f0b0df17af1812076e419d",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:52:37.924790+00:00",
+      "finished_utc": "2026-11-22T10:53:07.768942+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-control-version-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.023504600045271218,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-control-version",
+          "exit_code": 1,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 21.707340799970552,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 47759,
+            "sha256": "5604afc90b19a8a8fd7cd6a49050fb0d4a6fa129b467f086cf6ead5dfcc6709e"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 0,
+            "fail": 38,
+            "skip": 0
+          },
+          "test_terminal_count": 37,
+          "root_test_count": 3,
+          "subtest_count": 34,
+          "terminal_multiset_sha256": "d11feb87e9e9c8113b6cf08198d3aaf1974770c6cdc8afbe39c1429d0df331e7",
+          "required_output_markers": [
+            "request 1 POST: version=\"\" session=\"session\"; want \"2025-06-18\" \"session\"",
+            "methods=[POST POST DELETE]; want 2 requests",
+            "version=\"\" session-present=true; want \"2025-11-25\" true",
+            "unrelated/invalid result established session: version=\"\" session=\"session\""
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-owner-regression",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "6d89dc31375305bbe018aee207e83c4a1bece52f9617282de9d6ece8883372ec",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 981808,
+      "raw_inventory_sha256": "8d31ca0b83882bbaa241aa4f3bd9c49208ab11bd88ca205c545b03b71d17332b",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:57:36.613026+00:00",
+      "finished_utc": "2026-11-22T10:57:48.914867+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-owner-regression-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.022058599977754056,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-owner-regression",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 4.57427350000944,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 53482,
+            "sha256": "4374c80cc631d159520d7d30f3fd5062dad5e45a79a577ef860049cc71830cc2"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 63,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 62,
+          "root_test_count": 23,
+          "subtest_count": 39,
+          "terminal_multiset_sha256": "868c7d1b097d01f7b433a48b7fcf0abe89ddce1cf76a78170d65bde9d443d1b2",
+          "required_output_markers": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-response-regression",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "50c71411314af0e4c1aba89957bdacdd5178a86ac8acebeb9da93c711487c88a",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 1028500,
+      "raw_inventory_sha256": "ccd447fc2ad28089609f267288c7755dd00e1c6e393a98258569f6f9704d8718",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:56:35.777145+00:00",
+      "finished_utc": "2026-11-22T10:56:49.263645+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-response-regression-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.021961999940685928,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-response-regression",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 5.36982599995099,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 92517,
+            "sha256": "8998ab57fb717b36b803e9b0e41af4eec0759c2ab9ed1ebcb86e806cbb866289"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 103,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 102,
+          "root_test_count": 25,
+          "subtest_count": 77,
+          "terminal_multiset_sha256": "ca0b0863b23ae6f4442379c5d7dceed659e54bf525524ea19f90c4f65b9b8920",
+          "required_output_markers": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-v3-session-regression",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "fd4439afaf2590098c897215c20edfd7a2aa65d00d733777b032c99e7df78a43",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 924389,
+      "raw_inventory_sha256": "e4a5f30e94d6df16fbae47cbbd2c43e59eaec2b06c5a0f6a261f65cf9f54e9c2",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:58:06.569410+00:00",
+      "finished_utc": "2026-11-22T10:58:20.106929+00:00",
+      "commands": [
+        {
+          "label": "relay-v3-session-regression-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.023942400002852082,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-v3-session-regression",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 5.484067999990657,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 5702,
+            "sha256": "440b0b0623e1a2b4cd8a0b919cfad1b11dcdae12c5106693ae9488b893fda5d4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 7,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 6,
+          "root_test_count": 4,
+          "subtest_count": 2,
+          "terminal_multiset_sha256": "ff98cb96c11d50df8187df6b984baf7246107275ee17c9d7baed519c62312455",
+          "required_output_markers": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-vet",
+      "composition": "candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "719b82803a175d1783af48d6d2c56e8980c39b840b78ec6a65a86e1453c60f6e",
+      "manifest_sha256": "6e50eeded81d4306acfdb3ff3f57a290eca23a52ed449ecf4942caaf27d3d6d4",
+      "overlay_sha256": "b5e231d6026395b421d898e6d0a67325afd90b7c9525dde17da08035b34cf1f8",
+      "raw_files": 200,
+      "raw_bytes": 913282,
+      "raw_inventory_sha256": "252539722b40fa4e15ecb735612e3f04695cd98f68b92fe0c57e5e4954b4eae5",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T11:00:27.100206+00:00",
+      "finished_utc": "2026-11-22T11:00:56.370142+00:00",
+      "commands": [
+        {
+          "label": "relay-vet-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.0712077000644058,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "relay-vet",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 20.942840500036255,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "No Go, gofmt, test runner or remote command was executed by this reviewer; saved logs, receipts, local candidate files and exact local Git objects were read only.",
+    "An initial forwarded candidate aggregate of 248 test events was superseded by independent raw counting: 250 test/subtest PASS plus five package PASS. Session contributes four roots and two subtests.",
+    "Test implementation/transport provenance has its own source review; this runtime review binds that frozen runner/input composition to observed saved events, not to arbitrary future edits.",
+    "Native CLI stdin tests were not selected. Builds compile relevant code; this does not establish native end-to-end CLI operation.",
+    "Real-consumer evidence is the declared SDK GET-origin resumption case. POST-origin resumption and other consumers remain outside this run.",
+    "No peak/retained-memory, bounded-load performance, Linux/POSIX runtime, native Scheduler or installed-product qualification is claimed.",
+    "All direct children settled, but no whole-process-tree deadline or independent descendant-settlement proof is claimed.",
+    "Full default/tagged suites and external review of an exact published head remain outside these results."
+  ]
+}

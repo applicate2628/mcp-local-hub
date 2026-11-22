@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,10 +49,12 @@ type HTTPToStdioRelay struct {
 	// Run never stores its defaults here, including across repeated Runs.
 	HTTPClient *http.Client
 
-	// sessionID is minted by the server on the first POST response
-	// (InitializeResult) and echoed on every subsequent request.
+	// A matching InitializeResult publishes its session and negotiated version
+	// together, after stdout accepts the complete response. A GET must not race
+	// ahead with the session header alone while initialize is still in flight.
 	sessionMu       sync.Mutex
 	sessionID       string // "" until minted
+	protocolVersion string // "" until a matching InitializeResult is forwarded
 	qualificationMu sync.Mutex
 	qualification   *mcpHTTPQualificationOwner
 
@@ -79,8 +82,9 @@ type jsonrpcMeta struct {
 }
 
 const (
-	mcpSessionIDHeader = "MCP-Session-Id"
-	lastEventIDHeader  = "Last-Event-ID"
+	mcpSessionIDHeader       = "MCP-Session-Id"
+	lastEventIDHeader        = "Last-Event-ID"
+	mcpProtocolVersionHeader = "MCP-Protocol-Version"
 
 	// Default POST timeout is 60 s total, including its response body.
 	// The default server-initiated SSE client has no Client.Timeout;
@@ -356,6 +360,9 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	if sid := r.getSessionID(); sid != "" {
 		req.Header.Set(mcpSessionIDHeader, sid)
 	}
+	if version := r.getProtocolVersion(); version != "" {
+		req.Header.Set(mcpProtocolVersionHeader, version)
+	}
 
 	// A 307/308 can otherwise resend this POST after the first endpoint has
 	// already performed its effect. Keep the supplied client unmodified.
@@ -377,11 +384,45 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		r.sendSyntheticError(meta, metaErr, err)
 		return
 	}
-	defer resp.Body.Close()
-
-	// Capture session ID minted by the server on first initialize.
-	if sid := resp.Header.Get(mcpSessionIDHeader); sid != "" {
-		r.setSessionID(sid)
+	initializing := metaErr == nil && meta.Method == "initialize"
+	// Only an InitializeResult may establish a session. A response header on
+	// another method must not start GET before negotiation has completed.
+	sid := resp.Header.Get(mcpSessionIDHeader)
+	pendingSession := initializing && sid != ""
+	cleanupVersion := ""
+	defer func() {
+		resp.Body.Close()
+		if pendingSession {
+			// The server may already have created a session even though stdout
+			// failed or no matching result arrived. This worker retains its
+			// cleanup identity without exposing an unaccepted session to GET.
+			r.deleteSession(sid, cleanupVersion)
+		}
+	}()
+	forward := func(payload []byte) (bool, error) {
+		version := ""
+		if initializing {
+			version = relayInitializeVersion(meta.ID, payload)
+			if version != "" {
+				cleanupVersion = version
+			}
+		}
+		if err := r.writeLine(payload); err != nil {
+			return false, err
+		}
+		if version != "" {
+			r.sessionMu.Lock()
+			if r.protocolVersion == "" {
+				r.protocolVersion = version
+				if r.sessionID == "" {
+					r.sessionID = sid
+				}
+			}
+			pendingSession = sid != "" && r.sessionID != sid
+			r.sessionMu.Unlock()
+			initializing = false
+		}
+		return false, nil
 	}
 
 	switch resp.StatusCode {
@@ -390,7 +431,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	case http.StatusOK:
 		contentType := resp.Header.Get("Content-Type")
 		if strings.HasPrefix(contentType, "text/event-stream") {
-			if err := r.pipeSSE(ctx, resp.Body); err != nil {
+			if _, err := readRelaySSE(ctx, resp.Body, "", int(maxRelayResponseBytes), forward, nil); err != nil {
 				r.recordPOSTFailure(ctx, fmt.Errorf("POST SSE pipe: %w", err))
 				r.logErr("POST SSE pipe: %v", err)
 			}
@@ -404,7 +445,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 			r.sendSyntheticError(meta, metaErr, err)
 			return
 		}
-		r.writeLine(msg)
+		_, _ = forward(msg) // writeLine retains any stdout failure for Run
 	case http.StatusNotFound:
 		// Session dropped by server; relay could re-initialize automatically,
 		// but for v1 we surface the error to the client. Antigravity will
@@ -425,7 +466,9 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 }
 
 // sseListener opens a long-lived GET /mcp SSE stream and forwards each
-// event's JSON payload to stdout. Reconnects after a 1 s pause on clean EOF.
+// event's JSON payload to stdout. A valid server retry field updates the delay
+// for this GET stream, including subsequent clean EOF and transport retries.
+// The initial delay remains 1 s. POST streams are never replayed here.
 // Parser/output failures terminate the stream; they are not a resume point.
 func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 	client := r.HTTPClient
@@ -433,6 +476,7 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 		client = &http.Client{} // the owned stream lives until Run cancellation
 	}
 	var lastEventID string
+	retryDelay := time.Second
 	attempts := 0
 
 	for {
@@ -457,6 +501,9 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 		}
 		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set(mcpSessionIDHeader, r.getSessionID())
+		if version := r.getProtocolVersion(); version != "" {
+			req.Header.Set(mcpProtocolVersionHeader, version)
+		}
 		if lastEventID != "" {
 			req.Header.Set(lastEventIDHeader, lastEventID)
 		}
@@ -473,7 +520,7 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 			if attempts >= 3 {
 				return err
 			}
-			if !sleepOrDone(ctx, time.Second) {
+			if !sleepOrDone(ctx, retryDelay) {
 				return nil
 			}
 			continue
@@ -487,13 +534,13 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
 			r.logErr("GET SSE non-2xx: status=%d", resp.StatusCode)
-			if !sleepOrDone(ctx, time.Second) {
+			if !sleepOrDone(ctx, retryDelay) {
 				return nil
 			}
 			continue
 		}
 
-		lastEventID, err = r.readSSEStream(ctx, resp.Body, lastEventID)
+		lastEventID, err = r.readSSEStream(ctx, resp.Body, lastEventID, &retryDelay)
 		resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("GET SSE stream: %w", err)
@@ -503,7 +550,7 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 		}
 
 		// Stream ended cleanly (server closed). Reconnect after brief pause.
-		if !sleepOrDone(ctx, time.Second) {
+		if !sleepOrDone(ctx, retryDelay) {
 			return nil
 		}
 		attempts = 0 // reset on clean close
@@ -514,15 +561,18 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 // forwarding nonempty default/message event JSON payloads to stdout. Returns the
 // last observed event ID and any parser/output failure. Only clean EOF may
 // resume; an ID observed in a failed event is never used for reconnect.
-func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string) (string, error) {
+func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string, retryDelay *time.Duration) (string, error) {
 	return readRelaySSE(ctx, body, startID, int(maxRelayResponseBytes), func(payload []byte) (bool, error) {
 		return false, r.writeLine(payload)
-	})
+	}, retryDelay)
 }
 
 // The legacy relay and finite observed exchange share the same SSE framing.
 // A matched response can stop an observed POST without claiming body EOF.
-func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventBytes int, receive func([]byte) (bool, error)) (string, error) {
+// retryDelay is owned by the GET listener, or nil for callers that cannot
+// reconnect. Unlike an event cursor, retry takes effect when its field is read;
+// it does not depend on a blank line or successful message delivery.
+func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventBytes int, receive func([]byte) (bool, error), retryDelay *time.Duration) (string, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxStdinLineBytes)
 
@@ -588,9 +638,19 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 			if !strings.ContainsRune(val, '\x00') {
 				pendingID = val
 			}
+		case "retry":
+			if retryDelay != nil && val != "" && strings.IndexFunc(val, func(r rune) bool { return r < '0' || r > '9' }) == -1 {
+				const maxMillis = uint64((1<<63 - 1) / time.Millisecond)
+				millis, err := strconv.ParseUint(val, 10, 64)
+				if err != nil || millis > maxMillis {
+					// Do not wrap or ignore a valid but unrepresentable delay:
+					// either could reconnect before the server permits it.
+					return lastID, errors.Join(errors.New("SSE retry exceeds supported duration"), scanner.Err())
+				}
+				*retryDelay = time.Duration(millis) * time.Millisecond
+			}
 		default:
-			// retry remains unsupported. Comments and unknown field names
-			// do not contribute to the message payload.
+			// Comments and unknown fields do not contribute to the payload.
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -602,12 +662,11 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 	return lastID, nil
 }
 
-// pipeSSE handles the rare case where POST /mcp returns an SSE stream
-// (long-running request). The payload framing is identical to the GET
-// case, but a separate code path keeps the POST handler focused on
-// request-scoped responses.
+// pipeSSE forwards request-scoped SSE without retaining reconnect state.
+// Initialize responses use a response-aware receiver in handlePOST; both
+// receivers keep the same bounded framing and stdout failure contract.
 func (r *HTTPToStdioRelay) pipeSSE(ctx context.Context, body io.Reader) error {
-	_, err := r.readSSEStream(ctx, body, "")
+	_, err := r.readSSEStream(ctx, body, "", nil)
 	return err
 }
 
@@ -615,7 +674,14 @@ func (r *HTTPToStdioRelay) pipeSSE(ctx context.Context, body io.Reader) error {
 // header. Failures are logged and ignored — relay is shutting down
 // regardless.
 func (r *HTTPToStdioRelay) terminateSession() {
+	version := r.getProtocolVersion()
 	sid := r.takeSessionID()
+	r.deleteSession(sid, version)
+}
+
+// deleteSession is also used by a POST worker whose initialization response
+// could not be published. Both cleanup paths have the same independent bound.
+func (r *HTTPToStdioRelay) deleteSession(sid, version string) {
 	if sid == "" {
 		return
 	}
@@ -626,6 +692,9 @@ func (r *HTTPToStdioRelay) terminateSession() {
 		return
 	}
 	req.Header.Set(mcpSessionIDHeader, sid)
+	if version != "" {
+		req.Header.Set(mcpProtocolVersionHeader, version)
+	}
 	client := r.HTTPClient
 	if client == nil {
 		client = &http.Client{} // the cleanup context already supplies its 2 s bound
@@ -721,6 +790,12 @@ func (r *HTTPToStdioRelay) getSessionID() string {
 	return r.sessionID
 }
 
+func (r *HTTPToStdioRelay) getProtocolVersion() string {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	return r.protocolVersion
+}
+
 func (r *HTTPToStdioRelay) setSessionID(sid string) {
 	// Only store the first session id; rotation would happen via
 	// explicit re-initialize which is out of v1 scope.
@@ -736,7 +811,117 @@ func (r *HTTPToStdioRelay) takeSessionID() string {
 	defer r.sessionMu.Unlock()
 	sid := r.sessionID
 	r.sessionID = ""
+	r.protocolVersion = ""
 	return sid
+}
+
+// The relay observes negotiation; endpoint peers still choose compatibility.
+// Never infer a version from a request, error, notification, or unrelated ID.
+// Date syntax keeps HTTP metadata valid without imposing a version allowlist.
+func relayInitializeVersion(requestID json.RawMessage, payload []byte) string {
+	var reply struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Result  *struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(payload, &reply) != nil || reply.JSONRPC != "2.0" || reply.Method != "" ||
+		reply.Result == nil || len(reply.Error) != 0 || !relayJSONRPCIDsEqual(requestID, reply.ID) {
+		return ""
+	}
+	version := reply.Result.ProtocolVersion
+	if _, err := time.Parse(time.DateOnly, version); err != nil {
+		return ""
+	}
+	return version
+}
+
+// Compare parsed JSON IDs by value without rounding numbers through float64.
+// MCP numeric IDs are integers. Normalize their coefficients and decimal
+// exponents separately; neither a power of ten nor a giant integer exponent
+// is materialized. Each digit is visited only a bounded number of times.
+func relayJSONRPCIDsEqual(a, b json.RawMessage) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	if a[0] == '"' || b[0] == '"' {
+		var left, right string
+		return a[0] == '"' && b[0] == '"' && json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && left == right
+	}
+	if (a[0] != '-' && (a[0] < '0' || a[0] > '9')) || (b[0] != '-' && (b[0] < '0' || b[0] > '9')) {
+		return false
+	}
+	// The adjustment only removes a decimal point or trailing coefficient
+	// zeros, so its magnitude is bounded by the admitted message byte limit.
+	// For an exponent longer than 18 significant digits that adjustment cannot
+	// change its sign. Decimal carry/borrow therefore needs just one scan.
+	adjustExponent := func(value string, adjustment int) string {
+		negative := strings.HasPrefix(value, "-")
+		value = strings.TrimPrefix(strings.TrimPrefix(value, "-"), "+")
+		value = strings.TrimLeft(value, "0")
+		if value == "" {
+			value, negative = "0", false
+		}
+		if len(value) <= 18 {
+			exponent, _ := strconv.ParseInt(value, 10, 64)
+			if negative {
+				exponent = -exponent
+			}
+			return strconv.FormatInt(exponent+int64(adjustment), 10)
+		}
+		if negative {
+			adjustment = -adjustment
+		}
+		digits := []byte(value)
+		for i := len(digits) - 1; i >= 0 && adjustment != 0; i-- {
+			digit := int(digits[i]-'0') + adjustment
+			if digit < 0 {
+				borrow := (9 - digit) / 10
+				digits[i], adjustment = byte(digit+10*borrow)+'0', -borrow
+			} else {
+				digits[i], adjustment = byte(digit%10)+'0', digit/10
+			}
+		}
+		value = string(digits)
+		if adjustment > 0 {
+			value = strconv.Itoa(adjustment) + value
+		}
+		value = strings.TrimLeft(value, "0")
+		if negative {
+			value = "-" + value
+		}
+		return value
+	}
+	coefficient := func(raw []byte) (string, string) {
+		value := string(raw)
+		sign := ""
+		if strings.HasPrefix(value, "-") {
+			sign, value = "-", value[1:]
+		}
+		exponent := "0"
+		if i := strings.IndexAny(value, "eE"); i >= 0 {
+			exponent = value[i+1:]
+			value = value[:i]
+		}
+		adjustment := 0
+		if i := strings.IndexByte(value, '.'); i >= 0 {
+			adjustment = -(len(value) - i - 1)
+			value = value[:i] + value[i+1:]
+		}
+		value = strings.TrimLeft(value, "0")
+		if value == "" {
+			return "0", "0"
+		}
+		normalized := strings.TrimRight(value, "0")
+		adjustment += len(value) - len(normalized)
+		return sign + normalized, adjustExponent(exponent, adjustment)
+	}
+	left, leftExponent := coefficient(a)
+	right, rightExponent := coefficient(b)
+	return !strings.HasPrefix(leftExponent, "-") && left == right && leftExponent == rightExponent
 }
 
 // readJSONRPCLine reads up to the next newline from r and returns the

@@ -377,7 +377,7 @@ func (o *mcpHTTPQualificationOwner) exchange(ctx context.Context, method, id str
 			return nil, errors.New("MCP_QUALIFICATION_REPLY_MISSING")
 		}
 	case "text/event-stream":
-		_, e = readRelaySSE(ctx, limited, "", maxStdinLineBytes, receive)
+		_, e = readRelaySSE(ctx, limited, "", maxStdinLineBytes, receive, nil)
 		if e != nil {
 			return nil, e
 		}
