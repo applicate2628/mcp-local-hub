@@ -1,0 +1,406 @@
+{
+  "schema": "reader-runtime-independent-review-v1",
+  "status": "SAVED_RUNTIME_EVIDENCE_REVIEWED_NO_MANDATORY_FINDINGS",
+  "reviewer": "/root/pr658_audit",
+  "review_kind": "Internal independent review of retained local evidence, not external review of an exact published commit.",
+  "execution_by_reviewer": {
+    "remote_commands": false,
+    "Go_or_gofmt": false,
+    "test_or_runner": false,
+    "source_or_raw_mutation": false,
+    "only_output": "qualification/reader-runtime-independent-review.json"
+  },
+  "mandatory_findings": [],
+  "qualification_scope": {
+    "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+    "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "go_version": "go version go1.27.4 windows/amd64",
+    "overlay_paths_per_composition": 13,
+    "windows_candidate": "Eight selected root tests and 22 subtests in internal/api, with -race -count=1 -timeout=90s; all 30 test terminal events plus the package passed, no failures or skips.",
+    "windows_control": "Four selected root tests and two subtests; all six failed with the exact reviewed assertions and package failed, exit 1; no pass, skip, build failure, timeout, panic or reported data race.",
+    "build_and_vet": "go build and go vet ./... with the exact candidate overlay, Windows amd64 and CGO_ENABLED=1: exit 0, empty stdout/stderr. This is not a full test regression.",
+    "linux": "go test -c ./internal/api with the exact candidate overlay, GOOS=linux GOARCH=amd64 CGO_ENABLED=0: exit 0 and a nonempty output recorded by the saved oracle. No Linux test process was executed.",
+    "source_admission": {
+      "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+      "matched_files": 3281,
+      "bytes": 50583217,
+      "inventory_sha256": "2086845d9b610a74da049e4524af48df4b0d07458f31b3ad82a42739015c8345",
+      "inventory_schema": "ls-tree order; JSON compact ASCII rows [relative_path, git_blob, byte_length]"
+    }
+  },
+  "artifact_sha256_relative_to_qualification": {
+    "reader_runner.py": "1008740b5420f9a85b1ae2aa9e62ab1691d12f228eec0cbcaaba7d1e32fa7560",
+    "reader-runner-scope.json": "f2cf7ecf4bb0cd7b062f3f49b40fccbf001c265381c14fa3efdc60464b014ed7",
+    "reader-runner-independent-review.json": "6326d1eb07da88cff68a1ba764329ff83cb5bfd68371b4c527e8e25196114332",
+    "reader-format-stage-independent-review.json": "6d6a5404885383ad75b051105085c2f348a85703ab6f643258a1eb997fca64bc",
+    "reader-qualification/control/manifest.json": "ea610e8cda77d2ebe2cf4accbfd7298443a679dc4d12cbe49ab28ee40a1363fc",
+    "reader-qualification/candidate/manifest.json": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3"
+  },
+  "tool_pins_observed_before_and_after_every_phase": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\Program Files\\Git\\cmd\\git.exe": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "integrity_totals": {
+    "phases": 6,
+    "raw_files": 1200,
+    "raw_bytes": 5479965,
+    "selected_command_rows": 12,
+    "Git_observation_rows": 222,
+    "direct_child_rows": 234,
+    "stdout_stderr_logs_hashed": 468,
+    "full_tree_admissions": 12,
+    "local_input_files_hashed": 26
+  },
+  "raw_inventory_encoding": "For each phase: sorted immediate regular files, JSON compact ASCII rows [filename, byte_length, sha256], UTF-8 with no trailing newline.",
+  "checks": [
+    "All six receipts completed=true/state=complete, without error, identity drift, unresolved-process or capture-error fields. Their initial, started, launched, command, oracle and final records agree.",
+    "All 234 direct-child rows settled with no timeout or termination fallback; observed monotonic durations were within their fixed direct-child deadlines. UTC start/launch/finish/capture ordering is consistent. This is no descendant-tree guarantee.",
+    "Every one of 468 retained stdout/stderr streams matches the corresponding recorded byte length and SHA-256. Each phase has exactly the expected 200 evidence files; there are no unindexed extra command records in these phase directories.",
+    "Runner hash, upstream capture-owner hash, both manifest hashes and all four preinstalled tool hashes agree before/after each phase. Both local 13-file input compositions match their manifests; manifest phases, paths, commands and oracles equal the pinned runner constants.",
+    "All concrete command arguments are the exact reviewed arguments after resolving candidate_files, overlay and binary placeholders. All six gofmt -l gates have exit 0 and empty output; the version command matches the pinned version.",
+    "All 222 Git observation argument arrays exactly match the prescribed snapshot/list-tree sequence. HEAD, tree, parents, staged and status output agree with source snapshots; all per-command source before/after and phase final snapshots are identical.",
+    "The 3281-file, 50583217-byte source inventory was independently reconstructed from exact local Git tree and blob sizes. Its compact-row digest equals the reported admission digest. All 12 retained ls-tree streams exactly match the exact Git tree, and each before/after admission reports the same inventory.",
+    "Control and candidate terminal events were independently parsed from retained JSON stdout and compared as exact multisets to the fixed oracles, with one run and one terminal event per test name and exactly one package terminal event. Counts distinguish roots, subtests and packages.",
+    "Control diagnostics demonstrate loss of close causes, repeated numeric-handle close attempts and both direct-consumer absence failures. The control built and executed selected assertions; its exit 1 is not a substitute build failure.",
+    "Recorded environment fixes Go toolchain/proxy/sumdb/VCS settings, Windows or Linux target as appropriate, D runtime/profile/temp paths and scheduler mode none. This is reviewed command/environment scope, not syscall enforcement."
+  ],
+  "phases": [
+    {
+      "phase": "reader-format",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "24b457faa9aba00626d9dff9500fc22dd97b66219ef7086efcec50044d87b7af",
+      "manifest_sha256": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3",
+      "overlay_sha256": "40342c57cd5cc328caa0b6e9c21a05c0065192940cafe832075c614b2ec07776",
+      "raw_files": 200,
+      "raw_bytes": 904422,
+      "raw_inventory_sha256": "c6376c273cef3d3571a418e5bb55bf916ed53b7fc9dff49a36554f1ccfff355b",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:38:55.108442+00:00",
+      "finished_utc": "2026-11-22T10:39:03.641115+00:00",
+      "commands": [
+        {
+          "label": "reader-version",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.026038700016215444,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02059119998011738,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "reader-control",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "a539740d4d6d64ec98846c24ce069770db594722ee8c1e98ec114137d64bb32f",
+      "manifest_sha256": "ea610e8cda77d2ebe2cf4accbfd7298443a679dc4d12cbe49ab28ee40a1363fc",
+      "overlay_sha256": "038a187d8ab1469aeec258c8c6741dd65756023436d33cf06f1ce1de4d68bc90",
+      "raw_files": 200,
+      "raw_bytes": 917072,
+      "raw_inventory_sha256": "f24b63e845d24e11a954a2ab0251db393f1edb8256b095361bad0bb9cbc62afe",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:39:33.036282+00:00",
+      "finished_utc": "2026-11-22T10:40:37.241286+00:00",
+      "commands": [
+        {
+          "label": "reader-control-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.02029949997086078,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-control",
+          "exit_code": 1,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 55.27395260008052,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 9291,
+            "sha256": "f273e358eab0ac3e525b083327eba5ff3774c3f8551904396c89f0604ce30e6b"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 0,
+            "fail": 7,
+            "skip": 0
+          },
+          "test_terminal_count": 6,
+          "root_test_count": 4,
+          "subtest_count": 2
+        }
+      ]
+    },
+    {
+      "phase": "reader-candidate",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "df39040621fad825ab672287200656841a57587a2f8b5a4ea1b5ecd19046cc2d",
+      "manifest_sha256": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3",
+      "overlay_sha256": "40342c57cd5cc328caa0b6e9c21a05c0065192940cafe832075c614b2ec07776",
+      "raw_files": 200,
+      "raw_bytes": 941956,
+      "raw_inventory_sha256": "747b468b5078467068935bba5493068f17d9b9747a7dbebdfdc4cfc9d7dd8030",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:40:48.818437+00:00",
+      "finished_utc": "2026-11-22T10:41:46.610323+00:00",
+      "commands": [
+        {
+          "label": "reader-candidate-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.019430799991823733,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-candidate",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 49.78169899992645,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 29302,
+            "sha256": "463a04b87130be122b3391c9b5d1664537fc5a28526a6c7c18d46458209330b2"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal_event_counts": {
+            "pass": 31,
+            "fail": 0,
+            "skip": 0
+          },
+          "test_terminal_count": 30,
+          "root_test_count": 8,
+          "subtest_count": 22
+        }
+      ]
+    },
+    {
+      "phase": "reader-build",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "1882bcef8c737b6e6891ca522f53dbd726ca4188f6eab5546bebb588699d7e77",
+      "manifest_sha256": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3",
+      "overlay_sha256": "40342c57cd5cc328caa0b6e9c21a05c0065192940cafe832075c614b2ec07776",
+      "raw_files": 200,
+      "raw_bytes": 904788,
+      "raw_inventory_sha256": "d12327b43e22cc73aa4778eb54b880283825f2ac641bd753989d0bd5b5114780",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:41:59.752482+00:00",
+      "finished_utc": "2026-11-22T10:42:34.852989+00:00",
+      "commands": [
+        {
+          "label": "reader-build-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.020813099923543632,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-build",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 26.74871069996152,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "reader-vet",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "c542bd28cac21a17901a8f18dbad437637e45ecac9f32025d00ad172d39aa56b",
+      "manifest_sha256": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3",
+      "overlay_sha256": "40342c57cd5cc328caa0b6e9c21a05c0065192940cafe832075c614b2ec07776",
+      "raw_files": 200,
+      "raw_bytes": 904413,
+      "raw_inventory_sha256": "c69661b5260f55b4afd8af9416478808c059c6edf75658ac47840acf76de6868",
+      "observation_count": 37,
+      "GOOS": "windows",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "1",
+      "started_utc": "2026-11-22T10:43:12.140742+00:00",
+      "finished_utc": "2026-11-22T10:43:47.521440+00:00",
+      "commands": [
+        {
+          "label": "reader-vet-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.01955560001078993,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-vet",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 26.909773700055666,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "phase": "reader-linux-compile",
+      "status": "complete",
+      "completed": true,
+      "receipt_sha256": "03a8725d11f95751575c4a3f8d0b7e23f07867b0a3b4ba4bb78de547a8be797f",
+      "manifest_sha256": "65629214015168b755c9729bd6c83936832e10deaa51a7e3021cbdd6a1f10bb3",
+      "overlay_sha256": "40342c57cd5cc328caa0b6e9c21a05c0065192940cafe832075c614b2ec07776",
+      "raw_files": 200,
+      "raw_bytes": 907314,
+      "raw_inventory_sha256": "ae0a39e1ea405f113dd33860b109be57a1cea0fde9fca32db628d9c26f824739",
+      "observation_count": 37,
+      "GOOS": "linux",
+      "GOARCH": "amd64",
+      "CGO_ENABLED": "0",
+      "started_utc": "2026-11-22T10:45:15.817874+00:00",
+      "finished_utc": "2026-11-22T10:46:04.121598+00:00",
+      "commands": [
+        {
+          "label": "reader-linux-compile-format",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 0.018809900037012994,
+          "direct_timeout_seconds": 30,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "reader-linux-compile",
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "seconds": 39.41600949992426,
+          "direct_timeout_seconds": 300,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "binary_identity_from_saved_oracle": {
+            "path": "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792\\evidence\\reader-linux-compile\\reader-linux-compile.exe",
+            "bytes": 49690620,
+            "sha256": "a655baf38218b16c729db21769e8036cc5bfba95c944c8a65fa06af6972ecde7"
+          }
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "This review reads retained local files and exact local Git objects; it does not re-observe the remote filesystem or repeat execution.",
+    "The Linux output binary itself is not present in the imported raw directory. Its 49690620-byte length and SHA-256 a655baf38218b16c729db21769e8036cc5bfba95c944c8a65fa06af6972ecde7 are observations from the saved oracle, not a second independent local binary hash or format inspection.",
+    "Physical inputs are source858 plus 13 explicit overlays, not the entire master75 tree and not a standalone published PR. Any publication needs its own exact byte/ref binding.",
+    "No full test regression, POSIX runtime qualification, installed product, native Scheduler acceptance, broad performance result or complete descendant-process settlement is claimed.",
+    "All four executable pins and pre/post source admissions are bounded observations. They do not claim a complete dependency/toolchain inventory or an atomic lock against intermediate external mutation.",
+    "This is internal independent evidence review. It does not satisfy the separate external review requirement for exact published heads."
+  ]
+}

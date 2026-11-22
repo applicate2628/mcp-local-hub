@@ -1,0 +1,60 @@
+{
+  "own_review": {
+    "reviewer": "/root",
+    "kind": "Own review of requirements, correctness, safety, compatibility and complexity; independent reviews supplement it",
+    "component": "reader",
+    "review": {
+      "status": "NO_OPEN_MANDATORY_FINDINGS_IN_DECLARED_SCOPE",
+      "requirements": "Retain primary and close failures, consume each native ownership once, return no data after failed close, preserve absence/cancellation and optional-digest backup behavior.",
+      "reviewed": [
+        "Four production files and four tests; Windows/POSIX ownership transitions, deferred cleanup, immediate consumers and typed error projection.",
+        "current transfers to the newly opened child before closing its previous parent. Failure does not leave the consumed numeric parent owned by deferred cleanup.",
+        "close failures join after the primary cause and zero/discard any result bytes. Native missing may remain discoverable diagnostically without authorizing the two absence-dependent consumers.",
+        "Per-call private seams introduce neither a public API nor a global mutable hook. Existing production functions supply native operations and the original reader.",
+        "Native test resources are owned fixtures; injected failures do not repeat an OS close on a potentially reused numeric identity. No Task Scheduler or installed product call is selected."
+      ],
+      "finding_fixed_before_qualification": {
+        "location": "internal/api/state_read_beneath_root_common.go:stateReadBeneathRootAbsent and platform native missing predicates",
+        "condition": "A direct StateFileReadError has a composite Cause containing native absence and another failure.",
+        "consequence": "A broad errors.Is predicate would let compensation or consumer logic treat an incomplete read as clean absence.",
+        "fix": "Require a direct native missing error at an allowed open operation and add a distinguishing nested-Cause regression."
+      },
+      "compatibility": "Ordinary errors.Is/As behavior is retained. Direct StateFileReadError.Is(os.ErrNotExist) now also recognizes the POSIX native missing case; this small method-level nuance is disclosed.",
+      "qualification": "Frozen source858 + 13 overlays; reader control/candidate, six phases, full build/vet and Linux compile-only have completed. Published-tree equality requires separate readback.",
+      "remaining": [
+        "POSIX runtime",
+        "real OS stat/close error injection",
+        "full default/tagged suites",
+        "external review of the exact published commit"
+      ]
+    },
+    "global_limits": [
+      "Qualification compositions are explicit overlays, not an assertion that an entire standalone branch passed all acceptance gates.",
+      "No full Go test suite, installed product, real Scheduler action, installation, manual CI or paid/quota reviewer was executed.",
+      "Direct-child settlement and available command-line observations do not constitute an atomic whole-process-tree guarantee."
+    ]
+  },
+  "independent_source_review": {
+    "reviewer": "/root/pr658_audit",
+    "mode": "independent read-only source/evidence review",
+    "result": "no mandatory findings in reviewed delta",
+    "candidate_patch_sha256": "32b8a25764d77e630ae2c0aa00b48fde920a50c373f2407dcd9bef00f9fa3ba9",
+    "candidate_manifest_sha256": "7a62a58dcb1e03a82f599e65f10b1a7116477ca45588609d849bb708edf4a959",
+    "verified": [
+      "8 candidate and 4 control byte/hash records",
+      "24 exact Git source-binding blobs",
+      "nested compound cause rejected by native-only absence predicate and test case exists",
+      "candidate-minus-control limited to agreed native ownership/error/absence changes",
+      "expected 8 candidate roots plus 22 subtests; expected 4 control roots plus 2 failing subtests"
+    ],
+    "not_executed": [
+      "Go compilation/tests",
+      "Comet",
+      "formatting"
+    ],
+    "limits": [
+      "Windows root/next inspection failure plus close failure not injected",
+      "POSIX runtime not available"
+    ]
+  }
+}

@@ -4,12 +4,14 @@ package api
 
 import (
 	"context"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
-func stateReadOpenCauseIsNotExist(error) bool {
-	return false
+func stateReadOpenCauseIsNotExist(cause error) bool {
+	errno, direct := cause.(syscall.Errno)
+	return direct && errno == unix.ENOENT
 }
 
 // ReadStateFileBeneathRootNoFollow reads one bounded regular state file through
@@ -44,12 +46,32 @@ func readStateFileBeneathRootNoFollow(
 	}, step)
 }
 
+// Only final stat and close are injected per invocation. The public readers
+// always supply the native operations; no process-global hook is retained.
+type stateReadBeneathRootNative struct {
+	statFinal func(int, *unix.Stat_t) error
+	close     func(int) error
+}
+
 func readStateFileBeneathRootNoFollowWithPolicy(
 	ctx context.Context,
 	root string,
 	relativeComponents []string,
 	policy stateReadBeneathRootPolicy,
 	step stateReadBeneathRootStepFunc,
+) (result []byte, retErr error) {
+	return readStateFileBeneathRootNoFollowWithNative(ctx, root, relativeComponents, policy, step, stateReadBeneathRootNative{
+		statFinal: unix.Fstat, close: unix.Close,
+	})
+}
+
+func readStateFileBeneathRootNoFollowWithNative(
+	ctx context.Context,
+	root string,
+	relativeComponents []string,
+	policy stateReadBeneathRootPolicy,
+	step stateReadBeneathRootStepFunc,
+	native stateReadBeneathRootNative,
 ) (result []byte, retErr error) {
 	if err := validateStateReadBeneathRootInputWithPolicy(root, relativeComponents, policy); err != nil {
 		return nil, err
@@ -63,11 +85,7 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 	}
 	currentFD := rootFD
 	defer func() {
-		if closeErr := unix.Close(currentFD); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", "", closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-parent", "", native.close(currentFD))
 	}()
 
 	for i, component := range relativeComponents[:len(relativeComponents)-1] {
@@ -83,11 +101,11 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 		if openErr != nil {
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, openErr)
 		}
-		if closeErr := unix.Close(currentFD); closeErr != nil {
-			_ = unix.Close(nextFD)
+		previousFD := currentFD
+		currentFD = nextFD
+		if closeErr := native.close(previousFD); closeErr != nil {
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", component, closeErr)
 		}
-		currentFD = nextFD
 	}
 	finalComponent := relativeComponents[len(relativeComponents)-1]
 	if err := ctx.Err(); err != nil {
@@ -103,14 +121,10 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-final", finalComponent, err)
 	}
 	defer func() {
-		if closeErr := unix.Close(finalFD); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-final", finalComponent, closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-final", finalComponent, native.close(finalFD))
 	}()
 	var st unix.Stat_t
-	if err := unix.Fstat(finalFD, &st); err != nil {
+	if err := native.statFinal(finalFD, &st); err != nil {
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "stat-final", finalComponent, err)
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {

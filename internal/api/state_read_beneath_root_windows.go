@@ -45,12 +45,32 @@ func readStateFileBeneathRootNoFollow(
 	}, step)
 }
 
+// Only final stat and close are injected per invocation. The public readers
+// always supply the native operations; no process-global hook is retained.
+type stateReadBeneathRootNative struct {
+	statFinal func(windows.Handle, *windows.ByHandleFileInformation) error
+	close     func(windows.Handle) error
+}
+
 func readStateFileBeneathRootNoFollowWithPolicy(
 	ctx context.Context,
 	root string,
 	relativeComponents []string,
 	policy stateReadBeneathRootPolicy,
 	step stateReadBeneathRootStepFunc,
+) (result []byte, retErr error) {
+	return readStateFileBeneathRootNoFollowWithNative(ctx, root, relativeComponents, policy, step, stateReadBeneathRootNative{
+		statFinal: windows.GetFileInformationByHandle, close: windows.CloseHandle,
+	})
+}
+
+func readStateFileBeneathRootNoFollowWithNative(
+	ctx context.Context,
+	root string,
+	relativeComponents []string,
+	policy stateReadBeneathRootPolicy,
+	step stateReadBeneathRootStepFunc,
+	native stateReadBeneathRootNative,
 ) (result []byte, retErr error) {
 	if err := validateStateReadBeneathRootInputWithPolicy(root, relativeComponents, policy); err != nil {
 		return nil, err
@@ -62,18 +82,13 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 	if err != nil {
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
 	}
-	if err := refuseReparsePointHandle(rootHandle); err != nil {
-		_ = windows.CloseHandle(rootHandle)
-		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
-	}
 	currentHandle := rootHandle
 	defer func() {
-		if closeErr := windows.CloseHandle(currentHandle); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", "", closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-parent", "", native.close(currentHandle))
 	}()
+	if err := refuseReparsePointHandle(rootHandle); err != nil {
+		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
+	}
 
 	for i, component := range relativeComponents[:len(relativeComponents)-1] {
 		if err := ctx.Err(); err != nil {
@@ -89,14 +104,14 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, openErr)
 		}
 		if infoErr := refuseReparsePointHandle(nextHandle); infoErr != nil {
-			_ = windows.CloseHandle(nextHandle)
-			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, infoErr)
+			primary := newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, infoErr)
+			return completeStateReadClose(nil, primary, "close-parent", component, native.close(nextHandle))
 		}
-		if closeErr := windows.CloseHandle(currentHandle); closeErr != nil {
-			_ = windows.CloseHandle(nextHandle)
+		previousHandle := currentHandle
+		currentHandle = nextHandle
+		if closeErr := native.close(previousHandle); closeErr != nil {
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", component, closeErr)
 		}
-		currentHandle = nextHandle
 	}
 	finalComponent := relativeComponents[len(relativeComponents)-1]
 	if err := ctx.Err(); err != nil {
@@ -112,14 +127,10 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-final", finalComponent, err)
 	}
 	defer func() {
-		if closeErr := windows.CloseHandle(finalHandle); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-final", finalComponent, closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-final", finalComponent, native.close(finalHandle))
 	}()
 	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(finalHandle, &info); err != nil {
+	if err := native.statFinal(finalHandle, &info); err != nil {
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "stat-final", finalComponent, err)
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {

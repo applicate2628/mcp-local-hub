@@ -62,10 +62,10 @@ type managedBackendCompensationRecord struct {
 	Received          ManagedBackendCompensationV1 `json:"received"`
 }
 
-func prepareOwnedBackendCompensation(ctx context.Context, root string, ref *ManagedBackendInstallReceiptV1, target string) (managedBackendCompensationRecord, bool, error) {
+func prepareOwnedBackendCompensation(ctx context.Context, root string, ref *ManagedBackendInstallReceiptV1, target string, readBackup func(context.Context, string, []string, string) ([]byte, error)) (managedBackendCompensationRecord, bool, error) {
 	record := managedBackendCompensationRecord{Schema: "managed-backend-compensation-v1", CapsuleReference: ref.reference, CapsuleSHA256: ref.digest, TargetGroupSHA256: target, Received: ManagedBackendCompensationV1{Outcome: "pending"}}
 	leaf := ref.reference + ".inverse.json"
-	b, err := ReadClientConfigBackupBeneathRootNoFollow(ctx, root, []string{leaf}, "")
+	b, err := readBackup(ctx, root, []string{leaf}, "")
 	if err == nil {
 		var previous managedBackendCompensationRecord
 		if err := decodeProjectAttachmentJSON(b, &previous); err != nil {
@@ -79,7 +79,7 @@ func prepareOwnedBackendCompensation(ctx context.Context, root string, ref *Mana
 		}
 		return record, false, errors.New("managed backend inverse already attempted; preserve pending custody")
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if !stateReadBeneathRootAbsent(err) {
 		return record, false, err
 	}
 	b, err = json.Marshal(record)
@@ -744,7 +744,7 @@ func (a *API) restoreOwnedBackendInstallWithOperation(ctx context.Context, recei
 		return result, err
 	}
 	if c.Ownership == "reused" {
-		record, terminal, err := prepareOwnedBackendCompensation(ctx, root, receipt, c.TargetGroupSHA256)
+		record, terminal, err := prepareOwnedBackendCompensation(ctx, root, receipt, c.TargetGroupSHA256, ReadClientConfigBackupBeneathRootNoFollow)
 		if err != nil {
 			return result, err
 		}
@@ -754,7 +754,7 @@ func (a *API) restoreOwnedBackendInstallWithOperation(ctx context.Context, recei
 		result = ManagedBackendCompensationV1{Outcome: "received", IntentRestored: true}
 		return result, receiveOwnedBackendCompensation(ctx, root, record, result)
 	}
-	if err := acquireNoManagedBackendConsumers(ctx, root, backup.Server, c.TargetGroupSHA256, c.OperationID); err != nil {
+	if err := acquireNoManagedBackendConsumers(ctx, root, backup.Server, c.TargetGroupSHA256, c.OperationID, ReadClientConfigBackupBeneathRootNoFollow); err != nil {
 		return result, err
 	}
 	var current *SupervisorIntentFile
@@ -805,7 +805,7 @@ func (a *API) restoreOwnedBackendInstallWithOperation(ctx context.Context, recei
 	if matches != 1 {
 		return result, clients.ErrProjectClientRollbackIncomplete
 	}
-	record, terminal, err := prepareOwnedBackendCompensation(ctx, root, receipt, c.TargetGroupSHA256)
+	record, terminal, err := prepareOwnedBackendCompensation(ctx, root, receipt, c.TargetGroupSHA256, ReadClientConfigBackupBeneathRootNoFollow)
 	if err != nil {
 		return result, err
 	}
@@ -917,7 +917,7 @@ func (a *API) restoreOwnedBackendInstallWithOperation(ctx context.Context, recei
 	return restoreLocked()
 }
 
-func acquireNoManagedBackendConsumers(ctx context.Context, root, server, targetGroup, ownOperation string) error {
+func acquireNoManagedBackendConsumers(ctx context.Context, root, server, targetGroup, ownOperation string, readBackup func(context.Context, string, []string, string) ([]byte, error)) error {
 	raw, err := ReadStateFileInodeAnchored(filepath.Join(root, managedEntriesFileLeaf))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -954,7 +954,7 @@ func acquireNoManagedBackendConsumers(ctx context.Context, root, server, targetG
 		if !strings.HasPrefix(entry.Name(), "backend-") || !strings.HasSuffix(entry.Name(), ".json") || strings.HasSuffix(entry.Name(), ".inverse.json") || entry.Name() == ownOperation+".json" {
 			continue
 		}
-		b, err := ReadClientConfigBackupBeneathRootNoFollow(ctx, root, []string{entry.Name()}, "")
+		b, err := readBackup(ctx, root, []string{entry.Name()}, "")
 		if err != nil {
 			return err
 		}
@@ -963,7 +963,7 @@ func acquireNoManagedBackendConsumers(ctx context.Context, root, server, targetG
 			return clients.ErrProjectClientRollbackIncomplete
 		}
 		if other.TargetGroupSHA256 == targetGroup && other.Publication != "rolled-back" {
-			inverseBytes, inverseErr := ReadClientConfigBackupBeneathRootNoFollow(ctx, root, []string{entry.Name() + ".inverse.json"}, "")
+			inverseBytes, inverseErr := readBackup(ctx, root, []string{entry.Name() + ".inverse.json"}, "")
 			if inverseErr == nil {
 				var inverse managedBackendCompensationRecord
 				if err := decodeProjectAttachmentJSON(inverseBytes, &inverse); err != nil {
@@ -975,7 +975,7 @@ func acquireNoManagedBackendConsumers(ctx context.Context, root, server, targetG
 				if inverse.Received.Outcome == "received" && inverse.Received.IntentRestored && (other.Ownership == "reused" || inverse.Received.NativeSettled) {
 					continue
 				}
-			} else if !errors.Is(inverseErr, os.ErrNotExist) {
+			} else if !stateReadBeneathRootAbsent(inverseErr) {
 				return inverseErr
 			}
 			return errors.New("managed backend still has pending admitted attachment")

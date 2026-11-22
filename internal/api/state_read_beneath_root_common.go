@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,37 @@ func (e *StateFileReadError) Is(target error) bool {
 
 func newStateFileReadError(category StateFileReadErrorCategory, operation, component string, cause error) *StateFileReadError {
 	return &StateFileReadError{Category: category, Operation: operation, Component: component, Cause: cause}
+}
+
+// stateReadBeneathRootAbsent accepts only the original, lone open-missing
+// outcome returned directly by this reader. errors.Is remains useful for
+// diagnostics across joined causes; it cannot qualify absence after a failed
+// close. Call this before any caller wrapping, without traversing error graphs.
+func stateReadBeneathRootAbsent(err error) bool {
+	readErr, direct := err.(*StateFileReadError)
+	if !direct || readErr == nil || readErr.Category != StateFileReadErrorUnsafeObjectOrIO {
+		return false
+	}
+	switch readErr.Operation {
+	case "open-root", "open-component", "open-final":
+		return stateReadOpenCauseIsNotExist(readErr.Cause)
+	default:
+		return false
+	}
+}
+
+// completeStateReadClose retains the primary category and all native causes,
+// but never releases bytes when an owned close is unconfirmed.
+func completeStateReadClose(result []byte, primary error, operation, component string, closeErr error) ([]byte, error) {
+	if closeErr == nil {
+		return result, primary
+	}
+	zeroStateSecretBytes(result)
+	failure := newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, operation, component, closeErr)
+	if primary == nil {
+		return nil, failure
+	}
+	return nil, errors.Join(primary, failure)
 }
 
 type stateReadBeneathRootPolicy struct {
