@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -114,13 +115,16 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 
 		// Snapshot the existing XML so a failed create can restore the
 		// prior task instead of leaving the user with nothing.
-		var priorXML []byte
-		if xml, err := sch.ExportXML(t.Name); err == nil {
-			priorXML = xml
-		}
-		if err := sch.Delete(t.Name); err != nil {
-			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("delete: %v", err)})
+		priorXML, err := snapshotTaskForSchedulerUpgrade(sch, t.Name)
+		if err != nil {
+			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("export: %v", err)})
 			continue
+		}
+		if len(priorXML) > 0 {
+			if err := sch.Delete(t.Name); err != nil {
+				results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("delete: %v", err)})
+				continue
+			}
 		}
 		// Anchor WorkingDir at the canonical install dir. The install
 		// flow (executeInstallTo) does the same — scheduler upgrade
@@ -151,6 +155,23 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: canonicalPath})
 	}
 	return results, nil
+}
+
+// snapshotTaskForSchedulerUpgrade admits either a successful, non-empty prior
+// definition or confirmed absence. Callers must not delete after absence: Create
+// owns conflict detection if another task occupies the name after this observation.
+func snapshotTaskForSchedulerUpgrade(sch scheduler.Scheduler, name string) ([]byte, error) {
+	priorXML, err := sch.ExportXML(name)
+	if err != nil {
+		if errors.Is(err, scheduler.ErrTaskNotFound) && len(priorXML) == 0 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(priorXML) == 0 {
+		return nil, fmt.Errorf("%w: empty XML snapshot", scheduler.ErrTaskCorrupt)
+	}
+	return bytes.Clone(priorXML), nil
 }
 
 // resolveSchedulerUpgradeServerDaemon resolves a per-server daemon task name to
@@ -275,16 +296,14 @@ func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, can
 	if !ok {
 		return &SchedulerUpgradeResult{TaskName: taskName, Err: "no registry entry for workspace-proxy task; run mcphub register to rebuild"}
 	}
-	var priorXML []byte
-	if xml, err := sch.ExportXML(taskName); err != nil {
-		if !errors.Is(err, scheduler.ErrTaskNotFound) {
-			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
-		}
-	} else {
-		priorXML = xml
+	priorXML, err := snapshotTaskForSchedulerUpgrade(sch, taskName)
+	if err != nil {
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
 	}
-	if err := sch.Delete(taskName); err != nil {
-		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
+	if len(priorXML) > 0 {
+		if err := sch.Delete(taskName); err != nil {
+			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
+		}
 	}
 	spec := scheduler.TaskSpec{
 		Name:        taskName,
