@@ -17,7 +17,7 @@ A stalled or noisy `--version` command could therefore stall discovery or retain
 unbounded output. This is separate from the stdout fixture isolation already
 published in this PR (pull request), which this increment preserves.
 
-The change keeps the public `ToolInfo`, `Catalog`, `DetectTools` and first-line
+The change keeps the public `ToolInfo`, `ToolCatalog`, `DetectTools` and first-line
 extraction contracts. After successful `exec.LookPath`, `probe` starts a
 five-second context and executes the resolved path. `runVersionProbe` uses the
 existing `cappedBuffer` with a **shared 64 KiB limit** for standard output and
