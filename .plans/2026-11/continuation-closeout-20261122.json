@@ -1,0 +1,1178 @@
+{
+  "schema": "mcp-continuation-closeout-20261122-v1",
+  "scope": "Two code increments and one scoped composition qualification in existing PRs; canonical plan update",
+  "user_snapshot_commit": "f9966f008aed4d0cfa80d88cc80c12d08e03634f",
+  "master_observed": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "canonical_update_expected_parent": "a908f98a9d55e25cb16f9062608b888280fc47be",
+  "canonical_plan_sha256": "4c389f361994dcfec97ed8d684f71dfda8dc6fefd9ee84e16069789b5c685a0f",
+  "publications": [
+    {
+      "pr": 667,
+      "head": "1eb934595d3c21954d0bddb934be57a3fe3138cf",
+      "previous_head": "99dd76ccd453ccd56d9adbcd6f4d4d06ce5cb57c",
+      "tree": "e7ef4a296ce1212c8440fbe77adecfe7386c7420",
+      "parents": [
+        "b20ba63192a9d0e48df5af242adece45b3ab95b0"
+      ],
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/667",
+      "files": [
+        {
+          "path": "internal/perftools/discovery.go",
+          "bytes": 4056,
+          "sha256": "3c7cc0b981348cdd0184d57270f8765a400fc7519719e7e543f033cfbb7dc78c",
+          "git_blob": "3397adbf168b8793dddd4ccc281641a611f3b66e",
+          "byte_equal": true
+        },
+        {
+          "path": "internal/perftools/discovery_test.go",
+          "bytes": 5669,
+          "sha256": "d413cbe57566e7f56cfc166b3084c908ece07cc0438fffaab2440ed87a0a3b29",
+          "git_blob": "4a3893bab33ba3dc148dcdfc3048d4b086352834",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/perftools-version-probe-2026-11-22/README.md",
+          "bytes": 8230,
+          "sha256": "09765daf73037141ea17b089dc24fe30a2093b800114019270efcf36633562e0",
+          "git_blob": "0046874ab22c1c2a972ba07ab815977495209f88",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/perftools-version-probe-2026-11-22/probe-evidence-manifest.json",
+          "bytes": 35188,
+          "sha256": "a985d64c0a3d6d91262ec73d6458d1d984d4c95b6e4265426685eb4364d9d821",
+          "git_blob": "e8f61f2337f627ba9a37f91dd1d60eef332e3ca3",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/perftools-version-probe-2026-11-22/probe-evidence.tar.xz",
+          "bytes": 15852,
+          "sha256": "4e4ac9ed77107ca156405e09238a3b2b48ced4f6af1359719488e09430b8c3a8",
+          "git_blob": "c7e52fa3cec3d2ea413f9970a852633d1cc382e4",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/perftools-version-probe-2026-11-22/verify_evidence.py",
+          "bytes": 3064,
+          "sha256": "9d0a7ace6eb0653a496e98ee26ab4485209e5ce374f02bbdae847f222ec16b62",
+          "git_blob": "5d7b574ed6bec56b950decfbb1891b5bb3544a3c",
+          "byte_equal": true
+        }
+      ],
+      "readback_method": "Fresh Git fetch of pinned public commit, git show bytes compared with exact local artifacts",
+      "draft": true,
+      "merged": false,
+      "external_exact_head_review": "PENDING"
+    },
+    {
+      "pr": 629,
+      "head": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+      "previous_head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "tree": "0f90d5ec9687a894c58fc3b61d97eb6820d447fe",
+      "parents": [
+        "b3646f19706d795a8b0c0dafb2193d7dc6f4c584"
+      ],
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "files": [
+        {
+          "path": "internal/daemon/relay.go",
+          "bytes": 25472,
+          "sha256": "4035863ec8ed9a4c39064a40205214adda8e4b742c5538dbd9286c39fee6e4b8",
+          "git_blob": "59ae24eb782749aa25760331b66c7a4876e94981",
+          "byte_equal": true
+        },
+        {
+          "path": "internal/daemon/relay_response_contract_test.go",
+          "bytes": 39360,
+          "sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+          "git_blob": "cce2f60cbe74b69d1bb9b8bb477620475de8293c",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/README.md",
+          "bytes": 16973,
+          "sha256": "1c40f1e1a9c759a374b7277724b49ceac2bba79af0cd332417c569d282f7f1e4",
+          "git_blob": "1f3fe8bb5049937bc5267ce4f4c289cacfb848ff",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/qualification-results.json",
+          "bytes": 108839,
+          "sha256": "7a93ae63db350555bc0ae05eecff5911fb989bad4f43a29f83ef36eefb5f2f77",
+          "git_blob": "1c5368aab48eed0edd47a3e043e65241cdc23c04",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/input-pins.json",
+          "bytes": 25131,
+          "sha256": "c8be1db510ad65a48d6302a265bf3ae8439806fb94d0ff03cef84e070142041c",
+          "git_blob": "1575ea3c81129cdd7a9b5d58112bab5d1b97482b",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/self-review.md",
+          "bytes": 11386,
+          "sha256": "57b85cecbcab42dce516b98025a50d6a6d9d0aaa3cb1098ff9db2702d2264dfd",
+          "git_blob": "22ff49c957daaf81f66eec4a48d2a8f0a14f854f",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/source-composition-proof.json",
+          "bytes": 14317,
+          "sha256": "2b9af876ef01c70642bdbf3aaef941b8f482b9a32877eded1e6621e186f2f883",
+          "git_blob": "d1a7bdd475f0459faf5eb2fa301e30e413bc42b8",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/qualify_relay.py",
+          "bytes": 15677,
+          "sha256": "b6a16eb3a0e281031b2db81f8d05c766bd685e0d2729b56323b4b4a7ae80192d",
+          "git_blob": "40265b6b88a957b26619f861fd5e0d1f0cfff864",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/summarize_evidence.py",
+          "bytes": 9940,
+          "sha256": "1371484b8c0c4db257a00b066a8dcfddd428a1469f3ff8e4cc2687258e16ed83",
+          "git_blob": "2c5a644411af8e63cec971a0360c0a721c30c485",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/relay-response-qualification-20261122/relay-evidence.tar.xz",
+          "bytes": 347240,
+          "sha256": "58e91f427ed92e02dbbaca74d5fdca07eeed3e84a002da01f9934415d622fae3",
+          "git_blob": "4dc0f706180b5b5dd8452cd7907a6e42f539c8c8",
+          "byte_equal": true
+        }
+      ],
+      "readback_method": "Fresh Git fetch of pinned public commit, git show bytes compared with exact local artifacts",
+      "draft": true,
+      "merged": false,
+      "external_exact_head_review": "PENDING"
+    },
+    {
+      "pr": 660,
+      "head": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+      "previous_head": "1cffaab021686a7ae27a5ffc038f280160f96a60",
+      "tree": "de19b96b0ec67bec170aaf7e2ed11db3f3fd52f2",
+      "parents": [
+        "1cffaab021686a7ae27a5ffc038f280160f96a60"
+      ],
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "files": [
+        {
+          "path": "docs/modernization/verification/scheduler-hold-composition-20261122/README.md",
+          "bytes": 22839,
+          "sha256": "e4563e02595823c6a5d00da531bef01064ddd92872ce43d8e4cd84eb5fc9ea53",
+          "git_blob": "e71f5d917aacf211c43632db55175c703b82d5f8",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/scheduler-hold-composition-20261122/qualification.json",
+          "bytes": 6150,
+          "sha256": "43249a9fb932a1ebd6f102c96165caa06f05c1b9480ea0e8a20f638bcb21a757",
+          "git_blob": "d6bc0953b23fbe7ca8df8a6883e4d8bbf2bbec14",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/scheduler-hold-composition-20261122/export-receipt.json",
+          "bytes": 15138,
+          "sha256": "a4bce35f6d6f335399a0efd0aaf1190c0847f2017e87f055894b0c163626a63d",
+          "git_blob": "c8fa6872563ccc999516c7994d3e42ccb32a6027",
+          "byte_equal": true
+        },
+        {
+          "path": "docs/modernization/verification/scheduler-hold-composition-20261122/qualification-evidence.zip",
+          "bytes": 416775,
+          "sha256": "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728",
+          "git_blob": "741a9dda2aa56f075b0abe4c38d9bcdc75fe2e17",
+          "byte_equal": true
+        }
+      ],
+      "readback_method": "Fresh Git fetch of pinned public commit, git show bytes compared with exact local artifacts",
+      "draft": true,
+      "merged": false,
+      "external_exact_head_review": "PENDING"
+    }
+  ],
+  "queue_snapshot": {
+    "read_finished_utc": "2026-11-22 09:14:48 UTC",
+    "open_count": 29,
+    "draft_count": 29,
+    "pulls": [
+      {
+        "number": 667,
+        "head": "1eb934595d3c21954d0bddb934be57a3fe3138cf",
+        "branch": "test/perftools-stdout-explicit-env-20261121",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/667"
+      },
+      {
+        "number": 666,
+        "head": "09de8e98d1aa6f122215dbe869bc6f7d0ce083f5",
+        "branch": "fix/cli-test-helper-dispatch-20261121",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/666"
+      },
+      {
+        "number": 665,
+        "head": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+        "branch": "fix/api-test-helper-dispatch-20261121",
+        "base": "fix/p0-test-entry-preserve-20261121",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/665"
+      },
+      {
+        "number": 664,
+        "head": "a908f98a9d55e25cb16f9062608b888280fc47be",
+        "branch": "fix/p0-test-entry-preserve-20261121",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/664"
+      },
+      {
+        "number": 663,
+        "head": "1cabce12655f810b742e6c31369441cacd72573c",
+        "branch": "fix/archguard-mcproute-baseline-20261121",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/663"
+      },
+      {
+        "number": 661,
+        "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+        "branch": "test/serena-conflict-validation-oracle-20261121",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/661"
+      },
+      {
+        "number": 660,
+        "head": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+        "branch": "fix/scheduler-hidden-task-lookup-20261119",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/660"
+      },
+      {
+        "number": 659,
+        "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+        "branch": "fix/api-port-pid-observation-20261118",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/659"
+      },
+      {
+        "number": 657,
+        "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+        "branch": "fix/canonical-command-test-product-20261116",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/657"
+      },
+      {
+        "number": 655,
+        "head": "2defe618259f7db4144824d19927b032300d160d",
+        "branch": "fix/serena-finalize-context-20261115",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/655"
+      },
+      {
+        "number": 654,
+        "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+        "branch": "fix/serena-ready-readback-20261115",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/654"
+      },
+      {
+        "number": 653,
+        "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+        "branch": "fix/serena-tcp-query-budget-20261115",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/653"
+      },
+      {
+        "number": 650,
+        "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+        "branch": "fix/serena-protocol-binding-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/650"
+      },
+      {
+        "number": 649,
+        "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+        "branch": "fix/serena-qualification-home-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/649"
+      },
+      {
+        "number": 647,
+        "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+        "branch": "fix/serena-executable-discovery-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/647"
+      },
+      {
+        "number": 646,
+        "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+        "branch": "fix/serena-python-discovery-preference-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/646"
+      },
+      {
+        "number": 644,
+        "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+        "branch": "spike/rx02-native-identity-20261114",
+        "base": "spike/rx02-native-process-owner-20261112",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/644"
+      },
+      {
+        "number": 643,
+        "head": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+        "branch": "fix/serena-cleanup-parent-observation-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/643"
+      },
+      {
+        "number": 637,
+        "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+        "branch": "fix/serena-integration-qualification-20261114",
+        "base": "fix/serena-qualification-publisher-20261114",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/637"
+      },
+      {
+        "number": 635,
+        "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+        "branch": "fix/serena-qualification-publisher-20261114",
+        "base": "fix/serena-qualified-uv-path-20261114",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/635"
+      },
+      {
+        "number": 632,
+        "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+        "branch": "fix/serena-qualified-uv-path-20261114",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/632"
+      },
+      {
+        "number": 631,
+        "head": "701535e3439d74495080463976d610a42303e5cf",
+        "branch": "spike/rx02-go-rust-boundary-20261113",
+        "base": "spike/rx02-native-identity-20261114",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/631"
+      },
+      {
+        "number": 629,
+        "head": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+        "branch": "fix/relay-output-failure-contract-20261113",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/629"
+      },
+      {
+        "number": 628,
+        "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+        "branch": "perf/rx16-native-observation-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/628"
+      },
+      {
+        "number": 627,
+        "head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+        "branch": "spike/rx04-anchored-read-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/627"
+      },
+      {
+        "number": 626,
+        "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+        "branch": "perf/rx01-relay-baseline-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/626"
+      },
+      {
+        "number": 625,
+        "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+        "branch": "spike/rx02-native-process-owner-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/625"
+      },
+      {
+        "number": 624,
+        "head": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+        "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/624"
+      },
+      {
+        "number": 623,
+        "head": "7a7263e7ff341496aeeb5431d53f6fed388a8ed0",
+        "branch": "docs/rust-cross-platform-no-com-20261112",
+        "base": "master",
+        "draft": true,
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/623"
+      }
+    ]
+  },
+  "new_prs": [],
+  "closed_prs": [],
+  "merges": [],
+  "force_pushes": [],
+  "deleted_branches": [],
+  "own_source_and_evidence_review": "COMPLETED in the stated scope; independent internal review supplements it",
+  "external_exact_published_head_review": "PENDING; no external quota run launched",
+  "full_default_tagged_go_tests": "NOT_RUN; scoped tests/build/vet do not replace these gates",
+  "native_scheduler_installed_product_operations": "NOT_RUN",
+  "cleanup": [
+    {
+      "lane": "perftools",
+      "raw_receipt_member": "perftools/cleanup-receipt.json",
+      "raw_bytes": 7332,
+      "raw_sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c",
+      "receipt": {
+        "schema": "perftools-trash-closeout-v1",
+        "source": "D:\\dev\\ChatGPT\\mcp-perftools-probe-20261122-e21a1792",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-perftools-probe-20261122-e21a1792",
+        "published_commit": "1eb934595d3c21954d0bddb934be57a3fe3138cf",
+        "state": "complete",
+        "queries": [
+          {
+            "utc": "2026-11-22T09:06:33.362245+00:00",
+            "rows": 304,
+            "available_command_lines": 126,
+            "unavailable_command_lines": 178,
+            "exact_path_matches": []
+          },
+          {
+            "utc": "2026-11-22T09:06:39.650296+00:00",
+            "rows": 317,
+            "available_command_lines": 139,
+            "unavailable_command_lines": 178,
+            "exact_path_matches": []
+          }
+        ],
+        "limits": [
+          "Available command lines and executable paths only; inaccessible commands and process working directories are not proven idle.",
+          "No general process-tree settlement guarantee; settled command receipts and path observations are recorded."
+        ],
+        "deletion_attempted": false,
+        "trash_emptied": false,
+        "inventory_definition": "SHA256 of UTF-8 json.dumps({files: sorted([relative_POSIX_path, byte_size, SHA256_file_bytes]), directories: sorted(relative_POSIX_paths_including_dot)}, ensure_ascii=False, sort_keys=True, separators=(comma,colon)); strict os.walk(onerror=raise); no reparse points",
+        "settled_commands": [
+          {
+            "phase": "prepare",
+            "label": "init",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 19608
+          },
+          {
+            "phase": "prepare",
+            "label": "fetch",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 13940
+          },
+          {
+            "phase": "prepare",
+            "label": "checkout",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 37596
+          },
+          {
+            "phase": "prepare",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 6684
+          },
+          {
+            "phase": "prepare",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 37232
+          },
+          {
+            "phase": "prepare",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 14576
+          },
+          {
+            "phase": "prepare",
+            "label": "go-version",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 34992
+          },
+          {
+            "phase": "prepare",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 52460
+          },
+          {
+            "phase": "prepare",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 38416
+          },
+          {
+            "phase": "format",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 54324
+          },
+          {
+            "phase": "format",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 13820
+          },
+          {
+            "phase": "format",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 35684
+          },
+          {
+            "phase": "format",
+            "label": "gofmt",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 54548
+          },
+          {
+            "phase": "format",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 34836
+          },
+          {
+            "phase": "format",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 54832
+          },
+          {
+            "phase": "control",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 29408
+          },
+          {
+            "phase": "control",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 46944
+          },
+          {
+            "phase": "control",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 38888
+          },
+          {
+            "phase": "control",
+            "label": "tests",
+            "exit_code": 1,
+            "expected_exit": 1,
+            "pid": 44580
+          },
+          {
+            "phase": "control",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 22464
+          },
+          {
+            "phase": "control",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 41336
+          },
+          {
+            "phase": "candidate",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 48740
+          },
+          {
+            "phase": "candidate",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 41200
+          },
+          {
+            "phase": "candidate",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 49824
+          },
+          {
+            "phase": "candidate",
+            "label": "tests",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 39032
+          },
+          {
+            "phase": "candidate",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 34848
+          },
+          {
+            "phase": "candidate",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 53464
+          },
+          {
+            "phase": "build",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 56000
+          },
+          {
+            "phase": "build",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 11552
+          },
+          {
+            "phase": "build",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 28972
+          },
+          {
+            "phase": "build",
+            "label": "build",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 55852
+          },
+          {
+            "phase": "build",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 33520
+          },
+          {
+            "phase": "build",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 52052
+          },
+          {
+            "phase": "vet",
+            "label": "head-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 23320
+          },
+          {
+            "phase": "vet",
+            "label": "tree",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 43736
+          },
+          {
+            "phase": "vet",
+            "label": "status-before",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 8868
+          },
+          {
+            "phase": "vet",
+            "label": "vet",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 28980
+          },
+          {
+            "phase": "vet",
+            "label": "status-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 54684
+          },
+          {
+            "phase": "vet",
+            "label": "head-after",
+            "exit_code": 0,
+            "expected_exit": 0,
+            "pid": 38416
+          }
+        ],
+        "before": {
+          "files": 3526,
+          "directories_including_root": 272,
+          "bytes": 68169146,
+          "inventory_sha256": "ebc624ce0cb78757cfc36c827f2887cfe2499c49353d877904b377aa7f1ca9b2"
+        },
+        "updated_utc": "2026-11-22T09:06:49.536189+00:00",
+        "after": {
+          "files": 3526,
+          "directories_including_root": 272,
+          "bytes": 68169146,
+          "inventory_sha256": "ebc624ce0cb78757cfc36c827f2887cfe2499c49353d877904b377aa7f1ca9b2"
+        },
+        "inventory_equal": true,
+        "source_absent": true
+      }
+    },
+    {
+      "lane": "relay",
+      "raw_receipt_member": "relay/cleanup-receipt.json",
+      "raw_bytes": 3251,
+      "raw_sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3",
+      "receipt": {
+        "schema": "relay-trash-closeout-v1",
+        "source": "D:\\dev\\ChatGPT\\mcp-relay-20261122-e21a1792",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-relay-20261122-e21a1792",
+        "published_commit": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+        "state": "complete",
+        "queries": [
+          {
+            "utc": "2026-11-22T09:04:01.454544+00:00",
+            "rows": 305,
+            "available_command_lines": 285,
+            "unavailable_command_lines": 20,
+            "exact_path_matches": []
+          },
+          {
+            "utc": "2026-11-22T09:04:14.629052+00:00",
+            "rows": 305,
+            "available_command_lines": 285,
+            "unavailable_command_lines": 20,
+            "exact_path_matches": []
+          }
+        ],
+        "limits": [
+          "Available command lines and executable paths only; inaccessible commands and process working directories are not proven idle.",
+          "No general process-tree settlement guarantee; settled command receipts and path observations are recorded."
+        ],
+        "deletion_attempted": false,
+        "trash_emptied": false,
+        "settled_commands": [
+          {
+            "path": "evidence/build/build.receipt.json",
+            "exit_code": 0,
+            "pid": 42964
+          },
+          {
+            "path": "evidence/build/format.receipt.json",
+            "exit_code": 0,
+            "pid": 8756
+          },
+          {
+            "path": "evidence/neighbors/format.receipt.json",
+            "exit_code": 0,
+            "pid": 54928
+          },
+          {
+            "path": "evidence/neighbors/neighbors.receipt.json",
+            "exit_code": 0,
+            "pid": 12296
+          },
+          {
+            "path": "evidence/prepare/source-identity.receipt.json",
+            "exit_code": 0,
+            "pid": 6032
+          },
+          {
+            "path": "evidence/prepare/source-tree.receipt.json",
+            "exit_code": 0,
+            "pid": 49720
+          },
+          {
+            "path": "evidence/vet/format.receipt.json",
+            "exit_code": 0,
+            "pid": 13168
+          },
+          {
+            "path": "evidence/vet/vet.receipt.json",
+            "exit_code": 0,
+            "pid": 56160
+          }
+        ],
+        "before": {
+          "files": 9354,
+          "directories_including_root": 504,
+          "bytes": 740759158,
+          "inventory_sha256": "b7fb99177368d2e8eef6f8c39f3df5c8772963a50688aa66290d48140e01024c"
+        },
+        "updated_utc": "2026-11-22T09:04:28.375311+00:00",
+        "after": {
+          "files": 9354,
+          "directories_including_root": 504,
+          "bytes": 740759158,
+          "inventory_sha256": "b7fb99177368d2e8eef6f8c39f3df5c8772963a50688aa66290d48140e01024c"
+        },
+        "inventory_equal": true,
+        "source_absent": true,
+        "strict_walk_verification": {
+          "method": "os.walk(followlinks=False,onerror=raise), lstat every file/directory, SHA-256 every byte",
+          "move_repeated": false,
+          "deletion_attempted": false,
+          "cleanup_source_sha256": "7c3e364f08ad261157ebb3e74f719154f4cda7ad489f19b995efbed993a08e9d",
+          "verification_source_sha256": "76feaff177e1cafa92d80dc45e2a7d30fe6f7c4f9bd064745aa463da03d51ccd",
+          "state": "complete",
+          "inventory": {
+            "files": 9354,
+            "directories_including_root": 504,
+            "bytes": 740759158,
+            "inventory_sha256": "b7fb99177368d2e8eef6f8c39f3df5c8772963a50688aa66290d48140e01024c"
+          },
+          "equal_to_before_and_after": true,
+          "traversal_errors": 0,
+          "reparse_paths": 0,
+          "finished_utc": "2026-11-22T09:05:32.223522+00:00"
+        }
+      }
+    },
+    {
+      "lane": "scheduler",
+      "raw_receipt_member": "scheduler/cleanup-receipt.json",
+      "raw_bytes": 5151,
+      "raw_sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b",
+      "receipt": {
+        "schema": "scheduler-trash-closeout-v3",
+        "source": "D:\\dev\\ChatGPT\\mcp-scheduler-20261122-e21a1792",
+        "destination": "D:\\dev\\ChatGPT\\trash\\mcp-scheduler-20261122-e21a1792",
+        "published_commit": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+        "publication_readback_confirmed_by": "parent agent",
+        "helper_sha256": "d40f66fa08576f2536662d4cb59278ea70bd9ba94c1162270d90f3081537f6c4",
+        "state": "complete",
+        "queries": [
+          {
+            "utc": "2026-11-22T09:12:22.827092+00:00",
+            "rows": 301,
+            "available_command_lines": 124,
+            "unavailable_command_lines": 177,
+            "exact_path_matches": []
+          },
+          {
+            "utc": "2026-11-22T09:12:23.468152+00:00",
+            "rows": 301,
+            "available_command_lines": 124,
+            "unavailable_command_lines": 177,
+            "exact_path_matches": []
+          }
+        ],
+        "limits": [
+          "Available command lines and executable paths only; inaccessible commands and process working directories are not proven idle.",
+          "No general process-tree settlement guarantee; settled command receipts and path observations are recorded."
+        ],
+        "inventory_algorithm": "SHA256 of UTF-8 compact JSON, sort_keys=True, ensure_ascii=False; sorted files [relative POSIX path,bytes,SHA256] and sorted directories including dot root.",
+        "deletion_attempted": false,
+        "trash_emptied": false,
+        "previous_attempt": {
+          "state": "stopped",
+          "move_attempted": false,
+          "receipt": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-20261122-e21a1792-stopped.json",
+          "sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac",
+          "error": "RuntimeError('File or directory metadata changed after the process query')"
+        },
+        "diagnostic": {
+          "path": "D:\\dev\\ChatGPT\\mcp-scheduler-closeout-diagnostic-20261122-e21a1792.json",
+          "sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9",
+          "observation": "Only own runtime/vet/tmp directory mtime changed around the process query; full byte inventories stayed identical. Attribution to the query is an inference; a concrete temporary entry was not observed.",
+          "all_three_content_inventories_equal": true,
+          "query_non_atime_delta": [
+            {
+              "path": "runtime/vet/tmp",
+              "before": {
+                "kind": "directory",
+                "size": 0,
+                "mtime_ns": 1795338399185672400,
+                "ctime_ns": 1795337520288167700,
+                "atime_ns": 1795338542096537800
+              },
+              "after": {
+                "kind": "directory",
+                "size": 0,
+                "mtime_ns": 1795338542160938800,
+                "ctime_ns": 1795337520288167700,
+                "atime_ns": 1795338542857046700
+              }
+            }
+          ],
+          "subsequent_non_atime_delta": []
+        },
+        "transport_preflight_failure": {
+          "outcome": "FAILED_BEFORE_MUTATION",
+          "runner_sha256": "04fc35d277743055495ae871ab7a7fd9e1dd2434ea42464a95f4b1e1c8c3f3e8",
+          "stage": "Prior receipt byte hash assertion, line 100",
+          "move_attempted": false,
+          "remote_files_written": false,
+          "normalized_lf_bytes": 2498,
+          "exact_crlf_bytes": 2580,
+          "normalized_sha256": "c1039c63ced8da6419e7199de41a82c00ff6c5e9389c8c3580ca556ca494428f",
+          "exact_sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac",
+          "only_crlf_normalization_difference_verified": true
+        },
+        "published_archive_sha256": "52c1c863b1438c380d0c8c808a18a0f136c37765127bd48de6cc43f84a240728",
+        "published_archive_members_rechecked": 75,
+        "settled_commands": [
+          {
+            "phase": "format",
+            "label": "go-version",
+            "exit_code": 0,
+            "pid": 51192
+          },
+          {
+            "phase": "format",
+            "label": "gofmt",
+            "exit_code": 0,
+            "pid": 54160
+          },
+          {
+            "phase": "control",
+            "label": "test",
+            "exit_code": 1,
+            "pid": 44624
+          },
+          {
+            "phase": "candidate",
+            "label": "test",
+            "exit_code": 0,
+            "pid": 53460
+          },
+          {
+            "phase": "build",
+            "label": "build",
+            "exit_code": 0,
+            "pid": 8340
+          },
+          {
+            "phase": "vet",
+            "label": "vet",
+            "exit_code": 0,
+            "pid": 42168
+          }
+        ],
+        "before_last_query": {
+          "files": 97,
+          "directories_including_root": 69,
+          "bytes": 3458012,
+          "inventory_sha256": "c84f561df443366df2ac6fa326e770e6966fa1c21062dabce20025edb754037a"
+        },
+        "before": {
+          "files": 97,
+          "directories_including_root": 69,
+          "bytes": 3458012,
+          "inventory_sha256": "c84f561df443366df2ac6fa326e770e6966fa1c21062dabce20025edb754037a"
+        },
+        "confirmed_before_move": {
+          "files": 97,
+          "directories_including_root": 69,
+          "bytes": 3458012,
+          "inventory_sha256": "c84f561df443366df2ac6fa326e770e6966fa1c21062dabce20025edb754037a"
+        },
+        "two_strict_post_query_inventories_and_stamps_equal": true,
+        "updated_utc": "2026-11-22T09:12:23.917810+00:00",
+        "after": {
+          "files": 97,
+          "directories_including_root": 69,
+          "bytes": 3458012,
+          "inventory_sha256": "c84f561df443366df2ac6fa326e770e6966fa1c21062dabce20025edb754037a"
+        },
+        "inventory_equal": true,
+        "source_absent": true
+      }
+    }
+  ],
+  "cleanup_totals": {
+    "files": 12977,
+    "directories_including_each_root": 845,
+    "bytes": 812386316
+  },
+  "cleanup_limits": [
+    "Only the three explicitly owned new Windows workspaces were moved directly to trash.",
+    "Shared caches and older workspaces were not moved; trash was not emptied.",
+    "Command-line/executable-path observations do not cover inaccessible commands or process working directories and do not prove general process-tree settlement.",
+    "Relay original traversal was supplemented by a strict read-only traversal with identical full inventory; the move was not repeated.",
+    "Scheduler v1 stopped before move on directory metadata drift. The observed change was only own TMP mtime around the process query; attribution to the query is an inference.",
+    "Scheduler v2 stopped before backup/move because a normalized LF receipt hash differed from exact CRLF bytes. Both bytes and the preflight failure are preserved.",
+    "Scheduler v3 verified exact raw prerequisites, then two strict inventories and file/directory stamps after the last query, and performed the single actual move.",
+    "Small standalone Windows receipt files remain outside trash until this publication is read back; their source evidence is already complete in this archive."
+  ],
+  "archive": {
+    "path": "continuation-closeout-evidence-20261122.tar.xz",
+    "bytes": 27692,
+    "sha256": "4152e635d9b380e267c4140521390eb4597b73457aaad2ed790bc2e9602d6e09",
+    "members": 24,
+    "files": [
+      {
+        "path": "continuation/publication-readback.json",
+        "bytes": 7998,
+        "sha256": "c64e8eb0e2e3571445f7abfd429d12a29d8d87f41e44a159932342b3b089f262"
+      },
+      {
+        "path": "continuation/queue-snapshot.json",
+        "bytes": 8074,
+        "sha256": "04ef1587d14dae06e9c22be1751d83e2a5c0b7da780c3d9565c62846fb31e195"
+      },
+      {
+        "path": "perftools/cleanup-receipt.json",
+        "bytes": 7332,
+        "sha256": "c125f3b4723d1b68f4b5d43461b10333a7319368199a03c1d30257b1bf2f065c"
+      },
+      {
+        "path": "perftools/cleanup_perftools_remote.py",
+        "bytes": 7667,
+        "sha256": "e1ff141a340f67440ec1df650087743d01e5ed5122a50702783469248838488d"
+      },
+      {
+        "path": "relay/cleanup-receipt.json",
+        "bytes": 3251,
+        "sha256": "13a285b0fe801e5df5c363f9b8d1e5ca53dfb3b55667ef4f4f912e015ffd4fc3"
+      },
+      {
+        "path": "relay/cleanup_relay_remote.py",
+        "bytes": 6991,
+        "sha256": "7c3e364f08ad261157ebb3e74f719154f4cda7ad489f19b995efbed993a08e9d"
+      },
+      {
+        "path": "relay/cleanup_strict_verify_remote.py",
+        "bytes": 3203,
+        "sha256": "76feaff177e1cafa92d80dc45e2a7d30fe6f7c4f9bd064745aa463da03d51ccd"
+      },
+      {
+        "path": "relay/local-cleanup-receipt.json",
+        "bytes": 1541,
+        "sha256": "402f38466e814ed1726eb8239cfff69da94bebc5d9136d8589a72cdc43faf3a2"
+      },
+      {
+        "path": "scheduler/bytecode-trash-receipt.json",
+        "bytes": 1071,
+        "sha256": "98b3c8097f3ee9bfb6ac8a07951a36cf7ee3cd3d87ffec6e4b947a16f1296887"
+      },
+      {
+        "path": "scheduler/cleanup-artifact-manifest.json",
+        "bytes": 2534,
+        "sha256": "00445a7b4d15c3f0b8f06156b92e7beabde01840f9c8b4b08b05104998e06085"
+      },
+      {
+        "path": "scheduler/cleanup-diagnostic.json",
+        "bytes": 143089,
+        "sha256": "5e4aeffb2985914e4f8da6569eb20839bc4e32b886609ff1826a3790d781add9"
+      },
+      {
+        "path": "scheduler/cleanup-receipt.json",
+        "bytes": 5151,
+        "sha256": "a5108e06ce7350a470554309d1d4cf38fc94510ce938ae751b3f071dc692400b"
+      },
+      {
+        "path": "scheduler/cleanup-stopped-receipt-normalized.json",
+        "bytes": 2498,
+        "sha256": "c1039c63ced8da6419e7199de41a82c00ff6c5e9389c8c3580ca556ca494428f"
+      },
+      {
+        "path": "scheduler/cleanup-stopped-receipt.json",
+        "bytes": 2580,
+        "sha256": "40c01c2ca80d8e2e98d22413fe340ae79a4048b6044c09192dde92854d8fa8ac"
+      },
+      {
+        "path": "scheduler/cleanup-v2-preflight-tool-result.json",
+        "bytes": 12004,
+        "sha256": "48b4f07260fb3673aa7f9b968576e8d35d086fc773efa6b92927337ea5861ede"
+      },
+      {
+        "path": "scheduler/cleanup-v2-preflight.json",
+        "bytes": 909,
+        "sha256": "89e584ed466db03ee5ae4b899133e0d68c3de018ce2a5b341eae48694c0d16e2"
+      },
+      {
+        "path": "scheduler/cleanup_scheduler_remote.py",
+        "bytes": 8977,
+        "sha256": "96ea9a20e7d4a64864a49443575c80247dee19da52d69d09ed936c5ea427b30e"
+      },
+      {
+        "path": "scheduler/cleanup_scheduler_remote_v2.py",
+        "bytes": 11512,
+        "sha256": "04fc35d277743055495ae871ab7a7fd9e1dd2434ea42464a95f4b1e1c8c3f3e8"
+      },
+      {
+        "path": "scheduler/cleanup_scheduler_remote_v3.py",
+        "bytes": 12103,
+        "sha256": "d40f66fa08576f2536662d4cb59278ea70bd9ba94c1162270d90f3081537f6c4"
+      },
+      {
+        "path": "scheduler/diagnose_cleanup_remote.py",
+        "bytes": 7412,
+        "sha256": "112a9461ee6aba7f225729e9c03e2c43f8705acf6d7130061deecc8a34687285"
+      },
+      {
+        "path": "scheduler/local-cleanup-receipt.json",
+        "bytes": 3082,
+        "sha256": "e38c318a1d8705e3c2ac3b959fb0cb85ab3d803c82ea24b3773ce862a51de0d5"
+      },
+      {
+        "path": "scheduler/prepare_inputs.py",
+        "bytes": 5886,
+        "sha256": "e1bc2b20cff19bfbb40e3f67a1404b1b09ce0137e3950200da88a918b896df6a"
+      },
+      {
+        "path": "scheduler/stage_inputs.py",
+        "bytes": 1957,
+        "sha256": "48e81fa5f59bc2cb2acff4362b35d865035f1d6d4c43c1b0855afdddad4a28d4"
+      },
+      {
+        "path": "scheduler/summarize_evidence.py",
+        "bytes": 4910,
+        "sha256": "81e26d05fa2e3eda0b3a68572e684fdb9a2bc72b45b3456519113bd17bb8d03d"
+      }
+    ]
+  }
+}
