@@ -791,6 +791,9 @@ type weeklyTypedNode struct {
 	key      string
 	function *types.Func
 	body     *ast.BlockStmt
+	origin   *weeklyTypedNode
+	bindings map[*types.Var]weeklyStaticBinding
+	calls    []*ast.CallExpr
 }
 
 type weeklyFunctionResultOrigin struct {
@@ -833,6 +836,7 @@ type weeklyTypedASTIndex struct {
 type weeklyTypedGraphOptions struct {
 	schedulerInterface          types.Type
 	approvedExportXMLParameters map[*types.Func]*types.Var
+	contextParameters           map[*types.Func][]int
 	desiredField                *types.Var
 	transaction                 *types.Func
 	mutationType                types.Type
@@ -1113,6 +1117,7 @@ func weeklyProductionTypedGraphOptions(t *testing.T, inventory weeklyTypedInvent
 	return weeklyTypedGraphOptions{
 		schedulerInterface:          weeklyRequiredPackageType(t, inventory, "weeklyRefreshTaskScheduler").Type(),
 		approvedExportXMLParameters: exportXMLParameters,
+		contextParameters:           weeklyProductionContextParameters(t, inventory),
 		desiredField:                weeklyRequiredStructField(t, mutationType, "desired"),
 		transaction:                 weeklyRequiredPackageFunc(t, inventory, "runWeeklyRefreshTaskTransaction"),
 		mutationType:                mutationType.Type(),
@@ -1210,6 +1215,12 @@ func (inventory *weeklyTypedInventory) addSyntheticNode(prefix string, literal *
 }
 
 func weeklyForEachDirectCall(node *weeklyTypedNode, visit func(*ast.CallExpr)) {
+	if node.calls != nil {
+		for _, call := range node.calls {
+			visit(call)
+		}
+		return
+	}
 	ast.Inspect(node.body, func(candidate ast.Node) bool {
 		if _, nested := candidate.(*ast.FuncLit); nested {
 			return false
@@ -1959,9 +1970,13 @@ func weeklyBuildTypedCallGraph(inventory *weeklyTypedInventory, options weeklyTy
 			processedAny = true
 			node := inventory.nodes[key]
 			graph.edges[key] = map[string]bool{}
+			node.calls = weeklyCallsInContext(*inventory, node)
 			weeklyForEachDirectCall(node, func(call *ast.CallExpr) {
 				if literal, ok := weeklyUnwrapCallExpression(call.Fun).(*ast.FuncLit); ok {
 					child, literalErr := inventory.addSyntheticNode("literal", literal)
+					if literalErr == nil {
+						child, literalErr = weeklyLiteralContext(inventory, node, child)
+					}
 					if literalErr != nil {
 						weeklyRecordUnresolved(&graph, *inventory, node, call, literalErr.Error())
 						return
@@ -1973,6 +1988,11 @@ func weeklyBuildTypedCallGraph(inventory *weeklyTypedInventory, options weeklyTy
 				switch value := target.(type) {
 				case *types.Func:
 					if child := inventory.byFunction[value]; child != nil {
+						child, contextErr := weeklyLocalCallContext(inventory, index, options, node, child, call, selection)
+						if contextErr != nil {
+							weeklyRecordUnresolved(&graph, *inventory, node, call, contextErr.Error())
+							return
+						}
 						graph.edges[key][child.key] = true
 						return
 					}
@@ -2003,6 +2023,23 @@ func weeklyBuildTypedCallGraph(inventory *weeklyTypedInventory, options weeklyTy
 					}
 					if value.Pkg() == inventory.pkg && value.Parent() == inventory.pkg.Scope() {
 						weeklyRecordUnresolved(&graph, *inventory, node, call, "package function variable has no exact selected-platform origin policy")
+						return
+					}
+					if binding, known := node.bindings[value]; known {
+						if binding.function == nil {
+							weeklyRecordUnresolved(&graph, *inventory, node, call, "reachable callback is proven nil, not a callable origin")
+							return
+						}
+						child, contextErr := weeklyLocalCallContext(inventory, index, options, node, inventory.byFunction[binding.function], call, nil)
+						if contextErr != nil {
+							weeklyRecordUnresolved(&graph, *inventory, node, call, contextErr.Error())
+							return
+						}
+						graph.edges[key][child.key] = true
+						return
+					}
+					if child, literalErr := weeklyLocalLiteralOrigin(inventory, index, node, value); literalErr == nil {
+						graph.edges[key][child.key] = true
 						return
 					}
 					factory, origin, originErr := weeklyResolveApprovedFunctionResultOrigin(inventory, options, node, call, value)
@@ -2481,10 +2518,12 @@ func root(callback func() error) { _ = callback() }
 			},
 		},
 		{
-			name: "function literal assignment remains unresolved",
+			name: "function literal alias remains unresolved",
 			source: `package fixture
 func root() {
 	callback := func() error { return nil }
+	alias := callback
+	_ = alias
 	_ = callback()
 }
 `,

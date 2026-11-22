@@ -119,6 +119,8 @@ func (a *API) EnsureWeeklyRefreshTask() error {
 // ApplyWeeklyRefreshSchedule updates the persisted weekly schedule and its
 // singleton scheduler task as one settings-then-scheduler transaction. Its
 // restore status is intentionally the existing GUI route vocabulary.
+// IsAppliedLockReleaseUnconfirmed distinguishes a verified committed pair
+// whose lock release failed from an unapplied or rolled-back change.
 func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus string, err error) {
 	if schedule == nil || schedule.Kind != ScheduleWeekly {
 		return "n/a", errors.New("weekly schedule is required")
@@ -133,6 +135,7 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 	}
 	restoreStatus = "n/a"
 	callbackEntered := false
+	applied := false
 	err = a.withWeeklyScheduleSettings(weeklyScheduleSettingsUpdate, schedule.Canonical(), func(_ string, rollback func() error) error {
 		callbackEntered = true
 		result, transactionErr := runWeeklyRefreshTaskTransaction(sch, weeklyRefreshMutation{
@@ -143,9 +146,11 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 		})
 		restoreStatus = result.restoreStatus
 		if result.state == weeklyRefreshTaskCommitted && transactionErr == nil {
+			applied = true
 			return nil
 		}
 		if result.state == weeklyRefreshTaskAppliedReleaseUnconfirmed {
+			applied = true
 			return transactionErr
 		}
 		if rollbackErr := rollback(); rollbackErr != nil {
@@ -154,6 +159,12 @@ func (a *API) ApplyWeeklyRefreshSchedule(schedule *ScheduleSpec) (restoreStatus 
 		}
 		return transactionErr
 	})
+	// Only the confirmed combined result can classify a settings-lock release
+	// failure as applied. A successful provisional settings write is insufficient:
+	// failed or unverified task changes must still restore the prior schedule.
+	if applied && !IsAppliedLockReleaseUnconfirmed(err) {
+		err = markAppliedLockReleaseUnconfirmed(err)
+	}
 	if err != nil && !callbackEntered {
 		err = fmt.Errorf("%w: %w", ErrWeeklyScheduleSettingsWrite, err)
 	}
@@ -304,14 +315,16 @@ func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation we
 		return result, nil
 	}()
 	if releaseErr := release(); releaseErr != nil {
+		candidateErr = errors.Join(candidateErr, fmt.Errorf("release weekly refresh singleton lock: %w", releaseErr))
 		switch candidate.state {
 		case weeklyRefreshTaskCommitted:
 			candidate.state = weeklyRefreshTaskAppliedReleaseUnconfirmed
 			candidate.restoreStatus = "n/a"
+			candidateErr = markAppliedLockReleaseUnconfirmed(candidateErr)
 		case weeklyRefreshTaskRestored:
 			candidate.state = ""
 		}
-		return candidate, errors.Join(candidateErr, fmt.Errorf("release weekly refresh singleton lock: %w", releaseErr))
+		return candidate, candidateErr
 	}
 	return candidate, candidateErr
 }
