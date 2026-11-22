@@ -327,10 +327,19 @@
     "moved_files": 5,
     "moved_bytes": 161403,
     "first_move_repeated": false,
-    "transport_failure_interpretation": "The first move returned an unavailable/connection-failed response. A later read proved it had completed with source absent and exact destination hash; it was not repeated. Only the four observed unmoved files received subsequent move requests.",
+    "transport_failure_interpretation": "The perftools move returned success. The subsequent Relay receipt move returned UNAVAILABLE. A later read showed the perftools file already at its destination and the Relay file unchanged at its source with destination absent. Only the four files then observed at their source received subsequent move requests. The Relay request was retried after that readback; the successful perftools move was not repeated. All five final destination byte hashes match the previously published source bytes.",
     "source_evidence_preserved_in": "a239d318a47d8247aa76e8338859f45f1326e8dc:.plans/2026-11/continuation-closeout-evidence-20261122.tar.xz",
     "deletion_attempted": false,
-    "trash_emptied": false
+    "trash_emptied": false,
+    "first_move_identity": "D:\\dev\\ChatGPT\\mcp-perftools-closeout-20261122-e21a1792.json",
+    "uncertain_request_identity": "D:\\dev\\ChatGPT\\mcp-relay-closeout-20261122-e21a1792.json",
+    "uncertain_request_ordinal": 2,
+    "uncertain_request_retried_after_verified_source_state": true,
+    "completed_move_repeated": false,
+    "move_request_count": 6,
+    "successful_move_responses": 5,
+    "unavailable_move_responses": 1,
+    "interpretation_correction": "This wording corrects the first-move attribution in commit 0876013212525eab6be60bc654e09d04728c1c74. Raw tool outcomes and before/recovered/after observations were retained unchanged."
   },
   "core_windows_workspaces": {
     "complete": 3,
