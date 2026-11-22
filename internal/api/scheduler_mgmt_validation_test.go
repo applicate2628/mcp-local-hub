@@ -70,13 +70,14 @@ func TestUpgradeLazyProxyTask_AbortOnExportError(t *testing.T) {
 }
 
 func TestUpgradeHelpers_AllowNotFoundExport(t *testing.T) {
+	installSwapWeeklyHarness(t)
 	sch := &exportErrScheduler{exportErr: scheduler.ErrTaskNotFound}
 	res := upgradeWorkspaceWeeklyRefreshTask(sch, WeeklyRefreshTaskName, "/tmp/mcphub")
 	if res == nil || res.Err != "" {
 		t.Fatalf("expected successful upgrade when export is not found, got %#v", res)
 	}
-	if !sch.deleted {
-		t.Fatalf("expected delete called on not-found export")
+	if sch.deleted {
+		t.Fatalf("delete must not follow a confirmed not-found export")
 	}
 }
 

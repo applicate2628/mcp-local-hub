@@ -48,6 +48,7 @@ func TestSchedulerUpgradeSnapshotAdmission(t *testing.T) {
 				{name: "delete_denied", snapshot: priorXML, initial: priorXML, deleteErr: scheduler.ErrPermissionDenied, wantErr: "delete: " + scheduler.ErrPermissionDenied.Error(), deletes: 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
+					t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 					name := `\mcp-local-hub-upgradesnapshot-alpha`
 					if kind == "lazy_proxy" {
 						name = `\mcp-local-hub-lsp-snapshot-python`
@@ -75,7 +76,11 @@ func TestSchedulerUpgradeSnapshotAdmission(t *testing.T) {
 						}
 						result = *got
 					}
-					if result.TaskName != name || result.Err != tc.wantErr {
+					matchesError := result.Err == tc.wantErr
+					if tc.deleteErr != nil {
+						matchesError = strings.HasPrefix(result.Err, tc.wantErr) && strings.Contains(result.Err, "recovery snapshot retained at")
+					}
+					if result.TaskName != name || !matchesError {
 						t.Errorf("upgrade result = %+v, want task %q error %q", result, name, tc.wantErr)
 					}
 					if f.deletes[name] != tc.deletes || f.creates[name] != tc.creates || f.imports[name] != 0 {
@@ -96,7 +101,7 @@ func TestSchedulerUpgradeSnapshotAdmission(t *testing.T) {
 
 func runServerUpgradeSnapshotFixture(t *testing.T, f *upgradeSnapshotScheduler, canonical string) SchedulerUpgradeResult {
 	t.Helper()
-	t.Cleanup(SetDaemonStateRootForTest(t.TempDir()))
+	t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
 	seedInstalledServerManifestsWithDaemons(t, map[string][]config.DaemonSpec{
 		"upgradesnapshot": {{Name: "alpha", Port: 19321}, {Name: "beta", Port: 19322}},
 	})
@@ -129,21 +134,33 @@ func runServerUpgradeSnapshotFixture(t *testing.T, f *upgradeSnapshotScheduler, 
 // in memory; unexpected runtime actions fail immediately instead of falling
 // through to the native scheduler, a process query, or a network listener.
 type upgradeSnapshotScheduler struct {
-	t         *testing.T
-	name      string
-	snapshot  []byte
-	exportErr error
-	createErr error
-	deleteErr error
-	xml       map[string][]byte
-	tasks     []scheduler.TaskStatus
-	deletes   map[string]int
-	creates   map[string]int
-	imports   map[string]int
+	t             *testing.T
+	name          string
+	snapshot      []byte
+	exportErr     error
+	createErr     error
+	deleteErr     error
+	xml           map[string][]byte
+	tasks         []scheduler.TaskStatus
+	deletes       map[string]int
+	creates       map[string]int
+	imports       map[string]int
+	createWrites  []byte
+	restoreWrites []byte
+	restoreErr    error
+	restores      int
+	beforeDelete  func(string)
+	beforeRestore func(string)
+	exports       int
+	reexport      func() ([]byte, error)
 }
 
 func (f *upgradeSnapshotScheduler) ExportXML(name string) ([]byte, error) {
 	if name == f.name {
+		f.exports++
+		if f.exports > 1 && f.reexport != nil {
+			return f.reexport()
+		}
 		return f.snapshot, f.exportErr
 	}
 	if xml, ok := f.xml[name]; ok {
@@ -154,6 +171,9 @@ func (f *upgradeSnapshotScheduler) ExportXML(name string) ([]byte, error) {
 
 func (f *upgradeSnapshotScheduler) Delete(name string) error {
 	f.deletes[name]++
+	if f.beforeDelete != nil {
+		f.beforeDelete(name)
+	}
 	if name == f.name && f.deleteErr != nil {
 		return f.deleteErr
 	}
@@ -164,12 +184,33 @@ func (f *upgradeSnapshotScheduler) Delete(name string) error {
 func (f *upgradeSnapshotScheduler) Create(spec scheduler.TaskSpec) error {
 	f.creates[spec.Name]++
 	if spec.Name == f.name && f.createErr != nil {
+		if f.createWrites != nil {
+			f.xml[spec.Name] = bytes.Clone(f.createWrites)
+		}
 		return f.createErr
 	}
 	if _, exists := f.xml[spec.Name]; exists {
 		return scheduler.ErrTaskAlreadyExists
 	}
 	f.xml[spec.Name] = []byte("<Task>upgraded</Task>")
+	return nil
+}
+
+func (f *upgradeSnapshotScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
+	f.restores++
+	if f.beforeRestore != nil {
+		f.beforeRestore(name)
+	}
+	if _, exists := f.xml[name]; exists {
+		return scheduler.ErrTaskAlreadyExists
+	}
+	if f.restoreWrites != nil {
+		f.xml[name] = bytes.Clone(f.restoreWrites)
+	}
+	if f.restoreErr != nil {
+		return f.restoreErr
+	}
+	f.xml[name] = bytes.Clone(xml)
 	return nil
 }
 

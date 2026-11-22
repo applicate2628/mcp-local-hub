@@ -3210,7 +3210,7 @@ func schedulerNewForRegister() (testScheduler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return realSchedulerAdapter{real}, nil
+	return real, nil
 }
 
 func clientsAllForRegister() map[string]registerClient {
@@ -3229,16 +3229,6 @@ func registryPathForRegister() (string, error) {
 		return testRegistryPathOverride, nil
 	}
 	return DefaultRegistryPath()
-}
-
-type realSchedulerAdapter struct{ s scheduler.Scheduler }
-
-func (a realSchedulerAdapter) Create(spec scheduler.TaskSpec) error  { return a.s.Create(spec) }
-func (a realSchedulerAdapter) Delete(name string) error              { return a.s.Delete(name) }
-func (a realSchedulerAdapter) Run(name string) error                 { return a.s.Run(name) }
-func (a realSchedulerAdapter) ExportXML(name string) ([]byte, error) { return a.s.ExportXML(name) }
-func (a realSchedulerAdapter) ImportXML(name string, xml []byte) error {
-	return a.s.ImportXML(name, xml)
 }
 
 type realClientAdapter struct{ c clients.Client }

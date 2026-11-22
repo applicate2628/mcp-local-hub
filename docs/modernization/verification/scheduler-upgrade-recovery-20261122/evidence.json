@@ -1,0 +1,917 @@
+{
+  "schema": 1,
+  "change_parent": "63ba3e771cb5a165e276bf7c481e10a3d3a19837",
+  "archive": {
+    "file": "raw-evidence.zip",
+    "bytes": 1695231,
+    "sha256": "858912769a69d45fd6fdd8e422ed169fd7bbc69c9a125e7fab8c2a0fe584bd29",
+    "payload_files": 145,
+    "payload_bytes": 5731611,
+    "manifest_sha256": "c56c28ff8e88aa6048a1755f7045c6086c3b9641034d71e0672e8be4dc6bd201",
+    "all_payloads_verified": true
+  },
+  "source_baseline": {
+    "commit": "858812988833a84368c60fba1540ae601155fa71",
+    "tree": "dba685c090952a93a80a1e82403c4646ad8aaed1"
+  },
+  "phases": [
+    {
+      "phase": "upgrade-recovery",
+      "receipt_completed": true,
+      "manifest_sha256": "7c7dbdd4513fafd6377149f29dadd2542fe37d2aa6c8a8c87bc5eff8e938518a",
+      "source": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs": {
+        "files": 47,
+        "bytes": 1012936,
+        "inventory_sha256": "5bd6d25135f0b0073a538ee61123344433eae88f343a58c1de4366028abab217"
+      },
+      "commands": [
+        {
+          "label": "upgrade-red",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\inputs\\upgrade-red-overlay.json",
+            "-run",
+            "^(TestSchedulerUpgradeRecovery|TestSchedulerUpgradeRecoveryAdmission|TestSchedulerUpgradeRevalidation)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\source",
+          "started_utc": "2026-11-22T18:37:06.372119+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 53912,
+          "exit_code": 1,
+          "seconds": 53.6910659999121,
+          "finished_utc": "2026-11-22T18:38:00.063257+00:00",
+          "stdout": {
+            "bytes": 37791,
+            "sha256": "0567f2f6590247ea98d251cdd54279780874e5f259645d756e1526b856a14716"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestSchedulerUpgradeRecoveryAdmission/absent"
+            ],
+            "fail": [
+              "TestSchedulerUpgradeRecovery/server/restored",
+              "TestSchedulerUpgradeRecovery/server/restore_failed",
+              "TestSchedulerUpgradeRecovery/server/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/server/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restored",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_failed",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy",
+              "TestSchedulerUpgradeRecovery",
+              "TestSchedulerUpgradeRecoveryAdmission/missing_capability",
+              "TestSchedulerUpgradeRecoveryAdmission/snapshot_storage_failure",
+              "TestSchedulerUpgradeRecoveryAdmission",
+              "TestSchedulerUpgradeRevalidation/changed",
+              "TestSchedulerUpgradeRevalidation/unreadable",
+              "TestSchedulerUpgradeRevalidation/empty",
+              "TestSchedulerUpgradeRevalidation",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 1,
+              "package": 0
+            },
+            "fail": {
+              "named": 20,
+              "package": 1
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 16
+        },
+        {
+          "label": "upgrade-green",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\inputs\\upgrade-green-overlay.json",
+            "-run",
+            "^(TestSchedulerUpgradeRecovery|TestSchedulerUpgradeRecoveryAdmission|TestSchedulerUpgradeRevalidation)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\source",
+          "started_utc": "2026-11-22T18:38:00.065974+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 53112,
+          "exit_code": 0,
+          "seconds": 45.608308400027454,
+          "finished_utc": "2026-11-22T18:38:45.674335+00:00",
+          "stdout": {
+            "bytes": 18287,
+            "sha256": "5b0b65fac17b627e2c6ebae9228635f5cec764a17f71f62c5973ccc639e0f37b"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestSchedulerUpgradeRecovery/server/restored",
+              "TestSchedulerUpgradeRecovery/server/restore_failed",
+              "TestSchedulerUpgradeRecovery/server/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/server/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restored",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_failed",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy",
+              "TestSchedulerUpgradeRecovery",
+              "TestSchedulerUpgradeRecoveryAdmission/missing_capability",
+              "TestSchedulerUpgradeRecoveryAdmission/snapshot_storage_failure",
+              "TestSchedulerUpgradeRecoveryAdmission/absent",
+              "TestSchedulerUpgradeRecoveryAdmission",
+              "TestSchedulerUpgradeRevalidation/changed",
+              "TestSchedulerUpgradeRevalidation/unreadable",
+              "TestSchedulerUpgradeRevalidation/empty",
+              "TestSchedulerUpgradeRevalidation",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 21,
+              "package": 1
+            },
+            "fail": {
+              "named": 0,
+              "package": 0
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 16
+        },
+        {
+          "label": "upgrade-adjacent",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\inputs\\upgrade-green-overlay.json",
+            "-run",
+            "^(TestSchedulerUpgradeSnapshotAdmission|TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs|TestUpgradeLazyProxyTask_AbortOnExportError|TestSchedulerUpgrade_TaskRoutingPredicates|TestExecuteInstallToCurrentTaskRecovery|TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\source",
+          "started_utc": "2026-11-22T18:38:45.676028+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 46268,
+          "exit_code": 0,
+          "seconds": 9.14917620003689,
+          "finished_utc": "2026-11-22T18:38:54.825426+00:00",
+          "stdout": {
+            "bytes": 43011,
+            "sha256": "28ef037328e188242ac5d6d63d05883b871cd27b667ae8d79dbcbe7883bf108d"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestExecuteInstallToCurrentTaskRecovery/restored",
+              "TestExecuteInstallToCurrentTaskRecovery/external_occupant",
+              "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_rejected",
+              "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost",
+              "TestExecuteInstallToCurrentTaskRecovery",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/plain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_acknowledged",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/current_uncertain",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater/later_and_current",
+              "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater",
+              "TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs",
+              "TestSchedulerUpgrade_TaskRoutingPredicates/global-weekly-refresh",
+              "TestSchedulerUpgrade_TaskRoutingPredicates/workspace-weekly-refresh",
+              "TestSchedulerUpgrade_TaskRoutingPredicates/lazy-proxy",
+              "TestSchedulerUpgrade_TaskRoutingPredicates/global-daemon",
+              "TestSchedulerUpgrade_TaskRoutingPredicates",
+              "TestUpgradeLazyProxyTask_AbortOnExportError",
+              "TestSchedulerUpgradeSnapshotAdmission/server/permission_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/server/unavailable",
+              "TestSchedulerUpgradeSnapshotAdmission/server/canceled",
+              "TestSchedulerUpgradeSnapshotAdmission/server/partial_failure",
+              "TestSchedulerUpgradeSnapshotAdmission/server/unsupported",
+              "TestSchedulerUpgradeSnapshotAdmission/server/nil_success",
+              "TestSchedulerUpgradeSnapshotAdmission/server/empty_success",
+              "TestSchedulerUpgradeSnapshotAdmission/server/conflicting_absence",
+              "TestSchedulerUpgradeSnapshotAdmission/server/existing",
+              "TestSchedulerUpgradeSnapshotAdmission/server/absent",
+              "TestSchedulerUpgradeSnapshotAdmission/server/wrapped_absent",
+              "TestSchedulerUpgradeSnapshotAdmission/server/absent_conflict",
+              "TestSchedulerUpgradeSnapshotAdmission/server/delete_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/server",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/permission_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unavailable",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/canceled",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/partial_failure",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unsupported",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/nil_success",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/empty_success",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/conflicting_absence",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/existing",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/wrapped_absent",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent_conflict",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/delete_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy",
+              "TestSchedulerUpgradeSnapshotAdmission",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 47,
+              "package": 1
+            },
+            "fail": {
+              "named": 0,
+              "package": 0
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 41
+        }
+      ]
+    },
+    {
+      "phase": "weekly-behavior",
+      "receipt_completed": true,
+      "manifest_sha256": "b7c5d5146fa6041db9bad67439a9b0392b1ade435ff8f32695c3e9c518325ec9",
+      "source": {
+        "files": 3305,
+        "bytes": 50813638,
+        "inventory_sha256": "ecc139439ca1c3b1185cdd0c6fea9861c9ed3e989d89c09421a2584156645715"
+      },
+      "inputs": {
+        "files": 60,
+        "bytes": 1519293,
+        "inventory_sha256": "58a44ed71fc55065b6afbbbd043ed2cddc19d315653ebac5daf348f71746991c"
+      },
+      "commands": [
+        {
+          "label": "weekly-red",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\inputs\\weekly-red-overlay.json",
+            "-run",
+            "^(TestRegisterSchedulerPreservesOptionalRecoveryThroughTestHooks|TestWeeklyRefreshRecoveryAdmission|TestWeeklyRefreshCreateFailureRecovery|TestWeeklyRefreshAbsentTaskNeverDeletesNewOccupant|TestWeeklyRefreshPostCreateForeignTaskIsPreserved)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\weekly-source",
+          "started_utc": "2026-11-22T18:51:14.038672+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 38264,
+          "exit_code": 1,
+          "seconds": 47.857201599981636,
+          "finished_utc": "2026-11-22T18:52:01.896069+00:00",
+          "stdout": {
+            "bytes": 64243,
+            "sha256": "6fa0119cd07b99196acfa93b088822316776bcac6a0bc8eb95604a95d7575298"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [],
+            "fail": [
+              "TestRegisterSchedulerPreservesOptionalRecoveryThroughTestHooks",
+              "TestWeeklyRefreshRecoveryAdmission/empty-success",
+              "TestWeeklyRefreshRecoveryAdmission/contradictory-absence",
+              "TestWeeklyRefreshRecoveryAdmission/missing-recovery-capability",
+              "TestWeeklyRefreshRecoveryAdmission/snapshot-cannot-fit",
+              "TestWeeklyRefreshRecoveryAdmission/changed-before-delete",
+              "TestWeeklyRefreshRecoveryAdmission",
+              "TestWeeklyRefreshCreateFailureRecovery/restored",
+              "TestWeeklyRefreshCreateFailureRecovery/prior-definition-already-observed",
+              "TestWeeklyRefreshCreateFailureRecovery/restore-refused",
+              "TestWeeklyRefreshCreateFailureRecovery/restore-applied-with-error",
+              "TestWeeklyRefreshCreateFailureRecovery/competitor-after-absence-observation",
+              "TestWeeklyRefreshCreateFailureRecovery/matching-desired-is-not-create-success",
+              "TestWeeklyRefreshCreateFailureRecovery/foreign-current",
+              "TestWeeklyRefreshCreateFailureRecovery/current-observation-failed",
+              "TestWeeklyRefreshCreateFailureRecovery/restoration-readback-failed",
+              "TestWeeklyRefreshCreateFailureRecovery",
+              "TestWeeklyRefreshAbsentTaskNeverDeletesNewOccupant",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved/fresh",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved/existing",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 0,
+              "package": 0
+            },
+            "fail": {
+              "named": 21,
+              "package": 1
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 18
+        },
+        {
+          "label": "weekly-green",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestRegisterSchedulerPreservesOptionalRecoveryThroughTestHooks|TestWeeklyRefreshRecoveryAdmission|TestWeeklyRefreshCreateFailureRecovery|TestWeeklyRefreshAbsentTaskNeverDeletesNewOccupant|TestWeeklyRefreshPostCreateForeignTaskIsPreserved)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\weekly-source",
+          "started_utc": "2026-11-22T18:52:01.899131+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 57820,
+          "exit_code": 0,
+          "seconds": 47.72500710003078,
+          "finished_utc": "2026-11-22T18:52:49.624213+00:00",
+          "stdout": {
+            "bytes": 19349,
+            "sha256": "ea0adcdfd940c5a3ba27bb524369e939d8257b841fa2bb57dffb9d020d5ec4cd"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestRegisterSchedulerPreservesOptionalRecoveryThroughTestHooks",
+              "TestWeeklyRefreshRecoveryAdmission/empty-success",
+              "TestWeeklyRefreshRecoveryAdmission/contradictory-absence",
+              "TestWeeklyRefreshRecoveryAdmission/missing-recovery-capability",
+              "TestWeeklyRefreshRecoveryAdmission/snapshot-cannot-fit",
+              "TestWeeklyRefreshRecoveryAdmission/changed-before-delete",
+              "TestWeeklyRefreshRecoveryAdmission",
+              "TestWeeklyRefreshCreateFailureRecovery/restored",
+              "TestWeeklyRefreshCreateFailureRecovery/prior-definition-already-observed",
+              "TestWeeklyRefreshCreateFailureRecovery/restore-refused",
+              "TestWeeklyRefreshCreateFailureRecovery/restore-applied-with-error",
+              "TestWeeklyRefreshCreateFailureRecovery/competitor-after-absence-observation",
+              "TestWeeklyRefreshCreateFailureRecovery/matching-desired-is-not-create-success",
+              "TestWeeklyRefreshCreateFailureRecovery/foreign-current",
+              "TestWeeklyRefreshCreateFailureRecovery/current-observation-failed",
+              "TestWeeklyRefreshCreateFailureRecovery/restoration-readback-failed",
+              "TestWeeklyRefreshCreateFailureRecovery",
+              "TestWeeklyRefreshAbsentTaskNeverDeletesNewOccupant",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved/fresh",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved/existing",
+              "TestWeeklyRefreshPostCreateForeignTaskIsPreserved",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 21,
+              "package": 1
+            },
+            "fail": {
+              "named": 0,
+              "package": 0
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 18
+        },
+        {
+          "label": "weekly-adjacent",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestSwapWeeklyTrigger_FreshInstall_Success|TestSwapWeeklyTrigger_HadPriorTask_Success|TestSwapWeeklyTrigger_FreshInstall_CreateFails_NoRollback|TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreOK|TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded|TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence|TestEnsureWeeklyRefreshTask_CreateFailurePreservesForeignCurrent|TestEnsureWeeklyRefreshTask_ReleaseFailureIsJoinedAndRecorded|TestWeeklyRefreshWritersSerializeAtTransactionOwner|TestEnsurePreservesPersistedWeeklySchedule|TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure|TestEnsureWeeklyRefreshTask_Idempotent|TestWeeklyRefreshReleaseSettlementMatrix|TestWeeklyScheduleSettingsReleaseSettlementMatrix|TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailure|TestUpgradeWorkspaceWeeklyRefreshTask_AbortOnExportError|TestUpgradeHelpers_AllowNotFoundExport|TestSchedulerUpgradePreservesWeeklyTrigger|TestWeeklyRefreshTaskMutationOwnerInventory|TestWeeklyTypedCallGraphResolution|TestWeeklyTypedExportXMLBoundary|TestRegistryLock_ReleaseFailureIsReportedAndReacquireFailsFast|TestLockLeafLedgered_ConcurrentWaiterSeesReleasePoison|TestReleaseAndJoinAppliedSettlementMatrix)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\weekly-source",
+          "started_utc": "2026-11-22T18:52:49.625781+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 58420,
+          "exit_code": 0,
+          "seconds": 14.218897000071593,
+          "finished_utc": "2026-11-22T18:53:03.844879+00:00",
+          "stdout": {
+            "bytes": 85205,
+            "sha256": "68c6c06545eb6d8986802484c0e2d1bdb1740f6b64d5493616efe149589f40ed"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestRegistryLock_ReleaseFailureIsReportedAndReacquireFailsFast",
+              "TestLockLeafLedgered_ConcurrentWaiterSeesReleasePoison",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-nil",
+              "TestReleaseAndJoinAppliedSettlementMatrix/success-primary",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-unapplied",
+              "TestReleaseAndJoinAppliedSettlementMatrix/release-applied",
+              "TestReleaseAndJoinAppliedSettlementMatrix/primary-and-release-applied",
+              "TestReleaseAndJoinAppliedSettlementMatrix",
+              "TestUpgradeWorkspaceWeeklyRefreshTask_AbortOnExportError",
+              "TestUpgradeHelpers_AllowNotFoundExport",
+              "TestSchedulerUpgradePreservesWeeklyTrigger",
+              "TestSwapWeeklyTrigger_FreshInstall_Success",
+              "TestSwapWeeklyTrigger_HadPriorTask_Success",
+              "TestSwapWeeklyTrigger_FreshInstall_CreateFails_NoRollback",
+              "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreOK",
+              "TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded",
+              "TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence",
+              "TestEnsureWeeklyRefreshTask_CreateFailurePreservesForeignCurrent",
+              "TestEnsureWeeklyRefreshTask_ReleaseFailureIsJoinedAndRecorded",
+              "TestWeeklyRefreshWritersSerializeAtTransactionOwner/settings_update_holds_settings_then_weekly_transaction_against_ensure",
+              "TestWeeklyRefreshWritersSerializeAtTransactionOwner/upgrade_waits_for_schedule_swap_and_preserves_committed_trigger",
+              "TestWeeklyRefreshWritersSerializeAtTransactionOwner/ensure_waits_for_upgrade_transaction",
+              "TestWeeklyRefreshWritersSerializeAtTransactionOwner",
+              "TestWeeklyTypedExportXMLBoundary/reviewed_reader_retains_local_settings_edges",
+              "TestWeeklyTypedExportXMLBoundary/same-shaped_unreviewed_helper_remains_unresolved",
+              "TestWeeklyTypedExportXMLBoundary/another_parameter_remains_unresolved",
+              "TestWeeklyTypedExportXMLBoundary/reassigned_reader_remains_unresolved",
+              "TestWeeklyTypedExportXMLBoundary/expanded_interface_remains_unresolved",
+              "TestWeeklyTypedExportXMLBoundary",
+              "TestWeeklyTypedCallGraphResolution/interface_false-positive_killer",
+              "TestWeeklyTypedCallGraphResolution/local_false-negative_killer",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_ledgered_function-result_origin",
+              "TestWeeklyTypedCallGraphResolution/type_conversion_is_an_external_leaf",
+              "TestWeeklyTypedCallGraphResolution/function_parameter_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/function_literal_assignment_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/named_function_assignment_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/same-signature_non-allowlisted_factory_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/assignment_instead_of_short_declaration_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/conditional_definition_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/reassigned_multiple-origin_variable_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/escaped_function_variable_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/returned_function_variable_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/closure-captured_function_variable_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/multiple_function-variable_calls_remain_unresolved",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_direct_settings_factory_remains_reachable",
+              "TestWeeklyTypedCallGraphResolution/allowlisted_transitive_settings_factory_remains_reachable",
+              "TestWeeklyTypedCallGraphResolution/selected_Windows_package_callback_origin",
+              "TestWeeklyTypedCallGraphResolution/selected_non-Windows_package_callback_origin",
+              "TestWeeklyTypedCallGraphResolution/unconfigured_package_callback_remains_unresolved",
+              "TestWeeklyTypedCallGraphResolution/package_callback_wrong_target",
+              "TestWeeklyTypedCallGraphResolution/Windows_policy_rejects_non-Windows_target",
+              "TestWeeklyTypedCallGraphResolution/non-Windows_policy_rejects_Windows_target",
+              "TestWeeklyTypedCallGraphResolution/package_callback_multiple_init_writes",
+              "TestWeeklyTypedCallGraphResolution/package_callback_missing_init_has_no_fallback",
+              "TestWeeklyTypedCallGraphResolution/package_callback_nested_init_is_mutable_origin",
+              "TestWeeklyTypedCallGraphResolution/test_override_moved_into_production_is_a_second_write",
+              "TestWeeklyTypedCallGraphResolution/package_callback_escape_is_rejected",
+              "TestWeeklyTypedCallGraphResolution/package_callback_go_dispatch_is_rejected",
+              "TestWeeklyTypedCallGraphResolution/package_callback_missing_nil_guard",
+              "TestWeeklyTypedCallGraphResolution/package_callback_direct_forbidden_target_remains_reachable",
+              "TestWeeklyTypedCallGraphResolution/package_callback_transitive_forbidden_target_remains_reachable",
+              "TestWeeklyTypedCallGraphResolution/unresolved_fail-closed_killer",
+              "TestWeeklyTypedCallGraphResolution",
+              "TestWeeklyRefreshTaskMutationOwnerInventory",
+              "TestEnsurePreservesPersistedWeeklySchedule",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=false",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed/create-error-current-matches=true",
+              "TestWeeklyRefreshReleaseSettlementMatrix/direct_owner_requires_acknowledged_creation_and_readback_before_applied-release-unconfirmed",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Ensure_preserves_release_failure_and_later_fail-fast",
+              "TestWeeklyRefreshReleaseSettlementMatrix/swap_preserves_release_failure_and_later_fail-fast",
+              "TestWeeklyRefreshReleaseSettlementMatrix/upgrade_preserves_release_failure_and_later_fail-fast",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=false",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure/create-error-current-matches=true",
+              "TestWeeklyRefreshReleaseSettlementMatrix/Apply_distinguishes_acknowledged_creation_from_failed_creation_on_release_failure",
+              "TestWeeklyRefreshReleaseSettlementMatrix",
+              "TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailure/export-error",
+              "TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailure/unclassifiable-export",
+              "TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailure",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/successful_combined_Apply_reports_settings_release_failure_after_the_requested_pair_settles",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix/callback_failure_after_rollback_remains_primary_and_joins_settings_release_failure",
+              "TestWeeklyScheduleSettingsReleaseSettlementMatrix",
+              "TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure",
+              "TestEnsureWeeklyRefreshTask_Idempotent",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 83,
+              "package": 1
+            },
+            "fail": {
+              "named": 0,
+              "package": 0
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 74
+        },
+        {
+          "label": "composed-upgrade",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestSchedulerUpgradeRecovery|TestSchedulerUpgradeRecoveryAdmission|TestSchedulerUpgradeRevalidation|TestSchedulerUpgradeSnapshotAdmission)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\weekly-source",
+          "started_utc": "2026-11-22T18:53:03.847401+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 58816,
+          "exit_code": 0,
+          "seconds": 10.216170500032604,
+          "finished_utc": "2026-11-22T18:53:14.063759+00:00",
+          "stdout": {
+            "bytes": 44397,
+            "sha256": "31ec46a0b4f2bdd6dbfbace20d35db94ee9b2a5516887c14983e2bf0b17dfcae"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [
+              "TestSchedulerUpgradeRecovery/server/restored",
+              "TestSchedulerUpgradeRecovery/server/restore_failed",
+              "TestSchedulerUpgradeRecovery/server/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/server/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/server",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restored",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_failed",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/create_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/concurrent_occupant",
+              "TestSchedulerUpgradeRecovery/lazy_proxy/restore_applied_reply_lost",
+              "TestSchedulerUpgradeRecovery/lazy_proxy",
+              "TestSchedulerUpgradeRecovery",
+              "TestSchedulerUpgradeRecoveryAdmission/missing_capability",
+              "TestSchedulerUpgradeRecoveryAdmission/snapshot_storage_failure",
+              "TestSchedulerUpgradeRecoveryAdmission/absent",
+              "TestSchedulerUpgradeRecoveryAdmission",
+              "TestSchedulerUpgradeRevalidation/changed",
+              "TestSchedulerUpgradeRevalidation/unreadable",
+              "TestSchedulerUpgradeRevalidation/empty",
+              "TestSchedulerUpgradeRevalidation",
+              "TestSchedulerUpgradeSnapshotAdmission/server/permission_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/server/unavailable",
+              "TestSchedulerUpgradeSnapshotAdmission/server/canceled",
+              "TestSchedulerUpgradeSnapshotAdmission/server/partial_failure",
+              "TestSchedulerUpgradeSnapshotAdmission/server/unsupported",
+              "TestSchedulerUpgradeSnapshotAdmission/server/nil_success",
+              "TestSchedulerUpgradeSnapshotAdmission/server/empty_success",
+              "TestSchedulerUpgradeSnapshotAdmission/server/conflicting_absence",
+              "TestSchedulerUpgradeSnapshotAdmission/server/existing",
+              "TestSchedulerUpgradeSnapshotAdmission/server/absent",
+              "TestSchedulerUpgradeSnapshotAdmission/server/wrapped_absent",
+              "TestSchedulerUpgradeSnapshotAdmission/server/absent_conflict",
+              "TestSchedulerUpgradeSnapshotAdmission/server/delete_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/server",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/permission_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unavailable",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/canceled",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/partial_failure",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/unsupported",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/nil_success",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/empty_success",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/conflicting_absence",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/existing",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/wrapped_absent",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/absent_conflict",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy/delete_denied",
+              "TestSchedulerUpgradeSnapshotAdmission/lazy_proxy",
+              "TestSchedulerUpgradeSnapshotAdmission",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle_pass": true,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 50,
+              "package": 1
+            },
+            "fail": {
+              "named": 0,
+              "package": 0
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 42
+        }
+      ]
+    },
+    {
+      "phase": "weekly-lock-order",
+      "receipt_completed": false,
+      "manifest_sha256": "acda22b21582cd373b4f647b557245dc7803ee86340730ef17bf17803722e5fa",
+      "source": {
+        "files": 3305,
+        "bytes": 50813638,
+        "inventory_sha256": "ecc139439ca1c3b1185cdd0c6fea9861c9ed3e989d89c09421a2584156645715"
+      },
+      "inputs": {
+        "files": 60,
+        "bytes": 1519293,
+        "inventory_sha256": "58a44ed71fc55065b6afbbbd043ed2cddc19d315653ebac5daf348f71746991c"
+      },
+      "commands": [
+        {
+          "label": "lock-order",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-tags=test_state_path_env",
+            "-race",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^(TestWeeklyRefreshLockOrderInventory)$",
+            "./internal/api"
+          ],
+          "cwd": "D:\\dev\\ChatGPT\\mcp-residual-20261122-dcb40fba\\weekly-source",
+          "started_utc": "2026-11-22T18:54:03.105091+00:00",
+          "direct_timeout_seconds": 240,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "pid": 34372,
+          "exit_code": 1,
+          "seconds": 26.762004300020635,
+          "finished_utc": "2026-11-22T18:54:29.867286+00:00",
+          "stdout": {
+            "bytes": 3568,
+            "sha256": "f4117ecf8411eb32db998cecb61ea5ea6237926a45e695cf4c0997c8c6c6d304"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "tests": {
+            "pass": [],
+            "fail": [
+              "TestWeeklyRefreshLockOrderInventory",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "skip": []
+          },
+          "oracle_pass": false,
+          "raw_events_verified": true,
+          "exact_selected_roots_verified": true,
+          "terminal_counts": {
+            "pass": {
+              "named": 0,
+              "package": 0
+            },
+            "fail": {
+              "named": 1,
+              "package": 1
+            },
+            "skip": {
+              "named": 0,
+              "package": 0
+            }
+          },
+          "leaf_scenarios": 1
+        }
+      ]
+    }
+  ],
+  "candidate_files": [
+    {
+      "path": "internal/api/scheduler_mgmt.go",
+      "archive_path": "inputs/candidate/internal/api/scheduler_mgmt.go",
+      "bytes": 16833,
+      "sha256": "9b7f545f179512f7e431d64c8820cc140c3ba410974fe0b961e1602f40ce9be1",
+      "git_blob": "72b0e41fd8a86f022c398ace7033bdc8c652369a"
+    },
+    {
+      "path": "internal/api/scheduler_upgrade_recovery_test.go",
+      "archive_path": "inputs/candidate/internal/api/scheduler_upgrade_recovery_test.go",
+      "bytes": 8501,
+      "sha256": "3cf9c6f4192f0987845a397961b700732269ec127251896ceff449a963343eec",
+      "git_blob": "960af4081bba1a58789595a5c8c1c0b25d15d1a2"
+    },
+    {
+      "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+      "archive_path": "inputs/candidate/internal/api/scheduler_upgrade_snapshot_test.go",
+      "bytes": 9596,
+      "sha256": "126214147fc2916287d5a8aa5e086a8f3f77db621f4be73a36a95ec40c5abe67",
+      "git_blob": "777d031b936da7f451fee918f9a3cccda4fc667b"
+    },
+    {
+      "path": "internal/api/register.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/register.go",
+      "bytes": 132551,
+      "sha256": "299793da32931d8354eb1dca315a3165cf4e64ac3e14a3333845ee55b1aaac4b",
+      "git_blob": "79cedceb128fdd77b1bc3be5dc759802fbd56cbd"
+    },
+    {
+      "path": "internal/api/scheduler_mgmt_validation_test.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/scheduler_mgmt_validation_test.go",
+      "bytes": 3977,
+      "sha256": "6208737e61d2a304d016cac4fc46f2799628671b326e664256b4f2ef86f31fc5",
+      "git_blob": "68821ca6cc90328dd1b52efc8e6b84fcc2e67ac0"
+    },
+    {
+      "path": "internal/api/scheduler_swap.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/scheduler_swap.go",
+      "bytes": 2779,
+      "sha256": "c8f0584bb8398e3cde00c6337d4f60e453f288b66441672d8b4c5e7f947a244f",
+      "git_blob": "a385762f47e659cf9898f7a8af03956545ea398e"
+    },
+    {
+      "path": "internal/api/scheduler_swap_test.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/scheduler_swap_test.go",
+      "bytes": 4347,
+      "sha256": "8452244d050fd27cd35efe1bb66fe7d62342160e994041c8e5f6907fd43db835",
+      "git_blob": "737d101c0328648ed1886f4c4c60487b49dd0533"
+    },
+    {
+      "path": "internal/api/testhooks.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/testhooks.go",
+      "bytes": 18363,
+      "sha256": "282fc70c59ea6026731518dfd607e7f22ccea54ca6cfbee8b88cb2b28c6b1e37",
+      "git_blob": "6dac4500fd4a59052531b96c4bb24a6526667d7f"
+    },
+    {
+      "path": "internal/api/weekly_refresh.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/weekly_refresh.go",
+      "bytes": 23016,
+      "sha256": "6170694a3adae109994cdae591236ac0755d1fd12e4f3c825677b00d2dd37239",
+      "git_blob": "aa75d296f7151f3d93bf6556d2fbf9e0b22ea888"
+    },
+    {
+      "path": "internal/api/weekly_refresh_atomic_test.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/weekly_refresh_atomic_test.go",
+      "bytes": 140805,
+      "sha256": "64c0731572009e8aedb691b6e36136195627103efa5d922f69020ae034e2eec8",
+      "git_blob": "24647c0c7b66921df0b77b5b0142cebd082337bb"
+    },
+    {
+      "path": "internal/api/weekly_refresh_recovery_test.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/weekly_refresh_recovery_test.go",
+      "bytes": 10883,
+      "sha256": "cb1aeeb75325a3834ca1d46992ec8a06830767f4a6155c3a83ae40dfbc72254b",
+      "git_blob": "ec595bf541f5234480c882f42ebe574b819204e5"
+    },
+    {
+      "path": "internal/api/weekly_refresh_test.go",
+      "archive_path": "inputs/weekly-candidate/internal/api/weekly_refresh_test.go",
+      "bytes": 9910,
+      "sha256": "caa059947e22aa50cb50b981d262d9147a3291ce29b642a5db56f8c4aa39371a",
+      "git_blob": "90e605c8a4f26f305213c234731bd3fe60c80268"
+    }
+  ],
+  "native_scheduler_operations": false,
+  "product_operations": false,
+  "full_standard_go_tests": "NOT_RUN",
+  "full_tagged_api_cli_tests": "NOT_RUN",
+  "exact_head_external_review": "PENDING",
+  "own_review": {
+    "requirements": "Two upgrade callers retain original/restoration errors and private snapshot before mutation; weekly restoration never replaces an occupant.",
+    "correctness": "Failed Create remains failure even after matching XML; absent paths do not Delete; current unverified definitions remain intact.",
+    "security": "Existing hardened snapshot writer and create-only scheduler capability are reused; actual optional capability survives composition.",
+    "compatibility": "Existing-task replacement refuses a backend without XMLCreator; interfaces and errors remain through existing owners.",
+    "complexity": "One shared upgrade helper and the existing install rollback owner; forwarding wrappers removed.",
+    "testing": "All raw terminal events verified. Source lock-order gate failed on four local cleanup closure calls; no successful gate claim."
+  },
+  "independent_review": {
+    "code": "Separate internal read found no actionable new production defect. Missing revalidation and Windows fixture admission cases were added before final qualification.",
+    "graph": "Exact four ExportXML parameter admissions unit-tested; helper bodies remain traversed. Wider storage callback graph is unresolved.",
+    "serena": "Independent source review performed separately in the composition report; its results do not qualify scheduler or vice versa."
+  },
+  "remaining": [
+    "Native generation ownership between final observation and name-based Delete remains open.",
+    "XML snapshot excludes separately stored credentials and task-object permissions.",
+    "TestWeeklyRefreshLockOrderInventory FAIL: secureCreateClientConfigIfMissingImpl cleanup() origin is unresolved; other storage callback origins require review.",
+    "Pre-existing applied-lock-release marker mismatch between weekly/settings owners and GUI projection remains open.",
+    "No full default/tagged suite, native scheduler lifecycle, real Product/Serena installation, POSIX execution or Unix ARM64 qualification.",
+    "External review must target the new publication commit."
+  ]
+}

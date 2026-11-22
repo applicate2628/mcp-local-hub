@@ -1,7 +1,7 @@
 // Package api — weekly Task Scheduler compatibility adapter.
 //
-// swapWeeklyTriggerWith supplies the expected prior generation and delegates
-// Export/Delete/Create/Import/verify plus release settlement to
+// swapWeeklyTriggerWith supplies the expected prior definition and delegates
+// snapshot/Delete/Create/create-only recovery plus release settlement to
 // runWeeklyRefreshTaskTransaction. It does not own settings.
 package api
 
@@ -13,14 +13,13 @@ import (
 
 // schedulerSwap is the test seam: production path is the real scheduler
 // returned by schedulerNewForRegister (which itself satisfies a wider
-// interface that includes Delete/Create/ImportXML); tests inject a fake
-// to drive deterministic Delete/Create/ImportXML outcomes without
+// interface that includes Delete/Create); tests inject a fake
+// to drive deterministic mutation and create-only recovery outcomes without
 // touching real Task Scheduler.
 type schedulerSwap interface {
 	ExportXML(name string) ([]byte, error)
 	Delete(name string) error
 	Create(spec scheduler.TaskSpec) error
-	ImportXML(name string, xml []byte) error
 }
 
 // SwapWeeklyTrigger is the production entrypoint. It loads the real
@@ -38,14 +37,14 @@ func SwapWeeklyTrigger(spec *ScheduleSpec, priorXML []byte) (restoreStatus strin
 //
 //	("n/a", nil)        Create succeeded (both fresh-install and
 //	                    had-prior-task paths). No rollback was needed.
-//	("ok", err)         Create FAILED, priorXML != nil, ImportXML
-//	                    succeeded — prior task restored.
-//	("degraded", err)   Create FAILED, priorXML != nil, ImportXML also
-//	                    FAILED — prior task lost.
-//	("n/a", err)        Create FAILED, priorXML == nil (fresh-install).
-//	                    No rollback was attempted (nothing to restore).
+//	("ok", err)         The failed mutation's prior definition is observed,
+//	                    including after create-only restoration and readback.
+//	("degraded", err)   Prior definition/absence could not be confirmed;
+//	                    current task and recovery material are retained.
+//	("n/a", err)        Mutation was refused, or fresh creation failed and
+//	                    absence is confirmed. No rollback was needed.
 //
-// All four cases are exhaustive over the helper's scheduler-XML domain.
+// Definition readback does not establish native task-generation ownership.
 // The caller's truth table at D8 step 8 maps these to response
 // `restore_status` after combining with settings-YAML rollback.
 func swapWeeklyTriggerWith(sch schedulerSwap, spec *ScheduleSpec, priorXML []byte) (restoreStatus string, err error) {

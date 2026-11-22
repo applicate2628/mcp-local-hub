@@ -39,10 +39,11 @@ import (
 // the plan's M4 section.
 const WeeklyRefreshTaskName = "mcp-local-hub-workspace-weekly-refresh"
 
-// ErrWeeklyRefreshConflict classifies a failed weekly-task replacement that
-// observed a foreign current generation and therefore preserved it.
+// ErrWeeklyRefreshConflict classifies a stale expected definition or an
+// unverified current definition that must be preserved. XML equality does not
+// establish ownership of a native task generation.
 var (
-	ErrWeeklyRefreshConflict            = errors.New("weekly refresh task changed concurrently; foreign task preserved")
+	ErrWeeklyRefreshConflict            = errors.New("weekly refresh task definition could not be reconciled; current task preserved")
 	ErrWeeklyRefreshSnapshotUnavailable = errors.New("weekly refresh task snapshot is unavailable")
 	ErrWeeklyScheduleSettingsWrite      = errors.New("weekly schedule settings update failed")
 )
@@ -53,7 +54,6 @@ type weeklyRefreshTaskScheduler interface {
 	ExportXML(name string) ([]byte, error)
 	Delete(name string) error
 	Create(spec scheduler.TaskSpec) error
-	ImportXML(name string, xml []byte) error
 }
 
 type weeklyRefreshTransactionState string
@@ -179,54 +179,50 @@ func weeklyRefreshTaskSpec(canonicalPath string, schedule *ScheduleSpec) schedul
 	}
 }
 
-// restoreWeeklyRefreshTaskAfterPostCreateFailure returns the scheduler to the
-// exact generation observed before a successful Create could be verified.  A
-// missing prior task is restored by removing the provisional replacement.
-func restoreWeeklyRefreshTaskAfterPostCreateFailure(
+// restoreWeeklyRefreshTaskAfterFailure observes the prior definition or absence
+// without deleting or replacing an occupant. A missing prior definition is
+// registered through the existing create-only recovery owner. An unreadable or
+// different current definition is retained with an incomplete recovery result.
+func restoreWeeklyRefreshTaskAfterFailure(
 	sch weeklyRefreshTaskScheduler,
 	taskName string,
-	priorXML []byte,
-	exists bool,
+	recovery *installTaskRollback,
 	cause error,
 ) (result weeklyRefreshTransactionResult, err error) {
 	result.restoreStatus = "n/a"
-	if exists {
-		if restoreErr := sch.ImportXML(taskName, priorXML); restoreErr != nil {
-			result.restoreStatus = "degraded"
-			return result, errors.Join(cause, fmt.Errorf("restore prior %s: %w", taskName, restoreErr))
+	if recovery != nil {
+		cause = fmt.Errorf("weekly task %s failed (recovery snapshot retained at %q): %w", taskName, recovery.snapshotPath, cause)
+	}
+	currentXML, readErr := sch.ExportXML(taskName)
+	if readErr == nil && recovery != nil && bytes.Equal(currentXML, recovery.priorXML) {
+		// This confirms the definition only, not its generation or who wrote it.
+		result.state = weeklyRefreshTaskRestored
+		result.restoreStatus = "ok"
+		return result, cause
+	}
+	if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(currentXML) == 0 {
+		if recovery == nil {
+			return result, cause
 		}
-		restoredXML, verifyErr := sch.ExportXML(taskName)
-		if verifyErr != nil || !bytes.Equal(restoredXML, priorXML) {
+		if restoreErr := recovery.restore(sch); restoreErr != nil {
 			result.restoreStatus = "degraded"
-			return result, errors.Join(
-				cause,
-				fmt.Errorf("%w: restored prior %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
-			)
+			return result, errors.Join(cause, restoreErr)
 		}
 		result.state = weeklyRefreshTaskRestored
 		result.restoreStatus = "ok"
 		return result, cause
 	}
-
-	if deleteErr := sch.Delete(taskName); deleteErr != nil {
-		result.restoreStatus = "degraded"
-		return result, errors.Join(cause, fmt.Errorf("remove newly created %s: %w", taskName, deleteErr))
+	result.restoreStatus = "degraded"
+	if readErr != nil {
+		return result, errors.Join(cause, fmt.Errorf("observe %s before recovery: %w", taskName, readErr))
 	}
-	if _, verifyErr := sch.ExportXML(taskName); verifyErr == nil || !errors.Is(verifyErr, scheduler.ErrTaskNotFound) {
-		result.restoreStatus = "degraded"
-		return result, errors.Join(
-			cause,
-			fmt.Errorf("%w: removed newly created %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
-		)
-	}
-	result.state = weeklyRefreshTaskRestored
-	result.restoreStatus = "ok"
-	return result, cause
+	return result, errors.Join(cause, fmt.Errorf("%w: %s does not have its prior definition or confirmed absence", ErrWeeklyRefreshConflict, taskName))
 }
 
 // runWeeklyRefreshTaskTransaction is the sole owner of the weekly task's
-// export/delete/create/import lifecycle. Every production writer uses its
-// existing singleton lock and returns only after the final XML is verified.
+// snapshot/delete/create/recovery lifecycle. Every production writer uses its
+// existing singleton lock. Verification observes definitions; the lock does not
+// exclude native external writers or grant ownership between a read and Delete.
 func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation weeklyRefreshMutation) (result weeklyRefreshTransactionResult, err error) {
 	result.restoreStatus = "n/a"
 	if sch == nil || mutation.desired == nil {
@@ -250,14 +246,14 @@ func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation we
 	}
 	candidate, candidateErr := func() (weeklyRefreshTransactionResult, error) {
 		result := weeklyRefreshTransactionResult{restoreStatus: "n/a"}
-		priorXML, exportErr := sch.ExportXML(taskName)
-		exists := exportErr == nil
-		if exportErr != nil && !errors.Is(exportErr, scheduler.ErrTaskNotFound) {
+		priorXML, exportErr := snapshotTaskForSchedulerUpgrade(sch, taskName)
+		exists := len(priorXML) > 0
+		if exportErr != nil {
 			return result, fmt.Errorf("%w: export prior %s: %w", ErrWeeklyRefreshSnapshotUnavailable, taskName, exportErr)
 		}
 		if mutation.expectedSet {
 			if exists != (mutation.expectedXML != nil) || (exists && !bytes.Equal(priorXML, mutation.expectedXML)) {
-				return result, fmt.Errorf("%w: expected weekly task generation is stale", ErrWeeklyRefreshConflict)
+				return result, fmt.Errorf("%w: expected weekly task definition is stale", ErrWeeklyRefreshConflict)
 			}
 		}
 		spec, desiredErr := mutation.desired(priorXML, exists)
@@ -265,67 +261,43 @@ func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation we
 			return result, desiredErr
 		}
 		spec.Name = taskName
-		if deleteErr := sch.Delete(taskName); deleteErr != nil {
-			return result, fmt.Errorf("delete prior %s: %w", taskName, deleteErr)
+		var recovery *installTaskRollback
+		if exists {
+			creator, ok := sch.(scheduler.XMLCreator)
+			if !ok {
+				return result, fmt.Errorf("restore prior %s without replacement: %w", taskName, scheduler.ErrNotImplemented)
+			}
+			snapshotPath, snapshotErr := retainInstallTaskSnapshot(taskName, priorXML)
+			if snapshotErr != nil {
+				return result, fmt.Errorf("retain recovery snapshot for %s at %q before replacement: %w", taskName, snapshotPath, snapshotErr)
+			}
+			recovery = &installTaskRollback{name: taskName, priorXML: priorXML, snapshotPath: snapshotPath, creator: creator}
+			if verifyErr := verifyInstallTaskDefinitionBeforeDelete(sch, taskName, priorXML); verifyErr != nil {
+				return result, fmt.Errorf("revalidate %s before replacement (recovery snapshot retained at %q): %w", taskName, snapshotPath, verifyErr)
+			}
+			if deleteErr := sch.Delete(taskName); deleteErr != nil {
+				cause := fmt.Errorf("delete prior %s (recovery snapshot retained at %q): %w", taskName, snapshotPath, deleteErr)
+				mutationErr := installTaskMutationFailure(sch, taskName, priorXML, cause)
+				var incomplete *InstallSchedulerRollbackIncompleteError
+				if errors.As(mutationErr, &incomplete) {
+					result.restoreStatus = "degraded"
+				}
+				return result, mutationErr
+			}
 		}
 		if createErr := sch.Create(spec); createErr != nil {
-			currentXML, currentErr := sch.ExportXML(taskName)
-			switch {
-			case currentErr == nil:
-				matches, classifyErr := weeklyTaskXMLMatchesSpec(currentXML, spec)
-				if classifyErr == nil && matches {
-					result.state = weeklyRefreshTaskCommitted
-					result.finalXML = append([]byte(nil), currentXML...)
-					return result, nil
-				}
-				if exists && bytes.Equal(currentXML, priorXML) {
-					result.state = weeklyRefreshTaskRestored
-					result.restoreStatus = "ok"
-					return result, fmt.Errorf("create %s: %w", taskName, createErr)
-				}
-				return result, errors.Join(
-					fmt.Errorf("create %s: %w", taskName, createErr),
-					fmt.Errorf("%w: classify current task after create failure: %v", ErrWeeklyRefreshConflict, classifyErr),
-				)
-			case errors.Is(currentErr, scheduler.ErrTaskNotFound):
-				if !exists {
-					return result, fmt.Errorf("create %s: %w", taskName, createErr)
-				}
-				if restoreErr := sch.ImportXML(taskName, priorXML); restoreErr != nil {
-					result.restoreStatus = "degraded"
-					return result, errors.Join(
-						fmt.Errorf("create %s: %w", taskName, createErr),
-						fmt.Errorf("restore prior %s: %w", taskName, restoreErr),
-					)
-				}
-				restoredXML, verifyErr := sch.ExportXML(taskName)
-				if verifyErr != nil || !bytes.Equal(restoredXML, priorXML) {
-					result.restoreStatus = "degraded"
-					return result, errors.Join(
-						fmt.Errorf("create %s: %w", taskName, createErr),
-						fmt.Errorf("%w: restored prior task did not verify: %v", ErrWeeklyRefreshConflict, verifyErr),
-					)
-				}
-				result.state = weeklyRefreshTaskRestored
-				result.restoreStatus = "ok"
-				return result, fmt.Errorf("create %s: %w", taskName, createErr)
-			default:
-				return result, errors.Join(
-					fmt.Errorf("create %s: %w", taskName, createErr),
-					fmt.Errorf("classify current %s: %w", taskName, currentErr),
-				)
-			}
+			return restoreWeeklyRefreshTaskAfterFailure(sch, taskName, recovery, fmt.Errorf("create %s: %w", taskName, createErr))
 		}
 		settledXML, verifyErr := sch.ExportXML(taskName)
 		if verifyErr != nil {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("verify created %s: %w", taskName, verifyErr))
+			return restoreWeeklyRefreshTaskAfterFailure(sch, taskName, recovery, fmt.Errorf("verify created %s: %w", taskName, verifyErr))
 		}
 		matches, classifyErr := weeklyTaskXMLMatchesSpec(settledXML, spec)
 		if classifyErr != nil {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: verify created %s: %v", ErrWeeklyRefreshConflict, taskName, classifyErr))
+			return restoreWeeklyRefreshTaskAfterFailure(sch, taskName, recovery, fmt.Errorf("%w: verify created %s: %w", ErrWeeklyRefreshConflict, taskName, classifyErr))
 		}
 		if !matches {
-			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: created %s does not match the requested generation", ErrWeeklyRefreshConflict, taskName))
+			return restoreWeeklyRefreshTaskAfterFailure(sch, taskName, recovery, fmt.Errorf("%w: created %s does not match the requested definition", ErrWeeklyRefreshConflict, taskName))
 		}
 		result.state = weeklyRefreshTaskCommitted
 		result.finalXML = append([]byte(nil), settledXML...)

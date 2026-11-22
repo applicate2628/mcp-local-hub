@@ -120,12 +120,6 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("export: %v", err)})
 			continue
 		}
-		if len(priorXML) > 0 {
-			if err := sch.Delete(t.Name); err != nil {
-				results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("delete: %v", err)})
-				continue
-			}
-		}
 		// Anchor WorkingDir at the canonical install dir. The install
 		// flow (executeInstallTo) does the same — scheduler upgrade
 		// rewrites Command + Args + WorkingDir together so tasks built
@@ -144,12 +138,8 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		} else {
 			spec.LogonTrigger = true
 		}
-		if err := sch.Create(spec); err != nil {
-			// Restore prior task on failure; don't leave user with nothing.
-			if len(priorXML) > 0 {
-				_ = sch.ImportXML(t.Name, priorXML)
-			}
-			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("create: %v", err)})
+		if err := replaceTaskForSchedulerUpgrade(sch, spec, priorXML); err != nil {
+			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: err.Error()})
 			continue
 		}
 		results = append(results, SchedulerUpgradeResult{TaskName: t.Name, NewCmd: canonicalPath})
@@ -160,7 +150,9 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 // snapshotTaskForSchedulerUpgrade admits either a successful, non-empty prior
 // definition or confirmed absence. Callers must not delete after absence: Create
 // owns conflict detection if another task occupies the name after this observation.
-func snapshotTaskForSchedulerUpgrade(sch scheduler.Scheduler, name string) ([]byte, error) {
+func snapshotTaskForSchedulerUpgrade(sch interface {
+	ExportXML(string) ([]byte, error)
+}, name string) ([]byte, error) {
 	priorXML, err := sch.ExportXML(name)
 	if err != nil {
 		if errors.Is(err, scheduler.ErrTaskNotFound) && len(priorXML) == 0 {
@@ -172,6 +164,44 @@ func snapshotTaskForSchedulerUpgrade(sch scheduler.Scheduler, name string) ([]by
 		return nil, fmt.Errorf("%w: empty XML snapshot", scheduler.ErrTaskCorrupt)
 	}
 	return bytes.Clone(priorXML), nil
+}
+
+// replaceTaskForSchedulerUpgrade retains recovery material before replacement.
+// XML equality only rejects an observed change; it does not own the generation
+// between the final observation and Delete. Restoration instead relies on the
+// scheduler's atomic create-only contract and never replaces an occupant.
+func replaceTaskForSchedulerUpgrade(sch scheduler.Scheduler, spec scheduler.TaskSpec, priorXML []byte) error {
+	var recovery scheduler.XMLCreator
+	var snapshotPath string
+	if len(priorXML) > 0 {
+		var ok bool
+		recovery, ok = sch.(scheduler.XMLCreator)
+		if !ok {
+			return fmt.Errorf("restore task %s without replacement: %w", spec.Name, scheduler.ErrNotImplemented)
+		}
+		var err error
+		snapshotPath, err = retainInstallTaskSnapshot(spec.Name, priorXML)
+		if err != nil {
+			return fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err)
+		}
+		if err := verifyInstallTaskDefinitionBeforeDelete(sch, spec.Name, priorXML); err != nil {
+			return fmt.Errorf("revalidate task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err)
+		}
+		if err := sch.Delete(spec.Name); err != nil {
+			cause := fmt.Errorf("delete: %w (recovery snapshot retained at %q)", err, snapshotPath)
+			return installTaskMutationFailure(sch, spec.Name, priorXML, cause)
+		}
+	}
+	if err := sch.Create(spec); err != nil {
+		if recovery != nil {
+			return &InstallTaskRecoveryError{
+				TaskName: spec.Name, SnapshotPath: snapshotPath, Cause: err,
+				Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
+			}
+		}
+		return fmt.Errorf("create: %w", err)
+	}
+	return nil
 }
 
 // resolveSchedulerUpgradeServerDaemon resolves a per-server daemon task name to
@@ -300,11 +330,6 @@ func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, can
 	if err != nil {
 		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
 	}
-	if len(priorXML) > 0 {
-		if err := sch.Delete(taskName); err != nil {
-			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
-		}
-	}
 	spec := scheduler.TaskSpec{
 		Name:        taskName,
 		Description: fmt.Sprintf("mcp-local-hub: workspace %s lang %s", entry.WorkspacePath, entry.Language),
@@ -319,11 +344,8 @@ func upgradeLazyProxyTask(sch scheduler.Scheduler, taskName, normalizedName, can
 		RestartOnFailure: true,
 		LogonTrigger:     true,
 	}
-	if err := sch.Create(spec); err != nil {
-		if len(priorXML) > 0 {
-			_ = sch.ImportXML(taskName, priorXML)
-		}
-		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("create: %v", err)}
+	if err := replaceTaskForSchedulerUpgrade(sch, spec, priorXML); err != nil {
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: err.Error()}
 	}
 	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"mcp-local-hub/internal/scheduler"
@@ -9,13 +10,13 @@ import (
 
 // fakeSwapScheduler is the test double for the complete weekly transaction.
 type fakeSwapScheduler struct {
-	deleteErr error
-	createErr error
-	importErr error
-	xml       []byte
-	deleted   bool
-	created   bool
-	imported  bool
+	deleteErr  error
+	createErr  error
+	restoreErr error
+	xml        []byte
+	deleted    bool
+	created    bool
+	restored   bool
 }
 
 func (f *fakeSwapScheduler) ExportXML(string) ([]byte, error) {
@@ -38,12 +39,15 @@ func (f *fakeSwapScheduler) Create(spec scheduler.TaskSpec) error {
 	}
 	return f.createErr
 }
-func (f *fakeSwapScheduler) ImportXML(name string, xml []byte) error {
-	f.imported = true
-	if f.importErr == nil {
+func (f *fakeSwapScheduler) CreateXMLIfAbsent(name string, xml []byte) error {
+	f.restored = true
+	if f.xml != nil {
+		return scheduler.ErrTaskAlreadyExists
+	}
+	if f.restoreErr == nil {
 		f.xml = append([]byte(nil), xml...)
 	}
-	return f.importErr
+	return f.restoreErr
 }
 
 func TestSwapWeeklyTrigger_FreshInstall_Success(t *testing.T) {
@@ -57,11 +61,11 @@ func TestSwapWeeklyTrigger_FreshInstall_Success(t *testing.T) {
 	if status != "n/a" {
 		t.Errorf(`status = %q, want "n/a" (D8 fresh-install Create-success)`, status)
 	}
-	if !fake.deleted || !fake.created {
-		t.Error("Delete + Create must both be invoked")
+	if fake.deleted || !fake.created {
+		t.Error("fresh creation must not delete after confirmed absence")
 	}
-	if fake.imported {
-		t.Error("ImportXML must NOT be invoked on Create success")
+	if fake.restored {
+		t.Error("recovery must NOT be invoked on Create success")
 	}
 }
 
@@ -77,8 +81,8 @@ func TestSwapWeeklyTrigger_HadPriorTask_Success(t *testing.T) {
 	if status != "n/a" {
 		t.Errorf(`status = %q, want "n/a" (D8 had-prior-task Create-success)`, status)
 	}
-	if fake.imported {
-		t.Error("ImportXML must NOT be invoked on Create success")
+	if fake.restored {
+		t.Error("recovery must NOT be invoked on Create success")
 	}
 }
 
@@ -93,8 +97,8 @@ func TestSwapWeeklyTrigger_FreshInstall_CreateFails_NoRollback(t *testing.T) {
 	if status != "n/a" {
 		t.Errorf(`status = %q, want "n/a" (D8 fresh-install Create-failed: nothing to restore)`, status)
 	}
-	if fake.imported {
-		t.Error("ImportXML must NOT be invoked when priorXML==nil")
+	if fake.restored {
+		t.Error("recovery must NOT be invoked when priorXML==nil")
 	}
 }
 
@@ -108,10 +112,10 @@ func TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreOK(t *testing.T) {
 		t.Fatal("err = nil, want create boom")
 	}
 	if status != "ok" {
-		t.Errorf(`status = %q, want "ok" (D8 had-prior-task Create-failed + ImportXML succeeded)`, status)
+		t.Errorf(`status = %q, want "ok" (prior definition restored and verified)`, status)
 	}
-	if !fake.imported {
-		t.Error("ImportXML must be invoked when priorXML != nil and Create fails")
+	if !fake.restored {
+		t.Error("create-only recovery must be invoked for a missing prior definition after Create fails")
 	}
 }
 
@@ -119,9 +123,9 @@ func TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded(t *tes
 	installSwapWeeklyHarness(t)
 	prior := []byte("<Task/>")
 	fake := &fakeSwapScheduler{
-		createErr: errors.New("create boom"),
-		importErr: errors.New("import boom"),
-		xml:       prior,
+		createErr:  errors.New("create boom"),
+		restoreErr: errors.New("restore boom"),
+		xml:        prior,
 	}
 	spec := &ScheduleSpec{Kind: ScheduleWeekly}
 	status, err := swapWeeklyTriggerWith(fake, spec, prior)
@@ -129,13 +133,15 @@ func TestSwapWeeklyTrigger_HadPriorTask_CreateFails_RestoreFails_Degraded(t *tes
 		t.Fatal("err = nil, want create boom")
 	}
 	if status != "degraded" {
-		t.Errorf(`status = %q, want "degraded" (D8 had-prior-task Create-failed + ImportXML-failed)`, status)
+		t.Errorf(`status = %q, want "degraded" (Create and create-only recovery both failed)`, status)
 	}
 }
 
 func installSwapWeeklyHarness(t *testing.T) {
 	t.Helper()
 	previousRoot := daemonStateRootOverride
-	daemonStateRootOverride = t.TempDir()
+	daemonStateRootOverride = hardenedTempDir(t)
 	t.Cleanup(func() { daemonStateRootOverride = previousRoot })
+	// The scheduler consumes a descriptor only; no Product image is executed.
+	t.Cleanup(SetTestCanonicalMcphubPath(filepath.Join(daemonStateRootOverride, mcphubShortName)))
 }
