@@ -1,0 +1,1288 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 663,
+  "status": {
+    "selected_behavior_tests": "PASS",
+    "negative_control": "EXPECTED_FAIL",
+    "build": "PASS",
+    "vet": "PASS",
+    "architecture_gate": "FAILED",
+    "publication_claimed": false,
+    "publication_note": "Prepared before publication; no new commit or publication readback is asserted.",
+    "external_exact_head_review": "PENDING",
+    "full_default_tagged_suites": "NOT_RUN",
+    "native_product_integration": "NOT_RUN",
+    "installed_product_operations": "NOT_RUN"
+  },
+  "source": {
+    "parent_commit": "c7617d1027888271a83c3b724171e1363289995e",
+    "parent_tree": "358dd1729c663cdb7fc78af24524825908fb5fbc",
+    "qualification_identity": "Exact parent Git tree plus four physically materialized, hash-bound candidate files; not an unchanged parent build.",
+    "candidate_files": [
+      {
+        "path": "internal/gui/gui_owner_lifecycle.go",
+        "change": "modified",
+        "candidate": {
+          "path": "inputs/candidate/architecture/internal/gui/gui_owner_lifecycle.go",
+          "bytes": 15291,
+          "sha256": "8cebc4cdeafd71eb556fc0b69c67ae9b2b8b9e7a541f69cea52747363bfe430c",
+          "archive": "raw-evidence.zip"
+        },
+        "parent": {
+          "bytes": 14298,
+          "sha256": "f7b13c7a944f2189c36462e7e7b899aa2b8a5f5451064bf2618419f7d2c829ce",
+          "git_blob": "00b10363ff43d2b635e4a0cddf5e22239e3b12d4"
+        },
+        "source_manifest_entry": {
+          "path": "internal/gui/gui_owner_lifecycle.go",
+          "bytes": 15291,
+          "sha256": "8cebc4cdeafd71eb556fc0b69c67ae9b2b8b9e7a541f69cea52747363bfe430c"
+        }
+      },
+      {
+        "path": "internal/gui/single_instance.go",
+        "change": "modified",
+        "candidate": {
+          "path": "inputs/candidate/architecture/internal/gui/single_instance.go",
+          "bytes": 81133,
+          "sha256": "315bae47d8d06ff00edcb2e23a2403764a4156d2bf358796f5efbe79aba7c702",
+          "archive": "raw-evidence.zip"
+        },
+        "parent": {
+          "bytes": 80908,
+          "sha256": "0e9a24a9449c836c878ddf4ac985b7a5770c064cba3251957c2c08fa2c845481",
+          "git_blob": "24720977143b25cf58678b2e11b9d9d6fe1e8102"
+        },
+        "source_manifest_entry": {
+          "path": "internal/gui/single_instance.go",
+          "bytes": 81133,
+          "sha256": "315bae47d8d06ff00edcb2e23a2403764a4156d2bf358796f5efbe79aba7c702"
+        }
+      },
+      {
+        "path": "internal/gui/gui_owner_lifecycle_test.go",
+        "change": "modified",
+        "candidate": {
+          "path": "inputs/candidate/architecture/internal/gui/gui_owner_lifecycle_test.go",
+          "bytes": 8646,
+          "sha256": "921d1ea88ae8d77aa4968b1da96f2ec87d4c431c275ae5266647ba8c7cae96ec",
+          "archive": "raw-evidence.zip"
+        },
+        "parent": {
+          "bytes": 8478,
+          "sha256": "1528e40216268ef58a37cd9f230d480d340ca9c3e29ae45727316b2e362c6fdf",
+          "git_blob": "c52bdec1cbf9e2b613bd7d08a7ac25c01feb5d5a"
+        },
+        "source_manifest_entry": {
+          "path": "internal/gui/gui_owner_lifecycle_test.go",
+          "bytes": 8646,
+          "sha256": "921d1ea88ae8d77aa4968b1da96f2ec87d4c431c275ae5266647ba8c7cae96ec"
+        }
+      },
+      {
+        "path": "internal/gui/gui_owner_policy_test.go",
+        "change": "added",
+        "candidate": {
+          "path": "inputs/candidate/architecture/internal/gui/gui_owner_policy_test.go",
+          "bytes": 10882,
+          "sha256": "ab5b8e5ed9c6f8d0d53b981ff5b8c9dce7f1aaea26a06e379902a97f3aa44f0d",
+          "archive": "raw-evidence.zip"
+        },
+        "parent": null,
+        "source_manifest_entry": {
+          "path": "internal/gui/gui_owner_policy_test.go",
+          "bytes": 10882,
+          "sha256": "ab5b8e5ed9c6f8d0d53b981ff5b8c9dce7f1aaea26a06e379902a97f3aa44f0d"
+        }
+      }
+    ],
+    "materialization_receipt": {
+      "path": "evidence/apply-architecture/receipt.json",
+      "bytes": 1913,
+      "sha256": "d44cdab7d6c142b112f51df40b4a07d98d82b8e2e9adea767586f7b7e94f9c68",
+      "archive": "raw-evidence.zip"
+    },
+    "parent_inventory": {
+      "files": 3279,
+      "bytes": 53647482,
+      "inventory_sha256": "a2b66395de7d2ac176decaa75a9707e03efe742db7ab3c3ec3c80791c4bb7b9c"
+    },
+    "candidate_inventory": {
+      "files": 3280,
+      "bytes": 53659750,
+      "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+    },
+    "source_inventory_members": [
+      "plans/architecture-owner-red.json",
+      "plans/architecture-owner-green.json"
+    ],
+    "baseline": {
+      "path": "architecture/baseline.yaml",
+      "bytes": 1435735,
+      "sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a",
+      "fingerprints": 2401,
+      "byte_identical_to_parent": true
+    },
+    "documentation_added_after_execution": [
+      "docs/modernization/verification/gui-owner-policy-20261122/README.md",
+      "docs/modernization/verification/gui-owner-policy-20261122/evidence.json",
+      "docs/modernization/verification/gui-owner-policy-20261122/raw-evidence.zip"
+    ],
+    "documentation_in_compile_or_scan_inputs": false
+  },
+  "archive": {
+    "file": "raw-evidence.zip",
+    "bytes": 1946361,
+    "sha256": "d4a7a6196cad98e658c676adbb77c4d6bf3e3cf75cee9572cffff3c8d0abeb77",
+    "payload_count": 111,
+    "zip_entry_count": 112,
+    "manifest": {
+      "member": "manifest.json",
+      "bytes": 21848,
+      "sha256": "c15aa940d02f7c52f7d0ebbb910e90e6266ebf2c7827fcbf4246e36db77750cc"
+    },
+    "all_payloads_verified": true,
+    "limits": {
+      "source": "Exact #663 parent plus four physical candidate files. Complete final source inventory checked once; root Git metadata excluded. Parent HEAD/tree do not identify composed bytes.",
+      "control": "One overlay file restores two original function bodies. Expected red is evidence of detected behavior, not a passing implementation.",
+      "qualification": "Selected tests, scan, build and vet only. Architecture verify is expected exit 1, not a passing architecture gate. Full test suite, native Scheduler/product operations and production GUI integration: NOT_RUN.",
+      "processes": "Recorded direct children settled without timeout or recovery flags. No independent descendant-tree settlement proof is claimed.",
+      "formatting": "Shared original formatting evidence contains all eight inputs; this archive additionally includes four architecture candidate files and four preimages.",
+      "scope": "Full phase logs/receipts, plans, helpers, source inventories and input bytes; no runtime, build outputs, full source copy or Git metadata. Scheduler v1/v2 is outside this export."
+    },
+    "full_source_copy_included": false
+  },
+  "qualification_phases": [
+    {
+      "phase": "architecture-owner-red",
+      "plan": {
+        "path": "plans/architecture-owner-red.json",
+        "bytes": 590562,
+        "sha256": "566860e2e51efe6a80ca425ba39f3de0e42c4f207e7558d033c5e4fb504ecca5",
+        "archive": "raw-evidence.zip"
+      },
+      "receipt": {
+        "path": "evidence/architecture-owner-red/receipt.json",
+        "bytes": 6346,
+        "sha256": "a23e03870d08579e086469a94b29b5188e8b591fd9fa32af27fab7df217b66cb",
+        "archive": "raw-evidence.zip"
+      },
+      "source_head": "c7617d1027888271a83c3b724171e1363289995e",
+      "source_tree": "358dd1729c663cdb7fc78af24524825908fb5fbc",
+      "runner_sha256": "3d691d1e2d78b3d81abc29ee64162ab04d299246da31039b7e76fc422b85108a",
+      "started_utc": "2026-11-22T17:15:21.168300+00:00",
+      "finished_utc": "2026-11-22T17:16:08.031849+00:00",
+      "completed": true,
+      "source_before": {
+        "files": 3280,
+        "bytes": 53659750,
+        "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+      },
+      "source_after": {
+        "files": 3280,
+        "bytes": 53659750,
+        "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+      },
+      "inputs_before": {
+        "files": 2,
+        "bytes": 15553,
+        "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+      },
+      "inputs_after": {
+        "files": 2,
+        "bytes": 15553,
+        "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+      },
+      "environment": {
+        "GOOS": "windows",
+        "GOARCH": "amd64",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOWORK": "off",
+        "GOTELEMETRY": "off",
+        "GOAUTH": "off",
+        "GOVCS": "*:off",
+        "GOMAXPROCS": "4",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "tool_image_sha256": {
+        "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+      },
+      "control_kind": "Original-function-body behavior reversion in candidate harness",
+      "source_identity_note": "Exact parent Git tree plus four physically materialized, hash-bound candidate files; not an unchanged parent build."
+    },
+    {
+      "phase": "architecture-owner-green",
+      "plan": {
+        "path": "plans/architecture-owner-green.json",
+        "bytes": 592972,
+        "sha256": "ca670f2d7ef94389932ad9fee3af60fc655bd55930620d6e34d85126095ff599",
+        "archive": "raw-evidence.zip"
+      },
+      "receipt": {
+        "path": "evidence/architecture-owner-green/receipt.json",
+        "bytes": 12073,
+        "sha256": "d08836805ba154389a7f73d1b5991c7553f6714c0aa0a2192923021578310e22",
+        "archive": "raw-evidence.zip"
+      },
+      "source_head": "c7617d1027888271a83c3b724171e1363289995e",
+      "source_tree": "358dd1729c663cdb7fc78af24524825908fb5fbc",
+      "runner_sha256": "3d691d1e2d78b3d81abc29ee64162ab04d299246da31039b7e76fc422b85108a",
+      "started_utc": "2026-11-22T17:16:26.193985+00:00",
+      "finished_utc": "2026-11-22T17:19:06.313799+00:00",
+      "completed": true,
+      "source_before": {
+        "files": 3280,
+        "bytes": 53659750,
+        "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+      },
+      "source_after": {
+        "files": 3280,
+        "bytes": 53659750,
+        "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+      },
+      "inputs_before": {
+        "files": 2,
+        "bytes": 15553,
+        "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+      },
+      "inputs_after": {
+        "files": 2,
+        "bytes": 15553,
+        "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+      },
+      "environment": {
+        "GOOS": "windows",
+        "GOARCH": "amd64",
+        "GOTOOLCHAIN": "local",
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOFLAGS": "-mod=readonly",
+        "GOWORK": "off",
+        "GOTELEMETRY": "off",
+        "GOAUTH": "off",
+        "GOVCS": "*:off",
+        "GOMAXPROCS": "4",
+        "MCPHUB_NO_AUTO_GUI": "1",
+        "MCPHUB_E2E_SCHEDULER": "none"
+      },
+      "tool_image_sha256": {
+        "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+        "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+      },
+      "control_kind": null,
+      "source_identity_note": "Exact parent Git tree plus four physically materialized, hash-bound candidate files; not an unchanged parent build."
+    }
+  ],
+  "commands": [
+    {
+      "label": "owner-red",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "test",
+        "-buildvcs=false",
+        "-p=2",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=120s",
+        "-parallel=1",
+        "-overlay",
+        "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\architecture-control\\overlay.json",
+        "-run",
+        "^(TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners|TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord|TestGUIOwnerPolicyHandoffRefusalPreservesRecord)$",
+        "./internal/gui"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:15:24.845499+00:00",
+      "finished_utc": "2026-11-22T17:16:03.847234+00:00",
+      "exit_code": 1,
+      "seconds": 39.00156769994646,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-red",
+      "stdout": {
+        "path": "evidence/architecture-owner-red/owner-red.stdout.log",
+        "bytes": 24643,
+        "sha256": "8e1fa1eedf76717b87f20c036026138a1957925c10970150046bc945f08ce07c",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-red/owner-red.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "terminal_events": {
+        "pass": [
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_conflict",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_conflict"
+        ],
+        "fail": [
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord",
+          "PACKAGE:mcp-local-hub/internal/gui"
+        ],
+        "skip": []
+      },
+      "counts": {
+        "pass": {
+          "named": 2,
+          "package": 0
+        },
+        "fail": {
+          "named": 17,
+          "package": 1
+        },
+        "skip": {
+          "named": 0,
+          "package": 0
+        }
+      },
+      "raw_error_messages": [
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+          "output": "    gui_owner_policy_test.go:136: resume first owner: write pidport: GUI_CONTROL_CONFLICT\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+          "output": "    gui_owner_policy_test.go:136: resume first owner: write pidport: GUI_CONTROL_CONFLICT\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=false err=write pidport: GUI_CONTROL_CONFLICT want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=GUI_STOPPED_BY_USER: run mcphub gui --resume to start the GUI\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=false err=write pidport: GUI_CONTROL_CONFLICT want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=GUI_STOPPED_BY_USER: run mcphub gui --resume to start the GUI\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+          "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+          "output": "    gui_owner_policy_test.go:284: handoff ignored settings failure: got=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+          "output": "    gui_owner_policy_test.go:286: owner record changed: got=\"{\\\"version\\\":2,\\\"state\\\":\\\"handoff\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\",\\\"handoff_id\\\":\\\"handoff\\\",\\\"handoff_generation\\\":\\\"child\\\",\\\"handoff_target_pid\\\":12345,\\\"handoff_target_port\\\":9126}\\n\" want=\"{\\\"version\\\":2,\\\"state\\\":\\\"active\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\"}\\n\" err=<nil>\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+          "output": "    gui_owner_policy_test.go:284: handoff ignored settings failure: got=<nil> want=synthetic settings failure\n"
+        },
+        {
+          "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+          "output": "    gui_owner_policy_test.go:286: owner record changed: got=\"{\\\"version\\\":2,\\\"state\\\":\\\"handoff\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\",\\\"handoff_id\\\":\\\"handoff\\\",\\\"handoff_generation\\\":\\\"child\\\",\\\"handoff_target_pid\\\":12345,\\\"handoff_target_port\\\":9126}\\n\" want=\"{\\\"version\\\":2,\\\"state\\\":\\\"active\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\"}\\n\" err=<nil>\n"
+        }
+      ]
+    },
+    {
+      "label": "owner-green",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "test",
+        "-buildvcs=false",
+        "-p=2",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=120s",
+        "-parallel=1",
+        "-run",
+        "^(TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners|TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord|TestGUIOwnerPolicyHandoffRefusalPreservesRecord)$",
+        "./internal/gui"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:16:29.959325+00:00",
+      "finished_utc": "2026-11-22T17:16:45.608427+00:00",
+      "exit_code": 0,
+      "seconds": 15.648854900035076,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/owner-green.stdout.log",
+        "bytes": 18563,
+        "sha256": "f7755d4f1416782cd6cee6627f366f1bf809528f7a10c10b9f11cf5ef91e7a2e",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/owner-green.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "terminal_events": {
+        "pass": [
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+          "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_conflict",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_conflict",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation",
+          "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+          "TestGUIOwnerPolicyHandoffRefusalPreservesRecord",
+          "PACKAGE:mcp-local-hub/internal/gui"
+        ],
+        "fail": [],
+        "skip": []
+      },
+      "counts": {
+        "pass": {
+          "named": 19,
+          "package": 1
+        },
+        "fail": {
+          "named": 0,
+          "package": 0
+        },
+        "skip": {
+          "named": 0,
+          "package": 0
+        }
+      },
+      "raw_error_messages": []
+    },
+    {
+      "label": "owner-adjacent",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "test",
+        "-buildvcs=false",
+        "-p=2",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=120s",
+        "-parallel=1",
+        "-run",
+        "^(TestGUIProvisionalLeaseExcludesAbsentQuit|TestGUIStoppedBootstrapDoesNotPublishAndExplicitResumeIsConditional|TestGUIOwnerRecord_ReadsLegacyButNewAcquireWritesV2|TestGUIOwnerLifecycle_CASNeverOverwritesSuccessor|TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure|TestGUIOwnerLifecycle_HandoffRollbackAndTerminalSettlement|TestGUIOwnerRecordReservationEndpointRejectsUnsettledVariants)$",
+        "./internal/gui"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:16:45.609898+00:00",
+      "finished_utc": "2026-11-22T17:16:52.140878+00:00",
+      "exit_code": 0,
+      "seconds": 6.53075179993175,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/owner-adjacent.stdout.log",
+        "bytes": 6758,
+        "sha256": "1805384ac3ff960c91db9f2e7a485e5eddbc48afd42077f8b73e50256f5a285d",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/owner-adjacent.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "terminal_events": {
+        "pass": [
+          "TestGUIProvisionalLeaseExcludesAbsentQuit",
+          "TestGUIStoppedBootstrapDoesNotPublishAndExplicitResumeIsConditional",
+          "TestGUIOwnerRecord_ReadsLegacyButNewAcquireWritesV2",
+          "TestGUIOwnerLifecycle_CASNeverOverwritesSuccessor",
+          "TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure",
+          "TestGUIOwnerLifecycle_HandoffRollbackAndTerminalSettlement",
+          "TestGUIOwnerRecordReservationEndpointRejectsUnsettledVariants",
+          "PACKAGE:mcp-local-hub/internal/gui"
+        ],
+        "fail": [],
+        "skip": []
+      },
+      "counts": {
+        "pass": {
+          "named": 7,
+          "package": 1
+        },
+        "fail": {
+          "named": 0,
+          "package": 0
+        },
+        "skip": {
+          "named": 0,
+          "package": 0
+        }
+      },
+      "raw_error_messages": []
+    },
+    {
+      "label": "arch-scan",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "run",
+        "./tools/archcheck",
+        "scan",
+        "--root",
+        ".",
+        "--policy",
+        "architecture/policy.yaml"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:16:52.142256+00:00",
+      "finished_utc": "2026-11-22T17:17:34.762158+00:00",
+      "exit_code": 0,
+      "seconds": 42.619841600069776,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/arch-scan.stdout.log",
+        "bytes": 1202617,
+        "sha256": "2c69b7528acfcd7380825479108b617f5706864c2d0ecbed2ba28786be45ccb6",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/arch-scan.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      }
+    },
+    {
+      "label": "arch-verify",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "run",
+        "./tools/archcheck",
+        "verify",
+        "--root",
+        ".",
+        "--policy",
+        "architecture/policy.yaml",
+        "--owners",
+        "architecture/owners.yaml",
+        "--baseline",
+        "architecture/baseline.yaml",
+        "--workers",
+        "architecture/workers.yaml"
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:17:34.766825+00:00",
+      "finished_utc": "2026-11-22T17:18:18.999559+00:00",
+      "exit_code": 1,
+      "seconds": 44.23267639998812,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/arch-verify.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/arch-verify.stderr.log",
+        "bytes": 99,
+        "sha256": "ab4ff346da8e4abf58b9f91f9fbe46d73f20ed8e1d1f3ea822efd861d784b5d3",
+        "archive": "raw-evidence.zip"
+      }
+    },
+    {
+      "label": "build",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "build",
+        "./..."
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:18:19.000715+00:00",
+      "finished_utc": "2026-11-22T17:18:38.661253+00:00",
+      "exit_code": 0,
+      "seconds": 19.660385299939662,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/build.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/build.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      }
+    },
+    {
+      "label": "vet",
+      "argv": [
+        "C:\\msys64\\ucrt64\\bin\\go.exe",
+        "vet",
+        "./..."
+      ],
+      "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\architecture",
+      "started_utc": "2026-11-22T17:18:38.662246+00:00",
+      "finished_utc": "2026-11-22T17:19:02.303895+00:00",
+      "exit_code": 0,
+      "seconds": 23.641517600044608,
+      "settled": true,
+      "timed_out": false,
+      "oracle_pass": true,
+      "direct_timeout_seconds": 360,
+      "whole_process_tree_deadline_enforced": false,
+      "phase": "architecture-owner-green",
+      "stdout": {
+        "path": "evidence/architecture-owner-green/vet.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      },
+      "stderr": {
+        "path": "evidence/architecture-owner-green/vet.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "archive": "raw-evidence.zip"
+      }
+    }
+  ],
+  "formatting": {
+    "receipt": {
+      "path": "evidence/format-inputs/receipt.json",
+      "bytes": 6721,
+      "sha256": "3a31eda5e91193c3107b2efd30205205f8cf3853657c93bb0fd078aa8bab64dd",
+      "archive": "raw-evidence.zip"
+    },
+    "completed": true,
+    "commands": [
+      {
+        "label": "gofmt-write",
+        "argv": [
+          "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "-w",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_lifecycle.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\single_instance.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_lifecycle_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_policy_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_mgmt.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_snapshot_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_recovery_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_recovery_errors_test.go"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f",
+        "started_utc": "2026-11-22T17:09:11.840299+00:00",
+        "settled": true,
+        "timed_out": false,
+        "whole_process_tree_deadline_enforced": false,
+        "pid": 58028,
+        "exit_code": 0,
+        "finished_utc": "2026-11-22T17:09:11.871578+00:00",
+        "seconds": 0.031016099965199828,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "label": "gofmt-check",
+        "argv": [
+          "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "-l",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_lifecycle.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\single_instance.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_lifecycle_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\architecture\\internal\\gui\\gui_owner_policy_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_mgmt.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_snapshot_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_recovery_test.go",
+          "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f\\inputs\\candidate\\scheduler\\internal\\api\\scheduler_upgrade_recovery_errors_test.go"
+        ],
+        "cwd": "D:\\dev\\ChatGPT\\mcp-p0-owners-20261122-e51f",
+        "started_utc": "2026-11-22T17:09:11.911146+00:00",
+        "direct_timeout_seconds": 60,
+        "settled": true,
+        "timed_out": false,
+        "whole_process_tree_deadline_enforced": false,
+        "pid": 26644,
+        "exit_code": 0,
+        "seconds": 0.029154699994251132,
+        "finished_utc": "2026-11-22T17:09:11.940636+00:00",
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "oracle_pass": true
+      }
+    ],
+    "scope": "Original shared formatting receipt covered eight files. Only the four architecture candidates in source.candidate_files define this report; Scheduler v2 is outside this archive.",
+    "gui_candidate_bytes_unchanged_by_formatter": true,
+    "source_preformat_members": [
+      "inputs/preformat/architecture/internal/gui/gui_owner_lifecycle.go",
+      "inputs/preformat/architecture/internal/gui/single_instance.go",
+      "inputs/preformat/architecture/internal/gui/gui_owner_lifecycle_test.go",
+      "inputs/preformat/architecture/internal/gui/gui_owner_policy_test.go"
+    ]
+  },
+  "negative_control": {
+    "kind": "Original-function-body behavior reversion in candidate harness",
+    "source_overlay": {
+      "path": "inputs/architecture-control/internal/gui/gui_owner_lifecycle.go",
+      "bytes": 15307,
+      "sha256": "53e5d5ce4ead039bffb0b1f1a14ee8c764d8f3b548836a6281f27c8ae67f1b75",
+      "archive": "raw-evidence.zip"
+    },
+    "overlay_manifest": {
+      "path": "inputs/architecture-control/overlay.json",
+      "bytes": 246,
+      "sha256": "fe9860ce1cc105bdf5962a8f2bd624345e38d07811ad8c73ca97876ab6bc8499",
+      "archive": "raw-evidence.zip"
+    },
+    "exact_original_function_bodies": [
+      {
+        "function": "writeCurrentGUIOwnerRecord",
+        "parent_body_sha256": "0cb9b57fe53aab69226bd357408ba9ad35f8d1323e227b6215facea43f29606b",
+        "control_body_sha256": "0cb9b57fe53aab69226bd357408ba9ad35f8d1323e227b6215facea43f29606b",
+        "exact_body_match": true
+      },
+      {
+        "function": "GUIOwnerLifecycle.BeginHandoff",
+        "parent_body_sha256": "7cc9607de05eb296a86cf51d4e9d718b2cbb09087cf015936db62e78870c538a",
+        "control_body_sha256": "7cc9607de05eb296a86cf51d4e9d718b2cbb09087cf015936db62e78870c538a",
+        "exact_body_match": true
+      }
+    ],
+    "unchanged_original_repository_execution": false,
+    "semantic_limits": [
+      "Independent-owner control leaves fail during ResumeGUIOwner with GUI_CONTROL_CONFLICT; their later handoff assertions are not reached in red.",
+      "The two resume_release control leaves also stop early with GUI_CONTROL_CONFLICT and no lease; they do not reach the injected release-error behavior.",
+      "The policy_read, stopped, and policy_release control leaves expose successful acquisition contrary to the fake policy.",
+      "Handoff refusal control leaves ignore the fake settings failure and change the durable active record.",
+      "The two resume_conflict leaves still pass. Parent test/group/package failures are not separate leaf scenarios."
+    ],
+    "all_control_state_is_fixture_owned": true
+  },
+  "architecture": {
+    "prior_result": {
+      "commit": "c7617d1027888271a83c3b724171e1363289995e",
+      "path": "docs/modernization/verification/lsp-router-owner-20261122/results.json",
+      "sha256": "d74f7b9e0ae7d73ec6d36a8f395e653294ffc17c2754cc600b88f1c0d306148f",
+      "gate": {
+        "status": "FAILED",
+        "exit_code": 1,
+        "new": 388,
+        "stale": 128,
+        "grown": 42,
+        "workers_in_new": 72,
+        "expired": 0,
+        "unowned": 0
+      }
+    },
+    "physical_delta_source_sha256": "2a9847301f6b2310d02ad99ea96cfc41cd4ee4ae98d4ce6b3f15bf015c951cbe",
+    "physical_delta": {
+      "before_findings": 2661,
+      "after_findings": 2660,
+      "removed": [
+        {
+          "fingerprint": "67fadbcd883d0d924e4dbfe27eed665f93a43324c34b6157193f1e3e4f27a946",
+          "kind": "api_construction",
+          "location": {
+            "path": "internal/gui/gui_owner_lifecycle.go",
+            "symbol": "*GUIOwnerLifecycle.BeginHandoff",
+            "line": 269
+          },
+          "evidence": "mcp-local-hub/internal/api.NewAPI",
+          "metric": 1,
+          "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+        },
+        {
+          "fingerprint": "aeeedf971877511aba0b3bd41dea8eb6024712e9cb0f8efa331a2c9305036b74",
+          "kind": "api_construction",
+          "location": {
+            "path": "internal/gui/gui_owner_lifecycle.go",
+            "symbol": "writeCurrentGUIOwnerRecord",
+            "line": 208
+          },
+          "evidence": "mcp-local-hub/internal/api.NewAPI",
+          "metric": 2,
+          "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+        }
+      ],
+      "added": [
+        {
+          "fingerprint": "b693fc8452c746e74f01a7cff7e5d76c6835cf717dfe40edd3d6abde6c46188b",
+          "kind": "api_construction",
+          "location": {
+            "path": "internal/gui/gui_owner_lifecycle.go",
+            "symbol": "newGUIOwnerLifecycle",
+            "line": 82
+          },
+          "evidence": "mcp-local-hub/internal/api.NewAPI",
+          "metric": 1,
+          "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+        }
+      ],
+      "changed_metrics": [
+        {
+          "before": {
+            "fingerprint": "be483bb14f320d01d6a287f7ccddb625f56a873f333889b5a4524c55616e0c19",
+            "kind": "file_budget",
+            "location": {
+              "path": "internal/gui/single_instance.go",
+              "symbol": "gui",
+              "line": 1
+            },
+            "evidence": "production_hard_lines",
+            "metric": 1845,
+            "message": "file has 1845 lines and exceeds production_hard_lines"
+          },
+          "after": {
+            "fingerprint": "be483bb14f320d01d6a287f7ccddb625f56a873f333889b5a4524c55616e0c19",
+            "kind": "file_budget",
+            "location": {
+              "path": "internal/gui/single_instance.go",
+              "symbol": "gui",
+              "line": 1
+            },
+            "evidence": "production_hard_lines",
+            "metric": 1849,
+            "message": "file has 1849 lines and exceeds production_hard_lines"
+          }
+        }
+      ],
+      "before_summary": {
+        "api_construction": 153,
+        "embedded_document": 2,
+        "file_budget": 101,
+        "history_comment": 1053,
+        "import": 39,
+        "mutable_global": 1078,
+        "production_constructor": 2,
+        "production_test_hook": 73,
+        "worker": 160
+      },
+      "after_summary": {
+        "api_construction": 152,
+        "embedded_document": 2,
+        "file_budget": 101,
+        "history_comment": 1053,
+        "import": 39,
+        "mutable_global": 1078,
+        "production_constructor": 2,
+        "production_test_hook": 73,
+        "worker": 160
+      },
+      "baseline_unchanged": true,
+      "baseline_sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a",
+      "baseline_fingerprints": 2401,
+      "gate_stderr": "architecture verification: expired=0 grown=42 new=387 stale=128 unowned=0 workers=72\nexit status 1\n"
+    },
+    "gate": {
+      "expired": 0,
+      "grown": 42,
+      "new": 387,
+      "stale": 128,
+      "unowned": 0,
+      "workers_in_new": 72,
+      "status": "FAILED",
+      "exit_code": 1,
+      "raw_stderr": "architecture verification: expired=0 grown=42 new=387 stale=128 unowned=0 workers=72\nexit status 1\n",
+      "runner_oracle_matches_expected_failure": true
+    },
+    "compatibility_constructor_remaining": true,
+    "blanket_baseline_prune_performed": false,
+    "removed_fingerprints_were_not_accepted_baseline_entries": true
+  },
+  "independent_archive_verification": {
+    "source_report_sha256": "950ccfe7c9355100aa361607338b7274477dd1df8c0a2bd436926fe14d5538d6",
+    "all_payloads_verified": true,
+    "raw_terminal_multisets_exact": true,
+    "phase_inventories": [
+      {
+        "phase": "architecture-owner-red",
+        "manifest_sha256": "566860e2e51efe6a80ca425ba39f3de0e42c4f207e7558d033c5e4fb504ecca5",
+        "source_inventory": {
+          "files": 3280,
+          "bytes": 53659750,
+          "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+        },
+        "input_inventory": {
+          "files": 2,
+          "bytes": 15553,
+          "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+        }
+      },
+      {
+        "phase": "architecture-owner-green",
+        "manifest_sha256": "ca670f2d7ef94389932ad9fee3af60fc655bd55930620d6e34d85126095ff599",
+        "source_inventory": {
+          "files": 3280,
+          "bytes": 53659750,
+          "inventory_sha256": "b5acc80f5519b0ee3553dd20ec83dd35580574810ac49cfc6d181d7016aedf77"
+        },
+        "input_inventory": {
+          "files": 2,
+          "bytes": 15553,
+          "inventory_sha256": "70477b8acacbb3be3c0990f07cf3f1627d283f5f924acd73170f26920574420c"
+        }
+      }
+    ],
+    "command_summaries": [
+      {
+        "phase": "architecture-owner-red",
+        "command": "owner-red",
+        "exit_code": 1,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 39.00156769994646,
+        "stdout_sha256": "8e1fa1eedf76717b87f20c036026138a1957925c10970150046bc945f08ce07c",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "terminal_events": {
+          "pass": [
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_conflict",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_conflict"
+          ],
+          "fail": [
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord",
+            "PACKAGE:mcp-local-hub/internal/gui"
+          ],
+          "skip": []
+        },
+        "counts": {
+          "pass": {
+            "named": 2,
+            "package": 0
+          },
+          "fail": {
+            "named": 17,
+            "package": 1
+          },
+          "skip": {
+            "named": 0,
+            "package": 0
+          }
+        },
+        "raw_error_messages": [
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+            "output": "    gui_owner_policy_test.go:136: resume first owner: write pidport: GUI_CONTROL_CONFLICT\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+            "output": "    gui_owner_policy_test.go:136: resume first owner: write pidport: GUI_CONTROL_CONFLICT\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=false err=write pidport: GUI_CONTROL_CONFLICT want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=GUI_STOPPED_BY_USER: run mcphub gui --resume to start the GUI\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=false err=write pidport: GUI_CONTROL_CONFLICT want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=GUI_STOPPED_BY_USER: run mcphub gui --resume to start the GUI\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+            "output": "    gui_owner_policy_test.go:239: failed settings operation published an owner: lease=true err=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+            "output": "    gui_owner_policy_test.go:284: handoff ignored settings failure: got=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+            "output": "    gui_owner_policy_test.go:286: owner record changed: got=\"{\\\"version\\\":2,\\\"state\\\":\\\"handoff\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\",\\\"handoff_id\\\":\\\"handoff\\\",\\\"handoff_generation\\\":\\\"child\\\",\\\"handoff_target_pid\\\":12345,\\\"handoff_target_port\\\":9126}\\n\" want=\"{\\\"version\\\":2,\\\"state\\\":\\\"active\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\"}\\n\" err=<nil>\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+            "output": "    gui_owner_policy_test.go:284: handoff ignored settings failure: got=<nil> want=synthetic settings failure\n"
+          },
+          {
+            "test": "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+            "output": "    gui_owner_policy_test.go:286: owner record changed: got=\"{\\\"version\\\":2,\\\"state\\\":\\\"handoff\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\",\\\"handoff_id\\\":\\\"handoff\\\",\\\"handoff_generation\\\":\\\"child\\\",\\\"handoff_target_pid\\\":12345,\\\"handoff_target_port\\\":9126}\\n\" want=\"{\\\"version\\\":2,\\\"state\\\":\\\"active\\\",\\\"pid\\\":14228,\\\"start_time\\\":\\\"2026-11-22T17:15:59.9445432Z\\\",\\\"port\\\":9125,\\\"generation\\\":\\\"a834eed93137433141c959ecdbd2124ba6ddbb614ae0c2aeb2c2186f0cb55cd0\\\"}\\n\" err=<nil>\n"
+          }
+        ]
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "owner-green",
+        "exit_code": 0,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 15.648854900035076,
+        "stdout_sha256": "f7755d4f1416782cd6cee6627f366f1bf809528f7a10c10b9f11cf5ef91e7a2e",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "terminal_events": {
+          "pass": [
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/legacy",
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners/reservation",
+            "TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_conflict",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_read",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/stopped",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/policy_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_conflict",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/resume_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_read",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/stopped",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation/policy_release",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/reservation",
+            "TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_read",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord/policy_release",
+            "TestGUIOwnerPolicyHandoffRefusalPreservesRecord",
+            "PACKAGE:mcp-local-hub/internal/gui"
+          ],
+          "fail": [],
+          "skip": []
+        },
+        "counts": {
+          "pass": {
+            "named": 19,
+            "package": 1
+          },
+          "fail": {
+            "named": 0,
+            "package": 0
+          },
+          "skip": {
+            "named": 0,
+            "package": 0
+          }
+        },
+        "raw_error_messages": []
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "owner-adjacent",
+        "exit_code": 0,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 6.53075179993175,
+        "stdout_sha256": "1805384ac3ff960c91db9f2e7a485e5eddbc48afd42077f8b73e50256f5a285d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "terminal_events": {
+          "pass": [
+            "TestGUIProvisionalLeaseExcludesAbsentQuit",
+            "TestGUIStoppedBootstrapDoesNotPublishAndExplicitResumeIsConditional",
+            "TestGUIOwnerRecord_ReadsLegacyButNewAcquireWritesV2",
+            "TestGUIOwnerLifecycle_CASNeverOverwritesSuccessor",
+            "TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure",
+            "TestGUIOwnerLifecycle_HandoffRollbackAndTerminalSettlement",
+            "TestGUIOwnerRecordReservationEndpointRejectsUnsettledVariants",
+            "PACKAGE:mcp-local-hub/internal/gui"
+          ],
+          "fail": [],
+          "skip": []
+        },
+        "counts": {
+          "pass": {
+            "named": 7,
+            "package": 1
+          },
+          "fail": {
+            "named": 0,
+            "package": 0
+          },
+          "skip": {
+            "named": 0,
+            "package": 0
+          }
+        },
+        "raw_error_messages": []
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "arch-scan",
+        "exit_code": 0,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 42.619841600069776,
+        "stdout_sha256": "2c69b7528acfcd7380825479108b617f5706864c2d0ecbed2ba28786be45ccb6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "arch-verify",
+        "exit_code": 1,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 44.23267639998812,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ab4ff346da8e4abf58b9f91f9fbe46d73f20ed8e1d1f3ea822efd861d784b5d3"
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "build",
+        "exit_code": 0,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 19.660385299939662,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "phase": "architecture-owner-green",
+        "command": "vet",
+        "exit_code": 0,
+        "settled": true,
+        "timed_out": false,
+        "seconds": 23.641517600044608,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "additional_checks": {
+      "whole_process_tree_settlement_claimed": false,
+      "reviewed_local_plans_bound": true,
+      "recorded_tools_and_environment_verified": true,
+      "historical_failed_phase": null,
+      "full_go_tests_executed": false,
+      "native_scheduler_executed": false,
+      "installed_product_executed": false
+    }
+  },
+  "source_reviews": [
+    {
+      "kind": "implementation_owner",
+      "source_path_at_authoring": "architecture/review.md",
+      "bytes": 16229,
+      "sha256": "f94934afccc057048de9e1e08b2d40ef469e18f6c5c7ffe9df7241d0d286a13f",
+      "status": "COMPLETED_SOURCE_REVIEW",
+      "qualification_scope": "Historical source-only review, before runtime receipts; later execution is recorded separately.",
+      "content_utf8": "# GUI owner policy binding — source review\n\n## Contents\n\n1. [Scope and status](#scope-and-status)\n2. [Producer and consumer trace](#producer-and-consumer-trace)\n3. [Correction and compatibility](#correction-and-compatibility)\n4. [Invariants and regression plan](#invariants-and-regression-plan)\n5. [Original-body negative control](#original-body-negative-control)\n6. [Own review and residual work](#own-review-and-residual-work)\n\n## Scope and status\n\nThe source input is pull request (PR) #663 at\n`c7617d1027888271a83c3b724171e1363289995e`; the stated master input is\n`75dbc6406123e22468f168b861d5e0622c9d5769`. The isolated editable source is\n`architecture/source` under this evidence directory. The repository objects\nwere used read-only for original-source comparisons.\n\nThe canonical instructions read were `metadata/AGENTS.md`, followed by the\nrelevant PR verification, graphical user interface (GUI), supervisor state,\nand managed-upgrade sections of `metadata/agent-runbook.md`. The latter was\nprovided from the current instructions branch because it is absent from the\n#663 tree. Applied skills: Architecture Review, Ponytail, and Go Testing and\nVerification.\n\n**This is a source-only review.** No Go compiler, formatter, test binary,\nnative Product, remote execution, external reviewer, installation, workflow\ndispatch, or Git publication was run by this implementation agent. The parent\nagent owns qualified execution, physical architecture scans, and any separately\nauthorized publication. Test results below are expected oracles, not receipts.\n\nTable 1. Changed source inventory.\n\n| Path | Change |\n| --- | --- |\n| `internal/gui/gui_owner_lifecycle.go` | Narrow retained policy dependency, one compatibility construction, exact-record binding after successful publication, and policy use during handoff. |\n| `internal/gui/single_instance.go` | Carry the optional policy through both acquisition branches; return the same acquisition-bound lifecycle; preserve standalone write defaults. |\n| `internal/gui/gui_owner_lifecycle_test.go` | Adapt two existing direct fixtures to explicit policy arguments; guarantee release of the fixture lock on early failures in the bound-lifecycle regression. |\n| `internal/gui/gui_owner_policy_test.go` | Three semantic regressions, 14 leaf subtests, sealed filesystem fixtures, and policy-return fault injection. |\n\nNo architecture policy, baseline, worker registry, GUI Server, command-line\ninterface (CLI), application programming interface (API) implementation,\nfrontend, or dependency files were edited.\n\n## Producer and consumer trace\n\n1. The ordinary command in `internal/cli/gui.go` optionally captures the\n   complete resume-policy preimage, then calls `acquireSingleInstanceWithHandoff`.\n   That reaches `gui.AcquireSingleInstanceAt` before the ordinary Server is\n   constructed. It is therefore incorrect to require `Server.api` for owner\n   publication.\n2. The ordinary legacy path takes the adjacent `.lock` file through\n   `tryAcquireSingleInstanceLockAt`. The reservation-aware path takes the same\n   file lock, validates the handoff marker and deadline, and admits only the\n   designated child while a reservation is open. Rejected marker/reservation\n   observations return through the existing tentative-lease release paths.\n3. Only after acquisition and any reservation checks does either path create\n   `GUIOwnerLifecycle`, binding its `GUIOwnerPolicy` once. With an explicit\n   resume, `ResumeGUIOwner` must complete, including its settings-lock release.\n   `WithGUIOwnerControl` then validates automatic start and must also complete\n   its release before any active GUI-owner record is written.\n4. `internal/api/gui_owner_control.go` delegates these operations to the\n   existing settings transaction in `internal/api/settings.go`.\n   `mutateSettingsMapLockedThen` owns the in-process mutex plus the settings\n   file lock. Its deferred `releaseAndJoinApplied` preserves release failures,\n   including an already-applied resume. The caller therefore must test the\n   returned error, not only successful callback execution or `Applied`.\n5. `currentGUIOwnerRecord` reads the current process generation; the\n   hardened state writer publishes the version-two record. `publishCurrent`\n   binds that exact successful record to the lifecycle without a second read.\n   A failed resume, settings read, policy decision, release, identity read, or\n   durable write never exposes the new lifecycle to the caller.\n6. `SingleInstanceLock.OwnerLifecycle` carries that object through\n   `releaseOnceLease` and `ownerLifecycleFromLease`. Ordinary\n   `startGuiServerWithStartup` obtains it before constructing the Server.\n   The ready path updates its bound port; deferred shutdown terminally settles\n   its generation before releasing the GUI lease.\n7. The structured restart-child branch is different from ordinary startup:\n   `runRestartV3ChildStartup` creates a Server and binds an authenticated standby\n   listener before the child acquires the GUI lease. The child still obtains\n   the durable owner exclusively through `SpawnedGUIChild.AcquireSingleInstanceAt`,\n   then passes the acquisition-bound lifecycle into runtime startup. The\n   corrected policy binding does not depend on that Server existing either.\n8. `buildRestartV3ParentDependencies` obtains `OwnerLifecycle` from the lease.\n   `RestartCoordinator` reserves its child, then invokes `BeginHandoff` before\n   releasing the parent lease. `BeginHandoff` first checks the same process ID\n   (PID), creation time, generation, and active state; only then does it query\n   the retained policy and write the handoff record. Its policy dependency is\n   no longer reconstructed inside the transition.\n9. `KillRecordedHolder` eventually reacquires through `AcquireSingleInstanceAt`\n   after its existing native settlement protocol. That producer receives the\n   same default owner binding. No native kill or takeover code was changed or\n   exercised by these new tests.\n\n`AcquireSingleInstanceLockOnlyAt`, absent-owner handling, compare-and-swap\ngeneration checks, rollback, terminal settlement, and reservation validation\nremain with their existing owners. The correction introduces no process or\nsettings ownership outside this chain.\n\n## Correction and compatibility\n\n`GUIOwnerPolicy` has only the two settings operations already used by this\nlifecycle. `SingleInstanceAcquireOptions.OwnerPolicy` allows a composition to\nsupply that authority. The chosen reference is held in the lifecycle, so\nchanging the caller's later composition cannot silently redirect a transition.\nThe dependency's policy observations remain fresh; its binding is retained,\nnot its settings values.\n\nFor existing callers that supply no policy, `newGUIOwnerLifecycle` creates one\nAPI handle. This default is used by ordinary acquisition, reservation-aware\nacquisition, `NewGUIOwnerLifecycle`, and `WritePidport`. `NewAPI` itself starts\nno background resource according to the inspected `internal/api/api.go`;\nthese policy methods operate on the existing canonical settings store. The\nchange therefore claims explicit dependency lifetime and testability, not a\nproved production resource leak in the old code.\n\nPublic function signatures, no-option acquisition, conditional resume, error\nclassification, handoff-reservation behavior, legacy record reading, and the\ndurable record format remain compatible. The private legacy acquisition helper\nnow accepts the existing options type so it can retain the policy as well as\nthe resume preimage. All inspected composite options literals are keyed.\n\n`publishCurrent` is responsible for the write-to-binding boundary: it records\nidentity only after the durable write succeeds and prevents the two acquisition\nbranches from duplicating that state transfer. It is used before a newly\ncreated lifecycle is exposed and adds no post-publication file read.\n\nThe default `api.NewAPI()` call is still outside `internal/app`. This is an\nexplicit compatibility construction at an owner-creation boundary, not a claim\nthat the repository has completed composition-root migration. No global\nfactory, production test hook, new service layer, or alternate settings store\nwas added.\n\n## Invariants and regression plan\n\nTable 2. New semantic oracles.\n\n| Top-level test | Leaf subtests | Observable property |\n| --- | --- | --- |\n| `TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners` | `legacy`, `reservation` | An explicit resume clears only the first injected policy's stop attribution and preserves its autorun preference. Both owners publish version-two records. A later stop in A refuses A's handoff without changing its record; B independently writes a handoff with its original process generation. Publication remains outside both policy-return boundaries while the original GUI lease stays held. |\n| `TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord` | Each of `legacy`, `reservation`, with `resume_conflict`, `resume_release`, `policy_read`, `stopped`, `policy_release` | Refusal preserves the prior tombstone byte for byte, returns the specific error, exposes no owner, and releases the tentative GUI lease. An applied resume followed by release failure still refuses publication; no later admission runs after a resume error. |\n| `TestGUIOwnerPolicyHandoffRefusalPreservesRecord` | `policy_read`, `policy_release` | A failure before or after the policy callback preserves the active record byte for byte and keeps the original owner lease. |\n\nThe green run has **3 top-level tests, 14 leaves, and 2 intermediate route\nsubtests: 19 test/subtest terminal events plus one package terminal event**.\nThere must be no skipped or missing required terminals. A focused selector is:\n\n```text\n^TestGUIOwnerPolicy(AcquisitionKeepsIndependentOwners|AcquisitionRefusalPreservesRecord|HandoffRefusalPreservesRecord)$\n```\n\nRelevant existing regressions include all seven roots in\n`gui_owner_lifecycle_test.go`, first/second single-instance acquisition,\n`TestWritePidport_WritesBothPidAndPort`, and the reservation-gate regressions.\nTheir exact runnable set must be separately admitted by the qualification\nowner; selecting the entire GUI package can reach native subprocess tests.\n\n### Fixture and assertion boundaries\n\n- Each new test explicitly seals `LOCALAPPDATA` to `apitest.HardenedTempDir`,\n  including the canonical API fallback reached by the negative control.\n  Normal GUI `TestMain` additionally redirects state and client paths.\n- The two independent policies are injected fixtures. They demonstrate\n  per-owner dependency binding; they do not imply separate persisted settings\n  stores for default production owners.\n- Real file locks and owner records exist only inside fixture directories.\n  The only native process observation is the executing test process's own\n  identity. Synthetic prior PID 42 and target child PIDs are record data only;\n  the tests neither probe nor signal those processes.\n- `processIDWindows` and its command-line query close their query handles;\n  `currentGUIOwnerRecord` does not request the separate retained-process probe.\n- Settings-release failures are modeled at the interface's synchronous return\n  boundary; they are not native operating-system unlock-failure qualification.\n  Real GUI lease ownership and durable-file ordering are observed at that\n  boundary.\n- Callback assertions use nonfatal errors, permitting acquisition to return\n  and release its tentative lease on an observed regression. Successful or\n  unexpectedly returned leases immediately register terminal settlement and\n  `ReleaseErr` cleanup before temporary-directory removal.\n- There are no new goroutines, timers, native listeners, subprocess launches,\n  process termination, scheduler mutation, or parallel tests. The reservation\n  branch uses the existing deterministic clock and marker-reader fixtures.\n\n## Original-body negative control\n\nUse a separate candidate copy. Keep the candidate types, signatures,\nacquisition plumbing, and all test files. Restore the **exact original body\nbytes** from `c7617d1027888271a83c3b724171e1363289995e` for:\n\n1. `writeCurrentGUIOwnerRecord`;\n2. `(*GUIOwnerLifecycle).BeginHandoff`.\n\nThe first signature retains its new `policy` parameter, which the restored\nbody legitimately ignores. Go permits unused parameters. No test oracle or\nfixture is changed. The complete behavior-reversion diff is equivalent to:\n\n```diff\n-        if _, err := policy.ResumeGUIOwner(*resume[0]); err != nil {\n+        if _, err := api.NewAPI().ResumeGUIOwner(*resume[0]); err != nil {\n-    if err := policy.WithGUIOwnerControl(func(control api.GUIOwnerControl) error {\n+    if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {\n-    if err := l.policy.WithGUIOwnerControl(func(control api.GUIOwnerControl) error {\n+    if err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {\n```\n\nThe bodies become byte-identical to the originals; the surrounding program is\nthe candidate harness. Label this **original-body behavior reversion**, not an\nexecution of the unchanged original repository. A build failure would not\nestablish the intended semantic negative result.\n\nWith both bodies restored, the predicted terminal set is:\n\n- **PASS:** only\n  `TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord/legacy/resume_conflict`\n  and its `reservation/resume_conflict` counterpart. The canonical running\n  policy independently rejects those stopped preimages.\n- **FAIL:** every other leaf; both intermediate route groups; all three\n  top-level tests. Expected total: **17 FAIL and 2 PASS test/subtest terminals,\n  plus package FAIL**.\n\nIndependent-owner tests fail because the real fallback cannot perform the\nfixture's stopped-to-running resume. The other admission refusal leaves either\npublish an owner despite the injected failure or return the wrong resume\nerror. Handoff failure leaves ignore the injected failure and mutate the\nactive record. The canonical fallback is sealed to test state throughout.\n\nCompile and run both the candidate and this control through the parent-owned\nqualified runner. This implementation agent has not executed either. Restore\nand verify candidate bytes before any green rerun or publication.\n\n## Own review and residual work\n\nOwn full-diff review checked requirements, compatibility, lock ordering,\nerror propagation, generation binding, callback timing, source scope, and\ncleanup. Every changed helper call was searched across the source. No\noutstanding source defect was identified by this review; compilation and\nexecution remain unverified here.\n\nAn adjacent test-fixture defect was confirmed during qualification review:\n`TestAcquireSingleInstance_BoundLifecycleAvoidsPostPublishOpenFailure` could\ncall `t.Fatal` after acquiring its fixture flock but before explicit release.\nAn immediate idempotent `t.Cleanup` with `ReleaseErr` now closes that failure\npath. The original successful settlement assertions remain.\n\nThe prior triage lists these two GUI-owner findings as **New**, not accepted\nbaseline entries:\n\n| Original symbol | Fingerprint | Original calls |\n| --- | --- | --- |\n| `*GUIOwnerLifecycle.BeginHandoff` | `67fadbcd883d0d924e4dbfe27eed665f93a43324c34b6157193f1e3e4f27a946` | 1 |\n| `writeCurrentGUIOwnerRecord` | `aeeedf971877511aba0b3bd41dea8eb6024712e9cb0f8efa331a2c9305036b74` | 2 |\n\nThe candidate removes those transition-site constructions and introduces one\nowner-constructor site in `newGUIOwnerLifecycle`. The physical scan must\nestablish its actual fingerprint and the before/after deltas. **There is no\nbaseline-edit candidate unless that scan proves an accepted block disappeared.**\nThe implementation left `architecture/baseline.yaml` untouched.\n\nResiduals: the compatibility constructor remains outside the future\ncomposition root; full build/vet/test and tagged gates require fresh receipts;\nexact-head external review remains separately gated; native GUI restart,\ninstalled-state behavior, and release Product qualification were not exercised.\nThe wider architecture gate and its previously reported New/Stale/Grown/worker\ndebt must be recomputed by the parent. This slice establishes no global gate\npass, native lifecycle qualification, or merge permission.\n"
+    },
+    {
+      "kind": "independent_source",
+      "source_path_at_authoring": "qualification/gui-independent-review.md",
+      "bytes": 16166,
+      "sha256": "469a90780ba5dfbc3b9f84c54c13818e9defcda19d70556e445e9243cd92a30f",
+      "status": "COMPLETED_SOURCE_REVIEW",
+      "qualification_scope": "Historical source-only review, before runtime receipts; later execution is recorded separately.",
+      "content_utf8": "# Independent source review: GUI owner policy binding\n\n## Contents\n\n1. [Verdict and evidence scope](#1-verdict-and-evidence-scope)\n2. [Acquisition and consumer trace](#2-acquisition-and-consumer-trace)\n3. [Error, nil and compatibility behavior](#3-error-nil-and-compatibility-behavior)\n4. [Test review](#4-test-review)\n5. [Residuals and unverified claims](#5-residuals-and-unverified-claims)\n\n## 1. Verdict and evidence scope\n\n**No blocking defect identified in the frozen candidate by this independent source review.** Both acquisition branches retain the selected policy before publication, expose the lifecycle only after successful publication, and pass that same object through the inspected existing consumers. Returned policy and settings-release errors prevent publication, and the existing tentative GUI-lease release/error owner remains intact.\n\nThis review supplements the implementation owner's review and the root's own review. It is not the separately required external review, a native qualification, or a claim that compilation or tests passed. No source was edited and no Go command, formatter, test binary, remote execution, installation, publication or merge was run.\n\nThe comparison baseline is the complete commit `c7617d1027888271a83c3b724171e1363289995e` for pull request (PR) #663. The short prefix `c761` is ambiguous in the local object database; all comparisons used the complete identity. I read `architecture/review.md` and independently compared all extracted source files with that exact Git tree. There are three modified files, one added file and no missing files. Of the four changed files, two are production and two are test files.\n\n**Table 1. Reviewed frozen bytes, before formatting.**\n\n| Path under `architecture/source/` | SHA-256 |\n| --- | --- |\n| `internal/gui/gui_owner_lifecycle.go` | `8cebc4cdeafd71eb556fc0b69c67ae9b2b8b9e7a541f69cea52747363bfe430c` |\n| `internal/gui/single_instance.go` | `315bae47d8d06ff00edcb2e23a2403764a4156d2bf358796f5efbe79aba7c702` |\n| `internal/gui/gui_owner_lifecycle_test.go` | `921d1ea88ae8d77aa4968b1da96f2ec87d4c431c275ae5266647ba8c7cae96ec` |\n| `internal/gui/gui_owner_policy_test.go` | `ab5b8e5ed9c6f8d0d53b981ff5b8c9dce7f1aaea26a06e379902a97f3aa44f0d` |\n\nAll locations below refer to those bytes. Any later source change requires review of its delta and updated qualification identities.\n\n## 2. Acquisition and consumer trace\n\n### Ordinary acquisition\n\n`internal/gui/single_instance.go:315`, `acquireSingleInstanceAt`, validates option cardinality before taking the file lock. After successful `tryAcquireSingleInstanceLockAt`, it constructs exactly one lifecycle with `option.OwnerPolicy`, calls `publishCurrent`, and attaches the same pointer to `lease.ownerLifecycle` only on success. The new helper does not reconstruct an application programming interface (API) handle inside each transition.\n\nThe public dispatcher at `single_instance.go:528` forwards the full options value on the ordinary route. Zero options and `RestartV3Enabled=false` remain valid and do not read a handoff marker. More than one option set remains rejected; the public error classifications are unchanged.\n\n### Reservation-aware acquisition\n\n`single_instance.go:538`, `acquireReservationAwareSingleInstanceAt`, retains the existing sequence: validate the absolute owner-record path, acquire the tentative lock, validate the marker, read the clock, and enforce designated-child/reservation conditions. Only after these checks does it construct the lifecycle with `options.OwnerPolicy` and publish. Rejected reservations therefore do not create an API handle, resume policy, or publish an active record.\n\nMarker/read/clock failures retain their existing `releaseTentativeLeaseUnknown` or `releaseTentativeLeaseWithReason` paths. Publication refusal still calls the same underlying `lease.release` owner and joins its failure with the primary error under `ErrGUIOwnerLeaseUnknown`. The ordinary route uses `ReleaseErr`, which delegates to that same owner. A failed release is not silently translated into a confirmed free lease.\n\n### Publication and retained identity\n\n`gui_owner_lifecycle.go:80`, `newGUIOwnerLifecycle`, selects the supplied policy reference or one default `api.NewAPI()` instance. `publishCurrent` at line 217 passes that stored reference into `writeCurrentGUIOwnerRecord` and copies the returned process generation, process ID (PID) and creation time only after the write succeeds. There is no new post-publication file read.\n\nThe helper's mutable identity fields are initialized before the lifecycle is attached to a returned lease. The inspected call graph contains no call to `publishCurrent` on an already-exposed lifecycle. Existing later transitions retain their mutex and generation comparisons; no new goroutine, lock ordering or shared mutable global was introduced.\n\n`BeginHandoff` at `gui_owner_lifecycle.go:279` first reads and matches the active record against the bound PID, creation time and generation. It then queries the retained policy and writes the handoff only after that query returns successfully. The policy is queried again at transition time; the candidate binds the authority reference, not a stale snapshot of its settings values.\n\n### Existing consumers\n\nI traced the producer through these unchanged consumers:\n\n- `internal/cli/gui.go:108` and `:119`: `releaseOnceLease.OwnerLifecycle` and `ownerLifecycleFromLease` forward the acquisition-bound object without reopening the record.\n- `gui.go:1112`: `startGuiServerWithStartup` obtains that object before ordinary Server construction; a missing lifecycle remains an explicit invariant failure. Its deferred cleanup calls `TerminalSettle` before `ReleaseErr`, and refuses to release if terminal publication fails.\n- `gui.go:1405`: listener readiness updates the bound owner's port through `UpdatePort`; this does not reconstruct or replace its policy.\n- `gui.go:310` and `internal/gui/gui_restart_protocol.go:912`: the restart child acquires through the reservation-aware public API, then the wrapper forwards its lifecycle into runtime startup. The child may already have a standby Server/listener, but owner-policy publication does not depend on that Server.\n- `gui.go:191` and `gui_restart_protocol.go:406`: parent restart passes the same lifecycle to the coordinator, which invokes `BeginHandoff` before releasing the parent lease.\n- `gui_restart_protocol.go:473`: rollback uses `RestoreActive` on the existing lifecycle. That method and terminal settlement do not acquire a different policy owner.\n\nThe unchanged native takeover path ultimately reacquires through the same public acquisition API. No native takeover or process termination was executed as part of this review.\n\n## 3. Error, nil and compatibility behavior\n\n**Table 2. Reviewed conditions and consequences.**\n\n| Place and condition | Observed source behavior |\n| --- | --- |\n| `newGUIOwnerLifecycle`, literal nil `GUIOwnerPolicy` | Creates the canonical API-backed policy once. Ordinary acquisition, reservation-aware acquisition, `NewGUIOwnerLifecycle` and `WritePidport` all reach this default. |\n| `writeCurrentGUIOwnerRecord:226`, absent or nil resume preimage | Skips resume and still performs automatic-start admission. Passing a single nil preimage from the new ordinary helper is behaviorally equivalent to the previous zero-preimage call. |\n| Same helper, resume returns an error after applying settings | Returns the error before automatic-start admission, identity probing or record publication. The caller releases the tentative GUI lease using its existing error-aware path. |\n| Same helper, policy read, validation or release returns an error | Returns before current identity lookup and the durable owner-record write. No lifecycle is returned to the caller. |\n| `BeginHandoff:279`, record mismatch or non-active state | Refuses before querying the policy and before changing the durable record. |\n| Same method, policy returns an error | Leaves the record unchanged and leaves the original GUI lease with its caller. |\n| Nil lifecycle receivers | Existing exported `BeginHandoff`/`UpdatePort`/`RestoreActive` errors, nil `TerminalSettle` success and nil `Generation` empty result are unchanged. The new private `publishCurrent` is called only on newly constructed non-nil objects. |\n| Standalone `WritePidport:821` and `NewGUIOwnerLifecycle:90` | Preserve the canonical default and existing record validation. Standalone port rewriting can construct a temporary lifecycle, but it does not replace the acquisition-bound object carried by production startup. |\n\nThe release ordering is supported by the actual API implementation, not just interface comments. `WithGUIOwnerControlIn` at `internal/api/gui_owner_control.go:105` delegates to the existing locked settings transaction. `ResumeGUIOwnerIn` at line 230 performs conditional mutation and readback there. `mutateSettingsMapLockedThen` at `internal/api/settings.go:246` defers `releaseAndJoinApplied` at line 264 before returning; that owner preserves a settings-release error even after an applied mutation. The candidate checks the returned error rather than treating callback completion or `Applied=true` as permission to publish.\n\nAll source references to the changed private constructor and write helper were inspected; their arguments were updated. All inspected `SingleInstanceAcquireOptions` composite literals are keyed, so adding `OwnerPolicy` does not break those call sites. Public function signatures, record encoding and generation computation remain unchanged. `api.NewAPI()` at `internal/api/api.go:131` initializes ordinary state and an event-bus header; these policy operations start no background resource. This change does not establish that the former temporary API objects leaked resources.\n\n## 4. Test review\n\nThe new tests are semantic tests of policy binding and publication boundaries, not just method-count checks.\n\n**Table 3. Oracles and their meaning.**\n\n| Tests | Meaningful observation |\n| --- | --- |\n| `TestGUIOwnerPolicyAcquisitionKeepsIndependentOwners`, `gui_owner_policy_test.go:104` | Exercises both acquisition routes with different policy objects, preserves the first owner's autorun preference through explicit resume, changes only A's later policy, and verifies that A refuses handoff while B preserves its original generation in a successful handoff record. |\n| `TestGUIOwnerPolicyAcquisitionRefusalPreservesRecord`, line 192 | Starts from a real tombstone and checks byte-for-byte preservation, exact error identity, no exposed lease, and released tentative lock for resume conflict, applied resume followed by release failure, read failure, stopped policy and policy-release failure. |\n| `TestGUIOwnerPolicyHandoffRefusalPreservesRecord`, line 257 | Injects policy read/release failure after successful acquisition, then checks unchanged active-record bytes and continued original-lock ownership. |\n| Policy fixture's deferred `beforeReturn`, lines 28 and 39 | Checks that the durable record has not changed and the real GUI file lock remains held at the settings-operation return boundary, including the simulated release-error case. Assertions are nonfatal so acquisition can perform cleanup. |\n| Cleanup helper, line 85 | Registers settlement and `ReleaseErr` immediately for any returned lease, before a later fatal assertion can lose the resource. The additional cleanup in the existing bound-lifecycle test at `gui_owner_lifecycle_test.go:168` also closes its previously unguarded failure path. |\n\nThe source-derived count is consistent with the implementation report: 14 leaf cases, two intermediate route groups and three roots, producing 19 named terminal events plus a package terminal event. I did not execute them.\n\nI independently compared the proposed behavior-reversion control: replacing the three retained-policy calls with their former `api.NewAPI()` calls makes the bodies of `writeCurrentGUIOwnerRecord` and `BeginHandoff` byte-identical to their exact-parent bodies. The candidate's new signatures and surrounding harness remain. Its claimed control scope is therefore accurate; it must not be labeled execution of the unchanged old repository. The predicted two passing resume-conflict leaves and 17 named failing terminals are consistent with the sealed canonical fallback's default running policy, but require actual execution receipts.\n\nThe fixtures redirect canonical settings through `LOCALAPPDATA` and use hardened test directories for records and real file locks. GUI `TestMain` separately fences daemon state and client paths. The new test file contains no subprocess launch, native scheduler action, network listener, goroutine or parallel test. Successful acquisition still observes the executing test process's native identity; target PIDs in handoff records are data and are not probed or signaled by these cases.\n\n## 5. Residuals and unverified claims\n\nThese are boundaries or future-provider requirements, not observed blocking defects in the current candidate:\n\n1. **Injected implementations remain trusted dependencies.** `GUIOwnerPolicy` at line 63 does not dynamically validate typed-nil implementations, prevent provider panics/reentrancy, or require callback invocation in code. The default nil-interface case is handled; an arbitrary typed-nil custom provider is not. Current production callers supply the default API, and the new fixtures supply valid objects. A future provider must preserve the synchronous callback/release contract.\n2. **Handoff relies on the provider returning a valid decoded control.** At `BeginHandoff:292`, the callback rejects `GUIRunStopped`; it does not independently reject every invalid `RunDesired` value. The default API validates controls before invoking the callback. If a future custom provider supplies a malformed observation with a nil error, it could permit handoff; no current production provider does so. Acquisition separately uses `ValidateAutomaticStart` and rejects an invalid run state. This provider-contract limitation should not be presented as validation of arbitrary implementations.\n3. **The default binds an API object, not a frozen filesystem namespace.** `api.WithGUIOwnerControl` and `ResumeGUIOwner` resolve `SettingsPath()` when called. The candidate retains dependency identity and reads fresh values; it does not pin the environment-derived settings path against later process-environment changes. That default behavior is unchanged.\n4. **Settings-release errors are simulated at the interface boundary.** The tests prove that the consumer honors returned errors and observes the GUI lease/file ordering. They do not qualify native settings unlock failures, operating-system persistence, process crashes or background GUI restart.\n5. **The new reservation-route cases use an empty marker.** They exercise the reservation-aware acquisition branch and its policy plumbing. Nonempty reservations, designated-child authentication and marker/clock refusal remain covered only by separately selected existing tests and source analysis; they were not executed here.\n6. **Durable-writer outcome semantics are unchanged.** A successful write is the binding point; no lifecycle is exposed after a returned write error. This review does not prove that every underlying write error implies the file was physically unmodified. Applied-but-unconfirmed storage failures remain the existing state writer's contract and need their own evidence.\n7. **Architecture qualification is still pending.** The default `api.NewAPI()` construction has moved to the lifecycle constructor outside the eventual application composition root. No architecture baseline, policy or worker-registry file changed. Physical scans, the exact-head architecture delta, full build/vet/test gates, native Product behavior and external review are outside this source-only verdict.\n\nNo corrective edit is requested by this independent review before the root proceeds to its separately authorized formatting, composition admission and focused verification. Any failing execution result must be assessed on its actual cause rather than overridden by this source verdict.\n"
+    }
+  ],
+  "limits": {
+    "whole_process_tree_settlement_claimed": false,
+    "recorded_direct_children_settled_without_timeout": true,
+    "full_go_tests_executed": false,
+    "native_scheduler_executed": false,
+    "installed_product_executed": false,
+    "provider_contract": "Custom GUIOwnerPolicy implementations are trusted to honor synchronous callback and release/error semantics; no arbitrary-provider validation is claimed.",
+    "settings_namespace": "The policy object is retained; default SettingsPath resolution at invocation remains unchanged.",
+    "reservation_tests": "New reservation cases use an empty marker and do not qualify an authenticated native child handoff.",
+    "storage_errors": "Settings failures are injected at the provider boundary; native unlock, crash and applied-but-unconfirmed durable writer failures are not qualified.",
+    "own_review_not_external_review": true
+  }
+}
