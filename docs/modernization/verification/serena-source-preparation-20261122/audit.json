@@ -1,0 +1,364 @@
+{
+  "schema": "independent-a5-data-audit-v1",
+  "result": "PASS",
+  "replay_sha256": "bb198f617f37a64ada61cd26c7fc68296b2a34dbdb3412623203e4b1ffeea7de",
+  "layout": "workspace",
+  "audit_scope": "Data-only replay; no subprocess, project import, Git, Go, Rust, helper, network, or native execution",
+  "evidence_zip": {
+    "bytes": 963852,
+    "sha256": "f4154b8e666f1cab452fc35d1083444c884413dee86dcdcb140b8d73e50a455b",
+    "rehashed": "PASS"
+  },
+  "frozen_extracted_members_checked": 198,
+  "export_manifest_records": 192,
+  "payload_files": 123,
+  "unchanged_execution_inputs_per_attempt": 121,
+  "delta_files": 109,
+  "additions": 53,
+  "modifications": 56,
+  "deletions": 0,
+  "independent_base_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+  "independent_source_tree": "8928e54342bc700b07f977a1d8f22bbaf986ad04",
+  "full_source_rehash": "PASS",
+  "local_candidate_files_rehashed": 3323,
+  "physical_inventory": {
+    "files": 3323,
+    "bytes": 50823826,
+    "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"
+  },
+  "actual_commit": {
+    "oid": "4c3eb47d002ea729fe80370a75506a1d0c9650ac",
+    "bytes": 1082,
+    "sha256": "c10b920e17c488e3ef581de679a1a514b438f13d1a6c576c62211b0efae4f11b",
+    "tree": "8928e54342bc700b07f977a1d8f22bbaf986ad04",
+    "parent": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "date": "2026-11-22T21:12:24Z"
+  },
+  "source_snapshot": {
+    "bytes": 415022,
+    "sha256": "2bcb3c313dea40ddcb93c5e2d7cd06f69fc23ca98f0ee7fcc08186bff5b6c2a2"
+  },
+  "source_input": {
+    "schema": "windows-publisher-source-input-v1",
+    "source_snapshot_sha256": "2bcb3c313dea40ddcb93c5e2d7cd06f69fc23ca98f0ee7fcc08186bff5b6c2a2",
+    "source_epoch": "4e07a48c4d77d0cdd086dcda1f704cae8d2ccab8067a65811f414ea6de55482d",
+    "file_count": 3323
+  },
+  "attempts": {
+    "a5-source-preparation": {
+      "receipt": {
+        "bytes": 7209,
+        "sha256": "f1bf9eee0228995e1fb6e8c3f00e86f3fbfbe89f9a3d0b34d28a8ad1d67c7b13"
+      },
+      "commands": 1,
+      "matching_streams": 2,
+      "total_streams": 2,
+      "completed": false,
+      "source_issuance": "NOT_RUN",
+      "process_tree_unresolved": false,
+      "commands_checked": [
+        {
+          "label": "git-version",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.14406050008255988
+        }
+      ]
+    },
+    "a5-source-preparation-v2": {
+      "receipt": {
+        "bytes": 20843,
+        "sha256": "046eb3c65e8141789c0dae60ca027ff698aec9331c39b91aa587985281b7a305"
+      },
+      "commands": 7,
+      "matching_streams": 13,
+      "total_streams": 14,
+      "completed": false,
+      "source_issuance": "NOT_RUN",
+      "process_tree_unresolved": true,
+      "commands_checked": [
+        {
+          "label": "git-version",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.18658249999862164
+        },
+        {
+          "label": "git-init",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.13866799999959767
+        },
+        {
+          "label": "git-config-core-hookspath",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.05068559991195798
+        },
+        {
+          "label": "git-config-commit-gpgsign",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.04962169995997101
+        },
+        {
+          "label": "git-config-init-templatedir",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.0520754000172019
+        },
+        {
+          "label": "git-config-crlf",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.05243110004812479
+        },
+        {
+          "label": "git-import-base-blobs",
+          "exit_code": 1,
+          "oracle_pass": false,
+          "direct_timeout_seconds": 60,
+          "seconds": 60.017886999994516
+        }
+      ]
+    },
+    "a5-source-preparation-v3": {
+      "receipt": {
+        "bytes": 51577,
+        "sha256": "c6e1375d7a1186ae2c26cc8060b3fcb53ce6567af4de1c195149b0ad70316420"
+      },
+      "commands": 27,
+      "matching_streams": 54,
+      "total_streams": 54,
+      "completed": true,
+      "source_issuance": "PASS",
+      "process_tree_unresolved": false,
+      "commands_checked": [
+        {
+          "label": "git-version",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.055036299978382885
+        },
+        {
+          "label": "git-init",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.06368290004320443
+        },
+        {
+          "label": "git-config-core-hookspath",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.050871800049208105
+        },
+        {
+          "label": "git-config-commit-gpgsign",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.04927239997778088
+        },
+        {
+          "label": "git-config-init-templatedir",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.04894040001090616
+        },
+        {
+          "label": "git-config-crlf",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.052119100000709295
+        },
+        {
+          "label": "git-import-base-blobs",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 300,
+          "seconds": 195.74563879997004
+        },
+        {
+          "label": "git-index-base",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.06489409995265305
+        },
+        {
+          "label": "git-tree-base",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 14.046537499991246
+        },
+        {
+          "label": "git-import-base-commit",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.09755870001390576
+        },
+        {
+          "label": "git-import-delta-blobs",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 6.614237200003117
+        },
+        {
+          "label": "git-index-composed",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.06255459995009005
+        },
+        {
+          "label": "git-tree-composed",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 1.3043296000687405
+        },
+        {
+          "label": "git-create-source-commit",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.10064250009600073
+        },
+        {
+          "label": "git-bind-source-ref",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.07051879994105548
+        },
+        {
+          "label": "git-bind-head",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.06084029993508011
+        },
+        {
+          "label": "git-read-head",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.05341369996313006
+        },
+        {
+          "label": "git-read-tree",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.053740000003017485
+        },
+        {
+          "label": "git-read-parent",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.05461589992046356
+        },
+        {
+          "label": "git-read-index",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.0554509999928996
+        },
+        {
+          "label": "git-read-leaves",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.07303129998035729
+        },
+        {
+          "label": "git-clean-status",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.45246000005863607
+        },
+        {
+          "label": "git-object-closure",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.7056763001019135
+        },
+        {
+          "label": "build-source-helper",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 900,
+          "seconds": 5.049021000042558
+        },
+        {
+          "label": "prepare-source",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 600,
+          "seconds": 188.23441809997894
+        },
+        {
+          "label": "verify-source-readback",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 300,
+          "seconds": 0.5582970000104979
+        },
+        {
+          "label": "git-clean-after-preparation",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "direct_timeout_seconds": 60,
+          "seconds": 0.4262435999698937
+        }
+      ]
+    }
+  },
+  "recorded_stream_exceptions": [
+    {
+      "path": "evidence/a5-source-preparation-v2/git-import-base-blobs.stdout.log",
+      "recorded": {
+        "bytes": 36864,
+        "sha256": "c6d00f8d72e7f29e30bbb77e494f05133c1111ebf79ed69b408d16bf731d04a4"
+      },
+      "captured": {
+        "bytes": 134070,
+        "sha256": "2ec42413cbe40cd4d78853f830c5d2859f05b82e3d4ca90f3a295ab5685680c5"
+      },
+      "exact_match": false,
+      "recorded_prefix_matches": true,
+      "recorded_prefix_file": "recorded-stream-prefixes/a5-source-preparation-v2/git-import-base-blobs.stdout.bin"
+    }
+  ],
+  "original_failures_preserved": true,
+  "whole_process_tree_deadline_qualification": false,
+  "source_issuance_supported": true,
+  "tests": "NOT_RUN",
+  "product_or_serena_execution": false,
+  "limitations": [
+    "This is a consistency and content audit of retained execution evidence, not a new runtime qualification.",
+    "The retained master ZIP itself is not in the evidence ZIP; its acquisition and runner checks are bound by the captured receipt and frozen runner.",
+    "Outer subprocess deadlines cover the retained direct child; the v2 timed-out attempt retains process_tree_unresolved=true.",
+    "Native checkout/export coverage is evidenced by inventoried runner/exporter receipts; this replay always matches the complete emitted snapshot to the frozen inventory and rehashes full local source only when supplied.",
+    "No Rust, Go test, Product, or Serena operational qualification follows from Source preparation."
+  ]
+}
