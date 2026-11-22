@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "status": "SCOPED_VERIFICATION_PASS_FULL_ACCEPTANCE_OPEN",
+  "date_utc": "2026-11-22",
+  "pr": 655,
+  "source_parent": "2defe618259f7db4144824d19927b032300d160d",
+  "physical_source_head": "858812988833a84368c60fba1540ae601155fa71",
+  "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "standalone_pr_head_tested": false,
+  "go_overlay_mappings": 15,
+  "supporting_overlay_files": 12,
+  "candidate_overlay_files": 3,
+  "candidate": [
+    {
+      "path": "internal/cli/serena_prepared_run.go",
+      "bytes": 7937,
+      "sha256": "c031a67a86f6d267fe2766f1fbeca9cc9d148115287399892f97bf010e264947"
+    },
+    {
+      "path": "internal/cli/serena_prepared_wrapper_close.go",
+      "bytes": 4251,
+      "sha256": "3e9dc9086d36a0fd65d61505f0096fc9a298dcb2fe90761668d3b1e6b950d430"
+    },
+    {
+      "path": "internal/cli/serena_prepared_wrapper_close_windows_test.go",
+      "bytes": 9780,
+      "sha256": "352bcda1080b011301095d6adaa03b1f61227c163cfaab00ba0ba2b0c1b02da3"
+    }
+  ],
+  "verification": {
+    "archive_bytes": 646315,
+    "archive_sha256": "90299ea0aff680c148c340213dd802adfb7c8c94996877b8eec702f0bd9a442c",
+    "payloads_verified": 78,
+    "phases": [
+      {
+        "phase": "serena-exit-red",
+        "manifest_sha256": "d40e070ba408cfaf94e3e7051e06513bab2d27205b2d055b0d1ab04f2d8f88f6",
+        "source": {
+          "files": 3281,
+          "bytes": 50583217,
+          "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+        },
+        "inputs": {
+          "files": 20,
+          "bytes": 297862,
+          "inventory_sha256": "e1af86e12e95a146349021fc9b982540046581a49777b060e7306e7cb3120a56"
+        },
+        "commands": [
+          {
+            "label": "wrapper-exit-red",
+            "exit_code": 1,
+            "seconds": 28.905561899999157,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestPreparedSerenaWrapperResultPolicy/clean",
+                "TestPreparedSerenaWrapperResultPolicy/ordinary-serve-failure",
+                "TestPreparedSerenaWrapperResultPolicy/child-exit",
+                "TestPreparedSerenaWrapperResultPolicy/shutdown-failure",
+                "TestPreparedSerenaWrapperResultPolicy/stop-failure",
+                "TestPreparedSerenaWrapperResultPolicy/receive-failure",
+                "TestPreparedSerenaWrapperResultPolicy/all-causes",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/serve-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-entered",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-failed",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/foreign-adapter",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/different-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/no-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/canceled",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/missing-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/duplicate-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/frame-without-close",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd"
+              ],
+              "fail": [
+                "TestPreparedSerenaWrapperServeFailureReceipt/serve-before-shutdown",
+                "TestPreparedSerenaWrapperServeFailureReceipt/service-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt/child-exit-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt",
+                "TestPreparedSerenaWrapperResultPolicy/address-in-use",
+                "TestPreparedSerenaWrapperResultPolicy/access-denied",
+                "TestPreparedSerenaWrapperResultPolicy",
+                "PACKAGE:mcp-local-hub/internal/cli"
+              ],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 20,
+              "fail": 8,
+              "skip": 0
+            }
+          }
+        ]
+      },
+      {
+        "phase": "serena-green",
+        "manifest_sha256": "30c784029bd93a2374cdd550aaee33c4ae30decf29c958f56ba35406e1900345",
+        "source": {
+          "files": 3281,
+          "bytes": 50583217,
+          "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+        },
+        "inputs": {
+          "files": 20,
+          "bytes": 297862,
+          "inventory_sha256": "e1af86e12e95a146349021fc9b982540046581a49777b060e7306e7cb3120a56"
+        },
+        "commands": [
+          {
+            "label": "wrapper-green",
+            "exit_code": 0,
+            "seconds": 29.769655599957332,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestPreparedSerenaWrapperServeFailureReceipt/serve-before-shutdown",
+                "TestPreparedSerenaWrapperServeFailureReceipt/service-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt/child-exit-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt",
+                "TestPreparedSerenaWrapperResultPolicy/clean",
+                "TestPreparedSerenaWrapperResultPolicy/ordinary-serve-failure",
+                "TestPreparedSerenaWrapperResultPolicy/child-exit",
+                "TestPreparedSerenaWrapperResultPolicy/address-in-use",
+                "TestPreparedSerenaWrapperResultPolicy/access-denied",
+                "TestPreparedSerenaWrapperResultPolicy/shutdown-failure",
+                "TestPreparedSerenaWrapperResultPolicy/stop-failure",
+                "TestPreparedSerenaWrapperResultPolicy/receive-failure",
+                "TestPreparedSerenaWrapperResultPolicy/all-causes",
+                "TestPreparedSerenaWrapperResultPolicy",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/serve-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-entered",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-failed",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/foreign-adapter",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/different-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/no-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/canceled",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/missing-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/duplicate-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/frame-without-close",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd",
+                "PACKAGE:mcp-local-hub/internal/cli"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 28,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          {
+            "label": "wrapper-adjacent",
+            "exit_code": 0,
+            "seconds": 6.672908499953337,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestBindRefusedExit_WSAEACCES_MapsToExitBindRefused",
+                "TestBindRefusedExit_WSAEADDRINUSE_MapsToExitBindRefused",
+                "TestBindRefusedExit_OtherError_PassesThrough",
+                "TestBindRefusedExit_Nil_PassesThrough",
+                "TestExitBindRefused_DistinctFromGenericExits",
+                "TestSerenaProxy_ReadyBudgetIsBoundedByItsOwnBindDeadline",
+                "TestSerenaProxy_ReadyBudgetTracksARetunedBindDeadline",
+                "PACKAGE:mcp-local-hub/internal/cli"
+              ],
+              "fail": [],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 8,
+              "fail": 0,
+              "skip": 0
+            }
+          },
+          {
+            "label": "build",
+            "exit_code": 0,
+            "seconds": 15.801209000055678,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          },
+          {
+            "label": "vet",
+            "exit_code": 0,
+            "seconds": 23.142654800089076,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false
+          }
+        ]
+      },
+      {
+        "phase": "serena-proof-red",
+        "manifest_sha256": "5cd8e5d88f7457a1f0df6302e5bab8f6d35424d9ae5ecff5c487fa3a40e9237f",
+        "source": {
+          "files": 3281,
+          "bytes": 50583217,
+          "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+        },
+        "inputs": {
+          "files": 20,
+          "bytes": 297862,
+          "inventory_sha256": "e1af86e12e95a146349021fc9b982540046581a49777b060e7306e7cb3120a56"
+        },
+        "commands": [
+          {
+            "label": "wrapper-proof-red",
+            "exit_code": 1,
+            "seconds": 51.61774010001682,
+            "direct_child_waited": true,
+            "whole_process_tree_deadline_enforced": false,
+            "exact_events": {
+              "pass": [
+                "TestPreparedSerenaWrapperResultPolicy/clean",
+                "TestPreparedSerenaWrapperResultPolicy/ordinary-serve-failure",
+                "TestPreparedSerenaWrapperResultPolicy/child-exit",
+                "TestPreparedSerenaWrapperResultPolicy/address-in-use",
+                "TestPreparedSerenaWrapperResultPolicy/access-denied",
+                "TestPreparedSerenaWrapperResultPolicy/shutdown-failure",
+                "TestPreparedSerenaWrapperResultPolicy/stop-failure",
+                "TestPreparedSerenaWrapperResultPolicy/receive-failure",
+                "TestPreparedSerenaWrapperResultPolicy/all-causes",
+                "TestPreparedSerenaWrapperResultPolicy",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/serve-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-entered",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-not-received",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/shutdown-failed",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/foreign-adapter",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/different-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/no-deadline",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt/canceled",
+                "TestPreparedSerenaWrapperCloseRequiresCompleteReceipt",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/missing-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/duplicate-frame",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd/frame-without-close",
+                "TestPreparedSerenaWrapperReceiveRequiresWorkerEnd"
+              ],
+              "fail": [
+                "TestPreparedSerenaWrapperServeFailureReceipt/serve-before-shutdown",
+                "TestPreparedSerenaWrapperServeFailureReceipt/service-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt/child-exit-before-serve",
+                "TestPreparedSerenaWrapperServeFailureReceipt",
+                "PACKAGE:mcp-local-hub/internal/cli"
+              ],
+              "skip": []
+            },
+            "counts_including_package": {
+              "pass": 23,
+              "fail": 5,
+              "skip": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "review": {
+    "own": true,
+    "independent_source": true,
+    "external_exact_head": "PENDING"
+  },
+  "full_default_tagged_suites": "NOT_RUN",
+  "native_scheduler_operations": false,
+  "installed_product_operations": false,
+  "limits": [
+    "Behavioral controls restore one old statement each, not the complete old head",
+    "Wrapper receipt/result policy only; actual native-child closure, consumer-intent write, Ready publication and supervisor reallocation not qualified",
+    "Direct children waited; no whole-process-tree settlement proof"
+  ]
+}

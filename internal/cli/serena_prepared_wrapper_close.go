@@ -78,7 +78,9 @@ func (s *preparedWrapperServerScope) receive(ctx context.Context) *preparedWrapp
 	}
 	s.finalized = true
 	d, finite := ctx.Deadline()
-	err := errors.Join(s.serveError, s.shutdownError)
+	// A received Serve failure is the operation's cause, not an unclosed
+	// resource. The result policy below preserves it after closure receiving.
+	err := s.shutdownError
 	if !finite || !d.Equal(s.deadline) || s.adapter == nil || s.adapter.wrapper != s ||
 		(s.serveEntered && (!s.serveReceived || !s.shutdownEntered || !s.shutdownReceived)) ||
 		(!s.serveEntered && (s.server != nil || s.shutdownEntered)) {
@@ -86,6 +88,16 @@ func (s *preparedWrapperServerScope) receive(ctx context.Context) *preparedWrapp
 	}
 	s.proof = &preparedWrapperServerCloseObservation{owner: s, deadline: d, completedInBound: ctx.Err() == nil, err: err}
 	return s.proof
+}
+
+func (s *preparedWrapperServerScope) result(cause, stopErr, receiveErr error) error {
+	serveErr := s.serveError
+	// A bind failure can arrive after the service or child-exit select won.
+	// Classify the received Serve result only after every cleanup owner settled.
+	if s.shutdownError == nil && stopErr == nil && receiveErr == nil {
+		serveErr = bindRefusedExit(serveErr)
+	}
+	return errors.Join(cause, s.shutdownError, serveErr, stopErr, receiveErr)
 }
 
 func (o *preparedWrapperServerCloseObservation) validate(ctx context.Context, p *preparedConsumerLifecycleAdapter) error {

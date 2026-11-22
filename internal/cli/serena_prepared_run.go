@@ -210,7 +210,6 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 		_, e := h.StopObserved(ctx)
 		return e
 	}, scope.shutdownDone, done, serverExited, cause)
-	shutdownErr = errors.Join(scope.shutdownError, scope.serveError)
 	receiveErr := adapter.ReceiveWrapperServerClose(shutdown, scope.receive(shutdown))
-	return errors.Join(cause, shutdownErr, stopErr, receiveErr)
+	return scope.result(cause, stopErr, receiveErr)
 }
