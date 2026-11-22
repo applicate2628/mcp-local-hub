@@ -614,7 +614,7 @@ if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$p
 foreach ($artifact in $artifacts) {
     $outFile = Join-Path $outDir $artifact.filename
     if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
-        Write-Error "$outFile missing after build — check Defender exclusions (see INSTALL.md)."
+        Write-Error "$outFile missing after build - check Defender exclusions (see INSTALL.md)."
         exit 1
     }
 }
