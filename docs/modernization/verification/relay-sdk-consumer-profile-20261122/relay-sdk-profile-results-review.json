@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "status": "SOURCE_AND_IMPORTED_RESULTS_REVIEWED_NO_MANDATORY_FINDINGS",
+  "reviewer": "/root/pr658_audit",
+  "created_utc": "2026-11-22T13:31:10.999686+00:00",
+  "files": [
+    {
+      "path": "evidence/relay-sdk-profile-results.json",
+      "bytes": 56826,
+      "sha256": "d13dc9ea4dc8190632eeb55b938fb5fe00461c670636b09ae5ac6b30f58f1a64"
+    },
+    {
+      "path": "evidence/relay-sdk-profile-publication-README.md",
+      "bytes": 16066,
+      "sha256": "af7b1d89201b934dcd0574445601f653a68cd7f5f20481b6a4766b94653962b5"
+    },
+    {
+      "path": "qualification/results/relay/readback-manifest.json",
+      "bytes": 3983,
+      "sha256": "c25727076af547b0d44194fbd6f4156346f06ce6b16d9a6528c70c55f4194a0c"
+    },
+    {
+      "path": "qualification/results/relay/analyze_results.py",
+      "bytes": 19865,
+      "sha256": "5de5395837291cd5a2c9eb9a65d381dd8c9a921aa4f6dbeadbe4bae9d5399014"
+    },
+    {
+      "path": "qualification/results/relay/export_readonly.py",
+      "bytes": 4057,
+      "sha256": "70de0719f4a2222fbc24311f370383fa9358b47e6c279f6b70f2704cad23f17b"
+    }
+  ],
+  "findings": [],
+  "checked": [
+    "All local exact raw bytes, completed receipts, plan/runner/source/input binding and command outcomes were independently checked by the retained local analyzer.",
+    "Full qualified SDK profile and Windows memory observer source read; claimed metric and cancellation scopes checked against source.",
+    "Every displayed latency, sampled memory peak, allocation volume and retained heap table value re-derived from the primary profiles.",
+    "Actual non-race GET0/0/4 versus race GET1/8/4 remain explicit.",
+    "No causal improvement, production SLO, full test-suite PASS, global process-tree guarantee or external published-head review claimed."
+  ],
+  "limitations": [
+    "Only aggregate latency quantiles and sampled memory maxima/counts are exported; no full timing or memory series exists in these primary profiles.",
+    "Cancellation tests accept errors.Is(context.Canceled), so additional joined notification errors cannot be excluded from saved results.",
+    "Receipt source inventories are exact recorded admission observations; this review did not re-open the whole remote source or shared module cache."
+  ],
+  "new_runtime_executions": false,
+  "remote_writes": false,
+  "source_or_plan_changes": false,
+  "publication": false
+}

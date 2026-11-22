@@ -35,8 +35,9 @@ type relayLoadMessage struct {
 	Params  relayLoadParams `json:"params"`
 }
 type relayLoadResult struct {
-	Payload string `json:"payload"`
-	Session string `json:"session"`
+	Payload         string `json:"payload"`
+	Session         string `json:"session"`
+	ProtocolVersion string `json:"protocolVersion,omitempty"`
 }
 type relayLoadResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -89,7 +90,11 @@ func newRelayLoadServer(tb testing.TB) *relayLoadServer {
 				}
 				f.calls.Add(1)
 			}
-			response, err := json.Marshal(relayLoadResponse{JSONRPC: "2.0", ID: msg.ID, Result: relayLoadResult{Payload: msg.Params.Payload, Session: sid}})
+			result := relayLoadResult{Payload: msg.Params.Payload, Session: sid}
+			if msg.Method == "initialize" {
+				result.ProtocolVersion = "2025-11-25"
+			}
+			response, err := json.Marshal(relayLoadResponse{JSONRPC: "2.0", ID: msg.ID, Result: result})
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
@@ -144,7 +149,7 @@ func verifyRelayLoadOutput(output []byte, calls, payloadBytes int) error {
 		seen[id] = true
 		if id == "0" {
 			sid = got.Result.Session
-			if !strings.HasPrefix(sid, "rx-session-") {
+			if !strings.HasPrefix(sid, "rx-session-") || got.Result.ProtocolVersion != "2025-11-25" {
 				return fmt.Errorf("invalid initialized session %q", sid)
 			}
 			continue
@@ -248,7 +253,7 @@ func TestRelayLoadHTTPErrorPreservesID(t *testing.T) {
 // Validate the oracle itself: equal-length corruption and duplicate IDs must
 // fail; byte-count-only checks would incorrectly accept either result.
 func TestRelayLoadOracleRejectsCorruption(t *testing.T) {
-	valid := []byte("{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"session\":\"rx-session-1\",\"payload\":\"\"}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"session\":\"rx-session-1\",\"payload\":\"xxx\"}}\n")
+	valid := []byte("{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"session\":\"rx-session-1\",\"payload\":\"\",\"protocolVersion\":\"2025-11-25\"}}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"session\":\"rx-session-1\",\"payload\":\"xxx\"}}\n")
 	if err := verifyRelayLoadOutput(valid, 1, 3); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +282,9 @@ func TestRelayLoadEOFDrainsFinalResponse(t *testing.T) {
 		if meta.ID == 2 {
 			close(entered)
 			<-release
+		}
+		if meta.ID == 1 {
+			return 200, "application/json", []byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"load-fixture","version":"1"}}}`)
 		}
 		return 200, "application/json", []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, meta.ID))
 	}

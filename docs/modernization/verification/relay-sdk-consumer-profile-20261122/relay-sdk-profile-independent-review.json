@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "status": "INDEPENDENT_SOURCE_REVIEWED_NOT_RUN",
+  "reviewer": "relay_residual",
+  "source_pins": [
+    {
+      "path": "profiles/internal/daemon/relay_sdk_profile_windows_test.go",
+      "bytes": 12986,
+      "sha256": "5fea0bae908029f1847d2ca25777d005408036f0b20438e3a37f73eec50829b2"
+    },
+    {
+      "path": "profiles/internal/daemon/relay_load_test.go",
+      "bytes": 10917,
+      "sha256": "717164eccc8dfbf4a76d18450ce8add18dd623b1bdfe214d9835a02ee26c683a"
+    }
+  ],
+  "composition": {
+    "profile_worktree_head": "04e1e19650318725850225ebadc521cbf97dadd9",
+    "production_relay_commit": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7",
+    "sdk_version": "1.6.1",
+    "reviewed_reference_pins": [
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/client.go",
+        "bytes": 44920,
+        "sha256": "8ecce1c2ac2b5fca92d2b18a91e03f95fbac6dd44d926feab6024584f1e2b2d5"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/transport.go",
+        "bytes": 20764,
+        "sha256": "92fade725b3281b42de860cd30845a1cc47b27a118c80c8a86d0fa56c51cbeec"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/server.go",
+        "bytes": 58296,
+        "sha256": "f34bf2b74cc9620cd557a9456fd2979d0806cef96853b14150b2f39512cbf201"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/shared.go",
+        "bytes": 21709,
+        "sha256": "9921546e9d5fece646e20d29e9b7b98b76c3eab565eeafeb56886b6c54e8407b"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/protocol.go",
+        "bytes": 67075,
+        "sha256": "bdb458ab0755f7fa25c33b329556eabc8c1429c2edecd6c8248ccd52839f7acc"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/streamable.go",
+        "bytes": 79595,
+        "sha256": "70c99ea3f509a4d040965746860b36a91aa6fd46183f53ffc1d84f902d4012a4"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/event.go",
+        "bytes": 12873,
+        "sha256": "ea1a54494e9a829f49929e8e4348b2144315cb647faf3344e6262c1b85e19174"
+      },
+      {
+        "path": "qualification/reference/relay/source/go-sdk/mcp/logging.go",
+        "bytes": 5559,
+        "sha256": "af2b9a6420a09dec350e3f657a311a008146f9749075ecdf312e5082b1edc3ff"
+      }
+    ],
+    "note": "Read the complete new profile and all relay_load_test.go changes. Read relevant exact production Relay and SDK owner/cancellation/stdio/HTTP paths, plus existing Windows memory observer. No source mutation or runtime by reviewer."
+  },
+  "findings": [
+    {
+      "id": "RSP-01",
+      "severity": "P1",
+      "status": "FIXED_SOURCE_REVIEWED",
+      "location": "relaySDKProfilePeer.close",
+      "condition": "A canceled SDK CallTool retires its local outgoing request before the server response necessarily finishes the HTTP POST. Calling ClientSession.Close first closes IOTransport Reader before Writer.",
+      "consequence": "The fixture may close Relay stdout consumer before postWG drains a valid late cancellation response, causing io.ErrClosedPipe and a false regression failure or invalid drain evidence.",
+      "evidence": [
+        "SDK mcp/transport.go call retires canceled calls; rwc.Close closes rc before wc.",
+        "SDK mcp/client.go ClientSession.Close delegates to connection.Close.",
+        "Production #629 HTTPToStdioRelay.Run waits postWG before canceling GET/terminating session."
+      ],
+      "correction": "Close only owned stdin first, keep SDK reader alive until Relay done; preserve bounded cancellation/pipe fallback, then close SDK session and output.",
+      "fixed_lines": {
+        "stdin_close": 83,
+        "relay_done_wait": 85,
+        "sdk_close": 99
+      }
+    },
+    {
+      "id": "RSP-02",
+      "severity": "P2",
+      "status": "FIXED_SOURCE_REVIEWED",
+      "location": "echo cancellation branch and cancellation measurement",
+      "condition": "Old cancelFinished signal was sent before return and deferred active decrement.",
+      "consequence": "The old cancel_settlement_ns label could understate even the tool handler own cleanup and overclaim completed cancellation.",
+      "correction": "One deferred action decrements active before signaling canceled handler cleanup. Rename fields to cancelled_handler_cleanups_observed/cancel_handler_cleanup_ns. Full HTTP/Relay/SDK-session settlement is checked separately after close.",
+      "fixed_lines": {
+        "active_cleanup": 134,
+        "handler_cleanup_signal": 136,
+        "measurement_fields": 355
+      }
+    }
+  ],
+  "mandatory_open_findings": [],
+  "source_checks": {
+    "scope": "Test-only profile plus fixture InitializeResult protocolVersion compatibility. No production Relay implementation, dependency, retry contract or new framework is changed.",
+    "response_oracle": "Every successful CallTool checks exact worker/iteration sequence and full payload, content count/type and IsError. Worker failures prevent reporting completed/lost counts. Server exact total covers warmup+held+measured+cancel calls; held barrier establishes exact max-active worker count.",
+    "workload": "Three finite closed-loop cases: 1x1x64 at 1 KiB, 8x1x32 at 1 KiB, 4x4x16 at 64 KiB; at most 16 tools simultaneously. Each case uses its own loopback server, transport, pipes and a 45 s context.",
+    "synchronization": "Latency slots are disjoint per worker and read only after all result channel receives. Sampler state is read only after samplesDone. Atomics protect server/HTTP counts; no observed shared-buffer/data race in the proposed schedule.",
+    "lifecycle": "Owned input interruption capability is explicit. Reordered close keeps reader alive through accepted response drain. Server counters and Sessions() are checked after explicit peer/HTTP close. Cleanup callbacks are idempotent on normal path; failed timeout is not treated as settled.",
+    "measurement": "Whole process memory is declared. Windows resident total/private and private commit are separate. Independent field maxima are sampled lower bounds, with availability false when samples==0. Allocation counters are differences across measured interval; all driver/sampler costs remain included.",
+    "cancellation": "Client cancellation and handler own cleanup are checked separately. New name intentionally does not claim entire internal SDK response completed at handler signal time.",
+    "load_fixture_diff": "InitializeResult gains protocolVersion, initialized response oracle requires it, and EOF-drain fixture emits a matching valid version result. This preserves its session admission when composed with current #629.",
+    "local_syntax_check": "git diff --check PASS only; no Go parser/build/test/gofmt executed by reviewer."
+  },
+  "remaining_limits": [
+    "No runtime, compiler, formatter, race-detector or actual performance result is established by this review. Exact final formatted inputs still need binding and qualified execution.",
+    "The profile exercises real SDK transport/dispatch with synthetic tools. It is not installed Hub, external consumer service or a production service-level objective.",
+    "Process measurements include SDK client/server, Relay, driver/sampler, payload, latency arrays and deliberately reachable cleanup closures/closed objects. Retained-after-close values do not by themselves prove a Relay leak or the memory of a standalone Relay executable.",
+    "Nominal 5 ms samples can miss transients; per-field maxima need not occur simultaneously. If sampled_peak_available=false there are no workload-time samples, only the baseline seed.",
+    "GET request count is observed but no pre-baseline GET barrier, server-initiated GET message workload or forced reconnect exists in this profile. Prior #629 32/32 GET reconnect evidence remains separate. POST-origin resumption remains outside the implementation/profile.",
+    "Call integrity is at SDK call/result level, not a byte-level oracle for every duplicate wire frame silently retired or discarded by SDK.",
+    "Internal jsonrpc2 connection.go was not available in the locally supplied reference set. Public Close code, IOTransport, SDK call retirement and HTTP session-close paths were inspected; internal connection scheduling was not reconstructed by assumption.",
+    "Two Relay close waits fail explicitly on deadline; a failed run does not prove an unresponsive inner lifetime settled. Root runner must enforce admitted process ownership/time/output limits and retain actual nested results."
+  ]
+}

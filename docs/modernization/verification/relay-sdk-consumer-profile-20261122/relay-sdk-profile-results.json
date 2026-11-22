@@ -1,0 +1,1478 @@
+{
+  "schema": 1,
+  "status": "LIMITED_RELAY_SDK_RUNTIME_RESULTS_VERIFIED",
+  "reviewer": "/root/pr658_audit",
+  "created_utc": "2026-11-22T13:28:19.616804+00:00",
+  "scope": "Independent local readback/data/source review of six completed phases; no repeat runtime, source mutation or publication.",
+  "mandatory_findings": [],
+  "readback": {
+    "path": "qualification/results/relay/readback-manifest.json",
+    "bytes": 3983,
+    "sha256": "c25727076af547b0d44194fbd6f4156346f06ce6b16d9a6528c70c55f4194a0c"
+  },
+  "analyzer": {
+    "path": "qualification/results/relay/analyze_results.py",
+    "bytes": 19865,
+    "sha256": "5de5395837291cd5a2c9eb9a65d381dd8c9a921aa4f6dbeadbe4bae9d5399014"
+  },
+  "runner": {
+    "path": "qualification/qualify_go.py",
+    "bytes": 13854,
+    "sha256": "893c3281026e988c200f61fb2b4459b3385d427b7b39e0eec38d27b9c03949e5"
+  },
+  "source_composition": {
+    "physical_source_commit": "858812988833a84368c60fba1540ae601155fa71",
+    "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "master_reference": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "production_relay_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7",
+    "canonical_two_test_fixtures_origin": "58670482426cd60aee35bf09b8d945a9809eb854",
+    "profile_worktree_base": "04e1e19650318725850225ebadc521cbf97dadd9",
+    "origins": {
+      "path": "qualification/composition-origins.json",
+      "bytes": 29869,
+      "sha256": "b3130d97f39734a50f62b9db52bde08da5167abaa4c1e519bf142044ff738b2f"
+    },
+    "archived_20_source_files_sha256": "beb16c79c122f7dd0e9e3f754dda80048bfc0ff7ce8e56b617cc55b639367e55",
+    "input_inventory": {
+      "files": 27,
+      "bytes": 269092,
+      "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+    },
+    "go_overlay_files": 26,
+    "files": [
+      {
+        "path": "qualification/inputs/relay/cmd/mcphub/main.go",
+        "bytes": 7404,
+        "sha256": "5b1d8d0c85606c82c897adf450c9e2e0d9fd520d71d11bff84d8dda6d76e1ae2",
+        "repository_path": "cmd/mcphub/main.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/cmd/mcphub/relay_input_windows_test.go",
+        "bytes": 5244,
+        "sha256": "0bc0f5f34b44cadeff3c36eb7ec1ff3495bd670a450c0c1559a5f290aff8cbe3",
+        "repository_path": "cmd/mcphub/relay_input_windows_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay.go",
+        "bytes": 4475,
+        "sha256": "949a1cfc9d6e2a9bb925fac2456ad6c2e6b3b483e28b7f2b1bb38f63fa92b2f3",
+        "repository_path": "internal/cli/relay.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input.go",
+        "bytes": 1279,
+        "sha256": "cf599abacafbe309fe812775b313c19513243dc30b83d75559b783f1aad54ec2",
+        "repository_path": "internal/cli/relay_process_input.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input_native_windows_test.go",
+        "bytes": 3872,
+        "sha256": "c658e20c7538712267828b9f1b79de42439ae251d2532f9532cf2f0ebbe4d251",
+        "repository_path": "internal/cli/relay_process_input_native_windows_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input_other.go",
+        "bytes": 356,
+        "sha256": "6fd717ec2aa39066c31648589bdb1866e84646fdcafe23564b6bcba901229a23",
+        "repository_path": "internal/cli/relay_process_input_other.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input_test.go",
+        "bytes": 2631,
+        "sha256": "b4c18cecb3432c3afbc8de3b7bc0f7dd0fbf643ab3c1279224f10d99caf4f005",
+        "repository_path": "internal/cli/relay_process_input_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input_windows.go",
+        "bytes": 5187,
+        "sha256": "35302df3af210f0f0c700f6260d5a90c1261419cd7f1f045123baa702c85334a",
+        "repository_path": "internal/cli/relay_process_input_windows.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/cli/relay_process_input_windows_test.go",
+        "bytes": 9103,
+        "sha256": "bc4c05d73123bb28db74fdc1dcbe7e78b7cd38134153aea224959ac459667416",
+        "repository_path": "internal/cli/relay_process_input_windows_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/main_dispatch_test.go",
+        "bytes": 8345,
+        "sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+        "repository_path": "internal/daemon/main_dispatch_test.go",
+        "exact_git_origin": "58670482426cd60aee35bf09b8d945a9809eb854"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/main_test.go",
+        "bytes": 4764,
+        "sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+        "repository_path": "internal/daemon/main_test.go",
+        "exact_git_origin": "58670482426cd60aee35bf09b8d945a9809eb854"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay.go",
+        "bytes": 32405,
+        "sha256": "f02549680ee78323150205a843c56e83a51193f481a18db6277d268557de06a3",
+        "repository_path": "internal/daemon/relay.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_consumer_profile_test.go",
+        "bytes": 11789,
+        "sha256": "f1a87a9746c805bdaafa2423c0fe66a49d1164234efdb240ce7f235b71b87ef2",
+        "repository_path": "internal/daemon/relay_consumer_profile_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_input_contract_test.go",
+        "bytes": 15531,
+        "sha256": "de9004137aa31158faf541be0f0c257b3357a36835a99752a4a98a456dbaf9d9",
+        "repository_path": "internal/daemon/relay_input_contract_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_output_contract_test.go",
+        "bytes": 13494,
+        "sha256": "9659845c0ed36d131a74e745bb18ab6dfccf5f68063f503cebfddac814382667",
+        "repository_path": "internal/daemon/relay_output_contract_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_protocol_contract_test.go",
+        "bytes": 22032,
+        "sha256": "d62759a589d2f2db6686e6f5bec1ff8cbab2c2ddbf4a92e1ae6e6c519da619cb",
+        "repository_path": "internal/daemon/relay_protocol_contract_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_qualification.go",
+        "bytes": 21423,
+        "sha256": "be155873eb35e11eb337107a43c7f4c99c0e426f403b2a9b5cc60a35ef2ff082",
+        "repository_path": "internal/daemon/relay_qualification.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_response_contract_test.go",
+        "bytes": 39400,
+        "sha256": "6d8b1f524503432fc7587f363a2e3679f0cb6834e2b2a9dc9664a7f6b2f6525c",
+        "repository_path": "internal/daemon/relay_response_contract_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_sse_session_retry_test.go",
+        "bytes": 2425,
+        "sha256": "d5a22bcc2cc76df750a5b4b8105aa567036c6ffabea0c25be0ecd4a15c65c23f",
+        "repository_path": "internal/daemon/relay_sse_session_retry_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_test.go",
+        "bytes": 13654,
+        "sha256": "4ea59e9f3def0ec45f986bfcc9ee87f4dbd2124d775464993d1e079515cd05de",
+        "repository_path": "internal/daemon/relay_test.go",
+        "exact_git_origin": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_benchmark_test.go",
+        "bytes": 2329,
+        "sha256": "11526b795549692164cbfee0363b1b3310e148693ca23cb566a643dad7087f28",
+        "repository_path": "internal/daemon/relay_benchmark_test.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_binary_probe_windows_test.go",
+        "bytes": 8475,
+        "sha256": "6de4d1554dd967402e7fbfb14d2e97a9ebf65f87b6ef31e5676601e1c2a87684",
+        "repository_path": "internal/daemon/relay_binary_probe_windows_test.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_load_test.go",
+        "bytes": 10917,
+        "sha256": "717164eccc8dfbf4a76d18450ce8add18dd623b1bdfe214d9835a02ee26c683a",
+        "repository_path": "internal/daemon/relay_load_test.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_private_memory_probe_windows_test.go",
+        "bytes": 3208,
+        "sha256": "4593717e70cb5dd1ef79a0d48c1c1bc7c8cf686b6d36da0bce9b735649d0f9b3",
+        "repository_path": "internal/daemon/relay_private_memory_probe_windows_test.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/relay_sdk_profile_windows_test.go",
+        "bytes": 13000,
+        "sha256": "21137730f81bc6aec205440067a36d402d40974fc35db7c359a9dda9d8cea145",
+        "repository_path": "internal/daemon/relay_sdk_profile_windows_test.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      },
+      {
+        "path": "qualification/inputs/relay/internal/daemon/testdata/relay-minimal/main.go",
+        "bytes": 772,
+        "sha256": "176ffc787ce573a9a1a326b24810798df3f98513828a626efb9cd9d8bf115f9a",
+        "repository_path": "internal/daemon/testdata/relay-minimal/main.go",
+        "origin": "current profiles worktree, checked byte-equal; runtime plan pins are authoritative"
+      }
+    ]
+  },
+  "tools_sha256": {
+    "C:\\msys64\\ucrt64\\bin\\go.exe": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "C:\\msys64\\ucrt64\\bin\\gofmt.exe": "95368e4aafefa20f962a345ab02f53ffc035ed69349612abbf385b52f4fb25c5",
+    "C:\\msys64\\ucrt64\\bin\\gcc.exe": "f6ff9378c1edb591131304518eac6456708d28720284105930d0d687136bcdd3"
+  },
+  "environment": {
+    "GOOS": "windows",
+    "GOARCH": "amd64",
+    "GOGC": "100",
+    "GOMAXPROCS": "4",
+    "GOPROXY": "off",
+    "GOTOOLCHAIN": "local",
+    "GOFLAGS": "-mod=readonly",
+    "GOMODCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gomodcache",
+    "GOCACHE": "D:\\dev\\ChatGPT\\mcp-pr616-qualification-20261114\\gocache"
+  },
+  "qualifications": [
+    {
+      "phase": "relay-load-compatibility",
+      "plan": {
+        "path": "qualification/plans/relay-load-compatibility.json",
+        "bytes": 593177,
+        "sha256": "fb9bd69c16a8b3047005de833b2cf90d17e698ff91cecb7a899dd6f711d325eb"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-load-compatibility/receipt.json",
+        "bytes": 5303,
+        "sha256": "a1fce57c937ae432cbc58bdb80e0bca45b5d5f45e47e9c0c83c771199807a8c4"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "load-oracles",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-race",
+            "-run",
+            "^(TestRelayLoadContract|TestRelayLoadHTTPErrorPreservesID|TestRelayLoadOracleRejectsCorruption|TestRelayLoadEOFDrainsFinalResponse)$",
+            "./internal/daemon"
+          ],
+          "pid": 42324,
+          "started_utc": "2026-11-22T12:59:41.566365+00:00",
+          "finished_utc": "2026-11-22T13:00:10.010083+00:00",
+          "seconds": 28.443478800007142,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 8413,
+            "sha256": "b328973ee5a424e2516e6f66db3645ad45db5c3879cbe6f514653dbe4ff5eb3e"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal": {
+            "pass": [
+              "TestRelayLoadContract/sse_false/clients_1",
+              "TestRelayLoadContract/sse_false/clients_8",
+              "TestRelayLoadContract/sse_false/clients_32",
+              "TestRelayLoadContract/sse_true/clients_1",
+              "TestRelayLoadContract/sse_true/clients_8",
+              "TestRelayLoadContract/sse_true/clients_32",
+              "TestRelayLoadContract",
+              "TestRelayLoadHTTPErrorPreservesID",
+              "TestRelayLoadOracleRejectsCorruption",
+              "TestRelayLoadEOFDrainsFinalResponse",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "test_pass": 10,
+          "package_pass": 1
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-race",
+      "plan": {
+        "path": "qualification/plans/relay-sdk-race.json",
+        "bytes": 592961,
+        "sha256": "a96304505c5496ca99daa1e5495ce63be52b7e6f7f9dfc24eb1915ca849f9eef"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-sdk-race/receipt.json",
+        "bytes": 4863,
+        "sha256": "b89873cf69d5ebfe76022a11b6f1907710fb673a99e1fed63349afbc969c9857"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "sdk-race",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-race",
+            "-run",
+            "^(TestRelaySDKConsumerProfile)$",
+            "./internal/daemon"
+          ],
+          "pid": 39176,
+          "started_utc": "2026-11-22T13:00:44.359111+00:00",
+          "finished_utc": "2026-11-22T13:00:51.273560+00:00",
+          "seconds": 6.914162199944258,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 12863,
+            "sha256": "6671f19f1155eed8e277c889e0f11209367fa5ede4d5a756a85af6ba8eeae1ca"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal": {
+            "pass": [
+              "TestRelaySDKConsumerProfile/clients_1/workers_1/bytes_1024",
+              "TestRelaySDKConsumerProfile/clients_8/workers_1/bytes_1024",
+              "TestRelaySDKConsumerProfile/clients_4/workers_4/bytes_65536",
+              "TestRelaySDKConsumerProfile",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "test_pass": 4,
+          "package_pass": 1
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-profile-1",
+      "plan": {
+        "path": "qualification/plans/relay-sdk-profile-1.json",
+        "bytes": 593051,
+        "sha256": "dc2cede0cfa85de6f18dcafd53bff640f3cd50a99c6d5eb93f9b859f415c67d4"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-sdk-profile-1/receipt.json",
+        "bytes": 4799,
+        "sha256": "167c2002831aba06022d4085c4bc3b85d603dc2153a25bd73bc5a8840bf2a708"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "sdk-profile",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^TestRelaySDKConsumerProfile$/^clients_1$/^workers_1$/^bytes_1024$",
+            "./internal/daemon"
+          ],
+          "pid": 13648,
+          "started_utc": "2026-11-22T13:01:40.479415+00:00",
+          "finished_utc": "2026-11-22T13:01:53.320347+00:00",
+          "seconds": 12.840623600059189,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 5073,
+            "sha256": "8e3e7bca9805c357d0d371c08088e5fb23fe18249f64f5e09d6934b431b60505"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal": {
+            "pass": [
+              "TestRelaySDKConsumerProfile/clients_1/workers_1/bytes_1024",
+              "TestRelaySDKConsumerProfile",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "test_pass": 2,
+          "package_pass": 1
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-profile-2",
+      "plan": {
+        "path": "qualification/plans/relay-sdk-profile-2.json",
+        "bytes": 593051,
+        "sha256": "41617e5f2e682fe88db6e8ba6a600419e429403ea3befdd9dd7fc7d78499ba6b"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-sdk-profile-2/receipt.json",
+        "bytes": 4799,
+        "sha256": "030760ef063dd1fa5f338a9096d06491efd4f9ef187def171457d4f197eadbc5"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "sdk-profile",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^TestRelaySDKConsumerProfile$/^clients_8$/^workers_1$/^bytes_1024$",
+            "./internal/daemon"
+          ],
+          "pid": 54568,
+          "started_utc": "2026-11-22T13:02:34.997263+00:00",
+          "finished_utc": "2026-11-22T13:02:36.666818+00:00",
+          "seconds": 1.6690209999214858,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 5095,
+            "sha256": "aa7f3f1db2ac79cdebf4693e689fb562adc45d2dd91de2efd8a6f167e54cd608"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal": {
+            "pass": [
+              "TestRelaySDKConsumerProfile/clients_8/workers_1/bytes_1024",
+              "TestRelaySDKConsumerProfile",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "test_pass": 2,
+          "package_pass": 1
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-profile-3",
+      "plan": {
+        "path": "qualification/plans/relay-sdk-profile-3.json",
+        "bytes": 593052,
+        "sha256": "a04aa31285777b430739e6f9049e0dcc72668dfc0cbdc2857a4f208a75731aee"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-sdk-profile-3/receipt.json",
+        "bytes": 4801,
+        "sha256": "c6ca7f9b69ce575b71708e17516192a4a17de3507a5a836d419baf09ff7e80b6"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "sdk-profile",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "test",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "-count=1",
+            "-timeout=180s",
+            "-json",
+            "-run",
+            "^TestRelaySDKConsumerProfile$/^clients_4$/^workers_4$/^bytes_65536$",
+            "./internal/daemon"
+          ],
+          "pid": 48276,
+          "started_utc": "2026-11-22T13:03:25.777076+00:00",
+          "finished_utc": "2026-11-22T13:03:27.604156+00:00",
+          "seconds": 1.8267456999747083,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 5120,
+            "sha256": "70cb91139260d277337f367b0642b56bfea4581e2f9550e4addccefee795f1cc"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "terminal": {
+            "pass": [
+              "TestRelaySDKConsumerProfile/clients_4/workers_4/bytes_65536",
+              "TestRelaySDKConsumerProfile",
+              "PACKAGE:mcp-local-hub/internal/daemon"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "test_pass": 2,
+          "package_pass": 1
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-build-vet",
+      "plan": {
+        "path": "qualification/plans/relay-sdk-build-vet.json",
+        "bytes": 592992,
+        "sha256": "47a462b73791f758bd51a9820316857d3348139602d15561f01b970ddf9a6cc9"
+      },
+      "receipt": {
+        "path": "qualification/results/relay/relay-sdk-build-vet/receipt.json",
+        "bytes": 5303,
+        "sha256": "753a04bf9e0bbafa48a2f00d01ac9bec4687b1e22b7b459edcd70d45be0a7e34"
+      },
+      "completed": true,
+      "source_before_after": {
+        "files": 3281,
+        "bytes": 50583217,
+        "inventory_sha256": "63d39033d88621b5152435fca89a96ec817d5973728a565d857bb235ab169bf7"
+      },
+      "inputs_before_after": {
+        "files": 27,
+        "bytes": 269092,
+        "inventory_sha256": "61091aa1768e7fb32b913b9c8e0efde1cc7ca049dce58352b34f2e6b2c544d34"
+      },
+      "commands": [
+        {
+          "label": "build",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "build",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "pid": 34944,
+          "started_utc": "2026-11-22T13:04:02.404718+00:00",
+          "finished_utc": "2026-11-22T13:04:16.321990+00:00",
+          "seconds": 13.91700540005695,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "vet",
+          "argv": [
+            "C:\\msys64\\ucrt64\\bin\\go.exe",
+            "vet",
+            "-buildvcs=false",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-final-20261122-e21a1792\\inputs\\relay\\overlay.json",
+            "-p=2",
+            "./..."
+          ],
+          "pid": 55256,
+          "started_utc": "2026-11-22T13:04:16.324003+00:00",
+          "finished_utc": "2026-11-22T13:04:40.914587+00:00",
+          "seconds": 24.59043770004064,
+          "direct_timeout_seconds": 300,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    }
+  ],
+  "terminal_totals": {
+    "test_pass": 20,
+    "package_pass": 5,
+    "test_fail": 0,
+    "package_fail": 0,
+    "skip": 0,
+    "build_exit": 0,
+    "vet_exit": 0
+  },
+  "non_race_fresh_process_profiles": [
+    {
+      "phase": "relay-sdk-profile-1",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_1/workers_1/bytes_1024",
+      "race_detector": false,
+      "go_command_pid": 13648,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-profile-1--clients_1-workers_1-bytes_1024.json",
+        "bytes": 2098,
+        "sha256": "9cf20fce483381986802efebf3eec932e10a2b4706f2ad3c6f7c40150d24430a"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 3169416,
+          "HeapInuse": 4677632,
+          "HeapObjects": 5435,
+          "TotalAlloc": 25712864,
+          "Mallocs": 26962,
+          "WorkingSet": 18653184,
+          "PrivateWorkingSet": 7749632,
+          "PrivateCommit": 55226368
+        },
+        "allocation_bytes": 22376640,
+        "allocations": 17090,
+        "baseline_after_gc": {
+          "HeapAlloc": 1730936,
+          "HeapInuse": 3129344,
+          "HeapObjects": 4287,
+          "TotalAlloc": 2942464,
+          "Mallocs": 9520,
+          "WorkingSet": 16801792,
+          "PrivateWorkingSet": 6127616,
+          "PrivateCommit": 54358016
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 1731872,
+          "HeapInuse": 3088384,
+          "HeapObjects": 4308,
+          "TotalAlloc": 3336224,
+          "Mallocs": 9872,
+          "WorkingSet": 16089088,
+          "PrivateWorkingSet": 5316608,
+          "PrivateCommit": 53252096
+        },
+        "cancel_handler_cleanup_ns": 518800,
+        "cancelled_calls": 1,
+        "cancelled_handler_cleanups_observed": 1,
+        "clients": 1,
+        "completed_calls": 64,
+        "deleted_sessions": 1,
+        "elapsed_ns": 20907900,
+        "get_requests": 0,
+        "held_after_gc": {
+          "HeapAlloc": 1778200,
+          "HeapInuse": 3137536,
+          "HeapObjects": 4377,
+          "TotalAlloc": 3110736,
+          "Mallocs": 9744,
+          "WorkingSet": 16244736,
+          "PrivateWorkingSet": 5513216,
+          "PrivateCommit": 53514240
+        },
+        "held_calls": 1,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 1037600,
+          "p50": 513400,
+          "p95": 529300
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 1,
+        "measured_calls": 64,
+        "payload_bytes": 1024,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 765152,
+          "HeapInuse": 2138112,
+          "HeapObjects": 4381,
+          "TotalAlloc": 26124832,
+          "Mallocs": 27631,
+          "WorkingSet": 17981440,
+          "PrivateWorkingSet": 7049216,
+          "PrivateCommit": 54513664
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 1858448,
+          "HeapInuse": 3293184,
+          "HeapObjects": 4491,
+          "TotalAlloc": 25712984,
+          "Mallocs": 26964,
+          "WorkingSet": 18653184,
+          "PrivateWorkingSet": 7749632,
+          "PrivateCommit": 55226368
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 3481536,
+          "heap_inuse": 4964352,
+          "private_commit": 55226368,
+          "private_working_set": 7737344,
+          "working_set": 18640896
+        },
+        "samples": 4,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 67,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 1,
+        "workers_per_client": 1
+      },
+      "derived": {
+        "total_workers": 1,
+        "allocation_bytes_per_completed_measured_call": 349635.0,
+        "allocations_per_completed_measured_call": 267.03125,
+        "latency_p50_sorted_zero_based_index": 31,
+        "latency_p95_sorted_zero_based_index": 60
+      }
+    },
+    {
+      "phase": "relay-sdk-profile-2",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_8/workers_1/bytes_1024",
+      "race_detector": false,
+      "go_command_pid": 54568,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-profile-2--clients_8-workers_1-bytes_1024.json",
+        "bytes": 2126,
+        "sha256": "df280ebf7ddc0368ba063f0aac265de633f280d2cbfcf519e9b0aa6c34d7f22f"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 16351912,
+          "HeapInuse": 17719296,
+          "HeapObjects": 10897,
+          "TotalAlloc": 105132688,
+          "Mallocs": 82863,
+          "WorkingSet": 29376512,
+          "PrivateWorkingSet": 18423808,
+          "PrivateCommit": 73367552
+        },
+        "allocation_bytes": 86186584,
+        "allocations": 64917,
+        "baseline_after_gc": {
+          "HeapAlloc": 9334104,
+          "HeapInuse": 10698752,
+          "HeapObjects": 5433,
+          "TotalAlloc": 16041024,
+          "Mallocs": 15251,
+          "WorkingSet": 19374080,
+          "PrivateWorkingSet": 8564736,
+          "PrivateCommit": 64303104
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 9395424,
+          "HeapInuse": 10797056,
+          "HeapObjects": 5866,
+          "TotalAlloc": 18946104,
+          "Mallocs": 17946,
+          "WorkingSet": 19357696,
+          "PrivateWorkingSet": 8515584,
+          "PrivateCommit": 63852544
+        },
+        "cancel_handler_cleanup_ns": 539800,
+        "cancelled_calls": 8,
+        "cancelled_handler_cleanups_observed": 8,
+        "clients": 8,
+        "completed_calls": 256,
+        "deleted_sessions": 8,
+        "elapsed_ns": 33848200,
+        "get_requests": 0,
+        "held_after_gc": {
+          "HeapAlloc": 9590096,
+          "HeapInuse": 10969088,
+          "HeapObjects": 6391,
+          "TotalAlloc": 17199440,
+          "Mallocs": 17170,
+          "WorkingSet": 19091456,
+          "PrivateWorkingSet": 8257536,
+          "PrivateCommit": 63655936
+        },
+        "held_calls": 8,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 4241600,
+          "p50": 1032700,
+          "p95": 2120400
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 8,
+        "measured_calls": 256,
+        "payload_bytes": 1024,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 1103160,
+          "HeapInuse": 2580480,
+          "HeapObjects": 5297,
+          "TotalAlloc": 108319392,
+          "Mallocs": 86958,
+          "WorkingSet": 28487680,
+          "PrivateWorkingSet": 17510400,
+          "PrivateCommit": 72450048
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 9735784,
+          "HeapInuse": 11304960,
+          "HeapObjects": 6432,
+          "TotalAlloc": 105132808,
+          "Mallocs": 82865,
+          "WorkingSet": 29376512,
+          "PrivateWorkingSet": 18423808,
+          "PrivateCommit": 73367552
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 19995000,
+          "heap_inuse": 21266432,
+          "private_commit": 74743808,
+          "private_working_set": 19443712,
+          "working_set": 30363648
+        },
+        "samples": 6,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 280,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 8,
+        "workers_per_client": 1
+      },
+      "derived": {
+        "total_workers": 8,
+        "allocation_bytes_per_completed_measured_call": 336666.34375,
+        "allocations_per_completed_measured_call": 253.58203125,
+        "latency_p50_sorted_zero_based_index": 127,
+        "latency_p95_sorted_zero_based_index": 243
+      }
+    },
+    {
+      "phase": "relay-sdk-profile-3",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_4/workers_4/bytes_65536",
+      "race_detector": false,
+      "go_command_pid": 48276,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-profile-3--clients_4-workers_4-bytes_65536.json",
+        "bytes": 2138,
+        "sha256": "d09bc5078c757f9fcc313ae89391b870a40df2b058525693381d18b83e96b519"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 11490776,
+          "HeapInuse": 12877824,
+          "HeapObjects": 6733,
+          "TotalAlloc": 999900560,
+          "Mallocs": 111466,
+          "WorkingSet": 37916672,
+          "PrivateWorkingSet": 26697728,
+          "PrivateCommit": 77041664
+        },
+        "allocation_bytes": 918522896,
+        "allocations": 91561,
+        "baseline_after_gc": {
+          "HeapAlloc": 6376624,
+          "HeapInuse": 7766016,
+          "HeapObjects": 4742,
+          "TotalAlloc": 23355080,
+          "Mallocs": 12746,
+          "WorkingSet": 22474752,
+          "PrivateWorkingSet": 11563008,
+          "PrivateCommit": 62177280
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 6660600,
+          "HeapInuse": 8028160,
+          "HeapObjects": 5759,
+          "TotalAlloc": 81377664,
+          "Mallocs": 19905,
+          "WorkingSet": 36016128,
+          "PrivateWorkingSet": 24969216,
+          "PrivateCommit": 76046336
+        },
+        "cancel_handler_cleanup_ns": 526800,
+        "cancelled_calls": 4,
+        "cancelled_handler_cleanups_observed": 4,
+        "clients": 4,
+        "completed_calls": 256,
+        "deleted_sessions": 4,
+        "elapsed_ns": 220607000,
+        "get_requests": 4,
+        "held_after_gc": {
+          "HeapAlloc": 9779720,
+          "HeapInuse": 11108352,
+          "HeapObjects": 7141,
+          "TotalAlloc": 45153688,
+          "Mallocs": 17615,
+          "WorkingSet": 32161792,
+          "PrivateWorkingSet": 21143552,
+          "PrivateCommit": 73093120
+        },
+        "held_calls": 16,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 36660600,
+          "p50": 11575600,
+          "p95": 26528300
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 16,
+        "measured_calls": 256,
+        "payload_bytes": 65536,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 1105072,
+          "HeapInuse": 2588672,
+          "HeapObjects": 5077,
+          "TotalAlloc": 1001660168,
+          "Mallocs": 113798,
+          "WorkingSet": 36573184,
+          "PrivateWorkingSet": 25333760,
+          "PrivateCommit": 75665408
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 6845224,
+          "HeapInuse": 8224768,
+          "HeapObjects": 6314,
+          "TotalAlloc": 999900680,
+          "Mallocs": 111468,
+          "WorkingSet": 37462016,
+          "PrivateWorkingSet": 26243072,
+          "PrivateCommit": 76582912
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 25278520,
+          "heap_inuse": 26976256,
+          "private_commit": 84172800,
+          "private_working_set": 32972800,
+          "working_set": 44097536
+        },
+        "samples": 44,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 280,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 4,
+        "workers_per_client": 4
+      },
+      "derived": {
+        "total_workers": 16,
+        "allocation_bytes_per_completed_measured_call": 3587980.0625,
+        "allocations_per_completed_measured_call": 357.66015625,
+        "latency_p50_sorted_zero_based_index": 127,
+        "latency_p95_sorted_zero_based_index": 243
+      }
+    }
+  ],
+  "race_functional_profiles": [
+    {
+      "phase": "relay-sdk-race",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_1/workers_1/bytes_1024",
+      "race_detector": true,
+      "go_command_pid": 39176,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-race--clients_1-workers_1-bytes_1024.json",
+        "bytes": 2116,
+        "sha256": "50539c26c3d1088b7cd6ee96550090233af9461e56778257e0e304e903ca61f1"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 3036224,
+          "HeapInuse": 4407296,
+          "HeapObjects": 5545,
+          "TotalAlloc": 28447776,
+          "Mallocs": 29593,
+          "WorkingSet": 54898688,
+          "PrivateWorkingSet": 42168320,
+          "PrivateCommit": 228257792
+        },
+        "allocation_bytes": 25056400,
+        "allocations": 19955,
+        "baseline_after_gc": {
+          "HeapAlloc": 1733320,
+          "HeapInuse": 3055616,
+          "HeapObjects": 4421,
+          "TotalAlloc": 2984432,
+          "Mallocs": 9268,
+          "WorkingSet": 44519424,
+          "PrivateWorkingSet": 32120832,
+          "PrivateCommit": 223461376
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 1731352,
+          "HeapInuse": 2998272,
+          "HeapObjects": 4429,
+          "TotalAlloc": 3391376,
+          "Mallocs": 9638,
+          "WorkingSet": 44855296,
+          "PrivateWorkingSet": 32387072,
+          "PrivateCommit": 223027200
+        },
+        "cancel_handler_cleanup_ns": 2522900,
+        "cancelled_calls": 1,
+        "cancelled_handler_cleanups_observed": 1,
+        "clients": 1,
+        "completed_calls": 64,
+        "deleted_sessions": 1,
+        "elapsed_ns": 92945500,
+        "get_requests": 1,
+        "held_after_gc": {
+          "HeapAlloc": 1786224,
+          "HeapInuse": 3112960,
+          "HeapObjects": 4517,
+          "TotalAlloc": 3160608,
+          "Mallocs": 9506,
+          "WorkingSet": 44462080,
+          "PrivateWorkingSet": 31993856,
+          "PrivateCommit": 223313920
+        },
+        "held_calls": 1,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 3219100,
+          "p50": 1556100,
+          "p95": 2141300
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 1,
+        "measured_calls": 64,
+        "payload_bytes": 1024,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 719952,
+          "HeapInuse": 1933312,
+          "HeapObjects": 4522,
+          "TotalAlloc": 28965896,
+          "Mallocs": 30410,
+          "WorkingSet": 55189504,
+          "PrivateWorkingSet": 42401792,
+          "PrivateCommit": 228192256
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 1918136,
+          "HeapInuse": 3276800,
+          "HeapObjects": 4670,
+          "TotalAlloc": 28447896,
+          "Mallocs": 29595,
+          "WorkingSet": 54898688,
+          "PrivateWorkingSet": 42168320,
+          "PrivateCommit": 228257792
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 3581624,
+          "heap_inuse": 5013504,
+          "private_commit": 228257792,
+          "private_working_set": 42156032,
+          "working_set": 54874112
+        },
+        "samples": 18,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 67,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 1,
+        "workers_per_client": 1
+      },
+      "derived": {
+        "total_workers": 1,
+        "allocation_bytes_per_completed_measured_call": 391506.25,
+        "allocations_per_completed_measured_call": 311.796875,
+        "latency_p50_sorted_zero_based_index": 31,
+        "latency_p95_sorted_zero_based_index": 60
+      }
+    },
+    {
+      "phase": "relay-sdk-race",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_8/workers_1/bytes_1024",
+      "race_detector": true,
+      "go_command_pid": 39176,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-race--clients_8-workers_1-bytes_1024.json",
+        "bytes": 2152,
+        "sha256": "198e052b739c9c60a9713bc4c09f0e8193defa4680269653596e880ee7e84088"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 15839936,
+          "HeapInuse": 17268736,
+          "HeapObjects": 11313,
+          "TotalAlloc": 143841208,
+          "Mallocs": 117402,
+          "WorkingSet": 155381760,
+          "PrivateWorkingSet": 142401536,
+          "PrivateCommit": 341041152
+        },
+        "allocation_bytes": 96049256,
+        "allocations": 76525,
+        "baseline_after_gc": {
+          "HeapAlloc": 9306984,
+          "HeapInuse": 10641408,
+          "HeapObjects": 5729,
+          "TotalAlloc": 44443336,
+          "Mallocs": 37909,
+          "WorkingSet": 79335424,
+          "PrivateWorkingSet": 66400256,
+          "PrivateCommit": 258555904
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 9389184,
+          "HeapInuse": 10739712,
+          "HeapObjects": 6105,
+          "TotalAlloc": 47791952,
+          "Mallocs": 40877,
+          "WorkingSet": 82296832,
+          "PrivateWorkingSet": 69361664,
+          "PrivateCommit": 267075584
+        },
+        "cancel_handler_cleanup_ns": 2680700,
+        "cancelled_calls": 8,
+        "cancelled_handler_cleanups_observed": 8,
+        "clients": 8,
+        "completed_calls": 256,
+        "deleted_sessions": 8,
+        "elapsed_ns": 130947200,
+        "get_requests": 8,
+        "held_after_gc": {
+          "HeapAlloc": 9568128,
+          "HeapInuse": 10919936,
+          "HeapObjects": 6675,
+          "TotalAlloc": 45971984,
+          "Mallocs": 39975,
+          "WorkingSet": 80543744,
+          "PrivateWorkingSet": 67608576,
+          "PrivateCommit": 265728000
+        },
+        "held_calls": 8,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 11727600,
+          "p50": 3539500,
+          "p95": 8662700
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 8,
+        "measured_calls": 256,
+        "payload_bytes": 1024,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 1062576,
+          "HeapInuse": 2465792,
+          "HeapObjects": 5414,
+          "TotalAlloc": 147326200,
+          "Mallocs": 122040,
+          "WorkingSet": 159014912,
+          "PrivateWorkingSet": 146034688,
+          "PrivateCommit": 340123648
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 10361272,
+          "HeapInuse": 11976704,
+          "HeapObjects": 7263,
+          "TotalAlloc": 143841328,
+          "Mallocs": 117404,
+          "WorkingSet": 155463680,
+          "PrivateWorkingSet": 142483456,
+          "PrivateCommit": 341041152
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 21372968,
+          "heap_inuse": 22536192,
+          "private_commit": 341041152,
+          "private_working_set": 142397440,
+          "working_set": 155377664
+        },
+        "samples": 26,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 280,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 8,
+        "workers_per_client": 1
+      },
+      "derived": {
+        "total_workers": 8,
+        "allocation_bytes_per_completed_measured_call": 375192.40625,
+        "allocations_per_completed_measured_call": 298.92578125,
+        "latency_p50_sorted_zero_based_index": 127,
+        "latency_p95_sorted_zero_based_index": 243
+      }
+    },
+    {
+      "phase": "relay-sdk-race",
+      "package": "mcp-local-hub/internal/daemon",
+      "test": "TestRelaySDKConsumerProfile/clients_4/workers_4/bytes_65536",
+      "race_detector": true,
+      "go_command_pid": 39176,
+      "output_fragments_for_test": 5,
+      "reconstructed_json": {
+        "path": "qualification/results/relay/reconstructed/relay-sdk-race--clients_4-workers_4-bytes_65536.json",
+        "bytes": 2175,
+        "sha256": "ddd8a0c27422bc0cfa01b4307a578871e73091c02f4ec347a5a03e0978d7c04c"
+      },
+      "profile": {
+        "after_calls": {
+          "HeapAlloc": 10989128,
+          "HeapInuse": 12271616,
+          "HeapObjects": 7012,
+          "TotalAlloc": 1364071608,
+          "Mallocs": 241263,
+          "WorkingSet": 189956096,
+          "PrivateWorkingSet": 176771072,
+          "PrivateCommit": 362942464
+        },
+        "allocation_bytes": 1119455504,
+        "allocations": 106199,
+        "baseline_after_gc": {
+          "HeapAlloc": 6187016,
+          "HeapInuse": 7462912,
+          "HeapObjects": 5383,
+          "TotalAlloc": 173296912,
+          "Mallocs": 126600,
+          "WorkingSet": 159723520,
+          "PrivateWorkingSet": 146722816,
+          "PrivateCommit": 333897728
+        },
+        "before_calls_after_gc": {
+          "HeapAlloc": 7064048,
+          "HeapInuse": 8347648,
+          "HeapObjects": 6595,
+          "TotalAlloc": 244616104,
+          "Mallocs": 135064,
+          "WorkingSet": 175788032,
+          "PrivateWorkingSet": 162754560,
+          "PrivateCommit": 342757376
+        },
+        "cancel_handler_cleanup_ns": 521600,
+        "cancelled_calls": 4,
+        "cancelled_handler_cleanups_observed": 4,
+        "clients": 4,
+        "completed_calls": 256,
+        "deleted_sessions": 4,
+        "elapsed_ns": 2011094000,
+        "get_requests": 4,
+        "held_after_gc": {
+          "HeapAlloc": 10104672,
+          "HeapInuse": 11337728,
+          "HeapObjects": 7897,
+          "TotalAlloc": 201756640,
+          "Mallocs": 132359,
+          "WorkingSet": 165568512,
+          "PrivateWorkingSet": 152555520,
+          "PrivateCommit": 338329600
+        },
+        "held_calls": 16,
+        "http_active_after_close": 0,
+        "latency_ns": {
+          "max": 272940200,
+          "p50": 114146700,
+          "p95": 210435400
+        },
+        "load": "closed loop; synthetic payload through real SDK transports; no production SLO claim",
+        "lost_or_corrupted": 0,
+        "max_active_tools": 16,
+        "measured_calls": 256,
+        "payload_bytes": 65536,
+        "retained_closed_after_gc": {
+          "HeapAlloc": 1013640,
+          "HeapInuse": 2326528,
+          "HeapObjects": 5206,
+          "TotalAlloc": 1365916920,
+          "Mallocs": 243534,
+          "WorkingSet": 188592128,
+          "PrivateWorkingSet": 175407104,
+          "PrivateCommit": 361566208
+        },
+        "retained_open_after_gc": {
+          "HeapAlloc": 6954224,
+          "HeapInuse": 8249344,
+          "HeapObjects": 6648,
+          "TotalAlloc": 1364071728,
+          "Mallocs": 241265,
+          "WorkingSet": 189497344,
+          "PrivateWorkingSet": 176312320,
+          "PrivateCommit": 362483712
+        },
+        "sample_interval_ns": 5000000,
+        "sampled_peak_available": true,
+        "sampled_peak_fields": {
+          "heap_alloc": 28339696,
+          "heap_inuse": 29597696,
+          "private_commit": 369659904,
+          "private_working_set": 183349248,
+          "working_set": 196534272
+        },
+        "samples": 332,
+        "scope": "whole test process: SDK client + Relay + SDK HTTP server + instrumented driver",
+        "server_calls": 280,
+        "server_sessions_after_close": 0,
+        "tool_active_after_close": 0,
+        "warmup_calls": 4,
+        "workers_per_client": 4
+      },
+      "derived": {
+        "total_workers": 16,
+        "allocation_bytes_per_completed_measured_call": 4372873.0625,
+        "allocations_per_completed_measured_call": 414.83984375,
+        "latency_p50_sorted_zero_based_index": 127,
+        "latency_p95_sorted_zero_based_index": 243
+      }
+    }
+  ],
+  "non_race_call_totals": {
+    "warmup_calls": 13,
+    "held_calls": 25,
+    "measured_calls": 576,
+    "completed_calls": 576,
+    "cancelled_calls": 13,
+    "cancelled_handler_cleanups_observed": 13,
+    "server_calls": 627,
+    "lost_or_corrupted": 0,
+    "deleted_sessions": 13,
+    "get_requests": 4
+  },
+  "checks": {
+    "all_20_imported_raw_file_hashes": true,
+    "all_six_exact_plan_hashes_and_runner_pins": true,
+    "all_six_complete_source_and_declared_input_before_after_receipts_match_plan_inventories": true,
+    "all_27_local_overlay_inputs_match_every_plan": true,
+    "all_seven_commands_settled_without_timeout": true,
+    "all_terminal_events_recomputed_exactly": true,
+    "all_profile_jsons_reconstructed_per_test_across_output_events": true,
+    "all_36_named_memory_snapshots_have_valid_units_shape_and_basic_relations": true,
+    "all_six_allocation_differences_match_cumulative_snapshots": true,
+    "all_six_profile_call_counts_close_state_and_session_deletions_match": true
+  },
+  "limits": [
+    "These are three distinct closed-loop synthetic configurations in three fresh non-race go test invocations, not repeated samples of one configuration or a before/after comparison. No causal improvement or production SLO follows.",
+    "Whole-process memory and allocations include SDK client/server, Relay, measurement driver, payloads, response checks and reachable cleanup closures/closed objects. No Relay-only or standalone-executable attribution is made.",
+    "Five-millisecond sampling produced per-field maxima and counts, not an exported time series. Maxima may occur at different instants and are lower bounds on transient peaks; the after_calls snapshot may exceed a sampled maximum.",
+    "Only aggregate p50/p95/max latency values are exported. Their order and source-defined ranks were checked; individual durations are unavailable for independent percentile recomputation. The p50 uses the lower middle element for even sample counts.",
+    "GET requests are 0, 0 and 4 in the non-race profiles. Only the third observed GET traffic. There is no GET readiness barrier, server-initiated GET message workload or forced reconnect in this profile; earlier #629 reconnect evidence remains separate.",
+    "Cancellation covers one entered synthetic tool call per client and its deferred active decrement/signal. cancel_handler_cleanup_ns includes client cancellation returns and tool cleanup; it does not independently time final HTTP response drain. Full owner cleanup is checked later after close.",
+    "The cancellation oracle accepts errors.Is(context.Canceled); it does not export each returned error or exclude additional joined cancellation-notification errors. No claim of exclusive cancellation error identity is made.",
+    "Call integrity is checked at SDK call/result level against sequence and payload, not every wire frame that SDK may discard. lost_or_corrupted=0 is conditional on those executed assertions.",
+    "The harness enforces a direct-child deadline only; whole_process_tree_deadline_enforced=false. Successful owner checks are bounded to these fixture lifetimes, not a native or installed-product process-tree guarantee.",
+    "The runtime receipts record complete 3281-file source admission and 27 declared input identities before/after. This reviewer did not re-read the whole remote source/cache or re-run any Go command; local metadata/input bindings and exact exported raw results were independently checked.",
+    "SDK semantic version comes from pinned module/source composition, not a version field in these profile JSONs; complete module-cache verification is outside these six receipts.",
+    "Full regression, installed Hub acceptance, public-network behavior and external review of an exact newly published head remain outside this result."
+  ],
+  "export_note": {
+    "remote_writes": false,
+    "new_load_processes": false,
+    "attempt_1": "Read-only exporter stopped because Windows lstat/fstat ctime fields differed for one unchanged file. Raw failure and exact metadata diagnosis retained.",
+    "attempt_2": "Compared ctime within the same API and stable identity across APIs; exact completed-receipt log hashes remained mandatory. Successful export imported 20 files.",
+    "source": {
+      "path": "qualification/results/relay/export_readonly.py",
+      "bytes": 4057,
+      "sha256": "70de0719f4a2222fbc24311f370383fa9358b47e6c279f6b70f2704cad23f17b"
+    }
+  }
+}
