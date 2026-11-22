@@ -1,0 +1,118 @@
+{
+  "schema": "cmake-sdk-profile-postformat-source-review-v1",
+  "created_utc": "2026-11-22T13:18:55.316589+00:00",
+  "reviewer": "/root/pr658_audit",
+  "status": "SOURCE_POSTFORMAT_REVIEWED_NOT_RUN",
+  "mandatory_findings": [],
+  "scope": "Full two-file local formatting diff and byte binding to the previously reviewed server-first close correction. No native calls, Go execution, compilation, benchmark or runtime review performed by this reviewer.",
+  "base_commit": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+  "prior_review": {
+    "path": "evidence/cmake-sdk-profile-own-review.json",
+    "bytes": 15369,
+    "sha256": "dccbdd0abcfc5888fd3a453a476fa0f1fa9eb1b2c8911bcc2ad5dace4f234063"
+  },
+  "prior_manifest": {
+    "path": "evidence/cmake-sdk-profile-manifest.json",
+    "bytes": 3199,
+    "sha256": "4acd4e1288d1ea41965d28efe6a59056df53e960e53d112e6ea83014f2e8d778"
+  },
+  "close_order_correction": {
+    "path": "evidence/cmake-sdk-profile-close-order.delta.patch",
+    "bytes": 3026,
+    "sha256": "0dc8a6c3e1ca9a72c1c2ac8017d112ed798d80989b1b9878212205bf7592d574"
+  },
+  "format_receipt": {
+    "path": "qualification/cmake-package/format-receipt.json",
+    "bytes": 3729,
+    "sha256": "31186167e39bfe5a8f0cc76e79a00e57433dc439265e307cafcda54cdb42892a"
+  },
+  "export": {
+    "path": "qualification/cmake-package/format-export.json",
+    "bytes": 20005,
+    "sha256": "11aed75c8fb9de95c1fa281e5c22ae84d3cb332e1878ba792271d2145538736f"
+  },
+  "input_archive": {
+    "path": "qualification/cmake-package/cmake-sdk-profile-source.zip",
+    "bytes": 198599,
+    "sha256": "c382f7efe0a69c9a2439d342b05903b66c2cf2ef795ff9de22d6c9bf0f7795e9"
+  },
+  "full_format_diff": {
+    "path": "evidence/cmake-sdk-profile-format-only.diff",
+    "bytes": 21850,
+    "sha256": "c5d60d7fc17b140842dc689b3e03d23116ea751fd1d3134f747ef96a58d6b555"
+  },
+  "format_stage": {
+    "script_sha256": "103f4a3f84e20344b59e57c799e29dfedf2b95242ea82181f0c8ef91266fb297",
+    "runner_sha256": "893c3281026e988c200f61fb2b4459b3385d427b7b39e0eec38d27b9c03949e5",
+    "exit_code": 0,
+    "settled": true,
+    "timed_out": false,
+    "started_utc": "2026-11-22T13:16:06.397083+00:00",
+    "finished_utc": "2026-11-22T13:16:06.454022+00:00",
+    "source": "Observed from retained receipt; execution was owned by root."
+  },
+  "checks": {
+    "full_diff_read_for_both_files": true,
+    "only_statement_line_breaks_indentation_and_field_alignment": true,
+    "raw_six_files_match_receipt_before": true,
+    "formatted_six_files_match_receipt_after": true,
+    "raw_archive_six_members_match_retained_raw": true,
+    "three_export_records_decode_to_exact_receipt_and_formatted_files": true,
+    "only_two_files_changed_in_stage": [
+      "inputs/cmake-sdk-profile/internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go",
+      "inputs/cmake-sdk-profile/internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go"
+    ],
+    "oracle_production_overlay_and_materialization_inputs_unchanged": true,
+    "worktree_before_equals_prior_reviewed_pins": true,
+    "worktree_after_equals_formatted_export": true
+  },
+  "files": [
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_profile_windows_test.go",
+      "before": {
+        "bytes": 24616,
+        "sha256": "b7606aee1730a0e3e7c292cf8c6552069b44fc40bc655e82a2a93a4216311bfb"
+      },
+      "after": {
+        "bytes": 25003,
+        "sha256": "2e70941f8db24106fcca787577f81978fa86a7e155ae0e55c3cf4d990376ea8f"
+      }
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/cmake_trace_sdk_memory_windows_test.go",
+      "before": {
+        "bytes": 2924,
+        "sha256": "5c88cd9b48acacecc9193d2e569f921cfc15cd928f74af70f074d6112bcf727d"
+      },
+      "after": {
+        "bytes": 2922,
+        "sha256": "fd57c6c28f638191ad0370ee2cc36b10335468e441fbfcc81cd98a2dbcd929d4"
+      }
+    },
+    {
+      "path": "internal/vcpkgmcp/vcpkgserver/testdata/cmake_trace_sdk_profile_oracle.json",
+      "unchanged": true,
+      "bytes": 12055,
+      "sha256": "66edc3230924cb22f31235ebdc0a607e4a1e227db117209f56c24b7d49139ace"
+    }
+  ],
+  "lifecycle_binding": {
+    "server_close_precedes_client_close": true,
+    "client_reader_remains_live_during_server_close": true,
+    "both_owners_started_at_most_once": true,
+    "graceful_observation_seconds": 5,
+    "fallback_observation_seconds": 5,
+    "fallback_scope": "Only four owned pipe endpoints; any outstanding client Close is started once. Unresolved owners or forced close fail the profile.",
+    "late_cancel_response_delivery_guaranteed": false,
+    "stuck_file_read_interruption_guaranteed": false,
+    "previous_source_review_and_limits_preserved": true
+  },
+  "mutation": {
+    "performed": "Only the two expressly authorized local worktree Go files were replaced with the fully reviewed exported bytes.",
+    "originals_retained": "qualification/cmake-package/raw and the exact six-member source ZIP",
+    "prior_review_artifacts_preserved": true,
+    "remote_writes": false,
+    "production_changes": false
+  },
+  "runtime_status": "NOT_RUN in this source review. Formatting success is not evidence of compilation, SDK consumer behavior, cancellation, resource settlement or measured performance."
+}
