@@ -1,0 +1,282 @@
+{
+  "schema": "relay-preserved-composition-v2",
+  "qualification": "NOT_RUN; byte and tree arithmetic only",
+  "physical_source_head": "858812988833a84368c60fba1540ae601155fa71",
+  "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "master_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "master_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+  "donor_head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+  "donor_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+  "master_tree_input": {
+    "path": "next-arch-audit/replacement658/tree-inputs.json",
+    "sha256": "0e0d623be4d9545fbb831480af0d2910ca4c34c2244b4874d3478f1049c3f63f",
+    "all_three_source_trees_rehashed": true,
+    "master_leaf_count": 3270
+  },
+  "donor_delta_completeness_source": "relay-next/master-pr629-comparison.json; exact refs, merge base, all 13 changed-file records",
+  "donor_counts": {
+    "paths": 13,
+    "production_go": 6,
+    "test_go": 7,
+    "modified_existing_master_paths": 3,
+    "new_paths_absent_in_master": 10
+  },
+  "preserved_delta_paths": [
+    ".plans/2026-11/open-pr-integration-20261117.md",
+    ".plans/2026-11/prune-recovery-closeout-20261121.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "cmd/mcphub/main_test.go",
+    "docs/agent-runbook.md",
+    "docs/frontend-flowbite.md",
+    "docs/skills/mcphub-explained/SKILL.md",
+    "internal/api/hub_mcp_state_read_inode_windows.go",
+    "internal/api/hub_mcp_state_read_policy_windows_test.go",
+    "internal/api/lsp_routing/main_test.go",
+    "internal/api/lsp_routing/resolver_benchmark_test.go",
+    "internal/api/lsp_routing/resolver_test.go",
+    "internal/api/serena_routing/main_test.go",
+    "internal/api/serena_routing/resolver_test.go",
+    "internal/api/serena_routing/shared_observer_public_test.go",
+    "internal/cli/gui_force_test.go",
+    "internal/cli/supervise_reconcile_ipc_test.go",
+    "internal/daemon/host_original_windows_test.go",
+    "internal/daemon/lazy_proxy_readiness_test.go",
+    "internal/daemon/lazy_proxy_test.go",
+    "internal/daemon/main_test.go",
+    "internal/oneapirun/async_owner_test.go",
+    "internal/oneapirun/async_test.go",
+    "internal/oneapirun/main_test.go",
+    "tools/testshards/main.go",
+    "tools/testshards/main_test.go"
+  ],
+  "donor_overlap_with_preserved_delta": [],
+  "donor_paths": [
+    {
+      "path": "cmd/mcphub/main.go",
+      "kind": "production_go",
+      "master_state": "present",
+      "master_git_blob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+      "preserved_git_blob": "10e7aaf4c614bc9f3bad5c1df404ac7471181f1a",
+      "merge_base_equals_master": true,
+      "donor_git_blob": "40a07531f2a0e747206ae528c0824841ed440b4e",
+      "donor_sha256": "5b1d8d0c85606c82c897adf450c9e2e0d9fd520d71d11bff84d8dda6d76e1ae2",
+      "donor_bytes": 7404,
+      "donor_source": "relay-next/source/pr629/cmd/mcphub/main.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/cmd/mcphub/main.go"
+    },
+    {
+      "path": "cmd/mcphub/relay_input_windows_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "19e85fee0c4acb30bd74612e18a3b4b6ffdffaf4",
+      "donor_sha256": "0bc0f5f34b44cadeff3c36eb7ec1ff3495bd670a450c0c1559a5f290aff8cbe3",
+      "donor_bytes": 5244,
+      "donor_source": "relay-next/qualification/source/pr629/cmd/mcphub/relay_input_windows_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/cmd/mcphub/relay_input_windows_test.go"
+    },
+    {
+      "path": "internal/cli/relay.go",
+      "kind": "production_go",
+      "master_state": "present",
+      "master_git_blob": "134896522bf8465281a06ff59fe6e9bd2753d8da",
+      "preserved_git_blob": "134896522bf8465281a06ff59fe6e9bd2753d8da",
+      "merge_base_equals_master": true,
+      "donor_git_blob": "fb51291538112933b32ef443e82975d9ed6e53e3",
+      "donor_sha256": "949a1cfc9d6e2a9bb925fac2456ad6c2e6b3b483e28b7f2b1bb38f63fa92b2f3",
+      "donor_bytes": 4475,
+      "donor_source": "relay-next/source/pr629/internal/cli/relay.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input.go",
+      "kind": "production_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "717f09b62afc8de68117f84edcead61a52cd99e4",
+      "donor_sha256": "cf599abacafbe309fe812775b313c19513243dc30b83d75559b783f1aad54ec2",
+      "donor_bytes": 1279,
+      "donor_source": "relay-next/source/pr629/internal/cli/relay_process_input.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input_native_windows_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "89c164f90d085939468e7bd8ffaa1baa3824cebc",
+      "donor_sha256": "c658e20c7538712267828b9f1b79de42439ae251d2532f9532cf2f0ebbe4d251",
+      "donor_bytes": 3872,
+      "donor_source": "relay-next/qualification/source/pr629/internal/cli/relay_process_input_native_windows_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input_native_windows_test.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input_other.go",
+      "kind": "production_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "d8e9dae674bc67b9b8c187b3e8b33a4a1db65a94",
+      "donor_sha256": "6fd717ec2aa39066c31648589bdb1866e84646fdcafe23564b6bcba901229a23",
+      "donor_bytes": 356,
+      "donor_source": "relay-next/source/pr629/internal/cli/relay_process_input_other.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input_other.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "b41ccc5cfb7f8079318eeff66a83fa7036ba0af1",
+      "donor_sha256": "b4c18cecb3432c3afbc8de3b7bc0f7dd0fbf643ab3c1279224f10d99caf4f005",
+      "donor_bytes": 2631,
+      "donor_source": "relay-next/qualification/source/pr629/internal/cli/relay_process_input_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input_test.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input_windows.go",
+      "kind": "production_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "35b45ddaec2d09dac1cabe847a3c81fb2614f3df",
+      "donor_sha256": "35302df3af210f0f0c700f6260d5a90c1261419cd7f1f045123baa702c85334a",
+      "donor_bytes": 5187,
+      "donor_source": "relay-next/qualification/source/pr629/internal/cli/relay_process_input_windows.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input_windows.go"
+    },
+    {
+      "path": "internal/cli/relay_process_input_windows_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "cf34655b8f3da584f1874e86fcca87965fd9a281",
+      "donor_sha256": "bc4c05d73123bb28db74fdc1dcbe7e78b7cd38134153aea224959ac459667416",
+      "donor_bytes": 9103,
+      "donor_source": "relay-next/qualification/source/pr629/internal/cli/relay_process_input_windows_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/cli/relay_process_input_windows_test.go"
+    },
+    {
+      "path": "internal/daemon/relay.go",
+      "kind": "production_go",
+      "master_state": "present",
+      "master_git_blob": "8f6840af738d31fd1271463e32a315a3694ae8b8",
+      "preserved_git_blob": "8f6840af738d31fd1271463e32a315a3694ae8b8",
+      "merge_base_equals_master": true,
+      "donor_git_blob": "52493e2c87c5e81a6a1f8861dd7f2469df64321c",
+      "donor_sha256": "81b39fb727199d17e64e18b5fef858f2d0a472256e2fd25b1583c451f478f513",
+      "donor_bytes": 21494,
+      "donor_source": "relay-next/source/pr629/internal/daemon/relay.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/daemon/relay.go"
+    },
+    {
+      "path": "internal/daemon/relay_input_contract_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "de8531726f791a4d7eed685ac80e972c8ab5dc60",
+      "donor_sha256": "de9004137aa31158faf541be0f0c257b3357a36835a99752a4a98a456dbaf9d9",
+      "donor_bytes": 15531,
+      "donor_source": "relay-next/source/pr629/internal/daemon/relay_input_contract_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/daemon/relay_input_contract_test.go"
+    },
+    {
+      "path": "internal/daemon/relay_output_contract_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "cfd4c07295416f59bd582f96c701235cfacdef76",
+      "donor_sha256": "9659845c0ed36d131a74e745bb18ab6dfccf5f68063f503cebfddac814382667",
+      "donor_bytes": 13494,
+      "donor_source": "relay-next/source/pr629/internal/daemon/relay_output_contract_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/daemon/relay_output_contract_test.go"
+    },
+    {
+      "path": "internal/daemon/relay_sse_session_retry_test.go",
+      "kind": "test_go",
+      "master_state": "absent_in_complete_tree",
+      "master_git_blob": null,
+      "preserved_git_blob": null,
+      "merge_base_equals_master": "new donor path; absent in complete master tree",
+      "donor_git_blob": "fb47b1594936d8130836abd9afd09be907c9d8dc",
+      "donor_sha256": "d5a22bcc2cc76df750a5b4b8105aa567036c6ffabea0c25be0ecd4a15c65c23f",
+      "donor_bytes": 2425,
+      "donor_source": "relay-next/source/pr629/internal/daemon/relay_sse_session_retry_test.go",
+      "donor_url": "https://github.com/applicate2628/mcp-local-hub/blob/b3646f19706d795a8b0c0dafb2193d7dc6f4c584/internal/daemon/relay_sse_session_retry_test.go"
+    }
+  ],
+  "canonical_entry": {
+    "commit_provenance": "97ff6da0c428a8c30f1952da470e3ff033a740e4",
+    "paths": [
+      {
+        "path": "internal/daemon/main_test.go",
+        "bytes": 4764,
+        "sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+        "git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8"
+      },
+      {
+        "path": "internal/daemon/main_dispatch_test.go",
+        "bytes": 8345,
+        "sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+        "git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7"
+      }
+    ],
+    "main_dispatch_absent_in_preserved_tree": true
+  },
+  "latest_two_file_manifest": {
+    "path": "relay-consumer-next/protocol-delta/candidate-manifest.json",
+    "sha256": "fbadeb757beb700849fd2143cc72ce9823e39c4dfbdcaf0ccf9eecb028ba1d0d"
+  },
+  "composition_counts": {
+    "paths": 16,
+    "production_go": 6,
+    "test_go": 10,
+    "existing_physical_paths": 4,
+    "added_physical_paths": 12
+  },
+  "virtual_composition_trees": {
+    "control": "fc2e7217c4b5ad749617d23643757eb96cae9aa1",
+    "prime-control": "e249b0302f694c6918837deaeb9fa5358127eb2c",
+    "candidate": "fcd2ad6bce89c71a180973c8f0a65b912899fdc5"
+  },
+  "control_candidate_differ_only_in": [
+    "internal/daemon/relay.go"
+  ],
+  "subtraction": {
+    "remove_latest_response_test_restore_donor_relay": "preserved + 13 donor paths + 2 canonical entry paths",
+    "restore_canonical_entry_to_preserved": "preserved + 13 donor paths",
+    "restore_13_donor_paths_to_preserved": "exact original physical source tree dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "no_unrelated_master_entries_replaced": true
+  },
+  "limitations": [
+    "Tree hashes are locally computed compositions; no Git object or ref was created.",
+    "This is not a complete #629 tree: the preserved master has unrelated newer work which remains untouched.",
+    "No Go formatter, compiler, test, runtime, HTTP server or remote execution occurred."
+  ],
+  "variant_count": 3,
+  "historical_v1_proof_sha256": "a955f263742351c8e7ff361f721ba166bdc821ccc6a1f8b077d8ee52b31ee2b1",
+  "protocol_correction": {
+    "production_sha256": "4035863ec8ed9a4c39064a40205214adda8e4b742c5538dbd9286c39fee6e4b8",
+    "test_sha256": "6350541c53e501402405a130bdbb704934a82facdf48149da30d33d81b5625d6",
+    "source_pins_sha256": "5e6a38325ff5e7eb647d084c55213958fbac436ed14e115e97b2e2f024442aeb",
+    "prime_control_uses_d49": true
+  }
+}

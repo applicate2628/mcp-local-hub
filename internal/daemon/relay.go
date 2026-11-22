@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // HTTPToStdioRelay forwards JSON-RPC messages between a stdio MCP client
@@ -42,7 +43,9 @@ type HTTPToStdioRelay struct {
 	// unrelated read errors and this callback's error remain observable.
 	InterruptStdin func() error
 
-	// HTTPClient is optional; a sensible default is used if nil.
+	// HTTPClient is optional and remains caller-owned. If nil, POST uses
+	// the default request timeout; streaming GET follows the Run context.
+	// Run never stores its defaults here, including across repeated Runs.
 	HTTPClient *http.Client
 
 	// sessionID is minted by the server on the first POST response
@@ -52,11 +55,18 @@ type HTTPToStdioRelay struct {
 	qualificationMu sync.Mutex
 	qualification   *mcpHTTPQualificationOwner
 
-	// stdoutMu owns complete frame writes and the first output failure.
+	// stdoutMu owns complete frame writes and the first framing/output failure.
 	// Once a frame fails, every producer must stop using this stream.
 	stdoutMu     sync.Mutex
 	stdoutErr    error
 	stdoutCancel context.CancelFunc // this Run's network/dispatch context only
+
+	// POST failures have their own exclusion so a borrowed, blocked Stdout
+	// cannot prevent response failure from canceling context-aware work.
+	// Run joins the bounded POST workers before reading or resetting postErr.
+	postMu     sync.Mutex
+	postErr    error
+	postCancel context.CancelFunc
 }
 
 // jsonrpcMeta captures the three fields relay needs to route/synthesize
@@ -72,10 +82,10 @@ const (
 	mcpSessionIDHeader = "MCP-Session-Id"
 	lastEventIDHeader  = "Last-Event-ID"
 
-	// Default HTTP timeout matches what Claude Code uses against our
-	// Serena daemon (60 s total). Individual SSE streams are read
-	// without a body-read deadline — only the overall connection
-	// inherits the HTTPClient's timeout when set to 0 here.
+	// Default POST timeout is 60 s total, including its response body.
+	// The default server-initiated SSE client has no Client.Timeout;
+	// its request follows the Run context. An explicit HTTPClient keeps
+	// its own timeout policy for both methods.
 	defaultHTTPTimeoutSec = 60
 
 	// Max line the relay accepts from stdin. MCP messages are typically
@@ -87,6 +97,10 @@ const (
 	// session establishment. Provides backpressure against untrusted or
 	// buggy stdio clients that can otherwise enqueue unbounded work.
 	maxConcurrentPOSTs = 64
+
+	// Match the existing HTTP host's finite body envelope. SSE streams may
+	// continue across events; each pending event has this aggregate bound.
+	maxRelayResponseBytes = maxHTTPHostBodyBytes
 )
 
 var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
@@ -104,9 +118,10 @@ var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
 // No detached reader goroutine or implicit ownership transfer is introduced.
 //
 // The first output failure is retained even when it causes context cancellation.
-// A separately observed stdin failure is returned alongside it. Failure to
-// deliver an answer does not prove the remote operation did not execute and
-// never triggers a replay. Clean EOF/cancellation alone retains the nil result.
+// Independently observed response/parser and stdin failures are returned
+// alongside it. Failure to deliver an answer does not prove the remote
+// operation did not execute. POST redirects and parser-failure reconnects
+// are refused. Clean EOF/cancellation alone retains the nil result.
 //
 // Lifecycle rules:
 //   - stdin pump reads lines and dispatches POSTs in parallel goroutines
@@ -127,28 +142,37 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	if r.Stderr == nil {
 		r.Stderr = io.Discard
 	}
-	if r.HTTPClient == nil {
-		r.HTTPClient = &http.Client{
-			Timeout: time.Duration(defaultHTTPTimeoutSec) * time.Second,
-		}
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r.stdoutMu.Lock()
 	r.stdoutErr = nil
 	r.stdoutCancel = cancel
 	r.stdoutMu.Unlock()
+	r.postMu.Lock()
+	r.postErr = nil
+	r.postCancel = cancel
+	r.postMu.Unlock()
 	defer func() {
 		r.stdoutMu.Lock()
 		r.stdoutCancel = nil
 		r.stdoutMu.Unlock()
+		r.postMu.Lock()
+		r.postCancel = nil
+		r.postMu.Unlock()
 	}()
 
 	var postWG sync.WaitGroup
 	sseErrCh := make(chan error, 1)
 
 	go func() {
-		sseErrCh <- r.sseListener(runCtx)
+		err := r.sseListener(runCtx)
+		if runCtx.Err() != nil && relayCleanDetach(err, false) {
+			err = nil
+		}
+		if err != nil {
+			cancel()
+		}
+		sseErrCh <- err
 	}()
 
 	stdinErr, interruptErr := r.pumpInput(runCtx, &postWG)
@@ -159,16 +183,19 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 
 	// Shut down SSE listener by canceling runCtx, then wait for it.
 	cancel()
-	<-sseErrCh
+	sseErr := <-sseErrCh
 
 	// Best-effort session termination — don't block caller on failure.
 	r.terminateSession()
 
-	outputErr := r.stdoutFailure()
+	r.postMu.Lock()
+	postErr := r.postErr
+	r.postMu.Unlock()
+	outputErr := errors.Join(r.stdoutFailure(), postErr, sseErr)
 	if interruptErr != nil {
 		outputErr = errors.Join(outputErr, interruptErr)
 	}
-	if !relayInputCleanDetach(stdinErr) {
+	if !relayCleanDetach(stdinErr, true) {
 		if outputErr != nil {
 			return errors.Join(stdinErr, outputErr)
 		}
@@ -177,11 +204,12 @@ func (r *HTTPToStdioRelay) Run(ctx context.Context) error {
 	return outputErr
 }
 
-// relayInputCleanDetach accepts only error trees composed entirely of the
-// two expected input-end sentinels. errors.Is would match just one branch and
-// incorrectly discard independent read/cleanup failures in errors.Join.
-func relayInputCleanDetach(err error) bool {
-	if err == nil || err == io.EOF || err == context.Canceled {
+// relayCleanDetach accepts only error trees composed entirely of expected
+// cancellation causes, plus EOF for input. errors.Is would match just one
+// branch and incorrectly discard independent failures in errors.Join.
+// Response callers also require their own context to be canceled.
+func relayCleanDetach(err error, allowEOF bool) bool {
+	if err == nil || err == context.Canceled || (allowEOF && err == io.EOF) {
 		return true
 	}
 	switch e := err.(type) {
@@ -191,14 +219,14 @@ func relayInputCleanDetach(err error) bool {
 			return false
 		}
 		for _, cause := range causes {
-			if cause == nil || !relayInputCleanDetach(cause) {
+			if cause == nil || !relayCleanDetach(cause, allowEOF) {
 				return false
 			}
 		}
 		return true
 	case interface{ Unwrap() error }:
 		cause := e.Unwrap()
-		return cause != nil && relayInputCleanDetach(cause)
+		return cause != nil && relayCleanDetach(cause, allowEOF)
 	default:
 		return false
 	}
@@ -294,6 +322,21 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 	}
 }
 
+// recordPOSTFailure preserves all failures from the bounded admitted workers.
+// Cancellation never authorizes replay of a request with an unknown effect.
+func (r *HTTPToStdioRelay) recordPOSTFailure(ctx context.Context, err error) {
+	if err == nil || (ctx.Err() != nil && relayCleanDetach(err, false)) {
+		return
+	}
+	r.postMu.Lock()
+	r.postErr = errors.Join(r.postErr, err)
+	cancel := r.postCancel
+	r.postMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // handlePOST sends one JSON-RPC message over HTTP POST and forwards the
 // server's response(s) back to stdout. On HTTP failure with a request
 // (has id), synthesizes a JSON-RPC error response so the client does
@@ -303,6 +346,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 
 	req, err := http.NewRequestWithContext(ctx, "POST", r.URL, bytes.NewReader(body))
 	if err != nil {
+		r.recordPOSTFailure(ctx, fmt.Errorf("build POST request: %w", err))
 		r.logErr("build POST request: %v", err)
 		r.sendSyntheticError(meta, metaErr, err)
 		return
@@ -313,9 +357,20 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		req.Header.Set(mcpSessionIDHeader, sid)
 	}
 
-	resp, err := r.HTTPClient.Do(req)
+	// A 307/308 can otherwise resend this POST after the first endpoint has
+	// already performed its effect. Keep the supplied client unmodified.
+	client := http.Client{Timeout: time.Duration(defaultHTTPTimeoutSec) * time.Second}
+	if r.HTTPClient != nil {
+		client = *r.HTTPClient
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
+		shuttingDown := ctx.Err() != nil
+		r.recordPOSTFailure(ctx, fmt.Errorf("POST request: %w", err))
+		if shuttingDown {
 			return // shutting down; do not synthesize a response
 		}
 		r.logErr("POST %s: %v", r.URL, err)
@@ -336,13 +391,15 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		contentType := resp.Header.Get("Content-Type")
 		if strings.HasPrefix(contentType, "text/event-stream") {
 			if err := r.pipeSSE(ctx, resp.Body); err != nil {
+				r.recordPOSTFailure(ctx, fmt.Errorf("POST SSE pipe: %w", err))
 				r.logErr("POST SSE pipe: %v", err)
 			}
 			return
 		}
 		// application/json (or anything else) — single message body.
-		msg, err := io.ReadAll(resp.Body)
+		msg, err := readAllWithLimit(resp.Body, maxRelayResponseBytes)
 		if err != nil {
+			r.recordPOSTFailure(ctx, fmt.Errorf("read POST response body: %w", err))
 			r.logErr("read POST response body: %v", err)
 			r.sendSyntheticError(meta, metaErr, err)
 			return
@@ -355,16 +412,26 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		r.logErr("session lost (server returned 404)")
 		r.sendSyntheticError(meta, metaErr, fmt.Errorf("session lost"))
 	default:
-		msg, _ := io.ReadAll(resp.Body)
-		r.logErr("POST non-2xx: status=%d body=%q", resp.StatusCode, msg)
-		r.sendSyntheticError(meta, metaErr, fmt.Errorf("HTTP %d", resp.StatusCode))
+		msg, readErr := readAllWithLimit(resp.Body, maxRelayResponseBytes)
+		statusErr := fmt.Errorf("HTTP %d", resp.StatusCode)
+		if readErr != nil {
+			r.recordPOSTFailure(ctx, fmt.Errorf("read POST HTTP %d body: %w", resp.StatusCode, readErr))
+			r.logErr("POST non-2xx: status=%d body read: %v", resp.StatusCode, readErr)
+		} else {
+			r.logErr("POST non-2xx: status=%d body=%q", resp.StatusCode, msg)
+		}
+		r.sendSyntheticError(meta, metaErr, errors.Join(statusErr, readErr))
 	}
 }
 
 // sseListener opens a long-lived GET /mcp SSE stream and forwards each
-// event's JSON payload to stdout. Reconnects once after a 1 s pause on
-// stream drop.
+// event's JSON payload to stdout. Reconnects after a 1 s pause on clean EOF.
+// Parser/output failures terminate the stream; they are not a resume point.
 func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
+	client := r.HTTPClient
+	if client == nil {
+		client = &http.Client{} // the owned stream lives until Run cancellation
+	}
 	var lastEventID string
 	attempts := 0
 
@@ -394,10 +461,13 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 			req.Header.Set(lastEventIDHeader, lastEventID)
 		}
 
-		resp, err := r.HTTPClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				if relayCleanDetach(err, false) {
+					return nil
+				}
+				return err
 			}
 			r.logErr("GET SSE: %v", err)
 			if attempts >= 3 {
@@ -423,8 +493,11 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 			continue
 		}
 
-		lastEventID = r.readSSEStream(ctx, resp.Body, lastEventID)
+		lastEventID, err = r.readSSEStream(ctx, resp.Body, lastEventID)
 		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("GET SSE stream: %w", err)
+		}
 		if err := r.stdoutFailure(); err != nil {
 			return err // a damaged output stream must not reconnect and write again
 		}
@@ -438,13 +511,13 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 }
 
 // readSSEStream reads an SSE response body until EOF or ctx cancel,
-// forwarding each `data:` event's JSON payload to stdout. Returns the
-// last observed event ID so the caller may resume.
-func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string) string {
-	lastID, _ := readRelaySSE(ctx, body, startID, 0, func(payload []byte) (bool, error) {
+// forwarding nonempty default/message event JSON payloads to stdout. Returns the
+// last observed event ID and any parser/output failure. Only clean EOF may
+// resume; an ID observed in a failed event is never used for reconnect.
+func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, startID string) (string, error) {
+	return readRelaySSE(ctx, body, startID, int(maxRelayResponseBytes), func(payload []byte) (bool, error) {
 		return false, r.writeLine(payload)
 	})
-	return lastID
 }
 
 // The legacy relay and finite observed exchange share the same SSE framing.
@@ -454,55 +527,79 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 	scanner.Buffer(make([]byte, 0, 64*1024), maxStdinLineBytes)
 
 	var dataBuf strings.Builder
+	hasData := false
+	eventName := ""
 	lastID := startID
+	pendingID := startID
 
 	flush := func() (bool, error) {
-		if dataBuf.Len() == 0 {
+		payload := dataBuf.String()
+		messageEvent := eventName == "" || eventName == "message"
+		dataBuf.Reset()
+		hasData = false
+		eventName = ""
+		// MCP priming/control events carry cursors without JSON messages.
+		// Reset the type even for an id-only block; it never carries over.
+		if len(payload) == 0 || !messageEvent {
 			return false, nil
 		}
-		payload := dataBuf.String()
-		dataBuf.Reset()
 		// SSE `data:` payloads may span multiple lines (joined with \n per spec).
-		// For our use case MCP messages are single JSON objects and never contain
-		// raw newlines, so the joined form equals the JSON bytes.
+		// The receiver owns JSON validation and stdio framing.
 		return receive([]byte(payload))
 	}
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			return lastID, ctx.Err()
+			return lastID, errors.Join(ctx.Err(), scanner.Err())
 		}
 		line := scanner.Text()
-		switch {
-		case line == "":
-			if stop, err := flush(); stop || err != nil {
-				return lastID, err
+		if line == "" {
+			stop, err := flush()
+			if err != nil {
+				return lastID, errors.Join(err, scanner.Err())
 			}
-		case strings.HasPrefix(line, "data:"):
-			// Per SSE spec the value is everything after the first colon,
-			// optionally with one leading space stripped.
-			val := strings.TrimPrefix(line, "data:")
-			val = strings.TrimPrefix(val, " ")
-			if dataBuf.Len() > 0 {
+			lastID = pendingID
+			if stop {
+				return lastID, scanner.Err()
+			}
+			continue
+		}
+		// A field without a colon has an empty value. Remove at most one
+		// ASCII space after the colon; other whitespace remains meaningful.
+		field, val, _ := strings.Cut(line, ":")
+		val = strings.TrimPrefix(val, " ")
+		switch field {
+		case "data":
+			additional := len(val)
+			if hasData {
+				additional++ // separator counts toward the event envelope
+			}
+			if maxEventBytes > 0 && additional > maxEventBytes-dataBuf.Len() {
+				return lastID, errors.Join(errStdinLineTooLong, scanner.Err())
+			}
+			if hasData {
 				dataBuf.WriteByte('\n')
 			}
 			dataBuf.WriteString(val)
-			if maxEventBytes > 0 && dataBuf.Len() > maxEventBytes {
-				return lastID, errStdinLineTooLong
+			hasData = true
+		case "event":
+			eventName = val
+		case "id":
+			if !strings.ContainsRune(val, '\x00') {
+				pendingID = val
 			}
-		case strings.HasPrefix(line, "id:"):
-			lastID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 		default:
-			// Other SSE field lines (event:, retry:, comment lines starting
-			// with ':', or unrecognized fields) are ignored — the relay is
-			// transport-level and forwards only the data: payload.
+			// retry remains unsupported. Comments and unknown field names
+			// do not contribute to the message payload.
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return lastID, err
 	}
-	_, err := flush()
-	return lastID, err
+	if hasData {
+		return lastID, io.ErrUnexpectedEOF // no blank line committed this event
+	}
+	return lastID, nil
 }
 
 // pipeSSE handles the rare case where POST /mcp returns an SSE stream
@@ -510,8 +607,8 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 // case, but a separate code path keeps the POST handler focused on
 // request-scoped responses.
 func (r *HTTPToStdioRelay) pipeSSE(ctx context.Context, body io.Reader) error {
-	r.readSSEStream(ctx, body, "")
-	return r.stdoutFailure()
+	_, err := r.readSSEStream(ctx, body, "")
+	return err
 }
 
 // terminateSession issues a best-effort DELETE /mcp with the session
@@ -529,7 +626,11 @@ func (r *HTTPToStdioRelay) terminateSession() {
 		return
 	}
 	req.Header.Set(mcpSessionIDHeader, sid)
-	resp, err := r.HTTPClient.Do(req)
+	client := r.HTTPClient
+	if client == nil {
+		client = &http.Client{} // the cleanup context already supplies its 2 s bound
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		r.logErr("DELETE /mcp: %v", err)
 		return
@@ -562,28 +663,44 @@ func (r *HTTPToStdioRelay) sendSyntheticError(meta *jsonrpcMeta, metaErr error, 
 	r.writeLine(raw)
 }
 
-// writeLine writes a single JSON-RPC message plus trailing newline under
-// the stdout mutex. The message must be a single-line JSON payload —
-// line-delimited framing per MCP stdio transport spec.
+// writeLine compacts one bounded UTF-8 JSON message before any output write.
+// JSON whitespace may span HTTP/SSE lines; escaped newlines inside strings
+// remain data. Syntax/framing failure poisons this stream just like a failed
+// write, so another producer cannot append a success-looking response.
 func (r *HTTPToStdioRelay) writeLine(msg []byte) error {
-	msg = bytes.TrimRight(msg, "\r\n")
 	r.stdoutMu.Lock()
 	defer r.stdoutMu.Unlock()
 	if r.stdoutErr != nil {
 		return r.stdoutErr
 	}
-	for _, part := range [][]byte{msg, []byte("\n")} {
-		n, err := r.Stdout.Write(part)
-		if err == nil && n != len(part) {
-			err = io.ErrShortWrite
-		}
-		if err != nil {
-			r.stdoutErr = fmt.Errorf("relay stdout: %w", err)
-			if r.stdoutCancel != nil {
-				r.stdoutCancel()
+	var frame bytes.Buffer
+	var err error
+	switch {
+	case int64(len(msg)) > maxRelayResponseBytes:
+		err = errBodyTooLarge
+	case !utf8.Valid(msg):
+		err = errors.New("JSON message is not valid UTF-8")
+	default:
+		err = json.Compact(&frame, msg)
+	}
+	if err == nil {
+		for _, part := range [][]byte{frame.Bytes(), []byte("\n")} {
+			var n int
+			n, err = r.Stdout.Write(part)
+			if err == nil && n != len(part) {
+				err = io.ErrShortWrite
 			}
-			return r.stdoutErr
+			if err != nil {
+				break
+			}
 		}
+	}
+	if err != nil {
+		r.stdoutErr = fmt.Errorf("relay stdout: %w", err)
+		if r.stdoutCancel != nil {
+			r.stdoutCancel()
+		}
+		return r.stdoutErr
 	}
 	return nil
 }
