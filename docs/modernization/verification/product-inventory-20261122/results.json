@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "pr": 657,
+  "source_head": "4fa52b60b719664ede441be339e196a8b9766c50",
+  "source_tree": "861683a904ea33ad43e08917fe076c43056ee0df",
+  "master_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "donor": "434f27e476aa02bebdc7e73dbf6e5cd9f4aeb569",
+  "production_paths": [
+    "build.ps1"
+  ],
+  "archive": {
+    "path": "raw-evidence.zip",
+    "bytes": 44134,
+    "sha256": "1e874e5bc0914394848850ddec10afb6cf4ac585265a77a890f0f26a6d232174",
+    "indexed_files": 24,
+    "regular_files": 25
+  },
+  "receipt": {
+    "started_utc": "2026-11-22T14:30:58.066696+00:00",
+    "runner_sha256": "7d6ac5d17841f46d84f8d52a98c55062bf6dfe8ffbf1381ec28af5f5f7c80ce4",
+    "input_zip_sha256": "dfa893526eda85cf65acbeb2d5ac474cbb4cc6f770365ca82b375c5a768c35ff",
+    "inputs_sha256": {
+      "inputs/pr657/build.ps1": "9dd728889a303534e872913832ba89614cfc79b50a4eb1d864e8fe287b22ab7b",
+      "publication/build.ps1": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2",
+      "composition/build.ps1": "8735f68771d545b814a3c609a8d019ec03adb9f0266fb1fcb3918e9029fb9579",
+      "windows-product-artifacts.json": "3442d29fcc99611c299d9c9e6496ed2cfe7f9b5192f8452298fe2dd6e229cd0b",
+      "test-product-inventory.ps1": "4089d9dbf4e30a712b03563ab280fd2245f70a6928b5f118699ba1b48389e9e4",
+      "test-product-inventory-utf8.ps1": "993c1e62444d14f7b5c9015d307113ce0a8df19ee267ac4a29260f2d88df3e03"
+    },
+    "powershell_sha256_before": "95ce2acbc6cd9d7f4a22759d39a8d40fc2a53ceeecf068ef856849f0d2076961",
+    "commands": [
+      {
+        "label": "policy-before",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$ErrorActionPreference='Stop'; [pscustomobject]@{version=$PSVersionTable.PSVersion.ToString(); effective=(Get-ExecutionPolicy).ToString(); scopes=@(Get-ExecutionPolicy -List | ForEach-Object {[pscustomobject]@{scope=$_.Scope.ToString(); policy=$_.ExecutionPolicy.ToString()}})} | ConvertTo-Json -Compress -Depth 4"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "direct_child_waited": true,
+        "seconds": 0.888,
+        "stdout": {
+          "bytes": 295,
+          "sha256": "66417061ee16080642adc3d5a5e7a6938964a6f9d5983d34d5ed411a2ee44c36"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "label": "control",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-File",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\test-product-inventory-utf8.ps1",
+          "-BuildScript",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\inputs\\pr657\\build.ps1",
+          "-RegistryPath",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\windows-product-artifacts.json"
+        ],
+        "expected_exit": 1,
+        "exit_code": 1,
+        "direct_child_waited": true,
+        "seconds": 0.646,
+        "stdout": {
+          "bytes": 1924,
+          "sha256": "1f38ae590853cd5194439dd09b9d5bc0b14cd76599dcb71360ef17634659d0b3"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "label": "publication",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-File",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\test-product-inventory-utf8.ps1",
+          "-BuildScript",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\publication\\build.ps1",
+          "-RegistryPath",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\windows-product-artifacts.json"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "direct_child_waited": true,
+        "seconds": 0.609,
+        "stdout": {
+          "bytes": 1924,
+          "sha256": "e78e362ad1c3115ff3b78596285faed04865390655c52022eb8838642d48f587"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "label": "composition",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-File",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\test-product-inventory-utf8.ps1",
+          "-BuildScript",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\composition\\build.ps1",
+          "-RegistryPath",
+          "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f\\windows-product-artifacts.json"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "direct_child_waited": true,
+        "seconds": 0.585,
+        "stdout": {
+          "bytes": 1924,
+          "sha256": "190d61d9c8130fc1e7425ab11c44e92c44133fac04bd71a48682f3b517ff09c6"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "label": "policy-after",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$ErrorActionPreference='Stop'; [pscustomobject]@{version=$PSVersionTable.PSVersion.ToString(); effective=(Get-ExecutionPolicy).ToString(); scopes=@(Get-ExecutionPolicy -List | ForEach-Object {[pscustomobject]@{scope=$_.Scope.ToString(); policy=$_.ExecutionPolicy.ToString()}})} | ConvertTo-Json -Compress -Depth 4"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "direct_child_waited": true,
+        "seconds": 0.908,
+        "stdout": {
+          "bytes": 295,
+          "sha256": "66417061ee16080642adc3d5a5e7a6938964a6f9d5983d34d5ed411a2ee44c36"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    ],
+    "completed": true,
+    "boundary": "Exact three inventory statements, mocked provider; no build/install/native lifecycle",
+    "execution_policy_changed": false,
+    "policy_before": {
+      "version": "5.1.26100.10068",
+      "effective": "Unrestricted",
+      "scopes": [
+        {
+          "scope": "MachinePolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "UserPolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "Process",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "CurrentUser",
+          "policy": "Unrestricted"
+        },
+        {
+          "scope": "LocalMachine",
+          "policy": "Undefined"
+        }
+      ]
+    },
+    "control": {
+      "pass": 9,
+      "fail": 2,
+      "failed_cases": [
+        "ancestor-case-only",
+        "product-ignorable-character"
+      ]
+    },
+    "publication": {
+      "pass": 11,
+      "fail": 0,
+      "failed_cases": []
+    },
+    "composition": {
+      "pass": 11,
+      "fail": 0,
+      "failed_cases": []
+    },
+    "policy_after": {
+      "version": "5.1.26100.10068",
+      "effective": "Unrestricted",
+      "scopes": [
+        {
+          "scope": "MachinePolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "UserPolicy",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "Process",
+          "policy": "Undefined"
+        },
+        {
+          "scope": "CurrentUser",
+          "policy": "Unrestricted"
+        },
+        {
+          "scope": "LocalMachine",
+          "policy": "Undefined"
+        }
+      ]
+    },
+    "powershell_sha256_after": "95ce2acbc6cd9d7f4a22759d39a8d40fc2a53ceeecf068ef856849f0d2076961",
+    "finished_utc": "2026-11-22T14:31:01.754640+00:00"
+  },
+  "limits": [
+    "Provider-result comparison only",
+    "No whole-builder execution",
+    "No actual native Product/installation/Scheduler/Serena",
+    "No PowerShell 7 qualification",
+    "Full default/tagged Go NOT_RUN",
+    "External exact-head review PENDING"
+  ]
+}
