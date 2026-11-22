@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "scope": "Second reader/relay increment on 2026-11-22; exact code publication and owned Windows cleanup",
-  "canonical_parent": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+  "scope": "Second reader/relay increment on 2026-11-22; exact code publication, canonical readback and completed owned Windows/local cleanup",
+  "canonical_parent": "fcca94575b94cebcc0b9bc99b9e8250d28858d0b",
   "code_publication_readback": {
     "schema": 1,
     "observed_utc": "2026-11-22T11:17:16.312730+00:00",
@@ -534,8 +534,73 @@
     "settled_children": 706
   },
   "local_cleanup": {
-    "state": "PENDING_AFTER_CANONICAL_READBACK",
-    "reason": "Source checkout is still required for byte readback of the canonical publication."
+    "state": "complete",
+    "sources": [
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/source",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/reader",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/relay",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/qualification",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/p0",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/cleanup"
+    ],
+    "destination": "/workspace/scratch/e21a17927f63/trash/iteration-20261122b-work-20261122",
+    "retained_directory": "/workspace/scratch/e21a17927f63/iteration-20261122b/publication",
+    "moves": 6,
+    "before": {
+      "files": 7224,
+      "directories_including_six_roots": 288,
+      "bytes": 234260451,
+      "inventory_sha256": "d4faea10999d16511709c0e891af9561342137b6be5043815eb0edef8ff88ea5",
+      "inventory_json_bytes": 906417
+    },
+    "after": {
+      "files": 7224,
+      "directories_including_six_roots": 288,
+      "bytes": 234260451,
+      "inventory_sha256": "d4faea10999d16511709c0e891af9561342137b6be5043815eb0edef8ff88ea5",
+      "inventory_json_bytes": 906417
+    },
+    "inventory_equal": true,
+    "source_absent": true,
+    "process_checks": [
+      {
+        "utc": "2026-11-22T11:44:48.440990+00:00",
+        "pids": 2,
+        "argv": 2,
+        "cwd": 2,
+        "exe": 2,
+        "fd": 7,
+        "disappeared": 1,
+        "unavailable": [],
+        "hits": [],
+        "seconds": 0.000593241000387934
+      },
+      {
+        "utc": "2026-11-22T11:44:51.027174+00:00",
+        "pids": 2,
+        "argv": 2,
+        "cwd": 2,
+        "exe": 2,
+        "fd": 7,
+        "disappeared": 1,
+        "unavailable": [],
+        "hits": [],
+        "seconds": 0.00043158100015716627
+      }
+    ],
+    "required_pins_rechecked_after_cleanup": 77,
+    "admission_sha256": "e01db6f81b3f8b96358cc20bf519d44894a74d9d5b6b03674c4cde5c40b26388",
+    "helper_sha256": "5646f5bf8bdddf449651699b47f96bf75783d5196c4a525d792407d8519bb1dc",
+    "raw_receipt_sha256": "0735235a10385c854bc50c1024ea3cd33053afa044e1da635de2185de26721b8",
+    "deletion_attempted": false,
+    "trash_emptied": false,
+    "limits": [
+      "Only the visible /proc namespace is inspected. No atomic process/filesystem freeze.",
+      "Literal argv and simple path arguments are checked; shell expansion, scripts, aliases, encoded references and other namespaces are not fully interpreted.",
+      "Disappearing processes/fds are counted; other access errors refuse the move. The 30-second query budget is checked between reads, not a syscall interruption.",
+      "Inventories cover ordinary file byte streams and directory paths, not ACLs/xattrs or every filesystem property. Six renames are not one atomic transaction.",
+      "The pinned admission is root's publication/preservation decision; this helper does not contact GitHub or independently approve those documents."
+    ]
   },
   "recovery": "publication/recovery/source858-delta.json and all 28 exact delta files preserve source858 content on master75 outside trash; Git commit bytes are retained.",
   "p0": {
@@ -605,8 +670,8 @@
     "modified_project_sources": false,
     "runtime_checks_executed": false
   },
-  "own_review": "Requirements, correctness, safety, compatibility, complexity, qualification scope, archive members and published byte/ref binding reviewed by root.",
-  "independent_review": "Separate source, formatter, runner, runtime, packaging, canonical-plan and cleanup-source reviews retained. Cleanup input hash substitution and final observations checked by root.",
+  "own_review": "Requirements, correctness, safety, compatibility, complexity, qualification scope, archive members and published byte/ref binding reviewed by root. Final local helper/input binding, actual receipt, equal decoded inventories, six source absences and all 77 retained pins were independently checked by root after execution.",
+  "independent_review": "Separate source, formatter, runner, runtime, packaging, canonical-plan and cleanup-source reviews retained. Cleanup input hash substitution and final observations checked by root. Final canonical bytes/archive, local helper source and complete preservation coverage received separate internal reviews without mandatory findings.",
   "full_default_tests": "NOT_RUN",
   "full_tagged_tests": "NOT_RUN",
   "external_exact_head_review": "PENDING",
@@ -614,5 +679,57 @@
   "force_push": false,
   "donor_closed": false,
   "branch_deleted": false,
-  "previous_R24_R25_scope": "Unchanged; this increment does not enlarge earlier acceptance claims."
+  "previous_R24_R25_scope": "Unchanged; this increment does not enlarge earlier acceptance claims.",
+  "initial_canonical_publication_readback": {
+    "schema": 1,
+    "component": "canonical-plan-and-closeout",
+    "observed_utc": "2026-11-22T11:34:13.757449+00:00",
+    "remote_fetch": "explicit newly published SHA fetched with --refetch --depth=1",
+    "commit": "fcca94575b94cebcc0b9bc99b9e8250d28858d0b",
+    "parents": [
+      "b4bb85c2a099916974c55a69490c6644702b6fe0"
+    ],
+    "tree": "add7e7bcfafe246d8ca6a23491bc0e9605713cb0",
+    "base": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+    "exact_delta_paths": [
+      ".plans/2026-11/archguard-source-binding-20261122.json",
+      ".plans/2026-11/open-pr-integration-20261117.md",
+      ".plans/2026-11/reader-relay-closeout-20261122.json",
+      ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz"
+    ],
+    "all_published_bytes_equal": true,
+    "files": [
+      {
+        "path": ".plans/2026-11/archguard-source-binding-20261122.json",
+        "bytes": 3015,
+        "sha256": "844dbd65240a677dd50864d33b36c402abd593c61ef4642042acacaddf2738aa",
+        "git_blob": "e37b24d9804de327b0ed64b6ca7b0dccc0bda9d9"
+      },
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 105036,
+        "sha256": "1ac244594b256ddea67026f223a345237818803479ee8779c067f3b285836da5",
+        "git_blob": "13aa8ba491e43e26cd61a08be0377ae3a4135357"
+      },
+      {
+        "path": ".plans/2026-11/reader-relay-closeout-20261122.json",
+        "bytes": 27266,
+        "sha256": "450ff679bc05c5c0679b845649b231a3ac5a8f69788d9759a6ae7fb60073a37f",
+        "git_blob": "0eedcae94897a109fdc615faf9bcd768ebe92ad2"
+      },
+      {
+        "path": ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz",
+        "bytes": 1232237,
+        "sha256": "02f86bd092328434aa26d1753027d23cbc991efb9b61ca869097296388ac7e07",
+        "git_blob": "b115394d95fa3baf8f16efe5df7d8ec8c7190712"
+      }
+    ],
+    "source_worktree_status": ""
+  },
+  "local_evidence": {
+    "path": "reader-relay-local-cleanup-20261122.json",
+    "bytes": 849757,
+    "sha256": "2be0f3e5cb6a099bda0f916ac16409ebcfc85ab47ea35bb91d6ab9e8779ae4d8",
+    "contents": "Exact helper text, admission values, full before/after inventories within the receipt, own/independent source and preservation reviews, root observation and initial canonical readback."
+  }
 }
