@@ -27921,18 +27921,6 @@ entries:
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
-    - fingerprint: e5fdef8f26dc96d7e48ecb4765a02366700db59ddb2bc8a5dadef4ddf59feb1e
-      kind: mutable_global
-      location:
-        path: internal/gui/lsp_router_control.go
-        symbol: lspRouterControlAPIFactory
-        line: 18
-      evidence: var lspRouterControlAPIFactory
-      message: production package-level var lspRouterControlAPIFactory requires an explicit policy allowance or instance-owned dependency
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
     - fingerprint: e60c414690f3bdd5b151bd73e0c705899ffb3d0b8f5fe236e9e753af6a52cdf4
       kind: api_construction
       location:
@@ -29848,20 +29836,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-      max_metric: 1
-    - fingerprint: f3d272e6ed8a36d6358b42d85f3f10b2280af119c731c45422694de9d84c981a
-      kind: api_construction
-      location:
-        path: internal/gui/lsp_router_control.go
-        symbol: lspRouterControlAPIFactory
-        line: 18
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: f43925f9922651ba18ccf867e242e2192b6ffa9129b51e87da25067991d49cf3
       kind: history_comment

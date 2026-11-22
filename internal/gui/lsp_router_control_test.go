@@ -77,13 +77,12 @@ func (f *fakeLSPRouterControlAPI) EnsureLSPRouterClientEntries(opts api.LSPClien
 func withFakeLSPRouterControlAPI(t *testing.T, fake *fakeLSPRouterControlAPI) *Server {
 	t.Helper()
 	// The control API itself is faked, but the handler still resolves the target
-	// through lspRouterControlClientAdapter → clients.AllClients()
-	// (lsp_router_control.go:102, :126), which constructs the whole registry.
+	// through lspRouterControlClientAdapter → clients.AllClients(), which
+	// constructs the whole registry.
 	sandboxClientConfigHome(t)
-	orig := lspRouterControlAPIFactory
-	lspRouterControlAPIFactory = func() lspRouterControlAPI { return fake }
-	t.Cleanup(func() { lspRouterControlAPIFactory = orig })
-	return newEphemeralServer(t, Config{Port: 7777})
+	s := newEphemeralServer(t, Config{Port: 7777})
+	s.lspRouterControl = fake
+	return s
 }
 
 func postLSPRouterControl(t *testing.T, s *Server, path, client string) *httptest.ResponseRecorder {
@@ -190,5 +189,53 @@ func TestLSPRouterStatusRouteReportsPersistedClientOptOut(t *testing.T) {
 	}
 	if len(got.MissingEntries) != 1 || got.MissingEntries[0] != "mcp-language-server-python" {
 		t.Fatalf("missing entries=%+v", got.MissingEntries)
+	}
+}
+
+func TestLSPRouterControlRoutesKeepServerDependenciesSeparate(t *testing.T) {
+	firstAPI := &fakeLSPRouterControlAPI{
+		statuses: []api.LSPRouterClientStatus{{Client: "codex-cli", Disabled: true}},
+	}
+	first := withFakeLSPRouterControlAPI(t, firstAPI)
+	secondAPI := &fakeLSPRouterControlAPI{
+		statuses: []api.LSPRouterClientStatus{{Client: "claude-code"}},
+	}
+	second := withFakeLSPRouterControlAPI(t, secondAPI)
+
+	for _, tc := range []struct {
+		name   string
+		client string
+		server *Server
+		api    *fakeLSPRouterControlAPI
+	}{
+		{name: "first", client: "codex-cli", server: first, api: firstAPI},
+		{name: "second", client: "claude-code", server: second, api: secondAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/lsp-router/status", nil)
+			rec := httptest.NewRecorder()
+			tc.server.mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+			}
+			var response lspRouterStatusResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v body=%q", err, rec.Body.String())
+			}
+			if len(response.Clients) != 1 || response.Clients[0].Client != tc.client {
+				t.Errorf("client statuses=%+v, want this server's client %q", response.Clients, tc.client)
+			}
+
+			for _, action := range []string{"disable", "enable"} {
+				rec := postLSPRouterControl(t, tc.server, "/api/lsp-router/"+action, tc.client)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s status=%d body=%q", action, rec.Code, rec.Body.String())
+				}
+			}
+			if tc.api.disableClient != tc.client || tc.api.enableClient != tc.client {
+				t.Errorf("this server's backend changed clients disable=%q enable=%q, want %q for both",
+					tc.api.disableClient, tc.api.enableClient, tc.client)
+			}
+		})
 	}
 }

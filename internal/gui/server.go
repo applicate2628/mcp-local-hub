@@ -666,6 +666,7 @@ type Server struct {
 	clientInit         clientInitializer
 	symlinkWriter      symlinkResolveWriter
 	lspRegistrar       lspRegistrar
+	lspRouterControl   lspRouterControlAPI
 	groups             groupsAPI
 
 	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
@@ -845,6 +846,7 @@ func NewServer(cfg Config) *Server {
 	s.clientInit = realClientInitializer{}
 	s.symlinkWriter = realSymlinkResolveWriter{}
 	s.lspRegistrar = realLSPRegistrar{}
+	s.lspRouterControl = s.api
 	s.groups = realGroupsAPI{}
 	registerPingRoutes(s)
 	registerAssetRoutes(s)
