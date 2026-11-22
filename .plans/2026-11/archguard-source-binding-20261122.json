@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "scope": "Read-only binding of the current master input to the published #663 architecture qualification; no Go, native, installed-product or external-review execution",
+  "canonical_instructions_commit": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+  "observed_master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "physical_source": "../source",
+  "source_files": [
+    {
+      "path": "architecture/baseline.yaml",
+      "sha256": "7b9a60e93c34b43b6664afcf708de1ac8b8871024adf97f5d0ec5fc2ca172312",
+      "git_blob": "3b0ab8a006ed4e2b211e3e9202c74cca925bb064",
+      "physical_bytes_match": true
+    },
+    {
+      "path": "architecture/owners.yaml",
+      "sha256": "59ac427dd7ef9b8fe02cc613d480d7a45c1ed80158c73ab542adbc4217b2d424",
+      "git_blob": "e83618d45e0a16b081a510cb5b350903d7df807f",
+      "physical_bytes_match": true
+    },
+    {
+      "path": "architecture/policy.yaml",
+      "sha256": "0bbddfab2a92dd9f795cb5518be6b1e435ef4055bda95786d417eb99f9e0d961",
+      "git_blob": "ac7f174afe40e0097d7bc0771acd72547f175d7e",
+      "physical_bytes_match": true
+    },
+    {
+      "path": "internal/mcproute/serena_router_lifecycle.go",
+      "sha256": "a6927853b36b2f8062e2ae9062c34b5740637c1f1d67bf0024c88078a7ebc7cc",
+      "git_blob": "7617d1a5044f94eed6159de350d5a5f7df4612eb",
+      "physical_bytes_match": true
+    }
+  ],
+  "published_qualification": {
+    "commit": "1cabce12655f810b742e6c31369441cacd72573c",
+    "path": "docs/modernization/verification/archguard-migration-2026-11-21/qualification.json",
+    "git_blob": "b02865d0393cfa83875f7b4feb5e283febb9dd21",
+    "executed_source": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+    "executed_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+    "source_delta_paths": [
+      "architecture/baseline.yaml",
+      "architecture/owners.yaml",
+      "architecture/policy.yaml",
+      "internal/mcproute/serena_router_lifecycle.go"
+    ],
+    "verify_exit_code": 1,
+    "residual": {
+      "New": 389,
+      "Stale": 128,
+      "Grown": 42,
+      "workers": 72,
+      "expired": 0,
+      "unowned": 0
+    },
+    "worker_count_is_subset_of_new": true,
+    "wrapper_status": "FAILED",
+    "skipped_test": "TestUnixBackslashPathRemainsDistinct"
+  },
+  "conclusions": [
+    "The current immutable physical input is master, not the four-file candidate executed by the recorded #663 qualification.",
+    "No justified minimal analyzer correction was established in this bounded review; no gate weakening or bulk rebaseline is recommended.",
+    "Unowned=0 establishes metadata completeness only; legacy worker baseline and an empty registry do not establish cancellation, join or lifetime contracts.",
+    "The Windows skip tests real Unix filename semantics and remains unexecuted in that qualification.",
+    "No primary published source for the parallel Serena checkpoint was obtained by this reviewer; preliminary messages were not treated as PASS."
+  ],
+  "modified_project_sources": false,
+  "runtime_checks_executed": false
+}
