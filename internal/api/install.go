@@ -4413,6 +4413,9 @@ func clientConfigPath(name string) (string, error) {
 // calls sch.Stop to clean up the scheduler state. Returns a per-task
 // result set so callers can surface partial failures without bailing
 // after the first row.
+// A successful port kill does not settle a failed scheduler stop: the launch
+// action can still be live, and a nil port-kill result may mean no lookup was
+// available. Report the scheduler failure even when the daemon was killed.
 //
 // Task 10 wiring (plan §8 + §11 + §51): Stop is the back-compat entry
 // for the no-force path. It records Desired=stopped intent + a
@@ -4511,7 +4514,10 @@ func (a *API) stopKillCore(server, daemonFilter string, handledTasks map[string]
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
@@ -4635,7 +4641,10 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
@@ -4868,7 +4877,10 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 				continue
 			}
 		}
-		_ = sch.Stop(t.Name) // no-op for completed actions; preserve for the edge case of a mid-launch task
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		if err := sch.Run(t.Name); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: err.Error()})
 			continue
@@ -4976,7 +4988,10 @@ func (a *API) StopAll() ([]RestartResult, error) {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
-		_ = sch.Stop(t.Name)
+		if err := sch.Stop(t.Name); err != nil {
+			results = append(results, RestartResult{TaskName: t.Name, Err: "stop scheduler task: " + err.Error()})
+			continue
+		}
 		results = append(results, RestartResult{TaskName: t.Name})
 	}
 	return results, nil
