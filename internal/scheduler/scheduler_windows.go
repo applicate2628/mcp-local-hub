@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -24,25 +23,20 @@ import (
 // We build a Task Scheduler XML document per spec, pipe it to `schtasks /Create /XML`,
 // and parse the output of `/Query` for Status/List.
 type windowsScheduler struct {
-	username     string // e.g., "alice"
+	username     string // canonical SID of the current user, also used in task XML
 	schtasksPath string
 }
 
 func newPlatformScheduler() (Scheduler, error) {
-	u, err := user.Current()
+	ownerSID, err := currentWindowsTaskOwner()
 	if err != nil {
-		return nil, fmt.Errorf("user.Current: %w", err)
+		return nil, err
 	}
 	schtasksPath, err := resolveSchtasksPath()
 	if err != nil {
 		return nil, err
 	}
-	// u.Username is typically "MACHINE\\user" on Windows — strip the domain.
-	name := u.Username
-	if i := strings.LastIndex(name, "\\"); i >= 0 {
-		name = name[i+1:]
-	}
-	return &windowsScheduler{username: name, schtasksPath: schtasksPath}, nil
+	return &windowsScheduler{username: ownerSID, schtasksPath: schtasksPath}, nil
 }
 
 func resolveSchtasksPath() (string, error) {
@@ -385,8 +379,9 @@ func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]Ta
 	return results, nil
 }
 
-// sameWindowsUser compares a Task Scheduler "Run As User" value against the
-// current user's short username (no DOMAIN\ prefix), case-insensitively.
-func sameWindowsUser(owner, currentShortName string) bool {
-	return WindowsUsersEquivalent(owner, currentShortName)
+// sameWindowsUser compares identities already resolved by the native producer.
+// Production List and Status return SIDs; never discard an account's domain.
+func sameWindowsUser(owner, currentOwner string) bool {
+	owner, currentOwner = strings.TrimSpace(owner), strings.TrimSpace(currentOwner)
+	return owner != "" && currentOwner != "" && strings.EqualFold(owner, currentOwner)
 }

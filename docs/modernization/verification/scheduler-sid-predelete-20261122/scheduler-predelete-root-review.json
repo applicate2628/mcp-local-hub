@@ -1,0 +1,60 @@
+{
+  "status": "SOURCE_REVIEWED_RUNTIME_NOT_RUN",
+  "reviewer": "root",
+  "source_manifest_sha256": "ae328d44051b19a51876064404e23cb172649eae730ceba42ecb14cd5f04fe94",
+  "reviewed": [
+    "Both install.go mutation call sites and surrounding rollback ownership",
+    "Full new pre-delete helper and previous rollback owner",
+    "Full candidate patch including fixture phase changes and every new assertion"
+  ],
+  "findings": [],
+  "composition": {
+    "install_go_sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7",
+    "go_overlay_files": 39,
+    "sid_preserved": true,
+    "old_source_and_inputs_unchanged": true,
+    "backend_hold_file_sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561"
+  },
+  "acceptance": [
+    "Changed, absent, empty or failed current XML reads refuse current-task mutation",
+    "Current-task refusal does not acquire a compensation; prior tasks retain rollback",
+    "Optional prune emits a named warning and retains snapshot",
+    "Source tests check exact effects, original errors, and retained external occupant"
+  ],
+  "limitations": [
+    "Name-based Delete remains non-atomic after the last XML read",
+    "Identical XML cannot distinguish task generations",
+    "No native Task Scheduler or installed Product execution is authorized by this plan",
+    "Required-test declarations are minimum sets; observed terminal events require exact post-review"
+  ],
+  "selected_api_roots": [
+    "TestSchedulerPortOwnerRequiresCurrentSID",
+    "TestPortHeldByOurDaemon",
+    "TestInstallMergePreservesBackendRunHold",
+    "TestInstallPreflightPreservesBackendRunHold",
+    "TestExecuteInstallToEarlierTaskRollback",
+    "TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask",
+    "TestExecuteInstallToRollbackOwnsCapturedBytes",
+    "TestExecuteInstallToRollbackContinuesAndPreservesEveryCause",
+    "TestExecuteInstallToRollbackPreservesClientErrorDomains",
+    "TestInstallSchedulerRecoveryTasksClassifiesCurrentAndLater",
+    "TestExecuteInstallToRollbackBackendCompatibility",
+    "TestExecuteInstallToPreDeleteRevalidation",
+    "TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask",
+    "TestExecuteInstallToCurrentTaskRecovery",
+    "TestExecuteInstallToRecoveryCapabilityRequired",
+    "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+    "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+    "TestExecuteInstallToAbsentFailureHasNoRecovery",
+    "TestExecuteInstallToRejectsAliasedRecoveryNames",
+    "TestExecuteInstallToCurrentMutationFailureObservation",
+    "TestExecuteInstallToCurrentAndEarlierRecoveryNames",
+    "TestExecuteAdoptCurrentMutationFailurePreservesRecovery",
+    "TestExecuteInstallToPruneSnapshotBeforeDelete",
+    "TestExecuteInstallToPruneRequiresRecoveryBeforeDelete",
+    "TestExecuteInstallToPruneDeleteUnconfirmedStopsAndRollsBack",
+    "TestExecuteInstallToPruneRollbackObservation",
+    "TestExecuteInstallToPruneRollbackPreservesExternalOccupant",
+    "TestExecuteAdoptPruneRecoveryPreservesProvenance"
+  ]
+}

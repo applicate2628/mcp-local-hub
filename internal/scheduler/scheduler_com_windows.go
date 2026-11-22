@@ -64,7 +64,7 @@ function Get-NativeHRESULT($exception){
  return [uint32]([int64]$native -band 0xffffffffL)
 }
 function Get-OwnerSID([string]$owner){
- if([string]::IsNullOrWhiteSpace($owner)){return ''}
+ if([string]::IsNullOrWhiteSpace($owner)){throw 'task owner unavailable'}
  if($owner.StartsWith('S-1-')){return ([System.Security.Principal.SecurityIdentifier]::new($owner)).Value}
  return ([System.Security.Principal.NTAccount]::new($owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value
 }
@@ -123,7 +123,8 @@ if($r.operation -eq 'create_xml_if_absent'){
 };
 # Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
 $flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
-if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId;last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
+# Owner filtering and status consumers receive a resolved SID, never a short account name.
+if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=(Get-OwnerSID ([string]$_.Definition.Principal.UserId));last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
 if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};
 if($r.operation -eq 'run_owned'){
  $snapshot=[string]$t.Xml
@@ -142,7 +143,7 @@ if($r.operation -eq 'delete'){$f.DeleteTask($t.Name,0);[pscustomobject]@{ok=$tru
 if($r.operation -eq 'stop'){if([int]$t.State -ne 4){[pscustomobject]@{ok=$false;kind='task_not_running'}|ConvertTo-Json -Compress;exit};$t.Stop(0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};
 if($r.operation -notin @('status','export')){[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='operation'}|ConvertTo-Json -Compress;exit};
 $row=[ordered]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}
-if($r.operation -eq 'status'){$row['last_result']=Get-TaskLastResult $t}
+if($r.operation -eq 'status'){$row['owner']=Get-OwnerSID ([string]$row['owner']);$row['last_result']=Get-TaskLastResult $t}
 [pscustomobject]@{ok=$true;task=[pscustomobject]$row}|ConvertTo-Json -Compress -Depth 4
 }catch{
  if($r.operation -eq 'create_xml_if_absent'){

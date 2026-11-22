@@ -125,17 +125,22 @@ func TestExecuteInstallToEarlierTaskRollback(t *testing.T) {
 				s.tasks[name], s.xml[name] = true, bytes.Clone(prior)
 			}
 			plan := installRecoveryPlan(t, s, root, name)
-			s.exportHook = func(task string, ordinal int) ([]byte, error, bool) {
+			rollbackStarted, rollbackReads := false, 0
+			s.exportHook = func(task string, _ int) ([]byte, error, bool) {
+				if !rollbackStarted {
+					return nil, nil, false
+				}
+				rollbackReads++
 				switch {
-				case ordinal == 3 && tc.name == "read_error":
+				case rollbackReads == 1 && tc.name == "read_error":
 					return nil, readCause, true
-				case ordinal == 3 && tc.name == "partial_read_error":
+				case rollbackReads == 1 && tc.name == "partial_read_error":
 					return []byte("<partial>"), readCause, true
-				case ordinal == 3 && tc.name == "empty_read":
+				case rollbackReads == 1 && tc.name == "empty_read":
 					return nil, nil, true
-				case ordinal == 4 && tc.name == "absence_read_error":
+				case rollbackReads == 2 && tc.name == "absence_read_error":
 					return nil, readCause, true
-				case ordinal == 5 && tc.name == "restored_read_error":
+				case rollbackReads == 3 && tc.name == "restored_read_error":
 					return nil, readCause, true
 				}
 				return nil, nil, false
@@ -176,6 +181,7 @@ func TestExecuteInstallToEarlierTaskRollback(t *testing.T) {
 				return nil, false
 			}
 			intermediate := func() (func(), error) {
+				rollbackStarted = true
 				switch tc.name {
 				case "already_absent":
 					delete(s.tasks, name)
@@ -236,8 +242,8 @@ func TestExecuteInstallToRollbackCaptureFailureRetainsCreatedTask(t *testing.T) 
 			root := hardenedTempDir(t)
 			s := newRollbackFixtureScheduler()
 			s.tasks[name], s.xml[name] = true, bytes.Clone(prior)
-			s.exportHook = func(_ string, ordinal int) ([]byte, error, bool) {
-				return tc.raw, tc.err, ordinal == 2
+			s.exportHook = func(_ string, _ int) ([]byte, error, bool) {
+				return tc.raw, tc.err, s.createCount > 0
 			}
 			plan := installRecoveryPlan(t, s, root, name)
 			err := executeInstallTo(io.Discard, &config.ServerManifest{Name: "r22-capture"}, plan, 0, false, nil, true, false)
@@ -401,4 +407,195 @@ func TestExecuteInstallToRollbackBackendCompatibility(t *testing.T) {
 			t.Fatalf("ROLLBACK-PLATFORM: unsupported backend contract changed: %v", err)
 		}
 	})
+}
+
+// Exercise both forward deletion sites through the install owner. The first
+// export returns an owned snapshot while the live fake can already change;
+// no native Scheduler, process, socket, or installed state is involved.
+func TestExecuteInstallToPreDeleteRevalidation(t *testing.T) {
+	const server = "predelete"
+	const name = "mcp-local-hub-predelete-default"
+	prior := []byte("<Task>prior-Привет-🙂</Task>")
+	external := []byte("<Task>external replacement</Task>")
+	readCause := errors.New("fixture: pre-delete current read unavailable")
+	laterCause := errors.New("fixture: later install step failed")
+	for _, flow := range []string{"replace", "prune"} {
+		for _, scenario := range []string{"same_xml", "changed_xml", "missing", "empty", "read_error", "matching_xml_with_error"} {
+			t.Run(flow+"_"+scenario, func(t *testing.T) {
+				root := hardenedTempDir(t)
+				t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
+				s := newRollbackFixtureScheduler()
+				s.tasks[name], s.xml[name] = true, bytes.Clone(prior)
+				plan := installRecoveryPlan(t, s, root, name)
+				prune := flow == "prune"
+				var intermediate intentWriteStep
+				if prune {
+					plan.SchedulerTasks = nil
+					plan.FullInstall = true
+					s.listSeed = []scheduler.TaskStatus{{Name: name}}
+					// A refused prune must not acquire a compensation that could
+					// recreate an absent task or overwrite an external definition.
+					intermediate = func() (func(), error) { return nil, laterCause }
+				}
+				s.exportHook = func(task string, ordinal int) ([]byte, error, bool) {
+					if task != name {
+						t.Fatalf("unexpected export of %s", task)
+					}
+					if ordinal == 1 {
+						switch scenario {
+						case "changed_xml":
+							s.xml[name] = bytes.Clone(external)
+						case "missing":
+							delete(s.tasks, name)
+							delete(s.xml, name)
+						}
+						return bytes.Clone(prior), nil, true
+					}
+					if len(s.deleteAttempts) == 0 {
+						switch scenario {
+						case "empty":
+							return nil, nil, true
+						case "read_error":
+							return nil, readCause, true
+						case "matching_xml_with_error":
+							return bytes.Clone(prior), readCause, true
+						}
+					}
+					return nil, nil, false
+				}
+				s.deleteHook = func(task string, _ int) (error, bool) {
+					if task != name {
+						t.Fatalf("unexpected deletion of %s", task)
+					}
+					readInstallRecoverySnapshot(t, root, name, prior)
+					return nil, false
+				}
+				var output bytes.Buffer
+				err := executeInstallTo(&output, &config.ServerManifest{Name: server}, plan, 0, false, intermediate, !prune, false)
+				allowed := scenario == "same_xml"
+				if prune {
+					if !errors.Is(err, laterCause) {
+						t.Errorf("PREDELETE-PRUNE-CAUSE: got %v, want later failure", err)
+					}
+					if !allowed && (!strings.Contains(output.String(), "Skipped pruning obsolete scheduler task "+name) || strings.Contains(output.String(), "Scheduler task removed (obsolete)")) {
+						t.Errorf("PREDELETE-PRUNE-OUTPUT: missing refusal or false removal claim: %s", output.String())
+					}
+				} else if allowed {
+					if err != nil {
+						t.Errorf("PREDELETE-MATCH: matching definition refused: %v", err)
+					}
+				} else {
+					if err == nil || !strings.Contains(err.Error(), "revalidate task "+name+" before replacement") {
+						t.Errorf("PREDELETE-REFUSAL: missing named pre-delete refusal: %v", err)
+					}
+					if (scenario == "read_error" || scenario == "matching_xml_with_error") && !errors.Is(err, readCause) {
+						t.Errorf("PREDELETE-READ-CAUSE: original read failure lost: %v", err)
+					}
+					if scenario == "missing" && !errors.Is(err, scheduler.ErrTaskNotFound) {
+						t.Errorf("PREDELETE-ABSENCE-CAUSE: observed absence lost: %v", err)
+					}
+				}
+				var incomplete *InstallSchedulerRollbackIncompleteError
+				if errors.As(err, &incomplete) {
+					t.Errorf("PREDELETE-CLASS: unmutated or restored task acquired incomplete recovery: %v", err)
+				}
+				wantXML, wantPresent := prior, true
+				switch scenario {
+				case "changed_xml":
+					wantXML = external
+				case "missing":
+					wantXML, wantPresent = nil, false
+				}
+				wantDeletes, wantCreates, wantRestores := 0, 0, 0
+				if allowed {
+					wantDeletes = 1
+					if prune {
+						wantRestores = 1
+					} else {
+						wantCreates = 1
+						wantXML = s.createdXML[name]
+					}
+				}
+				if s.tasks[name] != wantPresent || !bytes.Equal(s.xml[name], wantXML) {
+					t.Errorf("PREDELETE-STATE: present=%v XML=%q; want present=%v XML=%q", s.tasks[name], s.xml[name], wantPresent, wantXML)
+				}
+				if len(s.deleteAttempts) != wantDeletes || s.createCount != wantCreates || len(s.restoreNames) != wantRestores || len(s.importNames) != 0 || s.runCount != 0 || s.stopCalls != 0 {
+					t.Errorf("PREDELETE-EFFECTS: deletes=%v creates=%d restores=%v imports=%v runs=%d stops=%d", s.deleteAttempts, s.createCount, s.restoreNames, s.importNames, s.runCount, s.stopCalls)
+				}
+				path := readInstallRecoverySnapshot(t, root, name, prior)
+				if !prune && !allowed && (err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", path))) {
+					t.Errorf("PREDELETE-SNAPSHOT: refusal lost retained recovery path: %v", err)
+				}
+				if prune && !allowed {
+					if !strings.Contains(output.String(), fmt.Sprintf("%q", path)) {
+						t.Errorf("PREDELETE-PRUNE-SNAPSHOT: refusal lost retained recovery path: %s", output.String())
+					}
+					if (scenario == "read_error" || scenario == "matching_xml_with_error") && !strings.Contains(output.String(), readCause.Error()) {
+						t.Errorf("PREDELETE-PRUNE-READ-CAUSE: warning lost original read failure: %s", output.String())
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestExecuteInstallToPreDeleteRefusalRollsBackEarlierTask(t *testing.T) {
+	const first = "mcp-local-hub-predelete-earlier-first"
+	const blocked = "mcp-local-hub-predelete-earlier-blocked"
+	prior := []byte("<Task>prior blocked task</Task>")
+	external := []byte("<Task>external blocked task</Task>")
+	readCause := errors.New("fixture: pre-delete read failed")
+	rollbackCause := errors.New("fixture: earlier rollback delete denied")
+	for _, rollbackFails := range []bool{false, true} {
+		label := "earlier_creation_removed"
+		if rollbackFails {
+			label = "earlier_rollback_failure_retained"
+		}
+		t.Run(label, func(t *testing.T) {
+			root := hardenedTempDir(t)
+			s := newRollbackFixtureScheduler()
+			s.tasks[blocked], s.xml[blocked] = true, bytes.Clone(prior)
+			plan := installRecoveryPlan(t, s, root, blocked)
+			plan.SchedulerTasks = append([]ScheduledTaskPlan{{Name: first, Command: plan.installRelayExePath}}, plan.SchedulerTasks...)
+			s.exportHook = func(task string, ordinal int) ([]byte, error, bool) {
+				if task != blocked {
+					return nil, nil, false
+				}
+				if ordinal == 1 {
+					s.xml[blocked] = bytes.Clone(external)
+					return bytes.Clone(prior), nil, true
+				}
+				if len(s.deleteAttempts) == 0 {
+					return bytes.Clone(external), readCause, true
+				}
+				return nil, nil, false
+			}
+			s.deleteHook = func(task string, _ int) (error, bool) {
+				if task == first && rollbackFails {
+					return rollbackCause, true
+				}
+				return nil, false
+			}
+			err := executeInstallTo(io.Discard, &config.ServerManifest{Name: "predelete-earlier"}, plan, 0, false, nil, true, false)
+			if !errors.Is(err, readCause) || (rollbackFails && !errors.Is(err, rollbackCause)) {
+				t.Errorf("PREDELETE-EARLIER-CAUSES: original read or rollback error lost: %v", err)
+			}
+			var incomplete *InstallSchedulerRollbackIncompleteError
+			if got := errors.As(err, &incomplete); got != rollbackFails {
+				t.Errorf("PREDELETE-EARLIER-CLASS: incomplete=%v want %v; err=%v", got, rollbackFails, err)
+			} else if got && !reflect.DeepEqual(incomplete.Tasks, []string{first}) {
+				t.Errorf("PREDELETE-EARLIER-CLASS: unmutated task entered recovery set: %v", incomplete.Tasks)
+			}
+			if !s.tasks[blocked] || !bytes.Equal(s.xml[blocked], external) || s.tasks[first] != rollbackFails || (!rollbackFails && len(s.xml[first]) != 0) || (rollbackFails && !bytes.Equal(s.xml[first], s.createdXML[first])) {
+				t.Errorf("PREDELETE-EARLIER-STATE: first=%v blocked=%v XML=%v", s.tasks[first], s.tasks[blocked], s.xml)
+			}
+			if !reflect.DeepEqual(s.deleteAttempts, []string{first}) || s.createCount != 1 || len(s.restoreNames) != 0 || len(s.importNames) != 0 || s.runCount != 0 || s.stopCalls != 0 {
+				t.Errorf("PREDELETE-EARLIER-EFFECTS: deletes=%v creates=%d restores=%v imports=%v runs=%d stops=%d", s.deleteAttempts, s.createCount, s.restoreNames, s.importNames, s.runCount, s.stopCalls)
+			}
+			path := readInstallRecoverySnapshot(t, root, blocked, prior)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", path)) {
+				t.Errorf("PREDELETE-EARLIER-SNAPSHOT: original snapshot location lost: %v", err)
+			}
+		})
+	}
 }

@@ -1,0 +1,25 @@
+{
+  "reviewer": "root",
+  "base": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+  "scope": "scheduler",
+  "source_paths": [
+    "internal/api/install.go",
+    "internal/api/install_own_port_test.go",
+    "internal/api/install_task_rollback.go",
+    "internal/api/install_task_rollback_test.go",
+    "internal/api/scheduler_owner_sid_windows_test.go",
+    "internal/scheduler/entrypoint_migration_windows.go",
+    "internal/scheduler/entrypoint_migration_windows_test.go",
+    "internal/scheduler/scheduler_com_windows.go",
+    "internal/scheduler/scheduler_last_result_windows_test.go",
+    "internal/scheduler/scheduler_owner_sid_windows_test.go",
+    "internal/scheduler/scheduler_windows.go",
+    "internal/scheduler/scheduler_windows_test.go"
+  ],
+  "requirements": "Only reviewed scoped candidate changes; no base synchronization, merge or unrelated source changes.",
+  "qualification_boundary": "Exact input bytes and physical source are bound in preserved plans and results; composed Go evidence is not standalone branch qualification.",
+  "security_and_lifecycle": "Reviewed owned resources, cancellation, original-handle behavior, bounded runners and explicit unproven native/full-suite boundaries.",
+  "compatibility": "Existing published donor contracts retained. Scheduler BackendRunHold composition stays in evidence, not a partial API import into #660.",
+  "mandatory_findings": [],
+  "external_published_commit_review": "NOT_RUN"
+}

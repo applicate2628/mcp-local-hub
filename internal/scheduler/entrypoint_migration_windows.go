@@ -676,14 +676,11 @@ func currentWindowsTaskOwner() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("entrypoint task current user: %w", err)
 	}
-	name := strings.TrimSpace(u.Username)
-	if i := strings.LastIndex(name, `\`); i >= 0 {
-		name = name[i+1:]
+	ownerSID := strings.TrimSpace(u.Uid)
+	if ownerSID == "" {
+		return "", errors.New("entrypoint task current user SID is empty")
 	}
-	if name == "" {
-		return "", errors.New("entrypoint task current user is empty")
-	}
-	return name, nil
+	return ownerSID, nil
 }
 
 // sameWindowsEntrypointPath compares only Windows path casing. It deliberately

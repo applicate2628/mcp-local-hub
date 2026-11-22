@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "status": "SELF_REVIEWED_SAVED_RUNTIME_EVIDENCE_AND_PUBLICATION_TEXT",
+  "artifacts": [
+    {
+      "path": "evidence/scheduler-sid-predelete-results.json",
+      "bytes": 58219,
+      "sha256": "6c59ab1a3ef73f87580485ee808f3507e750d67d39df6d4f0279f7ed8d783912"
+    },
+    {
+      "path": "evidence/scheduler-sid-predelete-README.md",
+      "bytes": 26244,
+      "sha256": "f5f5c2b5f052ea9354caab873b6cb2a981184c05ae480a65f27e81bd04126295"
+    },
+    {
+      "path": "evidence/scheduler-backend-hold-proposal.json",
+      "bytes": 3287,
+      "sha256": "59a300d8cd5eb757a9c78875beab46dde8cdeb4ce7141bf867b97de8279cce8f"
+    },
+    {
+      "path": "evidence/scheduler-backend-hold-integration-only.patch",
+      "bytes": 1141,
+      "sha256": "a455995d7a6c039895265673dbdf58c3035765d9f154df8acac8ed20d8894710"
+    }
+  ],
+  "required_findings": [],
+  "verified": [
+    "36 exported files have exact hashes; remote reread stability and locally decoded bytes retained.",
+    "All three phase receipts match pinned plans, input inventories and all command receipts/logs.",
+    "Exact negative-control names and the 39-event pre-delete subset match source-derived expectations.",
+    "35 positive roots, 174 test/subtest PASS, two package PASS and one named platform SKIP are kept distinct.",
+    "The 39-file composition is explicitly separated from standalone PR #660.",
+    "Hold model dependency absence prevents applying only two master hunks; qualified bytes preserve both hold behaviors and the provider recovery guard.",
+    "Ten frozen SID files and three frozen pre-delete files remain unchanged.",
+    "Seven-section table of contents and three numbered tables are present; artifact paths are literal archived-member names, not fabricated member links."
+  ],
+  "scope_limits": [
+    "No tests, builds, formatters, native Scheduler operations or source changes during collection/review.",
+    "Remote action was read-only export from three authorized evidence directories; one cmd quoting failure preceded successful export and is retained.",
+    "Current tests use memory Scheduler and substituted PowerShell COM script fixtures; native lifecycle acceptance remains open.",
+    "This is author self-review; external review of a final published commit remains separate."
+  ]
+}

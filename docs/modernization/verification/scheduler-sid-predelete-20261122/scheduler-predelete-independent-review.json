@@ -1,0 +1,123 @@
+{
+  "schema": "scheduler-predelete-independent-source-review-v1",
+  "reviewer": "/root/pr658_audit",
+  "created_utc": "2026-11-22T13:16:46.758435+00:00",
+  "status": "SOURCE_REVIEWED_NO_MANDATORY_FINDINGS",
+  "scope": "Frozen pre-delete source delta and local root composition only; this is internal source review, not external review of a published head.",
+  "base": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+  "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "inputs": [
+    {
+      "path": "evidence/scheduler-predelete-candidate.patch",
+      "bytes": 14679,
+      "sha256": "3f1e595a097186566098126ed5a336975018c5bb28c279e9800118cc8501be71"
+    },
+    {
+      "path": "evidence/scheduler-predelete-files.json",
+      "bytes": 17378,
+      "sha256": "ae328d44051b19a51876064404e23cb172649eae730ceba42ecb14cd5f04fe94"
+    },
+    {
+      "path": "evidence/scheduler-predelete-root-review.json",
+      "bytes": 3049,
+      "sha256": "fb6eca29ae74f195e4b5c7bf679f7e0a809ac762d8ada2dfb8f28cab72bdde81"
+    },
+    {
+      "path": "evidence/scheduler-sid-files.json",
+      "bytes": 6890,
+      "sha256": "ed0c20ca5d33d2d94ab50e19ae908505a55a624392891c322e65807bac44d8ae"
+    },
+    {
+      "path": "qualification/inputs/scheduler-predelete/overlay.json",
+      "bytes": 8805,
+      "sha256": "c2c99a136e3acee7d6b7ab15103cac38170dbb27fe393357fffce1ef0967c610"
+    },
+    {
+      "path": "qualification/inputs/scheduler-predelete/control-overlay.json",
+      "bytes": 8785,
+      "sha256": "eef2cbc756085d13c19bb749628831e6c6ee2174396e6cd7e699cb4da4fbee74"
+    },
+    {
+      "path": "qualification/inputs/scheduler-predelete/internal/api/install.go",
+      "bytes": 218267,
+      "sha256": "9e6a81aa7a8936789698c3ddc4bd6304f719bbce20a62ec7b7ad47338abbccd7"
+    },
+    {
+      "path": "qualification/inputs/scheduler-predelete/internal/api/install_task_rollback.go",
+      "bytes": 7521,
+      "sha256": "4986cf2770250ae34dd6458ee97f113e7ba8c46ca4e1d1c22535ba7cd70b1a06"
+    },
+    {
+      "path": "qualification/inputs/scheduler-predelete/internal/api/install_task_rollback_test.go",
+      "bytes": 27426,
+      "sha256": "8a59365cba82ce7996e01f9c30108a7a49ec2f53d3b754c7807b253e42f5b3c8"
+    },
+    {
+      "path": "qualification/inputs/scheduler/internal/api/install_parsed_manifest.go",
+      "bytes": 143465,
+      "sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561"
+    }
+  ],
+  "findings": [],
+  "source_conclusions": [
+    {
+      "location": "internal/api/install.go:3874; internal/api/install_task_rollback.go:59",
+      "fact": "Replacement revalidates only after a cloned nonempty prior definition is retained durably. Any current read error, empty successful result or byte difference returns before Delete, Create and acquisition of this task compensation. The wrapped read error remains accessible through errors.Is."
+    },
+    {
+      "location": "internal/api/install.go:4374-4396",
+      "fact": "Optional prune applies the same refusal before Delete and before append of its rollback. Refusal emits the task name and retained snapshot path, then continues. A refused task is not reported removed and gets no inverse operation."
+    },
+    {
+      "location": "internal/api/install.go:3921-3961; internal/api/install_task_rollback.go",
+      "fact": "Previously acquired mutation owners remain in the existing rollback stack. A later replacement refusal calls that owner. Existing completed-prune compensations are armed even if a later mutation is uncertain. The old created-definition comparison, create-only restore and recovery-error classification code is unchanged."
+    },
+    {
+      "location": "internal/api/install_task_rollback_test.go:415-600",
+      "fact": "New cases cover replacement and optional prune with same XML, changed XML, absence, empty successful export, read failure and matching XML accompanied by error. They assert exact mutation effects, current occupant bytes, original error identity where returned, named prune diagnostics and retained original snapshot. Separate prior-task cases check successful and failed earlier rollback without adding the refused task to recovery ownership."
+    },
+    {
+      "location": "internal/api/install_task_rollback_test.go:128-185,246",
+      "fact": "Existing fixture injections now select rollback phase or post-create capture rather than absolute ExportXML counts; the additional pre-delete read does not redirect those injections into the wrong lifecycle phase."
+    }
+  ],
+  "composition": {
+    "overlay_source_key_counts": {
+      "prior_sid": 39,
+      "candidate": 39,
+      "negative_control": 39
+    },
+    "all_source_keys_equal": true,
+    "candidate_changes_from_prior_sid_overlay": [
+      "internal/api/install.go",
+      "internal/api/install_task_rollback.go",
+      "internal/api/install_task_rollback_test.go"
+    ],
+    "control_differs_from_candidate_only_in_production_targets": [
+      "internal/api/install.go",
+      "internal/api/install_task_rollback.go"
+    ],
+    "new_tests_shared_by_control_and_candidate": true,
+    "all_10_prior_sid_inputs_match_frozen_sid_manifest": true,
+    "all_3_author_files_match_frozen_predelete_manifest": true,
+    "staged_rollback_and_test_equal_author_candidate": true,
+    "combined_install_delta_from_frozen_sid": "Exactly the two forward pre-delete calls; no SID changes are removed or rewritten.",
+    "old_rollback_implementation_preserved": "The sole production addition to install_task_rollback.go is verifyInstallTaskDefinitionBeforeDelete.",
+    "backend_hold_input_target_unchanged": true,
+    "backend_hold_input_sha256": "e3b66f71a690d2be7006f5cd65e6ef38365fee01aa297ee332cdfe93de05b561"
+  },
+  "limits": [
+    "The comparison does not make name-based Delete atomic. An external writer may change the task after the final read, and identical XML does not distinguish generations.",
+    "This review does not establish native Task Scheduler ownership, credential behavior, process-tree settlement or installed-product acceptance.",
+    "Root-reported runtime results were not independently re-run or re-audited here and are not used as a substitute for source review.",
+    "This review preserves the frozen three-file source boundary and does not authorize changes to unrelated scheduler or API paths."
+  ],
+  "actions": {
+    "local_read_only_git_python_analysis": true,
+    "report_written": true,
+    "project_sources_modified": false,
+    "remote_access": false,
+    "runtime_or_tests_executed": false,
+    "publication": false
+  }
+}

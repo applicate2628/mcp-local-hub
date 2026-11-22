@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,6 +26,9 @@ func TestPortHeldByOurDaemon(t *testing.T) {
 	current := "root"
 	if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
 		current = u.Username
+		if runtime.GOOS == "windows" {
+			current = u.Uid
+		}
 	}
 	origLookup := lookupProcess
 	origIdent := processIdentityByPID

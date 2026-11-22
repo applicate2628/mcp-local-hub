@@ -114,7 +114,7 @@ func TestSchedulerCOMLastResultPublicQueries(t *testing.T) {
 		},
 		{
 			name: "list-preserves-each-result", operation: "list",
-			json: `{"ok":true,"tasks":[{"name":"fixture-zero","state":3,"owner":"DOMAIN\\alice","last_result":0},{"name":"fixture-error","state":4,"owner":"DOMAIN\\alice","last_result":87},{"name":"fixture-never-run","state":3,"owner":"DOMAIN\\alice","last_result":267011}]}`,
+			json: `{"ok":true,"tasks":[{"name":"fixture-zero","state":3,"owner":"S-1-5-21-1","last_result":0},{"name":"fixture-error","state":4,"owner":"S-1-5-21-1","last_result":87},{"name":"fixture-never-run","state":3,"owner":"S-1-5-21-1","last_result":267011}]}`,
 			want: []int{0, 87, 267011},
 		},
 		{
@@ -124,7 +124,7 @@ func TestSchedulerCOMLastResultPublicQueries(t *testing.T) {
 		},
 		{
 			name: "list-rejects-null-without-partial-results", operation: "list",
-			json:      `{"ok":true,"tasks":[{"name":"fixture-good","state":3,"owner":"DOMAIN\\alice","last_result":87},{"name":"fixture-null","state":3,"owner":"DOMAIN\\alice","last_result":null}]}`,
+			json:      `{"ok":true,"tasks":[{"name":"fixture-good","state":3,"owner":"S-1-5-21-1","last_result":87},{"name":"fixture-null","state":3,"owner":"S-1-5-21-1","last_result":null}]}`,
 			wantError: true,
 		},
 	} {
@@ -139,7 +139,7 @@ func TestSchedulerCOMLastResultPublicQueries(t *testing.T) {
 				}
 				return response, nil
 			})
-			scheduler := &windowsScheduler{username: "alice"}
+			scheduler := &windowsScheduler{username: "S-1-5-21-1"}
 			var statuses []TaskStatus
 			var err error
 			if tc.operation == "status" {
@@ -281,7 +281,7 @@ func runLastResultCOMScriptFixture(t *testing.T, powerShell string, request sche
 	// property getter, row construction, and catch block remain unchanged.
 	const fixtureBody = `
 $script:fixtureTasks=@(foreach($row in $script:lastResultFixture.tasks){
- $task=[pscustomobject]@{Name=[string]$row.name;State=3;Xml=[string]$script:lastResultFixture.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='DOMAIN\alice'}};FixtureResult=$row.value;FixtureMode=[string]$row.mode}
+ $task=[pscustomobject]@{Name=[string]$row.name;State=3;Xml=[string]$script:lastResultFixture.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}};FixtureResult=$row.value;FixtureMode=[string]$row.mode}
  if($row.mode -cne 'missing'){
   $task|Add-Member ScriptProperty LastTaskResult {
    [Console]::Error.WriteLine('fixture-last-result:'+ $this.Name)

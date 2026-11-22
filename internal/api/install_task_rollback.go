@@ -51,6 +51,26 @@ func installSchedulerRecoveryTasks(err error) []string {
 	return names
 }
 
+// verifyInstallTaskDefinitionBeforeDelete refuses an observed change after the
+// durable snapshot was captured. It grants no atomic generation ownership:
+// another writer can still replace the task between this read and Delete, and
+// an identical-XML replacement cannot be distinguished by this observation.
+func verifyInstallTaskDefinitionBeforeDelete(s interface {
+	ExportXML(string) ([]byte, error)
+}, name string, priorXML []byte) error {
+	current, err := s.ExportXML(name)
+	if err != nil {
+		return fmt.Errorf("read current definition: %w", err)
+	}
+	if len(current) == 0 {
+		return errors.New("empty current definition; deletion refused")
+	}
+	if !bytes.Equal(current, priorXML) {
+		return errors.New("current definition changed; deletion refused")
+	}
+	return nil
+}
+
 // installTaskMutationFailure observes the prior definition or absence after a
 // failed current-step mutation. An error alone does not establish its outcome.
 // Reuse the scheduler recovery owner unless that prior state is observed;

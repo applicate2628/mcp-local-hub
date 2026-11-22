@@ -3161,8 +3161,13 @@ func statusOwnedByCurrentUser(owner string) bool {
 	if err != nil || cur == nil {
 		return false
 	}
-	// Task Scheduler often reports owner as DOMAIN\user, while Go may
-	// return either `user` or `DOMAIN\user` depending on environment.
+	// The Windows scheduler's Status result carries a resolved principal SID.
+	// A display account, including a matching short name in another domain,
+	// cannot establish ownership of the running task.
+	if runtime.GOOS == "windows" {
+		return cur.Uid != "" && owner == cur.Uid
+	}
+	// Preserve the existing account-name projection on non-Windows backends.
 	u := strings.ToLower(strings.TrimSpace(cur.Username))
 	o := strings.ToLower(owner)
 	if u == o {
@@ -3866,6 +3871,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 				return failAfterRollback(fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err))
 			}
 			fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
+			if err := verifyInstallTaskDefinitionBeforeDelete(sch, spec.Name, priorXML); err != nil {
+				return failAfterRollback(fmt.Errorf("revalidate task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err))
+			}
 			if err := sch.Delete(spec.Name); err != nil {
 				cause := fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err)
 				return failAfterRollback(installTaskMutationFailure(sch, spec.Name, priorXML, cause))
@@ -4363,6 +4371,10 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 			continue
 		}
 		fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
+		if err := verifyInstallTaskDefinitionBeforeDelete(sch, name, priorXML); err != nil {
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: revalidate before deletion (recovery snapshot retained at %q): %v\n", name, snapshotPath, err)
+			continue
+		}
 		if derr := sch.Delete(name); derr != nil {
 			cause := fmt.Errorf("delete obsolete task %s (recovery snapshot retained at %q): %w", name, snapshotPath, derr)
 			mutationErr := installTaskMutationFailure(sch, name, priorXML, cause)

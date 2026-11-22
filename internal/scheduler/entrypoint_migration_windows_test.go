@@ -297,6 +297,12 @@ func TestEntrypointTaskTxnRejectsForeignOrAmbiguousTaskBeforeMutation(t *testing
 			wantErr: "foreign owner",
 		},
 		{
+			name:    "same short name foreign domain",
+			owner:   `OTHER\test-user`,
+			xml:     taskXML("\\mcp-local-hub-autostart", `OTHER\test-user`, priorCLI, "gui", "autostart"),
+			wantErr: "foreign owner",
+		},
+		{
 			name:    "multiple actions",
 			owner:   "test-user",
 			xml:     []byte("<?xml version=\"1.0\" encoding=\"UTF-16\"?><Task><RegistrationInfo><URI>\\mcp-local-hub-autostart</URI></RegistrationInfo><Principals><Principal><UserId>test-user</UserId></Principal></Principals><Actions><Exec><Command>" + priorCLI + "</Command></Exec><ComHandler><ClassId>x</ClassId></ComHandler></Actions></Task>"),
