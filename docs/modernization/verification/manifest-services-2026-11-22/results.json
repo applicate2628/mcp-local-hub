@@ -1,0 +1,589 @@
+{
+  "schema_version": 1,
+  "status": "SCOPE_CHECKS_PASSED_ARCHITECTURE_GATE_FAILED",
+  "qualification_date_utc": "2026-11-22",
+  "repository": "applicate2628/mcp-local-hub",
+  "pull_request": 663,
+  "scope": {
+    "change": "Remove eight empty manifest API forwarding wrappers; bind the existing narrow interfaces to the server-owned API; remove only seven obsolete baseline records.",
+    "classification": "simplification and architecture debt reduction",
+    "measured_performance_claim": false,
+    "runtime_leak_fix_claim": false,
+    "full_repository_tests_claim": false,
+    "native_scheduler_operations": false,
+    "installed_product_operations": false,
+    "dependency_downloads": false
+  },
+  "source": {
+    "qualified_base_commit": "1cabce12655f810b742e6c31369441cacd72573c",
+    "qualified_base_tree": "8eed2215a72d8f56164afa562e277dd5ae387f28",
+    "qualified_worktree": "The exact base commit plus the two-file architecture.patch; base tree identifies the source before that patch.",
+    "source_role": "PR #663 head used for this qualification; not a new master or composed-feature qualification.",
+    "patch_sha256": "349cb21b1789055c62e623015be0e1e154ff3eba803749d4bf547f28b7e3d971",
+    "patch_bytes": 10089,
+    "materialized_source": true,
+    "compiler_overlay_used": false,
+    "files": [
+      {
+        "path": "internal/gui/server.go",
+        "before_sha256": "38b8e33d2f3f8c8cad5785094d6ddd8cbf08ff1554a17d6831e5a6430fdf32ff",
+        "before_bytes": 55733,
+        "after_sha256": "edcffcc94cb1078801d1329e04e1e98824527f5c9eb080fcdb20560675131325",
+        "after_bytes": 53605,
+        "before_lines": 1322,
+        "after_lines": 1263
+      },
+      {
+        "path": "architecture/baseline.yaml",
+        "before_sha256": "912b62fb68c6666afef240da875e475731934582366e30de7dc87bc0a099e12e",
+        "before_bytes": 1441158,
+        "after_sha256": "e0620345b7999fdb97462172d20226255e3397345078e98178098ddcd082632c",
+        "after_bytes": 1436933,
+        "before_lines": 31595,
+        "after_lines": 31497
+      }
+    ],
+    "unchanged_controls": [
+      {
+        "path": "architecture/owners.yaml",
+        "sha256": "21bad3b2ec476639e163d11ae00f05141ed267a0dea6c7d32b89228dc157d98e",
+        "unchanged_from_base": true
+      },
+      {
+        "path": "architecture/policy.yaml",
+        "sha256": "ec0ea859f554cdbf1bd329106f3a787668a8441f181828eb9da74d6863558a0a",
+        "unchanged_from_base": true
+      },
+      {
+        "path": "architecture/workers.yaml",
+        "sha256": "4511250f4407bf8e3d4c66deaea468602e8faf5734b4f9b5a57d93bf54ab68cc",
+        "unchanged_from_base": true
+      }
+    ]
+  },
+  "baseline_invariants": {
+    "before_entries": 2410,
+    "after_entries": 2403,
+    "deleted_entries": 7,
+    "new_entries": 0,
+    "changed_retained_entries": 0,
+    "retained_entries": 2403,
+    "retained_blocks_byte_identical": true,
+    "retained_blocks_aggregate_sha256": "54b111bc95ec9cfb828b3ed9fefc7e66b166cef317c1fdb061dd5f23d7cc22b4",
+    "aggregate_encoding": "UTF-8; sorted fingerprint + ASCII space + block SHA-256 + LF",
+    "header_byte_identical": true,
+    "header_bytes": 84,
+    "header_sha256": "70f6aceea00af46c5ffcf57ac1748606dabbadaad962039f34836f8021fd8b03",
+    "generated_from": "1b875e3ad9f0ca7d4bc306edb6c22431b66da6c7",
+    "baseline_regenerated": false,
+    "all_retained_deadlines_and_caps_preserved": true,
+    "removed_calls": [
+      {
+        "fingerprint": "66aa2c139d7a9a8f63aeb09863c60706eba8cf8eea8d13a6c5629c2a3210c485",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestLister.ManifestList",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "a116b21e02ca8092237a157695f96adaaf6c2caf6369669637c95408e4947735",
+        "baseline_block_bytes": 599
+      },
+      {
+        "fingerprint": "6842ac72d8e1be0944e78e5d14aa1e76a7f0aacda6a20b9696989a121a2aff6d",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestPresence.ManifestExists",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "6fc520475376604901072bea2a697ecf659830cfe4ceb0c16ee0b7ddb122ba6b",
+        "baseline_block_bytes": 603
+      },
+      {
+        "fingerprint": "897b89e0a0d3cf60c83a5bf06e046b6724864b70ebd6290ba44116c4afde348f",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestViewer.ManifestGet",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": false
+      },
+      {
+        "fingerprint": "8a177f66eab2784270b7c113f4d1f0b00542b471d38ea1266f2abb0a0d848a7d",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestValidator.ManifestValidate",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "edc15af0b5026a473b1ff597d614dee41efe1dfd7a1c9b572fad3434063ebb7e",
+        "baseline_block_bytes": 606
+      },
+      {
+        "fingerprint": "bae8c75bbf3a838740cd10b9043bdf6da334baff95d4d34d81dcf6f5c6e8aa68",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestEditor.ManifestEditWithHash",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "e4e4174c7d95b3a03a7ed1914e5f59495a29bc5702cddd41bf1ca17364f8cbb5",
+        "baseline_block_bytes": 607
+      },
+      {
+        "fingerprint": "beb70d485bbe7b0e16fc31b848e2dfd634eae4e0a921e4304c9b7bfd24a1eeb2",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestDeleter.ManifestDelete",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "e9cf3f7a743bc7ed6808d12ec65b13bcc009281137ca98c1eadb8099810e062d",
+        "baseline_block_bytes": 602
+      },
+      {
+        "fingerprint": "c68604a1a100ec4a66f31c53660c3cf424d50412c383d8398a3ca9e296ef6666",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestCreator.ManifestCreate",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "8c480ef34ba816d29051ce9c3e351177f0fdbc5540f78e201d0944cab4378bf1",
+        "baseline_block_bytes": 602
+      },
+      {
+        "fingerprint": "f5b25fba0b9f9d9446daad4ff897e9dab5bb4afab4482262483840bc08d98926",
+        "kind": "api_construction",
+        "path": "internal/gui/server.go",
+        "symbol": "realManifestGetter.ManifestGetWithHash",
+        "absent_from_full_candidate_scan": true,
+        "baseline_entry_removed": true,
+        "baseline_block_sha256": "66577cba34190d822e455572e7a532632bcd66540ca8adc690462bc98ab32be4",
+        "baseline_block_bytes": 606
+      }
+    ]
+  },
+  "physical_scan": {
+    "full_report": {
+      "path": "evidence/architecture/arch-scan.stdout",
+      "bytes": 1204058,
+      "sha256": "65bfd254e612f19ca6c730e66da7e3532e050e2a1c70b1f80410ee1bac49b70a"
+    },
+    "violations": 2663,
+    "summary": {
+      "api_construction": 154,
+      "embedded_document": 2,
+      "file_budget": 101,
+      "history_comment": 1053,
+      "import": 39,
+      "mutable_global": 1079,
+      "production_constructor": 2,
+      "production_test_hook": 73,
+      "worker": 160
+    },
+    "comparison_reference_sha256": "2c5b6585703ae17ec394fdf7a2713f263cf9e3af83aafacd6a0cadc7001958da",
+    "comparison_reference_violations": 2671,
+    "added_fingerprints": [],
+    "removed_fingerprints": [
+      "66aa2c139d7a9a8f63aeb09863c60706eba8cf8eea8d13a6c5629c2a3210c485",
+      "6842ac72d8e1be0944e78e5d14aa1e76a7f0aacda6a20b9696989a121a2aff6d",
+      "897b89e0a0d3cf60c83a5bf06e046b6724864b70ebd6290ba44116c4afde348f",
+      "8a177f66eab2784270b7c113f4d1f0b00542b471d38ea1266f2abb0a0d848a7d",
+      "bae8c75bbf3a838740cd10b9043bdf6da334baff95d4d34d81dcf6f5c6e8aa68",
+      "beb70d485bbe7b0e16fc31b848e2dfd634eae4e0a921e4304c9b7bfd24a1eeb2",
+      "c68604a1a100ec4a66f31c53660c3cf424d50412c383d8398a3ca9e296ef6666",
+      "f5b25fba0b9f9d9446daad4ff897e9dab5bb4afab4482262483840bc08d98926"
+    ],
+    "retained_metric_changes": [
+      {
+        "path": "internal/gui/server.go",
+        "kind": "file_budget",
+        "fingerprint": "e7f29b64ccfbb97e6553b041f6a4c1d9952da9e14de4033f9da9820e976d1d88",
+        "before": 1322,
+        "after": 1263,
+        "baseline_cap_unchanged": 1406
+      }
+    ]
+  },
+  "architecture_gate": {
+    "status": "FAILED",
+    "exit_code": 1,
+    "reported_summary": "architecture verification: expired=0 grown=42 new=388 stale=128 unowned=0 workers=72",
+    "new": 388,
+    "stale": 128,
+    "grown": 42,
+    "workers": 72,
+    "expired": 0,
+    "unowned": 0,
+    "workers_are_subset_of_new": true,
+    "unowned_scope": "Baseline metadata completeness and metric/date validity checked by Verify; not complete owner-policy coverage of the current source.",
+    "new_by_kind": {
+      "api_construction": 29,
+      "file_budget": 25,
+      "history_comment": 44,
+      "import": 22,
+      "mutable_global": 186,
+      "production_test_hook": 10,
+      "worker": 72
+    },
+    "set_hash_encoding": "sorted fingerprint + LF; UTF-8",
+    "set_sha256": {
+      "new": "b3a2e6d4b6fa45732b95e68508174ff801bf33beb382766095c355c0a3eb6678",
+      "stale": "769eb91335735b1a170d0004aee8d375331da7eb74230b2f39acb1199001069a",
+      "grown": "7ed13ac02a4cef2142f6b44a4ea343ce6fdf03682777f67ed0de8f72772e8cdd",
+      "workers": "ad8f9934dd3659756e4c436d524433230542489b5dd27ffa81cfc0a6bcd39117"
+    }
+  },
+  "execution": {
+    "platform": "windows/amd64",
+    "go_version": "go1.27.4",
+    "go_sha256": "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113",
+    "qualifier_sha256": "84231591aaface7284be6a4a768a4393cc71d6738839ae34d7f349400fdbf594",
+    "archcheck_sha256": "ac46e78372e9f311891af33e3b9e1705b0a938eed909a2cc1132b522e3139bc5",
+    "environment": {
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "GOVCS": "*:off",
+      "GOTOOLCHAIN": "local",
+      "GOENV": "off",
+      "GOWORK": "off",
+      "GOFLAGS": "-mod=readonly",
+      "GOTELEMETRY": "off",
+      "GOMAXPROCS": "4",
+      "CGO_ENABLED": "1",
+      "MCPHUB_NO_AUTO_GUI": "1",
+      "MCPHUB_E2E_SCHEDULER": "none",
+      "cache_policy": "pre-existing Go module and build caches; no installations"
+    },
+    "selected_test_regex": "^(TestManifest.*|TestReadinessHandler_DraftPOST_(CreateModeExistingManifestBlocks|EditTargetExistingManifestDoesNotBlock|EditTargetMissingManifestBlocks|MirrorsManifestWriteGate)|TestMarketplaceInstall_Hub(HappyPath|EmbeddedNameCollisionGraceful|RetryableManifestLeaseConflict409))$",
+    "started_utc": "2026-11-22T14:33:00.305573+00:00",
+    "finished_utc": "2026-11-22T14:35:43.826882+00:00",
+    "qualifier_completed": true,
+    "qualification_receipt": {
+      "path": "evidence/architecture/receipt.json",
+      "bytes": 6997,
+      "sha256": "4accc6e418a5bfa81c62e39c768aaa8ea69c5e0185d1e31d2874232a5ec6a5b5"
+    },
+    "commands": [
+      {
+        "label": "go-version",
+        "exit_code": 0,
+        "seconds": 0.08,
+        "direct_child_waited": true
+      },
+      {
+        "label": "format",
+        "exit_code": 0,
+        "seconds": 0.029,
+        "direct_child_waited": true
+      },
+      {
+        "label": "gui-focused",
+        "exit_code": 0,
+        "seconds": 34.826,
+        "direct_child_waited": true
+      },
+      {
+        "label": "archcheck-build",
+        "exit_code": 0,
+        "seconds": 1.385,
+        "direct_child_waited": true
+      },
+      {
+        "label": "arch-scan",
+        "exit_code": 0,
+        "seconds": 40.147,
+        "direct_child_waited": true
+      },
+      {
+        "label": "arch-verify",
+        "exit_code": 1,
+        "seconds": 42.076,
+        "direct_child_waited": true
+      },
+      {
+        "label": "build",
+        "exit_code": 0,
+        "seconds": 21.852,
+        "direct_child_waited": true
+      },
+      {
+        "label": "vet",
+        "exit_code": 0,
+        "seconds": 23.1,
+        "direct_child_waited": true
+      }
+    ],
+    "race_tests": {
+      "top_level_pass": 46,
+      "test_and_subtest_pass": 68,
+      "package_pass": 1,
+      "fail": 0,
+      "skip": 0,
+      "raw_json": {
+        "path": "evidence/architecture/gui-focused.stdout",
+        "bytes": 61142,
+        "sha256": "0e3cfa485c3c3e3949936fe354d0d6749639c4b5cd4b8a459f3f42e5e30d8b25"
+      }
+    },
+    "direct_children_waited": true,
+    "timeouts": 0,
+    "whole_process_tree_settlement_observed": false,
+    "process_scope_note": "Receipts prove waited direct children; no whole-process-tree settlement claim is made."
+  },
+  "recovery": {
+    "initial_prepare_completed": false,
+    "initial_prepare_error": "RuntimeError: Unexpected exit for fetch-source",
+    "initial_fetch_exit": 128,
+    "initial_finished_utc": "2026-11-22T14:21:17.477335+00:00",
+    "initial_receipt": {
+      "path": "evidence/prepare-architecture/receipt.json",
+      "bytes": 3476,
+      "sha256": "a3f24f2ed98e085d560d0460174421dda18989c263402e132a1cd8cd644b15e7"
+    },
+    "initial_fetch_stderr": {
+      "path": "evidence/prepare-architecture/fetch-source.stderr",
+      "bytes": 234,
+      "sha256": "8a59b4333100306a6b9d4b15ed3ecebf41d538537b249ece0bdd1f54a17ac666"
+    },
+    "recovery_completed": true,
+    "recovery_receipt": {
+      "path": "evidence/recover-architecture-1/receipt.json",
+      "bytes": 10467,
+      "sha256": "7562584eda07ce593d93f39acfe9998a1af8786c87e0626e781bdc6cafb850c1"
+    },
+    "recovery_helper_sha256": "6de66e8542aae8c4af0e1b50881b12716105a0d1c9a2b6e89a740de54d0b627b",
+    "predecessor_receipt_unchanged": true,
+    "explicit_shallow_fetch_attempts": 1,
+    "fetch_count_scope": "Explicit fetch commands; no inference about all possible Git network activity.",
+    "recovery_finished_utc": "2026-11-22T14:32:27.318725+00:00",
+    "prior_receipt_not_rewritten": true
+  },
+  "evidence_archive": {
+    "file": "manifest-services-evidence.zip",
+    "bytes": 218111,
+    "sha256": "5f1e0c3221aae6cd9bac45e84560dbb4733f02134c49b82cf53438eb90f03c05",
+    "entries": 53,
+    "manifest_payload_entries": 52,
+    "manifest_path": "manifest.json",
+    "manifest_sha256": "169762c139db8a90d7167038e0a1e0f8cda45abd34cee96e8adce1d89a5e9173",
+    "all_manifest_lengths_and_hashes_verified": true,
+    "native_binaries_included": false,
+    "raw_streams_and_receipts_preserved": true,
+    "inventory": {
+      "architecture.patch": {
+        "bytes": 10089,
+        "sha256": "349cb21b1789055c62e623015be0e1e154ff3eba803749d4bf547f28b7e3d971"
+      },
+      "evidence/architecture/arch-scan.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/arch-scan.stdout": {
+        "bytes": 1204058,
+        "sha256": "65bfd254e612f19ca6c730e66da7e3532e050e2a1c70b1f80410ee1bac49b70a"
+      },
+      "evidence/architecture/arch-verify.stderr": {
+        "bytes": 85,
+        "sha256": "6cf741e2689f6f943b04871154a91520cdffb0df901b74c419fe2f61428b82f9"
+      },
+      "evidence/architecture/arch-verify.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/archcheck-build.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/archcheck-build.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/build.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/build.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/format.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/format.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/go-version.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/go-version.stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "evidence/architecture/gui-focused.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/gui-focused.stdout": {
+        "bytes": 61142,
+        "sha256": "0e3cfa485c3c3e3949936fe354d0d6749639c4b5cd4b8a459f3f42e5e30d8b25"
+      },
+      "evidence/architecture/receipt.json": {
+        "bytes": 6997,
+        "sha256": "4accc6e418a5bfa81c62e39c768aaa8ea69c5e0185d1e31d2874232a5ec6a5b5"
+      },
+      "evidence/architecture/vet.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/architecture/vet.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/prepare-architecture/clone-cache.stderr": {
+        "bytes": 77,
+        "sha256": "728722dfe9625466d6d6cb72aec811bbe00201ad53a89ee55727c67cf7645210"
+      },
+      "evidence/prepare-architecture/clone-cache.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/prepare-architecture/fetch-source.stderr": {
+        "bytes": 234,
+        "sha256": "8a59b4333100306a6b9d4b15ed3ecebf41d538537b249ece0bdd1f54a17ac666"
+      },
+      "evidence/prepare-architecture/fetch-source.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/prepare-architecture/go-version.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/prepare-architecture/go-version.stdout": {
+        "bytes": 34,
+        "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+      },
+      "evidence/prepare-architecture/receipt.json": {
+        "bytes": 3476,
+        "sha256": "a3f24f2ed98e085d560d0460174421dda18989c263402e132a1cd8cd644b15e7"
+      },
+      "evidence/prepare-architecture/set-source-remote.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/prepare-architecture/set-source-remote.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/apply-check.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/apply-check.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/apply.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/apply.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/candidate-status.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/candidate-status.stdout": {
+        "bytes": 56,
+        "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+      },
+      "evidence/recover-architecture-1/checkout.stderr": {
+        "bytes": 389,
+        "sha256": "88d415e0a4708963f1c1031b451be8ec07f0f82de7419a182d07650ddc6902f6"
+      },
+      "evidence/recover-architecture-1/checkout.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/exact-head.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/exact-head.stdout": {
+        "bytes": 41,
+        "sha256": "ee667218216dfed420625163dee190c2d420b8970f144898fafe2170eb2560e6"
+      },
+      "evidence/recover-architecture-1/exact-tree.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/exact-tree.stdout": {
+        "bytes": 41,
+        "sha256": "eb55ce4eb37e54b93429c3ace3da3340c4f7496d63649a918b2c093442748ffd"
+      },
+      "evidence/recover-architecture-1/fetch-exact-head.stderr": {
+        "bytes": 128,
+        "sha256": "75dd48e2880bf8c3b4c651f8755795e6840a3014777d5e6b85a17f9b8a0589cf"
+      },
+      "evidence/recover-architecture-1/fetch-exact-head.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/head-object.stderr": {
+        "bytes": 81,
+        "sha256": "3d8afb7d955b7bdfffbf8c4ac8dfeb96bbe3b7c40f520606192dccf45d265daf"
+      },
+      "evidence/recover-architecture-1/head-object.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/receipt.json": {
+        "bytes": 10467,
+        "sha256": "7562584eda07ce593d93f39acfe9998a1af8786c87e0626e781bdc6cafb850c1"
+      },
+      "evidence/recover-architecture-1/source-clean.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/source-clean.stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/source-remote.stderr": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "evidence/recover-architecture-1/source-remote.stdout": {
+        "bytes": 51,
+        "sha256": "5704ed4893b0a153a8dc5de2d2193cef5f6fbcbe8fc119b0403c29e43f8b1f50"
+      },
+      "export_architecture.py": {
+        "bytes": 5874,
+        "sha256": "2c4736544c8733ab419b2529a5e73521ffc8183a4f77859e0f0b1e80b62ec8ed"
+      },
+      "observed-summary.json": {
+        "bytes": 3195,
+        "sha256": "80f35dff7a6d047d94dd5809726228e29741799d640fbe5b9174a3e4f45fb5c1"
+      },
+      "qualify.py": {
+        "bytes": 9253,
+        "sha256": "84231591aaface7284be6a4a768a4393cc71d6738839ae34d7f349400fdbf594"
+      },
+      "recover_architecture.py": {
+        "bytes": 8566,
+        "sha256": "6de66e8542aae8c4af0e1b50881b12716105a0d1c9a2b6e89a740de54d0b627b"
+      }
+    }
+  },
+  "claim_limits": [
+    "This qualifies the materialized #663 head plus the exact two-file patch, not every other PR or later master composition.",
+    "Focused GUI handler tests exercise the selected existing contract cases; the whole repository test suite was not run.",
+    "The full architecture gate remains FAILED; seven deleted accepted records and one removed new violation are not a rebaseline.",
+    "The helper completed with the known verify exit 1 explicitly expected; helper completion is not architecture-gate success.",
+    "Worker ownership/lifecycle debt and owner-policy coverage are not resolved by this change.",
+    "No measured speedup or runtime leak repair is claimed.",
+    "Initial failed preparation is retained as failure; the separate source-only recovery and later qualification have their own terminal receipts.",
+    "No complete operating-system process-tree settlement claim follows from direct-child wait receipts."
+  ]
+}

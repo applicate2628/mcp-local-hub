@@ -284,65 +284,6 @@ func (realDismisser) ListDismissedUnknown() (map[string]struct{}, error) {
 	return api.ListDismissedUnknown()
 }
 
-// realManifestCreator is the production adapter for /api/manifest/create.
-// Matches the realDemigrater / realDismisser idiom: empty value receiver,
-// lazy api.NewAPI() per call so tests can swap the interface without
-// needing to stub a constructor.
-type realManifestCreator struct{}
-
-func (realManifestCreator) ManifestCreate(name, yaml string) error {
-	return api.NewAPI().ManifestCreate(name, yaml)
-}
-
-// realManifestValidator is the production adapter for /api/manifest/validate.
-// Same shape as realManifestCreator above.
-type realManifestValidator struct{}
-
-func (realManifestValidator) ManifestValidate(yaml string) []string {
-	return api.NewAPI().ManifestValidate(yaml)
-}
-
-// realManifestGetter is the production adapter for /api/manifest/get.
-type realManifestGetter struct{}
-
-func (realManifestGetter) ManifestGetWithHash(name string) (string, string, error) {
-	return api.NewAPI().ManifestGetWithHash(name)
-}
-
-// realManifestViewer is the production adapter for /api/manifest/view.
-type realManifestViewer struct{}
-
-func (realManifestViewer) ManifestGet(name string) (string, error) {
-	return api.NewAPI().ManifestGet(name)
-}
-
-type realManifestPresence struct{}
-
-func (realManifestPresence) ManifestExists(name string) (bool, error) {
-	return api.NewAPI().ManifestExists(name)
-}
-
-// realManifestEditor is the production adapter for /api/manifest/edit.
-type realManifestEditor struct{}
-
-func (realManifestEditor) ManifestEditWithHash(name, yaml, expectedHash string) (string, error) {
-	return api.NewAPI().ManifestEditWithHash(name, yaml, expectedHash)
-}
-
-// realManifestLister is the production adapter for GET /api/manifests.
-type realManifestLister struct{}
-
-func (realManifestLister) ManifestList() ([]string, error) {
-	return api.NewAPI().ManifestList()
-}
-
-// realManifestDeleter is the production adapter for DELETE /api/manifest/:name.
-type realManifestDeleter struct{}
-
-func (realManifestDeleter) ManifestDelete(name string) error {
-	return api.NewAPI().ManifestDelete(name)
-}
-
 // realCatalogLister is the production adapter for GET /api/catalog.
 type realCatalogLister struct{}
 
@@ -847,14 +788,14 @@ func NewServer(cfg Config) *Server {
 	s.demigrater = realDemigrater{}
 	s.clientEntryRemover = s.api
 	s.dismisser = realDismisser{}
-	s.manifestCreator = realManifestCreator{}
-	s.manifestValidator = realManifestValidator{}
-	s.manifestGetter = realManifestGetter{}
-	s.manifestViewer = realManifestViewer{}
-	s.manifestPresence = realManifestPresence{}
-	s.manifestEditor = realManifestEditor{}
-	s.manifestLister = realManifestLister{}
-	s.manifestDeleter = realManifestDeleter{}
+	s.manifestCreator = s.api
+	s.manifestValidator = s.api
+	s.manifestGetter = s.api
+	s.manifestViewer = s.api
+	s.manifestPresence = s.api
+	s.manifestEditor = s.api
+	s.manifestLister = s.api
+	s.manifestDeleter = s.api
 	s.catalogLister = realCatalogLister{}
 	s.catalogManifestGetter = realCatalogManifestGetter{}
 	s.marketplaceLister = realMarketplaceLister{}
