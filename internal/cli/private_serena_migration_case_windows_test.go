@@ -57,17 +57,18 @@ type privateSerenaMigrationCaseConfig struct {
 }
 
 type privateSerenaMigrationOperation struct {
-	Test              string `json:"test"`
-	PrepareCalls      int    `json:"prepare_calls"`
-	NonemptyCalls     int    `json:"nonempty_prepare_calls"`
-	InstallCalls      int    `json:"install_calls"`
-	IntentPath        string `json:"intent_path,omitempty"`
-	ConstructorError  string `json:"constructor_error,omitempty"`
-	PrepareError      string `json:"prepare_error,omitempty"`
-	InstallError      string `json:"install_error,omitempty"`
-	CleanupError      string `json:"cleanup_error,omitempty"`
-	DriverError       string `json:"driver_error,omitempty"`
-	OperationComplete bool   `json:"original_operation_complete"`
+	Test              string                              `json:"test"`
+	PrepareCalls      int                                 `json:"prepare_calls"`
+	NonemptyCalls     int                                 `json:"nonempty_prepare_calls"`
+	InstallCalls      int                                 `json:"install_calls"`
+	IntentPath        string                              `json:"intent_path,omitempty"`
+	ConstructorError  string                              `json:"constructor_error,omitempty"`
+	PrepareError      string                              `json:"prepare_error,omitempty"`
+	InstallError      string                              `json:"install_error,omitempty"`
+	CleanupError      string                              `json:"cleanup_error,omitempty"`
+	DriverError       string                              `json:"driver_error,omitempty"`
+	OperationComplete bool                                `json:"original_operation_complete"`
+	NativeConsumer    *privateSerenaNativeConsumerReceipt `json:"native_consumer,omitempty"`
 }
 
 type privateSerenaMigrationChildFrame struct {
@@ -83,16 +84,17 @@ type privateSerenaMigrationChildFrame struct {
 }
 
 type privateSerenaMigrationCase struct {
-	config     privateSerenaMigrationCaseConfig
-	loaded     *privateSerenaMigrationLoaded
-	root       privateSerenaMigrationRoot
-	ctx        context.Context
-	cancel     context.CancelFunc
-	product    *windowsCanonicalNativeActorFixture
-	frame      privateSerenaMigrationChildFrame
-	apis       []*api.API
-	operations []migrateSerenaInstallOperation
-	blocked    error
+	config          privateSerenaMigrationCaseConfig
+	loaded          *privateSerenaMigrationLoaded
+	root            privateSerenaMigrationRoot
+	ctx             context.Context
+	cancel          context.CancelFunc
+	product         *windowsCanonicalNativeActorFixture
+	frame           privateSerenaMigrationChildFrame
+	apis            []*api.API
+	operations      []migrateSerenaInstallOperation
+	nativeConsumers []*privateSerenaMigrationNativeConsumer
+	blocked         error
 }
 
 // Published records are immutable. Every uncertain original remains reachable
@@ -518,7 +520,7 @@ func runPrivateSerenaMigrationChild(t *testing.T, root privateSerenaMigrationRoo
 		t.Fatal(err)
 	}
 	record["child"] = child
-	if child.Schema != "private-serena-migration-child-v1" || !child.Complete || child.Root != root.Name ||
+	if child.Schema != "private-serena-migration-child-v2" || !child.Complete || child.Root != root.Name ||
 		child.InputSHA256 != artifact.SHA256 || !child.WorkEnd.Equal(workEnd) ||
 		int(child.Native.PID) != observed.RootIdentity.PID || child.Native.NativeBirthFILETIME != observed.RootIdentity.NativeBirthFILETIME ||
 		child.Native.NativeBirthFILETIME == 0 || child.Image.ImageSHA256 != loaded.Input.Image.SHA256 ||
@@ -534,6 +536,16 @@ func runPrivateSerenaMigrationChild(t *testing.T, root privateSerenaMigrationRoo
 		if operation.Test != expectedTest || !operation.OperationComplete || operation.NonemptyCalls < 1 || operation.InstallCalls != 1 || operation.IntentPath == "" ||
 			operation.ConstructorError != "" || operation.PrepareError != "" || operation.InstallError != "" || operation.CleanupError != "" {
 			t.Fatal("private migration original positive preparation/consumer did not complete")
+		}
+		if root.Name == privateSerenaNativeConsumerRoot {
+			if operation.PrepareCalls != 1 || operation.NonemptyCalls != 1 || operation.DriverError != "" {
+				t.Fatal("private migration native consumer requires exactly one completed preparation and install")
+			}
+			if err := validatePrivateSerenaNativeConsumer(operation.NativeConsumer, loaded.Input); err != nil {
+				t.Fatalf("private migration original native consumer receiving: %v", err)
+			}
+		} else if operation.NativeConsumer != nil {
+			t.Fatal("private migration native consumer belongs to another fixed case")
 		}
 	}
 	if !time.Now().Before(parentEnd) {
@@ -711,7 +723,7 @@ func receivePrivateSerenaMigrationCase(t *testing.T, root privateSerenaMigration
 		privateSerenaMigrationFailStop(c, "child-current-image-validation", err)
 	}
 	c.frame = privateSerenaMigrationChildFrame{
-		Schema: "private-serena-migration-child-v1", Root: root.Name, InputSHA256: config.Input.SHA256, WorkEnd: workEnd,
+		Schema: "private-serena-migration-child-v2", Root: root.Name, InputSHA256: config.Input.SHA256, WorkEnd: workEnd,
 		Native: native.NativeSnapshot(), Image: image.Snapshot(), Operations: []privateSerenaMigrationOperation{}, Seeds: []privateSerenaMigrationArtifact{},
 	}
 	if c.frame.Image.ImageSHA256 != input.Image.SHA256 || c.frame.Image.SourceEpoch != input.SourceEpoch || !c.frame.Image.ResourcesClosed {
@@ -868,6 +880,8 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	deps := defaultMigrateSerenaRunDeps()
 	deps.newInstallAPI = func() *api.API { return installer }
 	originalOperation := deps.newInstallOperation
+	var consumerOperation migrateSerenaInstallOperation
+	var installedWorkspaces []api.WorkspaceEntry
 	deps.newInstallOperation = func(a *api.API) (migrateSerenaInstallOperation, error) {
 		original, err := originalOperation(a)
 		// These original closures retain the prepared pointer and its
@@ -892,6 +906,8 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 			},
 			install: func(ctx context.Context, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error, error) {
 				current.InstallCalls++
+				consumerOperation = original
+				installedWorkspaces = append([]api.WorkspaceEntry(nil), opts.Workspaces...)
 				path, installErr, cleanupErr := original.install(ctx, manifest, opts)
 				current.IntentPath = path
 				if installErr != nil {
@@ -917,6 +933,19 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	if !current.OperationComplete {
 		c.blocked = errors.Join(driverErr, errors.New("private migration original positive operation did not receive its terminal install/close"))
 		privateSerenaMigrationFailStop(c, "unreceived-positive-operation", c.blocked)
+	}
+	if c.root.Name == privateSerenaNativeConsumerRoot {
+		if driverErr != nil || current.PrepareCalls != 1 || current.NonemptyCalls != 1 || len(installedWorkspaces) != 1 {
+			c.blocked = errors.Join(driverErr, errors.New("private migration native consumer requires its one original completed preparation and install"))
+			privateSerenaMigrationFailStop(c, "native-consumer-original-selection", c.blocked)
+		}
+		task := api.SerenaTaskNameForWorkspace(installedWorkspaces[0].WorkspacePath)
+		receipt, consumerErr := c.consumeNative(installer, consumerOperation, task)
+		if consumerErr != nil {
+			c.blocked = consumerErr
+			privateSerenaMigrationFailStop(c, "original-post-ready-consumer", consumerErr)
+		}
+		current.NativeConsumer = receipt
 	}
 	returned = true
 	// Late supervisor/readiness errors are the original assertions' subject.

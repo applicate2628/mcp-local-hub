@@ -463,7 +463,8 @@ type migrateSerenaInstallOperation struct {
 	prepare func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) error
 	// A nonempty intentPath is the install's committed forward result and
 	// survives later settlement errors. It is never inferred from disk state.
-	install func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) (intentPath string, installErr, cleanupErr error)
+	install               func(context.Context, *config.ServerManifest, api.InstallParsedManifestOpts) (intentPath string, installErr, cleanupErr error)
+	observeConsumerLaunch func(context.Context, string) (*api.PreparedSerenaLaunchObservation, error)
 }
 
 type migrateSerenaRunDeps struct {
@@ -489,6 +490,9 @@ func newPreparedMigrateSerenaInstallOperation(installer *api.API) (migrateSerena
 		},
 		install: func(ctx context.Context, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error, error) {
 			return installPreparedMigrateSerena(ctx, installer, prepared, manifest, opts)
+		},
+		observeConsumerLaunch: func(ctx context.Context, task string) (*api.PreparedSerenaLaunchObservation, error) {
+			return prepared.ObserveConsumerLaunch(ctx, task)
 		},
 	}, nil
 }

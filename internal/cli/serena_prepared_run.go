@@ -54,17 +54,15 @@ func preparedFlagContext(parent context.Context, task *preparedTaskFlag, deadlin
 	return api.PreparedSerenaStartContext(parent, time.Duration(deadline.value)*time.Second)
 }
 
-func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch *api.PreparedSerenaLaunchObservation, descriptor api.SupervisorDaemon, logPath string) (err error) {
-	if err = launch.Validate(start, descriptor); err != nil {
-		return err
-	}
-	owner, err := a.PreparedSerenaConsumerOwnerObserved(start, launch)
-	if err != nil {
-		return err
+// preparedSerenaHTTPHostConfig validates the launch before resolving its
+// environment and arguments. Consumer admission and lifetime stay with the caller.
+func preparedSerenaHTTPHostConfig(start context.Context, launch *api.PreparedSerenaLaunchObservation, descriptor api.SupervisorDaemon, logPath string) (daemon.HTTPHostConfig, error) {
+	if err := launch.Validate(start, descriptor); err != nil {
+		return daemon.HTTPHostConfig{}, err
 	}
 	manifest, err := launch.Manifest(start)
 	if err != nil {
-		return err
+		return daemon.HTTPHostConfig{}, err
 	}
 	refs := descriptor.Env
 	if descriptor.RuntimeSpec != nil {
@@ -84,11 +82,11 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 		return raw, reader.Validate(start, path, 64<<20, raw, apiConsumerSHA(raw))
 	})
 	if verr != nil && secrets.HasSecretRef(refs) {
-		return daemonSecretVaultFatalError(descriptor.Server, descriptor.Daemon, defaultKeyPath(), defaultVaultPath(), verr)
+		return daemon.HTTPHostConfig{}, daemonSecretVaultFatalError(descriptor.Server, descriptor.Daemon, defaultKeyPath(), defaultVaultPath(), verr)
 	}
 	resolved, omitted, err := secrets.NewResolver(vault, nil).ResolveMapBestEffort(refs)
 	if err != nil {
-		return err
+		return daemon.HTTPHostConfig{}, err
 	}
 	env, unset, err := mergeResolvedDaemonEnvWithOverlayReader(descriptor.TaskName, resolved, omitted, func(task string) (map[string]string, error) {
 		root, resolution, e := api.ResolveDaemonStateDirObserved(start)
@@ -126,7 +124,7 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 		return daemon_env_overlay.ExpandParentPath(values, os.Environ())
 	}, manifest.EnvForwardLocal)
 	if err != nil {
-		return err
+		return daemon.HTTPHostConfig{}, err
 	}
 	cfg := daemon.HTTPHostConfig{Env: env, UnsetEnv: unset, LogPath: logPath, WorkingDir: descriptor.WorkingDir, OuterBindDeadline: time.Duration(api.EffectiveStartupBindDeadlineSeconds(descriptor)) * time.Second}
 	if descriptor.RuntimeSpec != nil {
@@ -135,7 +133,7 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 		cfg.UpstreamPort = descriptor.RuntimeSpec.UpstreamPort
 	} else {
 		if filepath.Base(manifest.Command) != "uvx" && filepath.Base(manifest.Command) != "uvx.exe" || len(manifest.BaseArgs) < 4 || manifest.BaseArgs[0] != "--from" || manifest.BaseArgs[2] != "serena" || manifest.BaseArgs[3] != "start-mcp-server" {
-			return errors.New("prepared global package prefix mismatch")
+			return daemon.HTTPHostConfig{}, errors.New("prepared global package prefix mismatch")
 		}
 		cfg.Args = append([]string(nil), manifest.BaseArgs[3:]...)
 		matches := 0
@@ -146,15 +144,30 @@ func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch
 			}
 		}
 		if matches != 1 {
-			return errors.New("prepared global daemon source ambiguous")
+			return daemon.HTTPHostConfig{}, errors.New("prepared global daemon source ambiguous")
 		}
 		for _, arg := range cfg.Args {
 			if arg == "--port" || strings.HasPrefix(arg, "--port=") {
-				return errors.New("prepared global upstream port duplicated")
+				return daemon.HTTPHostConfig{}, errors.New("prepared global upstream port duplicated")
 			}
 		}
 		cfg.UpstreamPort = descriptor.Port + config.NativeHTTPInternalPortOffset
 		cfg.Args = append(cfg.Args, "--port", strconv.Itoa(cfg.UpstreamPort))
+	}
+	return cfg, nil
+}
+
+func runPreparedSerenaWrapper(service, start context.Context, a *api.API, launch *api.PreparedSerenaLaunchObservation, descriptor api.SupervisorDaemon, logPath string) (err error) {
+	if err = launch.Validate(start, descriptor); err != nil {
+		return err
+	}
+	owner, err := a.PreparedSerenaConsumerOwnerObserved(start, launch)
+	if err != nil {
+		return err
+	}
+	cfg, err := preparedSerenaHTTPHostConfig(start, launch, descriptor, logPath)
+	if err != nil {
+		return err
 	}
 	h, adapter, err := newPreparedConsumerHTTPHost(start, owner, descriptor, cfg, launch)
 	if err != nil {
