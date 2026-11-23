@@ -187,6 +187,7 @@ type StagedWindowsCanonicalEntrySetV2 struct {
 	priorAttempted        bool
 	priorError            error
 	launcherStageRelative string
+	retainsRuntime        bool
 }
 
 type WindowsCanonicalEntryPriorSetV2 struct {
@@ -194,6 +195,7 @@ type WindowsCanonicalEntryPriorSetV2 struct {
 	observation   WindowsCanonicalEntryPriorObservationV2
 	artifact      WindowsArtifact
 	runtimeMember string
+	readOnly      bool
 }
 
 type WindowsCanonicalEntryRecoverySetV2 struct {

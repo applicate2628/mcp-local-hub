@@ -7,6 +7,9 @@ import "context"
 func (*WindowsCanonicalEntrySetV2) Stage(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	return nil, nil, errWindowsCanonicalEntryUnsupported
+}
 func (*StagedWindowsCanonicalEntrySetV2) Snapshot() (WindowsCanonicalEntrySetSnapshotV2, error) {
 	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
 }

@@ -3,6 +3,7 @@
 package binaryadmission
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -417,7 +418,20 @@ func (c *canonicalEntryMembersV2) close() error {
 }
 
 func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, error) {
-	s := &StagedWindowsCanonicalEntrySetV2{original: newCanonicalEntryMembersV2()}
+	return o.stage(ctx, canonicalEntryPath, false)
+}
+
+// StageRetainingEqualRuntime qualifies the original installed current bundle
+// before creating any staged file. The prior owner is read-only for this
+// preparation. Close the stage on every exit, including a partially received
+// pair. It closes its prior first and its shared directory lenders last.
+func (o *WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	stage, err := o.stage(ctx, canonicalEntryPath, true)
+	return stage, stage.prior, err
+}
+
+func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPath string, retainRuntime bool) (*StagedWindowsCanonicalEntrySetV2, error) {
+	s := &StagedWindowsCanonicalEntrySetV2{original: newCanonicalEntryMembersV2(), retainsRuntime: retainRuntime}
 	c := &s.original
 	if o == nil || ctx == nil {
 		return s, errors.New("source owner and stage context required")
@@ -446,8 +460,22 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 	if err != nil {
 		return s, err
 	}
-	c.keys = keys
 	c.root.memberFinalPaths = append([]string(nil), keys...)
+	if retainRuntime {
+		prior, err := s.acquireOriginalPriorSet(ctx, keys, nil)
+		if err != nil {
+			return s, err
+		}
+		if err := verifyRetainedCanonicalRuntime(ctx, prior, c.snapshot); err != nil {
+			return s, err
+		}
+		keys, err = o.changedCanonicalStageKeys(prior, keys, plan)
+		if err != nil {
+			return s, err
+		}
+	} else {
+		c.keys = keys
+	}
 	var token [16]byte
 	if _, err = rand.Read(token[:]); err != nil {
 		return s, err
@@ -479,12 +507,18 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 		}
 		h, e := canonicalEntryOpenNativeAttributes(windows.Handle(c.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_CREATE, attributes)
 		if e != nil {
+			if retainRuntime {
+				return s, fmt.Errorf("create selective stage member: %w", e)
+			}
 			return s, e
 		}
 		// FILE_CREATE already selected this object. Retain its physical duty
 		// even if wrapping or receiving native identity fails before evidence.
 		m := &canonicalEntryOwnedMemberV2{original: &canonicalEntryNativeFile{path: name}, evidence: WindowsCanonicalEntryMemberEvidenceV2{Member: key, File: WindowsCanonicalEntryFileV1{Path: leaf}}}
 		c.members[key] = m
+		if retainRuntime {
+			c.keys = append(c.keys, key)
+		}
 		guard, e := c.root.retain(h, name, false)
 		if guard != nil {
 			m.original = guard
@@ -549,6 +583,94 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 	}
 	c.ready = true
 	return s, nil
+}
+
+// Component content-ID directories own their descriptor, inventory and
+// runtime root. Other files in the bundle are independently staged if changed.
+func canonicalRuntimeObjects(snapshot WindowsCanonicalEntrySetSnapshotV2, payload RuntimePayloadV1) map[string]RuntimeObjectV1 {
+	objects := make(map[string]RuntimeObjectV1)
+	for _, object := range snapshot.BundleInventory {
+		for _, component := range payload.Components {
+			parent := path.Dir(component.Root)
+			if object.Path == parent || strings.HasPrefix(object.Path, parent+"/") {
+				objects[object.Path] = object
+				break
+			}
+		}
+	}
+	return objects
+}
+
+func verifyRetainedCanonicalRuntime(ctx context.Context, prior *WindowsCanonicalEntryPriorSetV2, expected WindowsCanonicalEntrySetSnapshotV2) error {
+	if prior.observation.BeforeKind != WindowsCanonicalEntryBeforeBundleV2 {
+		return errors.New("retained runtime requires an original current installed bundle")
+	}
+	pc := &prior.original
+	if !bytes.Equal(pc.snapshot.RuntimePayloadBytes, expected.RuntimePayloadBytes) {
+		return errors.New("installed runtime components differ from the candidate")
+	}
+	payload, err := ParseRuntimePayload(expected.RuntimePayloadBytes)
+	if err != nil {
+		return err
+	}
+	want := canonicalRuntimeObjects(expected, payload)
+	installed := canonicalRuntimeObjects(pc.snapshot, payload)
+	if !reflect.DeepEqual(installed, want) {
+		return errors.New("original installed runtime inventory differs from the candidate")
+	}
+
+	objects := make(map[string]*canonicalEntryNativeFile, len(want))
+	for name, object := range want {
+		key := path.Join(expected.BundleRelativePath, name)
+		if object.Kind == "directory" {
+			directory, attrs, err := receiveCanonicalSuccessorDirectoryV2(ctx, pc, key)
+			if err != nil {
+				return err
+			}
+			if attrs != object.Attributes {
+				return errors.New("original retained runtime directory attributes changed")
+			}
+			objects[name] = directory
+			continue
+		}
+		member := pc.members[key]
+		object.Path = key
+		if member == nil || !canonicalMemberMatchesPlanV2(member.evidence, object) {
+			return errors.New("original retained runtime file differs from the candidate")
+		}
+		objects[name] = member.original
+	}
+	for _, component := range payload.Components {
+		root := path.Dir(component.Root)
+		original := objects[root]
+		if original == nil {
+			return errors.New("original retained runtime component directory unavailable")
+		}
+		if err := canonicalEntryVerifyDirectoryMembers(ctx, pc.root, objects, original, root); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (o *WindowsCanonicalEntrySetV2) changedCanonicalStageKeys(prior *WindowsCanonicalEntryPriorSetV2, keys []string, plan map[string]RuntimeObjectV1) ([]string, error) {
+	// The launcher has no extent/attributes in the bundle inventory because
+	// it sits outside the bundle. Receive those from the held candidate.
+	_, size, attrs, err := canonicalMemberFileIdentityV2(o.guard.entry)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, key := range keys {
+		object := plan[key]
+		if key == o.snapshot.CanonicalEntryRelativePath {
+			object.Size, object.Attributes = &size, attrs
+		}
+		if member := prior.original.members[key]; member == nil || !canonicalMemberMatchesPlanV2(member.evidence, object) {
+			changed = append(changed, key)
+		}
+	}
+	return changed, nil
 }
 
 func (s *StagedWindowsCanonicalEntrySetV2) Snapshot() (WindowsCanonicalEntrySetSnapshotV2, error) {
@@ -620,6 +742,9 @@ func (s *StagedWindowsCanonicalEntrySetV2) TakeForTransaction(ctx context.Contex
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if s.retainsRuntime {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("retained runtime stage cannot transfer to the full-member transaction")
+	}
 	if c.transferred {
 		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("member custody already transferred")
 	}
@@ -746,6 +871,9 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 	if c.closed {
 		return c.closeError
 	}
+	if s.retainsRuntime && s.prior != nil {
+		c.closeError = errors.Join(c.closeError, s.prior.Close())
+	}
 	if !c.transferred {
 		prefix := planCanonicalEntryStageClosePrefixV2(c.root, c.parent)
 		if s.prior != nil && s.priorError == nil {
@@ -781,7 +909,13 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 			c.closeError = errors.Join(c.closeError, e)
 		}
 	}
-	return c.close()
+	c.close()
+	if s.retainsRuntime {
+		for _, directory := range c.directoryOwners() {
+			c.closeError = errors.Join(c.closeError, directory.Close())
+		}
+	}
+	return c.closeError
 }
 
 func (d *WindowsCanonicalEntryPayloadDirectoryV1) SnapshotForEntryMembersV2() (WindowsCanonicalEntryMemberDirectorySnapshotV2, error) {
@@ -1275,11 +1409,21 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if s.retainsRuntime {
+		return nil, errors.New("selective stage requires its original prior handoff")
+	}
 	if s.priorAttempted {
 		return s.prior, s.priorError
 	}
+	return s.acquireOriginalPriorSet(ctx, c.keys, c.verify(ctx))
+}
+
+// The caller owns c.mu, or the unexposed Stage while composing its native
+// destination. incoming is the complete candidate namespace in both modes.
+func (s *StagedWindowsCanonicalEntrySetV2) acquireOriginalPriorSet(ctx context.Context, incoming []string, stageErr error) (*WindowsCanonicalEntryPriorSetV2, error) {
+	c := &s.original
 	s.priorAttempted = true
-	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2()}
+	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2(), readOnly: s.retainsRuntime}
 	s.prior = p
 	pc := &p.original
 	pc.targets = c.targets
@@ -1287,8 +1431,8 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 	pc.directories = c.directories
 	pc.root.memberDirectories = c.directories
 	s.priorError = func() error {
-		if err := c.verify(ctx); err != nil {
-			return err
+		if stageErr != nil {
+			return stageErr
 		}
 		var err error
 		pc.parent, err = pc.root.openAbsolute(c.parent.path, true)
@@ -1437,7 +1581,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 				return errors.New("prior entry has no admitted Product/launcher role")
 			}
 		}
-		keys, err := canonicalEntryPriorProbeKeysV2(c.keys, pc.members, p.observation.BeforeKind)
+		keys, err := canonicalEntryPriorProbeKeysV2(incoming, pc.members, p.observation.BeforeKind)
 		if err != nil {
 			return err
 		}
@@ -1591,6 +1735,9 @@ func (p *WindowsCanonicalEntryPriorSetV2) MoveOriginal(ctx context.Context, key,
 	if p == nil {
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("prior required")
 	}
+	if p.readOnly {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
+	}
 	c := &p.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1599,6 +1746,9 @@ func (p *WindowsCanonicalEntryPriorSetV2) MoveOriginal(ctx context.Context, key,
 func (p *WindowsCanonicalEntryPriorSetV2) DiscardOriginal(ctx context.Context, key, relative string) (WindowsCanonicalEntryMoveResultV1, error) {
 	if p == nil {
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("prior required")
+	}
+	if p.readOnly {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
 	}
 	c := &p.original
 	c.mu.Lock()
