@@ -713,7 +713,7 @@ func TestClearDaemonIntent_CanonicalSizeRecheck_RejectsAt1024PreCanonical(t *tes
 // TestTryReadDaemonIntent_TimesOutWhenLockHeld guards the regression
 // from PR #142 round 2 P2: the tray aggregator's snapshot loop must
 // not stall behind a long-held daemon-intent.json flock. The test
-// holds the flock on a sibling goroutine for 2 s, calls
+// holds the flock until cleanup (with a 2 s fallback), calls
 // TryReadDaemonIntent with a 50 ms budget, and asserts the read
 // returns within ~100 ms with State=missing and a timeout-flavoured
 // error — never the 2 s blocking stall the prior wiring exhibited.
@@ -733,24 +733,26 @@ func TestTryReadDaemonIntent_TimesOutWhenLockHeld(t *testing.T) {
 	}
 	lockPath := filepath.Join(dir, intentLockLeaf)
 
-	// Hold the lock for 2 s on a sibling goroutine. The release
-	// happens unconditionally; even if the test's assertions fail
-	// the goroutine still unwinds cleanly within the 2 s window.
+	// Keep the lock held through the assertions. Cleanup releases it
+	// promptly; the 2 s fallback still bounds a broken blocking read.
 	holder := flock.New(lockPath)
 	if err := holder.Lock(); err != nil {
 		t.Fatalf("holder lock: %v", err)
 	}
 	holderDone := make(chan struct{})
+	releaseHolder := make(chan struct{})
 	go func() {
 		defer close(holderDone)
-		time.Sleep(2 * time.Second)
+		fallback := time.NewTimer(2 * time.Second)
+		defer fallback.Stop()
+		select {
+		case <-releaseHolder:
+		case <-fallback.C:
+		}
 		_ = holder.Unlock()
 	}()
 	t.Cleanup(func() {
-		// Defensive: ensure the holder releases even if the test
-		// panics earlier than expected. Unlock is idempotent in the
-		// "already unlocked" case at the gofrs/flock level.
-		_ = holder.Unlock()
+		close(releaseHolder)
 		<-holderDone
 	})
 
@@ -1056,17 +1058,23 @@ func TestTryReadDaemonIntent_CorruptFileUnderLockContention(t *testing.T) {
 		t.Fatalf("holder lock: %v", lockErr)
 	}
 	holderDone := make(chan struct{})
+	releaseHolder := make(chan struct{})
 	go func() {
 		defer close(holderDone)
-		time.Sleep(2 * time.Second)
+		fallback := time.NewTimer(2 * time.Second)
+		defer fallback.Stop()
+		select {
+		case <-releaseHolder:
+		case <-fallback.C:
+		}
 		_ = holder.Unlock()
 	}()
 	t.Cleanup(func() {
-		_ = holder.Unlock()
+		close(releaseHolder)
 		<-holderDone
 	})
 
-	// 50ms budget — far smaller than the 2s holder grip. The call
+	// 50ms budget — far smaller than the 2s fallback release. The call
 	// must return promptly with a timeout-flavoured error.
 	res := a.TryReadDaemonIntent(50 * time.Millisecond)
 	if res.State != IntentStateMissing {

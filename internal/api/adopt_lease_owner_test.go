@@ -326,8 +326,18 @@ type adoptLeaseChild struct {
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	stderr bytes.Buffer
+	ctx    context.Context
 	cancel context.CancelFunc
 	role   string
+
+	// The test and its cleanup share one completion of this original Cmd.
+	// They run sequentially; cleanup must not wait or close its pipes twice.
+	waited        bool
+	waitErr       error
+	stdoutTail    []byte
+	stdoutReadErr error
+	stdinCloseErr error
+	contextErr    error
 }
 
 func startAdoptLeaseChild(t *testing.T, stateDir, entry, role string) *adoptLeaseChild {
@@ -336,15 +346,17 @@ func startAdoptLeaseChild(t *testing.T, stateDir, entry, role string) *adoptLeas
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdoptLeaseRaceChild$")
 	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_A2_ROLE="+role, "MCPHUB_A2_STATE="+stateDir, "MCPHUB_A2_ENTRY="+entry)
-	child := &adoptLeaseChild{cmd: cmd, cancel: cancel, role: role}
+	child := &adoptLeaseChild{cmd: cmd, ctx: ctx, cancel: cancel, role: role}
 	cmd.Stderr = &child.stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
+		cancel()
 		t.Fatalf("child stdin: %v", err)
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		t.Fatalf("child stdout: %v", err)
+		cancel()
+		t.Fatalf("child stdout: %v", errors.Join(err, in.Close()))
 	}
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -353,13 +365,34 @@ func startAdoptLeaseChild(t *testing.T, stateDir, entry, role string) *adoptLeas
 	child.stdin = in
 	child.stdout = bufio.NewReader(out)
 	t.Cleanup(func() {
-		child.cancel()
-		if child.cmd.Process != nil && child.cmd.ProcessState == nil {
-			_ = child.cmd.Process.Kill()
-			_, _ = child.cmd.Process.Wait()
+		if child.waited {
+			return
 		}
+		child.finish(true)
+		t.Logf("child %s cleanup cancelled unfinished command: wait=%v; context_before_cancel=%v; stdin_close=%v; stdout_read=%v; stdout_tail=%q; stderr=%q",
+			child.role, child.waitErr, child.contextErr, child.stdinCloseErr, child.stdoutReadErr, child.stdoutTail, child.stderr.String())
 	})
 	return child
+}
+
+func (child *adoptLeaseChild) finish(cancelForCleanup bool) {
+	if child.waited {
+		return
+	}
+	if cancelForCleanup {
+		child.contextErr = child.ctx.Err()
+		child.cancel()
+	}
+	child.stdinCloseErr = child.stdin.Close()
+	// Keep the protocol reader: it may already hold bytes beyond the last
+	// handshake. Drain before Wait closes the original stdout pipe.
+	child.stdoutTail, child.stdoutReadErr = io.ReadAll(child.stdout)
+	child.waitErr = child.cmd.Wait()
+	if !cancelForCleanup {
+		child.contextErr = child.ctx.Err()
+	}
+	child.cancel()
+	child.waited = true
 }
 
 func waitAdoptLeaseChildLine(t *testing.T, out *bufio.Reader, want string) {
@@ -388,10 +421,10 @@ func waitAdoptLeaseChildResult(t *testing.T, child *adoptLeaseChild) string {
 
 func waitAdoptLeaseChild(t *testing.T, child *adoptLeaseChild) {
 	t.Helper()
-	err := child.cmd.Wait()
-	child.cancel()
-	if err != nil {
-		t.Fatalf("child %s exit: %v; stderr=%q", child.role, err, child.stderr.String())
+	child.finish(false)
+	if child.waitErr != nil || child.stdinCloseErr != nil || child.stdoutReadErr != nil {
+		t.Fatalf("child %s completion: wait=%v; context_before_cancel=%v; stdin_close=%v; stdout_read=%v; stdout_tail=%q; stderr=%q",
+			child.role, child.waitErr, child.contextErr, child.stdinCloseErr, child.stdoutReadErr, child.stdoutTail, child.stderr.String())
 	}
 }
 
