@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -864,7 +865,7 @@ func resolveCanonicalRecoveryRequest(req *windowsProductRecoveryRequest, j windo
 
 func cleanupColdCanonicalOriginals(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j *windowsProductRecoveryJournalV3) (retErr error) {
 	if j.EntryBundle != nil {
-		return cleanupColdCurrentCanonicalOriginals(req, d, path, j)
+		return cleanupColdCurrentCanonicalOriginals(req, d, path, j, nil)
 	}
 	source, err := prepareCanonicalRecoverySource(req, d, path, *j, canonicalRecoveryCommittedCleanup)
 	if err != nil {
@@ -944,7 +945,7 @@ func cleanupColdCanonicalOriginals(req windowsProductRecoveryRequest, d windowsP
 }
 
 func cloneCurrentRecoveryJournal(j windowsProductRecoveryJournalV3) (windowsProductRecoveryJournalV3, error) {
-	raw, err := encodeWindowsProductRecoveryJournalV3(j)
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(j)
 	if err != nil {
 		return windowsProductRecoveryJournalV3{}, err
 	}
@@ -992,11 +993,11 @@ func prepareCurrentCanonicalRecoverySource(req windowsProductRecoveryRequest, d 
 	if err != nil {
 		return nil, err
 	}
-	left, err := encodeWindowsProductRecoveryJournalV3(decoded)
+	left, err := encodeReceivedWindowsProductRecoveryJournalV3(decoded)
 	if err != nil {
 		return nil, err
 	}
-	right, err := encodeWindowsProductRecoveryJournalV3(j)
+	right, err := encodeReceivedWindowsProductRecoveryJournalV3(j)
 	if err != nil {
 		return nil, err
 	}
@@ -1100,11 +1101,14 @@ func (s *windowsCanonicalJournalRecoverySource) persistCurrent(next windowsProdu
 	if err := s.ValidateOriginalRecovery(context.WithoutCancel(s.req.Context)); err != nil {
 		return err
 	}
+	if next.EntryBundle == nil || !reflect.DeepEqual(next.EntryBundle.Bundle.Retained, s.journal.EntryBundle.Bundle.Retained) {
+		return fmt.Errorf("%w: original retained member witness changed", ErrWindowsProductRecoveryIdentity)
+	}
 	owned, err := cloneCurrentRecoveryJournal(next)
 	if err != nil {
 		return err
 	}
-	raw, err := encodeWindowsProductRecoveryJournalV3(owned)
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(owned)
 	if err != nil {
 		return err
 	}
@@ -1543,7 +1547,7 @@ func currentRollbackRecoveryPurpose(j windowsProductRecoveryJournalV3) windowsCa
 	return canonicalRecoveryRollback
 }
 
-func cleanupColdCurrentCanonicalOriginals(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j *windowsProductRecoveryJournalV3) (retErr error) {
+func cleanupColdCurrentCanonicalOriginals(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j *windowsProductRecoveryJournalV3, finish func(*windowsCanonicalJournalRecoverySource) error) (retErr error) {
 	s, err := prepareCurrentCanonicalRecoverySource(req, d, path, *j, canonicalRecoveryCommittedCleanup)
 	if err != nil {
 		return err
@@ -1569,7 +1573,31 @@ func cleanupColdCurrentCanonicalOriginals(req windowsProductRecoveryRequest, d w
 	if err := s.closeCurrentMembers(prior, successor); err != nil {
 		return err
 	}
-	return s.settleCurrentDirectories(ctx, false)
+	if err := s.settleCurrentDirectories(ctx, false); err != nil {
+		return err
+	}
+	if finish != nil {
+		return finish(s)
+	}
+	return nil
+}
+
+// The settled path already completed member cleanup. It still must receive
+// the exact retained witness before reconciling the receipt or retiring state.
+func verifySettledCurrentRetention(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, path string, j windowsProductRecoveryJournalV3) (retErr error) {
+	s, err := prepareCurrentCanonicalRecoverySource(req, d, path, j, canonicalRecoveryCommittedCleanup)
+	if err != nil {
+		return err
+	}
+	successor, err := s.acquireCurrentSide(req.Context, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	defer func() {
+		retErr = errors.Join(retErr, s.closeCurrentMembers(successor), s.closeCurrentDirectories())
+		s.active = false
+	}()
+	if err != nil {
+		return err
+	}
+	return s.ValidateOriginalRecovery(req.Context)
 }
 
 // This is a detached data projection only. The private fenced source validates
@@ -1585,9 +1613,6 @@ func projectCurrentRecoveryJournal(j windowsProductRecoveryJournalV3, purpose bi
 		return result, ErrWindowsProductRecoveryIdentity
 	}
 	e := j.EntryBundle
-	if err := requireCurrentEntryNativeRetention(e); err != nil {
-		return result, err
-	}
 	targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntry.Target)
 	if err != nil {
 		return result, err
@@ -1600,6 +1625,12 @@ func projectCurrentRecoveryJournal(j windowsProductRecoveryJournalV3, purpose bi
 		return &copy
 	}
 	result = binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2{Targets: targets, BeforeKind: e.Bundle.BeforeKind, Expected: e.Expected, TransactionID: j.TransactionID, Purpose: purpose}
+	if retained := e.Bundle.Retained; retained != nil {
+		result.Retained = &binaryadmission.WindowsCanonicalEntryRetainedMembersV2{
+			MembersSHA256: retained.MembersSHA256,
+			Singletons:    slices.Clone(retained.Singletons),
+		}
+	}
 	result.Expected.IdentityBytes = append([]byte(nil), e.Expected.IdentityBytes...)
 	result.Expected.RuntimePayloadBytes = append([]byte(nil), e.Expected.RuntimePayloadBytes...)
 	result.Expected.BundleInventory = append([]binaryadmission.RuntimeObjectV1(nil), e.Expected.BundleInventory...)

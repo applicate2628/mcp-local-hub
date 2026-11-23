@@ -1225,6 +1225,8 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	}
 }
 
+// This fixture tests selective V3 receiving without granting the warm producer
+// native authority for its first selective journal write.
 func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string) {
 	t.Helper()
 	txn.Opts.Mode = WindowsProductPairModeUpgrade
@@ -1244,6 +1246,9 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 	}
 	if encoded, err := encodeWindowsProductRecoveryJournalV3(old); err != nil || !bytes.Equal(encoded, before) {
 		t.Fatal("existing exact-member wire bytes changed", err)
+	}
+	if projection, err := projectCurrentRecoveryJournal(old, binaryadmission.WindowsCanonicalRecoveryRollbackV2); err != nil || projection.Retained != nil {
+		t.Fatal("existing exact-member projection acquired selective evidence", err)
 	}
 	makeSparse := func(t *testing.T) windowsProductRecoveryJournalV3 {
 		t.Helper()
@@ -1286,12 +1291,59 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 	if err := validateCanonicalEntryBundleJournal(typed); err != nil {
 		t.Fatal("valid selective V3 structure was not recognized", err)
 	}
-	if _, err := decodeWindowsProductRecoveryJournalV3(raw); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
-		t.Fatal("selective prepared V3 did not refuse without native recovery", err)
+	received, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil || !reflect.DeepEqual(received, typed) {
+		t.Fatal("strict selective V3 receiving changed or rejected the original", err)
 	}
-	projection, err := projectCurrentRecoveryJournal(typed, binaryadmission.WindowsCanonicalRecoveryRollbackV2)
-	if !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) || projection.Members != nil {
-		t.Fatal("selective recovery projected a witness-free native bank", err)
+	wantRetained := binaryadmission.WindowsCanonicalEntryRetainedMembersV2{
+		MembersSHA256: typed.EntryBundle.Bundle.Retained.MembersSHA256,
+		Singletons:    slices.Clone(typed.EntryBundle.Bundle.Retained.Singletons),
+	}
+	coldRaw := bytes.Clone(raw)
+	coldWrites := 0
+	req := windowsProductRecoveryRequest{Context: ctx, JournalAllowance: txn.Opts.JournalAllowance}
+	source, err := prepareCurrentCanonicalRecoverySource(req, windowsProductRecoveryDeps{
+		ReadJournal: func(string) ([]byte, error) { return bytes.Clone(coldRaw), nil },
+		WriteJournal: func(_ string, body []byte) error {
+			coldWrites++
+			coldRaw = bytes.Clone(body)
+			return nil
+		},
+	}, journalPath, received, canonicalRecoveryRollback)
+	if err != nil {
+		t.Fatal("cold source did not receive sealed selective V3 bytes", err)
+	}
+	defer func() { source.active = false }()
+	for _, side := range []binaryadmission.WindowsCanonicalRecoverySideV1{binaryadmission.WindowsCanonicalRecoveryPriorV1, binaryadmission.WindowsCanonicalRecoverySuccessorV1} {
+		if err := source.WithOriginalMemberRecoveryInput(ctx, side, func(input binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error {
+			if input.Retained == nil || !reflect.DeepEqual(*input.Retained, wantRetained) ||
+				input.TransactionID != received.TransactionID || input.Purpose != binaryadmission.WindowsCanonicalRecoveryRollbackV2 ||
+				len(input.Members) != len(received.EntryBundle.Bundle.Members) || len(input.Moves) != len(received.EntryBundle.Moves) {
+				t.Fatal("cold bank did not receive the exact original witness and lineage")
+			}
+			input.Retained.MembersSHA256 = strings.Repeat("f", 64)
+			input.Retained.Singletons[0] = "foreign.exe"
+			return nil
+		}); err != nil {
+			t.Fatal("sealed cold input did not settle", err)
+		}
+	}
+	next, err := cloneCurrentRecoveryJournal(source.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.EntryBundle.Bundle.Retained.MembersSHA256 = strings.Repeat("f", 64)
+	if err := source.persistCurrent(next); !errors.Is(err, ErrWindowsProductRecoveryIdentity) || coldWrites != 0 || !bytes.Equal(coldRaw, raw) {
+		t.Fatal("cold continuation replaced the original witness", err)
+	}
+	next.EntryBundle.Bundle.Retained.MembersSHA256 = wantRetained.MembersSHA256
+	next.EntryBundle.Bundle.Disposition.State = "rollback-pending"
+	if err := source.persistCurrent(next); err != nil || coldWrites != 1 {
+		t.Fatal("cold continuation could not persist and receive a valid update", err)
+	}
+	readback, err := decodeWindowsProductRecoveryJournalV3(coldRaw)
+	if err != nil || !reflect.DeepEqual(readback, next) {
+		t.Fatal("cold update did not retain its exact strict V3 record", err)
 	}
 	writes, reads := 0, 0
 	err = persistWindowsProductRecoveryJournalV3(ctx, txn.Opts.JournalAllowance, journalPath, typed,
@@ -1403,8 +1455,13 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 			if err := validateCanonicalEntryBundleJournal(received); err != nil {
 				t.Fatal("selective core wire lost its exact original proof", err)
 			}
-			if _, err := decodeWindowsProductRecoveryJournalV3(raw); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
-				t.Fatal("cold core retention failed to keep native recovery pending", err)
+			cold, err := decodeWindowsProductRecoveryJournalV3(raw)
+			if err != nil || !reflect.DeepEqual(cold, received) {
+				t.Fatal("cold core retention lost its strict V3 proof", err)
+			}
+			projected, err := projectCurrentRecoveryJournal(cold, binaryadmission.WindowsCanonicalRecoveryRollbackV2)
+			if err != nil || projected.Retained == nil || !reflect.DeepEqual(projected.Retained.Singletons, e.Bundle.Retained.Singletons) {
+				t.Fatal("cold core projection lost its retained singletons", err)
 			}
 			if _, err := encodeWindowsProductRecoveryJournalV3(received); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
 				t.Fatal("warm core retention reached the writer without native authority", err)
@@ -1431,6 +1488,151 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 	}
 	if !bytes.Equal(mustReadFile(t, journalPath), before) {
 		t.Fatal("refused journal admission changed the exact prepared record")
+	}
+	t.Run("selective_committed_recovery", func(t *testing.T) {
+		v2TxnAssertSelectiveCommittedRecovery(t, ctx, txn, journalPath, old)
+	})
+}
+
+func v2TxnAssertSelectiveCommittedRecovery(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string, journal windowsProductRecoveryJournalV3) {
+	t.Helper()
+	// Use the exact native evidence from the unmodified prior bundle. The test
+	// authors a synthetic commit decision because the warm selective writer
+	// remains gated. It performs no live Product or Scheduler operation.
+	launcher := journal.EntryBundle.Expected.CanonicalEntryRelativePath
+	plan := currentEntryMember(journal.EntryBundle, launcher)
+	if plan == nil || plan.PriorAsideRelative == nil {
+		t.Fatal("fixture lacks the changed Launcher's original aside")
+	}
+	if err := txn.moveCurrentEntryOriginal(ctx, true, launcher, *plan.PriorAsideRelative); err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.moveCurrentEntryOriginal(ctx, false, launcher, launcher); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := journal.EntryBundle
+	var originals []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2
+	for _, member := range bundle.Bundle.Members {
+		if member.Member == launcher {
+			continue
+		}
+		if member.Prior == nil {
+			t.Fatal("fixture has no recorded original member")
+		}
+		originals = append(originals, *member.Prior)
+	}
+	witnessBytes, err := binaryadmission.CanonicalRuntimeJSON(originals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	singletons := []string{bundle.Expected.ProductRelativePath, bundle.Expected.IdentityRelativePath, bundle.Expected.RuntimePayload.Path}
+	sort.Strings(singletons)
+	bundle.Bundle.Retained = &windowsCanonicalEntryRetainedRuntimeV2{MembersSHA256: v2TxnFixtureDigest(witnessBytes), Singletons: singletons}
+	bundle.Bundle.Members = []windowsCanonicalEntryMemberJournalV2{*currentEntryMember(bundle, launcher)}
+	journal.Staged = windowsProductRecoveryStagedV3{}
+	journal.Mode = WindowsProductPairModeCanonicalize
+	journal.PreSettlement = nil
+	journal.FrozenPorts = nil
+	journal.Phase = WindowsProductRecoveryCommitDecided
+	coldTasks := &v2TxnFixtureTasks{root: journal.Tasks.StoreRoot, currentXML: "<Task>existing fixture task</Task>"}
+	journal.TaskSetSHA256, err = coldTasks.VerifyRuntimeSHA256()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	publish, reconcile, discard, remove := 0, 0, 0, 0
+	leaveSettled := true
+	req := windowsProductRecoveryRequest{
+		Context: ctx, JournalAllowance: txn.Opts.JournalAllowance, StateDir: txn.Opts.StateDir,
+		CanonicalEntryPath: bundle.CanonicalEntry.Target, ProductPath: journal.Product.Target, IdentityPath: bundle.Expected.Identity.Path,
+		LegacyWindowlessPath:  journal.LegacyWindowless.Target,
+		Legacy:                windowsProductPairRecoveryRequest{Context: ctx, JournalAllowance: txn.Opts.JournalAllowance, StateDir: txn.Opts.StateDir},
+		ObserveSuccessorReady: func(context.Context, string, string) (bool, error) { return true, nil },
+		StartSupervisor: func(string) (SupervisorLaunch, error) {
+			t.Fatal("cold fixture must not start a Product")
+			return nil, nil
+		},
+		WaitSupervisorReady: func(context.Context, string, string) error { return errors.New("unexpected Product wait") },
+		ReconcileCommitted: func(received windowsProductRecoveryJournalV3) error {
+			reconcile++
+			if received.TransactionID != journal.TransactionID || received.Phase != WindowsProductRecoverySettledCommit {
+				t.Fatal("settled reconciliation received a different original")
+			}
+			return nil
+		},
+		Deps: windowsProductRecoveryDeps{
+			ReopenEntryBundleTasks: func(context.Context, WindowsProductPairTaskRecovery, binaryadmission.WindowsCanonicalEntrySetTargetsV2) (WindowsProductTaskTxn, error) {
+				return coldTasks, nil
+			},
+			DiscardTaskStore: func(WindowsProductPairTaskRecovery) error { discard++; return nil },
+			PublishCommitted: func(WindowsProductCommitEvent) (string, error) {
+				publish++
+				return strings.Repeat("c", 64), nil
+			},
+			RemoveJournal: func(path string) error {
+				remove++
+				if leaveSettled {
+					return errors.New("leave settled fixture journal for the next run")
+				}
+				return os.Remove(path)
+			},
+		},
+	}
+	writeFixture := func(value windowsProductRecoveryJournalV3) {
+		t.Helper()
+		raw, err := encodeReceivedWindowsProductRecoveryJournalV3(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := api.WriteStateFileBytesAtomic(journalPath, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	wrong, err := cloneCurrentRecoveryJournal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong.EntryBundle.Bundle.Retained.MembersSHA256 = strings.Repeat("f", 64)
+	for _, phase := range []WindowsProductRecoveryPhase{WindowsProductRecoveryCommitDecided, WindowsProductRecoverySettledCommit} {
+		wrong.Phase = phase
+		writeFixture(wrong)
+		before := mustReadFile(t, journalPath)
+		if result, err := reconcileWindowsProductRecovery(req); err == nil || !strings.Contains(err.Error(), "canonical retained original identity witness changed") || result != nil ||
+			publish != 0 || reconcile != 0 || discard != 0 || remove != 0 || coldTasks.discards != 0 ||
+			!bytes.Equal(mustReadFile(t, journalPath), before) {
+			t.Fatalf("%s with a mismatched retained witness reached a committed effect: %v", phase, err)
+		}
+	}
+
+	writeFixture(journal)
+	if _, err := reconcileWindowsProductRecovery(req); err == nil || !strings.Contains(err.Error(), "leave settled fixture journal") ||
+		publish != 1 || coldTasks.discards != 1 || remove != 1 {
+		t.Fatal("cold owner did not write and receive the settled commit before cleanup", err)
+	}
+	settled, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil || settled.Phase != WindowsProductRecoverySettledCommit ||
+		!reflect.DeepEqual(settled.EntryBundle.Bundle.Retained, journal.EntryBundle.Bundle.Retained) {
+		t.Fatal("settled cold journal lost the original retained witness", err)
+	}
+	leaveSettled = false
+	if result, err := reconcileWindowsProductRecovery(req); err != nil || result == nil ||
+		result.Outcome != WindowsProductPairRecoverySettledCommit || result.TransactionID != journal.TransactionID ||
+		publish != 1 || reconcile != 1 || discard != 1 || remove != 2 {
+		t.Fatal("settled selective recovery did not receive and finish the same transaction", err)
+	}
+	for _, original := range originals {
+		target := filepath.Join(filepath.Dir(bundle.CanonicalEntry.Target), filepath.FromSlash(original.Member))
+		if v2TxnFixtureIdentity(t, target) != original.NativeIdentity || v2TxnFixtureDigest(mustReadFile(t, target)) != original.File.SHA256 {
+			t.Fatal("cold committed recovery changed a retained file")
+		}
 	}
 }
 

@@ -52,7 +52,8 @@ func (*StagedWindowsCanonicalEntrySetV2) DiscardOriginal(context.Context, string
 func (*StagedWindowsCanonicalEntrySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	return WindowsCanonicalEntryMemberDispositionV2{}
 }
-func (*StagedWindowsCanonicalEntrySetV2) Close() error { return nil }
+func (*StagedWindowsCanonicalEntrySetV2) CloseMembers() error { return nil }
+func (*StagedWindowsCanonicalEntrySetV2) Close() error        { return nil }
 func (*WindowsCanonicalEntryPriorSetV2) Observation(context.Context) (WindowsCanonicalEntryPriorObservationV2, error) {
 	return WindowsCanonicalEntryPriorObservationV2{}, errWindowsCanonicalEntryUnsupported
 }

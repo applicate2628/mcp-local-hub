@@ -1167,7 +1167,7 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 	if err := fault(WindowsProductStageCommitDecided); err != nil {
 		return WindowsProductCommitted{}, fmt.Errorf("%w: %v", ErrWindowsProductCleanupPending, err)
 	}
-	committed, err := t.finishProductCommit(ctx, readBack, false)
+	committed, err := t.finishProductCommit(ctx, readBack, false, nil)
 	if err != nil {
 		return committed, err
 	}
@@ -1612,8 +1612,11 @@ func verifyBoundWindowsProductFile(path string, prior productPairFileSnapshot, t
 	return nil
 }
 
-func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool) (WindowsProductCommitted, error) {
+func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact binaryadmission.WindowsArtifact, forwardReplay bool, persistSettled func(windowsProductRecoveryJournalV3) error) (WindowsProductCommitted, error) {
 	o, p := t.Opts, t.prepared
+	if persistSettled != nil && !forwardReplay {
+		return WindowsProductCommitted{}, errors.New("warm Product commit cannot borrow cold journal authority")
+	}
 	if p.entryBundle != nil {
 		p.journal.EntryBundle.Bundle.Disposition.State = "committed"
 		if err := t.cleanupCurrentEntryFiles(true, true); err != nil {
@@ -1738,9 +1741,15 @@ func (t *WindowsProductTxn) finishProductCommit(_ context.Context, artifact bina
 		p.journal.EntryBundle.Bundle.Disposition.DispositionPending = false
 	}
 	p.journal.Phase = WindowsProductRecoverySettledCommit
-	if err := t.persistProductJournal(); err != nil {
+	var journalErr error
+	if persistSettled != nil {
+		journalErr = persistSettled(p.journal)
+	} else {
+		journalErr = t.persistProductJournal()
+	}
+	if journalErr != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
-		return committed, fmt.Errorf("%w: persist settled commit: %v", ErrWindowsProductCleanupPending, err)
+		return committed, fmt.Errorf("%w: persist settled commit: %v", ErrWindowsProductCleanupPending, journalErr)
 	}
 	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
 		committed.Outcome = WindowsProductPairCommittedCleanupFailed
@@ -2482,7 +2491,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 				!(guiOwned && j.Phase == WindowsProductRecoverySettledRollback)) || j.PriorFleetReaped || j.QuiescenceReceiptSHA256 != "" {
 				return errors.New("invalid initial prepared V3 recovery form")
 			}
-			return requireCurrentEntryNativeRetention(j.EntryBundle)
+			return nil
 		}
 		legacy := windowsProductPairRecoveryJournal{
 			Schema: WindowsProductPairRecoverySchemaV2,
@@ -2506,7 +2515,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		j.PriorFleetReaped || j.Quiescence != nil || j.QuiescenceReceiptSHA256 != "" {
 		return errors.New("non-upgrade V3 recovery contains quiescence state")
 	}
-	return requireCurrentEntryNativeRetention(j.EntryBundle)
+	return nil
 }
 
 func validateWindowsProductPreSettlementV3(observation windowsProductQuiescenceObservationV1, frozen []windowsProductIntentPortV1, guiOwned bool) error {
@@ -2654,6 +2663,19 @@ func sameWindowsProductPath(left, right string) bool {
 }
 
 func encodeWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(journal)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireCurrentEntryNativeRetention(journal.EntryBundle); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// The cold owner uses this codec only for its sealed, validated original and
+// the ensuing journal updates. It does not grant first-journal write authority.
+func encodeReceivedWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
 	if err := validateWindowsProductRecoveryJournalV3(journal); err != nil {
 		return nil, err
 	}

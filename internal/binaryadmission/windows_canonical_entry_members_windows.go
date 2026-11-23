@@ -1041,6 +1041,31 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 	c := &s.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	s.closeMembersLocked()
+	if s.ownsPrior && !s.directoryCloseEntered {
+		s.directoryCloseEntered = true
+		for _, directory := range c.directoryOwners() {
+			c.closeError = errors.Join(c.closeError, directory.Close())
+		}
+	}
+	return c.closeError
+}
+
+// CloseMembers settles the file banks without closing the directory lenders.
+// The existing transaction may then dispose its eligible original directories
+// before the final Close. Untransferred stage files keep their normal cleanup.
+func (s *StagedWindowsCanonicalEntrySetV2) CloseMembers() error {
+	if s == nil {
+		return nil
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return s.closeMembersLocked()
+}
+
+func (s *StagedWindowsCanonicalEntrySetV2) closeMembersLocked() error {
+	c := &s.original
 	if c.closed {
 		return c.closeError
 	}
@@ -1082,13 +1107,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 			c.closeError = errors.Join(c.closeError, e)
 		}
 	}
-	c.close()
-	if s.ownsPrior {
-		for _, directory := range c.directoryOwners() {
-			c.closeError = errors.Join(c.closeError, directory.Close())
-		}
-	}
-	return c.closeError
+	return c.close()
 }
 
 func (d *WindowsCanonicalEntryPayloadDirectoryV1) SnapshotForEntryMembersV2() (WindowsCanonicalEntryMemberDirectorySnapshotV2, error) {

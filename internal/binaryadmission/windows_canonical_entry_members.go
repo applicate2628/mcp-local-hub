@@ -199,6 +199,7 @@ type StagedWindowsCanonicalEntrySetV2 struct {
 	launcherStageRelative string
 	ownsPrior             bool
 	retainsRuntime        bool
+	directoryCloseEntered bool
 }
 
 // RetainsRuntime reports the mode issued by successful Stage preparation.

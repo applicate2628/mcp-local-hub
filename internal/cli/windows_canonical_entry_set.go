@@ -3158,8 +3158,8 @@ var errCurrentEntryRuntimeRetentionUnavailable = errors.New("native current runt
 
 func requireCurrentEntryNativeRetention(e *windowsCanonicalEntrySetJournalV2) error {
 	if e != nil && e.Bundle.Retained != nil {
-		// The current native reader cannot receive a selective bank. Keep
-		// the original V3 record pending instead of dropping its witness.
+		// The warm producer cannot yet authorize the first selective write.
+		// Cold recovery receives its witness through the original V3 record.
 		return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
 	}
 	return nil

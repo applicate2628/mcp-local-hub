@@ -318,6 +318,11 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 			}
 		}
 		if journal.Phase == WindowsProductRecoverySettledCommit {
+			if journal.EntryBundle != nil && journal.EntryBundle.Bundle.Retained != nil {
+				if err := verifySettledCurrentRetention(req, d, v3Path, journal); err != nil {
+					return nil, err
+				}
+			}
 			if req.ReconcileCommitted == nil {
 				return nil, errors.New("committed product recovery reconciliation owner is unavailable")
 			}
@@ -500,6 +505,18 @@ func validateWindowsProductPendingRecovery(req windowsProductRecoveryRequest, j 
 }
 
 func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journalPath string, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn) (*WindowsProductPairRecoverySettled, error) {
+	if journal.EntryBundle != nil && journal.EntryBundle.Bundle.Retained != nil {
+		var settled *WindowsProductPairRecoverySettled
+		err := cleanupColdCurrentCanonicalOriginals(req, d, journalPath, &journal, func(source *windowsCanonicalJournalRecoverySource) error {
+			received, err := source.clonePersistedCurrentJournal()
+			if err != nil {
+				return err
+			}
+			settled, err = finishWindowsProductRecoveryForward(req, d, received, tasks, source.persistCurrent)
+			return err
+		})
+		return settled, err
+	}
 	if hasCanonicalEntryArm(journal) {
 		if err := cleanupColdCanonicalOriginals(req, d, journalPath, &journal); err != nil {
 			return nil, err
@@ -508,6 +525,10 @@ func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d 
 			return nil, err
 		}
 	}
+	return finishWindowsProductRecoveryForward(req, d, journal, tasks, nil)
+}
+
+func finishWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d windowsProductRecoveryDeps, journal windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn, persistSettled func(windowsProductRecoveryJournalV3) error) (*WindowsProductPairRecoverySettled, error) {
 	product, err := d.AdmitProduct(binaryadmission.WindowsArtifact{
 		Path: journal.Product.Target, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: journal.Product.NewSHA256,
 	})
@@ -574,7 +595,7 @@ func completeWindowsProductRecoveryForward(req windowsProductRecoveryRequest, d 
 		},
 		legacyRetained: legacyPriorAside,
 	}
-	committed, err := productTxn.finishProductCommit(req.Context, product, true)
+	committed, err := productTxn.finishProductCommit(req.Context, product, true, persistSettled)
 	if err != nil {
 		return nil, err
 	}
