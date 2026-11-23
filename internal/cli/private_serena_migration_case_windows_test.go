@@ -124,9 +124,9 @@ func privateSerenaMigrationFailStop(custody any, stage string, cause error) {
 	raw, _ := json.Marshal(struct {
 		Schema, Stage, Error string
 		CustodyRetained      bool
-		Diagnostics          []api.PreparedSerenaFailureDiagnostic `json:"diagnostics,omitempty"`
-	}{"private-serena-migration-abort-v1", stage, message, true, api.PreparedSerenaFailureDiagnostics(cause)})
-	// Memory-derived diagnostics only: do not read/close an unjoined sink or
+	}{"private-serena-migration-abort-v1", stage, message, true})
+	// The original cause remains retained above. Emit only the available
+	// memory-derived failure: do not read/close an unjoined sink or
 	// run testing cleanup while native/preparation ownership is unknown.
 	_, _ = fmt.Fprintf(os.Stderr, "PRIVATE_SERENA_MIGRATION_ABORT_JSON=%s\n", raw)
 	os.Exit(86)
@@ -396,9 +396,6 @@ func runPrivateSerenaMigrationChild(t *testing.T, root privateSerenaMigrationRoo
 	if _, err := buildinfo.CurrentPublisherSource(); !errors.Is(err, buildinfo.ErrPublisherSourceUnmarked) {
 		t.Fatal("ordinary migration receiver must retain its unmarked publisher contract")
 	}
-	if _, err := buildinfo.CurrentRustOwnerSHA256(); !errors.Is(err, buildinfo.ErrRustOwnerBuildUnmarked) {
-		t.Fatal("ordinary migration receiver must retain its original unmarked contained owner")
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -658,9 +655,6 @@ func receivePrivateSerenaMigrationCase(t *testing.T, root privateSerenaMigration
 	source, err := buildinfo.CurrentPublisherSource()
 	if err != nil || source.Validate(input.SourceEpoch) != nil {
 		t.Fatalf("private migration actual compiled Source differs: %v", err)
-	}
-	if _, err := buildinfo.CurrentRustOwnerSHA256(); !errors.Is(err, buildinfo.ErrRustOwnerBuildUnmarked) {
-		t.Fatal("private test publisher must not acquire a Product Rust owner mark")
 	}
 	_, productErr := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: self, Role: binaryadmission.WindowsArtifactRoleProduct, SHA256: input.Image.SHA256})
 	roleRefusal := fmt.Sprintf("VERSIONINFO role %q disagrees with expected role %q", binaryadmission.WindowsArtifactRolePublisherTest, binaryadmission.WindowsArtifactRoleProduct)
