@@ -3311,8 +3311,32 @@ func weeklyValidateKnownFolderTestOverrideLifecycle(t *testing.T) {
 		t.Fatalf("installKnownFolderStub exact writes = %d, want 1", setterWrites)
 	}
 
-	callSites := 0
+	// Bind the census to actual test owners. A new, reviewed source owner may
+	// add a selected test file without granting other callers an extra slot.
+	wantCallSites := map[string]int{
+		"client_write_init_sec301_test.go/TestReadStrictModeFromIntent_PathUnresolvable_FailsClosed": 1,
+		"state_paths_test.go/TestDaemonStateDir_Windows_KnownFolderFails_NoFallbackInProduction":     1,
+		"state_paths_test.go/TestDaemonStateDir_PublicWrapperReturnsSamePath":                        1,
+	}
+	if testEnvFallbackBuild {
+		for _, name := range []string{
+			"TestDaemonStateDir_Windows_KnownFolder",
+			"TestDaemonStateDir_StateDirOverride_WinsOverResolver",
+			"TestDaemonStateDir_Windows_KnownFolderFails_FallsBackToEnv",
+			"TestDaemonStateDir_Windows_KnownFolderFails_UserProfileFallback",
+			"TestDaemonStateDir_Windows_KnownFolderFails_NoEnvVars",
+		} {
+			wantCallSites["state_paths_envfallback_test.go/"+name] = 1
+		}
+	}
+	callSites := map[string]int{}
 	for _, file := range source.files {
+		fileName := filepath.Base(source.fileSet.Position(file.Pos()).Filename)
+		if fileName == "state_dir_resolution_observed_windows_test.go" {
+			// #637's selected Windows observer test uses the same original
+			// save/restore lifecycle; its absence does not admit a substitute.
+			wantCallSites[fileName+"/TestStateDirObserved_SelectedBuildSource"] = 1
+		}
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok || function.Body == nil || function == setter {
@@ -3331,7 +3355,12 @@ func weeklyValidateKnownFolderTestOverrideLifecycle(t *testing.T) {
 				if !ok {
 					t.Fatalf("installKnownFolderStub call at %s has no exact testing argument", source.fileSet.Position(call.Pos()))
 				}
-				callSites++
+				site := fileName + "/" + function.Name.Name
+				want, known := wantCallSites[site]
+				if !known || function.Recv != nil || callSites[site] >= want {
+					t.Fatalf("unapproved or duplicate installKnownFolderStub caller %s at %s", site, source.fileSet.Position(call.Pos()))
+				}
+				callSites[site]++
 				helperBefore := false
 				parallel := false
 				ast.Inspect(function.Body, func(candidate ast.Node) bool {
@@ -3355,12 +3384,10 @@ func weeklyValidateKnownFolderTestOverrideLifecycle(t *testing.T) {
 			})
 		}
 	}
-	wantCallSites := 3
-	if testEnvFallbackBuild {
-		wantCallSites = 8
-	}
-	if callSites != wantCallSites {
-		t.Fatalf("selected installKnownFolderStub call sites = %d, want %d", callSites, wantCallSites)
+	for site, want := range wantCallSites {
+		if callSites[site] != want {
+			t.Fatalf("selected installKnownFolderStub caller %s has %d calls, want %d", site, callSites[site], want)
+		}
 	}
 }
 
