@@ -132,7 +132,7 @@ func captureSetvarsEnv(setvars string) ([]string, bool) {
 		return nil, false
 	}
 	cmd := exec.Command("cmd", "/c", batPath)
-	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	process.HideToolConsole(cmd) // ordinary tool children inherit a hidden console
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, false

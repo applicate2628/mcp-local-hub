@@ -505,6 +505,7 @@ func TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun(t *testing
 		t.Skip("real receiver harness requires -tags=test_state_path_env to isolate the hidden child")
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$")
+	process.NoConsole(cmd)
 	cmd.Env = append(withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS),
 		auditLockR6ReceiverHelperEnv+"=1", auditLockR6StateRootEnv+"="+stateRoot)
 	var stdout, stderr bytes.Buffer

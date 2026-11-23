@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestDetectTools_ReportsInstalledWithVersion(t *testing.T) {
@@ -386,6 +388,7 @@ func TestLLVMObjdump_DisassemblesBinary(t *testing.T) {
 	}
 	exe := filepath.Join(tmp, "hello.exe")
 	build := exec.Command("go", "build", "-o", exe, src)
+	process.HideToolConsole(build)
 	build.Env = append(os.Environ(), "GOFLAGS=")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v: %s", err, out)

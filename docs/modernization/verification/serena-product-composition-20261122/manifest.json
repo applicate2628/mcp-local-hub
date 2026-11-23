@@ -1,0 +1,2043 @@
+{
+  "kind": "source-only candidate composition",
+  "repository": "applicate2628/mcp-local-hub",
+  "base": {
+    "ref": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "tree": "cb3eec77c23f9400be962d91c9f23834b84f7643"
+  },
+  "generator": {
+    "file": "compose.py",
+    "sha256": "225f34c1ad448e2ac74fc473f82761957221b642a2f6879cd3f5fce71e7729f2"
+  },
+  "source_refs": {
+    "643": {
+      "ref": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 25
+    },
+    "650": {
+      "ref": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 4
+    },
+    "654": {
+      "ref": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "path_count": 2
+    },
+    "655": {
+      "ref": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "path_count": 5
+    },
+    "657": {
+      "ref": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+      "merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "path_count": 2
+    },
+    "637": {
+      "ref": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 30
+    },
+    "646": {
+      "ref": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 2
+    },
+    "647": {
+      "ref": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 3
+    },
+    "649": {
+      "ref": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "path_count": 1
+    },
+    "653": {
+      "ref": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "path_count": 4
+    }
+  },
+  "sets": {
+    "core": {
+      "root": "core",
+      "sources": [
+        "643",
+        "650",
+        "654",
+        "655",
+        "657"
+      ],
+      "path_count": 37,
+      "go_path_count": 35,
+      "paths": [
+        "build.ps1",
+        "internal/api/serena_build_constraint_policy_windows_test.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_finalization_context_windows_test.go",
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_cleanup_windows_test.go",
+        "internal/api/serena_owned_tree_delete_windows_test.go",
+        "internal/api/serena_owned_tree_streams_windows_test.go",
+        "internal/api/serena_owned_tree_unsupported.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_build_constraint.go",
+        "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+        "internal/api/serena_prepared_build_constraint_test.go",
+        "internal/api/serena_prepared_build_constraint_unsupported.go",
+        "internal/api/serena_prepared_build_constraint_windows.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_file_unsupported.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_owned_file_windows_test.go",
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/serena_prepared_publication_native_windows_test.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go",
+        "internal/api/serena_qualification_resources.go",
+        "internal/cli/serena_prepared_run.go",
+        "internal/cli/serena_prepared_wrapper_close.go",
+        "internal/cli/serena_prepared_wrapper_close_windows_test.go",
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_connection_close_test.go",
+        "internal/daemon/relay_qualification_test.go",
+        "internal/daemon/relay_qualification_transport_test.go",
+        "scripts/test-windows-product-build.ps1"
+      ]
+    },
+    "extended": {
+      "root": "extended",
+      "sources": [
+        "643",
+        "650",
+        "654",
+        "655",
+        "657",
+        "637",
+        "646",
+        "647",
+        "649",
+        "653"
+      ],
+      "path_count": 74,
+      "go_path_count": 72,
+      "paths": [
+        "build.ps1",
+        "internal/api/serena_build_constraint_policy_windows_test.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_executable_windows_test.go",
+        "internal/api/serena_build_environment_python_test.go",
+        "internal/api/serena_finalization_context_windows_test.go",
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_cleanup_windows_test.go",
+        "internal/api/serena_owned_tree_delete_windows_test.go",
+        "internal/api/serena_owned_tree_streams_windows_test.go",
+        "internal/api/serena_owned_tree_unsupported.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_preparation_policy.go",
+        "internal/api/serena_preparation_policy_test.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_build_constraint.go",
+        "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+        "internal/api/serena_prepared_build_constraint_test.go",
+        "internal/api/serena_prepared_build_constraint_unsupported.go",
+        "internal/api/serena_prepared_build_constraint_windows.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_file_unsupported.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_owned_file_windows_test.go",
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/serena_prepared_publication_native_windows_test.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go",
+        "internal/api/serena_prepared_uv_discovery_test.go",
+        "internal/api/serena_publisher_image.go",
+        "internal/api/serena_publisher_role.go",
+        "internal/api/serena_publisher_role_qualification_windows.go",
+        "internal/api/serena_publisher_role_qualification_windows_test.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_qualification_namespace_unavailable_test.go",
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_windows_test.go",
+        "internal/api/serena_qualification_resources.go",
+        "internal/api/serena_tcp_rows_observed.go",
+        "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+        "internal/api/serena_tcp_rows_observed_test.go",
+        "internal/api/serena_tcp_rows_observed_windows.go",
+        "internal/api/state_dir_resolution_observed.go",
+        "internal/api/state_dir_resolution_observed_production_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+        "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+        "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+        "internal/api/state_dir_resolution_observed_windows.go",
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/source_prepare_test.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_pe_test.go",
+        "internal/binaryadmission/windows_serena_qualification_test.go",
+        "internal/binaryadmission/windows_versioninfo.go",
+        "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+        "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/serena_prepared_run.go",
+        "internal/cli/serena_prepared_wrapper_close.go",
+        "internal/cli/serena_prepared_wrapper_close_windows_test.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go",
+        "internal/daemon/relay_qualification.go",
+        "internal/daemon/relay_qualification_connection_close_test.go",
+        "internal/daemon/relay_qualification_test.go",
+        "internal/daemon/relay_qualification_transport_test.go",
+        "scripts/test-windows-product-build.ps1",
+        "tools/test-serena-publisher/main_windows.go",
+        "tools/test-serena-publisher/main_windows_test.go"
+      ]
+    }
+  },
+  "resolution_notes": {
+    "copy": "Exact source blob; its preimage equals the pinned master.",
+    "runtime": "Retain #643 transient generation custody and #655 finalizer-before-work-cancel ordering; disjoint base intervals.",
+    "builder": "Retain master version 0.4.65 and its already common relative inventory guard; add #657 command-test mode and ASCII diagnostic.",
+    "environment": "Retain both Windows policy bodies under one condition, constraint first then PATHEXT/Git; keep the common runtime import once. Projection entries remain sorted by the existing final sorter.",
+    "inputs": "Retain #637 qualified-PATH discovery and #643 original probe cleanup deadline; disjoint base intervals.",
+    "qualification": "Retain #643 original qualification cleanup deadline and #649 USERPROFILE bound to the held qualification root; disjoint base intervals."
+  },
+  "files": [
+    {
+      "path": "build.ps1",
+      "base": {
+        "blob": "8d042c8e8417b579bf7ace90da1a73d8b5484b2e",
+        "sha256": "92be70f504bb3ee6a6a78c0bb979c7112147f2ce4dc6c43c0635cc7eebaec86d"
+      },
+      "inputs": [
+        {
+          "source": "657",
+          "blob": "0027986c32d8266f626f633c9e7776661570d75d",
+          "sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 35902,
+          "blob": "3484e518390c29f34e4fe3bd86edacbaed139c08",
+          "sha256": "e811e4549672ec4cc3ea72e59b3fa6f0235191137e41007a3600edf0f6354fa8",
+          "resolution": "builder"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_constraint_policy_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+          "sha256": "891ae639e946b72967fa82bf94d4860a0e71241fbb6f43541d086b135d52a739"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 4475,
+          "blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+          "sha256": "891ae639e946b72967fa82bf94d4860a0e71241fbb6f43541d086b135d52a739",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "base": {
+        "blob": "35af40886d457d10e7de63edec99b11262a0006c",
+        "sha256": "0cf235923e319246e1fe3403da5803b06bd020bdb089f8740fedcacda26e465f"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+          "sha256": "7e64ffa0390db6eade4b26edc11d932bc33702ef24aaca8856fe8fc1898c0d58"
+        },
+        {
+          "source": "647",
+          "blob": "ed7b610d8969ce8dbf21efda54df94125be57e1b",
+          "sha256": "edfa3f547cbcd50c1e54349d57156a5ef4060a83a1f0bf033c3423e579f16334"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core"
+          ],
+          "bytes": 13671,
+          "blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+          "sha256": "7e64ffa0390db6eade4b26edc11d932bc33702ef24aaca8856fe8fc1898c0d58",
+          "resolution": "copy"
+        },
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 15082,
+          "blob": "7a39553076034e669a26b2d02c829e14f2dd0f5a",
+          "sha256": "425f687f2b0fa984e778335623752b383161606b57ece9aaa1f260aac7118bcb",
+          "resolution": "environment"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment_executable_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "647",
+          "blob": "1cedbefd415de1f7e2ae040e26bd95db4d3636d4",
+          "sha256": "64712e37f2e1ef19d51ef361c958bd064363c1595e42565fe51288b86c4db26d"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 6088,
+          "blob": "1cedbefd415de1f7e2ae040e26bd95db4d3636d4",
+          "sha256": "64712e37f2e1ef19d51ef361c958bd064363c1595e42565fe51288b86c4db26d",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_build_environment_python_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "647",
+          "blob": "9d98ebe99206e869fe28b2fb0b33e5448ea65040",
+          "sha256": "64e862f0f2455047249429eb62c301c8255269dea57cd847216f19b0ad671e50"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 2974,
+          "blob": "9d98ebe99206e869fe28b2fb0b33e5448ea65040",
+          "sha256": "64e862f0f2455047249429eb62c301c8255269dea57cd847216f19b0ad671e50",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_finalization_context_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "655",
+          "blob": "7f1e5aa41c0b346afd8dc7b059e3b4992a0634e5",
+          "sha256": "e91054f458f4ae73247d768274d94c8b64fb55d815eaa60d85f73903082cff4b"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 8558,
+          "blob": "7f1e5aa41c0b346afd8dc7b059e3b4992a0634e5",
+          "sha256": "e91054f458f4ae73247d768274d94c8b64fb55d815eaa60d85f73903082cff4b",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree.go",
+      "base": {
+        "blob": "c69b1943fd64c2459038e43cca0d36db1b6e79ed",
+        "sha256": "25bad5f5e4c3914c62429875ad17c3d7b698f169893f1946f87d06f52d1e0d5f"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+          "sha256": "50ede0b831ab23ebd34a58a2311d201ac3b88c7ad0864d06d2819ca7fd204b4c"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 5286,
+          "blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+          "sha256": "50ede0b831ab23ebd34a58a2311d201ac3b88c7ad0864d06d2819ca7fd204b4c",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_cleanup_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+          "sha256": "2eda90b729a224359ee9051b7a481933b05ce0eec2c3ac392a1b292bae911396"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 13114,
+          "blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+          "sha256": "2eda90b729a224359ee9051b7a481933b05ce0eec2c3ac392a1b292bae911396",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+          "sha256": "8792ca17eb87dc4033753f210f4fe1b34a9ff7d5a4d0d3ed5701f76eb80056b3"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 6186,
+          "blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+          "sha256": "8792ca17eb87dc4033753f210f4fe1b34a9ff7d5a4d0d3ed5701f76eb80056b3",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+          "sha256": "a2ba550535cc6d56e7972d450f8bba147271af146d2b2407040052ac162b9dc2"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 4052,
+          "blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+          "sha256": "a2ba550535cc6d56e7972d450f8bba147271af146d2b2407040052ac162b9dc2",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_unsupported.go",
+      "base": {
+        "blob": "6d3c1a035ab8ea47b29c9e0c271f375b066e0731",
+        "sha256": "2267e10141342553559424c2c00ffb1c219add96d83a0ab4f90459950d70724d"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+          "sha256": "c953763bd67224cb80b90263dc81e5650c151e3679dbfb7a7cfe4009e554525e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 596,
+          "blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+          "sha256": "c953763bd67224cb80b90263dc81e5650c151e3679dbfb7a7cfe4009e554525e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "base": {
+        "blob": "6d4a2e8982654c10132cb3e0c863e5acc73cb358",
+        "sha256": "6b17535da4a33983d73698d3823f3da4e9efad073cf11316f64b9fe3afa16324"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+          "sha256": "9493ef9c9580f8bec149160dbff3678ccd286ad21308195d33c160b53e95489e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 28761,
+          "blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+          "sha256": "9493ef9c9580f8bec149160dbff3678ccd286ad21308195d33c160b53e95489e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_preparation_policy.go",
+      "base": {
+        "blob": "0c24f69be5a2e80ffb5f2c10643c138b6e5e4222",
+        "sha256": "e095ca53412c08ec49249abaa1c522b51e79e8057be4a9ab96235386ad03d0dc"
+      },
+      "inputs": [
+        {
+          "source": "646",
+          "blob": "d541faf832aa47e03ffedbf9c88659ff81ca4618",
+          "sha256": "cf774e23c0ffd313dd7a5fb8173f34edb0808f98bfec8df6d635b7407d5df250"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 8302,
+          "blob": "d541faf832aa47e03ffedbf9c88659ff81ca4618",
+          "sha256": "cf774e23c0ffd313dd7a5fb8173f34edb0808f98bfec8df6d635b7407d5df250",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_preparation_policy_test.go",
+      "base": {
+        "blob": "7ab986cc7ac7bb5a49ca8fcf2a2a46ecb6098222",
+        "sha256": "d2c87bb9c049b55967900862e87156fb57e4284b5c302d099ac776397d16c098"
+      },
+      "inputs": [
+        {
+          "source": "646",
+          "blob": "5d9aefb636e3bebf5b3aa3d849db3ff14239c373",
+          "sha256": "edfc4ecf7e0cb0d183af60764986c8b7f391ffe5c1340e8b93e82a01a8659e9e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 5503,
+          "blob": "5d9aefb636e3bebf5b3aa3d849db3ff14239c373",
+          "sha256": "edfc4ecf7e0cb0d183af60764986c8b7f391ffe5c1340e8b93e82a01a8659e9e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "base": {
+        "blob": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+        "sha256": "978232151d1c54f9d6d877a2481c8f0ea40f32ea3aa349011a1cf1e9a26de9a1"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+          "sha256": "c980cfe6ef77da0fcb282c5e7a76e64807f96f2f228f05b02e2ca2eac3455eaa"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 8372,
+          "blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+          "sha256": "c980cfe6ef77da0fcb282c5e7a76e64807f96f2f228f05b02e2ca2eac3455eaa",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+          "sha256": "4947981547a2587d50ad65ef3162bf01ec5fdb7bde4d42cca1149d8f275d51e5"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 1049,
+          "blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+          "sha256": "4947981547a2587d50ad65ef3162bf01ec5fdb7bde4d42cca1149d8f275d51e5",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+          "sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 9418,
+          "blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+          "sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+          "sha256": "973d3d2ce2a88032199ad07a30b3cb805e96cbc2d58543772906449119554ece"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 2376,
+          "blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+          "sha256": "973d3d2ce2a88032199ad07a30b3cb805e96cbc2d58543772906449119554ece",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_unsupported.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+          "sha256": "b5ffaa5358c14cefbff4327c573c81c1d6fe418271ab20e25c06fd41e3a967bb"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 811,
+          "blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+          "sha256": "b5ffaa5358c14cefbff4327c573c81c1d6fe418271ab20e25c06fd41e3a967bb",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+          "sha256": "0e5a2642b1d916a5903ceeb4608faf0587442fd687f9ebf8f70d1ed61206a5c6"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 8203,
+          "blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+          "sha256": "0e5a2642b1d916a5903ceeb4608faf0587442fd687f9ebf8f70d1ed61206a5c6",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_effects.go",
+      "base": {
+        "blob": "05eff3480bbf929f7b9eace482cb3cd52f5acfa9",
+        "sha256": "372587d03e19a9f281ccf5d7a205d9fa64f1ff44333654af79fd4165390463c3"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+          "sha256": "1a5e1dbb714fe61319e026e31a4d88f356fb56c8916f11e7f2e4e5a4821c1b9a"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 25013,
+          "blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+          "sha256": "1a5e1dbb714fe61319e026e31a4d88f356fb56c8916f11e7f2e4e5a4821c1b9a",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "base": {
+        "blob": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+        "sha256": "0ac79225aa04e8529eb8d6743094386b87d5c86758a933d5b422bef994aaf636"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+          "sha256": "a6d084dffb06ee8377fd03fc47009f0c2c45ffbea41ea7a2ca0a1e84267735d0"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 5005,
+          "blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+          "sha256": "a6d084dffb06ee8377fd03fc47009f0c2c45ffbea41ea7a2ca0a1e84267735d0",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_file_unsupported.go",
+      "base": {
+        "blob": "58fffea91b00a37c9e881446fef1c083d7322227",
+        "sha256": "e49355a1f01663b09ef8f55077a6a3cbc69fb1a31e1214c883a66691e74a0122"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+          "sha256": "9193a8461e2c6e540db9e6f1e8effe98b32480eb097573232846440dfe071cd1"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 1437,
+          "blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+          "sha256": "9193a8461e2c6e540db9e6f1e8effe98b32480eb097573232846440dfe071cd1",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_file_windows.go",
+      "base": {
+        "blob": "9b7fbd1270420a05ad1e2e825ff0291192d722d1",
+        "sha256": "88e2583b1ccdefe64a386a02e418da8b855789284a0d1c45861ca49c5918a088"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+          "sha256": "d7e8a0145276d6e8fa89892f80ef19dd6e00ce30210210b60ee544f51f60d7c9"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 5842,
+          "blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+          "sha256": "d7e8a0145276d6e8fa89892f80ef19dd6e00ce30210210b60ee544f51f60d7c9",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "base": {
+        "blob": "8c5e13ae17037761d42be026dc0991a62be17ca1",
+        "sha256": "790b53f93590f0190529d471d9640d31770a121596561f0e9cdb8283e5021e48"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+          "sha256": "c0a3d5cea994b6c6d080c6d212747f370d134e059bd20971465b6ab252dca12c"
+        },
+        {
+          "source": "637",
+          "blob": "2f24bce84e7113a66f769a955906278181ad5159",
+          "sha256": "e0db954ba5a20b6d32d6433c857e8485421002546444bf822ba166a6726ddffc"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core"
+          ],
+          "bytes": 17190,
+          "blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+          "sha256": "c0a3d5cea994b6c6d080c6d212747f370d134e059bd20971465b6ab252dca12c",
+          "resolution": "copy"
+        },
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 18213,
+          "blob": "f2e2708ead7f0d61a055ae85454be0be7ca702d5",
+          "sha256": "3c68e99d9a0f198c450b3f44860c83c0b379294f8a8c25583520c1e662b84772",
+          "resolution": "inputs"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "base": {
+        "blob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+        "sha256": "070ab4ca4bbf5081134a0e7e7e87928492483d611eeaf770c0ae0639a2c1fccb"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+          "sha256": "32b94d9dafb6d70cc2c07575f19745439b1ff86b066b3fd0fad08801188191aa"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 9332,
+          "blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+          "sha256": "32b94d9dafb6d70cc2c07575f19745439b1ff86b066b3fd0fad08801188191aa",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+          "sha256": "889295f050febcd3bcc366f04fd5f40021f1333d125a781e78dee16c69079480"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 12212,
+          "blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+          "sha256": "889295f050febcd3bcc366f04fd5f40021f1333d125a781e78dee16c69079480",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "23f14a65e3b4f13b9e40730bd1f11a44f5560a52",
+          "sha256": "a558481e34e28611b2f108c7387478f7aee76839018c2d1c1faddb974eaa006e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 20324,
+          "blob": "23f14a65e3b4f13b9e40730bd1f11a44f5560a52",
+          "sha256": "a558481e34e28611b2f108c7387478f7aee76839018c2d1c1faddb974eaa006e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_publication.go",
+      "base": {
+        "blob": "865c7b948d4f2c3fc38c562c52ce69e5ed6324ed",
+        "sha256": "8892dcce74d32ef455a0169cf3699c4be1edcd18c201e0c7cd0a34f7d7b4fd1e"
+      },
+      "inputs": [
+        {
+          "source": "654",
+          "blob": "c94012d8fa6a086ea3bf71df1c409425e369480d",
+          "sha256": "62210dcb45d11ea567ca8b3dc4764b9d97d86ead4255dcdf4e59d3794e141c42"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 13423,
+          "blob": "c94012d8fa6a086ea3bf71df1c409425e369480d",
+          "sha256": "62210dcb45d11ea567ca8b3dc4764b9d97d86ead4255dcdf4e59d3794e141c42",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_publication_native_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "654",
+          "blob": "56263ea20d159dd637ce3dde267621b3707c0dc0",
+          "sha256": "15c2cc9bfab5da24f47c737658359ee2ad459b3104b1812bdc18be868ffbeb36"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 5956,
+          "blob": "56263ea20d159dd637ce3dde267621b3707c0dc0",
+          "sha256": "15c2cc9bfab5da24f47c737658359ee2ad459b3104b1812bdc18be868ffbeb36",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_qualification.go",
+      "base": {
+        "blob": "ff7cd293a7e64707b1c48f84ae8a87b03254e224",
+        "sha256": "2e359b0674e61864acc9326b3dde71a674d1de966efcc2aee903bcaeb839c02c"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+          "sha256": "2de30c087965be54453017521d372fe6f792da035d0c9bcfc698700325e74069"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 16640,
+          "blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+          "sha256": "2de30c087965be54453017521d372fe6f792da035d0c9bcfc698700325e74069",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "base": {
+        "blob": "da74b9d3a183204d64a420ef4c57a8bbbe625702",
+        "sha256": "60bcde5fbf7266725755af0995e21369e1f98ff9418ba6aafc382a9acd1e5978"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+          "sha256": "82d6e7ef173374fafafba5966768e94a7a2210898cb77f9016386d78c77d6eec"
+        },
+        {
+          "source": "655",
+          "blob": "4e769176af22799653f0463d63a36c1177754f8d",
+          "sha256": "c19f0a9b1b150644d1773d2defcada0c031e9abad04673500f617c4046c21bc5"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 31170,
+          "blob": "c55ae677533eb88e8fbce388ff5a42596f9f8bbd",
+          "sha256": "0ea18f0a12369ee77853dfa768e0bce60e13f483fd94c91de497047ad0696980",
+          "resolution": "runtime"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_prepared_uv_discovery_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "6ca6fdc408cf7b60e7c0f64141a2827c20f9adfc",
+          "sha256": "7744afb10a3aff61f9425066c4496f4bd0879552154ab1ada10cfb6380df2f83"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 4039,
+          "blob": "6ca6fdc408cf7b60e7c0f64141a2827c20f9adfc",
+          "sha256": "7744afb10a3aff61f9425066c4496f4bd0879552154ab1ada10cfb6380df2f83",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_publisher_image.go",
+      "base": {
+        "blob": "b25944a782c32d724f5090b6a9902d3f77d10053",
+        "sha256": "887c1e158e07d0239c97e784636c7c1f679bf25e95bece9e7a865cf534dcc754"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "2492f66bd6c667343e39ff485651205e4df06423",
+          "sha256": "0f59755e0198a58dda4637f78868864559917e6a986ee70fe5e03af132798314"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 8969,
+          "blob": "2492f66bd6c667343e39ff485651205e4df06423",
+          "sha256": "0f59755e0198a58dda4637f78868864559917e6a986ee70fe5e03af132798314",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_publisher_role.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "0abf286e186990203e5af49560890769b6df67c0",
+          "sha256": "67abf522c9b42b80186a78becd51ed3808359c2a02393357034df59ea01e2442"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 274,
+          "blob": "0abf286e186990203e5af49560890769b6df67c0",
+          "sha256": "67abf522c9b42b80186a78becd51ed3808359c2a02393357034df59ea01e2442",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_publisher_role_qualification_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "ef1dae5405644964b224c917c3f34a96a8012220",
+          "sha256": "53b60d0ea2bb9b5f29dfd0aaf1f6ebbf4337e867e9bb8a03a98e8bc5fe74904f"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 469,
+          "blob": "ef1dae5405644964b224c917c3f34a96a8012220",
+          "sha256": "53b60d0ea2bb9b5f29dfd0aaf1f6ebbf4337e867e9bb8a03a98e8bc5fe74904f",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_publisher_role_qualification_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "acc6a0d1184c50021d0c1fb6e9cb3489aa8537e0",
+          "sha256": "02b728b8a7db3e14f7164ce0a073f5777e021d14dd0fd6330dac1568be8771d5"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 701,
+          "blob": "acc6a0d1184c50021d0c1fb6e9cb3489aa8537e0",
+          "sha256": "02b728b8a7db3e14f7164ce0a073f5777e021d14dd0fd6330dac1568be8771d5",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_directory_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "24d662ca1dbb785e8d6684dca7fc166c4894e5ab",
+          "sha256": "6bb76c605c9a22075e075f9062a694890ef922c8dc7844e52350d8dbd8bde7e6"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 5861,
+          "blob": "24d662ca1dbb785e8d6684dca7fc166c4894e5ab",
+          "sha256": "6bb76c605c9a22075e075f9062a694890ef922c8dc7844e52350d8dbd8bde7e6",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_unavailable_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "2a29665a9ba9d66d95a7844d409492d8accbdd3f",
+          "sha256": "3bf4e1ccfca102e50a7a92d095e65181c0d164c127c6dab326e97dc5d7a397e0"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 2272,
+          "blob": "2a29665a9ba9d66d95a7844d409492d8accbdd3f",
+          "sha256": "3bf4e1ccfca102e50a7a92d095e65181c0d164c127c6dab326e97dc5d7a397e0",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "cf4e435ed736f962f7dd6ce9151f0e3a099c5cb8",
+          "sha256": "98ecf83d554fb6cef973ed6a26c4dbf46ec9a6ef399e2f70c98582a52a759ff3"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 11387,
+          "blob": "cf4e435ed736f962f7dd6ce9151f0e3a099c5cb8",
+          "sha256": "98ecf83d554fb6cef973ed6a26c4dbf46ec9a6ef399e2f70c98582a52a759ff3",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "b93596e6d1508f4154c5afd115e06f8c28e6d8b7",
+          "sha256": "3f727d4d25d1958280d64e3f8a4a23704eb94fd1742308b5d474ededb6cb5ef7"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 8572,
+          "blob": "b93596e6d1508f4154c5afd115e06f8c28e6d8b7",
+          "sha256": "3f727d4d25d1958280d64e3f8a4a23704eb94fd1742308b5d474ededb6cb5ef7",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "base": {
+        "blob": "fb195efd4a277155437d0a91f7beb81c1dda8cbb",
+        "sha256": "c6ec0fdf91c9cc17706b078540b52091883d9750c75c986fa33856b29c1df2bb"
+      },
+      "inputs": [
+        {
+          "source": "643",
+          "blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+          "sha256": "2aebd209e804b81613f21b5716a6b1a5a9dbccb1b401e109e69e0e22346996c2"
+        },
+        {
+          "source": "649",
+          "blob": "e7bc30531a9818032bf0a90a671c7c262b29e816",
+          "sha256": "5dfcf6dea975f8d220751668ad82c6d8c2f76312174aa17ac84c858217584404"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core"
+          ],
+          "bytes": 10787,
+          "blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+          "sha256": "2aebd209e804b81613f21b5716a6b1a5a9dbccb1b401e109e69e0e22346996c2",
+          "resolution": "copy"
+        },
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 10963,
+          "blob": "c3bd3725f7505822a897049e8f596b30b606305d",
+          "sha256": "632145de803f3ba0ac6c64e6db9cc5723502df3d7cf51627d4955a8140226a7b",
+          "resolution": "qualification"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed.go",
+      "base": {
+        "blob": "d142fd7cd5636c6f307c7776963c0a8904dc09d9",
+        "sha256": "5aa1cfce1aff839f7c224ba0bc10d417617e443af756141a49af379dc0c389fd"
+      },
+      "inputs": [
+        {
+          "source": "653",
+          "blob": "1b8d16a0fc02495545153ea1d69230dced683f9c",
+          "sha256": "4b4b35944370ed47da90feedeb35955692a37a8571fddf3e7f74618c1722142b"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 6897,
+          "blob": "1b8d16a0fc02495545153ea1d69230dced683f9c",
+          "sha256": "4b4b35944370ed47da90feedeb35955692a37a8571fddf3e7f74618c1722142b",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_native_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "653",
+          "blob": "e7f9786d7ea696a311bb7f1adcb934ec36b8986b",
+          "sha256": "d75888750d0e42e0a90eef0b04cd2b412b56669d7a57b76cc90304d791da4edf"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 3431,
+          "blob": "e7f9786d7ea696a311bb7f1adcb934ec36b8986b",
+          "sha256": "d75888750d0e42e0a90eef0b04cd2b412b56669d7a57b76cc90304d791da4edf",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_test.go",
+      "base": {
+        "blob": "a96e799794b5347f9bf251df80e6051be2cf0f29",
+        "sha256": "6896aa90ed62131e1b3b8344140828cff4d85e46671dd7a11ff6265d478bfe19"
+      },
+      "inputs": [
+        {
+          "source": "653",
+          "blob": "6dc44790481a0f52ae7735da06a3b5c71b26eb2d",
+          "sha256": "41067db172f1fec8072fed61c672a499b145ad53c1cafaa14709e621d1e8148d"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 12492,
+          "blob": "6dc44790481a0f52ae7735da06a3b5c71b26eb2d",
+          "sha256": "41067db172f1fec8072fed61c672a499b145ad53c1cafaa14709e621d1e8148d",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/serena_tcp_rows_observed_windows.go",
+      "base": {
+        "blob": "39c2e453fd8ca7d9c1bdaea567b19ab26286021e",
+        "sha256": "3ceac3437c82be0faf389c408b46a64d060a5ceaeeec1f35fe41365d1b6dba9a"
+      },
+      "inputs": [
+        {
+          "source": "653",
+          "blob": "cd566b8c0de75cf31901046b37e503b633b24f8e",
+          "sha256": "4fcc2c86a6f5a94ceddf29156ed6779c24573be2ce352d9b75f7e0d798086f0a"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 1975,
+          "blob": "cd566b8c0de75cf31901046b37e503b633b24f8e",
+          "sha256": "4fcc2c86a6f5a94ceddf29156ed6779c24573be2ce352d9b75f7e0d798086f0a",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed.go",
+      "base": {
+        "blob": "4d17e680e55d2b8aa9652206909df9b0a44f0b18",
+        "sha256": "53e69f25ea9fa23c0e94e975beebf24d985881635366a4c5846b820eadd1a234"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "87da7eaaac0efefc8fbb4997a5196a2fedf10be9",
+          "sha256": "d717950bbffd33afcdff39a1a3df9bf02252c2b88e3c8d0f3f6bee842cb4150e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 4427,
+          "blob": "87da7eaaac0efefc8fbb4997a5196a2fedf10be9",
+          "sha256": "d717950bbffd33afcdff39a1a3df9bf02252c2b88e3c8d0f3f6bee842cb4150e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_production_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "ab9c91251bfbef26173a10df46265add3940f142",
+          "sha256": "dccbead127168cfcb89e951d033e4b2662e15047cefc56082cac4e51fb902a24"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 269,
+          "blob": "ab9c91251bfbef26173a10df46265add3940f142",
+          "sha256": "dccbead127168cfcb89e951d033e4b2662e15047cefc56082cac4e51fb902a24",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "2dddab20730d929e850711e01d590dbbd09eef45",
+          "sha256": "c6a949dc6272d432793cdb85e52fc2d843c3042221286bfaa017b2a9862da733"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 299,
+          "blob": "2dddab20730d929e850711e01d590dbbd09eef45",
+          "sha256": "c6a949dc6272d432793cdb85e52fc2d843c3042221286bfaa017b2a9862da733",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "a68b86441adc6e3139dd10ba75db13e9ef8945a2",
+          "sha256": "ed7a03b4efcb18478858d3b52fbc42b73042fd141cd65da59568791aa908ca7e"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 536,
+          "blob": "a68b86441adc6e3139dd10ba75db13e9ef8945a2",
+          "sha256": "ed7a03b4efcb18478858d3b52fbc42b73042fd141cd65da59568791aa908ca7e",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "a2965e968bd579deeff97d845a2a24b0038dea42",
+          "sha256": "bc72fbec38279f78f43de945ebab3b8b3b7d181bc53a53182db267e479a2da22"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 438,
+          "blob": "a2965e968bd579deeff97d845a2a24b0038dea42",
+          "sha256": "bc72fbec38279f78f43de945ebab3b8b3b7d181bc53a53182db267e479a2da22",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_windows.go",
+      "base": {
+        "blob": "045902a8e93af9c4395e876275bd53d28cce587f",
+        "sha256": "2d69ded66a4d0d8fc9e4491ff3986d7522c3810fd0645cc3ccdba89603890b27"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "37bf02857efaba03c272d8f851ccf0fec388df95",
+          "sha256": "95833f2d13fceed4ca91b4913f4730e9ae5840b1de8c3fc3f79889222fce2503"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 5448,
+          "blob": "37bf02857efaba03c272d8f851ccf0fec388df95",
+          "sha256": "95833f2d13fceed4ca91b4913f4730e9ae5840b1de8c3fc3f79889222fce2503",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/source_prepare.go",
+      "base": {
+        "blob": "df64be91ecd4f8f4be2b2b8b599cc854bc408fbd",
+        "sha256": "d584b62ab72f948146c68335516fc9fa6adbcd4b72120df2736b103881be3836"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "502c7274763218ae20faf5735910cd0dcabe9ae5",
+          "sha256": "b80fc12d3d9f0e83fadc1e1367e364e602762cd6da6c5e3c12ad8f83c36bf8d6"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 23226,
+          "blob": "502c7274763218ae20faf5735910cd0dcabe9ae5",
+          "sha256": "b80fc12d3d9f0e83fadc1e1367e364e602762cd6da6c5e3c12ad8f83c36bf8d6",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/source_prepare_test.go",
+      "base": {
+        "blob": "8839a7e61d7c07c0b82b932b22ad8238ac56f4f3",
+        "sha256": "15c6a2d96c4971c22df363426b1364d7f7be06ed14e7d50eda60b17e7f7f94ea"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "c38ed3dec798a8955992d315c6745253ef9a0193",
+          "sha256": "292dcacc6cdd6a7b57bd1e0defee66363e691154900cebf5c61d2d9fe48ba933"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 13649,
+          "blob": "c38ed3dec798a8955992d315c6745253ef9a0193",
+          "sha256": "292dcacc6cdd6a7b57bd1e0defee66363e691154900cebf5c61d2d9fe48ba933",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_pe.go",
+      "base": {
+        "blob": "3754b1f5434c425b6d7dfe927fe9f8ef3a38c8a1",
+        "sha256": "1c74201bfca3ba6ffc379edb35ddd56139ae8b617b66ac48c55ddc6d7aa9f119"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "5808f4a0cd2af60f1786da50b2c8a07bcb61a0ec",
+          "sha256": "ca03afa4050cf223af5647651d26feec00a105eb7510c8000817cd24d356ffe0"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 12600,
+          "blob": "5808f4a0cd2af60f1786da50b2c8a07bcb61a0ec",
+          "sha256": "ca03afa4050cf223af5647651d26feec00a105eb7510c8000817cd24d356ffe0",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_pe_test.go",
+      "base": {
+        "blob": "c7a788e9ba761af334361c6b155e01eff73e9502",
+        "sha256": "0d2575e634a49d4d24062bb0f4f9fd686bb595ae5c0614676b7e05651d90f29d"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "406317da160d137a8ad1990a8983be044197fa06",
+          "sha256": "66a97708066532b9624ff466fe5ae559e58087bd6f394fd637d3e1111623e573"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 22397,
+          "blob": "406317da160d137a8ad1990a8983be044197fa06",
+          "sha256": "66a97708066532b9624ff466fe5ae559e58087bd6f394fd637d3e1111623e573",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_serena_qualification_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "bf4ee0176abad14f516364620b314a22c850314b",
+          "sha256": "e2cbd4e66bde5e20601e76634185b073c00a412beaf58f9ec7ae77e67596970c"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 4532,
+          "blob": "bf4ee0176abad14f516364620b314a22c850314b",
+          "sha256": "e2cbd4e66bde5e20601e76634185b073c00a412beaf58f9ec7ae77e67596970c",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/binaryadmission/windows_versioninfo.go",
+      "base": {
+        "blob": "5c629908fbd54db913d5e6e0ba0a70952bfcbcfc",
+        "sha256": "5f41805f1261d060b2ecebf94cdf14aa14029283a8fc3aad73409046f1342afe"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "70b5a9de50d6030d85123e840d3cb257b0e77a5b",
+          "sha256": "b72af5cc74890d9169285058e1dec5f4e0c49cd8e39c512f844db566618b1011"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 21607,
+          "blob": "70b5a9de50d6030d85123e840d3cb257b0e77a5b",
+          "sha256": "b72af5cc74890d9169285058e1dec5f4e0c49cd8e39c512f844db566618b1011",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "37b6ca42b6249df8ede7b3205387d02f9e653a1d",
+          "sha256": "28dba494ff6a78624a6de676ebc9e6b832702409568b3b2b9c070eadb79b5ee4"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 1230,
+          "blob": "37b6ca42b6249df8ede7b3205387d02f9e653a1d",
+          "sha256": "28dba494ff6a78624a6de676ebc9e6b832702409568b3b2b9c070eadb79b5ee4",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_prepared_fixture_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "0f97f2873061ba3e0c10d5593c263395a4dffd64",
+          "sha256": "3861a02bb475fcf28260b3e2ef06fb533eb07b481f1a6227361f7ee2f9ab9d21"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 3475,
+          "blob": "0f97f2873061ba3e0c10d5593c263395a4dffd64",
+          "sha256": "3861a02bb475fcf28260b3e2ef06fb533eb07b481f1a6227361f7ee2f9ab9d21",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "c279ef6fda464dbf6da507edd37ea1b8e0cac520",
+          "sha256": "62dbc48b952b247fa6026cb635e6682bc6b204fe5749a735a150fde81ac25dd3"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 673,
+          "blob": "c279ef6fda464dbf6da507edd37ea1b8e0cac520",
+          "sha256": "62dbc48b952b247fa6026cb635e6682bc6b204fe5749a735a150fde81ac25dd3",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_prepared_fixture_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "3e237867631c263cc168b859d56241c8625dad40",
+          "sha256": "22c796096a030b380fb653101c1afd58d44fde7a59c9cbe7d06ac3e855b4f5a2"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 4225,
+          "blob": "3e237867631c263cc168b859d56241c8625dad40",
+          "sha256": "22c796096a030b380fb653101c1afd58d44fde7a59c9cbe7d06ac3e855b4f5a2",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/migrate_serena_test.go",
+      "base": {
+        "blob": "d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463",
+        "sha256": "2d209f5feee08a50ec4389c95306b0299c62a08adf1695bf17397d54d6468774"
+      },
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "d4e651fd3e5351fc0013bf2fb5c254d5ae33e250",
+          "sha256": "a0f7faacb947169f92858d5a47f54f00b13a5c5fb622fdcbc927dc97385d70b8"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 190235,
+          "blob": "d4e651fd3e5351fc0013bf2fb5c254d5ae33e250",
+          "sha256": "a0f7faacb947169f92858d5a47f54f00b13a5c5fb622fdcbc927dc97385d70b8",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/serena_prepared_run.go",
+      "base": {
+        "blob": "cd96d388de722f0a326816001f90daaef02fd754",
+        "sha256": "bdeb16caefc39777b0d27a06acddd52be6e6d44cc2523c5f2ebf709b17bc8a51"
+      },
+      "inputs": [
+        {
+          "source": "655",
+          "blob": "de9b2b80dbc2e1016e2b9334f1d7306a2a9dafaf",
+          "sha256": "c031a67a86f6d267fe2766f1fbeca9cc9d148115287399892f97bf010e264947"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 7937,
+          "blob": "de9b2b80dbc2e1016e2b9334f1d7306a2a9dafaf",
+          "sha256": "c031a67a86f6d267fe2766f1fbeca9cc9d148115287399892f97bf010e264947",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/serena_prepared_wrapper_close.go",
+      "base": {
+        "blob": "e374b1294e21e2f11a11c014d3383a9af7b89756",
+        "sha256": "be0cd0d0c3fc151174c96e663e0cd9e0edd39596c5453f1ed2af3e615a6b0585"
+      },
+      "inputs": [
+        {
+          "source": "655",
+          "blob": "be36c14801f97f60ad89d5104f53436ee1ab1803",
+          "sha256": "3e9dc9086d36a0fd65d61505f0096fc9a298dcb2fe90761668d3b1e6b950d430"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 4251,
+          "blob": "be36c14801f97f60ad89d5104f53436ee1ab1803",
+          "sha256": "3e9dc9086d36a0fd65d61505f0096fc9a298dcb2fe90761668d3b1e6b950d430",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/serena_prepared_wrapper_close_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "655",
+          "blob": "50b0e008d370b237fc2eeb4ed3d7ceb93cefb4da",
+          "sha256": "352bcda1080b011301095d6adaa03b1f61227c163cfaab00ba0ba2b0c1b02da3"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 9780,
+          "blob": "50b0e008d370b237fc2eeb4ed3d7ceb93cefb4da",
+          "sha256": "352bcda1080b011301095d6adaa03b1f61227c163cfaab00ba0ba2b0c1b02da3",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/cli/serena_qualification_namespace_lifetime_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "012333bd1a0ff8d71d3145b233e7a466c734d854",
+          "sha256": "070609b0ee8d482b600c78b86cac0525568925684a34a5a5894979c0154e6c4c"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 6701,
+          "blob": "012333bd1a0ff8d71d3145b233e7a466c734d854",
+          "sha256": "070609b0ee8d482b600c78b86cac0525568925684a34a5a5894979c0154e6c4c",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification.go",
+      "base": {
+        "blob": "6cdf53546921796c437f3e3f2306c0a042f2b4ed",
+        "sha256": "be8a5e7f9dc389355173b3972d3c608112be772d50978a852e754d9cc5c0cad0"
+      },
+      "inputs": [
+        {
+          "source": "650",
+          "blob": "f58f0689794488d7f1dc5d98c771ea0e72c69c26",
+          "sha256": "1e5a50352d71d4ca6d12dc7fbf1a85ffc683419042dfd7a6c625c7c387d7b8b7"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 23729,
+          "blob": "f58f0689794488d7f1dc5d98c771ea0e72c69c26",
+          "sha256": "1e5a50352d71d4ca6d12dc7fbf1a85ffc683419042dfd7a6c625c7c387d7b8b7",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification_connection_close_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "650",
+          "blob": "687f22f38b3acefe67ebe14a7f0b8cdb2fbd5202",
+          "sha256": "ee7cd70c05cd6f6cd9c417d892b202253e58b6e8ed642365ff849973bfa05734"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 10193,
+          "blob": "687f22f38b3acefe67ebe14a7f0b8cdb2fbd5202",
+          "sha256": "ee7cd70c05cd6f6cd9c417d892b202253e58b6e8ed642365ff849973bfa05734",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification_test.go",
+      "base": {
+        "blob": "783d38b5244e241fd8e91c4444311b6cf1463190",
+        "sha256": "8a2e9fdc18a100f7340177f3f4a7da7cd5d331f2f0e28ae47601ef2549fd56eb"
+      },
+      "inputs": [
+        {
+          "source": "650",
+          "blob": "790952d1484fbb81d5546d1bc1aadb0cdfc09712",
+          "sha256": "afac48ee99505fadd854a5041e2adfd9956873b444b2eb4d8f37b9bbfee2a869"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 8948,
+          "blob": "790952d1484fbb81d5546d1bc1aadb0cdfc09712",
+          "sha256": "afac48ee99505fadd854a5041e2adfd9956873b444b2eb4d8f37b9bbfee2a869",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "internal/daemon/relay_qualification_transport_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "650",
+          "blob": "dc825b9f62deb047c3655bf00738bba81b18d671",
+          "sha256": "7c5fb6c3b8759c36631226aac6957f0493952d035ba4f022bfd35ddd2fe27555"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 11762,
+          "blob": "dc825b9f62deb047c3655bf00738bba81b18d671",
+          "sha256": "7c5fb6c3b8759c36631226aac6957f0493952d035ba4f022bfd35ddd2fe27555",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "scripts/test-windows-product-build.ps1",
+      "base": {
+        "blob": "78d3d63e04b8821ac4f9cef3ef9259370f22bb11",
+        "sha256": "040994a639be010f5da21162d8a86a0bf368875c67c2ec4d080c570af8f50681"
+      },
+      "inputs": [
+        {
+          "source": "657",
+          "blob": "1049f6b2b87267e864d7d51c7f4b16799cb0795f",
+          "sha256": "d5c24d218b0a0ffa98e2edf3d5298d107822842dec92e267acb179320faa6371"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "core",
+            "extended"
+          ],
+          "bytes": 44077,
+          "blob": "1049f6b2b87267e864d7d51c7f4b16799cb0795f",
+          "sha256": "d5c24d218b0a0ffa98e2edf3d5298d107822842dec92e267acb179320faa6371",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "tools/test-serena-publisher/main_windows.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "f31d9f1f0d0e98393fa378d9656efd9226e65f84",
+          "sha256": "0c788a30199fc17235860f32a40791c47a748a21c0ef550edd10b3ca2b760646"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 18071,
+          "blob": "f31d9f1f0d0e98393fa378d9656efd9226e65f84",
+          "sha256": "0c788a30199fc17235860f32a40791c47a748a21c0ef550edd10b3ca2b760646",
+          "resolution": "copy"
+        }
+      ]
+    },
+    {
+      "path": "tools/test-serena-publisher/main_windows_test.go",
+      "base": null,
+      "inputs": [
+        {
+          "source": "637",
+          "blob": "4e337b0293c2e51f54b085a064bd4a0588ab7e97",
+          "sha256": "e6a8ec8823fb2e6aafe0db52d45c061a5030a8ad453948ab1d6cca21e9adc7df"
+        }
+      ],
+      "outputs": [
+        {
+          "sets": [
+            "extended"
+          ],
+          "bytes": 4832,
+          "blob": "4e337b0293c2e51f54b085a064bd4a0588ab7e97",
+          "sha256": "e6a8ec8823fb2e6aafe0db52d45c061a5030a8ad453948ab1d6cca21e9adc7df",
+          "resolution": "copy"
+        }
+      ]
+    }
+  ],
+  "blocked_files": [],
+  "qualification": {
+    "project_code_executed": false,
+    "tests": "NOT_RUN",
+    "builds": "NOT_RUN",
+    "source_issuance": "NOT_RUN",
+    "publisher_or_product_issued": false,
+    "limit": "Candidate changed paths only; not a complete publisher Source or an installation admission."
+  }
+}

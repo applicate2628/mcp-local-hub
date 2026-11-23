@@ -78,6 +78,7 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 // startWithJobFilesObserved extends only the at-create owner; nil options
 // follow the ordinary launch path without retaining any additional handle.
 type startWithJobObserverOptions struct {
+	foreground                bool
 	beforeResume              func() error
 	resumeContext             context.Context
 	resumeThread              func(windows.Handle) (uint32, error)
@@ -253,6 +254,12 @@ func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *o
 	//     when envPtr is NULL (the kernel inherits the parent's env
 	//     in both cases).
 	creationFlags := startWithJobCreationFlags()
+	// Hide later console allocation for background starts. Foreground keeps
+	// its existing window policy unless the caller explicitly requests HideWindow.
+	if observer == nil || !observer.foreground || (cmd.SysProcAttr != nil && cmd.SysProcAttr.HideWindow) {
+		si.StartupInfo.Flags |= windows.STARTF_USESHOWWINDOW
+		si.StartupInfo.ShowWindow = windows.SW_HIDE
+	}
 	var applicationName *uint16
 	if observer != nil && observer.beforeResume != nil {
 		// The admitted original owner alone opts into suspended creation. Its

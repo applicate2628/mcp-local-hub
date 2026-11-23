@@ -5599,6 +5599,7 @@ func TestCSTSelectorHardlinkCaptureFailurePreservesOutside(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestCSTSavedFieldSelectorBindingSynthetic/copied-added-hardlink-outside-quarantined$", "-test.v=true")
+	hubprocess.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "TMP="+probeRoot, "TEMP="+probeRoot, "MCPHUB_CST_SELECTOR_CAPTURE_FAULT=1")
 	output, runErr := cmd.CombinedOutput()
 	if ctx.Err() != nil {

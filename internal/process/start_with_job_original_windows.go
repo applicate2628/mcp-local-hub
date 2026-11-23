@@ -79,6 +79,7 @@ func startWithJobFilesOriginalCore(job *Job, cmd *exec.Cmd, stdin, stdout, stder
 		}
 	}
 	if testOptions != nil {
+		options.foreground = testOptions.foreground
 		options.duplicateHandle = testOptions.duplicateHandle
 		options.closeChildHandle = testOptions.closeChildHandle
 		options.findProcess = testOptions.findProcess

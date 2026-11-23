@@ -1649,6 +1649,7 @@ func TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce(t *testin
 
 	stateDir := t.TempDir()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(),
 		helperFlag+"=1",
 		helperStateDir+"="+stateDir,

@@ -78,7 +78,7 @@ func runCaptureLimited(ctx context.Context, binPath, workingDir string, args []s
 // inherits the live process environment; a non-nil env is used exactly as given.
 func runCaptureLimitedWithEnv(ctx context.Context, binPath, workingDir string, args []string, stdoutLimit, stderrLimit int, env []string) (*captureResult, error) {
 	cmd := exec.CommandContext(ctx, binPath, args...)
-	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	process.HideToolConsole(cmd) // ordinary tool children inherit a hidden console
 	cmd.Env = env
 	if workingDir != "" {
 		cmd.Dir = workingDir

@@ -54,6 +54,7 @@ func TestContainedStreamWindowsHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		grandchild := exec.Command(exe, "-test.run=^TestContainedStreamWindowsHelper$")
+		NoConsole(grandchild)
 		grandchild.Env = append(os.Environ(), containedWindowsHelperEnv+"=hold")
 		grandchild.Stdout = os.Stdout
 		grandchild.Stderr = os.Stderr

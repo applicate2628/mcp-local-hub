@@ -61,7 +61,7 @@ func (tb *PerfToolbox) hyperfineTool(ctx context.Context, req *mcp.CallToolReque
 	cmdArgs = append(cmdArgs, args.Commands...)
 
 	cmd := exec.CommandContext(ctx, tb.tools.Hyperfine.Path, cmdArgs...)
-	process.NoConsole(cmd) // suppress console flash on windowsgui parent
+	process.HideToolConsole(cmd) // ordinary tool children inherit a hidden console
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr // ignore human-readable output; we only need the JSON export

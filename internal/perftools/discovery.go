@@ -93,7 +93,7 @@ func probe(bin string, versionExtract func(string) string) *ToolInfo {
 // does not establish that descendants have exited.
 func runVersionProbe(ctx context.Context, path string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
-	process.NoConsole(cmd)
+	process.HideToolConsole(cmd)
 	cmd.WaitDelay = versionProbeWaitDelay
 	out := cappedBuffer{limit: versionProbeOutputLimit}
 	// os/exec serializes writes when both streams have this same comparable

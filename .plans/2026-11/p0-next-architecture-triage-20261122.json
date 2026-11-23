@@ -1,0 +1,1923 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-11-22T16:21:35.584428+00:00",
+  "scope": "Read-only triage and draft-number verification; no Go/native/remote tests executed. Original p0-next paths below identify provenance and are not required retained runtime roots.",
+  "repository": "applicate2628/mcp-local-hub",
+  "published_head": "c7617d1027888271a83c3b724171e1363289995e",
+  "publication_parent": "d39b99db427eee026af12f8120c24477a2d9612a",
+  "publication_tree": "358dd1729c663cdb7fc78af24524825908fb5fbc",
+  "execution_source": {
+    "head": "d39b99db427eee026af12f8120c24477a2d9612a",
+    "tree": "8b6d3891e3b5790b53fc24fa9cb62a52397b4aa6",
+    "source_files": 3276,
+    "candidate_changed_files": [
+      "internal/gui/server.go",
+      "internal/gui/lsp_router_control.go",
+      "internal/gui/lsp_router_control_test.go",
+      "architecture/baseline.yaml"
+    ]
+  },
+  "inputs": {
+    "candidate_archive": {
+      "original_local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/docs/modernization/verification/lsp-router-owner-20261122/raw-evidence.zip",
+      "git_source": "c7617d1027888271a83c3b724171e1363289995e:docs/modernization/verification/lsp-router-owner-20261122/raw-evidence.zip",
+      "bytes": 1070779,
+      "sha256": "3c9d3ca51b131b15fd828c2410faf052d8a8cb684ff3a34f2b51ab584f292534"
+    },
+    "candidate_scan": {
+      "archive_member": "evidence/architecture-green/arch-scan.stdout.log",
+      "bytes": 1203102,
+      "sha256": "9e0a683f892584b8d2e47155d04a5a031f89444e1a369efacaecd8e1de312cf6"
+    },
+    "candidate_baseline": {
+      "original_local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/architecture/baseline.yaml",
+      "git_source": "c7617d1027888271a83c3b724171e1363289995e:architecture/baseline.yaml",
+      "bytes": 1435735,
+      "sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a"
+    },
+    "candidate_plan": {
+      "archive_member": "plans/architecture-green.json",
+      "bytes": 598593,
+      "sha256": "8a972c6edb8fc0318bb21cbe800f18fcc203a5cc7f20bf99831c38bbbe7a5c5a"
+    },
+    "candidate_report": {
+      "git_source": "c7617d1027888271a83c3b724171e1363289995e:docs/modernization/verification/lsp-router-owner-20261122/results.json",
+      "bytes": 8701,
+      "sha256": "d74f7b9e0ae7d73ec6d36a8f395e653294ffc17c2754cc600b88f1c0d306148f"
+    },
+    "publication_readback": {
+      "original_local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/readback-663.json",
+      "bytes": 3034,
+      "sha256": "aa55861c570e86edb4a6788121e17daab2ef59a88cf4dd01030a60dfca9c82c7"
+    },
+    "prior_baseline": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:architecture/baseline.yaml",
+      "bytes": 1436933,
+      "sha256": "e0620345b7999fdb97462172d20226255e3397345078e98178098ddcd082632c"
+    },
+    "prior_archive": {
+      "original_local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/metadata/architecture-evidence.zip",
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:docs/modernization/verification/manifest-services-2026-11-22/manifest-services-evidence.zip",
+      "bytes": 218111,
+      "sha256": "5f1e0c3221aae6cd9bac45e84560dbb4733f02134c49b82cf53438eb90f03c05"
+    },
+    "prior_scan": {
+      "archive_member": "evidence/architecture/arch-scan.stdout",
+      "bytes": 1204058,
+      "sha256": "65bfd254e612f19ca6c730e66da7e3532e050e2a1c70b1f80410ee1bac49b70a"
+    },
+    "migration_qualification": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:docs/modernization/verification/archguard-migration-2026-11-21/qualification.json",
+      "bytes": 86587,
+      "sha256": "85721e14a9d134efeee7832f03c332171ed0ba9366038d90d13fb98f501280b9"
+    }
+  },
+  "method": {
+    "new": "current fingerprint absent from baseline",
+    "stale": "baseline fingerprint absent from current scan",
+    "grown": "current metric exceeds the explicit baseline max_metric; absent caps are not inferred",
+    "worker_gate": "workers.yaml entries is empty; worker violations in New are the 72 unregistered findings. They are already counted in New.",
+    "owner_mapping": "First matching rule from exact architecture/owners.yaml; current globs are only literal paths or prefix /**, for which fnmatchcase matches the observed policy rule mapping.",
+    "unmatched_owner_warning": "NO_CURRENT_OWNER_RULE is this triage classification for current owner-rule coverage. It is not the verifier unowned count; published unowned=0 must not be interpreted as full live-path ownership coverage.",
+    "set_hash_encoding": "Unique fingerprint strings sorted lexicographically, joined by LF, one terminal LF, UTF-8.",
+    "rename_candidates": "Same rule worker, same file, same evidence under the six explicitly listed old/new enclosing-symbol pairs. This does not prove preserved semantics, valid lifecycle ownership or permission to transfer/remove exceptions."
+  },
+  "gate": {
+    "status": "FAILED",
+    "exit_code": 1,
+    "new": 388,
+    "stale": 128,
+    "grown": 42,
+    "workers_in_new": 72,
+    "expired": 0,
+    "unowned": 0,
+    "raw_stderr": "architecture verification: expired=0 grown=42 new=388 stale=128 unowned=0 workers=72\nexit status 1\n"
+  },
+  "groups": {
+    "new": {
+      "count": 388,
+      "fingerprint_set_sha256": "b3a2e6d4b6fa45732b95e68508174ff801bf33beb382766095c355c0a3eb6678",
+      "by_rule": {
+        "api_construction": 29,
+        "file_budget": 25,
+        "history_comment": 44,
+        "import": 22,
+        "mutable_global": 186,
+        "production_test_hook": 10,
+        "worker": 72
+      },
+      "by_owner": {
+        "NO_CURRENT_OWNER_RULE": 37,
+        "application-services": 104,
+        "composition-entrypoints": 6,
+        "gui-adapter": 10,
+        "lifecycle-runtime": 191,
+        "mcp-runtime": 28,
+        "repository-tooling": 11,
+        "tool-runtime": 1
+      },
+      "by_path": {
+        "cmd/mcphub-launcher/main_windows.go": 2,
+        "cmd/mcphub/main.go": 4,
+        "internal/api/adopt.go": 4,
+        "internal/api/adopt_port.go": 1,
+        "internal/api/adopt_project_target.go": 1,
+        "internal/api/adopt_provider_execution.go": 2,
+        "internal/api/adopted_entries.go": 2,
+        "internal/api/cleanup.go": 1,
+        "internal/api/client_entry_remove.go": 1,
+        "internal/api/client_write_init.go": 1,
+        "internal/api/dacl_create_observed_windows.go": 1,
+        "internal/api/deadopt.go": 1,
+        "internal/api/deadopt_execute_test.go": 1,
+        "internal/api/graphify_project_provenance.go": 1,
+        "internal/api/gui_owner_control.go": 3,
+        "internal/api/hub_mcp_project_authority.go": 1,
+        "internal/api/hub_mcp_tokens.go": 1,
+        "internal/api/idle_prune_gui_external_test.go": 1,
+        "internal/api/install.go": 1,
+        "internal/api/install_intent.go": 1,
+        "internal/api/install_parsed_manifest.go": 4,
+        "internal/api/manifest.go": 2,
+        "internal/api/project_client_attachment_install.go": 1,
+        "internal/api/provider_legacy_recovery_runtime.go": 2,
+        "internal/api/scan.go": 1,
+        "internal/api/secrets.go": 1,
+        "internal/api/secure_create_parent_anywhere_windows.go": 1,
+        "internal/api/secure_write_client_config.go": 3,
+        "internal/api/secure_write_windows.go": 2,
+        "internal/api/serena_client_reconcile_test.go": 1,
+        "internal/api/serena_intent_repair.go": 1,
+        "internal/api/serena_preparation_assembly.go": 1,
+        "internal/api/serena_preparation_policy.go": 1,
+        "internal/api/serena_prepared_inputs.go": 1,
+        "internal/api/settings.go": 2,
+        "internal/api/state_dir_resolution_observed_windows.go": 1,
+        "internal/api/state_file_observed_lease.go": 1,
+        "internal/api/state_read_dacl_observed_windows.go": 1,
+        "internal/api/stdio_bridge_admission.go": 2,
+        "internal/api/supervisor_backend_run_hold.go": 2,
+        "internal/api/supervisor_intent.go": 1,
+        "internal/api/supervisor_ipc_lazy_readiness_client.go": 1,
+        "internal/api/supervisor_ipc_status_client.go": 3,
+        "internal/api/supervisor_port_owner.go": 4,
+        "internal/api/testhooks.go": 1,
+        "internal/api/workspace_registry_snapshot.go": 3,
+        "internal/binaryadmission/source_epoch.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_build_observation.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_members_windows.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_read_comments.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_set.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_stage_windows.go": 1,
+        "internal/binaryadmission/windows_canonical_entry_unsupported.go": 1,
+        "internal/binaryadmission/windows_product_registry_compiled.go": 2,
+        "internal/buildinfo/buildinfo.go": 4,
+        "internal/cbuild/diagnostics.go": 5,
+        "internal/cbuild/mcp/server.go": 4,
+        "internal/cbuild/parse_output.go": 7,
+        "internal/cli/attach_client.go": 1,
+        "internal/cli/bare_launch_windows.go": 1,
+        "internal/cli/bare_launch_windows_test.go": 1,
+        "internal/cli/client_config_env_isolation_test.go": 1,
+        "internal/cli/daemon.go": 5,
+        "internal/cli/daemon_serena.go": 1,
+        "internal/cli/daemon_stdio.go": 1,
+        "internal/cli/graphify_launch_preparation.go": 2,
+        "internal/cli/gui.go": 1,
+        "internal/cli/gui_diagnostic_sink.go": 1,
+        "internal/cli/gui_quit.go": 2,
+        "internal/cli/gui_supervisor_owner.go": 5,
+        "internal/cli/gui_supervisor_restart.go": 2,
+        "internal/cli/gui_supervisor_restart_other.go": 1,
+        "internal/cli/gui_supervisor_restart_test.go": 1,
+        "internal/cli/gui_supervisor_restart_windows.go": 3,
+        "internal/cli/gui_supervisor_restart_windows_test.go": 1,
+        "internal/cli/install.go": 4,
+        "internal/cli/install_migration_wiring_windows.go": 11,
+        "internal/cli/install_reconcile_mcp_front.go": 1,
+        "internal/cli/install_upgrade.go": 8,
+        "internal/cli/migrate_serena.go": 1,
+        "internal/cli/quit.go": 2,
+        "internal/cli/relay.go": 1,
+        "internal/cli/serena_prepared_run.go": 1,
+        "internal/cli/serena_prepared_wrapper_close.go": 1,
+        "internal/cli/settings_registry_test.go": 1,
+        "internal/cli/setup.go": 1,
+        "internal/cli/setup_install_server_test.go": 1,
+        "internal/cli/strict_mode.go": 1,
+        "internal/cli/supervise.go": 35,
+        "internal/cli/supervise_aggregate_status.go": 6,
+        "internal/cli/supervise_ensure_alive.go": 2,
+        "internal/cli/supervise_reconcile_ipc_test.go": 1,
+        "internal/cli/supervisor_launch.go": 3,
+        "internal/cli/supervisor_launch_windows.go": 1,
+        "internal/cli/supervisor_launch_windows_test.go": 1,
+        "internal/cli/supervisor_runtime_tracker.go": 2,
+        "internal/cli/upgrade.go": 2,
+        "internal/cli/upgrade_committed_recovery_windows.go": 1,
+        "internal/cli/upgrade_committed_recovery_windows_test.go": 1,
+        "internal/cli/upgrade_gui_fence_windows_test.go": 2,
+        "internal/cli/upgrade_pending_recovery_windows_test.go": 1,
+        "internal/cli/windows_canonical_entry_gui_native_replay_windows_test.go": 1,
+        "internal/cli/windows_canonical_entry_gui_replay_windows_test.go": 1,
+        "internal/cli/windows_canonical_entry_recovery_windows.go": 1,
+        "internal/cli/windows_canonical_entry_set.go": 1,
+        "internal/cli/windows_product_pair.go": 12,
+        "internal/cli/windows_product_pair_recovery_windows.go": 1,
+        "internal/cli/windows_product_pair_wiring_windows.go": 1,
+        "internal/cli/windows_product_successor_quiescence_windows.go": 3,
+        "internal/cli/workspace_cmd_test.go": 1,
+        "internal/clients/codex_cli.go": 2,
+        "internal/clients/codex_cli_project.go": 6,
+        "internal/clients/codex_configured_profile.go": 1,
+        "internal/clients/codex_project_attachment.go": 4,
+        "internal/clients/codex_provider_mcp.go": 2,
+        "internal/clients/config_lock.go": 2,
+        "internal/clients/entry_bytes.go": 1,
+        "internal/clients/entry_removal.go": 3,
+        "internal/clients/managed_registration.go": 2,
+        "internal/clients/provider_mcp.go": 2,
+        "internal/clients/write.go": 6,
+        "internal/config/manifest.go": 4,
+        "internal/daemon/host.go": 8,
+        "internal/daemon/host_original.go": 3,
+        "internal/daemon/host_original_windows.go": 4,
+        "internal/daemon/http_host_prepared.go": 3,
+        "internal/daemon/isolated_stdio.go": 1,
+        "internal/daemon/isolated_stdio_write.go": 3,
+        "internal/daemon/lazy_proxy_readiness.go": 1,
+        "internal/daemon/stdio_launch_preparation.go": 5,
+        "internal/e2e/cst_saved_field_result_tree_probe_windows_test.go": 1,
+        "internal/e2e/cst_watchdog_parent/control_windows.go": 2,
+        "internal/e2e/cstwatchdogwire/wire_windows.go": 1,
+        "internal/e2e/scan_readiness_fixture/driver/main_windows.go": 1,
+        "internal/e2e/scan_readiness_fixture/fixture/main.go": 1,
+        "internal/gui/adopt.go": 1,
+        "internal/gui/gui_exit_reason.go": 1,
+        "internal/gui/gui_owner_lifecycle.go": 2,
+        "internal/gui/gui_quit_types.go": 4,
+        "internal/gui/gui_self_restart.go": 1,
+        "internal/gui/probe.go": 1,
+        "internal/kimi/receipt.go": 1,
+        "internal/kimi/runner.go": 2,
+        "internal/oneapirun/async.go": 1,
+        "internal/process/contained_stream.go": 3,
+        "internal/process/contained_stream_observed.go": 1,
+        "internal/process/cst_observer_adapter_windows.go": 4,
+        "internal/process/jobobject_windows.go": 3,
+        "internal/process/jobobject_windows_test.go": 1,
+        "internal/process/lookup_process_identity_set_windows.go": 1,
+        "internal/process/original_member_custody.go": 2,
+        "internal/process/proc_thread_attribute_observed_windows.go": 4,
+        "internal/process/provisional.go": 1,
+        "internal/process/publisher_lookup_windows.go": 1,
+        "internal/process/run_strictly_contained.go": 5,
+        "internal/process/start_with_job_windows.go": 1,
+        "internal/process/terminate_pid.go": 1,
+        "internal/releasegen/serena/main.go": 2,
+        "internal/scheduler/entrypoint_migration_windows.go": 1,
+        "internal/sonnet/server.go": 12,
+        "internal/tray/tray.go": 9,
+        "tools/test-job-entry/main_windows.go": 4,
+        "tools/test-job-entry/owner_windows.go": 1
+      }
+    },
+    "stale": {
+      "count": 128,
+      "fingerprint_set_sha256": "769eb91335735b1a170d0004aee8d375331da7eb74230b2f39acb1199001069a",
+      "by_rule": {
+        "api_construction": 15,
+        "history_comment": 57,
+        "import": 2,
+        "mutable_global": 10,
+        "production_constructor": 2,
+        "production_test_hook": 3,
+        "worker": 39
+      },
+      "by_owner": {
+        "application-services": 25,
+        "composition-entrypoints": 1,
+        "gui-adapter": 11,
+        "lifecycle-runtime": 81,
+        "mcp-runtime": 9,
+        "repository-tooling": 1
+      },
+      "by_path": {
+        "cmd/mcphub/main.go": 1,
+        "internal/api/adopted_entries.go": 5,
+        "internal/api/cleanup.go": 1,
+        "internal/api/install.go": 1,
+        "internal/api/install_intent.go": 1,
+        "internal/api/install_parsed_manifest.go": 5,
+        "internal/api/lsp_routing/resolver.go": 2,
+        "internal/api/scan.go": 2,
+        "internal/api/secrets.go": 1,
+        "internal/api/secure_create_parent_anywhere_windows.go": 1,
+        "internal/api/secure_write_windows.go": 1,
+        "internal/api/serena_routing/resolver.go": 2,
+        "internal/api/settings.go": 1,
+        "internal/api/supervisor_port_owner.go": 1,
+        "internal/cli/adopt.go": 1,
+        "internal/cli/daemon.go": 5,
+        "internal/cli/gui.go": 3,
+        "internal/cli/gui_supervisor_owner.go": 4,
+        "internal/cli/install.go": 7,
+        "internal/cli/install_migration_wiring_windows.go": 2,
+        "internal/cli/install_reconcile_mcp_front.go": 1,
+        "internal/cli/migrate_serena.go": 1,
+        "internal/cli/process_identity_match_common.go": 2,
+        "internal/cli/route.go": 4,
+        "internal/cli/route_session_expiry_test.go": 1,
+        "internal/cli/setup.go": 1,
+        "internal/cli/supervise.go": 36,
+        "internal/cli/supervise_reconcile_ipc.go": 1,
+        "internal/cli/windows_product_pair_wiring_windows.go": 1,
+        "internal/clients/config_lock.go": 1,
+        "internal/daemon/host.go": 9,
+        "internal/gui/adopt.go": 2,
+        "internal/gui/gui_self_restart.go": 1,
+        "internal/gui/hub_listener.go": 2,
+        "internal/gui/install.go": 3,
+        "internal/gui/server.go": 1,
+        "internal/gui/supervisor_restart.go": 2,
+        "internal/process/contained_stream.go": 3,
+        "internal/process/provisional.go": 1,
+        "internal/process/run_strictly_contained.go": 4,
+        "internal/process/start_with_job_windows.go": 1,
+        "internal/releasegen/serena/main.go": 1,
+        "internal/tray/tray.go": 2
+      }
+    },
+    "grown": {
+      "count": 42,
+      "fingerprint_set_sha256": "7ed13ac02a4cef2142f6b44a4ea343ce6fdf03682777f67ed0de8f72772e8cdd",
+      "by_rule": {
+        "api_construction": 1,
+        "file_budget": 41
+      },
+      "by_owner": {
+        "application-services": 19,
+        "gui-adapter": 3,
+        "lifecycle-runtime": 16,
+        "mcp-runtime": 3,
+        "repository-tooling": 1
+      },
+      "by_path": {
+        "internal/api/adopt.go": 1,
+        "internal/api/adopt_test.go": 1,
+        "internal/api/adopted_entries.go": 1,
+        "internal/api/client_write_init.go": 1,
+        "internal/api/deadopt.go": 1,
+        "internal/api/install.go": 1,
+        "internal/api/install_parsed_manifest.go": 1,
+        "internal/api/install_parsed_manifest_test.go": 1,
+        "internal/api/processes.go": 1,
+        "internal/api/register.go": 1,
+        "internal/api/register_supervisor.go": 1,
+        "internal/api/register_test.go": 1,
+        "internal/api/scan.go": 1,
+        "internal/api/scan_test.go": 1,
+        "internal/api/serena_client_reconcile.go": 1,
+        "internal/cli/gui.go": 2,
+        "internal/cli/install.go": 1,
+        "internal/cli/install_migration_wiring_windows.go": 1,
+        "internal/cli/install_reconcile_mcp_front.go": 1,
+        "internal/cli/install_reconcile_mcp_front_v3_test.go": 1,
+        "internal/cli/migrate_serena.go": 1,
+        "internal/cli/migrate_serena_test.go": 1,
+        "internal/cli/supervise.go": 1,
+        "internal/cli/supervise_ensure_alive.go": 1,
+        "internal/cli/supervise_ensure_alive_test.go": 1,
+        "internal/cli/supervise_reconcile_ipc.go": 1,
+        "internal/cli/supervise_reconcile_wiring_test.go": 1,
+        "internal/cli/supervisor_runtime_tracker.go": 1,
+        "internal/cli/workspace_cmd.go": 1,
+        "internal/clients/cas_mutator.go": 1,
+        "internal/clients/clients.go": 1,
+        "internal/clients/codex_cli.go": 1,
+        "internal/config/manifest.go": 1,
+        "internal/daemon/host.go": 1,
+        "internal/daemon/lazy_proxy.go": 1,
+        "internal/daemon/lazy_proxy_test.go": 1,
+        "internal/daemonrecovery/recovery_test.go": 1,
+        "internal/gui/gui_restart_protocol.go": 1,
+        "internal/gui/gui_restart_protocol_test.go": 1,
+        "internal/gui/single_instance.go": 1,
+        "internal/releasegen/serena/main.go": 1
+      }
+    },
+    "workers_in_new": {
+      "count": 72,
+      "fingerprint_set_sha256": "ad8f9934dd3659756e4c436d524433230542489b5dd27ffa81cfc0a6bcd39117",
+      "by_rule": {
+        "worker": 72
+      },
+      "by_owner": {
+        "NO_CURRENT_OWNER_RULE": 5,
+        "gui-adapter": 1,
+        "lifecycle-runtime": 45,
+        "mcp-runtime": 18,
+        "repository-tooling": 3
+      },
+      "by_path": {
+        "internal/cbuild/mcp/server.go": 3,
+        "internal/cli/daemon.go": 1,
+        "internal/cli/daemon_stdio.go": 1,
+        "internal/cli/gui.go": 1,
+        "internal/cli/gui_supervisor_owner.go": 1,
+        "internal/cli/gui_supervisor_restart.go": 1,
+        "internal/cli/serena_prepared_run.go": 1,
+        "internal/cli/serena_prepared_wrapper_close.go": 1,
+        "internal/cli/supervise.go": 19,
+        "internal/cli/supervise_aggregate_status.go": 2,
+        "internal/cli/supervisor_launch_windows.go": 1,
+        "internal/daemon/host.go": 5,
+        "internal/daemon/host_original.go": 3,
+        "internal/daemon/host_original_windows.go": 4,
+        "internal/daemon/http_host_prepared.go": 3,
+        "internal/daemon/isolated_stdio.go": 1,
+        "internal/daemon/isolated_stdio_write.go": 1,
+        "internal/daemon/lazy_proxy_readiness.go": 1,
+        "internal/e2e/scan_readiness_fixture/fixture/main.go": 1,
+        "internal/gui/gui_self_restart.go": 1,
+        "internal/process/contained_stream.go": 3,
+        "internal/process/provisional.go": 1,
+        "internal/process/run_strictly_contained.go": 4,
+        "internal/sonnet/server.go": 1,
+        "internal/tray/tray.go": 8,
+        "tools/test-job-entry/main_windows.go": 3
+      }
+    }
+  },
+  "comparison_with_parent_published_scan": {
+    "before_findings": 2663,
+    "after_findings": 2661,
+    "before_baseline_entries": 2403,
+    "after_baseline_entries": 2401,
+    "scan_removed_fingerprints": [
+      "e5fdef8f26dc96d7e48ecb4765a02366700db59ddb2bc8a5dadef4ddf59feb1e",
+      "f3d272e6ed8a36d6358b42d85f3f10b2280af119c731c45422694de9d84c981a"
+    ],
+    "scan_added_fingerprints": [],
+    "baseline_removed_fingerprints": [
+      "e5fdef8f26dc96d7e48ecb4765a02366700db59ddb2bc8a5dadef4ddf59feb1e",
+      "f3d272e6ed8a36d6358b42d85f3f10b2280af119c731c45422694de9d84c981a"
+    ],
+    "baseline_added_fingerprints": [],
+    "new_set_unchanged": true,
+    "stale_set_unchanged": true,
+    "grown_set_unchanged": true,
+    "scan_metric_changes": [
+      {
+        "fingerprint": "e7f29b64ccfbb97e6553b041f6a4c1d9952da9e14de4033f9da9820e976d1d88",
+        "path": "internal/gui/server.go",
+        "before": 1263,
+        "after": 1265
+      }
+    ]
+  },
+  "mcproute_accounting": {
+    "pairs": 102,
+    "scan_findings": 102,
+    "baseline_entries": 102,
+    "new": 0,
+    "stale": 0,
+    "old_fingerprints_in_current_baseline": 0,
+    "old_fingerprints_in_stale": 0,
+    "new_fingerprints_in_current_baseline": 102,
+    "new_fingerprints_in_current_scan": 102,
+    "current_fingerprint_set_sha256": "bed0eb1c9553b0918ed36878eb5585f581b4148d6e3f775b75f721f1a134cb50",
+    "interpretation": "All 102 previous gui-to-mcproute relocation fingerprints are already accounted for; they are not current Stale."
+  },
+  "worker_rename_candidates": {
+    "count": 30,
+    "by_symbol_pair": [
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "stale_workers": 15,
+        "new_workers": 15,
+        "matching_evidence": 15
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "makeProductionSpawnFnWithStatePath",
+        "new_symbol": "makeProductionSpawnFnWithCreatorRecords",
+        "stale_workers": 2,
+        "new_workers": 2,
+        "matching_evidence": 2
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "acceptIPCConnections",
+        "new_symbol": "acceptIPCConnectionsWithSession",
+        "stale_workers": 1,
+        "new_workers": 1,
+        "matching_evidence": 1
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "stale_workers": 5,
+        "new_workers": 5,
+        "matching_evidence": 5
+      },
+      {
+        "path": "internal/process/contained_stream.go",
+        "old_symbol": "runContainedStreamWithDependencies",
+        "new_symbol": "runContainedStreamCore",
+        "stale_workers": 3,
+        "new_workers": 3,
+        "matching_evidence": 3
+      },
+      {
+        "path": "internal/process/run_strictly_contained.go",
+        "old_symbol": "runStrictlyContainedWithJob",
+        "new_symbol": "runStrictlyContainedWithJobCloseFault",
+        "stale_workers": 4,
+        "new_workers": 4,
+        "matching_evidence": 4
+      }
+    ],
+    "pairs": [
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "b4e0b7e3803acfb229cfd85db1da8a3fa7d298df06f0290ea9e7a57f636ef192",
+        "new_fingerprint": "67f51f8fef195039529c30ad16c41806c0e5b3038c8489d9e55fa91888120c55",
+        "old_baseline_line": 864,
+        "new_scan_line": 961
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #10",
+        "old_fingerprint": "8a78a72cb816310f663a45d2522e9e111790ced94a908063a84946028ecf53bd",
+        "new_fingerprint": "bcf285fc5be0609ac5029e9ee5a4b489e10ff2e462555e7d8486a5e31b1bd7ac",
+        "old_baseline_line": 1339,
+        "new_scan_line": 1463
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #11",
+        "old_fingerprint": "db8ebc6870ea2bea7c3a7f7b8faa86aae869eebe11229161172c9c6bc02cafde",
+        "new_fingerprint": "3cac06b534653c1b664aa695af539c08b3ce53f20b91ae894823f6dd7455b3a4",
+        "old_baseline_line": 1348,
+        "new_scan_line": 1472
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #12",
+        "old_fingerprint": "1dd28a28dcdddbc06141d21343504a425049c24299d82310c539d6c2f8484a6c",
+        "new_fingerprint": "278b33cb4c30bf259453568b271c5c2e2471820f4b4ddda683677b9ce5c8a55b",
+        "old_baseline_line": 1451,
+        "new_scan_line": 1575
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #13",
+        "old_fingerprint": "16cd298667dcb7463c080d75f26deb50c9c9b7149f446250a0debb98e7e8f070",
+        "new_fingerprint": "de3dba97fc0c0a01a8c271b27c17b517b8f2af48bce1361795c666c0ed9d71e5",
+        "old_baseline_line": 1507,
+        "new_scan_line": 1631
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #14",
+        "old_fingerprint": "57687d7d00afdf9362ab0b5703f69a13652dfc6345d7a35d367546ed73fcdb4a",
+        "new_fingerprint": "992c9ce11d0c852370497524b5c3490345fd13c6c9d71f20b2f988869a3424a0",
+        "old_baseline_line": 1549,
+        "new_scan_line": 1677
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #15",
+        "old_fingerprint": "6c7865cece5e071db85e5e2b5381b56eb0202d7e6bec50a3fbbb3a2ce13a6ad7",
+        "new_fingerprint": "342e26b44969f25d0ec9f704af94155937fc92b3f97aad745ae18a031dd54431",
+        "old_baseline_line": 1563,
+        "new_scan_line": 1696
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #2",
+        "old_fingerprint": "1b44a142cc7cdbab1500fbe1adb963fe615ede4d3315a519b2cc15995f7a3a07",
+        "new_fingerprint": "7c087279b0ceee4ebbe4e1ea57c943878e00edb5cc424dc9813a024758e328de",
+        "old_baseline_line": 1083,
+        "new_scan_line": 1201
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #3",
+        "old_fingerprint": "771fc481939ff5bc3945536c52b606df1c43d7f42b1b086796d239c837b1b3ba",
+        "new_fingerprint": "6388c6cd3a0446f3a8e5cc5cff977a3bda12c15361d81c68b48c24ffab9ffd22",
+        "old_baseline_line": 1087,
+        "new_scan_line": 1205
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #4",
+        "old_fingerprint": "d2c6091943bab9357f27b7dc9287b077e7ba29ac2b3fae4b809d352067adc064",
+        "new_fingerprint": "22af18369c8f08ed65799f4878cc8f609774a7d4552741b6627ffcea6ca3e1a0",
+        "old_baseline_line": 1119,
+        "new_scan_line": 1242
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #5",
+        "old_fingerprint": "34305909d0f8ed37afc50a7e8c164b323f2cee8cdbabb271c9beba108cc8c96b",
+        "new_fingerprint": "95e30f36df92791d7e52e244b4151ec4d32ac718e19d897ff3abb8c0ac904947",
+        "old_baseline_line": 1241,
+        "new_scan_line": 1365
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #6",
+        "old_fingerprint": "379260e73c333cbd39f11ed126d19e479430d35e3d67b5e2d31c376de130e824",
+        "new_fingerprint": "e4b162f469e6684183ab3b16279a2976a14225471f1a00a6d7a4f4ae39690c19",
+        "old_baseline_line": 1256,
+        "new_scan_line": 1380
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #7",
+        "old_fingerprint": "db99509bcb9cdf1ad322db1e205182da0e3bfc416366c2e8edb7dc57b60d9eec",
+        "new_fingerprint": "6ea7feedec51becdde2638a10cac964b5f84c8646fa358eef6e2b2231d6e841e",
+        "old_baseline_line": 1279,
+        "new_scan_line": 1403
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #8",
+        "old_fingerprint": "087f6f701b5b7183497805404528c33487d9ec3fd4ef8e5e06c4ae9b42ff38bb",
+        "new_fingerprint": "5c61c04c291809aa5c0735c228d4c416a3042e643cf0bbb2bfd660a74891a84c",
+        "old_baseline_line": 1311,
+        "new_scan_line": 1435
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "runSupervise",
+        "new_symbol": "runSuperviseWithIPCOptions",
+        "evidence": "go func literal #9",
+        "old_fingerprint": "eb708a7d1809143e557b4c08b720fd05bd691012143da24407ee25788815aa51",
+        "new_fingerprint": "722f8f20bc923e920bc02a23b427d8ef0d4617c320100b5ff3136577a936c217",
+        "old_baseline_line": 1316,
+        "new_scan_line": 1440
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "makeProductionSpawnFnWithStatePath",
+        "new_symbol": "makeProductionSpawnFnWithCreatorRecords",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "927ac83ce8f134a9f5c56065ebd22f9f7ed7ebfa19fcc4ad5625806d614a2225",
+        "new_fingerprint": "73e725891aa839444e13075ff577482baf05be0daf1ed6c8a6800976cd19851d",
+        "old_baseline_line": 4137,
+        "new_scan_line": 4478
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "makeProductionSpawnFnWithStatePath",
+        "new_symbol": "makeProductionSpawnFnWithCreatorRecords",
+        "evidence": "go func literal #2",
+        "old_fingerprint": "8aaae1f42a8b82cc2fe9187275e3a15924a8fcea676d57f8d0a58323eaa4775c",
+        "new_fingerprint": "261aa46936ecf68fb3e6746fc8d1e56cdec2b5b05c02b6cfcef476e3f628cef3",
+        "old_baseline_line": 4179,
+        "new_scan_line": 4527
+      },
+      {
+        "path": "internal/cli/supervise.go",
+        "old_symbol": "acceptIPCConnections",
+        "new_symbol": "acceptIPCConnectionsWithSession",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "7804445d2fd301cbabef0ee0e2613dd721c01217f198cae939194ad9181d2e68",
+        "new_fingerprint": "c31384a32f26f2cca8f217860e67352ab2d784b9bf0063a811ecce0a13acf119",
+        "old_baseline_line": 1945,
+        "new_scan_line": 2096
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "c3bcaf7fa591f2188bf98f305864664ba83ee19f1ec28d878aa11b85bb47aedf",
+        "new_fingerprint": "8ba1528a2a187f7d7a348fad275953ab09441d4295500cc9ddb4b68cbc60e0e8",
+        "old_baseline_line": 408,
+        "new_scan_line": 437
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "evidence": "go func literal #2",
+        "old_fingerprint": "44f82363296725c280786f28c9a4bdb19cf5c1ffb483ff21033575118722e1da",
+        "new_fingerprint": "7c1b57ec388300e2c826de88aff526207cf10edeed90ede3d67c3ba8449fbe0d",
+        "old_baseline_line": 429,
+        "new_scan_line": 457
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "evidence": "go func literal #3",
+        "old_fingerprint": "9ba84bc68209fbcc91b5c8bac1b57ef174f441bc421108dcd603e2f27c97012c",
+        "new_fingerprint": "849c9b7143a603eda801ea818ac3eea827c4e88a84a1427d390fc7a138406761",
+        "old_baseline_line": 527,
+        "new_scan_line": 555
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "evidence": "go func literal #4",
+        "old_fingerprint": "f181bfab70ac84c7345e39a190d813650de295d8dc42ea3bd12e4f47de85276b",
+        "new_fingerprint": "1fb046a5479b96ac066bc7747197a099b54ac6fd304f41953525ff6910987b12",
+        "old_baseline_line": 538,
+        "new_scan_line": 566
+      },
+      {
+        "path": "internal/daemon/host.go",
+        "old_symbol": "*StdioHost.Start",
+        "new_symbol": "*StdioHost.start",
+        "evidence": "go func literal #5",
+        "old_fingerprint": "e0e97d83b8e56ba26304b4c86c6d141267d5bdd5811a80724b4b439162a4c998",
+        "new_fingerprint": "93fc7db6ad121f94ca611724c51fc692cf7630802ee916065489e7667ac5b49d",
+        "old_baseline_line": 554,
+        "new_scan_line": 582
+      },
+      {
+        "path": "internal/process/contained_stream.go",
+        "old_symbol": "runContainedStreamWithDependencies",
+        "new_symbol": "runContainedStreamCore",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "0c75d5ccdf74ee3f0f6228432128940d4ece3d53d3b2d68bf44b35a3d36946bd",
+        "new_fingerprint": "dc793c6a1b59bb42e56506a21a3fff2db0826a5992084e19529a941777062b2a",
+        "old_baseline_line": 343,
+        "new_scan_line": 461
+      },
+      {
+        "path": "internal/process/contained_stream.go",
+        "old_symbol": "runContainedStreamWithDependencies",
+        "new_symbol": "runContainedStreamCore",
+        "evidence": "go func literal #2",
+        "old_fingerprint": "18d6e9937e9fffb37994b8c11c5eae6297a0c271d5aec769ef455246e4307d98",
+        "new_fingerprint": "a9a1a07c4ead5d731ac1328f177748916ea78bc36c8e8ae8715263cc027549f7",
+        "old_baseline_line": 350,
+        "new_scan_line": 468
+      },
+      {
+        "path": "internal/process/contained_stream.go",
+        "old_symbol": "runContainedStreamWithDependencies",
+        "new_symbol": "runContainedStreamCore",
+        "evidence": "go func literal #3",
+        "old_fingerprint": "b524797a8aca6cbfebcb1ecefb37e58a53be87d144b37a6ae4bc1cfbfefda619",
+        "new_fingerprint": "be4091ad2fb064405dd12b486643497c84867bbd829270b81065970d1e610a98",
+        "old_baseline_line": 354,
+        "new_scan_line": 472
+      },
+      {
+        "path": "internal/process/run_strictly_contained.go",
+        "old_symbol": "runStrictlyContainedWithJob",
+        "new_symbol": "runStrictlyContainedWithJobCloseFault",
+        "evidence": "go func literal #1",
+        "old_fingerprint": "0efd947ceac3acb3ed39f9f77b5c512baae8936c7f8107ee5a729adc9a15e66d",
+        "new_fingerprint": "73d3d2f31982307c64b9aff60a7de80fee4a122d7be6f2ca74c8c2ac3436659c",
+        "old_baseline_line": 206,
+        "new_scan_line": 239
+      },
+      {
+        "path": "internal/process/run_strictly_contained.go",
+        "old_symbol": "runStrictlyContainedWithJob",
+        "new_symbol": "runStrictlyContainedWithJobCloseFault",
+        "evidence": "go func literal #2",
+        "old_fingerprint": "d4b6eda5d510600d4f4420027f7de9dd6fe374836e40c430474802b2a4f52c40",
+        "new_fingerprint": "059cd10675692e13ef23e149ae51d4ab5adf46c9535d4792fdbb22d348d9aa34",
+        "old_baseline_line": 212,
+        "new_scan_line": 245
+      },
+      {
+        "path": "internal/process/run_strictly_contained.go",
+        "old_symbol": "runStrictlyContainedWithJob",
+        "new_symbol": "runStrictlyContainedWithJobCloseFault",
+        "evidence": "go func literal #3",
+        "old_fingerprint": "9e51efdeda861f23dd03b1b71c4828f2beb297c33a3235fe10c175be390c880e",
+        "new_fingerprint": "70834c2b04710c64100a9614fd34b31c5013d35dbc0881a68b9544bb41c7944a",
+        "old_baseline_line": 217,
+        "new_scan_line": 250
+      },
+      {
+        "path": "internal/process/run_strictly_contained.go",
+        "old_symbol": "runStrictlyContainedWithJob",
+        "new_symbol": "runStrictlyContainedWithJobCloseFault",
+        "evidence": "go func literal #4",
+        "old_fingerprint": "d823f4469b82b8f610a755375680af0e96ebc59287804001e2e60bb9eab7e5c7",
+        "new_fingerprint": "bc9d0bb634e62c24bfa1c3d5868b59633d116cd73be3168655ebdc6aeefdae0a",
+        "old_baseline_line": 224,
+        "new_scan_line": 257
+      }
+    ],
+    "caveat": "These 30 matches are candidates for source and lifecycle review. An ordinal go func literal match alone cannot establish equivalence or absence of workers; no mass rebaseline is authorized."
+  },
+  "grown_details": [
+    {
+      "fingerprint": "3642b0312be448fda521b1d10cc0c0f0baa63f7135c7d00e4c7ff3f3c95d9c90",
+      "kind": "file_budget",
+      "path": "internal/cli/install_migration_wiring_windows.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1121,
+      "current_metric": 5047,
+      "delta": 3926
+    },
+    {
+      "fingerprint": "c9a375d33441f0be893cd8bb9e0f884c5cce6de42d85b52e4d07c6ef38244197",
+      "kind": "file_budget",
+      "path": "internal/api/adopted_entries.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1472,
+      "current_metric": 2230,
+      "delta": 758
+    },
+    {
+      "fingerprint": "9fcfb4628e74905b3e74bd3a0e26a5958e6264af8276b9d6e78178f6c2a162f5",
+      "kind": "file_budget",
+      "path": "internal/api/adopt.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1278,
+      "current_metric": 2003,
+      "delta": 725
+    },
+    {
+      "fingerprint": "523d1e57ce6365eb31a5d863d1b3f31855efa67ec8cdfe5a22f021239c7f4a78",
+      "kind": "file_budget",
+      "path": "internal/clients/codex_cli.go",
+      "symbol": "clients",
+      "owner": "application-services",
+      "baseline_max_metric": 1026,
+      "current_metric": 1717,
+      "delta": 691
+    },
+    {
+      "fingerprint": "460a6b27ebc48cd7cd05c7cd3eac045642ae8b2423f12533da9cad0f7b8bbfd1",
+      "kind": "file_budget",
+      "path": "internal/cli/migrate_serena_test.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 3712,
+      "current_metric": 4189,
+      "delta": 477
+    },
+    {
+      "fingerprint": "7e3aef63fa7531f8993eedf1da295b7437e83606dfa0e34f6c0418d2cd821469",
+      "kind": "file_budget",
+      "path": "internal/cli/install_reconcile_mcp_front.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 3116,
+      "current_metric": 3581,
+      "delta": 465
+    },
+    {
+      "fingerprint": "610bbf6d1ad2d3257949143ad0743f0284233e4cd23dec72da9f1012de3764bb",
+      "kind": "file_budget",
+      "path": "internal/api/install.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 4521,
+      "current_metric": 4967,
+      "delta": 446
+    },
+    {
+      "fingerprint": "ac8868ad01aad42ae71e84d693db5046320af7a0057ce9e906bb4bc2e53c1f7f",
+      "kind": "file_budget",
+      "path": "internal/api/install_parsed_manifest.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 2641,
+      "current_metric": 3086,
+      "delta": 445
+    },
+    {
+      "fingerprint": "b5c70d98916f794fdf1573d92daff1beb853ac8ed547e27c3cca33c9eff90a70",
+      "kind": "file_budget",
+      "path": "internal/api/deadopt.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1034,
+      "current_metric": 1459,
+      "delta": 425
+    },
+    {
+      "fingerprint": "afa3f821009cc4701d6bd6ec2372f14ea58e47fe3b36702fc6a479d0686726fe",
+      "kind": "file_budget",
+      "path": "internal/cli/supervise.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 4329,
+      "current_metric": 4737,
+      "delta": 408
+    },
+    {
+      "fingerprint": "f9fc81a17a32db7739e1685490827b065ca86a328d5d81e659334952497c2669",
+      "kind": "file_budget",
+      "path": "internal/api/register_test.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 8285,
+      "current_metric": 8640,
+      "delta": 355
+    },
+    {
+      "fingerprint": "743781d80a0ade14c3cefce8851bc0476801eceb64801e06d6cb97a86650ba77",
+      "kind": "file_budget",
+      "path": "internal/cli/supervise_reconcile_wiring_test.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 2331,
+      "current_metric": 2655,
+      "delta": 324
+    },
+    {
+      "fingerprint": "6889a2bc6ab62a1e28a1fa0eac23ff963866bf11f365be0997253726f6272e7d",
+      "kind": "file_budget",
+      "path": "internal/gui/gui_restart_protocol_test.go",
+      "symbol": "gui",
+      "owner": "gui-adapter",
+      "baseline_max_metric": 2015,
+      "current_metric": 2315,
+      "delta": 300
+    },
+    {
+      "fingerprint": "74c100e4dcbc72de9b8bd981d85c16e14a6f47b687ae5b423160cab6649a51f7",
+      "kind": "file_budget",
+      "path": "internal/releasegen/serena/main.go",
+      "symbol": "main",
+      "owner": "repository-tooling",
+      "baseline_max_metric": 1169,
+      "current_metric": 1408,
+      "delta": 239
+    },
+    {
+      "fingerprint": "78a50bf44c0538d27ff75d1d74bfd6508443daec4d1a7793cd5dd172000b5389",
+      "kind": "file_budget",
+      "path": "internal/api/scan.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 3054,
+      "current_metric": 3263,
+      "delta": 209
+    },
+    {
+      "fingerprint": "6c326ce034fc8ca1b8fc4e4650a21417403b8a1d6c15bc640b0befe9f8d23858",
+      "kind": "file_budget",
+      "path": "internal/api/scan_test.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 2581,
+      "current_metric": 2775,
+      "delta": 194
+    },
+    {
+      "fingerprint": "df8740c1d45f18f89ad1f39f0c06e9a0f2dca088587af6b5cc56d6e6d806b6ba",
+      "kind": "file_budget",
+      "path": "internal/config/manifest.go",
+      "symbol": "config",
+      "owner": "application-services",
+      "baseline_max_metric": 1455,
+      "current_metric": 1628,
+      "delta": 173
+    },
+    {
+      "fingerprint": "644f486ba4ae8d177bf64de19e1840a22c1aeefd44ff976faaf439a304c776e6",
+      "kind": "file_budget",
+      "path": "internal/api/install_parsed_manifest_test.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 3407,
+      "current_metric": 3570,
+      "delta": 163
+    },
+    {
+      "fingerprint": "8d714359f1c16abc06c33a37426e778dcc2fc8894b26554fc5af62c9d0fdfb21",
+      "kind": "file_budget",
+      "path": "internal/daemon/host.go",
+      "symbol": "daemon",
+      "owner": "mcp-runtime",
+      "baseline_max_metric": 1448,
+      "current_metric": 1596,
+      "delta": 148
+    },
+    {
+      "fingerprint": "929f932c7c5234e547f45e67fe6c26c47de21f51ded0f6475a1b9204ce54521c",
+      "kind": "file_budget",
+      "path": "internal/cli/install.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1437,
+      "current_metric": 1583,
+      "delta": 146
+    },
+    {
+      "fingerprint": "eec040e27481652de6e07e889dcae0df16a5a0e9c7a2efc2387c8a7cef30d5c6",
+      "kind": "file_budget",
+      "path": "internal/api/processes.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1010,
+      "current_metric": 1146,
+      "delta": 136
+    },
+    {
+      "fingerprint": "a58452bd91a6d8133252920b289208eb142f208e04af44c6c6ac58cc4c6b0b8b",
+      "kind": "file_budget",
+      "path": "internal/cli/migrate_serena.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1821,
+      "current_metric": 1932,
+      "delta": 111
+    },
+    {
+      "fingerprint": "8065a534a9e5b29a94a6ace417cbc9cd3e79c8156a38adf29b2b4ebe4a71dc99",
+      "kind": "file_budget",
+      "path": "internal/api/adopt_test.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 2151,
+      "current_metric": 2260,
+      "delta": 109
+    },
+    {
+      "fingerprint": "f5c306bfc3e038f2247925bb6a3f2bb3814198f42d50baba93897ee3391e7fda",
+      "kind": "file_budget",
+      "path": "internal/cli/gui.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 2112,
+      "current_metric": 2218,
+      "delta": 106
+    },
+    {
+      "fingerprint": "cefc3bc023d03576c0c0576ae7c3ce146aa379758768e1e2810b97e489eb2182",
+      "kind": "file_budget",
+      "path": "internal/cli/supervisor_runtime_tracker.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1335,
+      "current_metric": 1436,
+      "delta": 101
+    },
+    {
+      "fingerprint": "014ad87b0c4101fda016b589604c4cc03522253d08b0e9a303414073a61c3f52",
+      "kind": "file_budget",
+      "path": "internal/api/register_supervisor.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1024,
+      "current_metric": 1122,
+      "delta": 98
+    },
+    {
+      "fingerprint": "3a084e880d85a55dddb6fd301875b2601ecd69f029ad3f407e3656a33bb51b64",
+      "kind": "file_budget",
+      "path": "internal/daemon/lazy_proxy.go",
+      "symbol": "daemon",
+      "owner": "mcp-runtime",
+      "baseline_max_metric": 2168,
+      "current_metric": 2246,
+      "delta": 78
+    },
+    {
+      "fingerprint": "4ee5c66961c878dfcd581b6c1c26b4431be361ec0c4310da4d19e1f51065def1",
+      "kind": "file_budget",
+      "path": "internal/cli/supervise_reconcile_ipc.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1357,
+      "current_metric": 1425,
+      "delta": 68
+    },
+    {
+      "fingerprint": "c213ab404144665985e6c106a58feda0a076dc25a4ae3fa778d6be72a34ad666",
+      "kind": "file_budget",
+      "path": "internal/gui/gui_restart_protocol.go",
+      "symbol": "gui",
+      "owner": "gui-adapter",
+      "baseline_max_metric": 1279,
+      "current_metric": 1344,
+      "delta": 65
+    },
+    {
+      "fingerprint": "765a6fd1644bec5054b393ec5c42e1cd11c335d70616025a325c9c1b5dec23c9",
+      "kind": "file_budget",
+      "path": "internal/cli/supervise_ensure_alive_test.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 3560,
+      "current_metric": 3621,
+      "delta": 61
+    },
+    {
+      "fingerprint": "7cd51c6fd041571bbef9c37f7bd451a2a2e30995d66d5b4b8dff5e64d3549151",
+      "kind": "file_budget",
+      "path": "internal/api/client_write_init.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1244,
+      "current_metric": 1304,
+      "delta": 60
+    },
+    {
+      "fingerprint": "bbbf710cf2feed6ae89bc63cdb6e639b652993a0eb866f668848a9ff6dea800f",
+      "kind": "file_budget",
+      "path": "internal/clients/cas_mutator.go",
+      "symbol": "clients",
+      "owner": "application-services",
+      "baseline_max_metric": 1012,
+      "current_metric": 1057,
+      "delta": 45
+    },
+    {
+      "fingerprint": "ebb631f2b7bef412e225835c2ba9f8df99cef10da6c6f358233c91e53b846305",
+      "kind": "file_budget",
+      "path": "internal/cli/supervise_ensure_alive.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1953,
+      "current_metric": 1981,
+      "delta": 28
+    },
+    {
+      "fingerprint": "ae9d0f12d63d9b3394bf1872556fb9fcbabbab48956a6880881119724d4a0d36",
+      "kind": "file_budget",
+      "path": "internal/daemon/lazy_proxy_test.go",
+      "symbol": "daemon",
+      "owner": "mcp-runtime",
+      "baseline_max_metric": 4271,
+      "current_metric": 4285,
+      "delta": 14
+    },
+    {
+      "fingerprint": "be483bb14f320d01d6a287f7ccddb625f56a873f333889b5a4524c55616e0c19",
+      "kind": "file_budget",
+      "path": "internal/gui/single_instance.go",
+      "symbol": "gui",
+      "owner": "gui-adapter",
+      "baseline_max_metric": 1833,
+      "current_metric": 1845,
+      "delta": 12
+    },
+    {
+      "fingerprint": "11c735f6cb5968f84f749a90dea4dc934d79f80a6dba0a3998922c7375f6a03d",
+      "kind": "file_budget",
+      "path": "internal/api/register.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 3303,
+      "current_metric": 3314,
+      "delta": 11
+    },
+    {
+      "fingerprint": "71192396c5edc0bb05ee3591144892cf389d32e60d2a0a3ef19630e75b32e5ee",
+      "kind": "file_budget",
+      "path": "internal/clients/clients.go",
+      "symbol": "clients",
+      "owner": "application-services",
+      "baseline_max_metric": 1696,
+      "current_metric": 1705,
+      "delta": 9
+    },
+    {
+      "fingerprint": "27c5e84f1df0d1de2cdce4478d25e1ede1c945fb5d02b0625b7d5eb0fe8eab54",
+      "kind": "file_budget",
+      "path": "internal/daemonrecovery/recovery_test.go",
+      "symbol": "daemonrecovery",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 2712,
+      "current_metric": 2720,
+      "delta": 8
+    },
+    {
+      "fingerprint": "eb985651a1e47d1f5753a64990e78d01d53d73cebba499af00bd198588a0d555",
+      "kind": "api_construction",
+      "path": "internal/cli/gui.go",
+      "symbol": "newGuiCmdReal",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1,
+      "current_metric": 2,
+      "delta": 1
+    },
+    {
+      "fingerprint": "ef1d988fe0d1a5e074bcff3b719ff6295e23562e2a66b0620862afd28988c612",
+      "kind": "file_budget",
+      "path": "internal/api/serena_client_reconcile.go",
+      "symbol": "api",
+      "owner": "application-services",
+      "baseline_max_metric": 1593,
+      "current_metric": 1594,
+      "delta": 1
+    },
+    {
+      "fingerprint": "4f65b31a7a4803efd0e00d600d94ea61dff081e13b986406966b4e61ec1dfbf2",
+      "kind": "file_budget",
+      "path": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 2526,
+      "current_metric": 2527,
+      "delta": 1
+    },
+    {
+      "fingerprint": "7c7fee229d38b933692e97add0fdcf8cdc068014dee244024ebe11af26a64fc9",
+      "kind": "file_budget",
+      "path": "internal/cli/workspace_cmd.go",
+      "symbol": "cli",
+      "owner": "lifecycle-runtime",
+      "baseline_max_metric": 1904,
+      "current_metric": 1905,
+      "delta": 1
+    }
+  ],
+  "next_slices": [
+    {
+      "name": "GUIOwnerLifecycle policy-service dependency ownership",
+      "status": "proposed bounded source review and correction, not a demonstrated runtime defect",
+      "new_findings": [
+        {
+          "fingerprint": "67fadbcd883d0d924e4dbfe27eed665f93a43324c34b6157193f1e3e4f27a946",
+          "kind": "api_construction",
+          "location": {
+            "path": "internal/gui/gui_owner_lifecycle.go",
+            "symbol": "*GUIOwnerLifecycle.BeginHandoff",
+            "line": 269
+          },
+          "evidence": "mcp-local-hub/internal/api.NewAPI",
+          "metric": 1,
+          "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+        },
+        {
+          "fingerprint": "aeeedf971877511aba0b3bd41dea8eb6024712e9cb0f8efa331a2c9305036b74",
+          "kind": "api_construction",
+          "location": {
+            "path": "internal/gui/gui_owner_lifecycle.go",
+            "symbol": "writeCurrentGUIOwnerRecord",
+            "line": 208
+          },
+          "evidence": "mcp-local-hub/internal/api.NewAPI",
+          "metric": 2,
+          "message": "constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths"
+        }
+      ],
+      "actual_NewAPI_call_sites": [
+        {
+          "line": 208,
+          "text": "\t\tif _, err := api.NewAPI().ResumeGUIOwner(*resume[0]); err != nil {"
+        },
+        {
+          "line": 216,
+          "text": "\tif err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {"
+        },
+        {
+          "line": 269,
+          "text": "\tif err := api.NewAPI().WithGUIOwnerControl(func(control api.GUIOwnerControl) error {"
+        }
+      ],
+      "construction": {
+        "path": "internal/gui/gui_owner_lifecycle.go",
+        "start_line": 60,
+        "end_line": 97,
+        "lines": [
+          {
+            "line": 60,
+            "text": "// GUIOwnerLifecycle owns the durable record transitions for one process that"
+          },
+          {
+            "line": 61,
+            "text": "// already owns the GUI flock. SingleInstanceLock deliberately remains an"
+          },
+          {
+            "line": 62,
+            "text": "// unlock-only resource; cleanup changes the record before that lock releases."
+          },
+          {
+            "line": 63,
+            "text": "type GUIOwnerLifecycle struct {"
+          },
+          {
+            "line": 64,
+            "text": "\tmu         sync.Mutex"
+          },
+          {
+            "line": 65,
+            "text": "\tpath       string"
+          },
+          {
+            "line": 66,
+            "text": "\tgeneration string"
+          },
+          {
+            "line": 67,
+            "text": "\tpid        int"
+          },
+          {
+            "line": 68,
+            "text": "\tstartTime  time.Time"
+          },
+          {
+            "line": 69,
+            "text": "}"
+          },
+          {
+            "line": 70,
+            "text": ""
+          },
+          {
+            "line": 71,
+            "text": "func newGUIOwnerLifecycle(path string, record GUIOwnerRecord) *GUIOwnerLifecycle {"
+          },
+          {
+            "line": 72,
+            "text": "\treturn &GUIOwnerLifecycle{path: path, generation: record.Generation, pid: record.PID, startTime: record.StartTime.UTC()}"
+          },
+          {
+            "line": 73,
+            "text": "}"
+          },
+          {
+            "line": 74,
+            "text": ""
+          },
+          {
+            "line": 75,
+            "text": "// NewGUIOwnerLifecycle reads the record written by this process after flock"
+          },
+          {
+            "line": 76,
+            "text": "// acquisition. It is intentionally unavailable for legacy v1 records: legacy"
+          },
+          {
+            "line": 77,
+            "text": "// is a compatibility input only and cannot authorize a destructive CAS."
+          },
+          {
+            "line": 78,
+            "text": "func NewGUIOwnerLifecycle(path string) (*GUIOwnerLifecycle, error) {"
+          },
+          {
+            "line": 79,
+            "text": "\trecord, err := ReadGUIOwnerRecord(path)"
+          },
+          {
+            "line": 80,
+            "text": "\tif err != nil {"
+          },
+          {
+            "line": 81,
+            "text": "\t\treturn nil, err"
+          },
+          {
+            "line": 82,
+            "text": "\t}"
+          },
+          {
+            "line": 83,
+            "text": "\tif record.Legacy || record.Version != guiOwnerRecordVersion || record.State != guiOwnerStateActive || record.Generation == \"\" || record.PID <= 0 || record.StartTime.IsZero() {"
+          },
+          {
+            "line": 84,
+            "text": "\t\treturn nil, errors.New(\"GUI owner lifecycle requires a v2 active record\")"
+          },
+          {
+            "line": 85,
+            "text": "\t}"
+          },
+          {
+            "line": 86,
+            "text": "\tif record.PID != os.Getpid() || record.Generation != guiOwnerGeneration(record.PID, record.StartTime) {"
+          },
+          {
+            "line": 87,
+            "text": "\t\treturn nil, errors.New(\"GUI owner lifecycle record does not belong to this process\")"
+          },
+          {
+            "line": 88,
+            "text": "\t}"
+          },
+          {
+            "line": 89,
+            "text": "\tcurrent, err := currentGUIOwnerRecord(os.Getpid(), record.Port)"
+          },
+          {
+            "line": 90,
+            "text": "\tif err != nil || !current.StartTime.Equal(record.StartTime) {"
+          },
+          {
+            "line": 91,
+            "text": "\t\tif err != nil {"
+          },
+          {
+            "line": 92,
+            "text": "\t\t\treturn nil, fmt.Errorf(\"verify GUI owner process generation: %w\", err)"
+          },
+          {
+            "line": 93,
+            "text": "\t\t}"
+          },
+          {
+            "line": 94,
+            "text": "\t\treturn nil, errors.New(\"GUI owner lifecycle record has a stale process generation\")"
+          },
+          {
+            "line": 95,
+            "text": "\t}"
+          },
+          {
+            "line": 96,
+            "text": "\treturn newGUIOwnerLifecycle(path, record), nil"
+          },
+          {
+            "line": 97,
+            "text": "}"
+          }
+        ]
+      },
+      "callers_to_trace": "internal/gui/single_instance.go:317,565,798,818 at parent d39; lease acquisition and publication precede normal Server request handling",
+      "required_invariants": [
+        "Preserve GUI lease, settings-policy resume and release ordering before active record publication",
+        "Preserve exact process generation and refusal of stale ownership",
+        "Keep failed policy/resume from publishing active/handoff records",
+        "Do not assume Server.api exists at earlier single-instance lock acquisition"
+      ],
+      "suggested_checks": [
+        "Two owner instances with different injected policy dependencies",
+        "Policy/resume failure preserves prior durable record"
+      ],
+      "do_not_claim": "No blanket lifecycle or native Product qualification is established."
+    },
+    {
+      "name": "Route aggregate status worker lifecycle",
+      "status": "review existing cancellation/join evidence and tests before declaring worker contracts; no defect asserted",
+      "new_worker_findings": [
+        {
+          "fingerprint": "936ede73362243945d9fdb485ed4216437c23f8501c7a539a60f4c2cf9c5a0d1",
+          "kind": "worker",
+          "location": {
+            "path": "internal/cli/supervise_aggregate_status.go",
+            "symbol": "serveOperatorAggregateStatus",
+            "line": 436
+          },
+          "evidence": "go func literal #1",
+          "message": "goroutine func literal requires an owner, cancellation, join, and bound contract"
+        },
+        {
+          "fingerprint": "584ea7170235cb88c206b856b45b3bb7a2ce090a0fda24c78d7051510e6df8b3",
+          "kind": "worker",
+          "location": {
+            "path": "internal/cli/supervise_aggregate_status.go",
+            "symbol": "startRouteAggregateStatus",
+            "line": 484
+          },
+          "evidence": "go func literal #1",
+          "message": "goroutine func literal requires an owner, cancellation, join, and bound contract"
+        }
+      ],
+      "operator_reader_owner": {
+        "path": "internal/cli/supervise_aggregate_status.go",
+        "start_line": 432,
+        "end_line": 447,
+        "lines": [
+          {
+            "line": 432,
+            "text": "\t// From the bounded request's final LF to transport close, this is"
+          },
+          {
+            "line": 433,
+            "text": "\t// the only reader. EOF or an extra byte cancels the live query."
+          },
+          {
+            "line": 434,
+            "text": "\tvar ending atomic.Bool"
+          },
+          {
+            "line": 435,
+            "text": "\treaderDone := make(chan struct{})"
+          },
+          {
+            "line": 436,
+            "text": "\tgo func() {"
+          },
+          {
+            "line": 437,
+            "text": "\t\tdefer close(readerDone)"
+          },
+          {
+            "line": 438,
+            "text": "\t\tvar extra [1]byte"
+          },
+          {
+            "line": 439,
+            "text": "\t\t_, _ = conn.Read(extra[:])"
+          },
+          {
+            "line": 440,
+            "text": "\t\tif ending.CompareAndSwap(false, true) {"
+          },
+          {
+            "line": 441,
+            "text": "\t\t\tcancel()"
+          },
+          {
+            "line": 442,
+            "text": "\t\t}"
+          },
+          {
+            "line": 443,
+            "text": "\t}()"
+          },
+          {
+            "line": 444,
+            "text": "\tdefer func() {"
+          },
+          {
+            "line": 445,
+            "text": "\t\tretErr = errors.Join(retErr, conn.Close())"
+          },
+          {
+            "line": 446,
+            "text": "\t\t<-readerDone"
+          },
+          {
+            "line": 447,
+            "text": "\t}()"
+          }
+        ]
+      },
+      "route_start_stop_owner": {
+        "path": "internal/cli/supervise_aggregate_status.go",
+        "start_line": 472,
+        "end_line": 494,
+        "lines": [
+          {
+            "line": 472,
+            "text": "func startRouteAggregateStatus(ctx context.Context, diagnostics io.Writer, observe func() string) func() {"
+          },
+          {
+            "line": 473,
+            "text": "\tencoded, issued := os.LookupEnv(routeAggregateLaunchEnv)"
+          },
+          {
+            "line": 474,
+            "text": "\tif !issued {"
+          },
+          {
+            "line": 475,
+            "text": "\t\treturn func() {}"
+          },
+          {
+            "line": 476,
+            "text": "\t}"
+          },
+          {
+            "line": 477,
+            "text": "\tvar launch api.RouteAggregateLaunch"
+          },
+          {
+            "line": 478,
+            "text": "\tif err := json.Unmarshal([]byte(encoded), &launch); err != nil {"
+          },
+          {
+            "line": 479,
+            "text": "\t\tfmt.Fprintln(diagnostics, \"route: invalid aggregate-status supervisor launch\")"
+          },
+          {
+            "line": 480,
+            "text": "\t\treturn func() {}"
+          },
+          {
+            "line": 481,
+            "text": "\t}"
+          },
+          {
+            "line": 482,
+            "text": "\tctx, cancel := context.WithCancel(ctx)"
+          },
+          {
+            "line": 483,
+            "text": "\tdone := make(chan struct{})"
+          },
+          {
+            "line": 484,
+            "text": "\tgo func() {"
+          },
+          {
+            "line": 485,
+            "text": "\t\tdefer close(done)"
+          },
+          {
+            "line": 486,
+            "text": "\t\tif err := api.ServeRouteAggregateStatus(ctx, launch, observe); err != nil && ctx.Err() == nil {"
+          },
+          {
+            "line": 487,
+            "text": "\t\t\tfmt.Fprintf(diagnostics, \"route: aggregate-status unavailable: %v\\n\", err)"
+          },
+          {
+            "line": 488,
+            "text": "\t\t}"
+          },
+          {
+            "line": 489,
+            "text": "\t}()"
+          },
+          {
+            "line": 490,
+            "text": "\treturn func() {"
+          },
+          {
+            "line": 491,
+            "text": "\t\tcancel()"
+          },
+          {
+            "line": 492,
+            "text": "\t\t<-done"
+          },
+          {
+            "line": 493,
+            "text": "\t}"
+          },
+          {
+            "line": 494,
+            "text": "}"
+          }
+        ]
+      },
+      "required_checks": [
+        "Confirm connection Close unblocks the exact operator reader and readerDone is joined on every exit",
+        "Confirm cancel reaches ServeRouteAggregateStatus and done is joined before caller returns",
+        "Check idle peer loss, canceled query, malformed frames and existing fixture isolation; avoid registry-only whitelisting"
+      ]
+    }
+  ],
+  "source_bindings": {
+    "architecture/owners.yaml": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:architecture/owners.yaml",
+      "git_blob": "acd8ad575f5bb6cf0752fc8d7267379a7de5ecc3",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 3671,
+      "sha256": "21bad3b2ec476639e163d11ae00f05141ed267a0dea6c7d32b89228dc157d98e"
+    },
+    "architecture/workers.yaml": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:architecture/workers.yaml",
+      "git_blob": "8b0df806e5e1704aa4294b893e7aa8c7be58ab0f",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 30,
+      "sha256": "4511250f4407bf8e3d4c66deaea468602e8faf5734b4f9b5a57d93bf54ab68cc"
+    },
+    "internal/archguard/fingerprint.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/archguard/fingerprint.go",
+      "git_blob": "8c9b67ee870e470f9555cb2a8c3f79c1d70058de",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 1053,
+      "sha256": "b0cd933eb229fec0faa0fff4ac85d64af6836c39afe6ae61cb16574d4bcc4869"
+    },
+    "internal/archguard/owners.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/archguard/owners.go",
+      "git_blob": "f6a5b68134be6bbc8ae663a2292b3b59ba996316",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 2255,
+      "sha256": "ba70b5a224802789c7beb861f817a73cda8649f3233ec39a7e8a678f146570f3"
+    },
+    "internal/gui/gui_owner_lifecycle.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/gui/gui_owner_lifecycle.go",
+      "git_blob": "00b10363ff43d2b635e4a0cddf5e22239e3b12d4",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 14298,
+      "sha256": "f7b13c7a944f2189c36462e7e7b899aa2b8a5f5451064bf2618419f7d2c829ce"
+    },
+    "internal/cli/supervise_aggregate_status.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/cli/supervise_aggregate_status.go",
+      "git_blob": "2b916fa1bd5cee107e791ea2c8fd54a31fa4742a",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 15936,
+      "sha256": "495e710be05ed50afcd8d26c3190a5dadf73976eac068f58351c4ec92c6cac0d"
+    },
+    "internal/cli/supervise.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/cli/supervise.go",
+      "git_blob": "d9df69454113238db400ccb52563ac018a7da765",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 211565,
+      "sha256": "795e0f6e3a1021d2cdebae9a609a3d6f4d76e5e93756e73702672d87de20b7a5"
+    },
+    "internal/cli/install_migration_wiring_windows.go": {
+      "git_source": "d39b99db427eee026af12f8120c24477a2d9612a:internal/cli/install_migration_wiring_windows.go",
+      "git_blob": "7031d06460c74c979ac3cbcbdf6aa5be87cf8a49",
+      "qualified_source_inventory_match": true,
+      "unchanged_in_candidate": true,
+      "bytes": 218477,
+      "sha256": "f0ab9225ff36be9c3f8b34e6b4dbed8b91981e31c8454e849f929e97dab4c68f"
+    }
+  },
+  "draft_numeric_verification": {
+    "draft": {
+      "path": "/workspace/scratch/e51f442c712e/p0-next-closeout-20261122/residual-section-draft.md",
+      "bytes": 18787,
+      "sha256": "c468a03ff17e2de0065f2543765a52e6f45a7e0d42f602040fd5d9b654e23d2c"
+    },
+    "all_architecture_claims_match": true,
+    "claims": [
+      {
+        "claim": "physical findings after",
+        "observed": 2661,
+        "expected": 2661,
+        "draft_literal": "2661 вместо 2663",
+        "matches": true
+      },
+      {
+        "claim": "physical findings before",
+        "observed": 2663,
+        "expected": 2663,
+        "draft_literal": "2661 вместо 2663",
+        "matches": true
+      },
+      {
+        "claim": "baseline entries after",
+        "observed": 2401,
+        "expected": 2401,
+        "draft_literal": "2401 вместо 2403",
+        "matches": true
+      },
+      {
+        "claim": "baseline entries before",
+        "observed": 2403,
+        "expected": 2403,
+        "draft_literal": "2401 вместо 2403",
+        "matches": true
+      },
+      {
+        "claim": "new",
+        "observed": 388,
+        "expected": 388,
+        "draft_literal": "New=388",
+        "matches": true
+      },
+      {
+        "claim": "stale",
+        "observed": 128,
+        "expected": 128,
+        "draft_literal": "Stale=128",
+        "matches": true
+      },
+      {
+        "claim": "grown",
+        "observed": 42,
+        "expected": 42,
+        "draft_literal": "Grown=42",
+        "matches": true
+      },
+      {
+        "claim": "workers_in_new",
+        "observed": 72,
+        "expected": 72,
+        "draft_literal": "workers=72",
+        "matches": true
+      },
+      {
+        "claim": "lifecycle-runtime New",
+        "observed": 191,
+        "expected": 191,
+        "draft_literal": "191 New",
+        "matches": true
+      },
+      {
+        "claim": "application-services New",
+        "observed": 104,
+        "expected": 104,
+        "draft_literal": "104",
+        "matches": true
+      },
+      {
+        "claim": "supervise.go New",
+        "observed": 35,
+        "expected": 35,
+        "draft_literal": "35 New / 36 Stale",
+        "matches": true
+      },
+      {
+        "claim": "supervise.go Stale",
+        "observed": 36,
+        "expected": 36,
+        "draft_literal": "35 New / 36 Stale",
+        "matches": true
+      },
+      {
+        "claim": "install migration size baseline cap",
+        "observed": 1121,
+        "expected": 1121,
+        "draft_literal": "1121 → 5047",
+        "matches": true
+      },
+      {
+        "claim": "install migration size current metric",
+        "observed": 5047,
+        "expected": 5047,
+        "draft_literal": "1121 → 5047",
+        "matches": true
+      },
+      {
+        "claim": "mcproute migrations",
+        "observed": 102,
+        "expected": 102,
+        "draft_literal": "все 102",
+        "matches": true
+      },
+      {
+        "claim": "mcproute New",
+        "observed": 0,
+        "expected": 0,
+        "draft_literal": "New=0, Stale=0",
+        "matches": true
+      },
+      {
+        "claim": "mcproute Stale",
+        "observed": 0,
+        "expected": 0,
+        "draft_literal": "New=0, Stale=0",
+        "matches": true
+      },
+      {
+        "claim": "worker rename candidate count",
+        "observed": 30,
+        "expected": 30,
+        "draft_literal": "30 worker-соответствий",
+        "matches": true
+      },
+      {
+        "claim": "GUI owner New findings",
+        "observed": 2,
+        "expected": 2,
+        "draft_literal": "Две New-находки",
+        "matches": true
+      },
+      {
+        "claim": "GUI owner NewAPI sites",
+        "observed": 3,
+        "expected": 3,
+        "draft_literal": "трём вызовам",
+        "matches": true
+      },
+      {
+        "claim": "aggregate status New workers",
+        "observed": 2,
+        "expected": 2,
+        "draft_literal": "двух worker",
+        "matches": true
+      }
+    ]
+  },
+  "reproduction": {
+    "requirements": "Use the pinned candidate ZIP and baseline plus unchanged owners.yaml/workers.yaml from the cited Git source; existing PyYAML is sufficient. No remote or product execution is needed.",
+    "python": "# Existing Python + PyYAML only; reads the pinned inputs, writes nothing.\nimport collections, fnmatch, hashlib, json, zipfile, yaml\ndef recalculate(archive_path, baseline_path, owners_path, workers_path):\n    with zipfile.ZipFile(archive_path) as z:\n        scan = json.loads(z.read(\"evidence/architecture-green/arch-scan.stdout.log\"))\n    with open(baseline_path, encoding=\"utf-8\") as f: baseline = yaml.safe_load(f)\n    with open(owners_path, encoding=\"utf-8\") as f: owners = yaml.safe_load(f)\n    with open(workers_path, encoding=\"utf-8\") as f: workers = yaml.safe_load(f)\n    assert workers[\"entries\"] == []\n    B = {x[\"fingerprint\"]: x for x in baseline[\"entries\"]}\n    V = {x[\"fingerprint\"]: x for x in scan[\"violations\"]}\n    sets = {}\n    sets[\"new\"] = {k: v for k, v in V.items() if k not in B}\n    sets[\"stale\"] = {k: v for k, v in B.items() if k not in V}\n    sets[\"grown\"] = {k: v for k, v in V.items() if k in B and B[k].get(\"max_metric\") is not None and v.get(\"metric\", 0) > B[k][\"max_metric\"]}\n    sets[\"workers_in_new\"] = {k: v for k, v in sets[\"new\"].items() if v[\"kind\"] == \"worker\"}\n    def owner(v):\n        for rule in owners[\"rules\"]:\n            if any(fnmatch.fnmatchcase(v[\"location\"][\"path\"], g) for g in rule[\"globs\"]): return rule[\"owner\"]\n        return \"NO_CURRENT_OWNER_RULE\"\n    def count(records, key): return dict(sorted(collections.Counter(key(v) for v in records.values()).items()))\n    return {name: {\"count\": len(records), \"fingerprint_set_sha256\": hashlib.sha256((\"\\n\".join(sorted(records)) + \"\\n\").encode()).hexdigest(), \"by_rule\": count(records, lambda v: v[\"kind\"]), \"by_owner\": count(records, owner), \"by_path\": count(records, lambda v: v[\"location\"][\"path\"])} for name, records in sets.items()}\n"
+  },
+  "limitations": [
+    "Architecture gate remains FAILED. No global acceptance PASS is asserted.",
+    "Counted mutable globals include sentinel errors and regular-expression objects; rule findings are not automatically runtime defects.",
+    "Only six selected old/new worker-symbol pairs were investigated; remaining Stale are not globally classified as deleted code.",
+    "The GUI owner and aggregate worker slices are proposed work, not completed fixes or native lifecycle qualifications."
+  ]
+}
