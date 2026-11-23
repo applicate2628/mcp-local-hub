@@ -136,7 +136,7 @@ func admitRuntimeMcphubImage(path string) error {
 		return fmt.Errorf("runtime product image must be clean and absolute")
 	}
 	if runtime.GOOS == "windows" {
-		_, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleProduct})
+		_, err := binaryadmission.AdmitWindowsRuntimeProduct(path)
 		return err
 	}
 	info, err := os.Stat(path)

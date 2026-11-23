@@ -18,6 +18,108 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func TestWindowsRuntimeProductAdmissionSharesRetainedDelete(t *testing.T) {
+	fixture := writeWindowsPEVersionFixture(t, WindowsArtifactRoleProduct, "0.4.66", "abc1234", "2026-11-23T16:36:05Z", false)
+	contents, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise a real long Product path as well as a retained parent. The
+	// runtime reader must not rely on a separate compatible parent open.
+	dir := filepath.Join(t.TempDir(), strings.Repeat("runtime-", 26), strings.Repeat("bundle-", 14))
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "mcphub.exe")
+	if err := os.WriteFile(path, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := AdmitWindowsRole(WindowsArtifact{Path: path, Role: WindowsArtifactRoleProduct})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nativeName := func(path string) *uint16 {
+		t.Helper()
+		name, err := windows.UTF16PtrFromString(runtimeProductWin32Path(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+	parent, err := windows.CreateFile(nativeName(dir), windows.FILE_TRAVERSE|windows.DELETE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := windows.CloseHandle(parent); err != nil {
+			t.Error(err)
+		}
+	})
+	original, err := windows.CreateFile(nativeName(path), windows.GENERIC_READ|windows.DELETE,
+		windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if original != 0 {
+			if err := windows.CloseHandle(original); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	assertOrdinaryOpenBlocked := func() {
+		t.Helper()
+		f, err := os.Open(path)
+		if f != nil {
+			_ = f.Close()
+		}
+		if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			t.Fatalf("ordinary Product open = %v, want sharing violation", err)
+		}
+	}
+	assertOrdinaryOpenBlocked()
+	if _, err := AdmitWindowsRole(WindowsArtifact{Path: path, Role: WindowsArtifactRoleProduct}); !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+		t.Fatal("ordinary admission no longer uses its ordinary opener")
+	}
+	got, err := AdmitWindowsRuntimeProduct(path)
+	if err != nil || got != want {
+		t.Fatalf("held runtime Product evidence differs from ordinary admission: %v", err)
+	}
+	assertOrdinaryOpenBlocked()
+	if err := windows.CloseHandle(original); err != nil {
+		t.Fatal(err)
+	}
+	original = 0
+	exclusive, err := windows.CreateFile(nativeName(path), windows.GENERIC_READ, 0,
+		nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal("runtime admission left its file handle open", err)
+	}
+	if err := windows.CloseHandle(exclusive); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("ordinary open returned sharing violation before and after runtime admission; runtime evidence matched and the reader closed")
+}
+
+func TestWindowsRuntimeProductAdmissionPreservesOrdinaryPath(t *testing.T) {
+	path := writeWindowsPEVersionFixture(t, WindowsArtifactRoleProduct, "0.4.66", "abc1234", "2026-11-23T16:36:05Z", false)
+	alias := path + "."
+	if len(alias) >= 248 || filepath.Clean(alias) != alias {
+		t.Fatal("fixture requires a short, clean path with an ordinary Win32 trailing dot")
+	}
+	want, err := AdmitWindowsRole(WindowsArtifact{Path: alias, Role: WindowsArtifactRoleProduct})
+	if err != nil {
+		t.Fatalf("ordinary Win32 basename normalization: %v", err)
+	}
+	got, err := AdmitWindowsRuntimeProduct(alias)
+	if err != nil || got != want {
+		t.Fatalf("runtime open changed ordinary path interpretation: %v", err)
+	}
+}
+
 func canonicalEntryRebuildVersionFixture(block versionInfoBlock) []byte {
 	children := make([][]byte, 0, len(block.children))
 	for _, child := range block.children {

@@ -112,6 +112,16 @@ func ValidateWindowsNativeImage(path string) error {
 // AdmitWindowsRole validates one exact Windows artifact role and returns its
 // parsed identity and SHA-256 without executing the image.
 func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
+	return admitWindowsRole(artifact, os.Open)
+}
+
+// AdmitWindowsRuntimeProduct admits the selected runtime Product with a
+// read handle compatible with the retained Windows upgrade owner.
+func AdmitWindowsRuntimeProduct(path string) (WindowsArtifact, error) {
+	return admitWindowsRole(WindowsArtifact{Path: path, Role: WindowsArtifactRoleProduct}, openWindowsRuntimeProduct)
+}
+
+func admitWindowsRole(artifact WindowsArtifact, open func(string) (*os.File, error)) (WindowsArtifact, error) {
 	expected := uint16(0)
 	switch artifact.Role {
 	case WindowsArtifactRoleCLI:
@@ -121,51 +131,74 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	default:
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: invalid artifact role %q", WindowsProductPairErrorID, artifact.Path, artifact.Role)
 	}
-	if err := ValidateWindowsNativeImage(artifact.Path); err != nil {
-		return WindowsArtifact{}, err
+	f, err := open(artifact.Path)
+	if err != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, err)
 	}
-	subsystem, err := readWindowsPESubsystemFile(artifact.Path)
+	admitted, err := readWindowsRoleFile(artifact, expected, f)
+	closeErr := f.Close()
 	if err != nil {
 		return WindowsArtifact{}, err
 	}
-	if subsystem != expected {
-		return WindowsArtifact{}, &Error{ID: WindowsPESubsystemErrorID, Path: artifact.Path, Expected: expected, Actual: subsystem}
+	if closeErr != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, closeErr)
 	}
-	machine, err := readWindowsPEMachineFile(artifact.Path)
+	if artifact.SHA256 != "" && !strings.EqualFold(artifact.SHA256, admitted.SHA256) {
+		return WindowsArtifact{}, fmt.Errorf("%s: %s: SHA-256 mismatch", WindowsProductPairErrorID, artifact.Path)
+	}
+	return admitted, nil
+}
+
+func readWindowsRoleFile(artifact WindowsArtifact, expected uint16, f *os.File) (WindowsArtifact, error) {
+	info, err := f.Stat()
 	if err != nil {
-		return WindowsArtifact{}, err
+		return WindowsArtifact{}, formatError(artifact.Path, err)
 	}
-	identity, err := readWindowsBuildIdentity(artifact.Path)
+	if !info.Mode().IsRegular() {
+		return WindowsArtifact{}, formatError(artifact.Path, fmt.Errorf("not a regular file"))
+	}
+	header, err := readWindowsPEHeader(f, info.Size())
+	if err != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, err)
+	}
+	if header.characteristics&windowsPEDLLCharacteristic != 0 {
+		return WindowsArtifact{}, formatError(artifact.Path, fmt.Errorf("PE image is a DLL"))
+	}
+	if header.subsystem != expected {
+		return WindowsArtifact{}, &Error{ID: WindowsPESubsystemErrorID, Path: artifact.Path, Expected: expected, Actual: header.subsystem}
+	}
+	identity, err := readWindowsBuildIdentityAt(f, info.Size())
 	if err != nil {
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: VERSIONINFO: %w", WindowsProductPairErrorID, artifact.Path, err)
 	}
 	if identity.Role != artifact.Role {
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: VERSIONINFO role %q disagrees with expected role %q", WindowsProductPairErrorID, artifact.Path, identity.Role, artifact.Role)
 	}
-	f, err := os.Open(artifact.Path)
+	digest, err := hashWindowsRoleFile(f, info.Size())
 	if err != nil {
 		return WindowsArtifact{}, formatError(artifact.Path, err)
-	}
-	h := sha256.New()
-	_, copyErr := io.Copy(h, f)
-	closeErr := f.Close()
-	if copyErr != nil {
-		return WindowsArtifact{}, formatError(artifact.Path, copyErr)
-	}
-	if closeErr != nil {
-		return WindowsArtifact{}, formatError(artifact.Path, closeErr)
-	}
-	actual := hex.EncodeToString(h.Sum(nil))
-	if artifact.SHA256 != "" && !strings.EqualFold(artifact.SHA256, actual) {
-		return WindowsArtifact{}, fmt.Errorf("%s: %s: SHA-256 mismatch", WindowsProductPairErrorID, artifact.Path)
 	}
 	artifact.Version = identity.Version
 	artifact.Commit = identity.Commit
 	artifact.BuildDate = identity.BuildDate
-	artifact.SHA256 = actual
-	artifact.Machine = machine
-	artifact.Subsystem = subsystem
+	artifact.SHA256 = digest
+	artifact.Machine = header.machine
+	artifact.Subsystem = header.subsystem
 	return artifact, nil
+}
+
+// The PE readers above use ReaderAt, leaving the newly opened file at zero.
+// Reading to EOF receives the whole file and detects a stale stat extent.
+func hashWindowsRoleFile(f *os.File, size int64) (string, error) {
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", err
+	}
+	if n != size {
+		return "", fmt.Errorf("file size changed during admission: expected %d bytes, read %d", size, n)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // AdmitWindowsProductPair requires the canonical CLI CUI role and the
@@ -218,14 +251,6 @@ func readWindowsPESubsystemFile(path string) (uint16, error) {
 		return 0, err
 	}
 	return header.subsystem, nil
-}
-
-func readWindowsPEMachineFile(path string) (uint16, error) {
-	header, err := readWindowsPEHeaderFile(path)
-	if err != nil {
-		return 0, err
-	}
-	return header.machine, nil
 }
 
 func readWindowsPEHeaderFile(path string) (windowsPEHeader, error) {
@@ -287,8 +312,8 @@ func formatError(path string, err error) error {
 }
 
 type windowsPEHeader struct {
-	machine   uint16
-	subsystem uint16
+	machine         uint16
+	subsystem       uint16
 	characteristics uint16
 }
 
@@ -339,8 +364,8 @@ func readWindowsPEHeader(r io.ReaderAt, size int64) (windowsPEHeader, error) {
 		return windowsPEHeader{}, fmt.Errorf("unsupported optional-header magic %#x", magic)
 	}
 	return windowsPEHeader{
-		machine:   binary.LittleEndian.Uint16(header[4:6]),
-		subsystem: binary.LittleEndian.Uint16(header[24+68 : 24+70]),
+		machine:         binary.LittleEndian.Uint16(header[4:6]),
+		subsystem:       binary.LittleEndian.Uint16(header[24+68 : 24+70]),
 		characteristics: binary.LittleEndian.Uint16(header[22:24]),
 	}, nil
 }
