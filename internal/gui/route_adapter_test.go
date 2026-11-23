@@ -3,6 +3,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,21 +36,24 @@ func TestRouteHandler_MountsOnlySerenaAndLSP(t *testing.T) {
 		t.Errorf("/lsp/go/mcp status = 404, want mounted (any non-404 status)")
 	}
 
-	// The rest of the GUI API surface must NOT be reachable through this
-	// narrower mux — /api/ping is registered on the FULL s.mux but RouteHandler
-	// builds its own fresh mux with only the two MCP routes.
-	req3 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9200/api/ping", nil)
-	rec3 := httptest.NewRecorder()
-	h.ServeHTTP(rec3, req3)
-	if rec3.Code != http.StatusNotFound {
-		t.Errorf("/api/ping status = %d, want 404 (RouteHandler must not expose the GUI API surface)", rec3.Code)
-	}
-
-	req4 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9200/dashboard", nil)
-	rec4 := httptest.NewRecorder()
-	h.ServeHTTP(rec4, req4)
-	if rec4.Code != http.StatusNotFound {
-		t.Errorf("/dashboard status = %d, want 404 (RouteHandler must not expose the GUI API surface)", rec4.Code)
+	// GUI presentation and control endpoints are reachable only on the full
+	// GUI listener. The workspace listener mounts the two MCP handlers.
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/ping"},
+		{http.MethodGet, "/dashboard"},
+		{http.MethodGet, "/api/lsp-router/status"},
+		{http.MethodPost, "/api/lsp-router/disable"},
+		{http.MethodPost, "/api/lsp-router/enable"},
+	} {
+		req := httptest.NewRequest(route.method, "http://127.0.0.1:9200"+route.path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s status = %d, want 404", route.method, route.path, rec.Code)
+		}
 	}
 }
 
@@ -82,5 +86,35 @@ func TestRouteHandler_AdmitsNoOriginPOST(t *testing.T) {
 	// to the (unwired) serena router deps check -> 503, NOT 403.
 	if rec.Code == http.StatusForbidden {
 		t.Errorf("status = 403, want admitted (no-Origin POST must pass the same-origin guard)")
+	}
+}
+
+func TestRouteAdapter_FiltersAndCoalescesSerenaBackendLoss(t *testing.T) {
+	s := newEphemeralServer(t, Config{Port: 9200})
+	ch := make(chan Event, 8)
+	ch <- Event{Type: "daemon-state", Body: map[string]any{"server": "serena"}}
+	ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{"server": "mcp-language-server"}}
+	close(ch)
+	s.consumeSerenaBackendLossEvents(context.Background(), ch)
+	select {
+	case <-s.SerenaBackendLossReconcileTrigger():
+		t.Fatal("unrelated events woke Serena reconciliation")
+	default:
+	}
+	ch = make(chan Event, 5)
+	for i := 0; i < cap(ch); i++ {
+		ch <- Event{Type: "daemon-backend-lost", Body: map[string]any{"server": "serena"}}
+	}
+	close(ch)
+	s.consumeSerenaBackendLossEvents(context.Background(), ch)
+	select {
+	case <-s.SerenaBackendLossReconcileTrigger():
+	default:
+		t.Fatal("Serena backend loss did not wake reconciliation")
+	}
+	select {
+	case <-s.SerenaBackendLossReconcileTrigger():
+		t.Fatal("Serena backend-loss wake did not coalesce")
+	default:
 	}
 }

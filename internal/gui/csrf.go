@@ -2,7 +2,6 @@
 package gui
 
 import (
-	"fmt"
 	"net/http"
 
 	"mcp-local-hub/internal/mcproute"
@@ -24,14 +23,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requireAllowedHost(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.allowedHost(r.Host) {
-			writeAPIError(w, fmt.Errorf("host %q not allowed", r.Host),
-				http.StatusForbidden, "HOST_NOT_ALLOWED")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return mcproute.RequireAllowedHost(s.effectivePort, next)
 }
 
 // allowedHost and allowedOrigin delegate to mcproute's port-bound guard
@@ -56,35 +48,6 @@ func (s *Server) effectivePort() int {
 	return s.cfg.Port
 }
 
-// requireSameOrigin is a middleware that enforces a same-origin policy
-// on mutating routes. It rejects browser-driven cross-origin POSTs
-// while still allowing direct curl/script callers (which have no
-// Origin/Sec-Fetch-Site headers).
-//
-// Two checks must agree when both browser headers are present:
-//
-//  1. `Origin`, when present, must match this local GUI origin. Empty Origin
-//     (curl, native clients) passes.
-//  2. `Sec-Fetch-Site`, when present, must not be cross-site.
-//
-// If either present check fails, returns 403 with the api-error envelope so
-// CSRF attempts surface clearly in logs.
 func (s *Server) requireSameOrigin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && !s.allowedOrigin(origin) {
-			writeAPIError(w, fmt.Errorf("origin %q not allowed", origin),
-				http.StatusForbidden, "CROSS_ORIGIN")
-			return
-		}
-
-		sfs := r.Header.Get("Sec-Fetch-Site")
-		if sfs != "" && sfs != "same-origin" && sfs != "none" {
-			writeAPIError(w, fmt.Errorf("cross-origin %s request rejected", sfs),
-				http.StatusForbidden, "CROSS_ORIGIN")
-			return
-		}
-
-		next(w, r)
-	}
+	return mcproute.RequireSameOrigin(s.effectivePort, next)
 }

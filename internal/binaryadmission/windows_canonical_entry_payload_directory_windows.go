@@ -262,10 +262,17 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) Snapshot() (WindowsCanonicalEn
 	if !d.ready || d.closed {
 		return d.snapshot, errors.Join(d.acquisitionError, d.closeError, errors.New("payload directory owner is not ready/open"))
 	}
+	if d.memberSnapshot != nil {
+		return WindowsCanonicalEntryPayloadDirectorySnapshotV1{}, errors.New("current member directory cannot emit historical V1 evidence")
+	}
 	return d.snapshot, nil
 }
 
 func (d *WindowsCanonicalEntryPayloadDirectoryV1) validateLocked(ctx context.Context) error {
+	return d.validateReadLocked(ctx, nil)
+}
+
+func (d *WindowsCanonicalEntryPayloadDirectoryV1) validateReadLocked(ctx context.Context, scope *canonicalEntryRecoveryReadScopeV2) error {
 	if !d.ready || d.closed || d.directory == nil || d.directory.file == nil {
 		return errors.Join(d.acquisitionError, errors.New("original payload directory is not ready/open"))
 	}
@@ -275,8 +282,21 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) validateLocked(ctx context.Con
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if scope != nil {
+		if d.memberSnapshot == nil {
+			return errors.New("historical directory cannot use current read-only scope")
+		}
+		if err := scope.validateDirectory(ctx, d.memberSource); err != nil {
+			return err
+		}
+	}
 	if d.source != nil {
 		if err := d.source.ValidateOriginalRecovery(ctx); err != nil {
+			return err
+		}
+	}
+	if d.memberSource != nil && scope == nil {
+		if err := d.memberSource.ValidateOriginalRecovery(ctx); err != nil {
 			return err
 		}
 	}
@@ -288,7 +308,11 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) validateLocked(ctx context.Con
 	if err != nil {
 		return err
 	}
-	if parent != d.snapshot.ParentIdentity || directory != d.snapshot.DirectoryIdentity {
+	expectedParent, expectedDirectory := d.snapshot.ParentIdentity, d.snapshot.DirectoryIdentity
+	if d.memberSnapshot != nil {
+		expectedParent, expectedDirectory = d.memberSnapshot.ParentIdentity, d.memberSnapshot.DirectoryIdentity
+	}
+	if parent != expectedParent || directory != expectedDirectory {
 		return errors.New("original payload directory/parent identity or creation identity changed")
 	}
 	return nil
@@ -298,6 +322,16 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) validateLocked(ctx context.Con
 // compatible probe never weakens its DELETE-denying guard; all other directory
 // opens retain the ordinary restrictive sharing contract.
 func canonicalEntryBorrowPayloadDirectory(root *WindowsCanonicalEntrySetV1, parent *canonicalEntryNativeFile, component string) (*canonicalEntryNativeFile, bool, error) {
+	return canonicalEntryBorrowPayloadDirectoryRead(context.Background(), root, parent, component, nil)
+}
+
+func canonicalEntryBorrowPayloadDirectoryRead(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent *canonicalEntryNativeFile, component string, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryNativeFile, bool, error) {
+	if root.memberDirectories != nil {
+		return canonicalEntryBorrowMemberDirectoryReadV2(ctx, root, parent, component, scope)
+	}
+	if scope != nil {
+		return nil, false, errors.New("current read-only scope cannot borrow a historical directory")
+	}
 	d := root.payloadDirectoryOwner()
 	if d == nil {
 		return nil, false, nil
@@ -346,6 +380,9 @@ func canonicalEntryBorrowPayloadDirectory(root *WindowsCanonicalEntrySetV1, pare
 }
 
 func (o *WindowsCanonicalEntrySetV1) releasePayloadDirectoryBorrow() error {
+	if o.memberDirectories != nil {
+		return o.releaseMemberDirectoryBorrowsV2()
+	}
 	if !o.payloadDirectoryBorrowed {
 		return nil
 	}
@@ -372,6 +409,12 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) DisposeOriginalIfEmpty(ctx con
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	relative, leaf, created, directoryID := d.snapshot.RelativePath, d.snapshot.RelativePath, d.snapshot.Created, d.snapshot.DirectoryIdentity
+	if d.memberSnapshot != nil {
+		relative, created, directoryID = d.memberSnapshot.RelativePath, d.memberSnapshot.Created, d.memberSnapshot.DirectoryIdentity
+		leaf = filepath.Base(filepath.FromSlash(relative))
+	}
+	result.SourceRelative = relative
 	if d.disposition != nil {
 		return *d.disposition, d.disposition.Error
 	}
@@ -387,13 +430,16 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) DisposeOriginalIfEmpty(ctx con
 	if err := d.validateLocked(ctx); err != nil {
 		return result, err
 	}
-	if !d.snapshot.Created {
+	if err := d.authorizeMemberDirectoryDispose(ctx); err != nil {
+		return result, err
+	}
+	if !created {
 		return result, errors.New("prior-present payload directory has no original-created deletion authority")
 	}
 	if d.borrowers != 0 {
 		return result, errors.New("original payload child borrowers are not settled")
 	}
-	h, err := canonicalEntryOpenNative(windows.Handle(d.parent.file.Fd()), d.snapshot.RelativePath, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+	h, err := canonicalEntryOpenNative(windows.Handle(d.parent.file.Fd()), leaf, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
 	if err != nil {
 		return result, err
 	}
@@ -402,7 +448,7 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) DisposeOriginalIfEmpty(ctx con
 	if queryErr != nil || result.CloseError != nil {
 		return result, queryErr
 	}
-	if current != d.snapshot.DirectoryIdentity {
+	if current != directoryID {
 		return result, errors.New("original payload name no longer selects its created object")
 	}
 	if err = ctx.Err(); err != nil {
@@ -418,7 +464,7 @@ func (d *WindowsCanonicalEntryPayloadDirectoryV1) DisposeOriginalIfEmpty(ctx con
 	} // Native directory emptiness is authoritative.
 	result.Applied = true
 	result.CloseError = canonicalEntryCloseOriginalMember(d.guard, d.directory)
-	probe, absenceErr := canonicalEntryOpenNative(windows.Handle(d.parent.file.Fd()), d.snapshot.RelativePath, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+	probe, absenceErr := canonicalEntryOpenNative(windows.Handle(d.parent.file.Fd()), leaf, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
 	if absenceErr == nil {
 		result.CloseError = errors.Join(result.CloseError, windows.CloseHandle(probe))
 		absenceErr = errors.New("payload directory name is occupied after original close")

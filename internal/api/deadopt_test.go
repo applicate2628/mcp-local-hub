@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,6 +18,44 @@ import (
 )
 
 const deAdoptTestPort = 7 // inert URL data only; these tests never bind a TCP port
+
+func TestWriteDeAdoptSharedStdioNarration(t *testing.T) {
+	const narration = "completed lifecycle narration"
+	var delivered bytes.Buffer
+	if err := writeDeAdoptSharedStdioNarration(&delivered, []byte(narration)); err != nil || delivered.String() != narration {
+		t.Fatalf("expected complete caller delivery, error = %v", err)
+	}
+
+	const privatePath = "synthetic-private-caller-path"
+	writerErr := &os.PathError{Op: "write", Path: privatePath, Err: errors.New("synthetic writer failure")}
+	for _, tt := range []struct {
+		name     string
+		writeErr error
+		want     error
+	}{
+		{name: "caller-error", writeErr: writerErr, want: writerErr},
+		{name: "short-nil-error", want: io.ErrShortWrite},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := &deterministicFailingWriter{err: tt.writeErr}
+			err := writeDeAdoptSharedStdioNarration(w, []byte(narration))
+			var stage *AdoptStageError
+			if w.writes != 1 || !errors.Is(err, tt.want) || !errors.As(err, &stage) ||
+				stage.Stage != "result-publication" || stage.CommitState != "committed_unverified" {
+				t.Fatalf("unexpected result-publication outcome, writes = %d, error = %v", w.writes, err)
+			}
+			encoded, encodeErr := json.Marshal(stage)
+			if encodeErr != nil {
+				t.Fatal(encodeErr)
+			}
+			for _, public := range []string{err.Error(), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err), string(encoded)} {
+				if strings.Contains(public, privatePath) {
+					t.Fatal("public result-publication error exposed caller diagnostics")
+				}
+			}
+		})
+	}
+}
 
 type deAdoptPlannerFixture struct {
 	state                AdoptOperationState

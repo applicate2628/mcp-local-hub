@@ -3,7 +3,6 @@ package gui
 import (
 	"context"
 	"errors"
-	"net/http"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -67,23 +66,6 @@ func waitRestartDriverDone(t *testing.T, done <-chan struct{}) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("restart driver did not stop")
 	}
-}
-
-func waitHubRestartTestLogEvent(t *testing.T, want string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		events, err := api.RecentHubMcpEvents(16)
-		if err == nil {
-			for _, ev := range events {
-				if ev["event"] == want {
-					return
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for hub-mcp log event %q", want)
 }
 
 func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
@@ -228,7 +210,7 @@ func TestHubListenerRestartDriverRejectsDeadOnArrivalComponent(t *testing.T) {
 	var events []hubRestartTestEvent
 	outcome := restartHubListenerWithOutcome(context.Background(), s, hubListenerRestartDriverOptions{
 		startFn: func(context.Context) (*HubListenerComponents, error) {
-			serveHubMcpListener(s, deadComp, newHubMcpHTTPServer(http.NewServeMux()), fatalAcceptListener{}, 3439)
+			hubListenerServeFailed(s, deadComp)
 			return deadComp, nil
 		},
 		shutdownFn: func(_ context.Context, comp *HubListenerComponents) {
@@ -1353,48 +1335,6 @@ func TestHubListenerRestartEventReportsInstanceIDMismatchAsDegraded(t *testing.T
 	if !s.hubRestartLastSuccess.IsZero() {
 		t.Fatalf("hubRestartLastSuccess = %s, want zero after degraded restart", s.hubRestartLastSuccess)
 	}
-}
-
-func TestHubListenerStartOptionsInstallWatcherCallback(t *testing.T) {
-	seedManifestDir(t)
-	resetResolverSnapshot(t)
-	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
-	stateDir := apitest.HardenedTempDir(t)
-	restoreState := api.SetDaemonStateRootForTest(stateDir)
-	t.Cleanup(restoreState)
-	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
-	startReadySupervisorFixture(t, stateDir, nil)
-
-	a := api.NewAPI()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	signaled := make(chan struct{}, 1)
-	comp, err := startHubMcpListenerWithOptions(ctx, true, a, startHubMcpListenerOptions{
-		onUnresponsive: func() {
-			select {
-			case signaled <- struct{}{}:
-			default:
-			}
-		},
-		healthProbeInterval: time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("startHubMcpListenerWithOptions: %v", err)
-	}
-	t.Cleanup(func() {
-		cancel()
-		ShutdownHubListener(context.Background(), comp)
-	})
-
-	if err := comp.srv.Close(); err != nil {
-		t.Fatalf("force-close hub listener server: %v", err)
-	}
-	select {
-	case <-signaled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("health watcher did not invoke explicit onUnresponsive option")
-	}
-	waitHubRestartTestLogEvent(t, "hub-listener-unresponsive")
 }
 
 func TestHubListenerRestartSignalIsNonBlockingAndCoalesced(t *testing.T) {

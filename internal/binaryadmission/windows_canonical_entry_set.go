@@ -212,6 +212,9 @@ type WindowsCanonicalEntrySetV1 struct {
 	closeError               error
 	payloadDirectoryLink     *canonicalEntryPayloadDirectoryLinkV1
 	payloadDirectoryBorrowed bool
+	memberDirectories        *canonicalEntryMemberDirectoriesV2
+	memberDirectoryBorrows   map[*WindowsCanonicalEntryPayloadDirectoryV1]bool
+	memberFinalPaths         []string
 }
 
 type StagedWindowsCanonicalEntrySetV1 struct {
@@ -323,7 +326,7 @@ func ParseWindowsProductIdentity(raw []byte) (v WindowsProductIdentityV1, err er
 	if err = canonicalEntryExactJSONKeys(raw, "schema", "role", "filename", "subsystem", "machine", "version", "commit", "build_date", "sha256"); err != nil {
 		return v, err
 	}
-	if v.Schema != "windows-product-identity-v1" || v.Role != WindowsArtifactRoleProduct || v.Filename != WindowsCanonicalEntryRelativePathV1 || v.Subsystem != WindowsGUISubsystem || (v.Machine != 0x8664 && v.Machine != 0xaa64) || !validProductSemVer(v.Version) || !validLowerHex(v.Commit, 40, 40) || !validUTCSeconds(v.BuildDate) || !validLowerHex(v.SHA256, 64, 64) {
+	if v.Schema != "windows-product-identity-v1" || !validWindowsProductIdentityMetadata(v) {
 		return v, errors.New("invalid Windows Product identity-v1")
 	}
 	return v, nil

@@ -64,7 +64,7 @@ func partialPreventionUpgradePair(t *testing.T) (*WindowsProductTxn, productPair
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+	return &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(),
 		StateDir: stateDir, ProductPath: paths.priorCLI, LegacyWindowlessPath: paths.windowless,
 		StagedProduct: paths.stagedCLI, ReceiptV2Path: paths.receipt,
 		Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
