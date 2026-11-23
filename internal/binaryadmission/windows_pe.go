@@ -40,6 +40,9 @@ const (
 	// SerenaQualification identifies the source-issued integration test process.
 	// It is deliberately excluded from ordinary product/installer admission.
 	WindowsArtifactRoleSerenaQualification WindowsArtifactRole = "serena-qualification"
+
+	// Metadata for the fixed private CLI test image; never ordinary Product admission.
+	WindowsArtifactRolePublisherTest WindowsArtifactRole = "publisher-test"
 )
 
 // WindowsArtifact binds product metadata and exact bytes to one explicit role.

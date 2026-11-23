@@ -108,6 +108,8 @@ func (c PreparedSerenaExecutionClosure) complete(id string) bool {
 }
 
 type PreparedSerenaInstallation struct {
+	// Transient original custody; never part of the Ready file identity.
+	generation       *SerenaOwnedTree
 	Closure          PreparedSerenaExecutionClosure
 	SourceSHA256     string
 	ResolutionSHA256 string
@@ -554,6 +556,14 @@ func (o *PreparedSerenaRuntimeOwner) ResolveReady(ctx context.Context, request P
 func (o *PreparedSerenaRuntimeOwner) RetireUnused(ctx context.Context, r PreparedSerenaRuntimeRecord) (err error) {
 	if o == nil || o.effects == nil {
 		return errors.New("SERENA_CONSUMER_ONLY_RETIREMENT_UNAVAILABLE")
+	}
+	if private := o.privatePublisherOwner(); private != nil {
+		bounded, cancel, bindErr := private.boundedContext(ctx, private.api)
+		if bindErr != nil {
+			return bindErr
+		}
+		defer cancel()
+		ctx = bounded
 	}
 	releaseIntent, err := o.effects.LockIntentOperation(ctx)
 	if err != nil {

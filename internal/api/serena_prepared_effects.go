@@ -143,8 +143,23 @@ func (e *preparedSerenaRuntimeEffects) closeLocalResources(ctx context.Context) 
 // The default compiled source is received BEFORE any namespace acquisition.
 // Unmarked/cold products visibly refuse instead of inventing an epoch.
 func NewPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPreparationInputs, intentPath string, qualifier PreparedSerenaQualificationPort, publication *PreparedSerenaPublicationOwner) (owner *PreparedSerenaRuntimeOwner, retErr error) {
+	return newPreparedSerenaRuntimeComposition(ctx, inputs, intentPath, qualifier, publication, nil)
+}
+
+func newPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPreparationInputs, intentPath string, qualifier PreparedSerenaQualificationPort, publication *PreparedSerenaPublicationOwner, private *privateSerenaPublisherOwner) (owner *PreparedSerenaRuntimeOwner, retErr error) {
 	if ctx == nil || qualifier == nil || publication == nil {
 		return nil, errors.New("SERENA_PREPARED_COMPOSITION_INPUT_MISSING")
+	}
+	if err := validatePrivateSerenaCacheSeedBinding(inputs, private); err != nil {
+		return nil, err
+	}
+	if private != nil {
+		if private.publication != publication {
+			return nil, errors.New("SERENA_PRIVATE_PUBLISHER_PUBLICATION_MISMATCH")
+		}
+		if err := private.validateInputs(ctx, inputs); err != nil {
+			return nil, err
+		}
 	}
 	r := inputs.Request
 	if _, err := r.preparationContext.qualification(r); err != nil {
@@ -170,21 +185,44 @@ func NewPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPrepa
 	}
 	resources, cancel := context.WithDeadline(context.WithoutCancel(ctx), r.AbsoluteCleanupDeadline)
 	defer cancel()
+	acquisition := resources
+	if private != nil {
+		var stopAcquisition context.CancelFunc
+		acquisition, stopAcquisition = private.acquisitionContext(ctx, resources)
+		defer stopAcquisition()
+	}
 	effects := &preparedSerenaRuntimeEffects{PreparedSerenaRecordIO: recordIO, publication: publication, acquisition: preparedSerenaAcquisition{inputs: inputs, qualifier: qualifier}}
+	if private != nil {
+		private.retainEffects(effects)
+	}
 	defer func() {
 		if retErr != nil {
 			retErr = errors.Join(retErr, effects.closeLocalResources(resources))
+			if private != nil {
+				retErr = errors.Join(ctx.Err(), private.original.Err(), retErr)
+				private.retainFailure(retErr)
+			}
 		}
 	}()
+	if private != nil {
+		if err := private.validateOrigin(ctx); err != nil {
+			return nil, err
+		}
+	}
 	effects.readyNamespaceAttempted = true
-	namespace, err := recordIO.AcquireRecordNamespaceObserved(resources, key)
+	namespace, err := recordIO.AcquireRecordNamespaceObserved(acquisition, key)
 	if namespace != nil {
 		effects.namespace = namespace
 	}
 	if err != nil {
 		return nil, err
 	}
-	effects.PreparedSerenaRecordIO, err = recordIO.BindRecordNamespace(resources, namespace)
+	if private != nil {
+		if err := private.validateOrigin(ctx); err != nil {
+			return nil, err
+		}
+	}
+	effects.PreparedSerenaRecordIO, err = recordIO.BindRecordNamespace(acquisition, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +239,11 @@ func NewPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPrepa
 	if err != nil {
 		return nil, err
 	}
-	effects.image, err = CapturePublisherImageObserved(ctx, effects.capture, source.Epoch())
+	if private == nil {
+		effects.image, err = CapturePublisherImageObserved(ctx, effects.capture, source.Epoch())
+	} else {
+		effects.image, err = private.captureImage(ctx, binding, effects.capture, namespace)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +252,13 @@ func NewPreparedSerenaRuntimeComposition(ctx context.Context, inputs SerenaPrepa
 		return nil, err
 	}
 	effects.publisherBinding = binding
+	if private != nil {
+		if err := private.validateOrigin(ctx); err != nil {
+			return nil, err
+		}
+	}
 	effects.operationNamespaceAttempted = true
-	effects.operationNamespace, err = effects.PreparedSerenaRecordIO.AcquireOperationNamespaceObserved(resources, key, r.OperationID, true)
+	effects.operationNamespace, err = effects.PreparedSerenaRecordIO.AcquireOperationNamespaceObserved(acquisition, key, r.OperationID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -369,10 +416,22 @@ func (e *preparedSerenaRuntimeEffects) ValidateRecord(ctx context.Context, r Pre
 	if _, err = r.Binding(raw); err != nil {
 		return err
 	}
-	if err = revalidatePreparedSerenaFile(ctx, r.EntrypointIdentity); err != nil {
+	currentGeneration := e.finishObservation == nil && r.GenerationID == e.acquisition.inputs.Request.GenerationID && e.acquisition.generation != nil
+	if currentGeneration {
+		if r.OperationID != e.acquisition.inputs.Request.OperationID || e.installation.generation != e.acquisition.generation {
+			return errors.New("SERENA_PREPARED_RECORD_GENERATION_DRIFT")
+		}
+		if err = validatePreparedSerenaGeneration(ctx, e.acquisition.generation, e.acquisition.inputs.Request, e.acquisition.roots.Generation); err != nil {
+			return err
+		}
+		err = revalidatePreparedSerenaOwnedFile(ctx, e.acquisition.generation, r.EntrypointIdentity)
+	} else {
+		err = revalidatePreparedSerenaFile(ctx, r.EntrypointIdentity)
+	}
+	if err != nil {
 		return err
 	}
-	if e.finishObservation != nil || r.GenerationID != e.acquisition.inputs.Request.GenerationID || e.acquisition.generation == nil {
+	if !currentGeneration {
 		if e.finishObservation == nil && e.priorPublishedRead != nil {
 			selected, err := e.receivePriorSelectedContext(ctx, r)
 			if err != nil {

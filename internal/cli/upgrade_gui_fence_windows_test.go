@@ -142,7 +142,7 @@ func newUpgradeGUICommandC3Fixture(t *testing.T) *upgradeGUICommandC3Fixture {
 				return nil
 			}
 		}
-		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
+		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(), StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
 		return f.txn, nil
 	}
 	return f
@@ -693,7 +693,7 @@ func TestUpgradeGUIHeldGenerationAuthority(t *testing.T) {
 			job.queryErr = os.ErrPermission
 		}, wantGUI: 1, wantTray: 1, wantJob: 1, wantID: "UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN"},
 		{name: "failure after GUI hold", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
-			in.ListProcesses = func([]string) ([]api.ProcessInfo, error) { return nil, os.ErrPermission }
+			in.ListProcesses = func(context.Context, []string) ([]api.ProcessInfo, error) { return nil, os.ErrPermission }
 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
 		{name: "failure after tray hold", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
 			in.ParentPID = func(int) (int, error) { return 0, os.ErrPermission }
@@ -726,8 +726,8 @@ func TestUpgradeGUIHeldGenerationAuthority(t *testing.T) {
 				OwnerPath:        func() (string, error) { return ownerPath, nil },
 				VerifyListener:   func(context.Context, string, int, int) error { return nil },
 				ProbeLeaseUnheld: func(string) (bool, error) { return false, nil },
-				FindGUIs:         func(string) ([]api.ProcessInfo, error) { return []api.ProcessInfo{{PID: 101}}, nil },
-				ListProcesses: func([]string) ([]api.ProcessInfo, error) {
+				FindGUIs:         func(context.Context, string) ([]api.ProcessInfo, error) { return []api.ProcessInfo{{PID: 101}}, nil },
+				ListProcesses: func(context.Context, []string) ([]api.ProcessInfo, error) {
 					return []api.ProcessInfo{{PID: 102, Cmdline: target + " tray"}}, nil
 				},
 				HoldTermination: func(pid int) (process.HeldPIDGeneration, error) {
@@ -972,7 +972,7 @@ func TestUpgradeGUIOwnedPairIdentityRequiresExactChildJobTopology(t *testing.T) 
 
 func TestUpgradeGUIOwnedPairPreparePersistsLivePreimage(t *testing.T) {
 	f := newUpgradeGUICommandC3Fixture(t)
-	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
+	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
 		Context: context.Background(), StateDir: f.stateDir, ProductPath: f.target,
 		LegacyWindowlessPath: filepath.Join(filepath.Dir(f.target), "mcphub-windowless.exe"),
 		StagedProduct:        f.candidate, Mode: WindowsProductPairModeUpgrade,
@@ -1728,7 +1728,7 @@ func TestUpgradeGUIOwnedCommittedForwardRetainsJournalUntilGUIProof(t *testing.T
 	}
 	f.journal.Quiescence, f.journal.QuiescenceReceiptSHA256, f.journal.PriorFleetReaped = &projection, digest, true
 	journalPath := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
-	if err := persistWindowsProductRecoveryJournalV3(journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+	if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
 		t.Fatal(err)
 	}
 	tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}

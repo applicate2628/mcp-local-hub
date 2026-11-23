@@ -17,6 +17,8 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 )
 
+const usesSerenaQualificationFixture = true
+
 // The executing qualification publisher and the ordinary runtime Product have
 // distinct roles. These tests retain their real preparation, fan-out, write and
 // lock oracles; their existing reap/start seams never launch the Product.

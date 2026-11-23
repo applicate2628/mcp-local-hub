@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"testing"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -54,6 +57,76 @@ func stateDirResolverNativeOperations() stateDirResolverOperations {
 			return value, observation, err
 		},
 	}
+}
+
+func resolveTestStateDirObserved(ctx context.Context, source func() (string, error), sourceIdentity string) (resolved string, observation *StateDirResolutionObservation, retErr error) {
+	sourceSHA := stateFileReadObservationDigest([]byte(sourceIdentity))
+	o := &StateDirResolutionObservation{
+		issuer: &stateFileReadIssuer{marker: 1},
+		view: StateDirResolutionSnapshotV1{
+			Schema: "state-dir-resolution-observation-v1", Version: 1, SourceSHA256: sourceSHA,
+			ReleaseKind: "test-state-path-readonly", CleanupErrors: []StateFileReadFailureV1{},
+		},
+		testPathSource: source, testPathSourceSHA256: sourceSHA,
+	}
+	observation = o
+	defer func() {
+		o.finalized = true
+		o.finishedInBound = ctx != nil && ctx.Err() == nil
+		if ctx != nil {
+			o.primaryErr = errors.Join(o.primaryErr, ctx.Err())
+		}
+		o.view.Complete = o.finishedInBound && o.primaryErr == nil && o.cleanupErr == nil && o.path != "" && o.principalCheck != nil
+		if o.primaryErr != nil {
+			o.view.PrimaryError = &StateFileReadFailureV1{Code: "STATE_ROOT_RESOLUTION_FAILED", Stage: "resolve", Slot: "test-path"}
+		}
+		retErr = errors.Join(o.primaryErr, o.cleanupErr)
+		if retErr != nil {
+			resolved = ""
+		}
+	}()
+	if ctx == nil {
+		o.primaryErr = errors.New("state resolver context required")
+		return
+	}
+	o.deadline, o.deadlineDefined = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		o.primaryErr = err
+		return
+	}
+	if !(testEnvFallbackBuild || testing.Testing()) || source == nil || sourceIdentity == "" {
+		o.primaryErr = errors.New("original test state-path source required")
+		return
+	}
+	root, err := source()
+	if err != nil || root == "" || !filepath.IsAbs(root) || !utf8.ValidString(root) || strings.ContainsRune(root, '\x00') {
+		o.primaryErr = errors.Join(err, errors.New("test state path is undefined or invalid"))
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		o.primaryErr = err
+		return
+	}
+	ops := stateDirResolverNativeOperations()
+	principal, formatting, err := ops.principal()
+	o.principal, o.formatting = principal, formatting
+	o.principalCheck = func() error { return ops.validatePrincipal(principal, formatting) }
+	if err != nil {
+		o.primaryErr = err
+		return
+	}
+	if principal == "" {
+		o.primaryErr = errors.New("original resolver principal undefined")
+		return
+	}
+	if err := o.principalCheck(); err != nil {
+		o.primaryErr = err
+		return
+	}
+	o.path = root
+	o.view.PathSHA256 = stateFileReadObservationDigest([]byte(root))
+	resolved = root
+	return
 }
 
 func resolveDaemonStateDirWithOperations(ctx context.Context, ops stateDirResolverOperations) (resolved string, observation *StateDirResolutionObservation, retErr error) {

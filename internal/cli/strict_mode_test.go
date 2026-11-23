@@ -1373,7 +1373,11 @@ func TestStrictModeRecover_BreadcrumbReadBypassesPersistedStrictMode(t *testing.
 	}
 	timerEnabled := true
 	initial := &api.SupervisorIntentFile{
-		Version:   11,
+		Version: 2,
+		SerenaPreparedConsumers: &api.PreparedSerenaConsumersV1{
+			Schema:   api.PreparedSerenaConsumersSchema,
+			Bindings: []api.PreparedConsumerBindingV1{},
+		},
 		UpdatedAt: "1970-01-01T00:00:00Z",
 		Daemons: []api.SupervisorDaemon{{
 			TaskName:     `\mcp-local-hub-memory-default`,
@@ -1486,7 +1490,11 @@ func TestStrictModeDisable_PreservesNonStrictIntentFields(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	enabled := false
 	original := &api.SupervisorIntentFile{
-		Version:   7,
+		Version: 2,
+		SerenaPreparedConsumers: &api.PreparedSerenaConsumersV1{
+			Schema:   api.PreparedSerenaConsumersSchema,
+			Bindings: []api.PreparedConsumerBindingV1{},
+		},
 		UpdatedAt: "2026-06-20T12:34:56Z",
 		Daemons: []api.SupervisorDaemon{{
 			TaskName:     `\mcp-local-hub-time-default`,
@@ -1661,7 +1669,11 @@ func TestStrictModeRecover_PreservesNonStrictIntentFields(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	enabled := true
 	original := &api.SupervisorIntentFile{
-		Version:   9,
+		Version: 2,
+		SerenaPreparedConsumers: &api.PreparedSerenaConsumersV1{
+			Schema:   api.PreparedSerenaConsumersSchema,
+			Bindings: []api.PreparedConsumerBindingV1{},
+		},
 		UpdatedAt: "2026-06-20T13:00:00Z",
 		Daemons: []api.SupervisorDaemon{{
 			TaskName:     `\mcp-local-hub-memory-default`,

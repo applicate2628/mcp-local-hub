@@ -35,7 +35,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.4.60"
+$version = "0.4.65"
 try { $commit = (git -C $PSScriptRoot rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -596,9 +596,11 @@ if (-not (Test-Path -LiteralPath $identityManifestPath -PathType Leaf)) {
     Write-Error "$identityManifestPath missing after product admission."
     exit 1
 }
-$mcpHubExecutables = @(Get-ChildItem -LiteralPath $outDir -File -Filter "mcphub*.exe" -Recurse | ForEach-Object { $_.FullName } | Sort-Object)
-$expectedExecutables = @($artifacts | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $outDir $_.filename)) } | Sort-Object)
-if (($mcpHubExecutables -join [char]0) -cne ($expectedExecutables -join [char]0)) {
+# Compare registry-relative paths so ancestor spelling does not affect the exact executable set.
+$mcpHubExecutables = @(Get-ChildItem -LiteralPath $outDir -File -Filter "mcphub*.exe" -Recurse -Name |
+    ForEach-Object { $_.Replace([IO.Path]::DirectorySeparatorChar, [char]'/') } | Sort-Object)
+$expectedExecutables = @($artifacts | ForEach-Object { $_.filename } | Sort-Object)
+if (-not [string]::Equals(($mcpHubExecutables -join [char]0), ($expectedExecutables -join [char]0), [StringComparison]::Ordinal)) {
     throw "Windows output must contain exactly the registry's CUI and GUI executable paths"
 }
 if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {

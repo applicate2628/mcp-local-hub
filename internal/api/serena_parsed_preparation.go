@@ -115,8 +115,23 @@ func (prepared *PreparedSerenaParsedInstall) WithConsumerInvocation(ctx context.
 	if prepared == nil || ctx == nil || run == nil {
 		return errors.New("SERENA_PARSED_PREPARATION_MISSING"), nil
 	}
+	if prepared.api != nil && prepared.api.serenaPrivatePublisher != nil {
+		bounded, cancel, err := prepared.api.serenaPrivatePublisher.boundedContext(ctx, prepared.api)
+		if err != nil {
+			return err, nil
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	work, cancel := context.WithDeadline(ctx, prepared.request.WorkDeadline)
 	defer cancel()
+	if prepared.api != nil && prepared.api.serenaPrivatePublisher != nil {
+		// Receive this after the invocation close below. Revocation after a
+		// completed callback is finalization failure, not a pre-commit result.
+		defer func() {
+			cleanupErr = errors.Join(cleanupErr, prepared.api.serenaPrivatePublisher.validateOrigin(work))
+		}()
+	}
 	invocation, err := prepared.acquireConsumerInvocation(work, workspaces, bypass)
 	if err != nil {
 		return err, nil

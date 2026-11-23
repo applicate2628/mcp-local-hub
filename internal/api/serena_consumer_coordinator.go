@@ -7,6 +7,7 @@ type preparedSerenaConsumerCoordinator struct {
 	publication                   *PreparedSerenaPublicationOwner
 	runtimeIdentity               SerenaTreeObject
 	recovered                     *SerenaPublicationObservation
+	privatePublisher              *privateSerenaPublisherOwner
 }
 
 func (o *PreparedSerenaRuntimeOwner) consumerCoordinator() (*preparedSerenaConsumerCoordinator, error) {

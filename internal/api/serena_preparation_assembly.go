@@ -92,14 +92,39 @@ func (a *API) prepareSerenaInstall(ctx context.Context, m *config.ServerManifest
 	if a == nil || a.serenaPreparationAssembly == nil {
 		return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, errors.New("SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE")
 	}
+	private := a.serenaPrivatePublisher
+	if private != nil {
+		if err := private.claimActivity(a, privateSerenaPreparationActivity); err != nil {
+			return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+		}
+		bounded, cancel, err := private.preparationContext(ctx, a, policy)
+		if err != nil {
+			return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	inputs, err := a.serenaPreparationAssembly.PrepareInputs(ctx, m, rawSHA, append([]string(nil), tasks...), policy)
 	if err != nil {
+		if private != nil {
+			private.retainFailure(err)
+		}
 		return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+	}
+	if private != nil {
+		inputs, err = private.bindCacheSeed(ctx, inputs)
+		if err != nil {
+			private.retainFailure(err)
+			return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+		}
+		if err = private.validateInputs(ctx, inputs); err != nil {
+			return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+		}
 	}
 	work, cancel := context.WithDeadline(ctx, inputs.Request.WorkDeadline)
 	defer cancel()
 	intentPath := joinStateFilePath(inputs.Request.Namespace, supervisorIntentFileLeaf)
-	owner, err := NewPreparedSerenaRuntimeComposition(work, inputs, intentPath, a.serenaPreparationAssembly.QualificationPort(), a.serenaPreparationPublication)
+	owner, err := newPreparedSerenaRuntimeComposition(work, inputs, intentPath, a.serenaPreparationAssembly.QualificationPort(), a.serenaPreparationPublication, private)
 	if err != nil {
 		return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
 	}
@@ -112,6 +137,11 @@ func (a *API) prepareSerenaInstall(ctx context.Context, m *config.ServerManifest
 	}
 	if owner.completedRecord == nil {
 		return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, errors.New("SERENA_INSTALL_COMPLETED_SELECTION_MISSING")
+	}
+	if private != nil {
+		if err = private.validateOrigin(work); err != nil {
+			return PreparedSerenaRuntimeBinding{}, PreparedSerenaRuntimeRecord{}, PreparedSerenaRequest{}, err
+		}
 	}
 	return binding, *owner.completedRecord, inputs.Request, nil
 }

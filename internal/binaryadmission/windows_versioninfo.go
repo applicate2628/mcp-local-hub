@@ -347,6 +347,8 @@ func parseWindowsBuildIdentity(payload []byte) (windowsBuildIdentityV1, error) {
 		wantInternal, wantFilename = "mcphub", "mcphub.exe"
 	case WindowsArtifactRoleSerenaQualification:
 		wantInternal, wantFilename = "mcphub-serena-qualification", "serena-qualification.test.exe"
+	case WindowsArtifactRolePublisherTest:
+		wantInternal, wantFilename = "mcphub-cli-publisher-test", "cli.test.exe"
 	}
 	if values["InternalName"] != wantInternal || values["OriginalFilename"] != wantFilename {
 		return windowsBuildIdentityV1{}, fmt.Errorf("VERSIONINFO role/name mismatch for %s", role)
@@ -518,7 +520,7 @@ func parseRoleIdentityField(value string) (WindowsArtifactRole, error) {
 		return "", fmt.Errorf("SpecialBuild grammar is invalid")
 	}
 	role := WindowsArtifactRole(strings.TrimPrefix(value, prefix))
-	if role != WindowsArtifactRoleCLI && role != WindowsArtifactRoleWindowless && role != WindowsArtifactRoleProduct && role != WindowsArtifactRoleSerenaQualification {
+	if role != WindowsArtifactRoleCLI && role != WindowsArtifactRoleWindowless && role != WindowsArtifactRoleProduct && role != WindowsArtifactRoleSerenaQualification && role != WindowsArtifactRolePublisherTest {
 		return "", fmt.Errorf("SpecialBuild role is invalid")
 	}
 	return role, nil

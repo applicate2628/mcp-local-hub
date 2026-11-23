@@ -40,6 +40,14 @@ func (a *API) ObservePreparedSerenaLaunch(ctx context.Context, task string) (lau
 	if _, finite := ctx.Deadline(); !finite {
 		return nil, errors.New("SERENA_PREPARED_LAUNCH_DEADLINE_MISSING")
 	}
+	if a.serenaPrivatePublisher != nil {
+		bounded, cancel, err := a.serenaPrivatePublisher.boundedContext(ctx, a)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	assembly, ok := a.serenaPreparationAssembly.(SerenaConsumerEnvironmentAssembly)
 	if !ok || assembly == nil {
 		return nil, errors.New("SERENA_CONSUMER_ENVIRONMENT_UNAVAILABLE")

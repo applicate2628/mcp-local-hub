@@ -1,0 +1,393 @@
+{
+  "schema": "serena-pr643-publication-v1",
+  "status": "LOCAL_CANDIDATE_NO_REFERENCE_MUTATION",
+  "repository": "applicate2628/mcp-local-hub",
+  "target_pr": 643,
+  "target_branch": "fix/serena-cleanup-parent-observation-20261114",
+  "required_parent": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+  "required_parent_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+  "expected_code_only_tree": "d0493719ec58b8b737d25a95316bbf65122b0d2c",
+  "parent_count": 1,
+  "format_source": {
+    "physical_master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "formatted_manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+    "local_readback_receipt_sha256": "32b066c9648966741de84c414fe7bcc430312725948e985fb0e2d8e8813f1028",
+    "original_candidate_manifest_sha256": "6b498cf8526041640a247db1ebf0a940ce862d232531d186253d407be6f05044",
+    "formatting_changed_paths": [
+      "internal/api/serena_owned_tree_windows.go",
+      "internal/api/serena_prepared_owned_file_windows_test.go"
+    ]
+  },
+  "runtime_qualification": "No Go/native qualification results are included in this manifest; root owns and records those phases separately.",
+  "files": [
+    {
+      "path": "internal/api/serena_build_constraint_policy_windows_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+      "sha256": "891ae639e946b72967fa82bf94d4860a0e71241fbb6f43541d086b135d52a739",
+      "bytes": 4475,
+      "source_path": "candidate/internal/api/serena_build_constraint_policy_windows_test.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "35af40886d457d10e7de63edec99b11262a0006c",
+      "parent_sha256": "0cf235923e319246e1fe3403da5803b06bd020bdb089f8740fedcacda26e465f",
+      "parent_snapshot": "source/master/internal/api/serena_build_environment.go",
+      "candidate_blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+      "sha256": "7e64ffa0390db6eade4b26edc11d932bc33702ef24aaca8856fe8fc1898c0d58",
+      "bytes": 13671,
+      "source_path": "candidate/internal/api/serena_build_environment.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "748135c3ec7fed7b2fe51dfdd93960666cd830fe",
+      "parent_sha256": "a2bc63ba62e337757e21865a3650ac309d84f608fa53e47be21afeb8829ed0d3",
+      "parent_snapshot": "source/pr643/internal/api/serena_owned_tree_windows.go",
+      "candidate_blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+      "sha256": "9493ef9c9580f8bec149160dbff3678ccd286ad21308195d33c160b53e95489e",
+      "bytes": 28761,
+      "source_path": "candidate/internal/api/serena_owned_tree_windows.go",
+      "responsibilities": [
+        "pr643",
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "49d91f174bcd50d8e0573fad9b39993ef938915f",
+      "formatting_changed": true
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "27986fa88f8d5ce16b915402b47201ead67fd566",
+      "parent_sha256": "d8a7874b27aea04870e9040c4116496eb72ac7e94d6b7dd48af19f883dc6f25a",
+      "parent_snapshot": "source/pr643/internal/api/serena_prepared_acquisition.go",
+      "candidate_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+      "sha256": "c980cfe6ef77da0fcb282c5e7a76e64807f96f2f228f05b02e2ca2eac3455eaa",
+      "bytes": 8372,
+      "source_path": "candidate/internal/api/serena_prepared_acquisition.go",
+      "responsibilities": [
+        "pr643",
+        "pr648",
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+      "sha256": "4947981547a2587d50ad65ef3162bf01ec5fdb7bde4d42cca1149d8f275d51e5",
+      "bytes": 1049,
+      "source_path": "candidate/internal/api/serena_prepared_build_constraint.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+      "sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68",
+      "bytes": 9418,
+      "source_path": "candidate/internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+      "sha256": "973d3d2ce2a88032199ad07a30b3cb805e96cbc2d58543772906449119554ece",
+      "bytes": 2376,
+      "source_path": "candidate/internal/api/serena_prepared_build_constraint_test.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_unsupported.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+      "sha256": "b5ffaa5358c14cefbff4327c573c81c1d6fe418271ab20e25c06fd41e3a967bb",
+      "bytes": 811,
+      "source_path": "candidate/internal/api/serena_prepared_build_constraint_unsupported.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_windows.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+      "sha256": "0e5a2642b1d916a5903ceeb4608faf0587442fd687f9ebf8f70d1ed61206a5c6",
+      "bytes": 8203,
+      "source_path": "candidate/internal/api/serena_prepared_build_constraint_windows.go",
+      "responsibilities": [
+        "pr648"
+      ],
+      "unformatted_candidate_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_effects.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "05eff3480bbf929f7b9eace482cb3cd52f5acfa9",
+      "parent_sha256": "372587d03e19a9f281ccf5d7a205d9fa64f1ff44333654af79fd4165390463c3",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_effects.go",
+      "candidate_blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+      "sha256": "1a5e1dbb714fe61319e026e31a4d88f356fb56c8916f11e7f2e4e5a4821c1b9a",
+      "bytes": 25013,
+      "source_path": "candidate/internal/api/serena_prepared_effects.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+      "parent_sha256": "0ac79225aa04e8529eb8d6743094386b87d5c86758a933d5b422bef994aaf636",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_execution.go",
+      "candidate_blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+      "sha256": "a6d084dffb06ee8377fd03fc47009f0c2c45ffbea41ea7a2ca0a1e84267735d0",
+      "bytes": 5005,
+      "source_path": "candidate/internal/api/serena_prepared_execution.go",
+      "responsibilities": [
+        "pr648",
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_file_unsupported.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "58fffea91b00a37c9e881446fef1c083d7322227",
+      "parent_sha256": "e49355a1f01663b09ef8f55077a6a3cbc69fb1a31e1214c883a66691e74a0122",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_file_unsupported.go",
+      "candidate_blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+      "sha256": "9193a8461e2c6e540db9e6f1e8effe98b32480eb097573232846440dfe071cd1",
+      "bytes": 1437,
+      "source_path": "candidate/internal/api/serena_prepared_file_unsupported.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_file_windows.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "9b7fbd1270420a05ad1e2e825ff0291192d722d1",
+      "parent_sha256": "88e2583b1ccdefe64a386a02e418da8b855789284a0d1c45861ca49c5918a088",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_file_windows.go",
+      "candidate_blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+      "sha256": "d7e8a0145276d6e8fa89892f80ef19dd6e00ce30210210b60ee544f51f60d7c9",
+      "bytes": 5842,
+      "source_path": "candidate/internal/api/serena_prepared_file_windows.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+      "parent_sha256": "070ab4ca4bbf5081134a0e7e7e87928492483d611eeaf770c0ae0639a2c1fccb",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_install_effects.go",
+      "candidate_blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+      "sha256": "32b94d9dafb6d70cc2c07575f19745439b1ff86b066b3fd0fad08801188191aa",
+      "bytes": 9332,
+      "source_path": "candidate/internal/api/serena_prepared_install_effects.go",
+      "responsibilities": [
+        "pr648",
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+      "sha256": "889295f050febcd3bcc366f04fd5f40021f1333d125a781e78dee16c69079480",
+      "bytes": 12212,
+      "source_path": "candidate/internal/api/serena_prepared_owned_file_windows.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows_test.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "added",
+      "parent_blob": null,
+      "parent_sha256": null,
+      "parent_snapshot": null,
+      "candidate_blob": "23f14a65e3b4f13b9e40730bd1f11a44f5560a52",
+      "sha256": "a558481e34e28611b2f108c7387478f7aee76839018c2d1c1faddb974eaa006e",
+      "bytes": 20324,
+      "source_path": "candidate/internal/api/serena_prepared_owned_file_windows_test.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "1ff6cf8b65775061c51c426de102d3471e70baa0",
+      "formatting_changed": true
+    },
+    {
+      "path": "internal/api/serena_prepared_qualification.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "ff7cd293a7e64707b1c48f84ae8a87b03254e224",
+      "parent_sha256": "2e359b0674e61864acc9326b3dde71a674d1de966efcc2aee903bcaeb839c02c",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_qualification.go",
+      "candidate_blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+      "sha256": "2de30c087965be54453017521d372fe6f792da035d0c9bcfc698700325e74069",
+      "bytes": 16640,
+      "source_path": "candidate/internal/api/serena_prepared_qualification.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+      "formatting_changed": false
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "mode": "100644",
+      "type": "blob",
+      "change": "modified",
+      "parent_blob": "da74b9d3a183204d64a420ef4c57a8bbbe625702",
+      "parent_sha256": "60bcde5fbf7266725755af0995e21369e1f98ff9418ba6aafc382a9acd1e5978",
+      "parent_snapshot": "source/master/internal/api/serena_prepared_runtime.go",
+      "candidate_blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+      "sha256": "82d6e7ef173374fafafba5966768e94a7a2210898cb77f9016386d78c77d6eec",
+      "bytes": 30912,
+      "source_path": "candidate/internal/api/serena_prepared_runtime.go",
+      "responsibilities": [
+        "pr652"
+      ],
+      "unformatted_candidate_blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+      "formatting_changed": false
+    }
+  ],
+  "retained_pr643_files": [
+    {
+      "path": "internal/api/serena_owned_tree.go",
+      "git_blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+      "sha256": "50ede0b831ab23ebd34a58a2311d201ac3b88c7ad0864d06d2819ca7fd204b4c"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_cleanup_windows_test.go",
+      "git_blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+      "sha256": "2eda90b729a224359ee9051b7a481933b05ce0eec2c3ac392a1b292bae911396"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+      "git_blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+      "sha256": "8792ca17eb87dc4033753f210f4fe1b34a9ff7d5a4d0d3ed5701f76eb80056b3"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+      "git_blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+      "sha256": "a2ba550535cc6d56e7972d450f8bba147271af146d2b2407040052ac162b9dc2"
+    },
+    {
+      "path": "internal/api/serena_owned_tree_unsupported.go",
+      "git_blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+      "sha256": "c953763bd67224cb80b90263dc81e5650c151e3679dbfb7a7cfe4009e554525e"
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "git_blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+      "sha256": "c0a3d5cea994b6c6d080c6d212747f370d134e059bd20971465b6ab252dca12c"
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "git_blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+      "sha256": "2aebd209e804b81613f21b5716a6b1a5a9dbccb1b401e109e69e0e22346996c2"
+    }
+  ],
+  "no_deleted_paths": true,
+  "no_master_merge": true,
+  "docs_from_donor_heads_to_transfer": []
+}

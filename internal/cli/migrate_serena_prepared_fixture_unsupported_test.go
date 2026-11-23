@@ -4,6 +4,8 @@ package cli
 
 import "testing"
 
+const usesSerenaQualificationFixture = false
+
 // These positive tests require the real prepared-package and intent pipeline.
 // A normal test binary must report the missing prerequisite instead of skipping
 // the integration gate or substituting synthetic publication authority.

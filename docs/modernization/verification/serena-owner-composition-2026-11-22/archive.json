@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "archive": "serena-composition-evidence.zip",
+  "bytes": 2293451,
+  "sha256": "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+  "git_blob": "31033061efe0a5909408ba9b71a42fbcf0116958",
+  "entries": 205,
+  "payload_entries": 204,
+  "crc_and_all_member_size_sha256_verified": true,
+  "inner_archive": {
+    "bytes": 1304071,
+    "sha256": "0fcbed980fbba1cccfe0b3debe567e2d4344a1de5271a0a1f900a223cd136a28",
+    "entries": 1593
+  },
+  "remote_archive_readback": "Uploaded bytes and published Git tree blob identity must match this git_blob; no second binary download is claimed"
+}

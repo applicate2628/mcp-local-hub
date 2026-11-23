@@ -81,7 +81,7 @@ func AcquireUnpublishedSerenaQualificationResources(ctx context.Context, r Prepa
 		return nil, errors.New("SERENA_QUALIFICATION_RESOURCE_DEADLINE_INVALID")
 	}
 	resource = &PreparedSerenaQualificationResources{request: r, installation: installed, qualificationID: qualificationID, key: key}
-	resource.tree, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "qualification", QualificationID: qualificationID, Limits: r.OwnedTreeLimits})
+	resource.tree, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "qualification", QualificationID: qualificationID, Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline})
 	if err != nil {
 		return resource, err
 	}
@@ -147,7 +147,9 @@ func (r *PreparedSerenaQualificationResources) HostInputs(ctx context.Context, r
 		return PreparedSerenaQualificationHostInputs{}, errors.New("SERENA_QUALIFICATION_ORIGINAL_RESERVATION_NOT_RELEASED")
 	}
 	root := filepath.Join(r.request.Namespace, r.key, "qualifications", r.qualificationID)
-	return PreparedSerenaQualificationHostInputs{WorkingDirectory: root, SerenaHome: root, TemporaryDirectory: root, Entrypoint: r.installation.Entrypoint, Args: []string{"start-mcp-server", "--transport", "streamable-http", "--host", "127.0.0.1", "--port", strconv.Itoa(r.port), "--enable-web-dashboard", "false", "--open-web-dashboard", "false", "--enable-gui-log-window", "false"}, Environment: preparedSerenaEnvironmentWith(request.Inputs.Environment, map[string]string{"SERENA_HOME": root, "TMP": root, "TEMP": root, "PYTHONDONTWRITEBYTECODE": "1"}), Host: "127.0.0.1", Transport: "streamable-http", Port: r.port, OperationID: r.request.OperationID, QualificationID: r.qualificationID, GenerationID: r.request.GenerationID, RequestIdentitySHA256: r.key}, nil
+	// Python resolves Path.home() during import even when SERENA_HOME is set.
+	// Keep Windows home lookup within the same retained qualification directory.
+	return PreparedSerenaQualificationHostInputs{WorkingDirectory: root, SerenaHome: root, TemporaryDirectory: root, Entrypoint: r.installation.Entrypoint, Args: []string{"start-mcp-server", "--transport", "streamable-http", "--host", "127.0.0.1", "--port", strconv.Itoa(r.port), "--enable-web-dashboard", "false", "--open-web-dashboard", "false", "--enable-gui-log-window", "false"}, Environment: preparedSerenaEnvironmentWith(request.Inputs.Environment, map[string]string{"SERENA_HOME": root, "USERPROFILE": root, "HOME": root, "APPDATA": root, "LOCALAPPDATA": root, "TMP": root, "TEMP": root, "PYTHONDONTWRITEBYTECODE": "1"}), Host: "127.0.0.1", Transport: "streamable-http", Port: r.port, OperationID: r.request.OperationID, QualificationID: r.qualificationID, GenerationID: r.request.GenerationID, RequestIdentitySHA256: r.key}, nil
 }
 
 // Called by the configured original-host before-create admission, after its

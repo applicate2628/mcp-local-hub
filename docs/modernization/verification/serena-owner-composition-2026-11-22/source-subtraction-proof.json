@@ -1,0 +1,373 @@
+{
+  "schema": "serena-full-donor-subtraction-v1",
+  "scope": "All leaves, modes and identities of the exact common base and three PR heads; no extension or directory filter was applied before computing deltas.",
+  "tree_records": {
+    "base": {
+      "commit": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "tree": "dca478794d2b91050606848d5bfe7fb98627b6ad",
+      "leaf_count": 3205,
+      "recursive_tree_sha256": "f2ea4fa92f7fcf7e638cfa3c267bfdbe23aa8902a9e39093a0ff9006c671665a",
+      "truncated": false,
+      "reconstructed_tree_matches_commit": true
+    },
+    "pr643": {
+      "commit": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "leaf_count": 3208,
+      "recursive_tree_sha256": "7fa2ed4c0320fcfe27adbdf8d6ef05336859ce7141afa76c87540791cf983857",
+      "truncated": false,
+      "reconstructed_tree_matches_commit": true
+    },
+    "pr648": {
+      "commit": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "tree": "724265d9250f1d360636f98e14672133740f2c4c",
+      "leaf_count": 3211,
+      "recursive_tree_sha256": "0ecff877f480893472a2adbd552ef16f45ea704ce37e60f2fff56e1e9e592d8d",
+      "truncated": false,
+      "reconstructed_tree_matches_commit": true
+    },
+    "pr652": {
+      "commit": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "tree": "4d4e3a0d44b23b383d0db17e06101017e541934b",
+      "leaf_count": 3207,
+      "recursive_tree_sha256": "899da2504aa6b517597f61823f37f99414ab5a7511123ff3bacfd10e9ca0e744",
+      "truncated": false,
+      "reconstructed_tree_matches_commit": true
+    }
+  },
+  "non_go_leaf_count": 628,
+  "all_non_go_leaves_identical": true,
+  "docs_and_plans_leaf_count": 109,
+  "all_docs_and_plans_identical": true,
+  "archive_paths": {
+    "base": [],
+    "pr643": [],
+    "pr648": [],
+    "pr652": []
+  },
+  "donors": {
+    "pr643": {
+      "changed_paths_from_common_base": 9,
+      "compare_matches_full_tree": true,
+      "non_go_delta_from_common_base": [],
+      "non_go_delta_from_pr643": [],
+      "exact_donor_blob_count": 7,
+      "composed_count": 2,
+      "files": [
+        {
+          "path": "internal/api/serena_owned_tree.go",
+          "base_blob": "c69b1943fd64c2459038e43cca0d36db1b6e79ed",
+          "donor_blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+          "final_blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_cleanup_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+          "final_blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+          "final_blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+          "final_blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_unsupported.go",
+          "base_blob": "6d3c1a035ab8ea47b29c9e0c271f375b066e0731",
+          "donor_blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+          "final_blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_windows.go",
+          "base_blob": "6d4a2e8982654c10132cb3e0c863e5acc73cb358",
+          "donor_blob": "748135c3ec7fed7b2fe51dfdd93960666cd830fe",
+          "final_blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_acquisition.go",
+          "base_blob": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+          "donor_blob": "27986fa88f8d5ce16b915402b47201ead67fd566",
+          "final_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_inputs.go",
+          "base_blob": "8c5e13ae17037761d42be026dc0991a62be17ca1",
+          "donor_blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+          "final_blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_qualification_resources.go",
+          "base_blob": "fb195efd4a277155437d0a91f7beb81c1dda8cbb",
+          "donor_blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+          "final_blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+          "disposition": "exact_donor_blob_retained"
+        }
+      ]
+    },
+    "pr648": {
+      "changed_paths_from_common_base": 11,
+      "compare_matches_full_tree": true,
+      "non_go_delta_from_common_base": [],
+      "non_go_delta_from_pr643": [],
+      "exact_donor_blob_count": 7,
+      "composed_count": 4,
+      "files": [
+        {
+          "path": "internal/api/serena_build_constraint_policy_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+          "final_blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_build_environment.go",
+          "base_blob": "35af40886d457d10e7de63edec99b11262a0006c",
+          "donor_blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+          "final_blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_owned_tree_windows.go",
+          "base_blob": "6d4a2e8982654c10132cb3e0c863e5acc73cb358",
+          "donor_blob": "65c639124e6d830c0386c6a86cde6039fac4c5a6",
+          "final_blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_acquisition.go",
+          "base_blob": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+          "donor_blob": "811033f39e46b72c4fc6c03deb67188b92fc6a64",
+          "final_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_build_constraint.go",
+          "base_blob": null,
+          "donor_blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+          "final_blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+          "final_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_build_constraint_test.go",
+          "base_blob": null,
+          "donor_blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+          "final_blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_build_constraint_unsupported.go",
+          "base_blob": null,
+          "donor_blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+          "final_blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_build_constraint_windows.go",
+          "base_blob": null,
+          "donor_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+          "final_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_execution.go",
+          "base_blob": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+          "donor_blob": "ea77c1f3b142758c23a34ea812b87d400e9b5be9",
+          "final_blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_install_effects.go",
+          "base_blob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+          "donor_blob": "a7fe798cf1ee28dce54f7b03f72237be037bbdb6",
+          "final_blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+          "disposition": "composed_with_other_owner_contracts"
+        }
+      ]
+    },
+    "pr652": {
+      "changed_paths_from_common_base": 10,
+      "compare_matches_full_tree": true,
+      "non_go_delta_from_common_base": [],
+      "non_go_delta_from_pr643": [],
+      "exact_donor_blob_count": 5,
+      "composed_count": 5,
+      "files": [
+        {
+          "path": "internal/api/serena_prepared_acquisition.go",
+          "base_blob": "3cb72448d854ebd76f79647d54d35a8c70fe7733",
+          "donor_blob": "960edc4b31cb608cefd74d46bb44dc9f6713017c",
+          "final_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_effects.go",
+          "base_blob": "05eff3480bbf929f7b9eace482cb3cd52f5acfa9",
+          "donor_blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+          "final_blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_execution.go",
+          "base_blob": "c471c34f910195bc1ceec5e6fa0db5a6299f7a39",
+          "donor_blob": "cac70f0c4f613398bc52e3a59aeefaa82e9b9245",
+          "final_blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_file_unsupported.go",
+          "base_blob": "58fffea91b00a37c9e881446fef1c083d7322227",
+          "donor_blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+          "final_blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_file_windows.go",
+          "base_blob": "9b7fbd1270420a05ad1e2e825ff0291192d722d1",
+          "donor_blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+          "final_blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_install_effects.go",
+          "base_blob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0",
+          "donor_blob": "fed0421b0c6de05b659593c0a50070ee70239cae",
+          "final_blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_owned_file_windows.go",
+          "base_blob": null,
+          "donor_blob": "ebbcdc12878fbc12ab79eb5fe25a578686d439c1",
+          "final_blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_owned_file_windows_test.go",
+          "base_blob": null,
+          "donor_blob": "8da2ce58a7c3669e8a6d41c7f327165387a3a295",
+          "final_blob": "23f14a65e3b4f13b9e40730bd1f11a44f5560a52",
+          "disposition": "composed_with_other_owner_contracts"
+        },
+        {
+          "path": "internal/api/serena_prepared_qualification.go",
+          "base_blob": "ff7cd293a7e64707b1c48f84ae8a87b03254e224",
+          "donor_blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+          "final_blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+          "disposition": "exact_donor_blob_retained"
+        },
+        {
+          "path": "internal/api/serena_prepared_runtime.go",
+          "base_blob": "da74b9d3a183204d64a420ef4c57a8bbbe625702",
+          "donor_blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+          "final_blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+          "disposition": "exact_donor_blob_retained"
+        }
+      ]
+    }
+  },
+  "publication": {
+    "manifest18_sha256": "e2a9b22a6ed3ee7854dc08bb2666f38879bb0ef109f3e02a7409e953061267ae",
+    "code_only_tree": "d0493719ec58b8b737d25a95316bbf65122b0d2c",
+    "changed_paths": 18,
+    "added": 8,
+    "modified": 10,
+    "retained_pr643_paths": 7,
+    "deleted_paths": [],
+    "uncovered_donor_paths": [],
+    "non_go_paths_to_transfer": []
+  },
+  "semantic_preservation_basis": "Exact blob equality covers 12 donor files. The six composed files are covered by the original own/full-diff and independent candidate reviews plus the retained donor-to-composed patch; path coverage alone is not a semantic or runtime proof.",
+  "related_source_reviews": [
+    "../review-candidate.md",
+    "../review-lifetime.md",
+    "../source-composition-proof.json"
+  ],
+  "neighbor_655": "The existing exact hunk commutation proof remains applicable: formatting did not change serena_prepared_runtime.go. No #655 full-file import is made.",
+  "historical_evidence": {
+    "references": [
+      {
+        "pr": 643,
+        "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+        "snapshot_updated_at": "2026-11-21T18:29:39Z",
+        "description_path": "historical/pr643-description.md",
+        "description_sha256": "4d7cd2997b755b196d9cb4a5c28e9a7e6587a1957fe1a0684e7827456775d445",
+        "urls": [
+          "https://github.com/applicate2628/mcp-local-hub/blob/4c262ba522a2fbe8e040e4bb270f2b47bd579345/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения",
+          "https://github.com/applicate2628/mcp-local-hub/blob/b21402535ac4df032408d7bf06200ddd0557abf1/docs/modernization/verification/completion-r24-2026-11-21/README.md",
+          "https://github.com/applicate2628/mcp-local-hub/blob/b21402535ac4df032408d7bf06200ddd0557abf1/docs/modernization/verification/completion-r24-2026-11-21/original-pr-descriptions.zip",
+          "https://github.com/applicate2628/mcp-local-hub/blob/cc7b33a9e69028165cbab7042c536f846e6f901f/docs/modernization/verification/pr-state-audit-2026-11-21/README.md#pr-643"
+        ]
+      },
+      {
+        "pr": 648,
+        "head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+        "snapshot_updated_at": "2026-11-21T18:29:48Z",
+        "description_path": "historical/pr648-description.md",
+        "description_sha256": "54227f0f4d34ac264df853f7797e96647a4aa429cffc2c56f14f721ca3eb3f1e",
+        "urls": [
+          "https://github.com/applicate2628/mcp-local-hub/blob/4c262ba522a2fbe8e040e4bb270f2b47bd579345/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения",
+          "https://github.com/applicate2628/mcp-local-hub/blob/a4c6de78d867d9e99ee596c15251ac7d4a522737/docs/modernization/verification/completion-r25-2026-11-21/AUDIT.md",
+          "https://github.com/applicate2628/mcp-local-hub/blob/a4c6de78d867d9e99ee596c15251ac7d4a522737/docs/modernization/verification/completion-r25-2026-11-21/publication648.json",
+          "https://github.com/applicate2628/mcp-local-hub/blob/cc7b33a9e69028165cbab7042c536f846e6f901f/docs/modernization/verification/pr-state-audit-2026-11-21/README.md#pr-648",
+          "https://github.com/applicate2628/mcp-local-hub/commit/184104c186108b150d1183318c3f6791f2a4ba5f",
+          "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6896966516",
+          "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6923787383"
+        ]
+      },
+      {
+        "pr": 652,
+        "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+        "snapshot_updated_at": "2026-11-21T18:30:09Z",
+        "description_path": "historical/pr652-description.md",
+        "description_sha256": "3365ff3e430ed9119ad6d25dd1be8c7558cd55d9f22ba1e7403377e444ddacf5",
+        "urls": [
+          "https://github.com/applicate2628/mcp-local-hub/blob/4c262ba522a2fbe8e040e4bb270f2b47bd579345/.plans/2026-11/open-pr-integration-20261117.md#3-порядок-выполнения",
+          "https://github.com/applicate2628/mcp-local-hub/blob/cc7b33a9e69028165cbab7042c536f846e6f901f/docs/modernization/verification/pr-state-audit-2026-11-21/README.md#pr-652",
+          "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6885896339",
+          "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6893225526",
+          "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6956960866",
+          "https://github.com/applicate2628/mcp-local-hub/pull/652#pullrequestreview-5959531154",
+          "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6896966516",
+          "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6923787383"
+        ]
+      }
+    ],
+    "classification": "PR descriptions link to evidence on separate immutable commits and to historical comments. These are not unique files in donor branch deltas and are not new runtime receipts for the composition.",
+    "transfer_proposal": "Carry a concise provenance/limits summary and immutable links in the new #643 description/README; do not copy the unrelated R25 evidence bundle or retag historical outcomes as current qualification.",
+    "r25_publication648": {
+      "path": "source/historical-r25-publication648.json",
+      "source_commit": "a4c6de78d867d9e99ee596c15251ac7d4a522737",
+      "git_blob": "88ecb747033e535042806e92f76e1106aa0476a1",
+      "sha256": "92bdb6979ad9eefd62a2efc67b733d6e25a4d571d20c1bee6d3118c504962576"
+    }
+  },
+  "not_performed": [
+    "Go or native execution",
+    "remote PC actions",
+    "Git reference/PR actions",
+    "dependency download or installation",
+    "revalidation of all historical runtime archives"
+  ]
+}

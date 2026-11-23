@@ -458,6 +458,10 @@ func (a *API) ReconcileSerenaIntentForSupervisor(ctx context.Context, stateDir s
 	}
 	selection.invocation = invocation
 	selection.descriptors = descriptors
+	selection.ctx, err = invocation.privateEffectContext(ctx)
+	if err != nil {
+		return result, invocation, err
+	}
 	result, err = repairSerenaIntentFromRegistry(stateDir, true, selection)
 	return result, invocation, err
 }
@@ -580,14 +584,14 @@ func (s *serenaSupervisorRepair) publish(lease *StateFileObservedLease, prior *S
 		return failedSerenaIntentRepairResult(err)
 	}
 	result = completedSerenaIntentRepairResult(0, nil, nil)
-	err = s.invocation.WithIntentLockHeld(s.ctx, lease, func() error {
+	err = s.invocation.withIntentLockHeldContext(s.ctx, lease, func(work context.Context) error {
 		if err := s.validateHeldSupervisor(filepath.Dir(s.invocation.io.IntentPath)); err != nil {
 			return err
 		}
-		if err := s.invocation.preflightParsedIntentObserved(s.ctx, lease, s.beforeDefined, s.beforeSHA(), desired); err != nil {
+		if err := s.invocation.preflightParsedIntentObserved(work, lease, s.beforeDefined, s.beforeSHA(), desired); err != nil {
 			return err
 		}
-		publication, _, publishErr := s.invocation.publishParsedIntentObserved(s.ctx, lease, s.beforeDefined, s.beforeSHA(), desired)
+		publication, _, publishErr := s.invocation.publishParsedIntentObserved(work, lease, s.beforeDefined, s.beforeSHA(), desired)
 		if publication != nil {
 			if publication.writer != nil && publication.writer.readbackQualified {
 				result.Repaired = 1
