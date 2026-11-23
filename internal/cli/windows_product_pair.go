@@ -701,6 +701,9 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if t.prepareError != nil {
 		return t.prepareError
 	}
+	if t.Opts.EntryBundle != nil && t.Opts.EntryBundle.selective {
+		return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
+	}
 	if t.prepared != nil {
 		return requireWindowsProductWithoutBackendHold(t.prepared.journalContext, t.Opts.StateDir)
 	}

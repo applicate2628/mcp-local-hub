@@ -1046,6 +1046,185 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 
 // This fixture enters only the original file-move owner. No runtime recovery,
 // task restore, or supervisor invocation is part of the injected failure.
+func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
+	input, seed, _ := v2TxnFixtureInput(t)
+	for _, tc := range []struct {
+		name            string
+		changedIdentity bool
+		changedProduct  bool
+		changedAttrs    bool
+	}{
+		{name: "all_equal"},
+		{name: "identity_bytes_changed", changedIdentity: true},
+		{name: "product_and_identity_changed", changedProduct: true},
+		{name: "identity_attributes_changed", changedAttrs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			target := apitest.HardenedTempDir(t)
+			dst, err := binaryadmission.CanonicalEntryTargetsV2(filepath.Join(target, binaryadmission.WindowsCanonicalEntryRelativePathV1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			priorIDs := v2TxnSeedPrior(t, input, dst, seed)
+			oldIdentity := seed.IdentityBytes
+			oldProduct := mustReadFile(t, dst.ProductPath)
+			if tc.changedProduct {
+				oldProduct = append(oldProduct, []byte("fixture original Product")...)
+				if err := os.WriteFile(dst.ProductPath, oldProduct, 0600); err != nil {
+					t.Fatal(err)
+				}
+				identity, err := binaryadmission.ParseWindowsProductIdentityV2(oldIdentity)
+				if err != nil {
+					t.Fatal(err)
+				}
+				identity.SHA256 = v2TxnFixtureDigest(oldProduct)
+				oldIdentity, err = json.Marshal(identity)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.changedIdentity {
+				oldIdentity = append(append([]byte(nil), oldIdentity...), '\n')
+			}
+			if tc.changedProduct || tc.changedIdentity {
+				if err := os.WriteFile(dst.IdentityPath, oldIdentity, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.changedAttrs {
+				p, err := windows.UTF16PtrFromString(dst.IdentityPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := windows.SetFileAttributes(p, windows.FILE_ATTRIBUTE_HIDDEN); err != nil {
+					t.Fatal(err)
+				}
+			}
+			initial, err := os.ReadDir(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, err := binaryadmission.AcquireWindowsCanonicalEntrySetV2(ctx, input, seed)
+			if source != nil {
+				t.Cleanup(func() {
+					if err := source.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			carrier, err := stageRetainingCurrentEntryBundle(ctx, source, dst.CanonicalEntryPath)
+			if carrier != nil {
+				t.Cleanup(func() {
+					if err := carrier.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := source.Close(); err != nil {
+				t.Fatal(err)
+			}
+			members, err := carrier.original.Members()
+			if err != nil {
+				t.Fatal(err)
+			}
+			physical, err := os.ReadDir(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCount, wantDisposition := 0, windowsProductTargetIdentical
+			switch {
+			case tc.changedProduct:
+				wantCount, wantDisposition = 2, windowsProductTargetReplace
+			case tc.changedIdentity || tc.changedAttrs:
+				wantCount, wantDisposition = 1, windowsProductTargetReplace
+			}
+			if len(members) != wantCount || len(physical)-len(initial) != wantCount {
+				t.Fatal("native Stage created files beyond the actual changed bytes")
+			}
+			opts := WindowsProductTxnOpts{Context: ctx, EntryBundle: carrier, Mode: WindowsProductPairModeUpgrade,
+				CanonicalEntryPath: dst.CanonicalEntryPath, ProductPath: dst.ProductPath, IdentityPath: dst.IdentityPath,
+				LegacyWindowlessPath: filepath.Join(target, "mcphub-windowless.exe")}
+			if tc.changedProduct {
+				opts.StagedProduct, err = currentStageProductPath(carrier.original)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			preflight, err := inspectCurrentEntryPreflight(opts)
+			if err != nil || preflight.Disposition.CLI != wantDisposition || !preflight.PriorCLI.Present {
+				t.Fatal("selective preflight did not classify actual changed bytes and exact prior", err)
+			}
+			plan, arm, err := prepareCanonicalEntryBundle(opts, strings.Repeat("a", 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			witness, err := carrier.original.RetainedMembersWitness(ctx)
+			if err != nil || arm.Bundle.Retained == nil || arm.Bundle.Retained.MembersSHA256 != witness.MembersSHA256 ||
+				!reflect.DeepEqual(arm.Bundle.Retained.Singletons, witness.Singletons) {
+				t.Fatal("selective journal plan lost its original native witness", err)
+			}
+			if len(arm.Bundle.Members) != wantCount || len(plan.stagedLocations) != wantCount || len(plan.priorLocations) != wantCount ||
+				arm.StagedEntry != (windowsProductRecoveryStagedV3{}) ||
+				(currentEntryMember(arm, arm.Expected.ProductRelativePath) != nil) != tc.changedProduct ||
+				currentEntryMember(arm, arm.Expected.CanonicalEntryRelativePath) != nil ||
+				!arm.CanonicalEntry.PriorPresent || arm.CanonicalEntry.PriorSHA256 != seed.CanonicalEntry.SHA256 ||
+				arm.PriorRuntime == nil || !arm.PriorRuntime.Present || arm.PriorRuntime.Path != dst.ProductPath {
+				t.Fatal("selective plan fabricated a retained core file stage or lost the exact prior")
+			}
+			for _, issued := range members {
+				row := currentEntryMember(arm, issued.Member)
+				if row == nil || row.Staged == nil || *row.Staged != issued || row.Prior == nil ||
+					row.PriorAsideRelative == nil || row.SuccessorAsideRelative == nil {
+					t.Fatal("changed row is not the exact issued stage and prior")
+				}
+				switch issued.Member {
+				case seed.IdentityRelativePath:
+					if row.Staged.File.SHA256 != seed.Identity.SHA256 || row.Prior.File.SHA256 != v2TxnFixtureDigest(oldIdentity) ||
+						tc.changedAttrs && (row.Staged.File.SHA256 != row.Prior.File.SHA256 || row.Staged.Attributes == row.Prior.Attributes) {
+						t.Fatal("identity byte or attribute change did not preserve native evidence")
+					}
+				case seed.ProductRelativePath:
+					if !tc.changedProduct || row.Staged.File.SHA256 != seed.Product.SHA256 ||
+						row.Prior.File.SHA256 != v2TxnFixtureDigest(oldProduct) ||
+						!sameWindowsProductPath(opts.StagedProduct, filepath.Join(target, filepath.FromSlash(row.Staged.File.Path))) {
+						t.Fatal("changed Product did not carry the exact issued staged path and bytes")
+					}
+				default:
+					t.Fatal("unexpected runtime or Launcher stage")
+				}
+			}
+			var tasks v2TxnFixtureTasks
+			txn := &WindowsProductTxn{Opts: opts}
+			txn.Opts.Tasks = &tasks
+			if err := txn.Prepare(); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) || txn.prepared != nil || tasks.exports != 0 {
+				t.Fatal("unintegrated selective plan crossed the mutation boundary", err)
+			}
+			if err := carrier.Close(); err != nil {
+				t.Fatal(err)
+			}
+			closed, err := os.ReadDir(target)
+			if err != nil || len(closed) != len(initial) {
+				t.Fatal("ordinary cleanup did not settle the selective stage", err)
+			}
+			for name, id := range priorIDs {
+				if v2TxnFixtureIdentity(t, name) != id {
+					t.Fatal("selective close changed a retained original")
+				}
+			}
+			if !bytes.Equal(mustReadFile(t, dst.IdentityPath), oldIdentity) || !bytes.Equal(mustReadFile(t, dst.ProductPath), oldProduct) {
+				t.Fatal("preflight or cleanup changed unstaged original bytes")
+			}
+		})
+	}
+}
+
 func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string) {
 	t.Helper()
 	txn.Opts.Mode = WindowsProductPairModeUpgrade

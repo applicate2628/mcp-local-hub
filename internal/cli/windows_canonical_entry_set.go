@@ -458,11 +458,25 @@ type stagedWindowsCanonicalEntrySetV2 struct {
 	mu                 sync.Mutex
 	closeRequested     bool
 	closeError         error
+	selective          bool
 	original           *binaryadmission.StagedWindowsCanonicalEntrySetV2
 	prior              *binaryadmission.WindowsCanonicalEntryPriorSetV2
 	priorAttempted     bool
 	priorError         error
 	directorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2
+}
+
+// stageRetainingCurrentEntryBundle receives the pair from the same native
+// Stage. Callers close a non-nil carrier even on partial stage failure.
+func stageRetainingCurrentEntryBundle(ctx context.Context, source *binaryadmission.WindowsCanonicalEntrySetV2, target string) (*stagedWindowsCanonicalEntrySetV2, error) {
+	stage, prior, err := source.StageRetainingEqualRuntime(ctx, target)
+	if stage == nil {
+		return nil, errors.Join(err, errors.New("original selective stage unavailable"))
+	}
+	if err == nil && prior == nil {
+		err = errors.New("original selective prior unavailable")
+	}
+	return &stagedWindowsCanonicalEntrySetV2{selective: true, original: stage, prior: prior, priorAttempted: true, priorError: err}, err
 }
 
 func (s *stagedWindowsCanonicalEntrySetV2) acquirePrior(ctx context.Context) (*binaryadmission.WindowsCanonicalEntryPriorSetV2, error) {
@@ -544,6 +558,69 @@ func currentStageProductPath(stage *binaryadmission.StagedWindowsCanonicalEntryS
 	return "", errors.New("current original stage has no Product member")
 }
 
+// qualifyRetainedPlan pairs the Stage receipt with the existing V3 selection
+// rule. Only handed-off prior evidence and actual staged rows enter this plan.
+func (s *stagedWindowsCanonicalEntrySetV2) qualifyRetainedPlan(ctx context.Context, snapshot binaryadmission.WindowsCanonicalEntrySetSnapshotV2, before binaryadmission.WindowsCanonicalEntryPriorObservationV2, staged []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) (*windowsCanonicalEntryRetainedRuntimeV2, map[string]bool, error) {
+	if !s.selective {
+		return nil, nil, nil
+	}
+	witness, err := s.original.RetainedMembersWitness(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	retained := &windowsCanonicalEntryRetainedRuntimeV2{MembersSHA256: witness.MembersSHA256, Singletons: slices.Clone(witness.Singletons)}
+	e := windowsCanonicalEntrySetJournalV2{Expected: snapshot, Bundle: windowsCanonicalEntryBundleJournalV2{
+		RelativePath: snapshot.BundleRelativePath, BeforeKind: before.BeforeKind,
+		BeforeDirectory: before.BundleDirectory, BeforeInventory: before.Inventory, Retained: retained,
+	}}
+	for _, member := range before.Members {
+		if member.Member == snapshot.CanonicalEntryRelativePath {
+			e.CanonicalEntry.PriorPresent = true
+			e.CanonicalEntry.PriorSHA256 = member.File.SHA256
+			break
+		}
+	}
+	omitted, _, err := currentEntryRetainedRuntime(&e)
+	if err != nil {
+		return nil, nil, err
+	}
+	evidence := make([]binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, 0, len(omitted))
+	for _, member := range before.Members {
+		if omitted[member.Member] {
+			evidence = append(evidence, member)
+		}
+	}
+	sort.Slice(evidence, func(i, j int) bool { return evidence[i].Member < evidence[j].Member })
+	raw, err := binaryadmission.CanonicalRuntimeJSON(evidence)
+	if err != nil || len(evidence) != len(omitted) || binaryadmission.RuntimeDigest(raw) != witness.MembersSHA256 {
+		return nil, nil, errors.Join(err, errors.New("retained plan differs from held original witness"))
+	}
+
+	pending := map[string]binaryadmission.RuntimeObjectV1{
+		snapshot.CanonicalEntryRelativePath: {Kind: "file", SHA256: snapshot.CanonicalEntry.SHA256},
+	}
+	for _, object := range snapshot.BundleInventory {
+		if object.Kind == "file" {
+			pending[path.Join(snapshot.BundleRelativePath, object.Path)] = object
+		}
+	}
+	for key := range omitted {
+		delete(pending, key)
+	}
+	for _, member := range staged {
+		plan, exists := pending[member.Member]
+		if !exists || !currentEntryRelative(member.File.Path) || path.Dir(member.File.Path) != "." ||
+			member.File.SHA256 != plan.SHA256 || plan.Size != nil && (member.Size != *plan.Size || member.Attributes != plan.Attributes) {
+			return nil, nil, errors.New("selective stage has a foreign, retained or mismatched issued row")
+		}
+		delete(pending, member.Member)
+	}
+	if len(pending) != 0 {
+		return nil, nil, errors.New("selective stage and retained witness do not cover the candidate")
+	}
+	return retained, omitted, ctx.Err()
+}
+
 func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCanonicalEntryBundlePreparedV2, *windowsCanonicalEntrySetJournalV2, error) {
 	if o.EntryBundle == nil {
 		return nil, nil, nil
@@ -552,8 +629,10 @@ func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCa
 		return nil, nil, errors.New("one original current entry arm and context required")
 	}
 	source := o.EntryBundle
-	if err := source.original.VerifyUnchanged(o.Context); err != nil {
-		return nil, nil, err
+	if !source.selective {
+		if err := source.original.VerifyUnchanged(o.Context); err != nil {
+			return nil, nil, err
+		}
 	}
 	snapshot, err := source.original.Snapshot()
 	if err != nil {
@@ -580,6 +659,11 @@ func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCa
 	}
 	state := &windowsCanonicalEntryBundlePreparedV2{source: source, snapshot: snapshot, targets: targets, observation: observation, priorLocations: map[string]string{}, stagedLocations: map[string]string{}}
 	arm := &windowsCanonicalEntrySetJournalV2{Schema: binaryadmission.WindowsCanonicalEntrySetSchemaV2, TransactionID: id, Expected: snapshot, Moves: []windowsCanonicalEntryMoveRecordV2{}, Cleanup: []windowsCanonicalEntryCleanupV2{}, Bundle: windowsCanonicalEntryBundleJournalV2{RelativePath: snapshot.BundleRelativePath, BeforeKind: observation.BeforeKind, BeforeDirectory: observation.BundleDirectory, BeforeInventory: observation.Inventory, Effect: "exact-members", Members: []windowsCanonicalEntryMemberJournalV2{}, Directories: []windowsCanonicalEntryDirectoryJournalV2{}, Disposition: windowsCanonicalEntryDispositionV2{State: "staged", OriginalOwnerPending: true, DispositionPending: true}}}
+	retained, omitted, err := source.qualifyRetainedPlan(o.Context, snapshot, observation, members)
+	if err != nil {
+		return state, arm, err
+	}
+	arm.Bundle.Retained = retained
 	rows := map[string]*windowsCanonicalEntryMemberJournalV2{}
 	for i := range members {
 		member := members[i]
@@ -591,6 +675,9 @@ func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCa
 	}
 	for i := range observation.Members {
 		member := observation.Members[i]
+		if omitted[member.Member] {
+			continue
+		}
 		row := rows[member.Member]
 		if row == nil {
 			row = &windowsCanonicalEntryMemberJournalV2{Member: member.Member}
@@ -627,19 +714,31 @@ func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCa
 	}
 	entry := currentEntryMember(arm, snapshot.CanonicalEntryRelativePath)
 	product := currentEntryMember(arm, snapshot.ProductRelativePath)
-	if entry == nil || entry.Staged == nil || product == nil || product.Staged == nil {
+	launcherRetained := omitted[snapshot.CanonicalEntryRelativePath]
+	productRetained := omitted[snapshot.ProductRelativePath]
+	if !launcherRetained && (entry == nil || entry.Staged == nil) || !productRetained && (product == nil || product.Staged == nil) {
 		return state, arm, errors.New("current stage lacks canonical file projections")
 	}
 	root := filepath.Dir(targets.CanonicalEntryPath)
-	if !sameWindowsProductPath(filepath.Join(root, filepath.FromSlash(product.Staged.File.Path)), o.StagedProduct) {
+	if productRetained {
+		if o.StagedProduct != "" {
+			return state, arm, errors.New("retained Product cannot carry a staged path")
+		}
+	} else if !sameWindowsProductPath(filepath.Join(root, filepath.FromSlash(product.Staged.File.Path)), o.StagedProduct) {
 		return state, arm, errors.New("StagedProduct is not the issued original flat Product stage")
 	}
-	arm.CanonicalEntry = windowsProductRecoveryArtifactV3{Target: targets.CanonicalEntryPath, NewSHA256: entry.Staged.File.SHA256, BaselineAsides: []windowsProductRecoveryAsideV3{}}
-	if entry.Prior != nil {
+	arm.CanonicalEntry = windowsProductRecoveryArtifactV3{Target: targets.CanonicalEntryPath, NewSHA256: snapshot.CanonicalEntry.SHA256, BaselineAsides: []windowsProductRecoveryAsideV3{}}
+	if launcherRetained {
 		arm.CanonicalEntry.PriorPresent = true
-		arm.CanonicalEntry.PriorSHA256 = entry.Prior.File.SHA256
+		arm.CanonicalEntry.PriorSHA256 = snapshot.CanonicalEntry.SHA256
+	} else {
+		arm.CanonicalEntry.NewSHA256 = entry.Staged.File.SHA256
+		if entry.Prior != nil {
+			arm.CanonicalEntry.PriorPresent = true
+			arm.CanonicalEntry.PriorSHA256 = entry.Prior.File.SHA256
+		}
+		arm.StagedEntry = windowsProductRecoveryStagedV3{Path: filepath.Join(root, filepath.FromSlash(entry.Staged.File.Path)), SHA256: entry.Staged.File.SHA256}
 	}
-	arm.StagedEntry = windowsProductRecoveryStagedV3{Path: filepath.Join(root, filepath.FromSlash(entry.Staged.File.Path)), SHA256: entry.Staged.File.SHA256}
 	if o.Mode == WindowsProductPairModeUpgrade {
 		view, err := prior.RuntimeProduct(o.Context)
 		if err != nil {
@@ -906,8 +1005,10 @@ func inspectCurrentEntryPreflight(o WindowsProductTxnOpts) (result windowsProduc
 	if o.Context == nil || o.EntryBundle == nil || o.EntryBundle.original == nil || o.EntrySet != nil {
 		return result, errors.New("one current original entry stage and context required")
 	}
-	if err := o.EntryBundle.original.VerifyUnchanged(o.Context); err != nil {
-		return result, err
+	if !o.EntryBundle.selective {
+		if err := o.EntryBundle.original.VerifyUnchanged(o.Context); err != nil {
+			return result, err
+		}
 	}
 	snapshot, err := o.EntryBundle.original.Snapshot()
 	if err != nil {
@@ -932,9 +1033,15 @@ func inspectCurrentEntryPreflight(o WindowsProductTxnOpts) (result windowsProduc
 	if err != nil {
 		return result, err
 	}
+	_, omitted, err := o.EntryBundle.qualifyRetainedPlan(o.Context, snapshot, before, newMembers)
+	if err != nil {
+		return result, err
+	}
 	old := map[string]string{}
 	for _, member := range before.Members {
-		old[member.Member] = member.File.SHA256
+		if !omitted[member.Member] {
+			old[member.Member] = member.File.SHA256
+		}
 	}
 	disposition := windowsProductTargetIdentical
 	productStage := ""
@@ -947,7 +1054,7 @@ func inspectCurrentEntryPreflight(o WindowsProductTxnOpts) (result windowsProduc
 			if disposition != windowsProductTargetReplace {
 				disposition = windowsProductTargetCreate
 			}
-		} else if digest != member.File.SHA256 {
+		} else if o.EntryBundle.selective || digest != member.File.SHA256 {
 			disposition = windowsProductTargetReplace
 		}
 		delete(old, member.Member)
@@ -955,7 +1062,11 @@ func inspectCurrentEntryPreflight(o WindowsProductTxnOpts) (result windowsProduc
 	if len(old) != 0 {
 		disposition = windowsProductTargetReplace
 	}
-	if productStage == "" || !sameWindowsProductPath(filepath.Join(filepath.Dir(targets.CanonicalEntryPath), filepath.FromSlash(productStage)), o.StagedProduct) {
+	if omitted[snapshot.ProductRelativePath] {
+		if o.StagedProduct != "" {
+			return result, errors.New("retained Product cannot carry a staged path")
+		}
+	} else if productStage == "" || !sameWindowsProductPath(filepath.Join(filepath.Dir(targets.CanonicalEntryPath), filepath.FromSlash(productStage)), o.StagedProduct) {
 		return result, errors.New("Product stage is not the issued current original")
 	}
 	view, err := prior.RuntimeProduct(o.Context)
@@ -1061,6 +1172,11 @@ func (source *stagedWindowsCanonicalEntrySetV2) closeWithStageObservation(before
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	source.closeRequested = true
+	if source.selective {
+		// Selective Stage receives its own prior and shared lenders.
+		source.closeError = errors.Join(source.closeError, source.original.Close())
+		return source.closeError
+	}
 	owners := orderedCurrentDirectories(source)
 	err := settleCurrentEntryReferences(
 		func() error { return closeCurrentEntryFiles(source, beforeStageClose) },
