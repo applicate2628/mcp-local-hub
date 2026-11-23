@@ -369,10 +369,22 @@ func (e *preparedSerenaRuntimeEffects) ValidateRecord(ctx context.Context, r Pre
 	if _, err = r.Binding(raw); err != nil {
 		return err
 	}
-	if err = revalidatePreparedSerenaFile(ctx, r.EntrypointIdentity); err != nil {
+	currentGeneration := e.finishObservation == nil && r.GenerationID == e.acquisition.inputs.Request.GenerationID && e.acquisition.generation != nil
+	if currentGeneration {
+		if r.OperationID != e.acquisition.inputs.Request.OperationID || e.installation.generation != e.acquisition.generation {
+			return errors.New("SERENA_PREPARED_RECORD_GENERATION_DRIFT")
+		}
+		if err = validatePreparedSerenaGeneration(ctx, e.acquisition.generation, e.acquisition.inputs.Request, e.acquisition.roots.Generation); err != nil {
+			return err
+		}
+		err = revalidatePreparedSerenaOwnedFile(ctx, e.acquisition.generation, r.EntrypointIdentity)
+	} else {
+		err = revalidatePreparedSerenaFile(ctx, r.EntrypointIdentity)
+	}
+	if err != nil {
 		return err
 	}
-	if e.finishObservation != nil || r.GenerationID != e.acquisition.inputs.Request.GenerationID || e.acquisition.generation == nil {
+	if !currentGeneration {
 		if e.finishObservation == nil && e.priorPublishedRead != nil {
 			selected, err := e.receivePriorSelectedContext(ctx, r)
 			if err != nil {

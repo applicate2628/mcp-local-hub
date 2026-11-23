@@ -1,0 +1,789 @@
+{
+  "source_master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+  "overlay_count": 25,
+  "formatted_manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+  "code_commit": "4ce944d291663f117b2df6d5b2042f543a9c04ba",
+  "code_tree": "d0493719ec58b8b737d25a95316bbf65122b0d2c",
+  "publication_parent": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+  "qualification_scope": "Exact physical master plus 25 formatted overlays; not standalone code commit or full Go/product qualification",
+  "phases": [
+    {
+      "phase": "serena-format",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-format\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-format\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "go-version",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "version"
+          ],
+          "exit_code": 0,
+          "seconds": 0.12284920003730804,
+          "oracle": {
+            "label": "go-version",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 34,
+            "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+            "captured_utc": "2026-11-21T21:09:13.695158+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:09:13.695305+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        },
+        {
+          "label": "gofmt-check",
+          "executable": "C:\\msys64\\ucrt64\\bin\\gofmt.exe",
+          "args": [
+            "-l",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_build_constraint_policy_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_build_environment.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree_cleanup_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree_delete_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree_streams_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree_unsupported.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_owned_tree_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_acquisition.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_build_constraint.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_build_constraint_pin_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_build_constraint_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_build_constraint_unsupported.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_build_constraint_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_effects.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_execution.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_file_unsupported.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_file_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_inputs.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_install_effects.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_owned_file_windows.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_owned_file_windows_test.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_qualification.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_prepared_runtime.go",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\manifests\\serena-staged\\candidate\\internal\\api\\serena_qualification_resources.go"
+          ],
+          "exit_code": 0,
+          "seconds": 0.023996399948373437,
+          "oracle": {
+            "label": "gofmt-check",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:09:14.585288+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:09:14.585399+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-compile",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-compile\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-compile\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "api-tagged-race-compile",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-compile\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-c",
+            "-o",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-compile\\api-tagged-race-compile.exe",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 47.05011559999548,
+          "oracle": {
+            "label": "api-tagged-race-compile",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true,
+            "binary": {
+              "path": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-compile\\api-tagged-race-compile.exe",
+              "bytes": 88292065,
+              "sha256": "8467d05b6a5e1a1790772ea47e9b9ab6cc715abcf26878e8c348f85ad6f85547"
+            }
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:11:23.413828+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:11:23.413923+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-logic",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-logic\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-logic\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-logic",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-logic\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^(TestSerenaOwnedTreeCleanupDeadline|TestSerenaOwnedTreeCleanupParentBinding|TestSerenaOwnedTreeCleanupBorrowedNamespaceKeepsOriginalIssuer|TestSerenaOwnedTreeCleanupRefusesBeforeParentObservation|TestSerenaOwnedTreeCleanupRejectsPublishedReader|TestSerenaOwnedTreeCleanupClosedOwnerDoesNotReopen|TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation|TestSerenaOwnedTreeRemovalOpenRejectsPublishedReader|TestPreparedSerenaBuildConstraintReceipt|TestPreparedSerenaBuildConstraintRequiresOriginalAttempt|TestPreparedSerenaInvocationPreflightPreservesMissingClosure)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 8.86405009997543,
+          "tests": {
+            "pass": [
+              "TestSerenaOwnedTreeCleanupDeadline/same_captured_bound",
+              "TestSerenaOwnedTreeCleanupDeadline/shorter_receiving_context",
+              "TestSerenaOwnedTreeCleanupDeadline/renewed_receiving_context",
+              "TestSerenaOwnedTreeCleanupDeadline/missing_captured_bound",
+              "TestSerenaOwnedTreeCleanupDeadline/canceled_receiving_context",
+              "TestSerenaOwnedTreeCleanupDeadline/expired_receiving_context",
+              "TestSerenaOwnedTreeCleanupDeadline/nil",
+              "TestSerenaOwnedTreeCleanupDeadline/unbounded",
+              "TestSerenaOwnedTreeCleanupDeadline",
+              "TestSerenaOwnedTreeCleanupParentBinding/same_native_namespace_with_per-call_issuers",
+              "TestSerenaOwnedTreeCleanupParentBinding/expired_original_work_observation_stays_immutable",
+              "TestSerenaOwnedTreeCleanupParentBinding/intent_changes_without_weaker_protection",
+              "TestSerenaOwnedTreeCleanupParentBinding/relaxed_ancestor_but_strict_retained_parent",
+              "TestSerenaOwnedTreeCleanupParentBinding/strictness_increases",
+              "TestSerenaOwnedTreeCleanupParentBinding/original_close_incomplete",
+              "TestSerenaOwnedTreeCleanupParentBinding/fresh_close_incomplete",
+              "TestSerenaOwnedTreeCleanupParentBinding/fresh_resources_incomplete",
+              "TestSerenaOwnedTreeCleanupParentBinding/parent_path_drift",
+              "TestSerenaOwnedTreeCleanupParentBinding/fresh_parent_missing",
+              "TestSerenaOwnedTreeCleanupParentBinding/cleanup_would_create_parent",
+              "TestSerenaOwnedTreeCleanupParentBinding/cleanup_created_component",
+              "TestSerenaOwnedTreeCleanupParentBinding/retained_object_is_not_directory",
+              "TestSerenaOwnedTreeCleanupParentBinding/fresh_full_file_identity_high_half_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/original_full_file_identity_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/volume_high_bits_differ",
+              "TestSerenaOwnedTreeCleanupParentBinding/state_root_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/environment_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/strictness_decreases",
+              "TestSerenaOwnedTreeCleanupParentBinding/fresh_parent_needs_relaxed_gate",
+              "TestSerenaOwnedTreeCleanupParentBinding/both_ancestor_and_fresh_parent_relaxed",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_schema_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_version_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_release_semantics_differ",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_path_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_source_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/resolution_principal_differs",
+              "TestSerenaOwnedTreeCleanupParentBinding/unknown_release_semantics_fail_closed",
+              "TestSerenaOwnedTreeCleanupParentBinding",
+              "TestSerenaOwnedTreeCleanupBorrowedNamespaceKeepsOriginalIssuer",
+              "TestSerenaOwnedTreeCleanupRefusesBeforeParentObservation",
+              "TestSerenaOwnedTreeCleanupRejectsPublishedReader",
+              "TestSerenaOwnedTreeCleanupClosedOwnerDoesNotReopen",
+              "TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation/parent",
+              "TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation/inventory",
+              "TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation",
+              "TestSerenaOwnedTreeRemovalOpenRejectsPublishedReader",
+              "TestPreparedSerenaBuildConstraintReceipt/actual-fixed-policy",
+              "TestPreparedSerenaBuildConstraintReceipt/missing",
+              "TestPreparedSerenaBuildConstraintReceipt/wrong-package",
+              "TestPreparedSerenaBuildConstraintReceipt/wrong-range",
+              "TestPreparedSerenaBuildConstraintReceipt/missing-range",
+              "TestPreparedSerenaBuildConstraintReceipt/wrong-type",
+              "TestPreparedSerenaBuildConstraintReceipt/extra-source",
+              "TestPreparedSerenaBuildConstraintReceipt/extra-marker",
+              "TestPreparedSerenaBuildConstraintReceipt/duplicate",
+              "TestPreparedSerenaBuildConstraintReceipt",
+              "TestPreparedSerenaBuildConstraintRequiresOriginalAttempt",
+              "TestPreparedSerenaInvocationPreflightPreservesMissingClosure",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-logic",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 53878,
+            "sha256": "535661cdbe55c5b3a9fdd50834d168f1b4723322a7e47635c5c14c6517f79618",
+            "captured_utc": "2026-11-21T21:11:58.578883+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:11:58.578982+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-temp-refusal",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-temp-refusal\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-temp-refusal\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-temp-refusal",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-temp-refusal\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^(TestPreparedSerenaOwnedFileRejectsUnissuedOwners|TestPreparedSerenaOwnedGenerationRejectsBindings|TestPreparedSerenaInvocationRejectsForeignGeneration)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 7.165214500040747,
+          "tests": {
+            "pass": [
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/nil",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/attempt",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/no-platform",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/published-reader",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/mismatched-platform",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/cleanup-deadline-drift",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/closed",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/missing-handles",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners/close-debt",
+              "TestPreparedSerenaOwnedFileRejectsUnissuedOwners",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/namespace",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/package",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/operation",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/generation",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/kind",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/limits",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/cleanup-deadline",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/matching-request-reaches-owner",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/no-deadline",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/renewed-work-deadline",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings/canceled",
+              "TestPreparedSerenaOwnedGenerationRejectsBindings",
+              "TestPreparedSerenaInvocationRejectsForeignGeneration/foreign-operation",
+              "TestPreparedSerenaInvocationRejectsForeignGeneration/closed-original",
+              "TestPreparedSerenaInvocationRejectsForeignGeneration",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-temp-refusal",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 23376,
+            "sha256": "0416fa85d7215a0a802e7f0d43d890af62fca9610f7804d2cbc3b1fb3bd20170",
+            "captured_utc": "2026-11-21T21:16:49.092117+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:16:49.092282+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-native-temp-files",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-temp-files\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-temp-files\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-native-temp-files",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-native-temp-files\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^(TestSerenaOwnedTreeObserveStreamsNative|TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive|TestPreparedSerenaOwnedFileBatchPrimitive|TestPreparedSerenaBuildConstraintPinCloseFailureNative)$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 7.609542999998666,
+          "tests": {
+            "pass": [
+              "TestSerenaOwnedTreeObserveStreamsNative/empty-directory",
+              "TestSerenaOwnedTreeObserveStreamsNative/empty-file",
+              "TestSerenaOwnedTreeObserveStreamsNative/nonempty-file",
+              "TestSerenaOwnedTreeObserveStreamsNative/directory-named-stream",
+              "TestSerenaOwnedTreeObserveStreamsNative/file-named-stream",
+              "TestSerenaOwnedTreeObserveStreamsNative/canceled-context",
+              "TestSerenaOwnedTreeObserveStreamsNative/invalid-handle",
+              "TestSerenaOwnedTreeObserveStreamsNative/buffer-limit",
+              "TestSerenaOwnedTreeObserveStreamsNative",
+              "TestPreparedSerenaBuildConstraintPinCloseFailureNative",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/generic-reader-retains-exclusive-ancestor-policy",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/retained-root-read",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/root-is-not-a-leaf",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/outside-root",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/unclean-parent",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/named-stream",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/byte-cap",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/nonpositive-cap",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/depth-limit-before-open",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/handle-limit-before-open",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/directory-is-not-file",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/canceled",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/invalid-handle",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/borrowed-root-remains-live-and-exclusive",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive/leaf-and-descendant-handles-closed",
+              "TestPreparedSerenaOwnedFileRetainedDirectoryPrimitive",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/unique-members-and-duplicate-path",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/duplicates-do-not-consume-unique-budgets",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/entry-limit-discards-prefix",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/utf16-limit-discards-prefix",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/logical-limit-discards-prefix",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/parent-identity-drift",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/root-identity-drift",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/strict-environment-drift",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/closed-owner",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/sticky-close-debt",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/missing-member-discards-prefix",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/outside-member-discards-prefix",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/cancellation-discards-results",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/finite-deadline-required",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/traversal-does-not-issue-namespace",
+              "TestPreparedSerenaOwnedFileBatchPrimitive/borrowed-root-live-descendants-closed",
+              "TestPreparedSerenaOwnedFileBatchPrimitive",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-native-temp-files",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 41390,
+            "sha256": "0aa8d0134fa5b9f1b9eec4379b257b58956e4a5370b89bdfe765d28dd0669c7a",
+            "captured_utc": "2026-11-21T21:18:45.252955+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:18:45.253055+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-native-readonly-link",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-readonly-link\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-readonly-link\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-native-readonly-link",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-native-readonly-link\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^TestSerenaOwnedTreeReadonlyHardlinkDeletion$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 16.700371799990535,
+          "tests": {
+            "pass": [
+              "TestSerenaOwnedTreeReadonlyHardlinkDeletion",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-native-readonly-link",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 2419,
+            "sha256": "2f504309097999432c9fee8424e6dc2c6014bc16e403c721903f94fc917648e9",
+            "captured_utc": "2026-11-21T21:21:20.931318+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:21:20.931481+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-native-no-child",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-no-child\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-native-no-child\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-native-no-child",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-native-no-child\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^TestPreparedSerenaBuildConstraintPinSettlementNative$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 10.371542299981229,
+          "tests": {
+            "pass": [
+              "TestPreparedSerenaBuildConstraintPinSettlementNative/local-preflight-releases-unused-pin",
+              "TestPreparedSerenaBuildConstraintPinSettlementNative/missing-native-retains-pin",
+              "TestPreparedSerenaBuildConstraintPinSettlementNative/incomplete-io-retains-pin",
+              "TestPreparedSerenaBuildConstraintPinSettlementNative/original-no-child-releases-pin",
+              "TestPreparedSerenaBuildConstraintPinSettlementNative",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-native-no-child",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 5561,
+            "sha256": "d2683b22cd73340a09f5f9ed8c82fcb010da84a65a2071a8288454bf18c81b67",
+            "captured_utc": "2026-11-21T21:26:44.723373+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:26:44.723472+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-bootstrap-readonly",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-bootstrap-readonly\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-bootstrap-readonly\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "serena-bootstrap-readonly",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-bootstrap-readonly\\overlay.json",
+            "-mod=readonly",
+            "-tags=test_state_path_env",
+            "-race",
+            "-json",
+            "-count=1",
+            "-timeout=180s",
+            "-parallel=1",
+            "-run",
+            "^TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy$",
+            "./internal/api"
+          ],
+          "exit_code": 0,
+          "seconds": 7.5236191001022235,
+          "tests": {
+            "pass": [
+              "TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy/source-owned-content-and-identity",
+              "TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy/caller-declaration-refused-UV_BUILD_CONSTRAINT",
+              "TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy/caller-declaration-refused-uV_bUiLd_CoNsTrAiNt",
+              "TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy/caller-install-setting-refused",
+              "TestSerenaBuildEnvironmentWindowsBuildConstraintPolicy",
+              "PACKAGE:mcp-local-hub/internal/api"
+            ],
+            "fail": [],
+            "skip": []
+          },
+          "oracle": {
+            "label": "serena-bootstrap-readonly",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 5855,
+            "sha256": "0c7cfbd9e13273b9c8380cd4b72d229e9fa9453e44909926351ae2b7d40c350d",
+            "captured_utc": "2026-11-21T21:27:26.601721+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:27:26.602341+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-build",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-build\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-build\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "full-build",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "build",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-build\\overlay.json",
+            "-mod=readonly",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 17.993180899997242,
+          "oracle": {
+            "label": "full-build",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:28:31.090482+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:28:31.090576+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    },
+    {
+      "phase": "serena-vet",
+      "state": "complete",
+      "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+      "runner_sha256": "c3d746649232b088a403f88d0d42d6ac50f169ee100668d94eafed49a4e551c1",
+      "native_temporary_path": {
+        "api": "GetTempPath2W",
+        "requested": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-vet\\tmp",
+        "resolved": "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\runtime\\serena-vet\\tmp"
+      },
+      "source_head": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "source_tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+      "working_status": "",
+      "commands": [
+        {
+          "label": "full-vet",
+          "executable": "C:\\msys64\\ucrt64\\bin\\go.exe",
+          "args": [
+            "vet",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-p0-gates-20261121-247107d5\\evidence\\serena-vet\\overlay.json",
+            "-mod=readonly",
+            "./..."
+          ],
+          "exit_code": 0,
+          "seconds": 23.794037700048648,
+          "oracle": {
+            "label": "full-vet",
+            "manifest_sha256": "6be3cd0aa6a35b586ba623be051acb6e4bed4799bf25e92127efcf6191456ebf",
+            "matched": true
+          },
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:29:12.749393+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T21:29:12.749582+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "settled": true,
+          "timed_out": false,
+          "whole_process_tree_deadline_enforced": false
+        }
+      ]
+    }
+  ]
+}

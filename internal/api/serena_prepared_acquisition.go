@@ -12,12 +12,13 @@ import (
 // package effects owner. Original tree capabilities remain retained here;
 // returned path/identity DTOs never become deletion authority.
 type preparedSerenaAcquisition struct {
-	mu                  sync.Mutex
-	inputs              SerenaPreparationInputs
-	qualifier           PreparedSerenaQualificationPort
-	generation, attempt *SerenaOwnedTree
-	roots               PreparedSerenaOwnedRoots
-	started, acquiring  bool
+	mu                                    sync.Mutex
+	inputs                                SerenaPreparationInputs
+	qualifier                             PreparedSerenaQualificationPort
+	generation, attempt                   *SerenaOwnedTree
+	roots                                 PreparedSerenaOwnedRoots
+	buildConstraint                       *preparedSerenaBuildConstraint
+	started, acquiring                    bool
 	generationAttempted, attemptAttempted bool
 }
 
@@ -48,8 +49,8 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 		a.roots = roots
 		a.mu.Unlock()
 	}()
-	a.generationAttempted=true
-	a.generation, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "generation", Limits: r.OwnedTreeLimits})
+	a.generationAttempted = true
+	a.generation, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "generation", Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline})
 	if err != nil {
 		return roots, err
 	}
@@ -61,8 +62,8 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 	if err != nil {
 		return roots, err
 	}
-	a.attemptAttempted=true
-	a.attempt, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "attempt", Limits: r.OwnedTreeLimits, survivors: []*SerenaOwnedTree{a.generation}})
+	a.attemptAttempted = true
+	a.attempt, err = AcquireSerenaOwnedTree(ctx, SerenaOwnedTreeRequest{Namespace: r.Namespace, PackageIdentitySHA256: key, OperationID: r.OperationID, GenerationID: r.GenerationID, Kind: "attempt", Limits: r.OwnedTreeLimits, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, survivors: []*SerenaOwnedTree{a.generation}})
 	if err != nil {
 		return roots, err
 	}
@@ -70,7 +71,14 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 	if err != nil {
 		return roots, err
 	}
-	roots.Attempt, err = preparedSerenaRootFile(filepath.Join(r.Namespace, key, "attempts", r.OperationID), attempt.RootIdentity)
+	attemptPath, err := a.attempt.WorkingDirectory(ctx)
+	if err != nil {
+		return roots, err
+	}
+	roots.Attempt, err = preparedSerenaRootFile(attemptPath, attempt.RootIdentity)
+	if err == nil && a.inputs.execution.buildConstraint {
+		a.buildConstraint, err = acquirePreparedSerenaBuildConstraint(ctx, a.attempt)
+	}
 	return roots, err
 }
 
@@ -111,7 +119,7 @@ func (a *preparedSerenaAcquisition) install(ctx context.Context, r PreparedSeren
 	}
 	a.started = true
 	a.mu.Unlock()
-	installed, retErr = installPreparedSerena(ctx, a.inputs, roots)
+	installed, retErr = installPreparedSerena(ctx, a.inputs, roots, a.generation, a.buildConstraint)
 	if !installed.Closure.complete(r.OperationID) {
 		return installed, retErr
 	}
@@ -125,6 +133,9 @@ func (a *preparedSerenaAcquisition) install(ctx context.Context, r PreparedSeren
 func (a *preparedSerenaAcquisition) cleanupAttempt(ctx context.Context, roots PreparedSerenaOwnedRoots, closure PreparedSerenaExecutionClosure) (cleanup PreparedSerenaCleanup, retErr error) {
 	if a == nil || a.attempt == nil || a.roots != roots || !closure.complete(a.inputs.Request.OperationID) {
 		return cleanup, errors.New("SERENA_PREPARED_ATTEMPT_CLEANUP_UNQUALIFIED")
+	}
+	if err := closePreparedSerenaBuildConstraint(a.buildConstraint); err != nil {
+		return cleanup, errors.Join(err, errors.New("SERENA_PREPARED_BUILD_CONSTRAINT_CLOSE_PENDING"))
 	}
 	// The original generation capability qualifies surviving immutable links.
 	// No pathname or new handle becomes that survivor authority.
@@ -170,7 +181,7 @@ func (a *preparedSerenaAcquisition) qualify(ctx context.Context, r PreparedSeren
 	if err := observation.Validate(cleanupCtx, request); err != nil {
 		return qualification, errors.Join(qualifyErr, err)
 	}
-	inventory, err := a.generation.Inventory(cleanupCtx)
+	inventory, err := inventorySerenaOwnedTreeForCleanup(cleanupCtx, a.generation)
 	if err != nil {
 		return qualification, errors.Join(qualifyErr, err)
 	}

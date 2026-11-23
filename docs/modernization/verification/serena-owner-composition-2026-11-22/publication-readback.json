@@ -1,0 +1,229 @@
+{
+  "schema": 1,
+  "pr": 643,
+  "published_head": "ebc3735b8d31a5bc2cb771704b7fb357a314d701",
+  "published_tree": "2b925e4cd7c021d06bcf815d38a5b2f6a2db1547",
+  "code_commit": "4ce944d291663f117b2df6d5b2042f543a9c04ba",
+  "code_tree": "d0493719ec58b8b737d25a95316bbf65122b0d2c",
+  "prior_head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+  "single_parent_chain_verified": true,
+  "incremental_paths": 25,
+  "pr_diff_paths": 32,
+  "go_composition_paths": 25,
+  "published_text_files": [
+    {
+      "path": "internal/api/serena_build_constraint_policy_windows_test.go",
+      "sha256": "891ae639e946b72967fa82bf94d4860a0e71241fbb6f43541d086b135d52a739",
+      "git_blob": "4c25fa37f43e97feedc9d02eaa475d39f29e5bae",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_build_environment.go",
+      "sha256": "7e64ffa0390db6eade4b26edc11d932bc33702ef24aaca8856fe8fc1898c0d58",
+      "git_blob": "67f50757327a27e9ad1af255f88242f5137d4ca4",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree.go",
+      "sha256": "50ede0b831ab23ebd34a58a2311d201ac3b88c7ad0864d06d2819ca7fd204b4c",
+      "git_blob": "12d5aa1eface9c05a895ccd1fba17d7ed0155c38",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree_cleanup_windows_test.go",
+      "sha256": "2eda90b729a224359ee9051b7a481933b05ce0eec2c3ac392a1b292bae911396",
+      "git_blob": "9153eb9ca8b083b9dfe6c2e5b3ab4dcb281e824c",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+      "sha256": "8792ca17eb87dc4033753f210f4fe1b34a9ff7d5a4d0d3ed5701f76eb80056b3",
+      "git_blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+      "sha256": "a2ba550535cc6d56e7972d450f8bba147271af146d2b2407040052ac162b9dc2",
+      "git_blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree_unsupported.go",
+      "sha256": "c953763bd67224cb80b90263dc81e5650c151e3679dbfb7a7cfe4009e554525e",
+      "git_blob": "b94d8b9ddad6390e7d610a8a2749a87515b707d2",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_owned_tree_windows.go",
+      "sha256": "9493ef9c9580f8bec149160dbff3678ccd286ad21308195d33c160b53e95489e",
+      "git_blob": "1d8465aa6565c3516228a550d26f8adf2a914eb0",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_acquisition.go",
+      "sha256": "c980cfe6ef77da0fcb282c5e7a76e64807f96f2f228f05b02e2ca2eac3455eaa",
+      "git_blob": "2559c896f07bdb51dfa64a8e5815a1201d4ffc69",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint.go",
+      "sha256": "4947981547a2587d50ad65ef3162bf01ec5fdb7bde4d42cca1149d8f275d51e5",
+      "git_blob": "4a1682d2d9820cde34422b482d3052d53976f790",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68",
+      "git_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_test.go",
+      "sha256": "973d3d2ce2a88032199ad07a30b3cb805e96cbc2d58543772906449119554ece",
+      "git_blob": "38c82a218355a4245cd60b93ca33c3904c59ed68",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_unsupported.go",
+      "sha256": "b5ffaa5358c14cefbff4327c573c81c1d6fe418271ab20e25c06fd41e3a967bb",
+      "git_blob": "635b65c9f92fd8799e485b7122b04d11a71bc614",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_build_constraint_windows.go",
+      "sha256": "0e5a2642b1d916a5903ceeb4608faf0587442fd687f9ebf8f70d1ed61206a5c6",
+      "git_blob": "67bb5184be847fd6b0986f753863bd2daecc64c7",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_effects.go",
+      "sha256": "1a5e1dbb714fe61319e026e31a4d88f356fb56c8916f11e7f2e4e5a4821c1b9a",
+      "git_blob": "54de9106ba9d6c7b506c36f87e126bcbd20ffde1",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_execution.go",
+      "sha256": "a6d084dffb06ee8377fd03fc47009f0c2c45ffbea41ea7a2ca0a1e84267735d0",
+      "git_blob": "57d92ddf892a07cfe008b2af671df99fbcbacfc8",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_file_unsupported.go",
+      "sha256": "9193a8461e2c6e540db9e6f1e8effe98b32480eb097573232846440dfe071cd1",
+      "git_blob": "431a9889abd931a6900fc2156f05db8e6ba75eeb",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_file_windows.go",
+      "sha256": "d7e8a0145276d6e8fa89892f80ef19dd6e00ce30210210b60ee544f51f60d7c9",
+      "git_blob": "0e36d5b6adc2950a2f49d477ae56e390628d3c0a",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_inputs.go",
+      "sha256": "c0a3d5cea994b6c6d080c6d212747f370d134e059bd20971465b6ab252dca12c",
+      "git_blob": "b0a261c98eab44305334479de0039a0b8b3f6b4a",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_install_effects.go",
+      "sha256": "32b94d9dafb6d70cc2c07575f19745439b1ff86b066b3fd0fad08801188191aa",
+      "git_blob": "38e9441265a0fae9523414b07eda0852c7a3040e",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows.go",
+      "sha256": "889295f050febcd3bcc366f04fd5f40021f1333d125a781e78dee16c69079480",
+      "git_blob": "ca1d61ec62ef7528b872a1cf16b8b690ef0dba45",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_owned_file_windows_test.go",
+      "sha256": "a558481e34e28611b2f108c7387478f7aee76839018c2d1c1faddb974eaa006e",
+      "git_blob": "23f14a65e3b4f13b9e40730bd1f11a44f5560a52",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_qualification.go",
+      "sha256": "2de30c087965be54453017521d372fe6f792da035d0c9bcfc698700325e74069",
+      "git_blob": "fb0de37cc42aeab7c93962031332df3ce68a74f3",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_prepared_runtime.go",
+      "sha256": "82d6e7ef173374fafafba5966768e94a7a2210898cb77f9016386d78c77d6eec",
+      "git_blob": "a68d7b9ff101a120d7a5737d76fd3b4aa0bb5977",
+      "content_equal": true
+    },
+    {
+      "path": "internal/api/serena_qualification_resources.go",
+      "sha256": "2aebd209e804b81613f21b5716a6b1a5a9dbccb1b401e109e69e0e22346996c2",
+      "git_blob": "ebc4f429e05dd65b425a1058e5ebabdb5b0765bd",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/PRESERVATION.md",
+      "sha256": "f347886bd87b621531f0ff4f88eedfd354c58415b1e0399df9c246e93a169a0b",
+      "git_blob": "235f6fa725fecd8fa0ea199226d37c5e0485b6fe",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/README.md",
+      "sha256": "1b999dbb804a66ea005961c40eb6160f39e25255c36516a5e2bbcb4cf157fbd9",
+      "git_blob": "c652531b9a89edc481687965021dcbbef97df9ed",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/archive.json",
+      "sha256": "3ffa23c80345b9db61f12c88b8f5dac648cfc24fd1b244ea6f4ed2f3f10ab811",
+      "git_blob": "d0cb951808ba40f1014f3fe1541a8919405e6884",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/manifest18.json",
+      "sha256": "e2a9b22a6ed3ee7854dc08bb2666f38879bb0ef109f3e02a7409e953061267ae",
+      "git_blob": "e1e68c8293a49a3ed1697e4f620efcb98552c169",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/qualification.json",
+      "sha256": "0b643ce631b729b961aeeed6682627cc2899f83b21c80d7c1f102ec768845a2f",
+      "git_blob": "fabcb25e572b75b99894f0e2b430ccece2363742",
+      "content_equal": true
+    },
+    {
+      "path": "docs/modernization/verification/serena-owner-composition-2026-11-22/source-subtraction-proof.json",
+      "sha256": "db507009098000ae03e56d90df56eba930dfa775e7e4729f0661ebddc30ff45d",
+      "git_blob": "d89b6a43fd8813dc3e3c74261d63983e1cda2618",
+      "content_equal": true
+    }
+  ],
+  "archive": {
+    "schema": 1,
+    "archive": "serena-composition-evidence.zip",
+    "bytes": 2293451,
+    "sha256": "5fa49f768a4bd8856bea9775109989c896b437a77b3f88292d5e26322e0bb844",
+    "git_blob": "31033061efe0a5909408ba9b71a42fbcf0116958",
+    "entries": 205,
+    "payload_entries": 204,
+    "crc_and_all_member_size_sha256_verified": true,
+    "inner_archive": {
+      "bytes": 1304071,
+      "sha256": "0fcbed980fbba1cccfe0b3debe567e2d4344a1de5271a0a1f900a223cd136a28",
+      "entries": 1593
+    },
+    "remote_archive_readback": "Uploaded bytes and published Git tree blob identity must match this git_blob; no second binary download is claimed"
+  },
+  "all_expected_tree_entries_verified": true,
+  "unexpected_incremental_paths": [],
+  "donor_delta_accounted": {
+    "pr648": 11,
+    "pr652": 10,
+    "unique_paths": 18,
+    "unaccounted": 0,
+    "non_go_unique": 0
+  },
+  "scope": "Publication readback and source preservation; not full Go/installed product or external review",
+  "branch_deletion": false,
+  "merge": false
+}
