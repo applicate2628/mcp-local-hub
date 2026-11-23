@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -131,14 +132,30 @@ func exeSuffix() string {
 // also broken, so put it first to fail fast on build/launch
 // regressions before more elaborate scenarios run.
 func TestReliability_VersionCommandExitsZero(t *testing.T) {
+	preparationStarted := time.Now()
 	bin := ensureMcphubBinary(t)
+	preparationElapsed := time.Since(preparationStarted)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "version")
 	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
+	// Keep CombinedOutput's single shared sink and Start/Wait semantics, but
+	// distinguish native process creation from execution after Start returns.
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	versionStarted := time.Now()
+	err := cmd.Start()
+	startElapsed := time.Since(versionStarted)
+	var waitElapsed time.Duration
+	if err == nil {
+		waitStarted := time.Now()
+		err = cmd.Wait()
+		waitElapsed = time.Since(waitStarted)
+	}
+	versionElapsed := time.Since(versionStarted)
+	out := output.Bytes()
 	if err != nil {
-		t.Fatalf("`mcphub version` exit: %v\nOutput:\n%s", err, out)
+		t.Fatalf("`mcphub version` exit: %v (preparation elapsed: %s; command elapsed: %s; start elapsed: %s; wait elapsed: %s; context error: %v)\nOutput:\n%s", err, preparationElapsed, versionElapsed, startElapsed, waitElapsed, ctx.Err(), out)
 	}
 	if !strings.Contains(string(out), "mcp-local-hub") {
 		t.Errorf("version output missing 'mcp-local-hub' marker; got:\n%s", out)
