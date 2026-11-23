@@ -16,6 +16,7 @@ import (
 
 type PreparedSerenaLaunchObservation struct {
 	api                                                *API
+	prepared                                           *PreparedSerenaParsedInstall
 	descriptor                                         SupervisorDaemon
 	binding                                            PreparedSerenaRuntimeBinding
 	task, requestSHA, epoch, rawManifestSHA, intentSHA string
@@ -33,7 +34,11 @@ type PreparedSerenaLaunchObservation struct {
 	received                                           bool
 }
 
-func (a *API) ObservePreparedSerenaLaunch(ctx context.Context, task string) (launch *PreparedSerenaLaunchObservation, retErr error) {
+func (a *API) ObservePreparedSerenaLaunch(ctx context.Context, task string) (*PreparedSerenaLaunchObservation, error) {
+	return a.observePreparedSerenaLaunch(ctx, task, nil)
+}
+
+func (a *API) observePreparedSerenaLaunch(ctx context.Context, task string, prepared *PreparedSerenaParsedInstall) (launch *PreparedSerenaLaunchObservation, retErr error) {
 	if a == nil || ctx == nil || ctx.Err() != nil || task == "" {
 		return nil, errors.New("SERENA_PREPARED_LAUNCH_INPUT_MISSING")
 	}
@@ -47,6 +52,11 @@ func (a *API) ObservePreparedSerenaLaunch(ctx context.Context, task string) (lau
 		}
 		defer cancel()
 		ctx = bounded
+	}
+	if prepared != nil {
+		if err := prepared.validateConsumerLaunchSource(ctx, a); err != nil {
+			return nil, err
+		}
 	}
 	assembly, ok := a.serenaPreparationAssembly.(SerenaConsumerEnvironmentAssembly)
 	if !ok || assembly == nil {
@@ -148,43 +158,72 @@ func (a *API) ObservePreparedSerenaLaunch(ctx context.Context, task string) (lau
 	observation.binding = *selected
 	observation.intentSHA = preparedSerenaHash(raw)
 	observation.generation = intent.IntentGeneration
-	var manifestRaw []byte
-	if manifestDirForTests() != "" {
-		return nil, errors.New("SERENA_PREPARED_UNQUALIFIED_MANIFEST_OVERRIDE")
-	}
-	manifestRaw, err = fs.ReadFile(servers.Manifests, descriptor.Server+"/manifest.yaml")
-	if err != nil {
-		dir, resolveErr := CanonicalManifestDir()
-		if resolveErr != nil {
-			return nil, resolveErr
+	var policyOverride *SerenaPreparationPolicyV2
+	if prepared != nil {
+		observation.prepared = prepared
+		observation.rawManifestSHA = prepared.manifestSHA
+		observation.policy = prepared.policy
+		if err = observation.validatePreparedSource(ctx); err != nil {
+			return nil, err
 		}
-		manifestPath := filepath.Join(dir, descriptor.Server, "manifest.yaml")
-		manifestRaw, reader, err = ReadStateFileInodeAnchoredObserved(ctx, manifestPath, 64<<20)
-		observation.readers = append(observation.readers, reader)
+		observation.manifest, err = prepared.consumerLaunchManifest()
 		if err != nil {
 			return nil, err
 		}
-		if reader == nil {
-			return nil, errors.New("SERENA_PREPARED_MANIFEST_READER_MISSING")
+		policyOverride = &observation.policy
+	} else {
+		var manifestRaw []byte
+		if manifestDirForTests() != "" {
+			return nil, errors.New("SERENA_PREPARED_UNQUALIFIED_MANIFEST_OVERRIDE")
 		}
-		if err = reader.Validate(ctx, manifestPath, 64<<20, manifestRaw, preparedSerenaHash(manifestRaw)); err != nil {
+		manifestRaw, err = fs.ReadFile(servers.Manifests, descriptor.Server+"/manifest.yaml")
+		if err != nil {
+			dir, resolveErr := CanonicalManifestDir()
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			manifestPath := filepath.Join(dir, descriptor.Server, "manifest.yaml")
+			manifestRaw, reader, err = ReadStateFileInodeAnchoredObserved(ctx, manifestPath, 64<<20)
+			observation.readers = append(observation.readers, reader)
+			if err != nil {
+				return nil, err
+			}
+			if reader == nil {
+				return nil, errors.New("SERENA_PREPARED_MANIFEST_READER_MISSING")
+			}
+			if err = reader.Validate(ctx, manifestPath, 64<<20, manifestRaw, preparedSerenaHash(manifestRaw)); err != nil {
+				return nil, err
+			}
+		}
+		observation.rawManifestSHA = preparedSerenaHash(manifestRaw)
+		if observation.rawManifestSHA != descriptor.ManifestHash {
+			return nil, errors.New("SERENA_PREPARED_MANIFEST_SOURCE_DRIFT")
+		}
+		observation.manifestRaw = append([]byte(nil), manifestRaw...)
+		observation.manifest, err = config.ParseManifest(bytes.NewReader(manifestRaw))
+		if err != nil {
 			return nil, err
 		}
 	}
-	observation.rawManifestSHA = preparedSerenaHash(manifestRaw)
-	if observation.rawManifestSHA != descriptor.ManifestHash {
-		return nil, errors.New("SERENA_PREPARED_MANIFEST_SOURCE_DRIFT")
-	}
-	observation.manifestRaw = append([]byte(nil), manifestRaw...)
-	observation.manifest, err = config.ParseManifest(bytes.NewReader(manifestRaw))
-	if err != nil {
-		return nil, err
-	}
-	observation.environment, err = assembly.ObserveConsumerEnvironment(ctx, observation.manifest, observation.rawManifestSHA, task, nil)
+	observation.environment, err = assembly.ObserveConsumerEnvironment(ctx, observation.manifest, observation.rawManifestSHA, task, policyOverride)
 	if err != nil {
 		return nil, err
 	}
 	return observation, nil
+}
+
+func (o *PreparedSerenaLaunchObservation) validatePreparedSource(ctx context.Context) error {
+	prepared := o.prepared
+	if prepared == nil {
+		return nil
+	}
+	if err := prepared.validateConsumerLaunchSource(ctx, o.api); err != nil {
+		return err
+	}
+	if o.binding != prepared.binding || o.rawManifestSHA != prepared.manifestSHA || o.descriptor.ManifestHash != prepared.manifestSHA || o.epoch != prepared.record.SourceSHA256 || o.binding.SourceSHA256 != o.epoch || o.policy != prepared.policy {
+		return errors.New("SERENA_PARSED_PREPARATION_LAUNCH_DRIFT")
+	}
+	return nil
 }
 
 func (o *PreparedSerenaLaunchObservation) validateSource(ctx context.Context) error {
@@ -192,6 +231,9 @@ func (o *PreparedSerenaLaunchObservation) validateSource(ctx context.Context) er
 		return errors.New("SERENA_PREPARED_LAUNCH_RECEIVING_UNAVAILABLE")
 	}
 	if err := o.source.Validate(o.epoch); err != nil {
+		return err
+	}
+	if err := o.validatePreparedSource(ctx); err != nil {
 		return err
 	}
 	for _, r := range o.readers {
@@ -210,6 +252,9 @@ func (o *PreparedSerenaLaunchObservation) validateSource(ctx context.Context) er
 	policySHA, err := o.policy.IdentitySHA256()
 	if err != nil {
 		return err
+	}
+	if o.prepared != nil && sha != o.prepared.request.BuildEnvironmentSHA256 {
+		return errors.New("SERENA_PARSED_PREPARATION_ENVIRONMENT_DRIFT")
 	}
 	return o.environment.Validate(ctx, o.rawManifestSHA, o.task, policySHA, sha)
 }
@@ -233,6 +278,9 @@ func (o *PreparedSerenaLaunchObservation) Validate(ctx context.Context, descript
 func (o *PreparedSerenaLaunchObservation) Manifest(ctx context.Context) (*config.ServerManifest, error) {
 	if err := o.validateSource(ctx); err != nil {
 		return nil, err
+	}
+	if o.prepared != nil {
+		return o.prepared.consumerLaunchManifest()
 	}
 	return config.ParseManifest(bytes.NewReader(o.manifestRaw))
 }

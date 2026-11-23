@@ -106,6 +106,51 @@ func (a *API) PrepareSerenaParsedInstall(ctx context.Context, m *config.ServerMa
 	return &PreparedSerenaParsedInstall{api: a, owner: owner, manifest: &frozen, manifestSHA: opts.ManifestHash, policy: policy, request: request, binding: binding, record: record}, nil
 }
 
+// ObserveConsumerLaunch observes the installed descriptor and current consumer
+// environment using this original preparation's frozen manifest and policy.
+// The returned launch still requires the existing Ready consumer admission.
+func (prepared *PreparedSerenaParsedInstall) ObserveConsumerLaunch(ctx context.Context, task string) (*PreparedSerenaLaunchObservation, error) {
+	if prepared == nil || prepared.api == nil {
+		return nil, errors.New("SERENA_PARSED_PREPARATION_MISSING")
+	}
+	return prepared.api.observePreparedSerenaLaunch(ctx, task, prepared)
+}
+
+func (prepared *PreparedSerenaParsedInstall) validateConsumerLaunchSource(ctx context.Context, a *API) error {
+	if prepared == nil || a == nil || ctx == nil || prepared.api != a || prepared.owner == nil || prepared.manifest == nil {
+		return errors.New("SERENA_PARSED_PREPARATION_MISSING")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	owner, err := a.PreparedSerenaConsumerOwner()
+	if err != nil || owner != prepared.owner {
+		return errors.Join(err, errors.New("SERENA_PARSED_PREPARATION_OWNER_DRIFT"))
+	}
+	if a.serenaPrivatePublisher != nil {
+		if err := a.serenaPrivatePublisher.validateOrigin(ctx); err != nil {
+			return err
+		}
+	}
+	policySHA, err := prepared.policy.IdentitySHA256()
+	if err != nil || !preparedSerenaDigest(prepared.manifestSHA) || prepared.manifestSHA != prepared.request.ManifestSHA256 || policySHA != prepared.request.PolicySHA256 {
+		return errors.Join(err, errors.New("SERENA_PARSED_PREPARATION_SOURCE_DRIFT"))
+	}
+	return ctx.Err()
+}
+
+func (prepared *PreparedSerenaParsedInstall) consumerLaunchManifest() (*config.ServerManifest, error) {
+	raw, err := json.Marshal(prepared.manifest)
+	if err != nil {
+		return nil, err
+	}
+	var frozen config.ServerManifest
+	if err = json.Unmarshal(raw, &frozen); err != nil {
+		return nil, err
+	}
+	return &frozen, nil
+}
+
 // WithConsumerInvocation retains the exact final workspace selection through
 // the install callback and observed closure. Its context stays live until all
 // original mutation observations have received their resource closes. A
