@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -105,7 +106,7 @@ See also: install, setup, restart, stop.`,
 				if pendingRecoveryFn == nil {
 					return fmt.Errorf("UPGRADE_PENDING_RECOVERY_NOT_ADMITTED: pending Product recovery is unsupported on this platform")
 				}
-				return pendingRecoveryFn(cmd)
+				return runUpgradeRecoveryWithEntryInput(cmd, input, pendingRecoveryFn)
 			}
 			if recovery {
 				if len(args) != 0 || upgradeGUIRequested(cmd) || upgradeGUIOwnedFleetStopRequested(cmd) {
@@ -114,7 +115,7 @@ See also: install, setup, restart, stop.`,
 				if committedRecoveryFn == nil {
 					return fmt.Errorf("UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED: committed Product recovery is unsupported on this platform")
 				}
-				return committedRecoveryFn(cmd)
+				return runUpgradeRecoveryWithEntryInput(cmd, input, committedRecoveryFn)
 			}
 			if upgradeGUIOwnedFleetStopRequested(cmd) && !upgradeGUIRequested(cmd) {
 				return fmt.Errorf("--stop-gui-owned-fleet-for-upgrade requires --terminate-gui-for-upgrade")
@@ -138,3 +139,23 @@ See also: install, setup, restart, stop.`,
 // platforms leave this nil and reject the opt-in without side effects.
 var committedRecoveryFn func(*cobra.Command) error
 var pendingRecoveryFn func(*cobra.Command) error
+
+type windowsRecoveryEntryInputKey struct{}
+
+func windowsRecoveryInputFromContext(ctx context.Context) (windowsCanonicalEntryCommandInput, bool) {
+	if ctx == nil {
+		return windowsCanonicalEntryCommandInput{}, false
+	}
+	input, ok := ctx.Value(windowsRecoveryEntryInputKey{}).(windowsCanonicalEntryCommandInput)
+	return input, ok
+}
+
+func runUpgradeRecoveryWithEntryInput(cmd *cobra.Command, input windowsCanonicalEntryCommandInput, run func(*cobra.Command) error) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		return run(cmd)
+	}
+	cmd.SetContext(context.WithValue(ctx, windowsRecoveryEntryInputKey{}, input))
+	defer cmd.SetContext(ctx)
+	return run(cmd)
+}

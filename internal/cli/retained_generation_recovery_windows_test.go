@@ -390,7 +390,7 @@ func TestObserveRetainedGenerationClassifiesCompleteMixedPartition(t *testing.T)
 		},
 		LookupIdentity:      func(pid int) (process.ProcessIdentity, error) { return identities[pid], nil },
 		OwnerMatchesCurrent: func(int) (bool, error) { return true, nil },
-		ConfirmGUIAbsent:    func(string) error { return nil },
+		ConfirmGUIAbsent:    func(context.Context, string) error { return nil },
 		HandleIdentity:      func(pid int) (process.PIDHandleIdentity, error) { return handleIdentities[pid], nil },
 		ParentPID:           func(pid int) (int, error) { return parents[pid], nil },
 		PortOwner: func(_ context.Context, port int) (int, bool, error) {
@@ -442,7 +442,7 @@ func TestObserveRetainedGenerationRequiresPreciseChildStartIdentity(t *testing.T
 			},
 			LookupIdentity:      func(pid int) (process.ProcessIdentity, error) { return identities[pid], nil },
 			OwnerMatchesCurrent: func(int) (bool, error) { return true, nil },
-			ConfirmGUIAbsent:    func(string) error { return nil },
+			ConfirmGUIAbsent:    func(context.Context, string) error { return nil },
 			HandleIdentity: func(pid int) (process.PIDHandleIdentity, error) {
 				if pid == 1001 {
 					return process.PIDHandleIdentity{PID: 1001, ExecutablePath: retained, StartedAt: base}, nil
@@ -502,7 +502,7 @@ func TestObserveRetainedGenerationRequiresPreciseChildStartIdentity(t *testing.T
 func TestObserveRetainedGenerationIncompleteIdentityDepsFailClosed(t *testing.T) {
 	canonical := filepath.Join(t.TempDir(), "mcphub.exe")
 	observation, err := observeRetainedGenerationWithDeps(context.Background(), t.TempDir(), canonical, filepath.Join(filepath.Dir(canonical), "mcphub-windowless.exe"), nil, retainedGenerationObservationDeps{
-		ConfirmGUIAbsent: func(string) error { return nil },
+		ConfirmGUIAbsent: func(context.Context, string) error { return nil },
 	})
 	if err == nil || observation != nil || !strings.Contains(err.Error(), "E_RETAINED_GENERATION_CHANGED") {
 		t.Fatalf("observation=%+v error=%v", observation, err)
