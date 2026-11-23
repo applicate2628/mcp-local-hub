@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 const (
@@ -105,6 +106,7 @@ func TestResolveRelayURL_CanonicalManifestAcrossExecutableContexts(t *testing.T)
 	} {
 		t.Run(context.name, func(t *testing.T) {
 			cmd := exec.Command(context.executable, "-test.run=^TestResolveRelayURL_CanonicalManifestAcrossExecutableContexts$")
+			process.NoConsole(cmd)
 			cmd.Env = append(os.Environ(),
 				relayManifestContextHelperEnv+"=1",
 				relayManifestCanonicalPathEnv+"="+canonicalExecutable,

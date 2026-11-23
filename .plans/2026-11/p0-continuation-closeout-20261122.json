@@ -1,0 +1,2436 @@
+{
+  "schema": 1,
+  "status": "SCOPED_CONTINUATION_PUBLISHED_FULL_PLAN_OPEN",
+  "repository": "applicate2628/mcp-local-hub",
+  "assembled_utc": "2026-11-22T15:17:23.954113+00:00",
+  "user_timezone": "Europe/Moscow",
+  "master_observed": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "plan_parent": "58670482426cd60aee35bf09b8d945a9809eb854",
+  "plan_base_tree": "5a76b61bccb978bf7ef68d007e8029e16a2782dd",
+  "publications": {
+    "architecture": {
+      "record": {
+        "schema": 1,
+        "repository": "applicate2628/mcp-local-hub",
+        "pr": 663,
+        "branch": "fix/archguard-mcproute-baseline-20261121",
+        "parent_expected": "1cabce12655f810b742e6c31369441cacd72573c",
+        "head": "d39b99db427eee026af12f8120c24477a2d9612a",
+        "tree": "8b6d3891e3b5790b53fc24fa9cb62a52397b4aa6",
+        "files": [
+          {
+            "path": "internal/gui/server.go",
+            "bytes": 53605,
+            "sha256": "edcffcc94cb1078801d1329e04e1e98824527f5c9eb080fcdb20560675131325",
+            "git_blob": "43135eadcdf8dac18b4d5cba817ad809c2afd15a",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "architecture/baseline.yaml",
+            "bytes": 1436933,
+            "sha256": "e0620345b7999fdb97462172d20226255e3397345078e98178098ddcd082632c",
+            "git_blob": "58451730ea292dc93d77fb5ce484bfe37b4d9152",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/manifest-services-2026-11-22/README.md",
+            "bytes": 24803,
+            "sha256": "4ad4a379196621fa5a501bbfc4b3acc26ba6277403b834d45d28f4ee0d3e24f2",
+            "git_blob": "62c426316497c980e60983a34011686cbe928aa0",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/manifest-services-2026-11-22/results.json",
+            "bytes": 24457,
+            "sha256": "7da7c74d2997bebaca3c651e823ae29a25337dbe073f23073e883267361c1cd5",
+            "git_blob": "1b0fc4c79a67724a3de076cdb001836c29edf018",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/manifest-services-2026-11-22/manifest-services-evidence.zip",
+            "bytes": 218111,
+            "sha256": "5f1e0c3221aae6cd9bac45e84560dbb4733f02134c49b82cf53438eb90f03c05",
+            "git_blob": "7c98d9e19c6744fd71a82caca119edf4de86df66",
+            "readback_bytes_equal": true
+          }
+        ],
+        "draft": true,
+        "merged": false,
+        "force": false,
+        "external_review": "PENDING",
+        "parent_observed": "1cabce12655f810b742e6c31369441cacd72573c",
+        "parents_count": 1,
+        "tree_observed": "8b6d3891e3b5790b53fc24fa9cb62a52397b4aa6",
+        "git_object_fetch_verified": true
+      },
+      "record_identity": {
+        "bytes": 2052,
+        "sha256": "b7bbf2e9ad88a8100115b4a19451f33a81f045500edda00c0e8819f328b72454"
+      }
+    },
+    "scheduler": {
+      "record": {
+        "schema": 1,
+        "repository": "applicate2628/mcp-local-hub",
+        "pr": 660,
+        "branch": "fix/scheduler-hidden-task-lookup-20261119",
+        "parent_expected": "368e8b6cb8e95d9e5ebbf9305f75aa740991b1ab",
+        "head": "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9",
+        "tree": "2a0ed6d12bf77ba6788c212fa7e4c117b952039a",
+        "files": [
+          {
+            "path": "internal/api/install.go",
+            "bytes": 218988,
+            "sha256": "59d2903380dff8b5c5d024d63dad3642a9f817d3f705cf596d13ad13acc73d8f",
+            "git_blob": "7f4f742140838f1a294e98a04860ad2f63df9fd0",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "internal/api/install_scheduler_stop_failure_test.go",
+            "bytes": 7877,
+            "sha256": "dd6b4a9454ebfd0230d7645743899890f9eb74aa8e6ac7f5a33ed10cf662c917",
+            "git_blob": "5ca6e7cef4fd418575c481498ac32f6db4481b41",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/scheduler-stop-errors-20261122/README.md",
+            "bytes": 19453,
+            "sha256": "636da75a38a26fef935848ba03f8dd1b0d726e01bfab37850189b551a7ec7a4a",
+            "git_blob": "9cae64a2ea58e6d9e4819bf4765b7c597e20723e",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/scheduler-stop-errors-20261122/results.json",
+            "bytes": 77537,
+            "sha256": "ff19724f8d40009e4b99b130b4661cefb70a50931bf4b6f02150809747e4e2ab",
+            "git_blob": "6fcf8a199d9a7430b204956103409ec8b2447205",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/scheduler-stop-errors-20261122/raw-evidence.zip",
+            "bytes": 845603,
+            "sha256": "e83f6bf65a3610a5867d4f4995acedeca5af3c614b4ac519e1a5996e2c24c122",
+            "git_blob": "3f0f03b7f820b489b0fe22b174431be10741dc48",
+            "readback_bytes_equal": true
+          }
+        ],
+        "draft": true,
+        "merged": false,
+        "force": false,
+        "external_review": "PENDING",
+        "parent_observed": "368e8b6cb8e95d9e5ebbf9305f75aa740991b1ab",
+        "parents_count": 1,
+        "tree_observed": "2a0ed6d12bf77ba6788c212fa7e4c117b952039a",
+        "git_object_fetch_verified": true
+      },
+      "record_identity": {
+        "bytes": 2069,
+        "sha256": "95240681ec59c5c7487f3968b301d7157222765e9b31a4da6d68039957c1da99"
+      }
+    },
+    "product_inventory": {
+      "record": {
+        "schema": 1,
+        "repository": "applicate2628/mcp-local-hub",
+        "pr": 657,
+        "branch": "fix/canonical-command-test-product-20261116",
+        "parent_expected": "4fa52b60b719664ede441be339e196a8b9766c50",
+        "head": "477f6e3f66eca482e2267351af3535c62db8ebb2",
+        "tree": "ac39b01330527e83c8d68dc1823b8c6ab9a76b6f",
+        "readback_files": [
+          {
+            "path": "build.ps1",
+            "bytes": 35904,
+            "sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2",
+            "git_blob": "b624db22af0582295081b483234914b484ca5add",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-inventory-20261122/README.md",
+            "bytes": 8363,
+            "sha256": "94a5d1fecf337a338f5648218a20b8ba0e528886edc0057f35d5a960f29b8e24",
+            "git_blob": "93f03eb6226985058094593d42808ea2c70599b9",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-inventory-20261122/results.json",
+            "bytes": 8464,
+            "sha256": "862cc1560f3a49f2e3b58304f0b039fb71c894d00fd1ab54def6507edfc0dd65",
+            "git_blob": "183981c6ba5b3fb32b8fc00b6a600327b424bdbf",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-inventory-20261122/raw-evidence.zip",
+            "bytes": 44134,
+            "sha256": "1e874e5bc0914394848850ddec10afb6cf4ac585265a77a890f0f26a6d232174",
+            "git_blob": "cf067207d31fd916f037203623f897c02f12b86b",
+            "readback_bytes_equal": true
+          }
+        ],
+        "draft": true,
+        "merged": false,
+        "force": false,
+        "external_review": "PENDING",
+        "parent_observed": "4fa52b60b719664ede441be339e196a8b9766c50",
+        "parents_count": 1,
+        "tree_observed": "ac39b01330527e83c8d68dc1823b8c6ab9a76b6f",
+        "git_object_fetch_verified": true
+      },
+      "record_identity": {
+        "bytes": 1766,
+        "sha256": "5fd1b4400e7a958fd3188d8937683e89dd5ad6ef9e2096333ef7c6a692934630"
+      }
+    },
+    "product_parser": {
+      "record": {
+        "schema": 1,
+        "repository": "applicate2628/mcp-local-hub",
+        "pr": 657,
+        "branch": "fix/canonical-command-test-product-20261116",
+        "head": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+        "parent": "477f6e3f66eca482e2267351af3535c62db8ebb2",
+        "tree": "ce9723adac860dd50eec8d4515302fc1ab51d53e",
+        "files": [
+          {
+            "path": "build.ps1",
+            "local_path": "/workspace/scratch/e51f442c712e/product-candidate/encoding-candidate/inputs/candidate/build.ps1",
+            "bytes": 35902,
+            "sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90",
+            "git_blob": "0027986c32d8266f626f633c9e7776661570d75d",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-powershell51-parser-20261122/README.md",
+            "local_path": "/workspace/scratch/e51f442c712e/product-candidate/encoding-candidate/publication/README.md",
+            "bytes": 7458,
+            "sha256": "b1b910e13d62f494e8eb017b433bae315d3195b45279368a7c0319f91f7c295a",
+            "git_blob": "66a3e9cb5a2ba2af5e44eb2832283b1a9d15147f",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-powershell51-parser-20261122/results.json",
+            "local_path": "/workspace/scratch/e51f442c712e/product-candidate/encoding-candidate/publication/results.json",
+            "bytes": 8314,
+            "sha256": "70cb50496f0fe54c7b8457e2df5df347e800f077d6f94e2336ad2615583596e7",
+            "git_blob": "45f63deffacd8c95077a57d379955512e702d60d",
+            "readback_bytes_equal": true
+          },
+          {
+            "path": "docs/modernization/verification/product-powershell51-parser-20261122/raw-evidence.zip",
+            "local_path": "/workspace/scratch/e51f442c712e/product-candidate/encoding-candidate/publication/raw-evidence.zip",
+            "bytes": 43049,
+            "sha256": "464b2f1ced2a63c8d1e4b8eab9d2a9d4c844b726723352628be159b7350c9f8c",
+            "git_blob": "48190cf72cd7bc215e7c4acffa36599f4b1058d4",
+            "readback_bytes_equal": true
+          }
+        ],
+        "readback_complete": true,
+        "scope": "One ASCII punctuation substitution plus native parser evidence; no native Product build or installed lifecycle",
+        "git_object_fetch_verified": true,
+        "parent_observed": "477f6e3f66eca482e2267351af3535c62db8ebb2",
+        "parents_count": 1,
+        "tree_observed": "ce9723adac860dd50eec8d4515302fc1ab51d53e",
+        "checked_utc": "2026-11-22T15:01:09.385960+00:00"
+      },
+      "record_identity": {
+        "bytes": 2370,
+        "sha256": "6355dd046164155751b0daf73c0e0a3e1c89830603a57bd2eca5c9dee729192e"
+      }
+    }
+  },
+  "queue": {
+    "checked_utc": "2026-11-22T15:00:27.016Z",
+    "open": 30,
+    "draft": 30,
+    "issues": [
+      {
+        "number": 668,
+        "title": "fix(api): retain reader close failures and consume handles once",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/668",
+        "draft": true
+      },
+      {
+        "number": 667,
+        "title": "fix(perftools): bound discovery probes and isolate stdout fixture",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/667",
+        "draft": true
+      },
+      {
+        "number": 666,
+        "title": "test(cli): bind helper admission and caller state before package setup",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/666",
+        "draft": true
+      },
+      {
+        "number": 665,
+        "title": "test(api): validate helper roles before creating package fixtures",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/665",
+        "draft": true
+      },
+      {
+        "number": 664,
+        "title": "test: preserve package isolation and qualify GUI helper ownership",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/664",
+        "draft": true
+      },
+      {
+        "number": 663,
+        "title": "fix(archguard): preserve baseline ownership after route extraction",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/663",
+        "draft": true
+      },
+      {
+        "number": 661,
+        "title": "test(cli): require semantic Serena conflict validation failures",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/661",
+        "draft": true
+      },
+      {
+        "number": 660,
+        "title": "fix(scheduler): preserve task query results and hidden lookups",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+        "draft": true
+      },
+      {
+        "number": 659,
+        "title": "fix(api): preserve unknown port observations in stop decisions",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+        "draft": true
+      },
+      {
+        "number": 657,
+        "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+        "draft": true
+      },
+      {
+        "number": 655,
+        "title": "fix(serena): settle preparation before canceling work context",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+        "draft": true
+      },
+      {
+        "number": 654,
+        "title": "fix(serena): receive Ready readback with its original byte bound",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+        "draft": true
+      },
+      {
+        "number": 653,
+        "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+        "draft": true
+      },
+      {
+        "number": 650,
+        "title": "fix(serena): preserve qualification bindings and request budgets",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+        "draft": true
+      },
+      {
+        "number": 649,
+        "title": "fix(serena): bind qualification home to the owned directory",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+        "draft": true
+      },
+      {
+        "number": 647,
+        "title": "fix(serena): own Windows Git subprocess environment",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+        "draft": true
+      },
+      {
+        "number": 646,
+        "title": "fix(serena): prefer qualified system Python discovery",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+        "draft": true
+      },
+      {
+        "number": 644,
+        "title": "spike(rust): observe original process identity while retaining ownership",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+        "draft": true
+      },
+      {
+        "number": 643,
+        "title": "fix(serena): retain original owners through install and cleanup",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+        "draft": true
+      },
+      {
+        "number": 637,
+        "title": "test(serena): run positive migration fixtures through real preparation",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+        "draft": true
+      },
+      {
+        "number": 635,
+        "title": "test(serena): build a source-issued native qualification publisher",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+        "draft": true
+      },
+      {
+        "number": 632,
+        "title": "fix(serena): discover UV from the qualified execution PATH",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+        "draft": true
+      },
+      {
+        "number": 631,
+        "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+        "draft": true
+      },
+      {
+        "number": 629,
+        "title": "fix(relay): bound responses and preserve negotiated session ownership",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+        "draft": true
+      },
+      {
+        "number": 628,
+        "title": "fix(status): observe Windows process identity and RSS through one handle",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+        "draft": true
+      },
+      {
+        "number": 627,
+        "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+        "draft": true
+      },
+      {
+        "number": 626,
+        "title": "test(perf): relay workload and executable-size control before Rust migration",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+        "draft": true
+      },
+      {
+        "number": 625,
+        "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+        "draft": true
+      },
+      {
+        "number": 624,
+        "title": "perf(cmaketrace): retain bounded records and qualify terminal cancellation",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+        "draft": true
+      },
+      {
+        "number": 623,
+        "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+        "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+        "draft": true
+      }
+    ]
+  },
+  "reviewed_current_pr_metadata": [
+    {
+      "number": 643,
+      "head_sha": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 650,
+      "head_sha": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 654,
+      "head_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 655,
+      "head_sha": "2defe618259f7db4144824d19927b032300d160d",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 657,
+      "head_sha": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 660,
+      "head_sha": "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 663,
+      "head_sha": "d39b99db427eee026af12f8120c24477a2d9612a",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    },
+    {
+      "number": 664,
+      "head_sha": "58670482426cd60aee35bf09b8d945a9809eb854",
+      "draft": true,
+      "merged": false,
+      "mergeable": true
+    }
+  ],
+  "qualification": {
+    "architecture": {
+      "gui_root_tests": 46,
+      "test_and_subtest_pass": 68,
+      "package_pass": 1,
+      "race": true,
+      "fail": 0,
+      "skip": 0,
+      "full_build_exit": 0,
+      "full_vet_exit": 0,
+      "scan_before": 2671,
+      "scan_after": 2663,
+      "removed_fingerprints": 8,
+      "added_fingerprints": 0,
+      "baseline_removed_entries": 7,
+      "baseline_unchanged_entries": 2403,
+      "verify_exit": 1,
+      "verify_status": "FAILED",
+      "new": 388,
+      "stale": 128,
+      "grown": 42,
+      "workers_included_in_new": 72
+    },
+    "scheduler": {
+      "source": "858812988833a84368c60fba1540ae601155fa71",
+      "overlay_entries": 40,
+      "control_test_pass": 8,
+      "control_test_fail": 21,
+      "control_package_fail": 1,
+      "control_leaf_fail": 16,
+      "candidate_test_pass": 29,
+      "adjacent_test_pass": 25,
+      "positive_package_pass": 2,
+      "positive_fail": 0,
+      "positive_skip": 0,
+      "race": true,
+      "full_build_exit": 0,
+      "full_vet_exit": 0,
+      "native_scheduler_actions": false
+    },
+    "product_inventory": {
+      "control_exit": 1,
+      "control_pass": 9,
+      "control_fail": 2,
+      "candidate_pass": 11,
+      "composition_pass": 11,
+      "controlled_provider": true,
+      "whole_builder_executed": false
+    },
+    "product_parser": {
+      "engine": "Windows PowerShell Desktop 5.1.26100.10068",
+      "code_page": 1251,
+      "control_exit": 1,
+      "control_parse_errors": 3,
+      "candidate_exit": 0,
+      "candidate_parse_errors": 0,
+      "composition_exit": 0,
+      "composition_parse_errors": 0,
+      "direct_children_waited": 5,
+      "builder_executed": false
+    }
+  },
+  "cleanup": [
+    {
+      "name": "architecture",
+      "device": "Comet",
+      "archive": {
+        "file": "cleanup/architecture-cleanup-evidence.zip",
+        "bytes": 394387,
+        "sha256": "8cfe54a30b9d89c6a3232c9793ed9269e4e4715977ad6895c5e17b4ebc9fc042",
+        "files": 22
+      },
+      "receipt": {
+        "schema": 1,
+        "started_msk": "2026-11-22T17:53:05.763778+03:00",
+        "source": "D:\\dev\\ChatGPT\\mcp-continuation-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-continuation-20261122-e51f",
+        "control": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f",
+        "completed": true,
+        "moved": true,
+        "published_head": "d39b99db427eee026af12f8120c24477a2d9612a",
+        "published_tree": "8b6d3891e3b5790b53fc24fa9cb62a52397b4aa6",
+        "publication_readback_sha256": "b7bbf2e9ad88a8100115b4a19451f33a81f045500edda00c0e8819f328b72454",
+        "published_files_read_back": 5,
+        "source_head": "1cabce12655f810b742e6c31369441cacd72573c",
+        "source_tree_before_patch": "8eed2215a72d8f56164afa562e277dd5ae387f28",
+        "source_sha256": {
+          "internal/gui/server.go": "edcffcc94cb1078801d1329e04e1e98824527f5c9eb080fcdb20560675131325",
+          "architecture/baseline.yaml": "e0620345b7999fdb97462172d20226255e3397345078e98178098ddcd082632c"
+        },
+        "runner_sha256": "1471a04e19a999ee09591aa43e4173525bf077ebda89b78952b2033a89731b34",
+        "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+        "git_sha256": "177bc8a9af84fa3a400c694c975fda731d048279c074e1a93947ce8b067ebb48",
+        "trash_emptied": false,
+        "delete_attempted": false,
+        "termination_requested": false,
+        "whole_machine_settlement_claimed": false,
+        "process_observations": [
+          {
+            "msk": "2026-11-22T17:53:06.669379+03:00",
+            "process_rows": 310,
+            "missing_commandline": 186,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine, hidden-process, or open-handle settlement claim"
+          },
+          {
+            "msk": "2026-11-22T17:53:10.210466+03:00",
+            "process_rows": 314,
+            "missing_commandline": 186,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine, hidden-process, or open-handle settlement claim"
+          }
+        ],
+        "commands": [
+          {
+            "label": "source-identities",
+            "args": [
+              "C:\\Program Files\\Git\\cmd\\git.exe",
+              "-c",
+              "core.fsmonitor=false",
+              "-c",
+              "core.autocrlf=false",
+              "-c",
+              "core.hooksPath=D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\runtime-architecture-cleanup-recovery\\hooks",
+              "rev-parse",
+              "HEAD",
+              "HEAD^{tree}"
+            ],
+            "started_msk": "2026-11-22T17:53:05.771910+03:00",
+            "direct_child_waited": true,
+            "pid": 55128,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T17:53:05.813898+03:00",
+            "stdout": {
+              "bytes": 82,
+              "sha256": "9aaba3768f6e5f7270a12924780f9e875c5f5c7b8ca4504d4e8839dabf8ad1fe"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "source-status",
+            "args": [
+              "C:\\Program Files\\Git\\cmd\\git.exe",
+              "-c",
+              "core.fsmonitor=false",
+              "-c",
+              "core.autocrlf=false",
+              "-c",
+              "core.hooksPath=D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\runtime-architecture-cleanup-recovery\\hooks",
+              "status",
+              "--porcelain"
+            ],
+            "started_msk": "2026-11-22T17:53:05.814626+03:00",
+            "direct_child_waited": true,
+            "pid": 27632,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T17:53:05.885787+03:00",
+            "stdout": {
+              "bytes": 56,
+              "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "source-diff",
+            "args": [
+              "C:\\Program Files\\Git\\cmd\\git.exe",
+              "-c",
+              "core.fsmonitor=false",
+              "-c",
+              "core.autocrlf=false",
+              "-c",
+              "core.hooksPath=D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\runtime-architecture-cleanup-recovery\\hooks",
+              "diff",
+              "--binary",
+              "--no-ext-diff",
+              "--abbrev=9"
+            ],
+            "started_msk": "2026-11-22T17:53:05.886530+03:00",
+            "direct_child_waited": true,
+            "pid": 58964,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T17:53:05.963375+03:00",
+            "stdout": {
+              "bytes": 10089,
+              "sha256": "349cb21b1789055c62e623015be0e1e154ff3eba803749d4bf547f28b7e3d971"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "processes-before-inventory",
+            "args": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId,ParentProcessId,CommandLine) | ConvertTo-Json -Compress"
+            ],
+            "started_msk": "2026-11-22T17:53:05.968440+03:00",
+            "direct_child_waited": true,
+            "pid": 4456,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T17:53:06.666665+03:00",
+            "stdout": {
+              "bytes": 68254,
+              "sha256": "3177d0be547b82bce85a48d7378d657e526b5568f705c5eabc52fd7e9ae5be10"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "processes-before-move",
+            "args": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId,ParentProcessId,CommandLine) | ConvertTo-Json -Compress"
+            ],
+            "started_msk": "2026-11-22T17:53:09.320289+03:00",
+            "direct_child_waited": true,
+            "pid": 59112,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T17:53:10.208556+03:00",
+            "stdout": {
+              "bytes": 69169,
+              "sha256": "ad946e70f009446f1de6196488950d36beb01a116942a8c1d3676ef8987684fd"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        ],
+        "qualification_receipts": [
+          {
+            "phase": "prepare-architecture",
+            "sha256": "a3f24f2ed98e085d560d0460174421dda18989c263402e132a1cd8cd644b15e7",
+            "completed": false,
+            "waited_direct_children": 4
+          },
+          {
+            "phase": "recover-architecture-1",
+            "sha256": "7562584eda07ce593d93f39acfe9998a1af8786c87e0626e781bdc6cafb850c1",
+            "completed": true,
+            "waited_direct_children": 10
+          },
+          {
+            "phase": "architecture",
+            "sha256": "4accc6e418a5bfa81c62e39c768aaa8ea69c5e0185d1e31d2874232a5ec6a5b5",
+            "completed": true,
+            "waited_direct_children": 8
+          }
+        ],
+        "recovery": {
+          "predecessor_receipt": "architecture-cleanup.json",
+          "predecessor_sha256": "a9adb03d340fc5ce5e823ed78609659af63c6768759cb58e76d9901e52551a39",
+          "reason": "Git index abbreviations differed (7 vs 9); explicit --abbrev=9 preserves the exact frozen-patch check"
+        },
+        "published_source_and_evidence_match": true,
+        "inventory_before": {
+          "path": "architecture-recovery-inventory-before.json",
+          "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a",
+          "rows": 3614
+        },
+        "inventory_after": {
+          "path": "architecture-recovery-inventory-after.json",
+          "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a",
+          "rows": 3614
+        },
+        "source_absent": true,
+        "target_exists": true,
+        "inventory_equal": true,
+        "files": 3373,
+        "directories": 241,
+        "bytes": 83547833,
+        "predecessor_receipt_unchanged": true,
+        "finished_msk": "2026-11-22T17:53:13.169185+03:00"
+      }
+    },
+    {
+      "name": "scheduler",
+      "device": "Comet",
+      "archive": {
+        "file": "cleanup/scheduler-cleanup-evidence.zip",
+        "bytes": 395993,
+        "sha256": "527bbcb6fa7765bebdb157d86f04b7f78c5e5065fc83a5d6137b9172eb0ac9d7",
+        "files": 9
+      },
+      "receipt": {
+        "schema": 1,
+        "started_utc": "2026-11-22T15:00:26.019394+00:00",
+        "source": "D:\\dev\\ChatGPT\\mcp-continuation-scheduler-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-continuation-scheduler-20261122-e51f",
+        "control": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f",
+        "completed": true,
+        "moved": true,
+        "published_head": "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9",
+        "published_parent": "368e8b6cb8e95d9e5ebbf9305f75aa740991b1ab",
+        "published_tree": "2a0ed6d12bf77ba6788c212fa7e4c117b952039a",
+        "publication_readback_sha256": "95240681ec59c5c7487f3968b301d7157222765e9b31a4da6d68039957c1da99",
+        "published_results_sha256": "ff19724f8d40009e4b99b130b4661cefb70a50931bf4b6f02150809747e4e2ab",
+        "published_archive_sha256": "e83f6bf65a3610a5867d4f4995acedeca5af3c614b4ac519e1a5996e2c24c122",
+        "runner_sha256": "474eba51f77970bfb7fd82e1a632ef348666a4131f3d1cc272efa59ee3113413",
+        "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+        "trash_emptied": false,
+        "delete_attempted": false,
+        "termination_requested": false,
+        "history_or_shared_cache_modified": false,
+        "whole_machine_settlement_claimed": false,
+        "process_observations": [
+          {
+            "utc": "2026-11-22T15:00:26.735974+00:00",
+            "process_rows": 314,
+            "missing_commandline": 22,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine, hidden-process, or open-handle settlement claim"
+          },
+          {
+            "utc": "2026-11-22T15:00:29.412525+00:00",
+            "process_rows": 313,
+            "missing_commandline": 22,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine, hidden-process, or open-handle settlement claim"
+          }
+        ],
+        "commands": [
+          {
+            "label": "processes-before-inventory",
+            "argv": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId,ParentProcessId,CommandLine) | ConvertTo-Json -Compress"
+            ],
+            "started_utc": "2026-11-22T15:00:26.084983+00:00",
+            "direct_child_waited": true,
+            "timed_out": false,
+            "pid": 57664,
+            "exit_code": 0,
+            "finished_utc": "2026-11-22T15:00:26.732559+00:00",
+            "stdout": {
+              "bytes": 103904,
+              "sha256": "88ab5f42223cecfb0833af706c7ff63971b7e3922c4495bba45f33f2eaff490f"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "processes-before-move",
+            "argv": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId,ParentProcessId,CommandLine) | ConvertTo-Json -Compress"
+            ],
+            "started_utc": "2026-11-22T15:00:28.799446+00:00",
+            "direct_child_waited": true,
+            "timed_out": false,
+            "pid": 6536,
+            "exit_code": 0,
+            "finished_utc": "2026-11-22T15:00:29.410547+00:00",
+            "stdout": {
+              "bytes": 103663,
+              "sha256": "df9df4684e3a8e69b9b06dad56aa7b0ea9b5c3032f4cc05395bda0ed64b43eb9"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        ],
+        "qualification_receipts": [
+          {
+            "phase": "prepare",
+            "sha256": "ae252b11321b0fb72641ebcd0350e049663550e1f16f76e7e7100cde7d782155",
+            "completed": true,
+            "waited_direct_children": 5
+          },
+          {
+            "phase": "lifecycle-red-green",
+            "sha256": "62eca3043437654fe22729db5c7de96cd6b77a2eed2489492f760c6da0304f7d",
+            "completed": true,
+            "waited_direct_children": 3
+          },
+          {
+            "phase": "build-vet",
+            "sha256": "a733094941d1be6f1de8f2af4ce5d35a0d7f165d5e2ee86b1c5745fdf6859744",
+            "completed": true,
+            "waited_direct_children": 2
+          }
+        ],
+        "published_files_read_back": 5,
+        "input_files_preserved_in_published_archive": 45,
+        "unique_overlay_and_candidate_inputs_preserved": 41,
+        "published_source_and_evidence_match": true,
+        "physical_source_matches_qualified_inventory": true,
+        "inventory_before": {
+          "path": "scheduler-inventory-before.json",
+          "rows": 3622,
+          "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+        },
+        "inventory_after": {
+          "path": "scheduler-inventory-after.json",
+          "rows": 3622,
+          "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+        },
+        "source_absent": true,
+        "target_exists": true,
+        "inventory_equal": true,
+        "files": 3386,
+        "directories": 236,
+        "bytes": 55243174,
+        "finished_utc": "2026-11-22T15:00:31.655745+00:00"
+      }
+    },
+    {
+      "name": "product_parser",
+      "device": "Asus",
+      "archive": {
+        "file": "cleanup/encoding-cleanup-raw.zip",
+        "bytes": 12363,
+        "sha256": "3326b6cce714decd0e463120f548de5eb0e9d32dc8670a8c58b2cdb7dd4de054",
+        "files": 9
+      },
+      "receipt": {
+        "schema": 1,
+        "started_utc": "2026-11-22T15:09:21.738346+00:00",
+        "source": "D:\\dev\\ChatGPT\\mcp-product-encoding-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-product-encoding-20261122-e51f",
+        "control": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f",
+        "published_head": "f20bc4ae5a369e7c0be0f7ad4a0f0ba9ea758a57",
+        "completed": true,
+        "moved": true,
+        "delete_attempted": false,
+        "trash_emptied": false,
+        "kill_attempted": false,
+        "policy_changed": false,
+        "runner_sha256": "d63bf80af66bcb134a8f51e9c2cb2c2f3eb27dc97b5d4880c74f6fff7d64e398",
+        "process_observations": [
+          {
+            "label": "encoding-process-snapshot-1",
+            "started_utc": "2026-11-22T15:09:21.742276+00:00",
+            "direct_child_waited": true,
+            "timed_out": false,
+            "timeout_seconds": 30,
+            "kill_attempted": false,
+            "argv": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); $root=$env:MCPHUB_ENCODING_CLEANUP_SOURCE; $all=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine,ExecutablePath); $matches=@($all | Where-Object { ($_.CommandLine -and $_.CommandLine.IndexOf($root,[StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($root+'\\',[StringComparison]::OrdinalIgnoreCase)) } | Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath); [pscustomobject]@{observed_utc=[DateTime]::UtcNow.ToString('o'); process_rows=$all.Count; missing_commandline=@($all | Where-Object {-not $_.CommandLine}).Count; missing_executable=@($all | Where-Object {-not $_.ExecutablePath}).Count; matches=$matches} | ConvertTo-Json -Compress -Depth 5"
+            ],
+            "pid": 35596,
+            "exit_code": 0,
+            "seconds": 0.937,
+            "finished_utc": "2026-11-22T15:09:22.679148+00:00",
+            "stdout": {
+              "bytes": 130,
+              "sha256": "7f34f2ed53d804e03f41ab4d230b063d603a6eb75bc7a44aabf002ee16144e2d"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "observation": {
+              "observed_utc": "2026-11-22T15:09:22.6004059Z",
+              "process_rows": 409,
+              "missing_commandline": 27,
+              "missing_executable": 27,
+              "matches": []
+            }
+          },
+          {
+            "label": "encoding-process-snapshot-2",
+            "started_utc": "2026-11-22T15:09:22.700634+00:00",
+            "direct_child_waited": true,
+            "timed_out": false,
+            "timeout_seconds": 30,
+            "kill_attempted": false,
+            "argv": [
+              "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); $root=$env:MCPHUB_ENCODING_CLEANUP_SOURCE; $all=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine,ExecutablePath); $matches=@($all | Where-Object { ($_.CommandLine -and $_.CommandLine.IndexOf($root,[StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($root+'\\',[StringComparison]::OrdinalIgnoreCase)) } | Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath); [pscustomobject]@{observed_utc=[DateTime]::UtcNow.ToString('o'); process_rows=$all.Count; missing_commandline=@($all | Where-Object {-not $_.CommandLine}).Count; missing_executable=@($all | Where-Object {-not $_.ExecutablePath}).Count; matches=$matches} | ConvertTo-Json -Compress -Depth 5"
+            ],
+            "pid": 32692,
+            "exit_code": 0,
+            "seconds": 0.87,
+            "finished_utc": "2026-11-22T15:09:23.570572+00:00",
+            "stdout": {
+              "bytes": 130,
+              "sha256": "9c9ff00f275d92b44f4955f634cd667f72ab76da8488ad84ccf3a586fec0a346"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "observation": {
+              "observed_utc": "2026-11-22T15:09:23.5256610Z",
+              "process_rows": 408,
+              "missing_commandline": 25,
+              "missing_executable": 25,
+              "matches": []
+            }
+          }
+        ],
+        "process_scope": "Two visible command-line/executable snapshots; no complete-machine settlement claim",
+        "publication_input_sha256": {
+          "encoding-cleanup-inventory.json": "5ab49f3806aacd1b09f17cc97bc024f5be200a00ec0ebb8f09605d8ddb47c885",
+          "encoding-publication-readback.json": "6355dd046164155751b0daf73c0e0a3e1c89830603a57bd2eca5c9dee729192e",
+          "encoding-published-raw.zip.b64": "7d37e828c6fb01e97bb732037efb64ede75376fb01cc741a6e842fa7e7d79a85"
+        },
+        "published_archive_sha256": "464b2f1ced2a63c8d1e4b8eab9d2a9d4c844b726723352628be159b7350c9f8c",
+        "published_files_read_back": 4,
+        "published_core_files_preserved": 17,
+        "settled_qualification_children": [
+          13304,
+          3620,
+          39608,
+          40468,
+          8648
+        ],
+        "child_identity_note": "These are historical receipt PIDs with original waits; current PIDs are never treated as original owners or terminated.",
+        "environment": {
+          "PSMODULEPATH": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules",
+          "PSMODULEANALYSISCACHEPATH": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\localappdata\\module-analysis.cache",
+          "TEMP": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\tmp",
+          "TMP": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\tmp",
+          "TMPDIR": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\tmp",
+          "USERPROFILE": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\profile",
+          "APPDATA": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\appdata",
+          "LOCALAPPDATA": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f\\encoding-cleanup-runtime\\localappdata"
+        },
+        "inventory_before": {
+          "directories": [
+            ".",
+            "evidence",
+            "inputs",
+            "inputs/candidate",
+            "inputs/composition",
+            "inputs/published-477f",
+            "qualification",
+            "runtime",
+            "runtime/appdata",
+            "runtime/localappdata",
+            "runtime/profile",
+            "runtime/profile/AppData",
+            "runtime/profile/AppData/Roaming",
+            "runtime/tmp"
+          ],
+          "files": {
+            "evidence/current-source-composition.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/current-source-composition.stdout": {
+              "bytes": 661,
+              "sha256": "f1f6579090673eca60858b5fa0f32f5997d6c93a8f9adb36e40ef111f749c2a8"
+            },
+            "evidence/policy-after.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/policy-after.stdout": {
+              "bytes": 332,
+              "sha256": "0bd0a97b52a48f74a2274653ea585d358190dee2b22b0f0eabc0fbc2eac7ab89"
+            },
+            "evidence/policy-before.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/policy-before.stdout": {
+              "bytes": 332,
+              "sha256": "0bd0a97b52a48f74a2274653ea585d358190dee2b22b0f0eabc0fbc2eac7ab89"
+            },
+            "evidence/publication-candidate.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/publication-candidate.stdout": {
+              "bytes": 659,
+              "sha256": "82c24499ba18c07cf374a839e30ec2232bbdd75533a96b9564767c2e7b9f6c7d"
+            },
+            "evidence/published-control.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/published-control.stdout": {
+              "bytes": 1260,
+              "sha256": "6a2b34f11165bc93ed89c5dc3017cfc134a8850dee62dcb527e3ac93514baf9f"
+            },
+            "evidence/receipt.json": {
+              "bytes": 12820,
+              "sha256": "33c550cae82a82f847181c684644b12d4d89bd258b66476cbb6dcfa66db78b52"
+            },
+            "export-base64.txt": {
+              "bytes": 52925,
+              "sha256": "5a0333b5e4d0b9602c1c9daaf5b8d13f8aae7d8655b310bbc93156ef0d7ebaab"
+            },
+            "export-metadata.json": {
+              "bytes": 277,
+              "sha256": "1a678d537f40e805e33317000e53cf8e03c2486bed8f41831d3ff759caf527f3"
+            },
+            "export_parser.py": {
+              "bytes": 3844,
+              "sha256": "92df2271848820ecdb3ebe82f956e8df42f51706020a9331f7ec9be5b1ac5131"
+            },
+            "inputs/candidate/build.ps1": {
+              "bytes": 35902,
+              "sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90"
+            },
+            "inputs/composition/build.ps1": {
+              "bytes": 35902,
+              "sha256": "e811e4549672ec4cc3ea72e59b3fa6f0235191137e41007a3600edf0f6354fa8"
+            },
+            "inputs/published-477f/build.ps1": {
+              "bytes": 35904,
+              "sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2"
+            },
+            "qualification/test-product-script-parser.ps1": {
+              "bytes": 2660,
+              "sha256": "5312338621f991d12adb56ba0dcfca6bd5fd7ca479358a034fb4a84b30ba5def"
+            },
+            "qualify_parser.py": {
+              "bytes": 11621,
+              "sha256": "6033b0e96f5fdc73ba3589b7f467047256d2e3fbc0cb97369be15b68ea049c55"
+            },
+            "transport-inputs.json.zlib.b64": {
+              "bytes": 51632,
+              "sha256": "4299f749b53c2b21b087cf2e34ddfbbde28d60eff75652248c12e0d901870245"
+            }
+          }
+        },
+        "inventory_rechecked_immediately_before_move": true,
+        "move_method": "Path.rename on the same volume; no delete attempt",
+        "inventory_after": {
+          "directories": [
+            ".",
+            "evidence",
+            "inputs",
+            "inputs/candidate",
+            "inputs/composition",
+            "inputs/published-477f",
+            "qualification",
+            "runtime",
+            "runtime/appdata",
+            "runtime/localappdata",
+            "runtime/profile",
+            "runtime/profile/AppData",
+            "runtime/profile/AppData/Roaming",
+            "runtime/tmp"
+          ],
+          "files": {
+            "evidence/current-source-composition.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/current-source-composition.stdout": {
+              "bytes": 661,
+              "sha256": "f1f6579090673eca60858b5fa0f32f5997d6c93a8f9adb36e40ef111f749c2a8"
+            },
+            "evidence/policy-after.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/policy-after.stdout": {
+              "bytes": 332,
+              "sha256": "0bd0a97b52a48f74a2274653ea585d358190dee2b22b0f0eabc0fbc2eac7ab89"
+            },
+            "evidence/policy-before.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/policy-before.stdout": {
+              "bytes": 332,
+              "sha256": "0bd0a97b52a48f74a2274653ea585d358190dee2b22b0f0eabc0fbc2eac7ab89"
+            },
+            "evidence/publication-candidate.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/publication-candidate.stdout": {
+              "bytes": 659,
+              "sha256": "82c24499ba18c07cf374a839e30ec2232bbdd75533a96b9564767c2e7b9f6c7d"
+            },
+            "evidence/published-control.stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "evidence/published-control.stdout": {
+              "bytes": 1260,
+              "sha256": "6a2b34f11165bc93ed89c5dc3017cfc134a8850dee62dcb527e3ac93514baf9f"
+            },
+            "evidence/receipt.json": {
+              "bytes": 12820,
+              "sha256": "33c550cae82a82f847181c684644b12d4d89bd258b66476cbb6dcfa66db78b52"
+            },
+            "export-base64.txt": {
+              "bytes": 52925,
+              "sha256": "5a0333b5e4d0b9602c1c9daaf5b8d13f8aae7d8655b310bbc93156ef0d7ebaab"
+            },
+            "export-metadata.json": {
+              "bytes": 277,
+              "sha256": "1a678d537f40e805e33317000e53cf8e03c2486bed8f41831d3ff759caf527f3"
+            },
+            "export_parser.py": {
+              "bytes": 3844,
+              "sha256": "92df2271848820ecdb3ebe82f956e8df42f51706020a9331f7ec9be5b1ac5131"
+            },
+            "inputs/candidate/build.ps1": {
+              "bytes": 35902,
+              "sha256": "b52b2676ce02d61d6549091c224dfb65c7bbf747ee1698094a3e1a266c474d90"
+            },
+            "inputs/composition/build.ps1": {
+              "bytes": 35902,
+              "sha256": "e811e4549672ec4cc3ea72e59b3fa6f0235191137e41007a3600edf0f6354fa8"
+            },
+            "inputs/published-477f/build.ps1": {
+              "bytes": 35904,
+              "sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2"
+            },
+            "qualification/test-product-script-parser.ps1": {
+              "bytes": 2660,
+              "sha256": "5312338621f991d12adb56ba0dcfca6bd5fd7ca479358a034fb4a84b30ba5def"
+            },
+            "qualify_parser.py": {
+              "bytes": 11621,
+              "sha256": "6033b0e96f5fdc73ba3589b7f467047256d2e3fbc0cb97369be15b68ea049c55"
+            },
+            "transport-inputs.json.zlib.b64": {
+              "bytes": 51632,
+              "sha256": "4299f749b53c2b21b087cf2e34ddfbbde28d60eff75652248c12e0d901870245"
+            }
+          }
+        },
+        "source_absent": true,
+        "inventory_equal": true,
+        "files": 20,
+        "directories": 14,
+        "bytes": 246731,
+        "trash_contents_verified_against_published_evidence": true,
+        "finished_utc": "2026-11-22T15:09:23.604585+00:00"
+      }
+    },
+    {
+      "name": "product_inventory",
+      "device": "Asus",
+      "receipt": {
+        "schema": 1,
+        "started_utc": "2026-11-22T14:38:15.945762+00:00",
+        "source": "D:\\dev\\ChatGPT\\mcp-continuation-product-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-continuation-product-20261122-e51f",
+        "completed": true,
+        "published_head": "477f6e3f66eca482e2267351af3535c62db8ebb2",
+        "published_files_read_back": 4,
+        "trash_emptied": false,
+        "delete_attempted": false,
+        "process_observations": [
+          {
+            "utc": "2026-11-22T14:38:16.837401+00:00",
+            "process_rows": 414,
+            "missing_commandline": 27,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine settlement claim"
+          },
+          {
+            "utc": "2026-11-22T14:38:17.602670+00:00",
+            "process_rows": 409,
+            "missing_commandline": 25,
+            "matches": [],
+            "scope": "Visible command lines only; no whole-machine settlement claim"
+          }
+        ],
+        "runner_sha256": "ac8b8a24f959fa007731836ee016aeb42a6d4baac8e3d0575c486ab2800c11fb",
+        "inventory_before": [
+          {
+            "path": ".",
+            "type": "directory"
+          },
+          {
+            "path": "composition",
+            "type": "directory"
+          },
+          {
+            "path": "composition/build.ps1",
+            "type": "file",
+            "bytes": 35904,
+            "sha256": "8735f68771d545b814a3c609a8d019ec03adb9f0266fb1fcb3918e9029fb9579"
+          },
+          {
+            "path": "evidence",
+            "type": "directory"
+          },
+          {
+            "path": "evidence-utf8",
+            "type": "directory"
+          },
+          {
+            "path": "evidence-utf8/composition.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence-utf8/composition.stdout",
+            "type": "file",
+            "bytes": 1924,
+            "sha256": "190d61d9c8130fc1e7425ab11c44e92c44133fac04bd71a48682f3b517ff09c6"
+          },
+          {
+            "path": "evidence-utf8/control.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence-utf8/control.stdout",
+            "type": "file",
+            "bytes": 1924,
+            "sha256": "1f38ae590853cd5194439dd09b9d5bc0b14cd76599dcb71360ef17634659d0b3"
+          },
+          {
+            "path": "evidence-utf8/policy-after.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence-utf8/policy-after.stdout",
+            "type": "file",
+            "bytes": 295,
+            "sha256": "66417061ee16080642adc3d5a5e7a6938964a6f9d5983d34d5ed411a2ee44c36"
+          },
+          {
+            "path": "evidence-utf8/policy-before.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence-utf8/policy-before.stdout",
+            "type": "file",
+            "bytes": 295,
+            "sha256": "66417061ee16080642adc3d5a5e7a6938964a6f9d5983d34d5ed411a2ee44c36"
+          },
+          {
+            "path": "evidence-utf8/publication.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence-utf8/publication.stdout",
+            "type": "file",
+            "bytes": 1924,
+            "sha256": "e78e362ad1c3115ff3b78596285faed04865390655c52022eb8838642d48f587"
+          },
+          {
+            "path": "evidence-utf8/receipt.json",
+            "type": "file",
+            "bytes": 7405,
+            "sha256": "8d0816dbfa6a89bc10f8f555d59911199ca3317a548dfc1e893bc6bd1623294e"
+          },
+          {
+            "path": "evidence/control.stderr",
+            "type": "file",
+            "bytes": 455,
+            "sha256": "e3f45285675e6d9371a620a9028c177867a22d39370de0126d30d9afb08b812d"
+          },
+          {
+            "path": "evidence/control.stdout",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence/policy-before.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "evidence/policy-before.stdout",
+            "type": "file",
+            "bytes": 295,
+            "sha256": "66417061ee16080642adc3d5a5e7a6938964a6f9d5983d34d5ed411a2ee44c36"
+          },
+          {
+            "path": "evidence/receipt.json",
+            "type": "file",
+            "bytes": 3580,
+            "sha256": "6cc8e65ef058e61daf016753601fe464407a8db524d5a9544cb27c9cd761210b"
+          },
+          {
+            "path": "export_product.py",
+            "type": "file",
+            "bytes": 1577,
+            "sha256": "96a9057c89b1174c4c16de42ec38f187b258db3f02031c402807f5ea4f7f5143"
+          },
+          {
+            "path": "inputs",
+            "type": "directory"
+          },
+          {
+            "path": "inputs.b64",
+            "type": "file",
+            "bytes": 37268,
+            "sha256": "fc5807306696c730161508a8dea2a959ab24c55b14a9862f953e642b9b3e5bfe"
+          },
+          {
+            "path": "inputs/pr657",
+            "type": "directory"
+          },
+          {
+            "path": "inputs/pr657/build.ps1",
+            "type": "file",
+            "bytes": 35748,
+            "sha256": "9dd728889a303534e872913832ba89614cfc79b50a4eb1d864e8fe287b22ab7b"
+          },
+          {
+            "path": "publication",
+            "type": "directory"
+          },
+          {
+            "path": "publication/build.ps1",
+            "type": "file",
+            "bytes": 35904,
+            "sha256": "bc55dd0815e95c6dc5a19513f07e6a8b5eab636382a16e9940e28b209dd1b8f2"
+          },
+          {
+            "path": "qualify_product.py",
+            "type": "file",
+            "bytes": 7891,
+            "sha256": "4b40364193dbd364a6e245d740e5dc5d92672cf0d4bf7e1c558a5035759fd422"
+          },
+          {
+            "path": "qualify_product_utf8.py",
+            "type": "file",
+            "bytes": 7415,
+            "sha256": "7d6ac5d17841f46d84f8d52a98c55062bf6dfe8ffbf1381ec28af5f5f7c80ce4"
+          },
+          {
+            "path": "raw-evidence.zip",
+            "type": "file",
+            "bytes": 44134,
+            "sha256": "1e874e5bc0914394848850ddec10afb6cf4ac585265a77a890f0f26a6d232174"
+          },
+          {
+            "path": "raw-export.json",
+            "type": "file",
+            "bytes": 58969,
+            "sha256": "f970510996c7a621da79fe5c70542b894d78afe470b1cd32f25cae7b0c921c88"
+          },
+          {
+            "path": "runtime",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-utf8/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "test-product-inventory-utf8.ps1",
+            "type": "file",
+            "bytes": 6261,
+            "sha256": "993c1e62444d14f7b5c9015d307113ce0a8df19ee267ac4a29260f2d88df3e03"
+          },
+          {
+            "path": "test-product-inventory.ps1",
+            "type": "file",
+            "bytes": 5955,
+            "sha256": "4089d9dbf4e30a712b03563ab280fd2245f70a6928b5f118699ba1b48389e9e4"
+          },
+          {
+            "path": "windows-product-artifacts.json",
+            "type": "file",
+            "bytes": 600,
+            "sha256": "3442d29fcc99611c299d9c9e6496ed2cfe7f9b5192f8452298fe2dd6e229cd0b"
+          }
+        ],
+        "moved": true,
+        "source_absent": true,
+        "inventory_equal": true,
+        "files": 28,
+        "directories": 21,
+        "bytes": 295723,
+        "finished_utc": "2026-11-22T14:38:17.627276+00:00"
+      }
+    },
+    {
+      "name": "control_comet",
+      "device": "Comet",
+      "receipt": {
+        "schema": 1,
+        "device": "Comet",
+        "device_id": "9cf41183-4a92-4bca-a51b-528ca8ea98d7",
+        "source": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-closeout-20261122-e51f",
+        "started_msk": "2026-11-22T18:14:10.059968+03:00",
+        "completed": true,
+        "moved": true,
+        "runner_sha256": "37e50f32b476fe9df6d68dfb6907afdae5d4ac4303cee5a4f0befc6994046983",
+        "local_preservation_manifest_sha256": "92c589c88c03ea3c6128d441ca3eb7af2e829b7ac1441198217d1002ddaa65b2",
+        "expected_inventory_sha256": "b9d93bd556f4b14dd24523fa8c76ef54ec3a146d3c102dc775466bbe310c73a2",
+        "support_sha256": "8379f770febe012a54b72e86c03ce0717511ce82f9ef8f9c9bc5ae558d83beb2",
+        "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+        "delete_attempted": false,
+        "termination_requested": false,
+        "trash_emptied": false,
+        "new_remote_helper_or_receipt_files": false,
+        "whole_machine_settlement_claimed": false,
+        "prior_receipts": [
+          {
+            "path": "architecture-cleanup.json",
+            "sha256": "a9adb03d340fc5ce5e823ed78609659af63c6768759cb58e76d9901e52551a39",
+            "completed": false,
+            "waited_direct_children": 3
+          },
+          {
+            "path": "architecture-cleanup-recovery.json",
+            "sha256": "f91d9b9fe41e766f0ff6a40b14fa8b150427ead19faf288aded75c0a23604394",
+            "completed": true,
+            "waited_direct_children": 5
+          },
+          {
+            "path": "scheduler-cleanup.json",
+            "sha256": "8d079690eb814588d5c135c231cf6f7d8039fe32c6b5eaa1c7aba81882842229",
+            "completed": true,
+            "waited_direct_children": 2
+          }
+        ],
+        "process_observations": [
+          {
+            "msk": "2026-11-22T18:14:10.705210+03:00",
+            "process_rows": 313,
+            "missing_commandline": 186,
+            "matches": [],
+            "scope": "Visible command lines only; no hidden-process or open-handle settlement claim"
+          },
+          {
+            "msk": "2026-11-22T18:14:11.371429+03:00",
+            "process_rows": 313,
+            "missing_commandline": 186,
+            "matches": [],
+            "scope": "Visible command lines only; no hidden-process or open-handle settlement claim"
+          }
+        ],
+        "commands": [
+          {
+            "label": "before-inventory",
+            "started_msk": "2026-11-22T18:14:10.083516+03:00",
+            "direct_child_waited": true,
+            "pid": 27920,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T18:14:10.702817+03:00",
+            "stdout": {
+              "bytes": 77916,
+              "sha256": "9d0d522ab8b4a8ec85805a2b384e114218c091a7fc8d9b0b69cadb42c4d12273"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          {
+            "label": "before-move",
+            "started_msk": "2026-11-22T18:14:10.750977+03:00",
+            "direct_child_waited": true,
+            "pid": 27116,
+            "exit_code": 0,
+            "finished_msk": "2026-11-22T18:14:11.370428+03:00",
+            "stdout": {
+              "bytes": 77916,
+              "sha256": "e5e9edbcbd5bf2dce52c69dea033ba513678adba424d12f00ecc6fb77fac0df9"
+            },
+            "stderr": {
+              "bytes": 0,
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        ],
+        "inventory_before": [
+          {
+            "path": ".",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-evidence.b64",
+            "type": "file",
+            "bytes": 525984,
+            "sha256": "e29393d6f4d99378ce08feabab7b62dcc02e44b75526d0cf996137b6ce3a6b76"
+          },
+          {
+            "path": "architecture-cleanup-evidence.zip",
+            "type": "file",
+            "bytes": 394387,
+            "sha256": "8cfe54a30b9d89c6a3232c9793ed9269e4e4715977ad6895c5e17b4ebc9fc042"
+          },
+          {
+            "path": "architecture-cleanup-probes",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-diff.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-diff.stdout",
+            "type": "file",
+            "bytes": 10081,
+            "sha256": "d161319b00b15ef10598b529e536bc2e24df7cecd394371dbc722e04583afdfa"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-identities.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-identities.stdout",
+            "type": "file",
+            "bytes": 82,
+            "sha256": "9aaba3768f6e5f7270a12924780f9e875c5f5c7b8ca4504d4e8839dabf8ad1fe"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-status.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-status.stdout",
+            "type": "file",
+            "bytes": 56,
+            "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/processes-before-inventory.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/processes-before-move.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-diff.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-diff.stdout",
+            "type": "file",
+            "bytes": 10089,
+            "sha256": "349cb21b1789055c62e623015be0e1e154ff3eba803749d4bf547f28b7e3d971"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-identities.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-identities.stdout",
+            "type": "file",
+            "bytes": 82,
+            "sha256": "9aaba3768f6e5f7270a12924780f9e875c5f5c7b8ca4504d4e8839dabf8ad1fe"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-status.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-status.stdout",
+            "type": "file",
+            "bytes": 56,
+            "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+          },
+          {
+            "path": "architecture-cleanup-recovery.json",
+            "type": "file",
+            "bytes": 7913,
+            "sha256": "f91d9b9fe41e766f0ff6a40b14fa8b150427ead19faf288aded75c0a23604394"
+          },
+          {
+            "path": "architecture-cleanup.json",
+            "type": "file",
+            "bytes": 4640,
+            "sha256": "a9adb03d340fc5ce5e823ed78609659af63c6768759cb58e76d9901e52551a39"
+          },
+          {
+            "path": "architecture-publication-readback.json",
+            "type": "file",
+            "bytes": 2052,
+            "sha256": "b7bbf2e9ad88a8100115b4a19451f33a81f045500edda00c0e8819f328b72454"
+          },
+          {
+            "path": "architecture-recovery-inventory-after.json",
+            "type": "file",
+            "bytes": 700935,
+            "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a"
+          },
+          {
+            "path": "architecture-recovery-inventory-before.json",
+            "type": "file",
+            "bytes": 700935,
+            "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a"
+          },
+          {
+            "path": "cleanup_architecture.py",
+            "type": "file",
+            "bytes": 14902,
+            "sha256": "8379f770febe012a54b72e86c03ce0717511ce82f9ef8f9c9bc5ae558d83beb2"
+          },
+          {
+            "path": "cleanup_architecture_retry.py",
+            "type": "file",
+            "bytes": 16575,
+            "sha256": "1471a04e19a999ee09591aa43e4173525bf077ebda89b78952b2033a89731b34"
+          },
+          {
+            "path": "cleanup_scheduler.py",
+            "type": "file",
+            "bytes": 18046,
+            "sha256": "474eba51f77970bfb7fd82e1a632ef348666a4131f3d1cc272efa59ee3113413"
+          },
+          {
+            "path": "runtime-architecture-cleanup",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/hooks",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/hooks",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "scheduler-cleanup-evidence.b64",
+            "type": "file",
+            "bytes": 528124,
+            "sha256": "a3834dc2930f22be14deafe42723f9b4bf77f97cbbadd89e0b3c359143992f89"
+          },
+          {
+            "path": "scheduler-cleanup-evidence.zip",
+            "type": "file",
+            "bytes": 395993,
+            "sha256": "527bbcb6fa7765bebdb157d86f04b7f78c5e5065fc83a5d6137b9172eb0ac9d7"
+          },
+          {
+            "path": "scheduler-cleanup-export.json",
+            "type": "file",
+            "bytes": 207,
+            "sha256": "52033d2599903a999f856536a846235dcfc7c9f310e5a9268ceb0f6ac41094b7"
+          },
+          {
+            "path": "scheduler-cleanup-probes",
+            "type": "directory"
+          },
+          {
+            "path": "scheduler-cleanup-probes/processes-before-inventory.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "scheduler-cleanup-probes/processes-before-move.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "scheduler-cleanup.json",
+            "type": "file",
+            "bytes": 5061,
+            "sha256": "8d079690eb814588d5c135c231cf6f7d8039fe32c6b5eaa1c7aba81882842229"
+          },
+          {
+            "path": "scheduler-inventory-after.json",
+            "type": "file",
+            "bytes": 681587,
+            "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+          },
+          {
+            "path": "scheduler-inventory-before.json",
+            "type": "file",
+            "bytes": 681587,
+            "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+          },
+          {
+            "path": "scheduler-publication-readback.json",
+            "type": "file",
+            "bytes": 2069,
+            "sha256": "95240681ec59c5c7487f3968b301d7157222765e9b31a4da6d68039957c1da99"
+          },
+          {
+            "path": "scheduler-publication-results.json",
+            "type": "file",
+            "bytes": 77537,
+            "sha256": "ff19724f8d40009e4b99b130b4661cefb70a50931bf4b6f02150809747e4e2ab"
+          }
+        ],
+        "inventory_before_sha256": "b9d93bd556f4b14dd24523fa8c76ef54ec3a146d3c102dc775466bbe310c73a2",
+        "inventory_after": [
+          {
+            "path": ".",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-evidence.b64",
+            "type": "file",
+            "bytes": 525984,
+            "sha256": "e29393d6f4d99378ce08feabab7b62dcc02e44b75526d0cf996137b6ce3a6b76"
+          },
+          {
+            "path": "architecture-cleanup-evidence.zip",
+            "type": "file",
+            "bytes": 394387,
+            "sha256": "8cfe54a30b9d89c6a3232c9793ed9269e4e4715977ad6895c5e17b4ebc9fc042"
+          },
+          {
+            "path": "architecture-cleanup-probes",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-diff.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-diff.stdout",
+            "type": "file",
+            "bytes": 10081,
+            "sha256": "d161319b00b15ef10598b529e536bc2e24df7cecd394371dbc722e04583afdfa"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-identities.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-identities.stdout",
+            "type": "file",
+            "bytes": 82,
+            "sha256": "9aaba3768f6e5f7270a12924780f9e875c5f5c7b8ca4504d4e8839dabf8ad1fe"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-status.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-probes/source-status.stdout",
+            "type": "file",
+            "bytes": 56,
+            "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes",
+            "type": "directory"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/processes-before-inventory.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/processes-before-move.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-diff.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-diff.stdout",
+            "type": "file",
+            "bytes": 10089,
+            "sha256": "349cb21b1789055c62e623015be0e1e154ff3eba803749d4bf547f28b7e3d971"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-identities.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-identities.stdout",
+            "type": "file",
+            "bytes": 82,
+            "sha256": "9aaba3768f6e5f7270a12924780f9e875c5f5c7b8ca4504d4e8839dabf8ad1fe"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-status.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "architecture-cleanup-recovery-probes/source-status.stdout",
+            "type": "file",
+            "bytes": 56,
+            "sha256": "d927e7aae4fd898fe60aa11d0e81ff3dc45c7ea15447c8152116403ddc8805dc"
+          },
+          {
+            "path": "architecture-cleanup-recovery.json",
+            "type": "file",
+            "bytes": 7913,
+            "sha256": "f91d9b9fe41e766f0ff6a40b14fa8b150427ead19faf288aded75c0a23604394"
+          },
+          {
+            "path": "architecture-cleanup.json",
+            "type": "file",
+            "bytes": 4640,
+            "sha256": "a9adb03d340fc5ce5e823ed78609659af63c6768759cb58e76d9901e52551a39"
+          },
+          {
+            "path": "architecture-publication-readback.json",
+            "type": "file",
+            "bytes": 2052,
+            "sha256": "b7bbf2e9ad88a8100115b4a19451f33a81f045500edda00c0e8819f328b72454"
+          },
+          {
+            "path": "architecture-recovery-inventory-after.json",
+            "type": "file",
+            "bytes": 700935,
+            "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a"
+          },
+          {
+            "path": "architecture-recovery-inventory-before.json",
+            "type": "file",
+            "bytes": 700935,
+            "sha256": "55e541a81a72bbe1125b50b03bdfe598c6752bb22fae1840806206d0e3f0249a"
+          },
+          {
+            "path": "cleanup_architecture.py",
+            "type": "file",
+            "bytes": 14902,
+            "sha256": "8379f770febe012a54b72e86c03ce0717511ce82f9ef8f9c9bc5ae558d83beb2"
+          },
+          {
+            "path": "cleanup_architecture_retry.py",
+            "type": "file",
+            "bytes": 16575,
+            "sha256": "1471a04e19a999ee09591aa43e4173525bf077ebda89b78952b2033a89731b34"
+          },
+          {
+            "path": "cleanup_scheduler.py",
+            "type": "file",
+            "bytes": 18046,
+            "sha256": "474eba51f77970bfb7fd82e1a632ef348666a4131f3d1cc272efa59ee3113413"
+          },
+          {
+            "path": "runtime-architecture-cleanup",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/hooks",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup-recovery/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/hooks",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-architecture-cleanup/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/appdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/localappdata",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile/AppData",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/profile/AppData/Roaming",
+            "type": "directory"
+          },
+          {
+            "path": "runtime-scheduler-cleanup/tmp",
+            "type": "directory"
+          },
+          {
+            "path": "scheduler-cleanup-evidence.b64",
+            "type": "file",
+            "bytes": 528124,
+            "sha256": "a3834dc2930f22be14deafe42723f9b4bf77f97cbbadd89e0b3c359143992f89"
+          },
+          {
+            "path": "scheduler-cleanup-evidence.zip",
+            "type": "file",
+            "bytes": 395993,
+            "sha256": "527bbcb6fa7765bebdb157d86f04b7f78c5e5065fc83a5d6137b9172eb0ac9d7"
+          },
+          {
+            "path": "scheduler-cleanup-export.json",
+            "type": "file",
+            "bytes": 207,
+            "sha256": "52033d2599903a999f856536a846235dcfc7c9f310e5a9268ceb0f6ac41094b7"
+          },
+          {
+            "path": "scheduler-cleanup-probes",
+            "type": "directory"
+          },
+          {
+            "path": "scheduler-cleanup-probes/processes-before-inventory.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "scheduler-cleanup-probes/processes-before-move.stderr",
+            "type": "file",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "path": "scheduler-cleanup.json",
+            "type": "file",
+            "bytes": 5061,
+            "sha256": "8d079690eb814588d5c135c231cf6f7d8039fe32c6b5eaa1c7aba81882842229"
+          },
+          {
+            "path": "scheduler-inventory-after.json",
+            "type": "file",
+            "bytes": 681587,
+            "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+          },
+          {
+            "path": "scheduler-inventory-before.json",
+            "type": "file",
+            "bytes": 681587,
+            "sha256": "67febbf28ac22647fb390a37a21ca0f37dd2ffe5f2a3d6441463d8db70461b70"
+          },
+          {
+            "path": "scheduler-publication-readback.json",
+            "type": "file",
+            "bytes": 2069,
+            "sha256": "95240681ec59c5c7487f3968b301d7157222765e9b31a4da6d68039957c1da99"
+          },
+          {
+            "path": "scheduler-publication-results.json",
+            "type": "file",
+            "bytes": 77537,
+            "sha256": "ff19724f8d40009e4b99b130b4661cefb70a50931bf4b6f02150809747e4e2ab"
+          }
+        ],
+        "inventory_after_sha256": "b9d93bd556f4b14dd24523fa8c76ef54ec3a146d3c102dc775466bbe310c73a2",
+        "source_absent": true,
+        "target_exists": true,
+        "inventory_equal": true,
+        "files": 34,
+        "directories": 25,
+        "bytes": 4778980,
+        "finished_msk": "2026-11-22T18:14:11.423785+03:00"
+      }
+    },
+    {
+      "name": "control_asus",
+      "device": "Asus",
+      "receipt": {
+        "schema": 1,
+        "completed": true,
+        "device": "Asus",
+        "source": "D:\\dev\\ChatGPT\\mcp-closeout-20261122-e51f",
+        "target": "D:\\dev\\ChatGPT\\trash\\mcp-closeout-20261122-e51f",
+        "started_utc": "2026-11-22T15:14:19.687333+00:00",
+        "finished_utc": "2026-11-22T15:15:02.599816+00:00",
+        "source_absent": true,
+        "inventory_equal_before_after_and_local_backup": true,
+        "files": 11,
+        "directories": 15,
+        "bytes": 107661,
+        "move_method": "Remote Desktop Commander move_file; exact source and destination in move-tool-result.json",
+        "whole_machine_settlement_claim": false,
+        "process_observations": [
+          {
+            "pid": 36228,
+            "direct_child_waited": true,
+            "timed_out": false,
+            "exit_code": 0,
+            "process_rows": 410,
+            "missing_commandline": 27,
+            "missing_executable": 27,
+            "matches": []
+          },
+          {
+            "pid": 8700,
+            "direct_child_waited": true,
+            "timed_out": false,
+            "exit_code": 0,
+            "process_rows": 410,
+            "missing_commandline": 27,
+            "missing_executable": 27,
+            "matches": []
+          }
+        ],
+        "new_remote_helper_or_control_root_created": false,
+        "deletion_or_purge": false,
+        "process_kill": false,
+        "policy_change": false,
+        "prior_product_workspace_touched": false,
+        "artifacts": {
+          "before-receipt.json": {
+            "bytes": 9555,
+            "sha256": "97707124a1d03e85ed75814ec662992edc3e44c8940a9299c237493a83948e0a"
+          },
+          "after-receipt.json": {
+            "bytes": 3125,
+            "sha256": "992d610ea3c73aa2f848012f67f976d8e5bd15ee4327a57acc2506a8bbf4ab2d"
+          },
+          "move-tool-result.json": {
+            "bytes": 360,
+            "sha256": "f03edc35e9e8d24ca25634732ecf197c6d562e912f53eedf59ee9572d7e59650"
+          },
+          "before-tool-result.json": {
+            "bytes": 13231,
+            "sha256": "ab3d88d2ce1053adfe5deebbc0d7558f70450591a91dad484b90a6a34d3ec4ad"
+          },
+          "after-tool-result.json": {
+            "bytes": 4659,
+            "sha256": "ae959d7bae1956e3af99ef7f8722650765debf9dfa40e7e15eff963298f93b38"
+          },
+          "before-envelope.json": {
+            "bytes": 12880,
+            "sha256": "8abc075982870fae931ff5b79e403580da961e96397a468974334554b131b37f"
+          },
+          "after-envelope.json": {
+            "bytes": 4308,
+            "sha256": "86f6fbf203f8ce3ec6bfb5efa5dc2660b04e49b810b9cabb0c413c7626f240f5"
+          },
+          "control-inventory.json": {
+            "bytes": 2386,
+            "sha256": "d1ab5a5fe1e230a2caf7248e139bea8a54195a36728263f82dfb983ef6b2b9f5"
+          },
+          "control-payload-backup.zip": {
+            "bytes": 59590,
+            "sha256": "45850a83c60fac8019093e93c4d8f000ec815d099be30e33304794a8f96ff85c"
+          },
+          "control-probe-before.py": {
+            "bytes": 12903,
+            "sha256": "5082c502cbdcf8ac10c00a1b35b12c31553549c371104b9b8dce370348d63b37"
+          },
+          "control-probe-after.py": {
+            "bytes": 12902,
+            "sha256": "2b729b4c94dfbcb73d9020545fed700f6187142aa8a38845e2c0b1e302ba1917"
+          },
+          "control-probe-commands.json": {
+            "bytes": 13514,
+            "sha256": "286b7749be6e693e87bdaa59009729bf9e505d6a34b5b76243219b25dfbd3a48"
+          },
+          "before-snapshot-1.stdout": {
+            "bytes": 130,
+            "sha256": "f84f5f5895f802e99df4bf140eee6ae97e27ae105228ee215a4e3dd99c6e0f8e"
+          },
+          "before-snapshot-1.stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "before-snapshot-2.stdout": {
+            "bytes": 130,
+            "sha256": "55b022ddabe199932e81d046eb81904a83cc1151ed89492538a8845b724f7751"
+          },
+          "before-snapshot-2.stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "backup_scope": "All 11 CONTROL payloads plus exact full inventory; local outside trash",
+        "parent_parser_cleanup": {
+          "receipt_relative": "../encoding-cleanup-receipt.json",
+          "receipt_sha256": "26ae71b8bb5a973bf5cf09e21e6572056ee0f4212ff0968e9f8293fa1284a060",
+          "archive_relative": "../encoding-cleanup-raw.zip",
+          "archive_sha256": "3326b6cce714decd0e463120f548de5eb0e9d32dc8670a8c58b2cdb7dd4de054",
+          "files": 20,
+          "directories": 14,
+          "bytes": 246731
+        }
+      }
+    }
+  ],
+  "review": {
+    "own_review": "Root reviewed production diffs, relevant consumers, baseline preservation, test isolation, exact inputs, raw outcomes, publication bytes and cleanup preservation before completion.",
+    "independent_review": "Independent source/evidence and canonical-plan readings supplemented Root's review; no external quota review was run.",
+    "concrete_document_fixes": [
+      "Removed obsolete inventory implementation task",
+      "Marked SID implementation already published",
+      "Bound old architecture-owner deficiencies to master instead of #663",
+      "Corrected historical table references after insertion",
+      "Stage D rechecks unchanged evidence and reruns only affected boundaries"
+    ],
+    "preserved_failures": [
+      "Initial architecture source fetch RPC56/reset before tests",
+      "Product inventory harness UTF-8/ANSI parse failure before cases",
+      "Parser CMD launcher quoting failure before Python/PowerShell",
+      "First architecture cleanup stopped before move on Git patch abbreviation mismatch",
+      "Architecture verify remains exit 1",
+      "All distinct negative controls remain failures of their defective inputs"
+    ],
+    "not_claimed": [
+      "Whole operating-system process-tree settlement",
+      "Full default or tagged Go suite success",
+      "Current native Product issuance",
+      "Installed Serena lifecycle",
+      "Native Windows owner/action matrix",
+      "New memory/latency measurements or Rust production benefit",
+      "Final admission of all 30 PRs"
+    ]
+  },
+  "remaining_stages": {
+    "A": "Architecture verify debt, native Windows original-owner contracts, current Serena publisher/Product inputs and acceptance remain open.",
+    "B": "Full default/tagged Go, installation/cancellation/recovery and supported-platform runtime qualification remain open on an admitted integrated source.",
+    "C": "Remaining Relay/CMake memory/concurrency/latency profiles and Rust real-consumer contracts/benefit remain open.",
+    "D": "Full queue conflict/deduplication audit and current-head external reviews remain open; this turn preserved seven independent owners and created/closed no PR."
+  },
+  "prohibited_actions_performed": {
+    "merge": false,
+    "force_push": false,
+    "branch_delete": false,
+    "new_pr": false,
+    "donor_close": false,
+    "dependency_install": false,
+    "installed_product_change": false,
+    "scheduler_mutation": false,
+    "policy_change": false,
+    "manual_ci": false,
+    "paid_or_quota_review": false,
+    "trash_purge": false
+  },
+  "evidence": {
+    "file": "p0-continuation-evidence-20261122.zip",
+    "bytes": 1004421,
+    "sha256": "44b13007507ae4cac5b0e6631f171a9d950a420c77e1c4258f597dba0e9338ac",
+    "archive_files": 43,
+    "indexed_payload_files": 42,
+    "all_payload_hashes_verified": true
+  }
+}

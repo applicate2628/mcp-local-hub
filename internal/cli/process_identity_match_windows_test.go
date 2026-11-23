@@ -24,6 +24,7 @@ func TestPidMatchesMcphub_CurrentProcess(t *testing.T) {
 func TestPidMatchesMcphub_RejectsForeignPathSameBasename(t *testing.T) {
 	helperPath := copyCurrentTestBinaryAs(t, "mcphub.exe")
 	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start mcphub.exe-named helper: %v", err)
@@ -51,6 +52,7 @@ func TestLoadSupervisorCurrentRunning_SkipsLiveNonMcphubPID(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	helperPath := copyCurrentTestBinaryAs(t, "mcphub.exe")
 	cmd := exec.Command(helperPath, "-test.run=TestPidMatchesMcphub_HelperSleep")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_PID_MATCH_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start foreign mcphub.exe-named helper: %v", err)

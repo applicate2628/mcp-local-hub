@@ -1,0 +1,216 @@
+{
+  "schema": 1,
+  "source_head": "858812988833a84368c60fba1540ae601155fa71",
+  "source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+  "code_commit": "8f6a89b491c3dca11830688b8b158bf973b19363",
+  "code_tree": "a354fa2d72b85b851176c073a99a6f97c651276b",
+  "overlay_count": 4,
+  "normal_manifest_sha256": "d2bc2e7c65db4b3e66bcd8393e37482b834d10317ce876ace4a5c05152c03eea",
+  "control_manifest_sha256": "8d38e8532d2756b8b9771a7e7b59638dcea3c740d0219a3678e38259da498b97",
+  "phases": [
+    {
+      "phase": "gui-stage-format",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "gofmt-write",
+          "exit_code": 0,
+          "seconds": 0.13152970001101494,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": null
+        }
+      ]
+    },
+    {
+      "phase": "gui-format",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "go-version",
+          "exit_code": 0,
+          "seconds": 4.068843099987134,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "seconds": 0.01666189997922629,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-compile",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "cli-race-compile",
+          "exit_code": 0,
+          "seconds": 49.280913900001906,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-pure",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "gui-pure",
+          "exit_code": 0,
+          "seconds": 7.87097889999859,
+          "settled": true,
+          "timed_out": false,
+          "pass": 9,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-race-lost",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "gui-race-lost",
+          "exit_code": 0,
+          "seconds": 12.089395900024101,
+          "settled": true,
+          "timed_out": false,
+          "pass": 2,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-rewrite",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "gui-rewrite",
+          "exit_code": 0,
+          "seconds": 10.44770709995646,
+          "settled": true,
+          "timed_out": false,
+          "pass": 2,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-build",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "full-build",
+          "exit_code": 0,
+          "seconds": 9.509773200028576,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-vet",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "full-vet",
+          "exit_code": 0,
+          "seconds": 239.92329109995626,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    },
+    {
+      "phase": "gui-race-lost-control",
+      "state": "complete",
+      "completed": true,
+      "commands": [
+        {
+          "label": "gofmt-control",
+          "exit_code": 0,
+          "seconds": 0.017570900032296777,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 0,
+          "skip": 0,
+          "oracle_matched": true
+        },
+        {
+          "label": "gui-race-lost-control",
+          "exit_code": 1,
+          "seconds": 46.28281360003166,
+          "settled": true,
+          "timed_out": false,
+          "pass": 0,
+          "fail": 2,
+          "skip": 0,
+          "oracle_matched": true
+        }
+      ]
+    }
+  ],
+  "positive_root_tests": 3,
+  "positive_test_and_subtest_pass": 10,
+  "positive_package_pass": 3,
+  "positive_fail": 0,
+  "positive_skip": 0,
+  "negative_control": {
+    "go_exit": 1,
+    "test_fail": 1,
+    "package_fail": 1,
+    "pass": 0,
+    "skip": 0,
+    "oracle_matched": true,
+    "failure_preserved": true
+  },
+  "whole_process_tree_settlement_observed": false,
+  "all_gui_workers_joined": false,
+  "production_pid_owner_qualified": false,
+  "full_go_suites": "NOT_RUN",
+  "installed_product": "NOT_RUN",
+  "posix_execution": "NOT_RUN"
+}

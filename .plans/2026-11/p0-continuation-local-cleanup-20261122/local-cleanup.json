@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "started_utc": "2026-11-22T15:21:42.432784+00:00",
+  "completed": true,
+  "agents_released_by_root": true,
+  "runner_sha256": "f5da55e6e91b9c062cb4d2cc953e1d18247eff29f424d109ed2eaf64b4b045a8",
+  "publication_readback_sha256": "d8b266bab6fb6069a38f963f5bcaea7c16880ab901db087b6d62c392cab1d0ee",
+  "sources": [
+    "/workspace/scratch/e51f442c712e/architecture-candidate",
+    "/workspace/scratch/e51f442c712e/architecture-results",
+    "/workspace/scratch/e51f442c712e/scheduler-inputs",
+    "/workspace/scratch/e51f442c712e/scheduler-stop-candidate",
+    "/workspace/scratch/e51f442c712e/product-candidate",
+    "/workspace/scratch/e51f442c712e/context"
+  ],
+  "destination": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122",
+  "moves": [
+    {
+      "source": "/workspace/scratch/e51f442c712e/architecture-candidate",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/architecture-candidate"
+    },
+    {
+      "source": "/workspace/scratch/e51f442c712e/architecture-results",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/architecture-results"
+    },
+    {
+      "source": "/workspace/scratch/e51f442c712e/scheduler-inputs",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/scheduler-inputs"
+    },
+    {
+      "source": "/workspace/scratch/e51f442c712e/scheduler-stop-candidate",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/scheduler-stop-candidate"
+    },
+    {
+      "source": "/workspace/scratch/e51f442c712e/product-candidate",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/product-candidate"
+    },
+    {
+      "source": "/workspace/scratch/e51f442c712e/context",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-continuation-20261122/context"
+    }
+  ],
+  "retained_checkout": "/workspace/scratch/e51f442c712e/mcphub-base",
+  "process_observations": [
+    {
+      "label": "before-inventory",
+      "utc": "2026-11-22T15:21:42.445948+00:00",
+      "pids_seen": 1,
+      "unavailable_reads": 0,
+      "matches": [],
+      "excluded_pid": 2,
+      "scope": "Visible /proc cmdline, cwd and fd references; not whole-machine settlement"
+    },
+    {
+      "label": "before-move",
+      "utc": "2026-11-22T15:21:43.369257+00:00",
+      "pids_seen": 1,
+      "unavailable_reads": 0,
+      "matches": [],
+      "excluded_pid": 2,
+      "scope": "Visible /proc cmdline, cwd and fd references; not whole-machine settlement"
+    }
+  ],
+  "delete_attempted": false,
+  "kill_requested": false,
+  "trash_purged": false,
+  "git_metadata_edited": false,
+  "shared_cache_or_history_changed": false,
+  "published_head": "7afeefca988945b8a75355f89a9ab16dfaa7376d",
+  "published_tree": "1fac3cc6cb6218385e0ce66eb4214c60baeb7da2",
+  "bundle_payload_hashes_verified": 42,
+  "final_artifacts_verified": 4,
+  "inventory_before": {
+    "entries": 3872,
+    "sha256": "61c7aedc089564a354489f6e000902b89b1ef1af0a3444497027db66ce3318ed"
+  },
+  "inventory_after": {
+    "entries": 3872,
+    "sha256": "61c7aedc089564a354489f6e000902b89b1ef1af0a3444497027db66ce3318ed"
+  },
+  "inventory_equal": true,
+  "sources_absent": true,
+  "retained_checkout_exists": true,
+  "files": 3608,
+  "directories": 264,
+  "symlinks": 0,
+  "bytes": 67121830,
+  "inventory_file": {
+    "path": "local-cleanup-inventory.jsonl.gz",
+    "bytes": 378180,
+    "sha256": "20d1e704ea17a1ab79f84d4828a9260e583cbcf08cd64c98acc4dc70a79ab4c1"
+  },
+  "finished_utc": "2026-11-22T15:21:43.527269+00:00"
+}

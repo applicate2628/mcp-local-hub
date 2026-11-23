@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "archive": "gui-owner-evidence.zip",
+  "bytes": 766200,
+  "sha256": "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+  "git_blob": "2e5050d5c856399c90b33875df535807508fa9d6",
+  "entries": 28,
+  "payload_entries": 27,
+  "all_members_crc_length_sha256_verified": true,
+  "inner_archive": {
+    "bytes": 986320,
+    "sha256": "52879c23549f17d6aeaa622f702bc61c7417131441b1e3c3b7eb3b261101a335",
+    "entries": 1346
+  },
+  "remote_binary_readback": "Upload blob SHA and published Git tree must match; no second binary download is claimed"
+}

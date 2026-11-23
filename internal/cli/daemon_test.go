@@ -17,6 +17,7 @@ import (
 	"mcp-local-hub/internal/api/daemon_env_overlay"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/secrets"
 )
 
@@ -1075,6 +1076,7 @@ func TestFormatChildExit_LargeExitCodeShowsHex(t *testing.T) {
 		os.Exit(code)
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestFormatChildExit_LargeExitCodeShowsHex$")
+	process.NoConsole(cmd)
 	// Pick an exit code > 255 so formatChildExit emits the hex suffix.
 	// Go's os.Exit truncates to uint8 on POSIX so this only meaningfully
 	// reproduces the >255 path on Windows; the test still asserts the
@@ -1104,6 +1106,7 @@ func TestFormatChildExit_RealProcessShowsExitCode(t *testing.T) {
 		os.Exit(code)
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestFormatChildExit_RealProcessShowsExitCode$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_TEST_CHILD_EXIT_CODE=42")
 	if err := cmd.Run(); err == nil {
 		t.Fatalf("child should have failed with exit code 42; got nil")

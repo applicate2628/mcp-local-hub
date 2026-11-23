@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "target": {
+    "pr": 643,
+    "head": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+    "tree": "586f6a2c1026df65061b2bcf1423575b94b7fc68",
+    "draft": true
+  },
+  "closed": [
+    {
+      "pr": 648,
+      "state": "closed",
+      "merged": false,
+      "closed_at": "2026-11-21T21:46:53Z",
+      "branch": "fix/serena-build-compatibility-20261114",
+      "head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "branch_retained_and_verified": true
+    },
+    {
+      "pr": 652,
+      "state": "closed",
+      "merged": false,
+      "closed_at": "2026-11-21T21:46:56Z",
+      "branch": "fix/serena-owned-file-reads-20261114",
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "branch_retained_and_verified": true
+    }
+  ],
+  "open_pr_count": 29,
+  "all_open_draft": true,
+  "queue": [
+    {
+      "number": 667,
+      "title": "test(perftools): isolate stdout fixture from shell profiles and oneAPI discovery",
+      "head": "99dd76ccd453ccd56d9adbcd6f4d4d06ce5cb57c",
+      "branch": "test/perftools-stdout-explicit-env-20261121",
+      "draft": true
+    },
+    {
+      "number": 666,
+      "title": "test(cli): bind helper admission and caller state before package setup",
+      "head": "09de8e98d1aa6f122215dbe869bc6f7d0ce083f5",
+      "branch": "fix/cli-test-helper-dispatch-20261121",
+      "draft": true
+    },
+    {
+      "number": 665,
+      "title": "test(api): validate helper roles before creating package fixtures",
+      "head": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+      "branch": "fix/api-test-helper-dispatch-20261121",
+      "draft": true
+    },
+    {
+      "number": 664,
+      "title": "test: preserve #658 and admit daemon helpers before state allocation",
+      "head": "9ca27f6734ec3587ad0bd155d81d22b1a4960b84",
+      "branch": "fix/p0-test-entry-preserve-20261121",
+      "draft": true
+    },
+    {
+      "number": 663,
+      "title": "fix(archguard): preserve baseline ownership after route extraction",
+      "head": "1cabce12655f810b742e6c31369441cacd72573c",
+      "branch": "fix/archguard-mcproute-baseline-20261121",
+      "draft": true
+    },
+    {
+      "number": 661,
+      "title": "test(cli): require semantic Serena conflict validation failures",
+      "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "branch": "test/serena-conflict-validation-oracle-20261121",
+      "draft": true
+    },
+    {
+      "number": 660,
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "head": "1cffaab021686a7ae27a5ffc038f280160f96a60",
+      "branch": "fix/scheduler-hidden-task-lookup-20261119",
+      "draft": true
+    },
+    {
+      "number": 659,
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "branch": "fix/api-port-pid-observation-20261118",
+      "draft": true
+    },
+    {
+      "number": 657,
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "branch": "fix/canonical-command-test-product-20261116",
+      "draft": true
+    },
+    {
+      "number": 655,
+      "title": "fix(serena): settle preparation before canceling work context",
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "branch": "fix/serena-finalize-context-20261115",
+      "draft": true
+    },
+    {
+      "number": 654,
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "branch": "fix/serena-ready-readback-20261115",
+      "draft": true
+    },
+    {
+      "number": 653,
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "branch": "fix/serena-tcp-query-budget-20261115",
+      "draft": true
+    },
+    {
+      "number": 650,
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "branch": "fix/serena-protocol-binding-20261114",
+      "draft": true
+    },
+    {
+      "number": 649,
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "branch": "fix/serena-qualification-home-20261114",
+      "draft": true
+    },
+    {
+      "number": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "branch": "fix/serena-executable-discovery-20261114",
+      "draft": true
+    },
+    {
+      "number": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "branch": "fix/serena-python-discovery-preference-20261114",
+      "draft": true
+    },
+    {
+      "number": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "branch": "spike/rx02-native-identity-20261114",
+      "draft": true
+    },
+    {
+      "number": 643,
+      "title": "fix(serena): retain original owners through install and cleanup",
+      "head": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+      "branch": "fix/serena-cleanup-parent-observation-20261114",
+      "draft": true
+    },
+    {
+      "number": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "branch": "fix/serena-integration-qualification-20261114",
+      "draft": true
+    },
+    {
+      "number": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "branch": "fix/serena-qualification-publisher-20261114",
+      "draft": true
+    },
+    {
+      "number": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "branch": "fix/serena-qualified-uv-path-20261114",
+      "draft": true
+    },
+    {
+      "number": 631,
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "head": "701535e3439d74495080463976d610a42303e5cf",
+      "branch": "spike/rx02-go-rust-boundary-20261113",
+      "draft": true
+    },
+    {
+      "number": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "branch": "fix/relay-output-failure-contract-20261113",
+      "draft": true
+    },
+    {
+      "number": 628,
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "branch": "perf/rx16-native-observation-20261112",
+      "draft": true
+    },
+    {
+      "number": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "branch": "spike/rx04-anchored-read-20261112",
+      "draft": true
+    },
+    {
+      "number": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "branch": "perf/rx01-relay-baseline-20261112",
+      "draft": true
+    },
+    {
+      "number": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "branch": "spike/rx02-native-process-owner-20261112",
+      "draft": true
+    },
+    {
+      "number": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+      "draft": true
+    },
+    {
+      "number": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "head": "7a7263e7ff341496aeeb5431d53f6fed388a8ed0",
+      "branch": "docs/rust-cross-platform-no-com-20261112",
+      "draft": true
+    }
+  ],
+  "publication_readback": "docs/modernization/verification/serena-owner-composition-2026-11-22/publication-readback.json",
+  "scope": "Donor preservation and closure, not full Go/product acceptance",
+  "merge_performed": false,
+  "branch_deletion": false
+}

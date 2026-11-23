@@ -15,6 +15,8 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
 	markerPath := filepath.Join(root, "mapped-image-ready")
 	exitSelector := "-test.run=^TestFormatChildExit_RealProcessShowsExitCode$"
 	exitEnv := map[string]string{"MCPHUB_TEST_CHILD_EXIT_CODE": "42"}
+	rootExitSelector := "-test.run=^TestDaemonRootExitChildProcess$"
+	rootExitEnv := map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "0"}
 	staleEnv := map[string]string{staleExitHelperSentinelEnv: "1", staleExitHelperReleaseEnv: filepath.Join(root, "release")}
 	overlayEnv := map[string]string{overlayMarkerHelperSentinelEnv: "1", overlayMarkerHelperDumpPathEnv: filepath.Join(root, "dump"), cliProductionArgvHelperEnv: "1"}
 	secretArgs := []string{"test", "-test.run=^TestSecretsConcurrentSetHelperProcess$"}
@@ -133,6 +135,22 @@ func TestClassifyCLITestHelperDispatch(t *testing.T) {
 		{name: "precontrol unsupported marker", args: []string{"test", "-test.run=^TestSupervisorLaunchChildFixture$"}, env: map[string]string{"MCPHUB_TEST_OWNED_PRECONTROL_CHILD": "2"}, want: invalid},
 		{name: "precontrol missing marker", args: []string{"test", "-test.run=^TestSupervisorLaunchChildFixture$"}, want: invalid},
 		{name: "precontrol broad selector", args: []string{"test", "-test.run=TestSupervisorLaunch"}, env: map[string]string{"MCPHUB_TEST_OWNED_PRECONTROL_CHILD": "1"}, want: invalid},
+		{name: "daemon root exit zero", args: []string{"test", rootExitSelector}, env: rootExitEnv, want: mustExit, nilCheck: true},
+		{name: "daemon root exit seven", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "7"}, want: mustExit},
+		{name: "daemon root exit missing marker", args: []string{"test", rootExitSelector}, want: invalid},
+		{name: "daemon root exit empty marker", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": ""}, want: invalid},
+		{name: "daemon root exit malformed code", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "invalid"}, want: invalid},
+		{name: "daemon root exit unsupported code", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "42"}, want: invalid},
+		{name: "daemon root exit noncanonical code", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "07"}, want: invalid},
+		{name: "daemon root exit missing selector", args: []string{"test"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit wrong selector", args: []string{"test", "-test.run=^TestOrdinary$"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit broad selector", args: []string{"test", "-test.run=TestDaemonRootExitChildProcess"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit split selector", args: []string{"test", "-test.run", "^TestDaemonRootExitChildProcess$"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit selector alias", args: []string{"test", "--test.run=^TestDaemonRootExitChildProcess$"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit duplicate selector", args: []string{"test", rootExitSelector, rootExitSelector}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit extra flag", args: []string{"test", rootExitSelector, "-test.v"}, env: rootExitEnv, want: invalid},
+		{name: "daemon root exit mixed legacy role", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "0", "MCPHUB_TEST_CHILD_EXIT_CODE": "42"}, want: invalid},
+		{name: "daemon root exit mixed new role", args: []string{"test", rootExitSelector}, env: map[string]string{"MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE": "7", "MCPHUB_CODEGRAPH_COMPAT_HELPER": "1"}, want: invalid},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

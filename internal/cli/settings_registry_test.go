@@ -575,6 +575,7 @@ func classifyCLITestHelperDispatch(args []string, lookup func(string) (string, b
 	keyPath, keyPathPresent := lookup("MCPHUB_TEST_KEY_PATH")
 	markerPath, markerPresent := lookup("MCPHUB_MAPPED_IMAGE_RENAME_HELPER")
 	precontrol, precontrolPresent := lookup("MCPHUB_TEST_OWNED_PRECONTROL_CHILD")
+	rootExitCode, rootExitPresent := lookup("MCPHUB_DAEMON_ROOT_EXIT_CHILD_CODE")
 	vaultRoot := filepath.Dir(vaultPath)
 	candidates := []candidate{
 		{exitCodeRaw != "", exitCodeErr == nil && singleSelector && (selector == "^TestFormatChildExit_LargeExitCodeShowsHex$" || selector == "^TestFormatChildExit_RealProcessShowsExitCode$")},
@@ -591,6 +592,9 @@ func classifyCLITestHelperDispatch(args []string, lookup func(string) (string, b
 		{markerPresent, runtime.GOOS == "windows" && len(args) == 2 && args[1] == "-test.run=^TestWindowsMappedImageRenameRequiresExactGenerationReceipt$" &&
 			filepath.IsAbs(markerPath) && filepath.Clean(markerPath) == markerPath && filepath.Base(markerPath) == "mapped-image-ready"},
 		{precontrolPresent, runtime.GOOS == "windows" && precontrol == "1" && len(args) == 2 && args[1] == "-test.run=^TestSupervisorLaunchChildFixture$"},
+		// This stateless child calls os.Exit, so it must run before package
+		// fixture allocation. Admit only the two controlled parent cases.
+		{rootExitPresent, (rootExitCode == "0" || rootExitCode == "7") && singleSelector && selector == "^TestDaemonRootExitChildProcess$"},
 	}
 	active := 0
 	selected := -1
@@ -609,7 +613,7 @@ func classifyCLITestHelperDispatch(args []string, lookup func(string) (string, b
 	if active == 0 {
 		if selector == "^TestProductionTerminateFn_HelperSleep$" || selector == "TestProductionTerminateFn_HelperSleep" || selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestStaleExitReleaseHelper$" || selector == "^TestSpawnEnvDumpHelper$" ||
 			selector == "^TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper$" || selector == "TestDaemonCmdCodeGraphDiskManifestCompatibilityHelper" ||
-			selector == "^TestSecretsConcurrentSetHelperProcess$" || selector == "^TestSupervisorLaunchChildFixture$" ||
+			selector == "^TestSecretsConcurrentSetHelperProcess$" || selector == "^TestSupervisorLaunchChildFixture$" || selector == "^TestDaemonRootExitChildProcess$" ||
 			len(args) > 1 && (args[1] == "route" || args[1] == "supervise") {
 			return cliTestHelperDispatch{invalid: true}
 		}
@@ -622,7 +626,7 @@ func classifyCLITestHelperDispatch(args []string, lookup func(string) (string, b
 		return cliTestHelperDispatch{forensicsStateDir: getenv(forensicsSinkChildEnv)}
 	case 6:
 		return cliTestHelperDispatch{productionArgv: true}
-	case 7, 10:
+	case 7, 10, 11:
 		return cliTestHelperDispatch{runSelectedTest: true, mustExit: true}
 	case 8:
 		if checkPath == nil || checkPath(vaultRoot, cliTestHelperDirectory) != nil ||

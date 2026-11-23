@@ -57,8 +57,12 @@ const (
 )
 
 type supervisorLivenessProbe struct {
-	PIDAlive     func(pid int) bool
-	PIDIdentity  func(proof process.PIDIdentityProof) error
+	PIDAlive    func(pid int) bool
+	PIDIdentity func(proof process.PIDIdentityProof) error
+	// PIDStatus is an optional, status-only observation of one process object.
+	// The canonical liveness predicate and autonomous sweep do not use it.
+	// A nil value preserves the scalar probes, including existing test seams.
+	PIDStatus    func(proof process.PIDIdentityProof) (process.PIDStatusObservation, error)
 	PortLive     func(port int) bool
 	PortOwnerPID func(port int) (pid int, ok bool, err error)
 }
@@ -69,6 +73,7 @@ func defaultSupervisorLivenessProbe() supervisorLivenessProbe {
 	probe := supervisorLivenessProbe{
 		PIDAlive:    process.IsPidAlive,
 		PIDIdentity: process.VerifyPIDIdentity,
+		PIDStatus:   defaultStatusPIDObserver,
 		PortLive:    supervisorPortLive,
 	}
 	// Install the OS-level port-owner verification ONLY on platforms with a real

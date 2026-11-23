@@ -155,13 +155,15 @@ func (c *windowsContainedChild) start(
 	if err != nil {
 		return fixedContainedError(ContainedStageStart, err)
 	}
+	// Keep a later AllocConsole hidden as well as the initial child.
 	si := &procThreadAttributeStartupInfo{
 		StartupInfo: windows.StartupInfo{
-			Cb:        uint32(unsafe.Sizeof(procThreadAttributeStartupInfo{})),
-			Flags:     windows.STARTF_USESTDHANDLES,
-			StdInput:  stdHandles[0],
-			StdOutput: stdHandles[1],
-			StdErr:    stdHandles[2],
+			Cb:         uint32(unsafe.Sizeof(procThreadAttributeStartupInfo{})),
+			Flags:      windows.STARTF_USESTDHANDLES | windows.STARTF_USESHOWWINDOW,
+			ShowWindow: windows.SW_HIDE,
+			StdInput:   stdHandles[0],
+			StdOutput:  stdHandles[1],
+			StdErr:     stdHandles[2],
 		},
 		ProcThreadAttributeList: attrList.List(),
 	}

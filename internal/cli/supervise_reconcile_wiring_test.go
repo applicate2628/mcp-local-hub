@@ -2225,6 +2225,7 @@ func TestProductionTerminateFn_UpdatesTracker(t *testing.T) {
 	defer events.Close()
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -2299,6 +2300,7 @@ func TestProductionTerminateFn_IdentityMismatchAtEntry(t *testing.T) {
 	defer events.Close()
 
 	cmd := exec.Command(copyCurrentTestBinaryAsReconcileMcphub(t), "-test.run=TestProductionTerminateFn_HelperSleep")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start foreign helper child: %v", err)
@@ -2359,6 +2361,7 @@ func TestProductionTerminateFn_PidIdentityBoundToHandle(t *testing.T) {
 	defer events.Close()
 
 	cmd := exec.Command(os.Args[0], "-test.run=TestProductionTerminateFn_HelperSleep")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_PRODUCTION_TERMINATE_HELPER=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper child: %v", err)
@@ -2547,6 +2550,7 @@ func exitedProcessPID(t *testing.T) int {
 	} else {
 		cmd = exec.Command("sh", "-c", "exit 0")
 	}
+	process.NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start short-lived child: %v", err)
 	}

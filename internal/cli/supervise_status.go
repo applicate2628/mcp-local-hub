@@ -319,7 +319,37 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		}
 		port, deadlineSecs, _ := portResolver.Resolve(effDesc)
 		stalePID := 0
+		var pidStatus process.PIDStatusObservation
+		var pidStatusProof process.PIDIdentityProof
+		var pidStatusErr error
+		usedPIDStatus := false
 		if ok && !stopPending && runtimeState.State == daemonRuntimeStateRunning {
+			rowProbe := livenessProbe
+			if observe := rowProbe.PIDStatus; observe != nil {
+				usedPIDStatus = true
+				// Observe lazily at the canonical predicate's PIDAlive gate.
+				// It still owns missing-identity and port policy; the local
+				// callbacks only supply results from one process observation.
+				rowProbe.PIDAlive = func(pid int) bool {
+					expectedExe := daemonExpectedIdentityExe(d.Command)
+					pidStatusProof = process.PIDIdentityProof{
+						PID:            pid,
+						ExecutablePath: expectedExe,
+						StartedAt:      daemonRuntimeStartedAt(runtimeState.StartedAt),
+					}
+					pidStatus, pidStatusErr = observe(pidStatusProof)
+					return pidStatus.State == process.PIDStateAlive
+				}
+				rowProbe.PIDIdentity = func(proof process.PIDIdentityProof) error {
+					// Resolving a command through PATH or symlinks can change
+					// between the two gates. Do not reuse a successful observation
+					// as proof of a different identity expectation.
+					if proof != pidStatusProof {
+						pidStatusErr = errors.Join(pidStatusErr, fmt.Errorf("%w: PID %d status identity expectation changed", process.ErrProcessIdentityMismatch, proof.PID))
+					}
+					return pidStatusErr
+				}
+			}
 			// Status has no bind latch (it is a stateless per-refresh view), so
 			// pass the descriptor's P1b startup deadline as grace and discard the
 			// portBoundByCurrentPID return. Tradeoff: a bound-then-lost port shows
@@ -333,7 +363,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 				Port:                       port,
 				Args:                       d.Args,
 				StartupBindDeadlineSeconds: deadlineSecs,
-			}, runtimeState, time.Now().UTC(), livenessProbe, time.Duration(deadlineSecs)*time.Second)
+			}, runtimeState, time.Now().UTC(), rowProbe, time.Duration(deadlineSecs)*time.Second)
 			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
 			// not a restart: the liveness sweep deliberately only observes it
 			// (no EvManualRestart), so the status must not report "Restarting"
@@ -427,16 +457,34 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			row["spawn_hold_reason"] = runtimeState.SpawnHoldReason
 			row["spawn_hold_path"] = runtimeState.SpawnHoldPath
 		}
-		// Per-daemon resident-set-size (RAM). Looked up by the live
-		// current_pid only when the daemon is actually Running — a
-		// port-stale daemon already had CurrentPID zeroed above (stateText
-		// flipped to "Restarting"), and an Idle/Stopped row has no live
-		// process to measure. rssByPID returns ok=false when RAM cannot be
-		// determined (non-Windows, PID recycled, OpenProcess denied); we
-		// omit ram_bytes in that case so the GUI renders no RAM row rather
-		// than a misleading "0 MB". Best-effort diagnostic — no error path.
+		// RAM is optional and follows the existing local Running projection.
+		// A failed port gate zeroed CurrentPID above, so any eagerly observed
+		// RAM is discarded for that row. Unknown or zero bytes omit ram_bytes.
+		// The Windows observation supplies RAM from the same process object
+		// as its required proof; never reopen by PID after that observation,
+		// even if its RAM or required query failed. A pending stop receipt only
+		// qualifies optional RAM; the controller still owns its durable state.
 		if stateText == "Running" && runtimeState.CurrentPID > 0 {
-			if ram, okRAM := rssByPID(runtimeState.CurrentPID); okRAM && ram > 0 {
+			if stopPending && livenessProbe.PIDStatus != nil {
+				usedPIDStatus = true
+				// Snapshot and receipt are separate reads. Never attach RAM from
+				// a replacement runtime to this pending stop, or fall back to a
+				// scalar PID read when the receipt cannot qualify the metric.
+				if sameStopSettlementRuntimeIdentity(runtimeState, stopReceipt) {
+					if expectedExe := daemonExpectedIdentityExe(d.Command); expectedExe != "" {
+						pidStatus, pidStatusErr = livenessProbe.PIDStatus(process.PIDIdentityProof{
+							PID:            stopReceipt.PID,
+							ExecutablePath: expectedExe,
+							StartedAt:      stopReceipt.StartedAt,
+						})
+					}
+				}
+			}
+			if usedPIDStatus {
+				if pidStatusErr == nil && pidStatus.State == process.PIDStateAlive && pidStatus.ResidentBytesKnown && pidStatus.ResidentBytes > 0 {
+					row["ram_bytes"] = pidStatus.ResidentBytes
+				}
+			} else if ram, okRAM := rssByPID(runtimeState.CurrentPID); okRAM && ram > 0 {
 				row["ram_bytes"] = ram
 			}
 		}

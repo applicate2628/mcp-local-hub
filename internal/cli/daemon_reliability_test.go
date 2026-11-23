@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // MCP-Reliability smoke harness. These tests build the real `mcphub`
@@ -79,6 +81,7 @@ func ensureMcphubBinary(t *testing.T) string {
 		// daemon) are all regression-smoke-only and behave identically under
 		// the tag.
 		cmd := exec.Command("go", "build", "-tags", "test_state_path_env", "-o", binPath, "./cmd/mcphub")
+		process.HideToolConsole(cmd)
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
 			mcphubBuildErr = fmt.Errorf("go build ./cmd/mcphub: %w\n%s", err, out)
@@ -131,7 +134,9 @@ func TestReliability_VersionCommandExitsZero(t *testing.T) {
 	bin := ensureMcphubBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "version").CombinedOutput()
+	cmd := exec.CommandContext(ctx, bin, "version")
+	process.NoConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("`mcphub version` exit: %v\nOutput:\n%s", err, out)
 	}
@@ -152,9 +157,9 @@ func TestReliability_VersionCommandExitsZero(t *testing.T) {
 // path, or the OS-level exit-code propagation Task Scheduler
 // observes. This subprocess version closes that gap.
 // NOT gated behind MCPHUB_GUI_SPAWN_TESTS: this spawns the real binary but the
-// run deliberately fails at manifest load, BEFORE any daemon child is launched,
-// so it opens no window and cannot cause the desktop spam that gate exists to
-// prevent. Gating it would drop the only routine coverage of main.go's exit-code
+// real binary is launched with NoConsole, and the command deliberately fails at
+// manifest load before any daemon child is launched. Gating it would drop the
+// only routine coverage of main.go's exit-code
 // translation and the launch-failure log write.
 func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
 	bin := ensureMcphubBinary(t)
@@ -166,6 +171,7 @@ func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
 		"--server", "definitely-no-such-server",
 		"--daemon", "x",
 	)
+	process.NoConsole(cmd)
 	// FLEET-SAFETY (PR #300 r1 P1 + r2 P1): redirect the child's daemon state
 	// dir AND log base dir to the test-controlled tempdir so neither the real
 	// %LOCALAPPDATA%\mcp-local-hub state nor its logs are touched. childStateEnv
@@ -206,7 +212,9 @@ func TestReliability_HelpDaemonExitsZero(t *testing.T) {
 	bin := ensureMcphubBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "help", "daemon").CombinedOutput()
+	cmd := exec.CommandContext(ctx, bin, "help", "daemon")
+	process.NoConsole(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("`mcphub help daemon` exit: %v\nOutput:\n%s", err, out)
 	}

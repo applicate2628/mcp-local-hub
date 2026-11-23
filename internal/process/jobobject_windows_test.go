@@ -1088,6 +1088,117 @@ func TestJobCreatorObservationPreservesLegacyProjections(t *testing.T) {
 			}
 		})
 	}
+	// The PID list can become empty after the initial accounting sample. The
+	// original handle and later accounting still decide current closure.
+	t.Run("empty-after-active-snapshot", func(t *testing.T) {
+		for _, name := range []string{"read-only", "after-exit", "missing-original", "active-cancel", "lifetime-drift", "final-active", "final-accounting", "pending-original"} {
+			t.Run(name, func(t *testing.T) {
+				j, original, terminated := creatorObservationUnitJob()
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				cause := errors.New("synthetic final accounting failure")
+				accountingCalls := 0
+				j.terminationOps.accounting = func(got *Job) (jobObjectBasicAccountingInformation, error) {
+					if got != j {
+						t.Fatal("accounting used another Job")
+					}
+					accountingCalls++
+					info := jobObjectBasicAccountingInformation{TotalProcesses: 2}
+					if accountingCalls == 1 {
+						info.ActiveProcesses = 1
+					} else {
+						switch name {
+						case "active-cancel":
+							info.ActiveProcesses = 1
+							cancel()
+						case "lifetime-drift":
+							info.TotalProcesses++
+						case "final-active":
+							if accountingCalls == 3 {
+								info.ActiveProcesses = 1
+							}
+						case "final-accounting":
+							if accountingCalls == 3 {
+								return jobObjectBasicAccountingInformation{}, cause
+							}
+						}
+					}
+					return info, nil
+				}
+				j.terminationOps.listMembers = func(got *Job) (jobProcessIDList, error) {
+					if got != j {
+						t.Fatal("member query used another Job")
+					}
+					return jobProcessIDList{}, nil
+				}
+				j.terminationOps.openProcess = func(uint32) (windows.Handle, error) {
+					t.Fatal("empty member list must not reopen a process")
+					return 0, nil
+				}
+				j.terminationOps.closeProcess = func(windows.Handle) error {
+					t.Fatal("borrowed original handle must not be closed as a captured member")
+					return nil
+				}
+				j.terminationOps.wait = func(handle windows.Handle) (uint32, error) {
+					if handle != original.handle {
+						t.Fatal("wait did not use the retained original handle")
+					}
+					if name == "pending-original" {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
+					return uint32(windows.WAIT_OBJECT_0), nil
+				}
+				if name == "missing-original" {
+					original.handle = 0
+				}
+				afterExit := name == "after-exit" || name == "pending-original"
+				var observed jobTerminationObservation
+				var err error
+				if afterExit {
+					observed, err = j.completeCreatorAfterExit(ctx, original)
+				} else {
+					observed, err = j.observeCreatorClosure(ctx, original)
+				}
+				wantClosed := name == "read-only" || name == "after-exit"
+				wantTerminations := 0
+				if name == "after-exit" {
+					wantTerminations = 1
+				}
+				if *terminated != wantTerminations || j.handle != windows.Handle(1) {
+					t.Fatalf("policy changed original custody or termination count: calls=%d observed=%+v err=%v", *terminated, observed, err)
+				}
+				if wantClosed {
+					if err != nil || !observed.ObservedCurrentMembersExited || accountingCalls < 3 {
+						t.Fatalf("empty capture did not reach original wait and final accounting: calls=%d observed=%+v err=%v", accountingCalls, observed, err)
+					}
+					native := observed.native
+					if !native.InitialAccountingKnown || native.InitialTotal != 2 || native.InitialActive != 1 {
+						t.Fatalf("initial active observation was replaced or lost: %+v", native)
+					}
+					if !native.MemberListQueryKnown || native.RawAssignedMembers != 0 || !native.MemberListKnown || native.AssignedMembers != 0 || len(native.CapturedMemberPIDs) != 0 || len(native.Members) != 0 {
+						t.Fatalf("empty member observation was replaced or lost: %+v", native)
+					}
+					if !native.OriginalRootWaitKnown || native.OriginalRootWaitResult != uint32(windows.WAIT_OBJECT_0) || !native.FinalAccountingKnown || native.FinalTotal != 2 || native.FinalActive != 0 || !native.MemberHandlesClosed {
+						t.Fatalf("final original observation was replaced or lost: %+v", native)
+					}
+					if observed.StrictOriginalsSettled || observed.strictFailure == nil {
+						t.Fatal("current closure invented coverage of an uncaptured historical member")
+					}
+					if afterExit && observed.terminalAction != creatorTerminalRequestSucceeded {
+						t.Fatal("after-exit terminal request was not recorded")
+					}
+				} else if err == nil || observed.ObservedCurrentMembersExited || observed.StrictOriginalsSettled {
+					t.Fatalf("empty capture bypassed unsettled original evidence: observed=%+v err=%v", observed, err)
+				}
+				if name == "active-cancel" && !errors.Is(err, context.Canceled) {
+					t.Fatal("active Job cancellation was lost")
+				}
+				if name == "final-accounting" && !errors.Is(err, cause) {
+					t.Fatal("final accounting failure was lost")
+				}
+			})
+		}
+	})
 }
 
 func TestProvisionalCreatorClosureSourceUnit(t *testing.T) {
@@ -1251,13 +1362,14 @@ func collectCreatorClosureExitMetadata(t *testing.T) creatorExitObservation {
 // kernel terminates every process still in the job. Without this, the
 // fix is theater — the syscalls succeed but orphans still survive.
 //
-// Spawns `timeout /T 30` (Windows builtin), assigns it to a job,
+// Spawns a background `ping` that needs no console input, assigns it to a job,
 // closes the job, asserts the process is dead within ~1s.
 func TestJob_KillsAssignedProcessOnClose(t *testing.T) {
-	if _, err := exec.LookPath("timeout"); err != nil {
-		t.Skipf("timeout.exe not on PATH: %v", err)
+	if _, err := exec.LookPath("ping"); err != nil {
+		t.Skipf("ping.exe not on PATH: %v", err)
 	}
-	cmd := exec.Command("timeout", "/T", "30", "/NOBREAK")
+	cmd := exec.Command("ping", "-n", "30", "-w", "1000", "127.0.0.1")
+	NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1369,6 +1481,7 @@ func TestJob_TerminateAllWaitsForExit(t *testing.T) {
 	// ~1s intervals = ~30s wall-clock. The Job's TerminateAll
 	// must reap the process well before that natural exit.
 	cmd := exec.Command("ping", "-n", "30", "-w", "1000", "127.0.0.1")
+	NoConsole(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}

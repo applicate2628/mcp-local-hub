@@ -30,15 +30,18 @@ type procGroup struct {
 
 func newProcGroup() *procGroup { return &procGroup{} }
 
-// configure sets a new process group (isolation from console CTRL events) and
-// creates the kill-on-close Job Object. Job creation is best-effort: on failure
-// the group degrades to a single-process kill rather than breaking the command.
+// configure gives compiler tools a hidden console for ordinary children and
+// creates the kill-on-close Job Object. The private console isolates console
+// events; cancellation uses the Job below, not console process-group signals.
+// Job creation is best-effort: on failure the group degrades to a single-process
+// kill rather than breaking the command.
 func (p *procGroup) configure(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.HideWindow = true
-	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW
+	cmd.SysProcAttr.CreationFlags &^= windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NEW_CONSOLE | windows.CREATE_NEW_PROCESS_GROUP
 
 	h, err := windows.CreateJobObject(nil, nil)
 	if err != nil {

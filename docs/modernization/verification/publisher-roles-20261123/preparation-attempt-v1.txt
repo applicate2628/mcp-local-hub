@@ -1,0 +1,13 @@
+[Reading 10 new lines (total: 10 lines)]
+
+{"started_utc": "2026-11-23T12:52:18.325698+00:00", "completed": false, "source_commit": "4c3eb47d002ea729fe80370a75506a1d0c9650ac", "source_tree": "8928e54342bc700b07f977a1d8f22bbaf986ad04", "source_epoch": "4e07a48c4d77d0cdd086dcda1f704cae8d2ccab8067a65811f414ea6de55482d", "snapshot_sha256": "2bcb3c313dea40ddcb93c5e2d7cd06f69fc23ca98f0ee7fcc08186bff5b6c2a2", "original_before": {"files": 3323, "bytes": 50823826, "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"}, "installs": false, "tests": false, "native_scheduler_operations": false, "ordinary-source": {"files": 3323, "bytes": 50823826, "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"}, "fixture-checkout": {"files": 3323, "bytes": 50823826, "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"}, "finished_utc": "2026-11-23T12:52:56.274203+00:00"}
+Traceback (most recent call last):
+  File "D:\dev\ChatGPT\mcp-residual-next-20261122-dcb40fba\prepare_publishers_20261123_57604a3a.py", line 93, in <module>
+    main()
+    ~~~~^^
+  File "D:\dev\ChatGPT\mcp-residual-next-20261122-dcb40fba\prepare_publishers_20261123_57604a3a.py", line 55, in main
+    git_root = q.own("a5-work-v3/checkout/.git")
+  File "D:\dev\ChatGPT\mcp-residual-next-20261122-dcb40fba\qualify_go.py", line 45, in own
+    raise ValueError("Invalid owned relative path")
+ValueError: Invalid owned relative path
+✅ Process completed with exit code 1 (runtime: 60.18s)
