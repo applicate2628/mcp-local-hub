@@ -50,6 +50,7 @@ func TestHeldPIDExitWaiterNativeOriginalExitCodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			cmd := exec.Command(exe, "-test.run=^TestRetainedProcessExitChild$")
+			NoConsole(cmd)
 			cmd.Env = append(os.Environ(), retainedExitChildEnv+"="+strconv.Itoa(code))
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 			input, err := cmd.StdinPipe()
