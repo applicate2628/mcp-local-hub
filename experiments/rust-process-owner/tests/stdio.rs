@@ -430,3 +430,56 @@ fn explicit_context_composes_with_borrowed_stdio_owner() {
     );
     assert_eq!(f.flags(), before);
 }
+
+#[test]
+fn background_startup_hides_two_later_console_allocations() {
+    let f = Fixture::new();
+    let before = f.flags();
+    let mut owner =
+        NativeOwner::create_suspended_with_stdio(child(), &f.args("console-probe"), f.stdio())
+            .unwrap();
+    let original_pid = owner.root_pid();
+    if let Err(error) = owner.admit_and_resume(|_| Ok(())) {
+        eprintln!("original console child resume incomplete: {error}");
+        std::mem::forget(owner);
+        std::mem::forget(f);
+        std::process::exit(86);
+    }
+    let settlement = match owner.finish(DEADLINE) {
+        Ok(done @ Settlement::Complete { .. }) => done,
+        other => {
+            eprintln!("original console child settlement incomplete: {other:?}");
+            std::mem::forget(owner);
+            std::mem::forget(f);
+            std::process::exit(86);
+        }
+    };
+    // Original root/member completion and handle closes precede this file read.
+    let raw = fs::read(f.root.join("marker")).unwrap();
+    let report = std::str::from_utf8(&raw).unwrap();
+    assert_eq!(
+        settlement,
+        Settlement::Complete { root_exit: 0 },
+        "{report}"
+    );
+    let mut fields = report.split_ascii_whitespace();
+    assert_eq!(fields.next(), Some("console-probe-v1"));
+    let fields: Vec<u64> = fields.map(|value| value.parse().unwrap()).collect();
+    assert_eq!(fields.len(), 14, "{report}");
+    assert_ne!(original_pid, 0);
+    assert_eq!(fields[0], u64::from(original_pid));
+    assert_ne!(
+        fields[1] & u64::from(windows_sys::Win32::System::Threading::STARTF_USESHOWWINDOW),
+        0
+    );
+    assert_eq!(fields[2], 0); // SW_HIDE
+    assert_eq!(fields[3], 0); // no initial console window
+    for allocation in fields[4..].chunks_exact(5) {
+        assert_ne!(allocation[0], 0, "AllocConsole: {report}");
+        assert_ne!(allocation[1], 0, "GetConsoleWindow: {report}");
+        assert_eq!(allocation[2], 0, "IsWindowVisible: {report}");
+        assert_ne!(allocation[3], 0, "FreeConsole: {report}");
+        assert_eq!(allocation[4], 0, "released console window: {report}");
+    }
+    assert_eq!(f.flags(), before);
+}

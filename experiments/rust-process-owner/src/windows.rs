@@ -32,7 +32,7 @@ use windows_sys::Win32::{
             UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
             CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
             PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-            STARTF_USESTDHANDLES, STARTUPINFOEXW,
+            STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
         },
     },
 };
@@ -327,6 +327,9 @@ impl NativeOwner {
         let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.lpAttributeList = attributes.raw();
+        // This owner starts background processes; hide a later AllocConsole too.
+        startup.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+        startup.StartupInfo.wShowWindow = 0; // SW_HIDE; no UI dependency is needed.
         if let Some([input, output, error]) = stdio_handles {
             // SAFETY: distinct handles remain borrowed and inheritable across
             // CreateProcessW. The backing list is not moved/reallocated while
