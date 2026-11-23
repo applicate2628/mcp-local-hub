@@ -1,0 +1,668 @@
+{
+  "schema": "qualified-evidence-export-v1",
+  "kind": "relay",
+  "phases": [
+    {
+      "phase": "relay-post-candidate-v1-20261124-57604a3a",
+      "completed": true,
+      "source": {
+        "files": 3233,
+        "bytes": 54336981,
+        "inventory_sha256": "18cd96f7e20956cbbe7e36d217994fd3b6a38ab9a78f6625d30e633ecb9a50a3"
+      },
+      "commands": [
+        {
+          "label": "post-resumption-candidate",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "seconds": 30.209818300092593,
+          "pass": 25,
+          "fail": [],
+          "skip": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-post-control-v1-20261124-57604a3a",
+      "completed": true,
+      "source": {
+        "files": 3232,
+        "bytes": 54331608,
+        "inventory_sha256": "0f14ce8a2c1d36e35a9187608b821a35a851c7d1194f155801ad7396de732aeb"
+      },
+      "commands": [
+        {
+          "label": "post-resumption-control",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "seconds": 28.276619399897754,
+          "pass": 0,
+          "fail": [
+            "TestRelayPOSTResumesOriginalStream",
+            "TestRelayPOSTResumptionPreservesReadAndCloseErrors/read",
+            "TestRelayPOSTResumptionPreservesReadAndCloseErrors/close",
+            "TestRelayPOSTResumptionPreservesReadAndCloseErrors/both",
+            "TestRelayPOSTResumptionPreservesReadAndCloseErrors",
+            "TestRelayPOSTResumptionKeepsAbsoluteDeadline",
+            "PACKAGE:mcp-local-hub/internal/daemon"
+          ],
+          "skip": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-candidate-v2-20261124-57604a3a",
+      "completed": true,
+      "source": {
+        "files": 3234,
+        "bytes": 54345327,
+        "inventory_sha256": "985642b618e4dcdaf170f5bd4dbc9ad212906346abd9c6032eeb323176f9133a"
+      },
+      "commands": [
+        {
+          "label": "sdk-post-candidate",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "seconds": 26.37689649988897,
+          "pass": 2,
+          "fail": [],
+          "skip": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-sdk-control-v2-20261124-57604a3a",
+      "completed": true,
+      "source": {
+        "files": 3233,
+        "bytes": 54339954,
+        "inventory_sha256": "5707b7942425ca2fb83b8523c8f99d79265d04aacd037ced20f775ea26c00031"
+      },
+      "commands": [
+        {
+          "label": "sdk-post-control",
+          "exit_code": 1,
+          "oracle_pass": true,
+          "seconds": 35.768820700002834,
+          "pass": 0,
+          "fail": [
+            "TestRelayPOSTConsumerSDKResumesStoredResult",
+            "PACKAGE:mcp-local-hub/internal/daemon"
+          ],
+          "skip": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-regression-v2-20261124-57604a3a",
+      "completed": false,
+      "source": {
+        "files": 3234,
+        "bytes": 54345327,
+        "inventory_sha256": "985642b618e4dcdaf170f5bd4dbc9ad212906346abd9c6032eeb323176f9133a"
+      },
+      "commands": [
+        {
+          "label": "all-relay-and-shared-receiver",
+          "exit_code": 1,
+          "oracle_pass": false,
+          "seconds": 6.83952989988029,
+          "pass": 277,
+          "fail": [
+            "TestRelayResponseFramingFeedsOneStdioMessage/text/event-stream",
+            "TestRelayResponseFramingFeedsOneStdioMessage",
+            "PACKAGE:mcp-local-hub/internal/daemon"
+          ],
+          "skip": []
+        }
+      ]
+    },
+    {
+      "phase": "relay-regression-v3-20261124-57604a3a",
+      "completed": true,
+      "source": {
+        "files": 3234,
+        "bytes": 54345524,
+        "inventory_sha256": "04ada15ee0c742d75350589dd0cd04ed21184630a2d589090b0f1adad2f4f184"
+      },
+      "commands": [
+        {
+          "label": "all-relay-and-shared-receiver",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "seconds": 35.09370719990693,
+          "pass": 281,
+          "fail": [],
+          "skip": []
+        },
+        {
+          "label": "relay-build",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "seconds": 22.385709299938753,
+          "pass": 0,
+          "fail": [],
+          "skip": []
+        },
+        {
+          "label": "relay-vet",
+          "exit_code": 0,
+          "oracle_pass": true,
+          "seconds": 9.697903300169855,
+          "pass": 0,
+          "fail": [],
+          "skip": []
+        }
+      ]
+    }
+  ],
+  "raw_archive": {
+    "bytes": 1187479,
+    "sha256": "8f74b850399e652608d46579fcdfcbf9eaf94add96b92fc87138bb5fa7908103"
+  },
+  "path_redaction_only": true,
+  "original_events_retained": true,
+  "executables_included": false,
+  "members": [
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/post-resumption-candidate.launched.json",
+      "original_bytes": 755,
+      "original_sha256": "93e1904f35948ad454d354e1827dc6ec447679a72319bad222820995afe08933",
+      "published_bytes": 722,
+      "published_sha256": "cb7a1f95d4bd1a361959cf14ed482b438d426b56c2309058cd8bcb08e5169445"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/post-resumption-candidate.receipt.json",
+      "original_bytes": 2810,
+      "original_sha256": "63a591004e175f3c0856c4cde6bd823c66f13abed866380447ac6591b5d6158a",
+      "published_bytes": 2777,
+      "published_sha256": "bc4f54795d9e363b514dff765498b88c40ebfc46a2249a95a6fc489d211e1d16"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/post-resumption-candidate.started.json",
+      "original_bytes": 738,
+      "original_sha256": "a604c54523828bddffbd59407e15763312120397b11d6a2458b5b8b5135a8587",
+      "published_bytes": 705,
+      "published_sha256": "b50cb8b381041a55aaf15fdde65dc313daff4f7990a727792d567049f5c38e30"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/post-resumption-candidate.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/post-resumption-candidate.stdout.log",
+      "original_bytes": 22126,
+      "original_sha256": "6a3e5cf21a2d21590321ff4fee7f9542a58a612830b7b9fd82c155151f208b1e",
+      "published_bytes": 22126,
+      "published_sha256": "6a3e5cf21a2d21590321ff4fee7f9542a58a612830b7b9fd82c155151f208b1e"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 521,
+      "original_sha256": "0880f08d1b0c14a00e9fca4e08018dece469a781c4fe8e2389056510a20ba2d7",
+      "published_bytes": 521,
+      "published_sha256": "0880f08d1b0c14a00e9fca4e08018dece469a781c4fe8e2389056510a20ba2d7"
+    },
+    {
+      "path": "evidence/relay-post-candidate-v1-20261124-57604a3a/receipt.json",
+      "original_bytes": 6782,
+      "original_sha256": "a4dd3e6f8002bb9d933916ee6c606f5b4a9c1bcca57d58604b6b8ccd26c0c0aa",
+      "published_bytes": 6328,
+      "published_sha256": "e66539639a564a696f486872c513772b322b620bbfe44360e5f43c359bd35e04"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/post-resumption-control.launched.json",
+      "original_bytes": 657,
+      "original_sha256": "f2af97c8e48e8befcde9ae094a273e5cdb405dc7d304ba525893816cc8d4e654",
+      "published_bytes": 624,
+      "published_sha256": "df8e0071debb0e5e1eaa16105038b6e7178fbc5dd113b188e505c832d10a919c"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/post-resumption-control.receipt.json",
+      "original_bytes": 1489,
+      "original_sha256": "c2ae265c3ac7af026d041acc9f9466bd53a7eceb22ca5c85267b6f995ebac9e8",
+      "published_bytes": 1456,
+      "published_sha256": "ab9db1f941aa0f431b47717bff0711ef128faaff8c80a48e6de6ee05a2e2094b"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/post-resumption-control.started.json",
+      "original_bytes": 641,
+      "original_sha256": "10e4a3c8bf1c473a3cddbbe61c2f35f46172e2ca2b384a498bbf9880500421b1",
+      "published_bytes": 608,
+      "published_sha256": "c32b762864fd05230a5fbd803d84d4c49664016395f30a50bf8f400276b0c9db"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/post-resumption-control.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/post-resumption-control.stdout.log",
+      "original_bytes": 7257,
+      "original_sha256": "b90f7f54d8f419133ce32347370c0e1fb7f3a53900fd49748a6c070d466d0722",
+      "published_bytes": 7257,
+      "published_sha256": "b90f7f54d8f419133ce32347370c0e1fb7f3a53900fd49748a6c070d466d0722"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 524,
+      "original_sha256": "f4b0c6cc0e685cde8877132fe5d337e8632e9c73f4e2c0498ad2ee244f0925a1",
+      "published_bytes": 524,
+      "published_sha256": "f4b0c6cc0e685cde8877132fe5d337e8632e9c73f4e2c0498ad2ee244f0925a1"
+    },
+    {
+      "path": "evidence/relay-post-control-v1-20261124-57604a3a/receipt.json",
+      "original_bytes": 5370,
+      "original_sha256": "f08786a5f77c708936eeb6680c71170651a061586b6f58f21438713a76ad1ad7",
+      "published_bytes": 4916,
+      "published_sha256": "033ff84f52ba25335fd639c849dc499f0e6d8be799094fa17949bf3cc3f050ac"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/all-relay-and-shared-receiver.launched.json",
+      "original_bytes": 3748,
+      "original_sha256": "1ebe84138b94b36cea9e20b1cccdcb18dc927559feefe1a690e6fc353dae1b63",
+      "published_bytes": 3715,
+      "published_sha256": "0299308877b525cf698116833572feb402e8184759766e1429696420cc7d8aad"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/all-relay-and-shared-receiver.receipt.json",
+      "original_bytes": 21625,
+      "original_sha256": "4ee0dd2d7878989ea4267dbf80471713367c3d090dbeed47e49218c3f20eb647",
+      "published_bytes": 21592,
+      "published_sha256": "2989e24b8b6e93e2962a9ebaee1322b83dbd71f134a12b2c1fb8b5bdb7bfdd17"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/all-relay-and-shared-receiver.started.json",
+      "original_bytes": 3731,
+      "original_sha256": "1ee35174f74a3d05cdf7a930ab330b57e2a3f2a3d935ce5af186f1dd78b4008a",
+      "published_bytes": 3698,
+      "published_sha256": "da85cbea0fa8bba58460a078e02eb7fecaf8cd3e4b673d51b02dd4562a04eb78"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/all-relay-and-shared-receiver.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/all-relay-and-shared-receiver.stdout.log",
+      "original_bytes": 246749,
+      "original_sha256": "b0f376180fabee9d5a02d1b4817976d52822e466855899a1eb515ac1bb5a3286",
+      "published_bytes": 246749,
+      "published_sha256": "b0f376180fabee9d5a02d1b4817976d52822e466855899a1eb515ac1bb5a3286"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 517,
+      "original_sha256": "ba5ef8ea129e92bb9a51d219dca5bc526b9e377e398b8d9c453f1310d0eac41a",
+      "published_bytes": 517,
+      "published_sha256": "ba5ef8ea129e92bb9a51d219dca5bc526b9e377e398b8d9c453f1310d0eac41a"
+    },
+    {
+      "path": "evidence/relay-regression-v2-20261124-57604a3a/receipt.json",
+      "original_bytes": 26682,
+      "original_sha256": "c1b369e4e9ba12189c9226cceccb9f1b59db69ce9f84f75ab885478b23048dbe",
+      "published_bytes": 26228,
+      "published_sha256": "b69ed00eea62d3d8ab8713b9999bc8649a7d5280d9ee41ef17bf7b006cbd3218"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/all-relay-and-shared-receiver.launched.json",
+      "original_bytes": 3747,
+      "original_sha256": "b50b83db9282c90cc94910745fe517220f0e497a9049d53a7d4c185c8adf4d2b",
+      "published_bytes": 3714,
+      "published_sha256": "6ae325ac52f64ee5fadb10a485654e86a773b23201d74a17f6e774d12dfc6278"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/all-relay-and-shared-receiver.receipt.json",
+      "original_bytes": 21691,
+      "original_sha256": "179ad28603502177b0877405894153c3a079a0d1916d93bf000d7d9a1c7a7a2a",
+      "published_bytes": 21658,
+      "published_sha256": "57e4cf57bf2746a1bb326f869c9b0c34a439cbcee72e3d5252330dc831c297b3"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/all-relay-and-shared-receiver.started.json",
+      "original_bytes": 3731,
+      "original_sha256": "f8e1808896a03d5575ef07868ea509fdcc6b93e2c4f2070de1dbb879422d94c7",
+      "published_bytes": 3698,
+      "published_sha256": "c6817a05069055189561b6a3d6c31aa6595f074352fd1357a13a49cc5aff0e90"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/all-relay-and-shared-receiver.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/all-relay-and-shared-receiver.stdout.log",
+      "original_bytes": 247361,
+      "original_sha256": "31dfa4003f48c97cff26ac10cbfa99575798f8103dc5a5eac2fa3f3db0b5b77d",
+      "published_bytes": 247361,
+      "published_sha256": "31dfa4003f48c97cff26ac10cbfa99575798f8103dc5a5eac2fa3f3db0b5b77d"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 517,
+      "original_sha256": "e1e4d67080d72ca2585d9282b18c40761ecbb5b0ad77d12abfff301a0dc79c71",
+      "published_bytes": 517,
+      "published_sha256": "e1e4d67080d72ca2585d9282b18c40761ecbb5b0ad77d12abfff301a0dc79c71"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/receipt.json",
+      "original_bytes": 28408,
+      "original_sha256": "a6bd86de20779edf2889d29efa227784b1da88a49b4ed839d436e57caaae1fad",
+      "published_bytes": 27888,
+      "published_sha256": "b2e6865cb4afbb554a0925bc837a6881a92fa955e3513161b7716a03fcfba4df"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-build.launched.json",
+      "original_bytes": 420,
+      "original_sha256": "22358df86246c42073e457489c2184787e2fbe9f3402c61b188807fe52d14908",
+      "published_bytes": 387,
+      "published_sha256": "151acdfe7c5aab465c6e54cae442aae7807dc5299b0889f20ac94496de765ad5"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-build.receipt.json",
+      "original_bytes": 779,
+      "original_sha256": "29d7234b52f3b4c8feec8dffd8a13aa0771abb6a9e14cb2f540a5051eba30918",
+      "published_bytes": 746,
+      "published_sha256": "c6ed551b7d76d4863f8ffb92ae1c6e909d978a070495c860a3193acdf1f104d1"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-build.started.json",
+      "original_bytes": 403,
+      "original_sha256": "19055e4f8703f330cdb6de3131b28c430a8f3ec59622b3447e4cb24341e830ba",
+      "published_bytes": 370,
+      "published_sha256": "22832941f3cddee8d62ab82c85db64c457c37902d892d6f552d007a53b6ba3d6"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-build.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-build.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-vet.launched.json",
+      "original_bytes": 416,
+      "original_sha256": "3c23778144dd39429961a823d7b3d93180d0803b2efd53e1acaa42c790ed61b1",
+      "published_bytes": 383,
+      "published_sha256": "1bbae6ec2029f270c312dfd251f1038c2a92319829cbd3551089ada87d5d40f9"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-vet.receipt.json",
+      "original_bytes": 774,
+      "original_sha256": "a05760ef702d90f7efbc2dc836b084213562e2bf666bb9e415716725acb75eef",
+      "published_bytes": 741,
+      "published_sha256": "35b1aa1df22273ef6b25ae14e53c6a90ca34b31b1623550b8729514b485a300b"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-vet.started.json",
+      "original_bytes": 399,
+      "original_sha256": "654dd0ed7eb9bb3a55411d761581750c120de151ce596c79273876256af03bd6",
+      "published_bytes": 366,
+      "published_sha256": "63285b9b3e1356cb2718b109a700df2b0e943911141e43b4a75967f9ccb8e521"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-vet.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-regression-v3-20261124-57604a3a/relay-vet.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 520,
+      "original_sha256": "5eb914388812467972dd6a4f46fa99f1c71ccdae7594c8cee17856a200541053",
+      "published_bytes": 520,
+      "published_sha256": "5eb914388812467972dd6a4f46fa99f1c71ccdae7594c8cee17856a200541053"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/receipt.json",
+      "original_bytes": 4959,
+      "original_sha256": "e262dde870a1c98f5f39a844f5baac831d2064c3481dd2d325ba80c63cc554f5",
+      "published_bytes": 4505,
+      "published_sha256": "9e780e57c15b9e5c8f63111284ede2ac754032c709c65f9bcf3f245934625d7d"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/sdk-post-candidate.launched.json",
+      "original_bytes": 565,
+      "original_sha256": "cb6b625431d662e24538b08bf667dc36b7c63bf6590cdf2d785a6dd43f67513b",
+      "published_bytes": 532,
+      "published_sha256": "c20a5e0b02f976f2de62fcd90b5aae6830f0306c5b22cecaede5064bec86dd2e"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/sdk-post-candidate.receipt.json",
+      "original_bytes": 1095,
+      "original_sha256": "fa5fd914d191b8c57777a3e3f1b76b9fc03e86ccde23f21fb55ca65e7225d727",
+      "published_bytes": 1062,
+      "published_sha256": "8a3c7e8f53a4fde9a54eb3fe26b24350d3eda43dbe9c5c4f543eb4ac17eb0201"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/sdk-post-candidate.started.json",
+      "original_bytes": 549,
+      "original_sha256": "1b0c6d525507136b9b21b6eb21166817fe8f3229453418ed327c8281aeccc2b8",
+      "published_bytes": 516,
+      "published_sha256": "ff607815f195648a24f3ceec367054d3f44e6519928394a6463b38431843ed96"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/sdk-post-candidate.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-sdk-candidate-v2-20261124-57604a3a/sdk-post-candidate.stdout.log",
+      "original_bytes": 1651,
+      "original_sha256": "062ad972c2b958bd78c43bcf299999f547c58284c06ca3e88d61dd48996cd252",
+      "published_bytes": 1651,
+      "published_sha256": "062ad972c2b958bd78c43bcf299999f547c58284c06ca3e88d61dd48996cd252"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/receipt-initial.json",
+      "original_bytes": 523,
+      "original_sha256": "4051ebdd225d1bad9035c7f947e807a15676170a02c227a3eb01a4c431bf3b64",
+      "published_bytes": 523,
+      "published_sha256": "4051ebdd225d1bad9035c7f947e807a15676170a02c227a3eb01a4c431bf3b64"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/receipt.json",
+      "original_bytes": 4937,
+      "original_sha256": "cd43dfb905fde3ca35b819c11af1ece43b14016434a60768ee65973d53d4d9cd",
+      "published_bytes": 4483,
+      "published_sha256": "6f489a1e4564eb1f76416c7526e785464b3bc682b72f7326c27388a784e9eef4"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/sdk-post-control.launched.json",
+      "original_bytes": 561,
+      "original_sha256": "89f897b80408ed46ca708ff5b14a327896a30af58fa325520f78c8f13391a256",
+      "published_bytes": 528,
+      "published_sha256": "26485b02ccd543d24b5c48ee58cc05860dd5686328ad00f63f2f325f81d88b46"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/sdk-post-control.receipt.json",
+      "original_bytes": 1092,
+      "original_sha256": "c31972bdae053606a1a14e2d02a38868a16403dc19445151d7e9b77a2187fd3f",
+      "published_bytes": 1059,
+      "published_sha256": "855ef6b1e46eb5137a6969937e7c8fa40dfeccc62d8cb9c9cd5c2842e577393a"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/sdk-post-control.started.json",
+      "original_bytes": 545,
+      "original_sha256": "7044c18532e5e6dea958a855c1cf7013d13bd654e4f71b3c81c90d524839b9e1",
+      "published_bytes": 512,
+      "published_sha256": "5ea8ef8ad464998fb8f5e9cdcc5773e1d0680f3859f90b95ee2dc440e8710f5e"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/sdk-post-control.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "published_bytes": 0,
+      "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/relay-sdk-control-v2-20261124-57604a3a/sdk-post-control.stdout.log",
+      "original_bytes": 2572,
+      "original_sha256": "d90bc0baa2bab214976070d88991b4eda81d4a534a44b408f4a616a7f9d0347f",
+      "published_bytes": 2572,
+      "published_sha256": "d90bc0baa2bab214976070d88991b4eda81d4a534a44b408f4a616a7f9d0347f"
+    },
+    {
+      "path": "export_residual_slices_20261124_57604a3a.py",
+      "original_bytes": 7326,
+      "original_sha256": "bc9fb955606ede5bebeb5309a4495c5e3b1ac4e344d02ab85e5fed4f4da2ec24",
+      "published_bytes": 7244,
+      "published_sha256": "9bf035ec82c85f347b67f7ac1cf3e35f8f7b878834ebfa850804bb592ab52af9"
+    },
+    {
+      "path": "plans/relay-post-candidate-v1-20261124-57604a3a.json",
+      "original_bytes": 580265,
+      "original_sha256": "07ae2c81e6b9dd17a5821d529a5947ea409c1f5adab7a74a914d91ccc589c190",
+      "published_bytes": 580265,
+      "published_sha256": "07ae2c81e6b9dd17a5821d529a5947ea409c1f5adab7a74a914d91ccc589c190"
+    },
+    {
+      "path": "plans/relay-post-control-v1-20261124-57604a3a.json",
+      "original_bytes": 579881,
+      "original_sha256": "15e2978d54a8c44c66b5bbc2d44a41597e684278fc2160f702fa2b29330a9701",
+      "published_bytes": 579881,
+      "published_sha256": "15e2978d54a8c44c66b5bbc2d44a41597e684278fc2160f702fa2b29330a9701"
+    },
+    {
+      "path": "plans/relay-regression-v2-20261124-57604a3a.json",
+      "original_bytes": 587684,
+      "original_sha256": "abecddadf1030a553fa2e4423f08daa70d27f8411dd66aef2658a8e40b9cc338",
+      "published_bytes": 587684,
+      "published_sha256": "abecddadf1030a553fa2e4423f08daa70d27f8411dd66aef2658a8e40b9cc338"
+    },
+    {
+      "path": "plans/relay-regression-v3-20261124-57604a3a.json",
+      "original_bytes": 587686,
+      "original_sha256": "3044d7388e812a1e8c034b731db5b7795f6d32cb9bfb5d74509525ddaf57bd5b",
+      "published_bytes": 587686,
+      "published_sha256": "3044d7388e812a1e8c034b731db5b7795f6d32cb9bfb5d74509525ddaf57bd5b"
+    },
+    {
+      "path": "plans/relay-sdk-candidate-v2-20261124-57604a3a.json",
+      "original_bytes": 580029,
+      "original_sha256": "4d8e53d35bcb022aa84db9fa03059ce984640e9a023af14a13e0eac3dcf3d865",
+      "published_bytes": 580029,
+      "published_sha256": "4d8e53d35bcb022aa84db9fa03059ce984640e9a023af14a13e0eac3dcf3d865"
+    },
+    {
+      "path": "plans/relay-sdk-control-v2-20261124-57604a3a.json",
+      "original_bytes": 579926,
+      "original_sha256": "ccfb12ee4ff0fbeb46d6d0edb562433a72b87b7001e0191002e49fc924ed7583",
+      "published_bytes": 579926,
+      "published_sha256": "ccfb12ee4ff0fbeb46d6d0edb562433a72b87b7001e0191002e49fc924ed7583"
+    },
+    {
+      "path": "prepare_relay_resumption_20261124_57604a3a.py",
+      "original_bytes": 9154,
+      "original_sha256": "b12e0bdb3ef7aa79944d9f6ed31a5eb2e3f1c6331c5bfbd99ad095cbb010fe53",
+      "published_bytes": 9124,
+      "published_sha256": "3c4dcc19361fb3f4594127bd7dd8e80ea9277b087b01279da03753f9399b728f"
+    },
+    {
+      "path": "prepare_relay_sdk_20261124_57604a3a.py",
+      "original_bytes": 6079,
+      "original_sha256": "c0f1d4c6bb1ddc5759ab9d1a0a18eda16dc221920d9a56f4bf0d42fde3f554d5",
+      "published_bytes": 6049,
+      "published_sha256": "2d45eafc0d612c031dd89dd3670b276fe47c9f9303cbceb3ea56106887cefa73"
+    },
+    {
+      "path": "prepare_relay_v3_20261124_57604a3a.py",
+      "original_bytes": 4556,
+      "original_sha256": "fdea5dd5e73c193c99544886b99f530cad700f8f2d95d287569a513afc1df7a8",
+      "published_bytes": 4526,
+      "published_sha256": "b5b5b98195c6f74c655d512b16c6541004e1c80ccad323d772909b9f42c3ed86"
+    },
+    {
+      "path": "qualify_go.py",
+      "original_bytes": 13912,
+      "original_sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e",
+      "published_bytes": 13830,
+      "published_sha256": "f538fac6a2c496038a75d8062379fcd70c79bfdc3612204844aea1b4d9993bcd"
+    },
+    {
+      "path": "relay-resumption-v1-20261124-57604a3a/receipt.json",
+      "original_bytes": 1692,
+      "original_sha256": "596e3d26d7ea801f968ebf7f094db72be1cf84e1f6c99681c9add7823e992d59",
+      "published_bytes": 1692,
+      "published_sha256": "596e3d26d7ea801f968ebf7f094db72be1cf84e1f6c99681c9add7823e992d59"
+    },
+    {
+      "path": "relay-resumption-v2-20261124-57604a3a/receipt.json",
+      "original_bytes": 5084,
+      "original_sha256": "0d8ac59e31a39f002c1fc60c17ce1e047c22473516bf69d9956530e785a1f35e",
+      "published_bytes": 5084,
+      "published_sha256": "0d8ac59e31a39f002c1fc60c17ce1e047c22473516bf69d9956530e785a1f35e"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/candidate/internal/daemon/relay.go",
+      "original_bytes": 33989,
+      "original_sha256": "2cfdc77a384940bee96492189efccd3cf3af6e0eccceee71c9677b758f114f84",
+      "published_bytes": 33989,
+      "published_sha256": "2cfdc77a384940bee96492189efccd3cf3af6e0eccceee71c9677b758f114f84"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/candidate/internal/daemon/relay_post_consumer_test.go",
+      "original_bytes": 8346,
+      "original_sha256": "39c7fe85f0730150c4d63b023014fab26585c4313c39e93b1dabccfddc508dc0",
+      "published_bytes": 8346,
+      "published_sha256": "39c7fe85f0730150c4d63b023014fab26585c4313c39e93b1dabccfddc508dc0"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/candidate/internal/daemon/relay_post_resume.go",
+      "original_bytes": 3789,
+      "original_sha256": "be1d1823b1800cef6ac4a42eeedda2473db1c93048cf118d5852a53a0e42cc23",
+      "published_bytes": 3789,
+      "published_sha256": "be1d1823b1800cef6ac4a42eeedda2473db1c93048cf118d5852a53a0e42cc23"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/candidate/internal/daemon/relay_post_resume_test.go",
+      "original_bytes": 11942,
+      "original_sha256": "0f90672cfbdbfc9fb5600837e0cfb283bb6f80fed22e682e05e9a39c6729fcf4",
+      "published_bytes": 11942,
+      "published_sha256": "0f90672cfbdbfc9fb5600837e0cfb283bb6f80fed22e682e05e9a39c6729fcf4"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/candidate/internal/daemon/relay_response_contract_test.go",
+      "original_bytes": 39455,
+      "original_sha256": "3e93f95f822d9d1ead5f2f5c7957c09360936a92986d27f9705e2b8817293445",
+      "published_bytes": 39455,
+      "published_sha256": "3e93f95f822d9d1ead5f2f5c7957c09360936a92986d27f9705e2b8817293445"
+    },
+    {
+      "path": "relay-resumption-v3-20261124-57604a3a/receipt.json",
+      "original_bytes": 849,
+      "original_sha256": "029ebf3916e73ef86b630f155090d0d618ead5248d2521e5a7abd51183f6f26f",
+      "published_bytes": 849,
+      "published_sha256": "029ebf3916e73ef86b630f155090d0d618ead5248d2521e5a7abd51183f6f26f"
+    }
+  ],
+  "archive": "exports/relay-qualification-20261124-57604a3a.zip",
+  "bytes": 1186604,
+  "sha256": "7853ede2b4a9ec41ad6deed62f34344a85dc83600352c3f5be8e1079d2003107"
+}

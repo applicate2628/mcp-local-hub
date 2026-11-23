@@ -347,8 +347,23 @@ func (r *HTTPToStdioRelay) recordPOSTFailure(ctx context.Context, err error) {
 // not hang awaiting a reply.
 func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	meta, metaErr := decodeJSONRPCMeta(body)
+	// One deadline owns this operation, including any GET continuation. Copy
+	// the caller's client so redirect and timeout handling never mutate it.
+	client := http.Client{Timeout: time.Duration(defaultHTTPTimeoutSec) * time.Second}
+	if r.HTTPClient != nil {
+		client = *r.HTTPClient
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	requestCtx := ctx
+	if client.Timeout > 0 {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, client.Timeout)
+		defer cancel()
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", r.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(requestCtx, "POST", r.URL, bytes.NewReader(body))
 	if err != nil {
 		r.recordPOSTFailure(ctx, fmt.Errorf("build POST request: %w", err))
 		r.logErr("build POST request: %v", err)
@@ -364,15 +379,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		req.Header.Set(mcpProtocolVersionHeader, version)
 	}
 
-	// A 307/308 can otherwise resend this POST after the first endpoint has
-	// already performed its effect. Keep the supplied client unmodified.
-	client := http.Client{Timeout: time.Duration(defaultHTTPTimeoutSec) * time.Second}
-	if r.HTTPClient != nil {
-		client = *r.HTTPClient
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
+	// A redirect must never resend a possibly effectful POST.
 	resp, err := client.Do(req)
 	if err != nil {
 		shuttingDown := ctx.Err() != nil
@@ -390,8 +397,13 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	sid := resp.Header.Get(mcpSessionIDHeader)
 	pendingSession := initializing && sid != ""
 	cleanupVersion := ""
+	closeResponse := true
 	defer func() {
-		resp.Body.Close()
+		if closeResponse {
+			if err := resp.Body.Close(); err != nil {
+				r.recordPOSTFailure(ctx, fmt.Errorf("close POST response: %w", err))
+			}
+		}
 		if pendingSession {
 			// The server may already have created a session even though stdout
 			// failed or no matching result arrived. This worker retains its
@@ -422,7 +434,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 			r.sessionMu.Unlock()
 			initializing = false
 		}
-		return false, nil
+		return metaErr == nil && relayResponseMatches(meta.ID, payload), nil
 	}
 
 	switch resp.StatusCode {
@@ -431,7 +443,9 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	case http.StatusOK:
 		contentType := resp.Header.Get("Content-Type")
 		if strings.HasPrefix(contentType, "text/event-stream") {
-			if _, err := readRelaySSE(ctx, resp.Body, "", int(maxRelayResponseBytes), forward, nil); err != nil {
+			// The request-scoped stream owns every response body from here.
+			closeResponse = false
+			if err := r.pipePOSTSSE(requestCtx, &client, req, resp, meta, metaErr, forward); err != nil {
 				r.recordPOSTFailure(ctx, fmt.Errorf("POST SSE pipe: %w", err))
 				r.logErr("POST SSE pipe: %v", err)
 			}
@@ -573,14 +587,23 @@ func (r *HTTPToStdioRelay) readSSEStream(ctx context.Context, body io.Reader, st
 // reconnect. Unlike an event cursor, retry takes effect when its field is read;
 // it does not depend on a blank line or successful message delivery.
 func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventBytes int, receive func([]byte) (bool, error), retryDelay *time.Duration) (string, error) {
+	state, err := readRelaySSECursor(ctx, body, relaySSECursor{ID: startID}, maxEventBytes, receive, retryDelay)
+	return state.ID, err
+}
+
+// The shared parser retains its original cursor-only interface above. POST
+// continuation also needs to know whether every delivered message is covered
+// by the current cursor; reconstructing that fact from payloads is unsafe.
+func readRelaySSECursor(ctx context.Context, body io.Reader, state relaySSECursor, maxEventBytes int, receive func([]byte) (bool, error), retryDelay *time.Duration) (relaySSECursor, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxStdinLineBytes)
 
 	var dataBuf strings.Builder
 	hasData := false
 	eventName := ""
-	lastID := startID
-	pendingID := startID
+	pendingID := state.ID
+	explicitID := false
+	delivered := false
 
 	flush := func() (bool, error) {
 		payload := dataBuf.String()
@@ -593,6 +616,7 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 		if len(payload) == 0 || !messageEvent {
 			return false, nil
 		}
+		delivered = true
 		// SSE `data:` payloads may span multiple lines (joined with \n per spec).
 		// The receiver owns JSON validation and stdio framing.
 		return receive([]byte(payload))
@@ -600,17 +624,23 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			return lastID, errors.Join(ctx.Err(), scanner.Err())
+			return state, errors.Join(ctx.Err(), scanner.Err())
 		}
 		line := scanner.Text()
 		if line == "" {
 			stop, err := flush()
 			if err != nil {
-				return lastID, errors.Join(err, scanner.Err())
+				return state, errors.Join(err, scanner.Err())
 			}
-			lastID = pendingID
+			if explicitID {
+				state.ReplaySafe = pendingID != "" && (pendingID != state.ID || (state.ReplaySafe && !delivered))
+			} else if delivered {
+				state.ReplaySafe = false
+			}
+			state.ID = pendingID
+			explicitID, delivered = false, false
 			if stop {
-				return lastID, scanner.Err()
+				return state, scanner.Err()
 			}
 			continue
 		}
@@ -625,7 +655,7 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 				additional++ // separator counts toward the event envelope
 			}
 			if maxEventBytes > 0 && additional > maxEventBytes-dataBuf.Len() {
-				return lastID, errors.Join(errStdinLineTooLong, scanner.Err())
+				return state, errors.Join(errStdinLineTooLong, scanner.Err())
 			}
 			if hasData {
 				dataBuf.WriteByte('\n')
@@ -637,6 +667,7 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 		case "id":
 			if !strings.ContainsRune(val, '\x00') {
 				pendingID = val
+				explicitID = true
 			}
 		case "retry":
 			if retryDelay != nil && val != "" && strings.IndexFunc(val, func(r rune) bool { return r < '0' || r > '9' }) == -1 {
@@ -645,7 +676,7 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 				if err != nil || millis > maxMillis {
 					// Do not wrap or ignore a valid but unrepresentable delay:
 					// either could reconnect before the server permits it.
-					return lastID, errors.Join(errors.New("SSE retry exceeds supported duration"), scanner.Err())
+					return state, errors.Join(errors.New("SSE retry exceeds supported duration"), scanner.Err())
 				}
 				*retryDelay = time.Duration(millis) * time.Millisecond
 			}
@@ -654,12 +685,15 @@ func readRelaySSE(ctx context.Context, body io.Reader, startID string, maxEventB
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return lastID, err
+		if errors.Is(err, bufio.ErrTooLong) || errors.Is(err, bufio.ErrNegativeAdvance) || errors.Is(err, bufio.ErrAdvanceTooFar) || errors.Is(err, bufio.ErrBadReadCount) {
+			return state, err
+		}
+		return state, &relaySSEReadError{err}
 	}
 	if hasData {
-		return lastID, io.ErrUnexpectedEOF // no blank line committed this event
+		return state, &relaySSEReadError{io.ErrUnexpectedEOF} // no blank line committed this event
 	}
-	return lastID, nil
+	return state, nil
 }
 
 // pipeSSE forwards request-scoped SSE without retaining reconnect state.

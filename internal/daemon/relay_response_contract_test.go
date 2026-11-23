@@ -417,7 +417,7 @@ func TestRelayResponseFramingFeedsOneStdioMessage(t *testing.T) {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{media}}, Body: body}, nil
 			})}
 			var out bytes.Buffer
-			r := &HTTPToStdioRelay{URL: "http://relay.fixture/mcp", Stdin: strings.NewReader(relayResponseRequest), Stdout: &out, Stderr: io.Discard, HTTPClient: client}
+			r := &HTTPToStdioRelay{URL: "http://relay.fixture/mcp", Stdin: strings.NewReader(strings.Replace(relayResponseRequest, `"id":1`, `"id":9007199254740993`, 1)), Stdout: &out, Stderr: io.Discard, HTTPClient: client}
 			if err := r.Run(context.Background()); err != nil {
 				t.Fatal(err)
 			}
