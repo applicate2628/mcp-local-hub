@@ -4,10 +4,12 @@ package binaryadmission
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -128,6 +130,13 @@ func TestStageRetainingEqualRuntime(t *testing.T) {
 					t.Fatal("retained prior lent native move authority", err)
 				}
 			}
+			if name == "equal" {
+				assertRetainedMembersWitness(t, ctx, stage, prior, retained, runtimeBytes)
+			} else {
+				if got, err := stage.RetainedMembersWitness(ctx); err == nil || got.MembersSHA256 != "" {
+					t.Fatal("partial stage issued a retained witness", err)
+				}
+			}
 			if stageErr != nil && (len(stage.original.keys) != 0 || !reflect.DeepEqual(priorNames, retainedStageRootEntries(t, root))) {
 				t.Fatal("a refused original or runtime changed the destination")
 			}
@@ -144,12 +153,74 @@ func TestStageRetainingEqualRuntime(t *testing.T) {
 				!reflect.DeepEqual(priorNames, retainedStageRootEntries(t, root)) {
 				t.Fatal("a retained original or destination entry changed", errors.Join(err, readErr))
 			}
+			if name == "equal" {
+				foreign := filepath.Join(filepath.Dir(retained), "foreign-same-bytes.exe")
+				if got, err := os.ReadFile(foreign); err != nil || !bytes.Equal(got, runtimeBytes) {
+					t.Fatal("foreign equal-byte file did not survive selective close", err)
+				}
+			}
 			if name == "dirty_runtime" {
 				if got, err := os.ReadFile(foreign); err != nil || string(got) != "keep" {
 					t.Fatal("foreign runtime file was changed", err)
 				}
 			}
 		})
+	}
+}
+
+func assertRetainedMembersWitness(t *testing.T, ctx context.Context, stage *StagedWindowsCanonicalEntrySetV2, prior *WindowsCanonicalEntryPriorSetV2, retained string, runtimeBytes []byte) {
+	t.Helper()
+	before, err := prior.Observation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retainedRows []WindowsCanonicalEntryMemberEvidenceV2
+	for _, row := range before.Members {
+		if stage.original.members[row.Member] == nil {
+			retainedRows = append(retainedRows, row)
+		}
+	}
+	raw, err := CanonicalRuntimeJSON(retainedRows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := stage.original.snapshot
+	singletons := []string{snapshot.CanonicalEntryRelativePath, snapshot.RuntimePayload.Path}
+	sort.Strings(singletons)
+	want := WindowsCanonicalEntryRetainedMembersV2{MembersSHA256: RuntimeDigest(raw), Singletons: singletons}
+	for range 2 {
+		got, err := stage.RetainedMembersWitness(ctx)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("witness did not bind exact retained originals and singleton keys: %+v err=%v", got, err)
+		}
+	}
+	if result, err := prior.DiscardOriginal(ctx, retainedRows[0].Member, retainedRows[0].File.Path); err == nil || result.Attempted {
+		t.Fatal("retained witness granted discard authority", err)
+	}
+	if result, err := stage.MoveOriginal(ctx, snapshot.ProductRelativePath, snapshot.ProductRelativePath); err == nil || result.Attempted {
+		t.Fatal("retained witness granted selective transfer or move authority", err)
+	}
+
+	held := prior.original.members[retainedRows[0].Member]
+	original := held.evidence
+	held.evidence.NativeIdentity.CreationTime ^= 1
+	unissued, err := stage.RetainedMembersWitness(ctx)
+	held.evidence = original
+	if err == nil || unissued.MembersSHA256 != "" {
+		t.Fatal("a same-byte held file with a different recorded birth issued a witness", err)
+	}
+	if writer, err := os.OpenFile(retained, os.O_WRONLY, 0); err == nil {
+		t.Fatal("held retained original allowed write access", writer.Close())
+	}
+
+	// The same content under a foreign name is not a member of the native
+	// retained component. The witnessed directory must be received again.
+	foreign := filepath.Join(filepath.Dir(retained), "foreign-same-bytes.exe")
+	if err := os.WriteFile(foreign, runtimeBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := stage.RetainedMembersWitness(ctx); err == nil || got.MembersSHA256 != "" {
+		t.Fatal("witness accepted a same-byte foreign file in the retained component", err)
 	}
 }
 

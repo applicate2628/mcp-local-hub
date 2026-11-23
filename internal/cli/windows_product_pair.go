@@ -2412,10 +2412,13 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		!validRecoveryReceiptSnapshot(j.Receipts.V2) {
 		return errors.New("invalid V3 recovery receipt snapshots")
 	}
-	if !cleanAbsolutePath(j.Staged.Path) ||
-		sameWindowsProductPath(j.Staged.Path, j.Product.Target) ||
-		j.Staged.SHA256 != j.Product.NewSHA256 {
-		return errors.New("invalid V3 staged product identity")
+	e := j.EntryBundle
+	if e == nil || !e.retainsSingleton(e.Expected.ProductRelativePath) {
+		if !cleanAbsolutePath(j.Staged.Path) ||
+			sameWindowsProductPath(j.Staged.Path, j.Product.Target) ||
+			j.Staged.SHA256 != j.Product.NewSHA256 {
+			return errors.New("invalid V3 staged product identity")
+		}
 	}
 	if !cleanAbsolutePath(j.Tasks.StoreRoot) {
 		return errors.New("invalid V3 retained task store")

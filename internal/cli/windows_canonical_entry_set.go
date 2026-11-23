@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -59,6 +60,10 @@ type windowsCanonicalEntryRetainedRuntimeV2 struct {
 	Singletons    []string `json:"singletons"`
 }
 
+func (e *windowsCanonicalEntrySetJournalV2) retainsSingleton(key string) bool {
+	return e.Bundle.Retained != nil && slices.Contains(e.Bundle.Retained.Singletons, key)
+}
+
 type windowsCanonicalEntryMemberJournalV2 = binaryadmission.WindowsCanonicalEntryMemberRecoveryPlanV2
 
 type windowsCanonicalEntryDirectoryJournalV2 = binaryadmission.WindowsCanonicalEntryMemberDirectoryRecordV2
@@ -85,10 +90,40 @@ func (j windowsProductRecoveryJournalV3) MarshalJSON() ([]byte, error) {
 	if j.EntrySet != nil {
 		return nil, errors.New("legacy and current entry arms coexist")
 	}
+	e := j.EntryBundle
+	launcher := e.retainsSingleton(e.Expected.CanonicalEntryRelativePath)
+	product := e.retainsSingleton(e.Expected.ProductRelativePath)
+	if !launcher && !product {
+		return json.Marshal(struct {
+			legacy
+			EntrySet *windowsCanonicalEntrySetJournalV2 `json:"entry_set"`
+		}{legacy(j), e})
+	}
+	var entry any = e
+	if launcher {
+		if e.StagedEntry != (windowsProductRecoveryStagedV3{}) {
+			return nil, errors.New("retained Launcher cannot carry a stage")
+		}
+		type plain windowsCanonicalEntrySetJournalV2
+		entry = struct {
+			*plain
+			StagedEntry *windowsProductRecoveryStagedV3 `json:"staged_entry"`
+		}{(*plain)(e), nil}
+	}
+	if product {
+		if j.Staged != (windowsProductRecoveryStagedV3{}) {
+			return nil, errors.New("retained Product cannot carry a stage")
+		}
+		return json.Marshal(struct {
+			legacy
+			EntrySet any                             `json:"entry_set"`
+			Staged   *windowsProductRecoveryStagedV3 `json:"staged"`
+		}{legacy(j), entry, nil})
+	}
 	return json.Marshal(struct {
 		legacy
-		EntrySet *windowsCanonicalEntrySetJournalV2 `json:"entry_set"`
-	}{legacy(j), j.EntryBundle})
+		EntrySet any `json:"entry_set"`
+	}{legacy(j), entry})
 }
 
 func (j *windowsProductRecoveryJournalV3) UnmarshalJSON(raw []byte) error {
@@ -118,6 +153,21 @@ func (j *windowsProductRecoveryJournalV3) UnmarshalJSON(raw []byte) error {
 		}
 	default:
 		return errors.New("unsupported nested canonical entry journal schema")
+	}
+	if e := base.EntryBundle; e != nil && e.Bundle.Retained != nil {
+		staged, err := uniqueCanonicalEntryRecordMember(raw, "staged")
+		if err != nil {
+			return err
+		}
+		null := bytes.Equal(bytes.TrimSpace(staged), []byte("null"))
+		if null != e.retainsSingleton(e.Expected.ProductRelativePath) {
+			return errors.New("selective Product stage disagrees with retention")
+		}
+		if !null {
+			if _, err := canonicalCurrentObject(staged, "path", "sha256"); err != nil {
+				return err
+			}
+		}
 	}
 	*j = windowsProductRecoveryJournalV3(base)
 	return nil
@@ -220,7 +270,7 @@ func canonicalCurrentObjectWithOptional(raw []byte, optional string, names ...st
 		fields[name] = value
 		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			switch name {
-			case "prior", "staged", "prior_absence", "prior_aside_relative", "successor_aside_relative", "before_directory", "before_inventory", "staged_directory", "disposition", "error", "close_error", "prior_runtime":
+			case "prior", "staged", "staged_entry", "prior_absence", "prior_aside_relative", "successor_aside_relative", "before_directory", "before_inventory", "staged_directory", "disposition", "error", "close_error", "prior_runtime":
 			default:
 				return nil, errors.New("required current entry field is null")
 			}
@@ -258,7 +308,7 @@ func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
 	}
 	for key, names := range map[string][]string{
 		"canonical_entry": {"target", "prior_present", "prior_sha256", "new_sha256", "baseline_asides"},
-		"staged_entry":    {"path", "sha256"}, "prior_runtime": {"path", "present", "sha256"},
+		"prior_runtime":   {"path", "present", "sha256"},
 	} {
 		if _, err := object(f[key], key == "prior_runtime", names...); err != nil {
 			return err
@@ -380,7 +430,18 @@ func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	*e = windowsCanonicalEntrySetJournalV2(value)
+	decoded := windowsCanonicalEntrySetJournalV2(value)
+	staged := f["staged_entry"]
+	null := bytes.Equal(bytes.TrimSpace(staged), []byte("null"))
+	if null != decoded.retainsSingleton(decoded.Expected.CanonicalEntryRelativePath) {
+		return errors.New("current Launcher stage disagrees with retention")
+	}
+	if !null {
+		if _, err := object(staged, false, "path", "sha256"); err != nil {
+			return err
+		}
+	}
+	*e = decoded
 	return nil
 }
 
@@ -2686,7 +2747,14 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 		return err
 	}
 	root := filepath.Dir(targets.CanonicalEntryPath)
-	if !sameWindowsProductPath(targets.ProductPath, j.Product.Target) || e.Expected.Product.SHA256 != j.Product.NewSHA256 || e.Expected.CanonicalEntry.SHA256 != e.CanonicalEntry.NewSHA256 || !sameWindowsProductPath(e.Expected.ProductArtifact.Path, targets.ProductPath) || !sameWindowsProductPath(e.Expected.CanonicalEntry.Path, targets.CanonicalEntryPath) || !sameWindowsProductPath(e.Expected.Identity.Path, targets.IdentityPath) || !validRecoveryPreimage(e.CanonicalEntry.PriorPresent, e.CanonicalEntry.PriorSHA256) || e.StagedEntry.SHA256 != e.CanonicalEntry.NewSHA256 {
+	if !sameWindowsProductPath(targets.ProductPath, j.Product.Target) || e.Expected.Product.SHA256 != j.Product.NewSHA256 || e.Expected.CanonicalEntry.SHA256 != e.CanonicalEntry.NewSHA256 || !sameWindowsProductPath(e.Expected.ProductArtifact.Path, targets.ProductPath) || !sameWindowsProductPath(e.Expected.CanonicalEntry.Path, targets.CanonicalEntryPath) || !sameWindowsProductPath(e.Expected.Identity.Path, targets.IdentityPath) || !validRecoveryPreimage(e.CanonicalEntry.PriorPresent, e.CanonicalEntry.PriorSHA256) {
+		return errors.New("current journal file projections disagree")
+	}
+	if e.retainsSingleton(e.Expected.CanonicalEntryRelativePath) {
+		if e.StagedEntry != (windowsProductRecoveryStagedV3{}) {
+			return errors.New("retained Launcher cannot carry a stage")
+		}
+	} else if e.StagedEntry.SHA256 != e.CanonicalEntry.NewSHA256 {
 		return errors.New("current journal file projections disagree")
 	}
 	newFiles := map[string]binaryadmission.RuntimeObjectV1{e.Expected.CanonicalEntryRelativePath: {Path: e.Expected.CanonicalEntryRelativePath, Kind: "file", SHA256: e.Expected.CanonicalEntry.SHA256}}
@@ -2733,7 +2801,8 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 	if e.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 && e.Bundle.BeforeInventory != nil {
 		return errors.New("noncurrent prior cannot carry bundle inventory")
 	}
-	if len(e.Bundle.Members) == 0 || e.Moves == nil || e.Cleanup == nil || e.Bundle.Directories == nil {
+	if e.Bundle.Members == nil || len(e.Bundle.Members) == 0 && e.Bundle.Retained == nil ||
+		e.Moves == nil || e.Cleanup == nil || e.Bundle.Directories == nil {
 		return errors.New("current member evidence arrays missing")
 	}
 	var retainedFiles map[string]bool
@@ -2742,6 +2811,10 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 		retainedFiles, retainedDirectories, err = currentEntryRetainedRuntime(e)
 		if err != nil {
 			return err
+		}
+		if retainedFiles[e.Expected.ProductRelativePath] &&
+			(!j.Product.PriorPresent || j.Product.PriorSHA256 != j.Product.NewSHA256 || j.Staged != (windowsProductRecoveryStagedV3{})) {
+			return errors.New("retained Product preimage or absent stage disagrees")
 		}
 		for key := range retainedFiles {
 			delete(newFiles, key)
@@ -2899,9 +2972,14 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 		if err != nil {
 			return err
 		}
-		row := currentEntryMember(e, filepath.ToSlash(member))
+		member = filepath.ToSlash(member)
+		row := currentEntryMember(e, member)
 		if r.Present {
-			if row == nil || row.Prior == nil || row.Prior.File.SHA256 != r.SHA256 {
+			if member == e.Expected.ProductRelativePath && retainedFiles[member] {
+				if r.SHA256 != j.Product.PriorSHA256 {
+					return errors.New("prior runtime differs from the retained original Product")
+				}
+			} else if row == nil || row.Prior == nil || row.Prior.File.SHA256 != r.SHA256 {
 				return errors.New("prior runtime is not an actual original member")
 			}
 		} else if r.SHA256 != "" || e.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeAbsentV2 {
@@ -3035,10 +3113,24 @@ func currentEntryRetainedRuntime(e *windowsCanonicalEntrySetJournalV2) (files ma
 	}
 	last := ""
 	for _, key := range witness.Singletons {
-		if key <= last || key != e.Expected.RuntimePayload.Path && key != e.Expected.IdentityRelativePath {
+		if key <= last {
 			return nil, nil, errors.New("invalid retained runtime singleton selection")
 		}
 		last = key
+		switch key {
+		case e.Expected.CanonicalEntryRelativePath:
+			// Launcher is outside the bundle inventories. Its original
+			// digest is recorded separately; native attributes and extent
+			// remain part of the required held witness.
+			if !e.CanonicalEntry.PriorPresent || e.CanonicalEntry.PriorSHA256 != e.Expected.CanonicalEntry.SHA256 {
+				return nil, nil, errors.New("retained Launcher differs from its original preimage")
+			}
+			files[key] = true
+			continue
+		case e.Expected.ProductRelativePath, e.Expected.RuntimePayload.Path, e.Expected.IdentityRelativePath:
+		default:
+			return nil, nil, errors.New("invalid retained runtime singleton selection")
+		}
 		relative, _ := strings.CutPrefix(key, e.Bundle.RelativePath+"/")
 		object := next[relative]
 		if object.Kind != "file" || !reflect.DeepEqual(prior[relative], object) {

@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1127,7 +1128,7 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 		{"missing witness", func(e *windowsCanonicalEntrySetJournalV2) { e.Bundle.Retained = nil }},
 		{"invalid digest", func(e *windowsCanonicalEntrySetJournalV2) { e.Bundle.Retained.MembersSHA256 = "" }},
 		{"foreign singleton", func(e *windowsCanonicalEntrySetJournalV2) {
-			e.Bundle.Retained.Singletons = []string{e.Expected.ProductRelativePath}
+			e.Bundle.Retained.Singletons = []string{path.Join(e.Bundle.RelativePath, "fixture-foreign")}
 		}},
 		{"changed old index", func(e *windowsCanonicalEntrySetJournalV2) {
 			for i := range e.Bundle.BeforeInventory.Objects {
@@ -1168,6 +1169,84 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 			tc.corrupt(j.EntryBundle)
 			if err := validateCanonicalEntryBundleJournal(j); err == nil {
 				t.Fatal("corrupted selective V3 was accepted")
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name                        string
+		launcher, product, identity bool
+	}{
+		{name: "retained Launcher", launcher: true},
+		{name: "retained Product", product: true},
+		{name: "all equal core files", launcher: true, product: true, identity: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := makeSparse(t)
+			e := j.EntryBundle
+			if tc.launcher {
+				e.Bundle.Retained.Singletons = append(e.Bundle.Retained.Singletons, e.Expected.CanonicalEntryRelativePath)
+				e.StagedEntry = windowsProductRecoveryStagedV3{}
+			}
+			if tc.product {
+				e.Bundle.Retained.Singletons = append(e.Bundle.Retained.Singletons, e.Expected.ProductRelativePath)
+				j.Staged = windowsProductRecoveryStagedV3{}
+			}
+			if tc.identity {
+				e.Bundle.Retained.Singletons = append(e.Bundle.Retained.Singletons, e.Expected.IdentityRelativePath)
+			}
+			sort.Strings(e.Bundle.Retained.Singletons)
+			e.Bundle.Members = slices.DeleteFunc(e.Bundle.Members, func(row windowsCanonicalEntryMemberJournalV2) bool {
+				return e.retainsSingleton(row.Member)
+			})
+			if err := validateCanonicalEntryBundleJournal(j); err != nil {
+				t.Fatal("retained core originals did not validate without stage rows", err)
+			}
+			raw, err := json.Marshal(j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire struct {
+				Staged   json.RawMessage `json:"staged"`
+				EntrySet struct {
+					StagedEntry json.RawMessage `json:"staged_entry"`
+				} `json:"entry_set"`
+			}
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				t.Fatal(err)
+			}
+			if (string(wire.Staged) == "null") != tc.product || (string(wire.EntrySet.StagedEntry) == "null") != tc.launcher {
+				t.Fatal("retained core file did not record its exact absent stage")
+			}
+			var received windowsProductRecoveryJournalV3
+			if err := decodeStrictCanonicalProductRecord(raw, &received); err != nil {
+				t.Fatal("selective core wire did not receive its absent stages", err)
+			}
+			if err := validateCanonicalEntryBundleJournal(received); err != nil {
+				t.Fatal("selective core wire lost its exact original proof", err)
+			}
+			if _, err := decodeWindowsProductRecoveryJournalV3(raw); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
+				t.Fatal("cold core retention failed to keep native recovery pending", err)
+			}
+			if _, err := encodeWindowsProductRecoveryJournalV3(received); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
+				t.Fatal("warm core retention reached the writer without native authority", err)
+			}
+
+			if tc.launcher {
+				received.EntryBundle.CanonicalEntry.PriorSHA256 = strings.Repeat("0", 64)
+			} else {
+				received.Product.PriorSHA256 = strings.Repeat("0", 64)
+			}
+			if err := validateCanonicalEntryBundleJournal(received); err == nil {
+				t.Fatal("retained core accepted a different original digest")
+			}
+
+			if tc.product {
+				j.Staged = old.Staged
+			} else {
+				e.StagedEntry = old.EntryBundle.StagedEntry
+			}
+			if _, err := json.Marshal(j); err == nil {
+				t.Fatal("retained core accepted a fabricated staged path")
 			}
 		})
 	}

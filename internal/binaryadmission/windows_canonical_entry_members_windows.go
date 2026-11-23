@@ -723,6 +723,75 @@ func (s *StagedWindowsCanonicalEntrySetV2) VerifyUnchanged(ctx context.Context) 
 	return c.verify(ctx)
 }
 
+// RetainedMembersWitness rechecks the exact native originals omitted from
+// a selective stage. The digest covers the canonical JSON array of existing
+// member evidence records, ordered by their exact relative member key.
+func (s *StagedWindowsCanonicalEntrySetV2) RetainedMembersWitness(ctx context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
+	var witness WindowsCanonicalEntryRetainedMembersV2
+	if s == nil {
+		return witness, errors.New("selective runtime stage required")
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !s.retainsRuntime || s.prior == nil || s.priorError != nil {
+		return witness, errors.Join(s.priorError, errors.New("original retained runtime prior required"))
+	}
+	if err := c.verify(ctx); err != nil {
+		return witness, err
+	}
+	pc := &s.prior.original
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if !pc.ready || pc.closed || pc.root == nil || pc.root.closed ||
+		c.targets != pc.targets || c.parent == nil || pc.parent == nil ||
+		c.parent.identity != pc.parent.identity || c.directories == nil || c.directories != pc.directories {
+		return witness, errors.New("original retained runtime prior custody changed")
+	}
+	if err := verifyRetainedCanonicalRuntime(ctx, s.prior, c.snapshot); err != nil {
+		return witness, err
+	}
+	payload, err := ParseRuntimePayload(c.snapshot.RuntimePayloadBytes)
+	if err != nil {
+		return witness, err
+	}
+	components := canonicalRuntimeObjects(c.snapshot, payload)
+	keys, plan, err := canonicalMemberPlanV2(c.snapshot)
+	if err != nil {
+		return witness, err
+	}
+	var omitted []WindowsCanonicalEntryMemberEvidenceV2
+	singletons := []string{}
+	for _, key := range keys {
+		if c.members[key] != nil {
+			continue
+		}
+		member, err := pc.observeOriginalMember(ctx, key)
+		if err != nil {
+			return witness, err
+		}
+		if !canonicalMemberMatchesPlanV2(member, plan[key]) {
+			return witness, errors.New("retained original differs from the candidate plan")
+		}
+		omitted = append(omitted, member)
+		relative, inBundle := strings.CutPrefix(key, c.snapshot.BundleRelativePath+"/")
+		if _, inComponent := components[relative]; !inBundle || !inComponent {
+			singletons = append(singletons, key)
+		}
+	}
+	if len(omitted) == 0 {
+		return witness, errors.New("selective stage has no retained originals")
+	}
+	raw, err := CanonicalRuntimeJSON(omitted)
+	if err != nil {
+		return witness, err
+	}
+	if err := ctx.Err(); err != nil {
+		return witness, err
+	}
+	return WindowsCanonicalEntryRetainedMembersV2{MembersSHA256: RuntimeDigest(raw), Singletons: singletons}, nil
+}
+
 // ObserveOriginalMember freshly verifies only the selected issued original.
 // MoveOriginal independently revalidates it after the caller persists intent.
 func (s *StagedWindowsCanonicalEntrySetV2) ObserveOriginalMember(ctx context.Context, key string) (WindowsCanonicalEntryMemberEvidenceV2, error) {

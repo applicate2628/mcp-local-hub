@@ -35,6 +35,13 @@ type WindowsCanonicalEntryMemberEvidenceV2 struct {
 	Attributes     uint32                                   `json:"attributes"`
 }
 
+// WindowsCanonicalEntryRetainedMembersV2 describes an issued retained set.
+// The detached value does not grant move, discard or recovery authority.
+type WindowsCanonicalEntryRetainedMembersV2 struct {
+	MembersSHA256 string
+	Singletons    []string
+}
+
 type WindowsCanonicalEntryMemberDirectorySnapshotV2 struct {
 	Schema            string                                   `json:"schema"`
 	Root              string                                   `json:"root"`
