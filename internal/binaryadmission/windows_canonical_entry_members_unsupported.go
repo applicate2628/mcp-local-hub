@@ -37,6 +37,9 @@ func (*StagedWindowsCanonicalEntrySetV2) ObserveOriginalMember(context.Context, 
 func (*StagedWindowsCanonicalEntrySetV2) TakeForTransaction(context.Context, string) (WindowsCanonicalEntrySetSnapshotV2, error) {
 	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
 }
+func (*StagedWindowsCanonicalEntrySetV2) TakeRetainingForTransaction(context.Context, string, WindowsCanonicalEntryRetainedMembersV2) (WindowsCanonicalEntrySetSnapshotV2, error) {
+	return WindowsCanonicalEntrySetSnapshotV2{}, errWindowsCanonicalEntryUnsupported
+}
 func (*StagedWindowsCanonicalEntrySetV2) MoveOriginal(context.Context, string, string) (WindowsCanonicalEntryMoveResultV1, error) {
 	return WindowsCanonicalEntryMoveResultV1{}, errWindowsCanonicalEntryUnsupported
 }

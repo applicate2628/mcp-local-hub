@@ -185,6 +185,7 @@ type canonicalEntryMembersV2 struct {
 	recoveryInput              *WindowsCanonicalEntryMembersRecoveryInputV2
 	recoveryAbsences           map[string]WindowsCanonicalEntryMemberCleanupRecordV2
 	recoveryRetained           map[string]RuntimeObjectV1
+	warmChanged                map[string]bool
 	recoverySide               WindowsCanonicalRecoverySideV1
 	captures                   []WindowsCanonicalEntryMemberEvidenceV2
 	moves, cleanup             []WindowsCanonicalEntryMoveResultV1

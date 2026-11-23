@@ -744,12 +744,19 @@ func (s *StagedWindowsCanonicalEntrySetV2) RetainedMembersWitness(ctx context.Co
 	if !s.retainsRuntime || s.prior == nil || s.priorError != nil {
 		return witness, errors.Join(s.priorError, errors.New("original retained runtime prior required"))
 	}
-	if err := c.verify(ctx); err != nil {
-		return witness, err
-	}
 	pc := &s.prior.original
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
+	return s.retainedMembersWitnessLocked(ctx)
+}
+
+// The caller holds the selective stage and original prior mutexes in that order.
+func (s *StagedWindowsCanonicalEntrySetV2) retainedMembersWitnessLocked(ctx context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
+	var witness WindowsCanonicalEntryRetainedMembersV2
+	c, pc := &s.original, &s.prior.original
+	if err := c.verify(ctx); err != nil {
+		return witness, err
+	}
 	if !pc.ready || pc.closed || pc.root == nil || pc.root.closed ||
 		c.targets != pc.targets || c.parent == nil || pc.parent == nil ||
 		c.parent.identity != pc.parent.identity || c.directories == nil || c.directories != pc.directories {
@@ -840,6 +847,47 @@ func (s *StagedWindowsCanonicalEntrySetV2) TakeForTransaction(ctx context.Contex
 		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("member transfer destination mismatch")
 	}
 	c.transferred = true // Cancellation after this latch belongs to the transaction.
+	return cloneCanonicalEntrySnapshotV2(c.snapshot), nil
+}
+
+// TakeRetainingForTransaction transfers the selective stage to the existing
+// Product transaction. Its caller receives the first V3 write/readback and
+// each exact move or discard intent before entering the corresponding effect.
+func (s *StagedWindowsCanonicalEntrySetV2) TakeRetainingForTransaction(ctx context.Context, entry string, expected WindowsCanonicalEntryRetainedMembersV2) (WindowsCanonicalEntrySetSnapshotV2, error) {
+	if s == nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("selective stage required")
+	}
+	c := &s.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !s.retainsRuntime || s.prior == nil || s.priorError != nil || c.transferred || entry != c.targets.CanonicalEntryPath {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.Join(s.priorError, errors.New("selective original custody or target is unavailable"))
+	}
+	pc := &s.prior.original
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	witness, err := s.retainedMembersWitnessLocked(ctx)
+	if err != nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, err
+	}
+	if !reflect.DeepEqual(witness, expected) {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("current selective original witness differs")
+	}
+	if len(c.keys) == 0 {
+		return WindowsCanonicalEntrySetSnapshotV2{}, errors.New("selective transfer has no changed originals")
+	}
+	changed := make(map[string]bool, len(c.keys))
+	for _, key := range c.keys {
+		if _, err := pc.observeOriginalMember(ctx, key); err != nil {
+			return WindowsCanonicalEntrySetSnapshotV2{}, err
+		}
+		changed[key] = true
+	}
+	if err := ctx.Err(); err != nil {
+		return WindowsCanonicalEntrySetSnapshotV2{}, err
+	}
+	pc.warmChanged = changed
+	c.transferred = true
 	return cloneCanonicalEntrySnapshotV2(c.snapshot), nil
 }
 
@@ -1830,24 +1878,24 @@ func (p *WindowsCanonicalEntryPriorSetV2) MoveOriginal(ctx context.Context, key,
 	if p == nil {
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("prior required")
 	}
-	if p.readOnly {
-		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
-	}
 	c := &p.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if p.readOnly && !c.warmChanged[key] {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
+	}
 	return c.move(ctx, key, dst)
 }
 func (p *WindowsCanonicalEntryPriorSetV2) DiscardOriginal(ctx context.Context, key, relative string) (WindowsCanonicalEntryMoveResultV1, error) {
 	if p == nil {
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("prior required")
 	}
-	if p.readOnly {
-		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
-	}
 	c := &p.original
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if p.readOnly && !c.warmChanged[key] {
+		return WindowsCanonicalEntryMoveResultV1{Member: key}, errors.New("retained runtime prior is read-only")
+	}
 	return c.discard(ctx, key, relative)
 }
 func (p *WindowsCanonicalEntryPriorSetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
