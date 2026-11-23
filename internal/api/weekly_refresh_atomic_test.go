@@ -317,12 +317,11 @@ func setWeeklyScheduleForAtomicTest(t *testing.T, schedule string) []byte {
 	return bytes
 }
 
-func TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence(t *testing.T) {
+func TestEnsureWeeklyRefreshTask_SerializesFailedCreationBeforeLaterCreation(t *testing.T) {
 	block := make(chan struct{})
 	entered := make(chan struct{}, 1)
-	prior := []byte("<Task><operator-prior/></Task>")
 	sch := &weeklyAtomicScheduler{
-		xml:             map[string][]byte{WeeklyRefreshTaskName: prior},
+		xml:             map[string][]byte{},
 		failCreateCount: 1,
 		blockCreate:     block,
 		createEntered:   entered,
@@ -387,7 +386,7 @@ func TestEnsureWeeklyRefreshTask_SerializesFailedRestoreBeforeLaterConvergence(t
 func TestEnsureWeeklyRefreshTask_CreateFailurePreservesForeignCurrent(t *testing.T) {
 	foreign := []byte("<Task><foreign-generation/></Task>")
 	sch := &weeklyAtomicScheduler{
-		xml:             map[string][]byte{WeeklyRefreshTaskName: []byte("<Task><prior/></Task>")},
+		xml:             map[string][]byte{},
 		failCreateCount: 1,
 		foreignOnFail:   foreign,
 	}
@@ -426,7 +425,7 @@ func TestEnsureWeeklyRefreshTask_ReleaseFailureIsJoinedAndRecorded(t *testing.T)
 }
 
 func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
-	t.Run("settings update holds settings then weekly transaction against ensure", func(t *testing.T) {
+	t.Run("settings update holds settings then weekly transaction before later ensure refuses", func(t *testing.T) {
 		block := make(chan struct{})
 		entered := make(chan struct{}, 1)
 		sch := &weeklyAtomicScheduler{
@@ -482,8 +481,8 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		if err := awaitWeeklyAtomicValue(t, applyDone, "Apply settlement"); err != nil {
 			t.Fatalf("ApplyWeeklyRefreshSchedule: %v", err)
 		}
-		if err := awaitWeeklyAtomicValue(t, ensureDone, "Ensure settlement"); err != nil {
-			t.Fatalf("EnsureWeeklyRefreshTask: %v", err)
+		if err := awaitWeeklyAtomicValue(t, ensureDone, "Ensure settlement"); !errors.Is(err, ErrSchedulerReplacementUnowned) {
+			t.Fatalf("later EnsureWeeklyRefreshTask = %v, want existing-task refusal", err)
 		}
 		persisted, err := NewAPI().SettingsGet("daemons.weekly_schedule")
 		if err != nil || persisted != "weekly Tue 14:30" {
@@ -499,13 +498,12 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("upgrade waits for schedule swap and preserves committed trigger", func(t *testing.T) {
+	t.Run("upgrade waits for fresh schedule creation then refuses existing task", func(t *testing.T) {
 		block := make(chan struct{})
 		entered := make(chan struct{}, 1)
 		canonical := filepath.Join(t.TempDir(), "mcphub.exe")
-		prior := weeklyTaskXMLForSpec(weeklyRefreshTaskSpec(canonical, &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 0, Hour: 3, Minute: 0}))
 		sch := &weeklyAtomicScheduler{
-			xml:           map[string][]byte{WeeklyRefreshTaskName: prior},
+			xml:           map[string][]byte{},
 			blockCreate:   block,
 			createEntered: entered,
 		}
@@ -526,7 +524,7 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		})
 		go func() {
 			defer close(swapDone)
-			_, err := swapWeeklyTriggerWith(sch, &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 5, Hour: 9, Minute: 45}, prior)
+			_, err := swapWeeklyTriggerWith(sch, &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 5, Hour: 9, Minute: 45}, nil)
 			swapDone <- err
 		}()
 		awaitWeeklyAtomicValue(t, entered, "swap fake Create")
@@ -552,8 +550,8 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		if err := awaitWeeklyAtomicValue(t, swapDone, "swap settlement"); err != nil {
 			t.Fatalf("SwapWeeklyTrigger: %v", err)
 		}
-		if result := awaitWeeklyAtomicValue(t, upgradeDone, "upgrade settlement"); result == nil || result.Err != "" {
-			t.Fatalf("upgrade result = %+v, want success", result)
+		if result := awaitWeeklyAtomicValue(t, upgradeDone, "upgrade settlement"); result == nil || !strings.Contains(result.Err, ErrSchedulerReplacementUnowned.Error()) || result.NewCmd != "" {
+			t.Fatalf("upgrade result = %+v, want existing-task refusal", result)
 		}
 		finalXML, err := sch.ExportXML(WeeklyRefreshTaskName)
 		if err != nil {
@@ -565,7 +563,7 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("ensure waits for upgrade transaction", func(t *testing.T) {
+	t.Run("upgrade waits for fresh ensure then refuses existing task", func(t *testing.T) {
 		block := make(chan struct{})
 		entered := make(chan struct{}, 1)
 		canonical := filepath.Join(t.TempDir(), "mcphub.exe")
@@ -611,10 +609,10 @@ func TestWeeklyRefreshWritersSerializeAtTransactionOwner(t *testing.T) {
 		requireNoWeeklySchedulerOperationWhileBlocked(t, observed)
 		releaseCreate()
 		if err := awaitWeeklyAtomicValue(t, ensureDone, "Ensure settlement"); err != nil {
-			t.Fatalf("EnsureWeeklyRefreshTask: %v", err)
+			t.Fatalf("fresh EnsureWeeklyRefreshTask: %v", err)
 		}
-		if result := awaitWeeklyAtomicValue(t, upgradeDone, "upgrade settlement"); result == nil || result.Err != "" {
-			t.Fatalf("upgrade result = %+v, want success", result)
+		if result := awaitWeeklyAtomicValue(t, upgradeDone, "upgrade settlement"); result == nil || !strings.Contains(result.Err, ErrSchedulerReplacementUnowned.Error()) || result.NewCmd != "" {
+			t.Fatalf("upgrade result = %+v, want existing-task refusal", result)
 		}
 	})
 }
@@ -784,7 +782,15 @@ func weeklyCallbackCallsTransaction(fn *ast.FuncDecl) bool {
 type weeklyGoListExportPackage struct {
 	ImportPath string
 	Export     string
+	Dir        string
+	Module     *weeklyGoListModule
 	DepOnly    bool
+}
+
+type weeklyGoListModule struct {
+	Path    string
+	Version string
+	Replace *weeklyGoListModule
 }
 
 type weeklyTypedNode struct {
@@ -821,12 +827,14 @@ type weeklyFunctionVariableUse struct {
 }
 
 type weeklyTypedInventory struct {
-	fileSet    *token.FileSet
-	pkg        *types.Package
-	info       *types.Info
-	files      []*ast.File
-	nodes      map[string]*weeklyTypedNode
-	byFunction map[*types.Func]*weeklyTypedNode
+	fileSet            *token.FileSet
+	pkg                *types.Package
+	info               *types.Info
+	files              []*ast.File
+	nodes              map[string]*weeklyTypedNode
+	byFunction         map[*types.Func]*weeklyTypedNode
+	packageDirectories map[string]string
+	packageModules     map[string]*weeklyGoListModule
 }
 
 type weeklyTypedASTIndex struct {
@@ -842,6 +850,7 @@ type weeklyTypedGraphOptions struct {
 	mutationType                types.Type
 	approvedFunctionResults     map[weeklyFunctionResultOrigin]bool
 	approvedPackageCallbacks    map[*types.Var]weeklyPackageCallbackOrigin
+	errorContracts              *weeklyNativeErrorContracts
 }
 
 type weeklyUnresolvedCall struct {
@@ -858,6 +867,7 @@ type weeklyTypedCallGraph struct {
 	approvedInterfaceDispatches       map[string][]string
 	approvedFunctionResultDispatches  map[string][]weeklyFunctionResultOrigin
 	approvedPackageCallbackDispatches map[string][]weeklyPackageCallbackOrigin
+	standardErrorChainDispatches      map[string][]string
 }
 
 type weeklySettingsClosure struct {
@@ -908,6 +918,8 @@ func weeklyTypedAPIInventory(t *testing.T) weeklyTypedInventory {
 		t.Fatalf("load module-aware export inventory for weekly type analysis: %v", err)
 	}
 	exports := map[string]string{}
+	packageDirectories := map[string]string{}
+	packageModules := map[string]*weeklyGoListModule{}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	targetImportPath := ""
 	for {
@@ -925,6 +937,8 @@ func weeklyTypedAPIInventory(t *testing.T) weeklyTypedInventory {
 		if record.Export != "" {
 			exports[record.ImportPath] = record.Export
 		}
+		packageDirectories[record.ImportPath] = record.Dir
+		packageModules[record.ImportPath] = record.Module
 		if !record.DepOnly {
 			if targetImportPath != "" && targetImportPath != record.ImportPath {
 				t.Fatalf("module-aware export inventory selected multiple target packages: %s and %s", targetImportPath, record.ImportPath)
@@ -966,7 +980,10 @@ func weeklyTypedAPIInventory(t *testing.T) weeklyTypedInventory {
 	if pkg == nil {
 		t.Fatal("type-check build-selected non-test API source returned no package")
 	}
-	return weeklyTypedInventoryFromFiles(t, source.fileSet, pkg, info, source.files)
+	inventory := weeklyTypedInventoryFromFiles(t, source.fileSet, pkg, info, source.files)
+	inventory.packageDirectories = packageDirectories
+	inventory.packageModules = packageModules
+	return inventory
 }
 
 func weeklyTypedInventoryFromFiles(t *testing.T, fileSet *token.FileSet, pkg *types.Package, info *types.Info, files []*ast.File) weeklyTypedInventory {
@@ -1089,24 +1106,12 @@ func weeklyProductionTypedGraphOptions(t *testing.T, inventory weeklyTypedInvent
 	if inventory.byFunction[knownFolderTarget] == nil {
 		t.Fatalf("type inventory selected %s has no indexed local body", knownFolderTargetName)
 	}
-	rollbackType := weeklyRequiredPackageType(t, inventory, "installTaskRollback")
-	restoreSelection := types.NewMethodSet(types.NewPointer(rollbackType.Type())).Lookup(inventory.pkg, "restore")
-	if restoreSelection == nil {
-		t.Fatal("type inventory is missing installTaskRollback.restore")
-	}
-	restore, ok := restoreSelection.Obj().(*types.Func)
-	if !ok {
-		t.Fatal("type inventory installTaskRollback.restore is not a method")
-	}
-	// These reviewed helpers receive the existing scheduler boundary narrowed to
-	// ExportXML. Admit only their original first parameter, not every interface
-	// with the same shape or every method named ExportXML.
+	// The read-only snapshot helper retains the weekly ExportXML contract.
+	// Replacement/restore helpers are no longer weekly owners; their existence
+	// elsewhere in the package does not grant them a weekly boundary approval.
 	exportXMLParameters := map[*types.Func]*types.Var{}
 	for _, function := range []*types.Func{
 		weeklyRequiredPackageFunc(t, inventory, "snapshotTaskForSchedulerUpgrade"),
-		weeklyRequiredPackageFunc(t, inventory, "verifyInstallTaskDefinitionBeforeDelete"),
-		weeklyRequiredPackageFunc(t, inventory, "installTaskMutationFailure"),
-		restore,
 	} {
 		signature, ok := function.Type().(*types.Signature)
 		if !ok || signature.Params().Len() == 0 || inventory.byFunction[function] == nil {
@@ -1127,6 +1132,7 @@ func weeklyProductionTypedGraphOptions(t *testing.T, inventory weeklyTypedInvent
 		approvedPackageCallbacks: map[*types.Var]weeklyPackageCallbackOrigin{
 			knownFolderResolver: {variable: knownFolderResolver, target: knownFolderTarget},
 		},
+		errorContracts: weeklyProductionNativeErrorContracts(t, inventory),
 	}
 }
 
@@ -1954,6 +1960,7 @@ func weeklyBuildTypedCallGraph(inventory *weeklyTypedInventory, options weeklyTy
 		approvedInterfaceDispatches:       map[string][]string{},
 		approvedFunctionResultDispatches:  map[string][]weeklyFunctionResultOrigin{},
 		approvedPackageCallbackDispatches: map[string][]weeklyPackageCallbackOrigin{},
+		standardErrorChainDispatches:      map[string][]string{},
 	}
 	processed := map[string]bool{}
 	for {
@@ -1999,6 +2006,21 @@ func weeklyBuildTypedCallGraph(inventory *weeklyTypedInventory, options weeklyTy
 					if weeklyApprovedSchedulerDispatch(selection, options.schedulerInterface) ||
 						weeklyApprovedExportXMLDispatch(*inventory, index, node, call, selection, options.approvedExportXMLParameters) {
 						graph.approvedInterfaceDispatches[key] = append(graph.approvedInterfaceDispatches[key], weeklyNodePosition(*inventory, call.Pos()))
+						return
+					}
+					if weeklyErrorUnwrapSelection(selection) {
+						resolver := weeklyNewErrorOriginResolver(*inventory, index, options.errorContracts)
+						targets, originErr := resolver.dispatchTargets(node, call)
+						if originErr != nil {
+							weeklyRecordUnresolved(&graph, *inventory, node, call, originErr.Error())
+							return
+						}
+						for _, target := range targets {
+							graph.edges[key][target.key] = true
+						}
+						if resolver.standardDispatch {
+							graph.standardErrorChainDispatches[key] = append(graph.standardErrorChainDispatches[key], weeklyNodePosition(*inventory, call.Pos()))
+						}
 						return
 					}
 					if value.Pkg() == inventory.pkg {
@@ -3133,18 +3155,30 @@ func TestWeeklyRefreshTaskMutationOwnerInventory(t *testing.T) {
 	if owner == nil {
 		t.Fatal("weekly transaction owner is missing")
 	}
-	for _, operation := range []string{"snapshotTaskForSchedulerUpgrade", "retainInstallTaskSnapshot", "verifyInstallTaskDefinitionBeforeDelete", "ExportXML", "Delete", "Create", "restoreWeeklyRefreshTaskAfterFailure"} {
+	for _, operation := range []string{"snapshotTaskForSchedulerUpgrade", "refuseSchedulerTaskReplacement", "ExportXML", "Create", "observeWeeklyRefreshTaskAfterFailure"} {
 		if !weeklyFunctionCalls(owner, operation) {
 			t.Fatalf("weekly transaction owner no longer contains %s", operation)
 		}
 	}
-	for _, name := range []string{"runWeeklyRefreshTaskTransaction", "restoreWeeklyRefreshTaskAfterFailure"} {
+	for _, name := range []string{"runWeeklyRefreshTaskTransaction", "observeWeeklyRefreshTaskAfterFailure", "refuseSchedulerTaskReplacement", "replaceTaskForSchedulerUpgrade"} {
 		fn := functions[name]
 		if fn == nil {
-			t.Fatalf("weekly recovery owner %s is missing", name)
+			t.Fatalf("scheduler creation/refusal owner %s is missing", name)
 		}
-		if weeklyFunctionCalls(fn, "ImportXML") {
-			t.Fatalf("weekly recovery still invokes replacing ImportXML in %s", name)
+		for _, operation := range []string{"Delete", "ImportXML", "CreateXMLIfAbsent", "verifyInstallTaskDefinitionBeforeDelete"} {
+			if weeklyFunctionCalls(fn, operation) {
+				t.Fatalf("scheduler creation/refusal owner %s invokes %s", name, operation)
+			}
+		}
+	}
+	refusal := functions["refuseSchedulerTaskReplacement"]
+	if !weeklyFunctionCalls(refusal, "retainInstallTaskSnapshot") {
+		t.Fatal("existing-task refusal does not retain the observed definition")
+	}
+	upgrade := functions["replaceTaskForSchedulerUpgrade"]
+	for _, operation := range []string{"refuseSchedulerTaskReplacement", "Create", "installTaskMutationFailure"} {
+		if !weeklyFunctionCalls(upgrade, operation) {
+			t.Fatalf("upgrade creation/refusal owner no longer contains %s", operation)
 		}
 	}
 }
@@ -3645,7 +3679,6 @@ func TestWeeklyRefreshReleaseSettlementMatrix(t *testing.T) {
 }
 
 func TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailure(t *testing.T) {
-	priorSchedule := &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 0, Hour: 3, Minute: 0}
 	desiredSchedule := &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 2, Hour: 14, Minute: 30}
 
 	for _, tt := range []struct {
@@ -3659,8 +3692,8 @@ func TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailur
 		t.Run(tt.name, func(t *testing.T) {
 			sch := &weeklyAtomicScheduler{
 				xml:                  map[string][]byte{},
-				failExportOnCall:     map[int]error{3: tt.failExport},
-				exportOverrideOnCall: map[int][]byte{3: tt.override},
+				failExportOnCall:     map[int]error{2: tt.failExport},
+				exportOverrideOnCall: map[int][]byte{2: tt.override},
 			}
 			installWeeklyAtomicHarness(t, sch)
 			originalSettings := setWeeklyScheduleForAtomicTest(t, "weekly Sun 03:00")
@@ -3668,8 +3701,6 @@ func TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailur
 			previousCanonical := testCanonicalMcphubPathOverride
 			testCanonicalMcphubPathOverride = canonical
 			t.Cleanup(func() { testCanonicalMcphubPathOverride = previousCanonical })
-			priorSpec := weeklyRefreshTaskSpec(canonical, priorSchedule)
-			sch.xml[WeeklyRefreshTaskName] = weeklyTaskXMLForSpec(priorSpec)
 
 			restoreStatus, err := NewAPI().ApplyWeeklyRefreshSchedule(desiredSchedule)
 			if err == nil {
@@ -3692,8 +3723,8 @@ func TestApplyWeeklyRefreshSchedule_PreservesUnverifiedTaskAfterPostCreateFailur
 			if !bytes.Equal(current, weeklyTaskXMLForSpec(weeklyRefreshTaskSpec(canonical, desiredSchedule))) {
 				t.Fatalf("unverified current task was replaced: %s", current)
 			}
-			if sch.deleteCalls != 1 || sch.importCalls != 0 || sch.restoreCalls != 0 {
-				t.Fatalf("post-create compensation mutated a task without ownership: deletes=%d imports=%d restores=%d", sch.deleteCalls, sch.importCalls, sch.restoreCalls)
+			if sch.createCalls != 1 || sch.deleteCalls != 0 || sch.importCalls != 0 || sch.restoreCalls != 0 {
+				t.Fatalf("post-create observation mutated or retried: creates=%d deletes=%d imports=%d restores=%d", sch.createCalls, sch.deleteCalls, sch.importCalls, sch.restoreCalls)
 			}
 		})
 	}

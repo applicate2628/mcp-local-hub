@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -193,15 +195,10 @@ func (r *recordingScheduler) ImportXML(name string, xml []byte) error {
 	return r.inner.ImportXML(name, xml)
 }
 
-// TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure guards the
-// "transient Create glitch silently disables weekly refresh" regression.
-// Old behavior: Delete → Create. A Create failure left the previous
-// task gone, and Register treats EnsureWeeklyRefreshTask errors as
-// non-fatal warnings. Every registered workspace silently loses
-// weekly-refresh scheduling until someone re-registers successfully.
-// New behavior: retain priorXML before Delete; on Create failure,
-// create-only XML registration restores an absent prior schedule.
-func TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure(t *testing.T) {
+// An existing task must be refused before Create, regardless of whether that
+// unreachable creation would succeed or fail. Register retains the refusal as
+// a diagnostic; it must never silently remove the shared schedule.
+func TestEnsureWeeklyRefreshTask_PreservesPriorBeforeReplacement(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
@@ -210,23 +207,26 @@ func TestEnsureWeeklyRefreshTask_PreservesPriorOnCreateFailure(t *testing.T) {
 	if err := a.EnsureWeeklyRefreshTask(); err != nil {
 		t.Fatalf("seed Ensure: %v", err)
 	}
-	// Force the NEXT Create to fail (transient scheduler glitch).
+	prior, err := h.fakeSch.ExportXML(WeeklyRefreshTaskName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Configure a creation failure that a refused replacement must not reach.
 	h.fakeSch.failCreateForName = WeeklyRefreshTaskName
 
-	err := a.EnsureWeeklyRefreshTask()
-	if err == nil {
-		t.Fatal("expected Ensure to error on Create failure")
+	err = a.EnsureWeeklyRefreshTask()
+	if !errors.Is(err, ErrSchedulerReplacementUnowned) {
+		t.Fatalf("Ensure error = %v, want existing-task refusal", err)
 	}
-	// The prior task's XML must have been restored without replacing an occupant.
 	xml, xerr := h.fakeSch.ExportXML(WeeklyRefreshTaskName)
-	if xerr != nil || len(xml) == 0 {
-		t.Errorf("prior task not restored after Create failure: xerr=%v xml-len=%d", xerr, len(xml))
+	if xerr != nil || !bytes.Equal(xml, prior) {
+		t.Errorf("refused replacement changed prior task: xerr=%v xml=%q", xerr, xml)
 	}
 }
 
-// TestEnsureWeeklyRefreshTask_Idempotent verifies EnsureWeeklyRefreshTask can
-// be called repeatedly without error and produces exactly one shared task.
-func TestEnsureWeeklyRefreshTask_Idempotent(t *testing.T) {
+// Matching observed fields do not establish ownership of a task generation.
+// Repeated Ensure therefore reports a refusal without registering it again.
+func TestEnsureWeeklyRefreshTask_RepeatedCallRefusesReplacement(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
@@ -234,8 +234,8 @@ func TestEnsureWeeklyRefreshTask_Idempotent(t *testing.T) {
 	if err := a.EnsureWeeklyRefreshTask(); err != nil {
 		t.Fatalf("first EnsureWeeklyRefreshTask: %v", err)
 	}
-	if err := a.EnsureWeeklyRefreshTask(); err != nil {
-		t.Fatalf("second EnsureWeeklyRefreshTask: %v", err)
+	if err := a.EnsureWeeklyRefreshTask(); !errors.Is(err, ErrSchedulerReplacementUnowned) {
+		t.Fatalf("second EnsureWeeklyRefreshTask = %v, want existing-task refusal", err)
 	}
 	// Exactly one shared task by the expected name.
 	count := 0
@@ -246,10 +246,8 @@ func TestEnsureWeeklyRefreshTask_Idempotent(t *testing.T) {
 			spec = fmt.Sprintf("%+v", s.Args)
 		}
 	}
-	if count != 2 {
-		// fakeScheduler tracks every Create call; the second Ensure should
-		// Delete-then-Create again, so we expect 2 Create entries.
-		t.Errorf("expected 2 Create calls for %s (idempotent replace), got %d", WeeklyRefreshTaskName, count)
+	if count != 1 {
+		t.Errorf("expected one fresh Create for %s, got %d", WeeklyRefreshTaskName, count)
 	}
 	// The args should invoke the hidden `workspace-weekly-refresh` CLI path
 	// that M5 Task 17 will wire. Until M5 this task fails at runtime; that

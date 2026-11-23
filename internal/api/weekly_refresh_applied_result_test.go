@@ -71,7 +71,7 @@ func TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition(t *testing.T) {
 		{name: "committed", wantStatus: "n/a"},
 		{name: "create-failed", failCreate: true, wantStatus: "n/a"},
 		{name: "create-failed-after-write", failCreate: true, writeThenFail: true, wantStatus: "degraded"},
-		{name: "prior-restored", failCreate: true, priorTask: true, wantStatus: "ok"},
+		{name: "existing-refused", priorTask: true, wantStatus: "n/a"},
 	} {
 		for _, release := range []struct {
 			name     string
@@ -83,6 +83,7 @@ func TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition(t *testing.T) {
 			{name: "both", weekly: true, settings: true},
 		} {
 			t.Run(outcome.name+"/"+release.name, func(t *testing.T) {
+				wantApplied := !outcome.failCreate && !outcome.priorTask
 				createCause := errors.New("injected unacknowledged weekly creation")
 				sch := &weeklyAtomicScheduler{
 					xml: map[string][]byte{}, createFailure: createCause,
@@ -122,14 +123,17 @@ func TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition(t *testing.T) {
 				if outcome.failCreate && !errors.Is(err, createCause) {
 					t.Fatalf("Apply lost original create cause: %v", err)
 				}
-				if IsAppliedLockReleaseUnconfirmed(err) != !outcome.failCreate {
-					t.Fatalf("Apply applied disposition = %t, want %t: %v", IsAppliedLockReleaseUnconfirmed(err), !outcome.failCreate, err)
+				if outcome.priorTask && (!errors.Is(err, ErrSchedulerReplacementUnowned) || errors.Is(err, createCause)) {
+					t.Fatalf("Apply refusal lost its cause or included an unreached creation: %v", err)
+				}
+				if IsAppliedLockReleaseUnconfirmed(err) != wantApplied {
+					t.Fatalf("Apply applied disposition = %t, want %t: %v", IsAppliedLockReleaseUnconfirmed(err), wantApplied, err)
 				}
 				settings, readErr := os.ReadFile(SettingsPath())
 				if readErr != nil {
 					t.Fatal(readErr)
 				}
-				if outcome.failCreate {
+				if !wantApplied {
 					if !bytes.Equal(settings, original) {
 						t.Fatalf("failed Apply did not restore exact settings bytes: %q", settings)
 					}
@@ -137,7 +141,7 @@ func TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition(t *testing.T) {
 					t.Fatalf("committed settings = %q, err=%v; want %q", value, getErr, desired.Canonical())
 				}
 				var wantXML []byte
-				if !outcome.failCreate || outcome.writeThenFail {
+				if wantApplied || outcome.writeThenFail {
 					wantXML = weeklyTaskXMLForSpec(weeklyRefreshTaskSpec(canonical, desired))
 				} else if outcome.priorTask {
 					wantXML = priorXML
@@ -145,7 +149,40 @@ func TestApplyWeeklyRefreshSchedule_AppliedReleaseDisposition(t *testing.T) {
 				if current := sch.xml[WeeklyRefreshTaskName]; !bytes.Equal(current, wantXML) {
 					t.Fatalf("settled task = %s, want %s", current, wantXML)
 				}
+				wantCreates := 1
+				if outcome.priorTask {
+					wantCreates = 0
+				}
+				if sch.createCalls != wantCreates || sch.deleteCalls != 0 || sch.restoreCalls != 0 || sch.importCalls != 0 {
+					t.Fatalf("Apply mutated beyond fresh creation: create/delete/restore/import=%d/%d/%d/%d", sch.createCalls, sch.deleteCalls, sch.restoreCalls, sch.importCalls)
+				}
 			})
 		}
+	}
+}
+
+func TestApplyWeeklyRefreshSchedule_ExistingRefusalRestoresSettings(t *testing.T) {
+	sch := &weeklyAtomicScheduler{xml: map[string][]byte{}}
+	root, canonical := installWeeklyAppliedResultHarness(t, sch)
+	original := []byte("# keep exact preferences\ndaemons.weekly_schedule: weekly Sun 03:00\nunknown-key: retained\n")
+	if err := WriteStateFileBytesAtomic(SettingsPath(), original); err != nil {
+		t.Fatal(err)
+	}
+	prior := weeklyTaskXMLForSpec(weeklyRefreshTaskSpec(canonical, nil))
+	sch.xml[WeeklyRefreshTaskName] = bytes.Clone(prior)
+	status, err := NewAPI().ApplyWeeklyRefreshSchedule(&ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 2, Hour: 14, Minute: 30})
+	var refusal *SchedulerReplacementRefusedError
+	if status != "n/a" || !errors.Is(err, ErrSchedulerReplacementUnowned) || !errors.As(err, &refusal) || IsAppliedLockReleaseUnconfirmed(err) {
+		t.Fatalf("Apply result = %q, %v, want unapplied refusal", status, err)
+	}
+	if refusal.SnapshotPath != readInstallRecoverySnapshot(t, root, WeeklyRefreshTaskName, prior) {
+		t.Fatal("Apply refusal lost the observed definition")
+	}
+	settings, readErr := os.ReadFile(SettingsPath())
+	if readErr != nil || !bytes.Equal(settings, original) {
+		t.Fatalf("Apply did not restore exact settings bytes: err=%v bytes=%q", readErr, settings)
+	}
+	if !bytes.Equal(sch.xml[WeeklyRefreshTaskName], prior) || sch.createCalls != 0 || sch.deleteCalls != 0 || sch.restoreCalls != 0 || sch.importCalls != 0 {
+		t.Fatalf("Apply refusal mutated scheduler state: create/delete/restore/import=%d/%d/%d/%d", sch.createCalls, sch.deleteCalls, sch.restoreCalls, sch.importCalls)
 	}
 }

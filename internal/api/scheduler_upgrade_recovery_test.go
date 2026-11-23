@@ -15,82 +15,47 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// Both public upgrade branches must retain the original definition before
-// deleting it and must preserve any occupant after a failed Create. The fake
-// exposes applied-but-failed replies as well as a competitor at restoration.
-func TestSchedulerUpgradeRecovery(t *testing.T) {
+// Both public upgrade branches must refuse an existing registration before
+// any mutation. Recovery support and a usable snapshot do not grant authority
+// to delete a generation by its reusable name.
+func TestSchedulerUpgradeExistingTaskRefusal(t *testing.T) {
 	prior := []byte("<Task>original-Привет</Task>")
-	foreign := []byte("<Task>foreign</Task>")
-	candidate := []byte("<Task>candidate</Task>")
-	createErr := errors.New("fixture: create failed")
-	restoreErr := errors.New("fixture: restore reply unavailable")
+	createCause := errors.New("unreached create failure")
 	for _, kind := range []string{"server", "lazy_proxy"} {
 		t.Run(kind, func(t *testing.T) {
-			for _, tc := range []struct {
-				name                                           string
-				createWrites, restoreWrites, occupant, wantXML []byte
-				restoreErr, wantErr                            error
-			}{
-				{name: "restored", wantXML: prior},
-				{name: "restore_failed", restoreErr: restoreErr, wantErr: restoreErr},
-				{name: "create_applied_reply_lost", createWrites: candidate, wantXML: candidate, wantErr: scheduler.ErrTaskAlreadyExists},
-				{name: "concurrent_occupant", occupant: foreign, wantXML: foreign, wantErr: scheduler.ErrTaskAlreadyExists},
-				{name: "restore_applied_reply_lost", restoreWrites: prior, restoreErr: restoreErr, wantXML: prior, wantErr: restoreErr},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
-					name := `\mcp-local-hub-upgradesnapshot-alpha`
-					if kind == "lazy_proxy" {
-						name = `\mcp-local-hub-lsp-snapshot-python`
-					}
-					f := &upgradeSnapshotScheduler{
-						t: t, name: name, snapshot: prior, createErr: createErr,
-						xml:     map[string][]byte{name: bytes.Clone(prior)},
-						deletes: map[string]int{}, creates: map[string]int{}, imports: map[string]int{},
-						createWrites: tc.createWrites, restoreWrites: tc.restoreWrites, restoreErr: tc.restoreErr,
-					}
-					f.beforeDelete = func(task string) {
-						if task == name {
-							assertUpgradeRecoverySnapshot(t, name, prior)
-						}
-					}
-					f.beforeRestore = func(task string) {
-						if tc.occupant != nil {
-							f.xml[task] = bytes.Clone(tc.occupant)
-						}
-					}
-					canonical := filepath.Join(t.TempDir(), mcphubShortName)
-					var result SchedulerUpgradeResult
-					if kind == "server" {
-						result = runServerUpgradeSnapshotFixture(t, f, canonical)
-					} else {
-						bare := strings.TrimPrefix(name, `\`)
-						result = *upgradeLazyProxyTask(f, name, bare, canonical, map[string]WorkspaceEntry{
-							bare: {WorkspacePath: filepath.Join(t.TempDir(), "workspace"), Language: "python", Port: 19321},
-						})
-					}
-					path := assertUpgradeRecoverySnapshot(t, name, prior)
-					if result.NewCmd != "" || !strings.Contains(result.Err, createErr.Error()) ||
-						(tc.wantErr != nil && !strings.Contains(result.Err, tc.wantErr.Error())) ||
-						path == "" || !strings.Contains(result.Err, strconv.Quote(path)) {
-						t.Errorf("RECOVERY-RESULT: missing original/recovery error or retained snapshot, or false success: %+v", result)
-					}
-					if tc.wantErr != nil && strings.Contains(result.Err, "prior definition registered again") {
-						t.Error("RECOVERY-RESULT: uncertain restoration reported as acknowledged")
-					}
-					if !bytes.Equal(f.xml[name], tc.wantXML) || f.deletes[name] != 1 || f.creates[name] != 1 || f.restores != 1 || f.imports[name] != 0 {
-						t.Errorf("RECOVERY-STATE: task=%q want=%q delete/create/restore/import=%d/%d/%d/%d", f.xml[name], tc.wantXML, f.deletes[name], f.creates[name], f.restores, f.imports[name])
-					}
+			t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
+			name := `\mcp-local-hub-upgradesnapshot-alpha`
+			if kind == "lazy_proxy" {
+				name = `\mcp-local-hub-lsp-snapshot-python`
+			}
+			f := &upgradeSnapshotScheduler{
+				t: t, name: name, snapshot: prior, createErr: createCause,
+				xml:     map[string][]byte{name: bytes.Clone(prior)},
+				deletes: map[string]int{}, creates: map[string]int{}, imports: map[string]int{},
+			}
+			canonical := filepath.Join(t.TempDir(), mcphubShortName)
+			var result SchedulerUpgradeResult
+			if kind == "server" {
+				result = runServerUpgradeSnapshotFixture(t, f, canonical)
+			} else {
+				bare := strings.TrimPrefix(name, `\`)
+				result = *upgradeLazyProxyTask(f, name, bare, canonical, map[string]WorkspaceEntry{
+					bare: {WorkspacePath: filepath.Join(t.TempDir(), "workspace"), Language: "python", Port: 19321},
 				})
+			}
+			path := assertUpgradeRecoverySnapshot(t, name, prior)
+			if result.NewCmd != "" || !strings.Contains(result.Err, ErrSchedulerReplacementUnowned.Error()) ||
+				strings.Contains(result.Err, createCause.Error()) || path == "" || !strings.Contains(result.Err, strconv.Quote(path)) {
+				t.Fatalf("refusal lost the retained definition or reported a mutation outcome: %+v", result)
+			}
+			if !bytes.Equal(f.xml[name], prior) || f.deletes[name] != 0 || f.creates[name] != 0 || f.restores != 0 || f.imports[name] != 0 {
+				t.Fatalf("refusal changed the task: current=%q delete/create/restore/import=%d/%d/%d/%d", f.xml[name], f.deletes[name], f.creates[name], f.restores, f.imports[name])
 			}
 		})
 	}
 }
 
-// Admission failures must precede any task mutation. These exercise the shared
-// replacement owner through the lazy-proxy caller, including an absent task
-// that needs neither a snapshot nor restoration capability.
-func TestSchedulerUpgradeRecoveryAdmission(t *testing.T) {
+func TestSchedulerUpgradeReplacementAdmission(t *testing.T) {
 	for _, mode := range []string{"missing_capability", "snapshot_storage_failure", "absent"} {
 		t.Run(mode, func(t *testing.T) {
 			root := hardenedTempDir(t)
@@ -117,51 +82,57 @@ func TestSchedulerUpgradeRecoveryAdmission(t *testing.T) {
 			})
 			if mode == "absent" {
 				if result.Err != "" || result.NewCmd == "" || f.creates[name] != 1 || f.deletes[name] != 0 || f.restores != 0 {
-					t.Errorf("RECOVERY-ABSENCE: unexpected refusal or mutation: %+v", result)
+					t.Errorf("clean absence result=%+v, want one create-only registration", result)
 				}
 				return
 			}
-			if result.Err == "" || result.NewCmd != "" || !bytes.Equal(f.xml[name], prior) || f.creates[name] != 0 || f.deletes[name] != 0 || f.restores != 0 || f.imports[name] != 0 {
-				t.Errorf("RECOVERY-ADMISSION: unavailable recovery did not preserve original task: %+v", result)
+			if !strings.Contains(result.Err, ErrSchedulerReplacementUnowned.Error()) || result.NewCmd != "" ||
+				!bytes.Equal(f.xml[name], prior) || f.creates[name] != 0 || f.deletes[name] != 0 || f.restores != 0 || f.imports[name] != 0 {
+				t.Fatalf("replacement admission did not preserve the original task: %+v", result)
 			}
-			if mode == "missing_capability" && !strings.Contains(result.Err, scheduler.ErrNotImplemented.Error()) {
-				t.Errorf("RECOVERY-ADMISSION: lost capability error: %+v", result)
+			if mode == "missing_capability" && strings.Contains(result.Err, scheduler.ErrNotImplemented.Error()) {
+				t.Fatalf("refusal incorrectly depended on restoration capability: %+v", result)
+			}
+			if mode == "snapshot_storage_failure" && (strings.Contains(result.Err, "snapshot retained") || !strings.Contains(result.Err, "retain observed definition")) {
+				t.Fatalf("snapshot failure was lost or reported as retained: %+v", result)
 			}
 		})
 	}
 }
 
-func TestSchedulerUpgradeRevalidation(t *testing.T) {
-	for _, mode := range []string{"changed", "unreadable", "empty"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Cleanup(SetDaemonStateRootForTest(hardenedTempDir(t)))
-			name := "mcp-local-hub-lsp-revalidate-python"
-			prior := []byte("<Task>original</Task>")
-			foreign := []byte("<Task>competing definition</Task>")
-			f := &upgradeSnapshotScheduler{t: t, name: name, snapshot: prior,
-				xml: map[string][]byte{name: prior}, deletes: map[string]int{}, creates: map[string]int{}, imports: map[string]int{}}
-			want := prior
-			f.reexport = func() ([]byte, error) {
-				if mode == "unreadable" {
-					return nil, scheduler.ErrPermissionDenied
-				}
-				if mode == "empty" {
-					return nil, nil
-				}
-				f.xml[name] = bytes.Clone(foreign)
-				return foreign, nil
+func TestSchedulerUpgradeFreshCreateFailureObservation(t *testing.T) {
+	createCause := errors.New("fixture create result unavailable")
+	observeCause := errors.New("fixture observation unavailable")
+	for _, tc := range []struct {
+		name       string
+		current    []byte
+		observeErr error
+	}{
+		{name: "confirmed-absence"},
+		{name: "create-applied-reply-lost", current: []byte("<Task>candidate</Task>")},
+		{name: "competing-occupant", current: []byte("<Task>foreign</Task>")},
+		{name: "observation-failed", observeErr: observeCause},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "mcp-local-hub-lsp-fresh-python"
+			f := &upgradeSnapshotScheduler{t: t, name: name, exportErr: scheduler.ErrTaskNotFound,
+				xml: map[string][]byte{}, deletes: map[string]int{}, creates: map[string]int{}, imports: map[string]int{},
+				createErr: createCause, createWrites: tc.current,
 			}
-			if mode == "changed" {
-				want = foreign
+			if tc.observeErr != nil {
+				f.reexport = func() ([]byte, error) { return nil, tc.observeErr }
 			}
-			result := upgradeLazyProxyTask(f, name, name, filepath.Join(t.TempDir(), mcphubShortName), map[string]WorkspaceEntry{
-				name: {WorkspacePath: filepath.Join(t.TempDir(), "workspace"), Language: "python", Port: 19321},
-			})
-			path := assertUpgradeRecoverySnapshot(t, name, prior)
-			if !strings.Contains(result.Err, "revalidate task") || result.NewCmd != "" ||
-				!strings.Contains(result.Err, strconv.Quote(path)) || !bytes.Equal(f.xml[name], want) ||
-				f.deletes[name] != 0 || f.creates[name] != 0 || f.restores != 0 || f.imports[name] != 0 {
-				t.Errorf("RECOVERY-REVALIDATE: stale or unreadable task reached mutation: result=%+v current=%q", result, f.xml[name])
+			err := replaceTaskForSchedulerUpgrade(f, scheduler.TaskSpec{Name: name}, nil)
+			if !errors.Is(err, createCause) || (tc.observeErr != nil && !errors.Is(err, tc.observeErr)) {
+				t.Fatalf("fresh creation lost a cause: %v", err)
+			}
+			var incomplete *InstallSchedulerRollbackIncompleteError
+			wantIncomplete := tc.current != nil || tc.observeErr != nil
+			if errors.As(err, &incomplete) != wantIncomplete {
+				t.Fatalf("fresh creation uncertainty = %v, want incomplete=%t", err, wantIncomplete)
+			}
+			if f.creates[name] != 1 || f.deletes[name] != 0 || f.restores != 0 || f.imports[name] != 0 || !bytes.Equal(f.xml[name], tc.current) {
+				t.Fatalf("fresh creation observation mutated or retried: current=%q create/delete/restore/import=%d/%d/%d/%d", f.xml[name], f.creates[name], f.deletes[name], f.restores, f.imports[name])
 			}
 		})
 	}

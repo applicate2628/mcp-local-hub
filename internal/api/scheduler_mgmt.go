@@ -21,14 +21,11 @@ type SchedulerUpgradeResult struct {
 	Err      string
 }
 
-// SchedulerUpgrade regenerates every mcp-local-hub scheduler task using the
-// current executable path. Useful after:
-//   - moving the binary to a new location
-//   - renaming the binary (e.g. mcp.exe → mcphub.exe)
-//   - bin/ reorganization
-//
-// Preserves scheduler task names and trigger configurations; only the
-// <Command> and <WorkingDirectory> fields are updated.
+// SchedulerUpgrade resolves each listed mcp-local-hub task's intended current
+// specification. Existing registrations are preserved with a per-task refusal:
+// the scheduler cannot condition their replacement on an observed generation.
+// A task that is absent when exported can be registered with Create's atomic
+// name-conflict check. Other task rows continue after an individual refusal.
 func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 	canonicalPath, err := ensureCanonicalMcphubPresent()
 	if err != nil {
@@ -52,9 +49,7 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		// Workspace-scoped shared weekly-refresh task:
 		// "mcp-local-hub-workspace-weekly-refresh". parseTaskName would
 		// see server="workspace" and try to load a nonexistent manifest,
-		// but the task's Command DOES need rewriting to the new canonical
-		// mcphub path when the binary moves — otherwise weekly refreshes
-		// silently stop working after the upgrade.
+		// so this task needs its own spec resolver and existing-task refusal.
 		if normalized == WeeklyRefreshTaskName {
 			if r := upgradeWorkspaceWeeklyRefreshTask(sch, t.Name, canonicalPath); r != nil {
 				results = append(results, *r)
@@ -63,8 +58,7 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		}
 		// Workspace-scoped lazy-proxy tasks: "mcp-local-hub-lsp-<key>-<lang>".
 		// parseTaskName reports server="lsp" which also lacks a manifest.
-		// Cannot reuse the per-server manifest path, but the Command still
-		// needs rewriting so the new logon spawns the relocated mcphub.
+		// Cannot reuse the per-server manifest path for fresh registration.
 		// Args are reconstructed from the registry entry (port, workspace,
 		// language) which is already the source of truth for these tasks.
 		if IsLazyProxyTaskName(normalized) {
@@ -76,10 +70,7 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		srv, dmn := parseTaskName(t.Name)
 		// Hub-wide weekly-refresh ("mcp-local-hub-weekly-refresh") parses
 		// as ("", "weekly-refresh") — no per-server manifest to re-read,
-		// no Command rewrite needed (it already points at canonical mcphub
-		// and runs `restart --all`). Leave it untouched; the scheduler
-		// upgrade flow is specifically about per-server daemon tasks
-		// getting their Command rewired after the binary moves.
+		// so this separate legacy task is outside this upgrade owner.
 		if srv == "" && dmn == "weekly-refresh" {
 			continue
 		}
@@ -113,18 +104,16 @@ func (a *API) SchedulerUpgrade() ([]SchedulerUpgradeResult, error) {
 		}
 		_ = m // referenced for future expansion (env, triggers)
 
-		// Snapshot the existing XML so a failed create can restore the
-		// prior task instead of leaving the user with nothing.
+		// Existing XML is retained with a refusal. Only clean absence admits
+		// a fresh creation; the list result does not grant deletion authority.
 		priorXML, err := snapshotTaskForSchedulerUpgrade(sch, t.Name)
 		if err != nil {
 			results = append(results, SchedulerUpgradeResult{TaskName: t.Name, Err: fmt.Sprintf("export: %v", err)})
 			continue
 		}
 		// Anchor WorkingDir at the canonical install dir. The install
-		// flow (executeInstallTo) does the same — scheduler upgrade
-		// rewrites Command + Args + WorkingDir together so tasks built
-		// by a throwaway 'mcphub install' in %TEMP' don't keep pointing
-		// at a deleted cwd after the upgrade.
+		// flow (executeInstallTo) does the same. A newly registered task must
+		// not inherit a temporary install process's working directory.
 		spec := scheduler.TaskSpec{
 			Name:             t.Name,
 			Description:      "mcp-local-hub: " + m.Name,
@@ -166,40 +155,16 @@ func snapshotTaskForSchedulerUpgrade(sch interface {
 	return bytes.Clone(priorXML), nil
 }
 
-// replaceTaskForSchedulerUpgrade retains recovery material before replacement.
-// XML equality only rejects an observed change; it does not own the generation
-// between the final observation and Delete. Restoration instead relies on the
-// scheduler's atomic create-only contract and never replaces an occupant.
+// replaceTaskForSchedulerUpgrade refuses an existing registration because the
+// scheduler cannot make deletion conditional on its observed generation. Only a
+// previously absent name reaches Create, whose create-only contract preserves a
+// competing occupant. Uncertain creation results never authorize compensation.
 func replaceTaskForSchedulerUpgrade(sch scheduler.Scheduler, spec scheduler.TaskSpec, priorXML []byte) error {
-	var recovery scheduler.XMLCreator
-	var snapshotPath string
 	if len(priorXML) > 0 {
-		var ok bool
-		recovery, ok = sch.(scheduler.XMLCreator)
-		if !ok {
-			return fmt.Errorf("restore task %s without replacement: %w", spec.Name, scheduler.ErrNotImplemented)
-		}
-		var err error
-		snapshotPath, err = retainInstallTaskSnapshot(spec.Name, priorXML)
-		if err != nil {
-			return fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err)
-		}
-		if err := verifyInstallTaskDefinitionBeforeDelete(sch, spec.Name, priorXML); err != nil {
-			return fmt.Errorf("revalidate task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err)
-		}
-		if err := sch.Delete(spec.Name); err != nil {
-			cause := fmt.Errorf("delete: %w (recovery snapshot retained at %q)", err, snapshotPath)
-			return installTaskMutationFailure(sch, spec.Name, priorXML, cause)
-		}
+		return refuseSchedulerTaskReplacement(spec.Name, priorXML)
 	}
 	if err := sch.Create(spec); err != nil {
-		if recovery != nil {
-			return &InstallTaskRecoveryError{
-				TaskName: spec.Name, SnapshotPath: snapshotPath, Cause: err,
-				Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
-			}
-		}
-		return fmt.Errorf("create: %w", err)
+		return installTaskMutationFailure(sch, spec.Name, nil, fmt.Errorf("create: %w", err))
 	}
 	return nil
 }
@@ -281,28 +246,14 @@ func resolveSchedulerUpgradeServerDaemon(taskName, hintServer, hintDaemon string
 	}
 }
 
-// upgradeWorkspaceWeeklyRefreshTask rewrites the shared workspace
-// weekly-refresh task's Command to canonicalPath. Called from
-// SchedulerUpgrade for the `mcp-local-hub-workspace-weekly-refresh`
-// task — that task has no corresponding manifest so the main upgrade
-// loop can't use loadManifestForServer, but the Command path still
-// needs refreshing after a binary move. Snapshot + restore on failure
-// mirrors the rest of the upgrade loop.
+// upgradeWorkspaceWeeklyRefreshTask delegates to the shared weekly owner.
+// Existing registrations are refused; an absent task receives the default
+// weekly spec because there is no previous trigger to preserve.
 func upgradeWorkspaceWeeklyRefreshTask(sch scheduler.Scheduler, taskName, canonicalPath string) *SchedulerUpgradeResult {
 	_, err := runWeeklyRefreshTaskTransaction(sch, weeklyRefreshMutation{
 		taskName: taskName,
-		desired: func(priorXML []byte, exists bool) (scheduler.TaskSpec, error) {
-			trigger := &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
-			if exists {
-				var triggerErr error
-				trigger, triggerErr = weeklyTaskTriggerFromXML(priorXML)
-				if triggerErr != nil {
-					return scheduler.TaskSpec{}, fmt.Errorf("parse prior weekly trigger: %w", triggerErr)
-				}
-			}
-			return weeklyRefreshTaskSpec(canonicalPath, &ScheduleSpec{
-				Kind: ScheduleWeekly, DayOfWeek: trigger.DayOfWeek, Hour: trigger.HourLocal, Minute: trigger.MinuteLocal,
-			}), nil
+		desired: func([]byte, bool) (scheduler.TaskSpec, error) {
+			return weeklyRefreshTaskSpec(canonicalPath, nil), nil
 		},
 	})
 	if err != nil {
@@ -314,8 +265,8 @@ func upgradeWorkspaceWeeklyRefreshTask(sch scheduler.Scheduler, taskName, canoni
 	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
 }
 
-// upgradeLazyProxyTask rewrites a `mcp-local-hub-lsp-<key>-<lang>`
-// scheduler task's Command + Args to the new canonicalPath. Args
+// upgradeLazyProxyTask resolves a `mcp-local-hub-lsp-<key>-<lang>`
+// task's Command + Args and refuses replacement of an existing task. Args
 // (port, workspace path, language) come from the registry entry
 // which is the source of truth for these tasks. Missing registry
 // entry surfaces as an error — upgrading a task with no registry

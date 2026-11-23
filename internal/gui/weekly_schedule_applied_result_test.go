@@ -29,6 +29,7 @@ type weeklyScheduleRouteScheduler struct {
 	createCalls   int
 	deleteCalls   int
 	restoreCalls  int
+	importCalls   int
 }
 
 func (s *weeklyScheduleRouteScheduler) Create(spec scheduler.TaskSpec) error {
@@ -66,7 +67,8 @@ func (s *weeklyScheduleRouteScheduler) CreateXMLIfAbsent(_ string, raw []byte) e
 	return nil
 }
 
-func (*weeklyScheduleRouteScheduler) ImportXML(string, []byte) error {
+func (s *weeklyScheduleRouteScheduler) ImportXML(string, []byte) error {
+	s.importCalls++
 	return errors.New("unexpected replacing XML import")
 }
 
@@ -109,9 +111,10 @@ func TestWeeklyScheduleHandler_RealApplyReleaseSettlement(t *testing.T) {
 		{name: "committed-both-releases", weeklyRelease: true, settingsRelease: true, wantStatus: "n/a"},
 		{name: "failed-create-weekly-release", weeklyRelease: true, failCreate: true, wantStatus: "n/a"},
 		{name: "create-error-after-write-both-releases", weeklyRelease: true, settingsRelease: true, failCreate: true, writeThenFail: true, wantStatus: "degraded"},
-		{name: "prior-restored-settings-release", settingsRelease: true, failCreate: true, priorTask: true, wantStatus: "ok"},
+		{name: "existing-refused-settings-release", settingsRelease: true, priorTask: true, wantStatus: "n/a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			wantApplied := !tc.failCreate && !tc.priorTask
 			localData := t.TempDir()
 			root := apitest.HardenedDir(t, filepath.Join(localData, "mcp-local-hub"))
 			t.Setenv("LOCALAPPDATA", localData)
@@ -153,7 +156,7 @@ func TestWeeklyScheduleHandler_RealApplyReleaseSettlement(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 			wantHTTPStatus := http.StatusOK
-			if tc.failCreate {
+			if !wantApplied {
 				wantHTTPStatus = http.StatusInternalServerError
 			}
 			if rec.Code != wantHTTPStatus {
@@ -163,10 +166,10 @@ func TestWeeklyScheduleHandler_RealApplyReleaseSettlement(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
-			if response["updated"] != !tc.failCreate || response["restore_status"] != tc.wantStatus || len(response) != 5 {
-				t.Fatalf("Apply response = %#v, want applied=%t restore=%q and five fields", response, !tc.failCreate, tc.wantStatus)
+			if response["updated"] != wantApplied || response["restore_status"] != tc.wantStatus || len(response) != 5 {
+				t.Fatalf("Apply response = %#v, want applied=%t restore=%q and five fields", response, wantApplied, tc.wantStatus)
 			}
-			if tc.failCreate {
+			if !wantApplied {
 				if response["error"] != "scheduler_swap_failed" || response["detail"] != "internal error" || response["manual_recovery"] != weeklyScheduleReleaseUnconfirmedRecoveryHint {
 					t.Fatalf("failed Apply response = %#v", response)
 				}
@@ -182,11 +185,15 @@ func TestWeeklyScheduleHandler_RealApplyReleaseSettlement(t *testing.T) {
 				Command: canonical, Args: []string{"workspace-weekly-refresh"}, WorkingDir: root,
 				WeeklyTrigger: &scheduler.WeeklyTrigger{DayOfWeek: 2, HourLocal: 14, MinuteLocal: 30},
 			}
-			if sch.createCalls != 1 || !reflect.DeepEqual(sch.created, wantSpec) {
-				t.Fatalf("real Apply requested calls=%d spec=%+v, want one requested weekly task", sch.createCalls, sch.created)
+			wantCreates := 1
+			if tc.priorTask {
+				wantCreates = 0
+			}
+			if sch.createCalls != wantCreates || (wantCreates > 0 && !reflect.DeepEqual(sch.created, wantSpec)) {
+				t.Fatalf("real Apply requested calls=%d spec=%+v, want %d fresh creations", sch.createCalls, sch.created, wantCreates)
 			}
 			var wantXML []byte
-			if !tc.failCreate || tc.writeThenFail {
+			if wantApplied || tc.writeThenFail {
 				wantXML = weeklyScheduleRouteTaskXML(wantSpec)
 			} else if tc.priorTask {
 				wantXML = priorXML
@@ -194,18 +201,14 @@ func TestWeeklyScheduleHandler_RealApplyReleaseSettlement(t *testing.T) {
 			if !bytes.Equal(sch.currentXML, wantXML) {
 				t.Fatalf("settled task = %s, want %s", sch.currentXML, wantXML)
 			}
-			wantDeletes, wantRestores := 0, 0
-			if tc.priorTask {
-				wantDeletes, wantRestores = 1, 1
-			}
-			if sch.deleteCalls != wantDeletes || sch.restoreCalls != wantRestores {
-				t.Fatalf("task delete/restore calls = %d/%d, want %d/%d", sch.deleteCalls, sch.restoreCalls, wantDeletes, wantRestores)
+			if sch.deleteCalls != 0 || sch.restoreCalls != 0 || sch.importCalls != 0 {
+				t.Fatalf("task delete/restore/import calls = %d/%d/%d, want none", sch.deleteCalls, sch.restoreCalls, sch.importCalls)
 			}
 			persisted, err := os.ReadFile(api.SettingsPath())
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.failCreate {
+			if !wantApplied {
 				if !bytes.Equal(persisted, originalSettings) {
 					t.Fatalf("failed Apply did not restore exact preferences: %q", persisted)
 				}

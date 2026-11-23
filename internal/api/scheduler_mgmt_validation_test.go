@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,7 @@ func (s *exportErrScheduler) ExportXML(name string) ([]byte, error) {
 func (s *exportErrScheduler) ImportXML(name string, xml []byte) error { return nil }
 
 func TestUpgradeWorkspaceWeeklyRefreshTask_AbortOnExportError(t *testing.T) {
+	installSwapWeeklyHarness(t)
 	sch := &exportErrScheduler{exportErr: errors.New("RPC failure")}
 	res := upgradeWorkspaceWeeklyRefreshTask(sch, WeeklyRefreshTaskName, "/tmp/mcphub")
 	if res == nil || !strings.Contains(res.Err, "export:") {
@@ -81,31 +83,24 @@ func TestUpgradeHelpers_AllowNotFoundExport(t *testing.T) {
 	}
 }
 
-func TestSchedulerUpgradePreservesWeeklyTrigger(t *testing.T) {
+func TestSchedulerUpgradeRefusesExistingWeeklyTask(t *testing.T) {
 	canonical := filepath.Join(t.TempDir(), "mcphub.exe")
 	priorSpec := weeklyRefreshTaskSpec(filepath.Join(t.TempDir(), "old-mcphub.exe"), &ScheduleSpec{
 		Kind: ScheduleWeekly, DayOfWeek: 5, Hour: 9, Minute: 45,
 	})
-	sch := &weeklyAtomicScheduler{xml: map[string][]byte{
-		WeeklyRefreshTaskName: weeklyTaskXMLForSpec(priorSpec),
-	}}
+	prior := weeklyTaskXMLForSpec(priorSpec)
+	sch := &weeklyAtomicScheduler{xml: map[string][]byte{WeeklyRefreshTaskName: bytes.Clone(prior)}}
 	installWeeklyAtomicHarness(t, sch)
 
 	result := upgradeWorkspaceWeeklyRefreshTask(sch, WeeklyRefreshTaskName, canonical)
-	if result == nil || result.Err != "" || result.NewCmd != canonical {
-		t.Fatalf("upgrade result = %+v, want successful canonical-path update", result)
+	if result == nil || !strings.Contains(result.Err, ErrSchedulerReplacementUnowned.Error()) || result.NewCmd != "" {
+		t.Fatalf("upgrade result = %+v, want existing-task refusal", result)
 	}
 	current, err := sch.ExportXML(WeeklyRefreshTaskName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := weeklyTaskTriggerFromXML(current)
-	if err != nil || trigger.DayOfWeek != 5 || trigger.HourLocal != 9 || trigger.MinuteLocal != 45 {
-		t.Fatalf("upgraded weekly trigger = %+v err=%v, want Friday 09:45", trigger, err)
-	}
-	want := weeklyRefreshTaskSpec(canonical, &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 5, Hour: 9, Minute: 45})
-	matches, err := weeklyTaskXMLMatchesSpec(current, want)
-	if err != nil || !matches {
-		t.Fatalf("upgraded task does not preserve trigger while replacing command/workdir: matches=%t err=%v xml=%s", matches, err, current)
+	if !bytes.Equal(current, prior) || sch.createCalls != 0 || sch.deleteCalls != 0 || sch.restoreCalls != 0 || sch.importCalls != 0 {
+		t.Fatalf("refused upgrade changed prior trigger or command: current=%q create/delete/restore/import=%d/%d/%d/%d", current, sch.createCalls, sch.deleteCalls, sch.restoreCalls, sch.importCalls)
 	}
 }

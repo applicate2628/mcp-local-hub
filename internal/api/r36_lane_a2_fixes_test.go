@@ -368,22 +368,22 @@ func TestSelectSupervisorOwnedTargets_ServerOnly_ArgvBeatsLongestPrefix(t *testi
 }
 
 // ---------------------------------------------------------------------------
-// FIX 5 — SchedulerUpgrade must recreate a hyphenated-daemon task with the
+// FIX 5 — SchedulerUpgrade must create an absent hyphenated-daemon task with the
 // CORRECT (server, daemon) Args resolved from the task name (exact-name match
 // against installed manifests), not parseTaskName's lossy last-hyphen split.
 // ---------------------------------------------------------------------------
 
-// TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs locks FIX 5.
+// TestSchedulerUpgrade_HyphenatedDaemon_CreatesAbsentTaskWithCorrectArgs locks FIX 5.
 // Task \mcp-local-hub-demo-alpha-beta belongs to installed server demo (daemon
 // alpha-beta); sibling server demo-alpha is also installed (daemon gamma, which
-// does NOT match the task name). The upgrade must Delete+Create the task with
-// Args [daemon --server demo --daemon alpha-beta].
+// does NOT match the task name). The listed task is absent at snapshot time;
+// the admitted Create must use Args [daemon --server demo --daemon alpha-beta].
 //
 // Negative-control (pre-fix): parseTaskName splits to demo-alpha/beta and the
 // recreated task carries Args [daemon --server demo-alpha --daemon beta] →
 // spawns the wrong server/daemon. Asserting --server demo --daemon alpha-beta
 // fails pre-fix.
-func TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs(t *testing.T) {
+func TestSchedulerUpgrade_HyphenatedDaemon_CreatesAbsentTaskWithCorrectArgs(t *testing.T) {
 	daemonIntentTestHelper(t)
 	// demo declares daemon alpha-beta (which produces the exact task name);
 	// demo-alpha declares an unrelated daemon gamma (so the exact-name match is
@@ -406,14 +406,16 @@ func TestSchedulerUpgrade_HyphenatedDaemon_RecreatesWithCorrectArgs(t *testing.T
 
 	f := newInstallFakeScheduler()
 	f.listSeed = []scheduler.TaskStatus{{Name: `\mcp-local-hub-demo-alpha-beta`}}
-	// Seed the task as existing so ExportXML/Delete behave like a real upgrade.
-	f.tasks[`\mcp-local-hub-demo-alpha-beta`] = true
-	f.xml = map[string][]byte{`\mcp-local-hub-demo-alpha-beta`: []byte("<Task/>")}
+	// List can observe a task that disappears before ExportXML. Leave the
+	// in-memory registration absent so this checks the admitted Create path.
 	installFakeScheduler(t, f)
 
 	results, err := NewAPI().SchedulerUpgrade()
 	if err != nil {
 		t.Fatalf("SchedulerUpgrade: %v", err)
+	}
+	if len(results) != 1 || results[0].Err != "" || results[0].NewCmd != stubPath || len(f.deleteNames) != 0 {
+		t.Fatalf("fresh upgrade result=%+v deletes=%v, want one create-only result", results, f.deleteNames)
 	}
 
 	// The task must have been recreated (one createdSpec) with the right Args.
