@@ -22,6 +22,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/buildinfo"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -166,6 +167,15 @@ func pendingReservationAbsenceProjection(cause error) string {
 		return ""
 	}
 	message := "; absence_check=" + string(absence.check)
+	if absence.check == windowsProductAbsenceProcessIdentity {
+		stage, code, hasCode := process.PIDHandleObservationFailure(absence.cause)
+		if stage != "" {
+			message += "; identity_stage=" + stage
+			if hasCode {
+				message += fmt.Sprintf("; identity_win32=%d", code)
+			}
+		}
+	}
 	switch {
 	case errors.Is(absence.cause, context.DeadlineExceeded):
 		message += "; absence_reason=DEADLINE_EXCEEDED"

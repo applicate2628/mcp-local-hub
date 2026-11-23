@@ -20,6 +20,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 )
 
 func committedRecoveryFixture(t *testing.T) (productRecoveryV3Fixture, string, upgradeCommittedRecoveryDeps) {
@@ -775,6 +776,24 @@ func TestPendingRecoveryInverseProjectionUsesClosedChecks(t *testing.T) {
 				t.Fatalf("typed inverse projection lost a cause or safe field: %v", public)
 			}
 		})
+	}
+}
+
+func TestPendingRecoveryPIDObservationProjectionUsesClosedStage(t *testing.T) {
+	// A negative PID fails before OpenProcess and supplies a typed stage.
+	// No actual process is queried by this projection fixture.
+	_, cause := process.ObservePIDHandleIdentity(t.Context(), -987654)
+	absence := &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: cause}
+	want := "; absence_check=PROCESS_IDENTITY; identity_stage=OPEN"
+	if got := pendingReservationAbsenceProjection(absence); got != want {
+		t.Fatalf("process identity projection = %q, want %q", got, want)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, absence.cause = process.ObservePIDHandleIdentity(ctx, -987654)
+	want = "; absence_check=PROCESS_IDENTITY; identity_stage=CONTEXT; absence_reason=CANCELED"
+	if got := pendingReservationAbsenceProjection(absence); got != want {
+		t.Fatalf("canceled identity projection = %q, want %q", got, want)
 	}
 }
 
