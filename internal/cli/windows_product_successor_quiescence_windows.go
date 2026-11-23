@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,6 +271,9 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	if err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceIssuedImages, cause: err}
 	}
+	// The installed Product remains protected even if it was not returned
+	// among the successor's issued images.
+	images = append(images, q.journal.Product.Target)
 	frozen := expandWindowsProductFrozenPorts(q.intent.Ports)
 	if _, err := observeWindowsProductIntentPorts(ctx, q.journal.Product.Target, frozen, true); err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceFrozenPorts, cause: err}
@@ -277,15 +282,15 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	for _, image := range images {
 		names = append(names, filepath.Base(image))
 	}
-	rows, err := api.NewAPI().ListProcessesByImageNameContext(ctx, names)
+	pids, err := productImageSnapshotPIDs(ctx, names, nativeProductProcessSnapshotOps())
 	if err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
 	}
-	for _, row := range rows {
+	for _, pid := range pids {
 		if err := ctx.Err(); err != nil {
 			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
 		}
-		observation, err := process.ObservePIDHandleIdentity(ctx, row.PID)
+		observation, err := process.ObservePIDHandleIdentity(ctx, pid)
 		if err != nil {
 			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
 		}
@@ -298,14 +303,6 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
 			}
 		}
-		role := supervisorCommandLineSubcommand(row.Cmdline)
-		if role == "gui" || role == "tray" || role == "supervise" {
-			// Other namespaces remain untouched; their GUI listener/singleton may
-			// nevertheless conflict with this required per-user slot below.
-			if samePath(identity.ExecutablePath, q.journal.Product.Target) {
-				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: errors.New("current runtime actor remains")}
-			}
-		}
 	}
 	record, err := gui.ReadGUIOwnerRecord(q.guiOwnerPath)
 	if err != nil {
@@ -315,6 +312,40 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceGUIEndpoint, cause: err}
 	}
 	return nil
+}
+
+// Toolhelp supplies executable basenames only. It preselects candidates for
+// the held native process identity check and contributes no path authority.
+func productImageSnapshotPIDs(ctx context.Context, names []string, ops productProcessSnapshotOps) ([]int, error) {
+	var pids []int
+	haveProcess := false
+	err := walkProductProcessSnapshot(ctx, ops, func(entry *windows.ProcessEntry32) (bool, error) {
+		if entry.ProcessID == 0 {
+			return true, nil // The system idle pseudo-process has no image owner.
+		}
+		if !slices.Contains(entry.ExeFile[:], 0) {
+			return false, errors.New("process snapshot contains an incomplete image name")
+		}
+		name := windows.UTF16ToString(entry.ExeFile[:])
+		if name == "" {
+			return false, errors.New("process snapshot contains a row without an image name")
+		}
+		haveProcess = true
+		for _, image := range names {
+			if strings.EqualFold(name, image) {
+				pids = append(pids, int(entry.ProcessID))
+				break
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !haveProcess {
+		return nil, errors.New("process snapshot contains no complete process rows")
+	}
+	return pids, nil
 }
 
 type currentInverseCheck string

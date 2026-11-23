@@ -566,11 +566,11 @@ type ProcessInfo struct {
 }
 
 // runMatchingProcessesSnapshot returns the wmic-shape CSV that
-// ListMatchingProcesses parses (Node,CommandLine,Name,ProcessId,
+// ListMatchingProcesses parses (Node,CommandLine,ProcessId,
 // WorkingSetSize). On Windows 11 24H2+ wmic.exe may be absent
 // entirely (Microsoft is removing the legacy WMIC tool); fall
 // back to a PowerShell Get-CimInstance probe that emits the same
-// CSV shape so the downstream parser does not need a
+// 4-column CSV shape so the downstream parser does not need a
 // second path. Bot r1 P1 closure on PR #188: pre-fix, the
 // install-upgrade GUI preflight relied on ListMatchingProcesses
 // which only used wmic — on wmic-removed hosts, detection silently
@@ -578,7 +578,7 @@ type ProcessInfo struct {
 // StopAll then succeeded, and Bootstrap finally failed with
 // "target in use" leaving daemons down (exactly the regression A8
 // was added to prevent).
-func runMatchingProcessesSnapshot(parent context.Context, exactImageName bool, run func(context.Context, string, ...string) ([]byte, error)) ([]byte, error) {
+func runMatchingProcessesSnapshot(parent context.Context, run func(context.Context, string, ...string) ([]byte, error)) ([]byte, error) {
 	// Shared wmic→PowerShell chain deadline (see probeChainBudget).
 	ctx, cancel := context.WithTimeout(parent, probeChainBudget)
 	defer cancel()
@@ -586,7 +586,7 @@ func runMatchingProcessesSnapshot(parent context.Context, exactImageName bool, r
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(ErrProbeTimeout, err)
 	}
-	out, wmicErr := run(ctx, "wmic", "process", "get", "CommandLine,Name,ProcessId,WorkingSetSize", "/format:csv")
+	out, wmicErr := run(ctx, "wmic", "process", "get", "CommandLine,ProcessId,WorkingSetSize", "/format:csv")
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(ErrProbeTimeout, err, wmicErr)
 	}
@@ -595,24 +595,18 @@ func runMatchingProcessesSnapshot(parent context.Context, exactImageName bool, r
 	}
 
 	// Keep the WMIC error if PowerShell also fails.
-	query := "Get-CimInstance Win32_Process"
-	if exactImageName {
-		// A partial enumeration is not evidence that a selected image is absent.
-		query += " -ErrorAction Stop"
-	}
-	const renderRows = ` | ForEach-Object {
+	const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
 		$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
-		$name = if ($_.Name) { ($_.Name -replace '"', '""') } else { '' }
-		[string]::Format('HOST,"{0}","{1}",{2},{3}', $cmdline, $name, $_.ProcessId, $_.WorkingSetSize)
+		[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
 	}`
-	psOut, psErr := run(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", query+renderRows)
+	psOut, psErr := run(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(ErrProbeTimeout, err, wmicErr, psErr)
 	}
 	if psErr != nil {
 		return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%w; powershell=%w", wmicErr, psErr)
 	}
-	header := "Node,CommandLine,Name,ProcessId,WorkingSetSize\n"
+	header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
 	return append([]byte(header), psOut...), nil
 }
 
@@ -632,17 +626,6 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 // ListMatchingProcessesContext runs the existing process inventory within the
 // caller's context. A canceled inventory supplies no usable process rows.
 func (a *API) ListMatchingProcessesContext(ctx context.Context, patterns []string) ([]ProcessInfo, error) {
-	return listProcessInventoryContext(ctx, patterns, false)
-}
-
-// ListProcessesByImageNameContext selects complete, case-insensitive
-// Win32_Process.Name matches, including processes with no visible command line.
-// The returned rows are inventory candidates, not proof of process identity.
-func (a *API) ListProcessesByImageNameContext(ctx context.Context, imageNames []string) ([]ProcessInfo, error) {
-	return listProcessInventoryContext(ctx, imageNames, true)
-}
-
-func listProcessInventoryContext(ctx context.Context, patterns []string, exactImageName bool) ([]ProcessInfo, error) {
 	if ctx == nil {
 		return nil, errors.New("process inventory context required")
 	}
@@ -652,10 +635,10 @@ func listProcessInventoryContext(ctx context.Context, patterns []string, exactIm
 		}
 		return nil, nil
 	}
-	return listMatchingProcessesContext(ctx, patterns, exactImageName, runProbeCommandCtx)
+	return listMatchingProcessesContext(ctx, patterns, runProbeCommandCtx)
 }
 
-func listMatchingProcessesContext(ctx context.Context, patterns []string, exactImageName bool, run func(context.Context, string, ...string) ([]byte, error)) (results []ProcessInfo, retErr error) {
+func listMatchingProcessesContext(ctx context.Context, patterns []string, run func(context.Context, string, ...string) ([]byte, error)) (results []ProcessInfo, retErr error) {
 	defer func() {
 		if err := ctx.Err(); err != nil {
 			results = nil
@@ -664,22 +647,14 @@ func listMatchingProcessesContext(ctx context.Context, patterns []string, exactI
 			}
 		}
 	}()
-	out, err := runMatchingProcessesSnapshot(ctx, exactImageName, run)
+	out, err := runMatchingProcessesSnapshot(ctx, run)
 	if err != nil {
 		return nil, err
 	}
-	matchColumn := "CommandLine"
-	matches := strings.Contains
-	if exactImageName {
-		matchColumn = "Name"
-		matches = strings.EqualFold
-	} else {
-		// Preserve the existing case-insensitive substring matching.
-		lowerPatterns := make([]string, len(patterns))
-		for i, pattern := range patterns {
-			lowerPatterns[i] = strings.ToLower(pattern)
-		}
-		patterns = lowerPatterns
+	// Pre-lowercase patterns once so the per-line match is cheap.
+	lowerPatterns := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		lowerPatterns = append(lowerPatterns, strings.ToLower(p))
 	}
 	records, err := process.ReadWmicCSVRecords(strings.NewReader(string(out)))
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -688,43 +663,22 @@ func listMatchingProcessesContext(ctx context.Context, patterns []string, exactI
 	if err != nil {
 		return nil, err
 	}
-	required := []string{"Node", "CommandLine", "ProcessId", "WorkingSetSize"}
-	if exactImageName {
-		required = append(required, "Name")
-	}
-	header, ok := parseWmicHeaderFromRecords(records, required...)
+	header, ok := parseWmicHeaderFromRecords(records, "Node", "CommandLine", "ProcessId", "WorkingSetSize")
 	if !ok {
-		if exactImageName {
-			return nil, errors.New("process image inventory is missing its required Name header")
-		}
 		return nil, nil
 	}
-	var haveImageRow bool
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
 			return nil, errors.Join(ErrProbeTimeout, err)
 		}
 		row, ok := process.ParseWmicProcessCSVRecord(record, header)
 		if !ok {
-			if exactImageName && strings.TrimSpace(record) != "" {
-				if _, isHeader := process.ParseWmicCSVHeader(record, required...); !isHeader {
-					return nil, errors.New("process image inventory contains a malformed row")
-				}
-			}
 			continue
 		}
-		value := row[matchColumn]
-		if exactImageName {
-			if value == "" {
-				return nil, errors.New("process image inventory contains a row without a Name")
-			}
-			haveImageRow = true
-		} else {
-			value = strings.ToLower(value)
-		}
+		lineLower := strings.ToLower(row["CommandLine"])
 		matched := false
-		for _, pattern := range patterns {
-			if matches(value, pattern) {
+		for _, p := range lowerPatterns {
+			if strings.Contains(lineLower, p) {
 				matched = true
 				break
 			}
@@ -736,9 +690,6 @@ func listMatchingProcessesContext(ctx context.Context, patterns []string, exactI
 		ram, _ := strconv.ParseUint(row["WorkingSetSize"], 10, 64)
 		cmdline := row["CommandLine"]
 		results = append(results, ProcessInfo{PID: pid, RAMBytes: ram, Cmdline: cmdline})
-	}
-	if exactImageName && !haveImageRow {
-		return nil, errors.New("process image inventory contains no process rows")
 	}
 	return results, nil
 }

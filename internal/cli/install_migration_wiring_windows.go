@@ -2440,24 +2440,64 @@ func windowsProductArgvSHA256(argv []string) string {
 }
 
 func retainedGenerationParentPID(pid int) (int, error) {
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	parent := 0
+	found := false
+	err := walkProductProcessSnapshot(context.Background(), nativeProductProcessSnapshotOps(), func(entry *windows.ProcessEntry32) (bool, error) {
+		if int(entry.ProcessID) != pid {
+			return true, nil
+		}
+		parent, found = int(entry.ParentProcessID), true
+		return false, nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer windows.CloseHandle(snapshot)
+	if !found {
+		return 0, process.ErrProcessNotFound
+	}
+	return parent, nil
+}
+
+type productProcessSnapshotOps struct {
+	open  func(uint32, uint32) (windows.Handle, error)
+	first func(windows.Handle, *windows.ProcessEntry32) error
+	next  func(windows.Handle, *windows.ProcessEntry32) error
+	close func(windows.Handle) error
+}
+
+func nativeProductProcessSnapshotOps() productProcessSnapshotOps {
+	return productProcessSnapshotOps{windows.CreateToolhelp32Snapshot, windows.Process32First, windows.Process32Next, windows.CloseHandle}
+}
+
+func walkProductProcessSnapshot(ctx context.Context, ops productProcessSnapshotOps, visit func(*windows.ProcessEntry32) (bool, error)) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	snapshot, err := ops.open(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return err
+	}
+	if snapshot == 0 || snapshot == windows.InvalidHandle {
+		return errors.New("process snapshot has no native handle")
+	}
+	defer func() { retErr = errors.Join(retErr, ops.close(snapshot), ctx.Err()) }()
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
-	if err := windows.Process32First(snapshot, &entry); err != nil {
-		return 0, err
+	if err := ops.first(snapshot, &entry); err != nil {
+		return err
 	}
 	for {
-		if int(entry.ProcessID) == pid {
-			return int(entry.ParentProcessID), nil
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if err := windows.Process32Next(snapshot, &entry); err != nil {
+		more, err := visit(&entry)
+		if err != nil || !more {
+			return err
+		}
+		if err := ops.next(snapshot, &entry); err != nil {
 			if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-				return 0, process.ErrProcessNotFound
+				return nil
 			}
-			return 0, err
+			return err
 		}
 	}
 }
