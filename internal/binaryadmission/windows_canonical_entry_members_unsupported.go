@@ -10,6 +10,9 @@ func (*WindowsCanonicalEntrySetV2) Stage(context.Context, string) (*StagedWindow
 func (*WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
 	return nil, nil, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntrySetV2) StageForUpgrade(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	return nil, nil, errWindowsCanonicalEntryUnsupported
+}
 func (*StagedWindowsCanonicalEntrySetV2) RetainedMembersWitness(context.Context) (WindowsCanonicalEntryRetainedMembersV2, error) {
 	return WindowsCanonicalEntryRetainedMembersV2{}, errWindowsCanonicalEntryUnsupported
 }

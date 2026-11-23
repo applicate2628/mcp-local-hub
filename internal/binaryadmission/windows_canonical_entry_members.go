@@ -197,7 +197,13 @@ type StagedWindowsCanonicalEntrySetV2 struct {
 	priorAttempted        bool
 	priorError            error
 	launcherStageRelative string
+	ownsPrior             bool
 	retainsRuntime        bool
+}
+
+// RetainsRuntime reports the mode issued by successful Stage preparation.
+func (s *StagedWindowsCanonicalEntrySetV2) RetainsRuntime() bool {
+	return s != nil && s.retainsRuntime
 }
 
 type WindowsCanonicalEntryPriorSetV2 struct {

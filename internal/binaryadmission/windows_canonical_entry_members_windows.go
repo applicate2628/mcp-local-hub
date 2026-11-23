@@ -420,8 +420,16 @@ func (c *canonicalEntryMembersV2) close() error {
 	return c.closeError
 }
 
+type canonicalEntryStageSelectionV2 uint8
+
+const (
+	canonicalEntryStageFull canonicalEntryStageSelectionV2 = iota
+	canonicalEntryStageRetained
+	canonicalEntryStageUpgrade
+)
+
 func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, error) {
-	return o.stage(ctx, canonicalEntryPath, false)
+	return o.stage(ctx, canonicalEntryPath, canonicalEntryStageFull)
 }
 
 // StageRetainingEqualRuntime qualifies the original installed current bundle
@@ -429,12 +437,23 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 // preparation. Close the stage on every exit, including a partially received
 // pair. It closes its prior first and its shared directory lenders last.
 func (o *WindowsCanonicalEntrySetV2) StageRetainingEqualRuntime(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
-	stage, err := o.stage(ctx, canonicalEntryPath, true)
+	stage, err := o.stage(ctx, canonicalEntryPath, canonicalEntryStageRetained)
 	return stage, stage.prior, err
 }
 
-func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPath string, retainRuntime bool) (*StagedWindowsCanonicalEntrySetV2, error) {
-	s := &StagedWindowsCanonicalEntrySetV2{original: newCanonicalEntryMembersV2(), retainsRuntime: retainRuntime}
+// StageForUpgrade selects the staging mode from the admitted original target.
+// Close the stage on every exit. It owns its returned prior and directory
+// lenders in both modes, including a partially received pair.
+func (o *WindowsCanonicalEntrySetV2) StageForUpgrade(ctx context.Context, canonicalEntryPath string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error) {
+	stage, err := o.stage(ctx, canonicalEntryPath, canonicalEntryStageUpgrade)
+	return stage, stage.prior, err
+}
+
+func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPath string, selection canonicalEntryStageSelectionV2) (*StagedWindowsCanonicalEntrySetV2, error) {
+	s := &StagedWindowsCanonicalEntrySetV2{
+		original: newCanonicalEntryMembersV2(), ownsPrior: selection != canonicalEntryStageFull,
+		retainsRuntime: selection == canonicalEntryStageRetained,
+	}
 	c := &s.original
 	if o == nil || ctx == nil {
 		return s, errors.New("source owner and stage context required")
@@ -464,15 +483,27 @@ func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPa
 		return s, err
 	}
 	c.root.memberFinalPaths = append([]string(nil), keys...)
-	if retainRuntime {
+	if s.ownsPrior {
 		prior, err := s.acquireOriginalPriorSet(ctx, keys, nil)
 		if err != nil {
 			return s, err
 		}
-		if err := verifyRetainedCanonicalRuntime(ctx, prior, c.snapshot); err != nil {
+		if selection == canonicalEntryStageUpgrade {
+			switch prior.observation.BeforeKind {
+			case WindowsCanonicalEntryBeforeBundleV2:
+				s.retainsRuntime = true
+			case WindowsCanonicalEntryBeforeAbsentV2, WindowsCanonicalEntryBeforeRootProductV2, WindowsCanonicalEntryBeforeLegacyV2:
+				// The full loop consumes the same admitted prior.
+			default:
+				return s, errors.New("upgrade original prior kind is unavailable")
+			}
+		}
+	}
+	if s.retainsRuntime {
+		if err := verifyRetainedCanonicalRuntime(ctx, s.prior, c.snapshot); err != nil {
 			return s, err
 		}
-		keys, err = o.changedCanonicalStageKeys(prior, keys, plan)
+		keys, err = o.changedCanonicalStageKeys(s.prior, keys, plan)
 		if err != nil {
 			return s, err
 		}
@@ -510,7 +541,7 @@ func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPa
 		}
 		h, e := canonicalEntryOpenNativeAttributes(windows.Handle(c.parent.file.Fd()), leaf, false, windows.FILE_READ_DATA|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_CREATE, attributes)
 		if e != nil {
-			if retainRuntime {
+			if s.retainsRuntime {
 				return s, fmt.Errorf("create selective stage member: %w", e)
 			}
 			return s, e
@@ -519,7 +550,7 @@ func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPa
 		// even if wrapping or receiving native identity fails before evidence.
 		m := &canonicalEntryOwnedMemberV2{original: &canonicalEntryNativeFile{path: name}, evidence: WindowsCanonicalEntryMemberEvidenceV2{Member: key, File: WindowsCanonicalEntryFileV1{Path: leaf}}}
 		c.members[key] = m
-		if retainRuntime {
+		if s.retainsRuntime {
 			c.keys = append(c.keys, key)
 		}
 		guard, e := c.root.retain(h, name, false)
@@ -585,6 +616,9 @@ func (o *WindowsCanonicalEntrySetV2) stage(ctx context.Context, canonicalEntryPa
 		return s, err
 	}
 	c.ready = true
+	if s.ownsPrior && !s.retainsRuntime {
+		s.prior.readOnly = false
+	}
 	return s, nil
 }
 
@@ -1010,7 +1044,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 	if c.closed {
 		return c.closeError
 	}
-	if s.retainsRuntime && s.prior != nil {
+	if s.ownsPrior && s.prior != nil {
 		c.closeError = errors.Join(c.closeError, s.prior.Close())
 	}
 	if !c.transferred {
@@ -1049,7 +1083,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) Close() error {
 		}
 	}
 	c.close()
-	if s.retainsRuntime {
+	if s.ownsPrior {
 		for _, directory := range c.directoryOwners() {
 			c.closeError = errors.Join(c.closeError, directory.Close())
 		}
@@ -1566,7 +1600,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) AcquireOriginalPriorSet(ctx context.C
 func (s *StagedWindowsCanonicalEntrySetV2) acquireOriginalPriorSet(ctx context.Context, incoming []string, stageErr error) (*WindowsCanonicalEntryPriorSetV2, error) {
 	c := &s.original
 	s.priorAttempted = true
-	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2(), readOnly: s.retainsRuntime}
+	p := &WindowsCanonicalEntryPriorSetV2{original: newCanonicalEntryMembersV2(), readOnly: s.ownsPrior}
 	s.prior = p
 	pc := &p.original
 	pc.targets = c.targets

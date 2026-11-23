@@ -15,6 +15,15 @@ import (
 )
 
 func TestStageRetainingEqualRuntime(t *testing.T) {
+	testNativeRetainedRuntimeStage(t, (*WindowsCanonicalEntrySetV2).StageRetainingEqualRuntime)
+}
+
+func TestStageForUpgradeCurrentBundle(t *testing.T) {
+	testNativeRetainedRuntimeStage(t, (*WindowsCanonicalEntrySetV2).StageForUpgrade)
+}
+
+func testNativeRetainedRuntimeStage(t *testing.T, prepare func(*WindowsCanonicalEntrySetV2, context.Context, string) (*StagedWindowsCanonicalEntrySetV2, *WindowsCanonicalEntryPriorSetV2, error)) {
+	t.Helper()
 	for _, name := range []string{"equal", "different_runtime", "dirty_runtime"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
@@ -82,7 +91,7 @@ func TestStageRetainingEqualRuntime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			stage, prior, stageErr := owner.StageRetainingEqualRuntime(ctx, destination)
+			stage, prior, stageErr := prepare(owner, ctx, destination)
 			if stage != nil {
 				t.Cleanup(func() {
 					if err := stage.Close(); err != nil {
@@ -107,6 +116,9 @@ func TestStageRetainingEqualRuntime(t *testing.T) {
 			} else {
 				if stageErr != nil {
 					t.Fatal(stageErr)
+				}
+				if !stage.RetainsRuntime() {
+					t.Fatal("current equal bundle did not select retained mode")
 				}
 				members, err := stage.Members()
 				if err != nil {
