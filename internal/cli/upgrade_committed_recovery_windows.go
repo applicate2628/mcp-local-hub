@@ -29,12 +29,12 @@ type upgradeCommittedRecoveryDeps struct {
 	ReadJournal      func(context.Context, string, WindowsProductJournalAllowance) ([]byte, *api.StateFileReadObservation, error)
 	AcquireExecuting func(context.Context) (*binaryadmission.WindowsCanonicalEntrySetV2, error)
 	currentRegistry  bool
-	AdmitProduct    func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
-	BuildInfo       func() (string, string, string)
-	Recover         func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error)
-	AcquireFence    func(context.Context, string) (upgradeCommittedFence, error)
-	LstatJournal    func(string) (os.FileInfo, error)
-	ValidatePending func(windowsProductRecoveryRequest, windowsProductRecoveryJournalV3) error
+	AdmitProduct     func(binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error)
+	BuildInfo        func() (string, string, string)
+	Recover          func(windowsProductRecoveryRequest) (*WindowsProductPairRecoverySettled, error)
+	AcquireFence     func(context.Context, string) (upgradeCommittedFence, error)
+	LstatJournal     func(string) (os.FileInfo, error)
+	ValidatePending  func(windowsProductRecoveryRequest, windowsProductRecoveryJournalV3) error
 }
 
 type windowsRecoveryCommandPolicy uint8
@@ -115,6 +115,8 @@ func (e *upgradeCommittedCommandError) Error() string {
 				if prior.lastHealth != nil {
 					message += "; last_failed_predicate=" + upgradeGUIForwardHealthPredicate(prior.lastHealth)
 				}
+			} else if inverse := pendingInverseProjection(e.cause); inverse != "" {
+				message += "; recovery_result=OWNER_ERROR" + inverse
 			} else {
 				message += "; recovery_result=OWNER_ERROR_UNCLASSIFIED"
 			}
@@ -134,6 +136,27 @@ func (e *upgradeCommittedCommandError) Error() string {
 }
 func (e *upgradeCommittedCommandError) Unwrap() error     { return e.cause }
 func (e *upgradeCommittedCommandError) FailureID() string { return e.id }
+
+// pendingInverseProjection exposes only the actual closed location and the
+// number of fully received moves in this recovery invocation.
+func pendingInverseProjection(cause error) string {
+	var inverse *currentInverseRecoveryError
+	if !errors.As(cause, &inverse) || inverse == nil || !isCurrentInverseStage(inverse.stage) || inverse.movesReceived < 0 {
+		return ""
+	}
+	message := fmt.Sprintf("; inverse_stage=%s; inverse_moves_received=%d", inverse.stage, inverse.movesReceived)
+	var checked *currentInverseCheckError
+	if errors.As(inverse.cause, &checked) && checked != nil && isCurrentInverseCheck(checked.check) {
+		message += "; inverse_check=" + string(checked.check)
+		if checked.check == currentInverseCheckAbsence {
+			var absence *windowsProductAbsenceError
+			if errors.As(checked.cause, &absence) {
+				message += pendingReservationAbsenceProjection(absence)
+			}
+		}
+	}
+	return message
+}
 
 // Only the failed absence callback's top-level typed observation can
 // classify its check. Other causes stay in the original error chain.

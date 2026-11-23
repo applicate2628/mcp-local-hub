@@ -39,6 +39,7 @@ const (
 
 type windowsCanonicalJournalRecoverySource struct {
 	beforeCurrentInverse     func(context.Context) error
+	inverseMovesReceived     int
 	memberDirectories        []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1
 	memberDirectorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2
 	memberResults            []binaryadmission.WindowsCanonicalEntryMoveResultV1
@@ -1165,40 +1166,80 @@ func currentRecoveryMember(ctx context.Context, owner *binaryadmission.WindowsCa
 	return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, false, nil
 }
 
+type currentInverseStage string
+
+const (
+	currentInverseVerifyBeforeRollback currentInverseStage = "VERIFY_BEFORE_ROLLBACK_PENDING"
+	currentInversePersistRollback      currentInverseStage = "PERSIST_ROLLBACK_PENDING"
+	currentInverseVerifyAfterRollback  currentInverseStage = "VERIFY_AFTER_ROLLBACK_PENDING"
+	currentInversePrepareMove          currentInverseStage = "PREPARE_MOVE"
+	currentInverseVerifyBeforeIntent   currentInverseStage = "VERIFY_BEFORE_MOVE_INTENT"
+	currentInversePersistIntent        currentInverseStage = "PERSIST_MOVE_INTENT"
+	currentInverseVerifyAfterIntent    currentInverseStage = "VERIFY_AFTER_MOVE_INTENT"
+	currentInverseNativeMove           currentInverseStage = "NATIVE_MOVE"
+	currentInverseNativeReadback       currentInverseStage = "NATIVE_MOVE_READBACK"
+	currentInverseReadResult           currentInverseStage = "RECEIVE_MOVE_RESULT"
+	currentInversePersistResult        currentInverseStage = "PERSIST_MOVE_RESULT"
+)
+
+func isCurrentInverseStage(stage currentInverseStage) bool {
+	switch stage {
+	case currentInverseVerifyBeforeRollback, currentInversePersistRollback, currentInverseVerifyAfterRollback,
+		currentInversePrepareMove, currentInverseVerifyBeforeIntent, currentInversePersistIntent, currentInverseVerifyAfterIntent,
+		currentInverseNativeMove, currentInverseNativeReadback, currentInverseReadResult, currentInversePersistResult:
+		return true
+	default:
+		return false
+	}
+}
+
+type currentInverseRecoveryError struct {
+	stage         currentInverseStage
+	movesReceived int
+	cause         error
+}
+
+func (e *currentInverseRecoveryError) Error() string { return e.cause.Error() }
+func (e *currentInverseRecoveryError) Unwrap() error { return e.cause }
+
+func (s *windowsCanonicalJournalRecoverySource) inverseFailure(stage currentInverseStage, cause error) error {
+	return &currentInverseRecoveryError{stage: stage, movesReceived: s.inverseMovesReceived, cause: cause}
+}
+
 func (s *windowsCanonicalJournalRecoverySource) moveCurrentRecoveryOriginal(ctx context.Context, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2, prior bool, member, destination string) error {
 	if err := s.ValidateOriginalRecovery(ctx); err != nil {
-		return err
+		return s.inverseFailure(currentInversePrepareMove, err)
 	}
 	observation, present, err := currentRecoveryMember(ctx, owner, member)
 	if err != nil {
-		return err
+		return s.inverseFailure(currentInversePrepareMove, err)
 	}
 	if !present {
-		return errors.New("current recovery move has no original member")
+		return s.inverseFailure(currentInversePrepareMove, errors.New("current recovery move has no original member"))
 	}
 	plan := currentEntryMember(s.journal.EntryBundle, member)
 	if plan == nil {
-		return ErrWindowsProductRecoveryIdentity
+		return s.inverseFailure(currentInversePrepareMove, ErrWindowsProductRecoveryIdentity)
 	}
 	expected := plan.Staged
 	if prior {
 		expected = plan.Prior
 	}
 	if expected == nil || observation.NativeIdentity != expected.NativeIdentity || observation.File.SHA256 != expected.File.SHA256 || observation.Size != expected.Size || observation.Attributes != expected.Attributes {
-		return ErrWindowsProductRecoveryIdentity
+		return s.inverseFailure(currentInversePrepareMove, ErrWindowsProductRecoveryIdentity)
 	}
 	next, err := cloneCurrentRecoveryJournal(s.journal)
 	if err != nil {
-		return err
+		return s.inverseFailure(currentInversePrepareMove, err)
 	}
 	next.EntryBundle.Moves = append(next.EntryBundle.Moves, windowsCanonicalEntryMoveRecordV2{Member: member, Prior: prior, SourceRelative: observation.File.Path, DestinationRelative: destination})
 	index := len(next.EntryBundle.Moves) - 1
 	if err := s.persistCurrent(next); err != nil {
-		return err
+		return s.inverseFailure(currentInversePersistIntent, err)
 	}
 	if s.beforeCurrentInverse != nil {
 		if err := s.beforeCurrentInverse(ctx); err != nil {
-			return err
+			return s.inverseFailure(currentInverseVerifyAfterIntent, err)
 		}
 	}
 	actual, callErr := owner.MoveOriginal(ctx, member, destination)
@@ -1206,7 +1247,7 @@ func (s *windowsCanonicalJournalRecoverySource) moveCurrentRecoveryOriginal(ctx 
 	s.memberErrors = append(s.memberErrors, callErr)
 	next, cloneErr := s.clonePersistedCurrentJournal()
 	if cloneErr != nil {
-		return errors.Join(callErr, actual.Error, actual.CloseError, cloneErr)
+		return s.inverseFailure(currentInverseReadResult, errors.Join(callErr, actual.Error, actual.CloseError, cloneErr))
 	}
 	record := currentMoveRecord(actual, prior, observation.File.Path, destination)
 	record.Member = member
@@ -1215,7 +1256,21 @@ func (s *windowsCanonicalJournalRecoverySource) moveCurrentRecoveryOriginal(ctx 
 	if actual.SourceRelative != "" && actual.SourceRelative != observation.File.Path {
 		received = errors.Join(received, ErrWindowsProductRecoveryIdentity)
 	}
-	return errors.Join(received, s.persistCurrent(next))
+	persistErr := s.persistCurrent(next)
+	if received != nil {
+		stage := currentInverseNativeMove
+		if actual.Applied {
+			stage = currentInverseNativeReadback
+		}
+		received = s.inverseFailure(stage, received)
+	}
+	if persistErr != nil {
+		persistErr = s.inverseFailure(currentInversePersistResult, persistErr)
+	}
+	if received == nil && persistErr == nil {
+		s.inverseMovesReceived++
+	}
+	return errors.Join(received, persistErr)
 }
 
 func currentCleanupIndex(e *windowsCanonicalEntrySetJournalV2, side, member string) int {
@@ -1635,39 +1690,39 @@ func rollbackCurrentCanonicalEntryRecovery(req windowsProductRecoveryRequest, d 
 			return nil, errors.Join(ErrWindowsProductRecoveryPending, err, errors.New("current successor quiescence unavailable"))
 		}
 		if err = q.VerifyForInverse(req.Context); err != nil {
-			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, s.inverseFailure(currentInverseVerifyBeforeRollback, err))
 		}
 		s.beforeCurrentInverse = q.VerifyForInverse
 		next, err := cloneCurrentRecoveryJournal(s.journal)
 		if err != nil {
-			return nil, err
+			return nil, s.inverseFailure(currentInversePersistRollback, err)
 		}
 		next.EntryBundle.Bundle.Disposition.State = "rollback-pending"
 		if err = s.persistCurrent(next); err != nil {
-			return nil, err
+			return nil, s.inverseFailure(currentInversePersistRollback, err)
 		}
 		if err = q.VerifyForInverse(req.Context); err != nil {
-			return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+			return nil, errors.Join(ErrWindowsProductRecoveryPending, s.inverseFailure(currentInverseVerifyAfterRollback, err))
 		}
 		keys := currentPromotionOrder(s.journal.EntryBundle, false)
 		for i := len(keys) - 1; i >= 0; i-- {
 			key := keys[i]
 			actual, present, err := currentRecoveryMember(req.Context, successor, key)
 			if err != nil {
-				return nil, err
+				return nil, s.inverseFailure(currentInversePrepareMove, err)
 			}
 			if !present {
-				return nil, errors.New("rollback-needed successor original is missing")
+				return nil, s.inverseFailure(currentInversePrepareMove, errors.New("rollback-needed successor original is missing"))
 			}
 			if actual.File.Path != key {
 				continue
 			}
 			row := currentEntryMember(s.journal.EntryBundle, key)
 			if row == nil || row.SuccessorAsideRelative == nil {
-				return nil, ErrWindowsProductRecoveryIdentity
+				return nil, s.inverseFailure(currentInversePrepareMove, ErrWindowsProductRecoveryIdentity)
 			}
 			if err = q.VerifyForInverse(req.Context); err != nil {
-				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, s.inverseFailure(currentInverseVerifyBeforeIntent, err))
 			}
 			if err = s.moveCurrentRecoveryOriginal(req.Context, successor, false, key, *row.SuccessorAsideRelative); err != nil {
 				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
@@ -1678,16 +1733,16 @@ func rollbackCurrentCanonicalEntryRecovery(req windowsProductRecoveryRequest, d 
 			key := keys[i]
 			actual, present, err := currentRecoveryMember(req.Context, prior, key)
 			if err != nil {
-				return nil, err
+				return nil, s.inverseFailure(currentInversePrepareMove, err)
 			}
 			if !present {
-				return nil, errors.New("rollback-needed prior original is missing")
+				return nil, s.inverseFailure(currentInversePrepareMove, errors.New("rollback-needed prior original is missing"))
 			}
 			if actual.File.Path == key {
 				continue
 			}
 			if err = q.VerifyForInverse(req.Context); err != nil {
-				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)
+				return nil, errors.Join(ErrWindowsProductRecoveryPending, s.inverseFailure(currentInverseVerifyBeforeIntent, err))
 			}
 			if err = s.moveCurrentRecoveryOriginal(req.Context, prior, true, key, key); err != nil {
 				return nil, errors.Join(ErrWindowsProductRecoveryPending, err)

@@ -744,6 +744,7 @@ func TestPendingRecoveryProjectionRefusesInjectedOperationAndText(t *testing.T) 
 	for _, cause := range []error{
 		fmt.Errorf("%w: failed_operation=RESERVATION; %s", ErrWindowsProductRecoveryPending, private),
 		&upgradeGUIPriorSettlementError{operation: upgradeGUIPriorOperation(private), cause: errors.New(private), initialHealth: errors.New("UPGRADE_GUI_TASK_DRIFT: " + private)},
+		&currentInverseRecoveryError{stage: currentInverseStage(private), movesReceived: 1, cause: errors.New(private)},
 	} {
 		public := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", cause)
 		if public.Error() != "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR_UNCLASSIFIED" || strings.Contains(public.Error(), private) {
@@ -752,6 +753,28 @@ func TestPendingRecoveryProjectionRefusesInjectedOperationAndText(t *testing.T) 
 		if !errors.Is(public, cause) {
 			t.Fatal("redaction erased the original error")
 		}
+	}
+}
+
+func TestPendingRecoveryInverseProjectionUsesClosedChecks(t *testing.T) {
+	private := errors.New("PRIVATE_PATH_X; inverse_check=FORGED")
+	for _, tc := range []struct {
+		name   string
+		cause  error
+		fields string
+	}{
+		{"closed native location", &currentInverseCheckError{check: currentInverseCheckNativeJournal, cause: private}, "; inverse_check=NATIVE_JOURNAL"},
+		{"closed absence reason", &currentInverseCheckError{check: currentInverseCheckAbsence, cause: &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: errors.Join(private, context.DeadlineExceeded)}}, "; inverse_check=ABSENCE; absence_check=PROCESS_INVENTORY; absence_reason=DEADLINE_EXCEEDED"},
+		{"forged check", &currentInverseCheckError{check: currentInverseCheck(private.Error()), cause: private}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cause := &currentInverseRecoveryError{stage: currentInverseVerifyBeforeIntent, movesReceived: 16, cause: tc.cause}
+			public := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", errors.Join(ErrWindowsProductRecoveryPending, cause))
+			want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; inverse_stage=VERIFY_BEFORE_MOVE_INTENT; inverse_moves_received=16" + tc.fields
+			if public.Error() != want || !errors.Is(public, private) || !errors.Is(public, ErrWindowsProductRecoveryPending) {
+				t.Fatalf("typed inverse projection lost a cause or safe field: %v", public)
+			}
+		})
 	}
 }
 

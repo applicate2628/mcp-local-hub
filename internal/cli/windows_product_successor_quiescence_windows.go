@@ -184,7 +184,7 @@ func acquireWindowsProductSuccessorQuiescence(ctx context.Context, stateDir, gui
 		return q, err
 	}
 	stage = windowsProductQuiescenceAtHeldRecheck
-	if err = q.verifyHeld(limit); err != nil {
+	if err = q.verifyHeld(limit, nil); err != nil {
 		return q, err
 	}
 	q.phase = windowsProductQuiescenceInverseReady
@@ -317,28 +317,96 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	return nil
 }
 
-func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context) error {
-	if err := q.verifyNative(ctx, nil); err != nil {
+type currentInverseCheck string
+
+const (
+	currentInverseCheckPhase          currentInverseCheck = "PHASE"
+	currentInverseCheckNativeIdentity currentInverseCheck = "NATIVE_IDENTITY"
+	currentInverseCheckNativeJournal  currentInverseCheck = "NATIVE_JOURNAL"
+	currentInverseCheckSuccessorBank  currentInverseCheck = "SUCCESSOR_BANK"
+	currentInverseCheckReservations   currentInverseCheck = "RESERVATIONS"
+	currentInverseCheckSupervisor     currentInverseCheck = "SUPERVISOR_RESERVATION"
+	currentInverseCheckIntentLease    currentInverseCheck = "INTENT_RESERVATION"
+	currentInverseCheckIntentBorrow   currentInverseCheck = "INTENT_BORROW"
+	currentInverseCheckIntentObserve  currentInverseCheck = "INTENT_OBSERVATION"
+	currentInverseCheckIntentCompare  currentInverseCheck = "INTENT_COMPARE"
+	currentInverseCheckAbsence        currentInverseCheck = "ABSENCE"
+)
+
+func isCurrentInverseCheck(check currentInverseCheck) bool {
+	switch check {
+	case currentInverseCheckPhase, currentInverseCheckNativeIdentity, currentInverseCheckNativeJournal,
+		currentInverseCheckSuccessorBank, currentInverseCheckReservations, currentInverseCheckSupervisor,
+		currentInverseCheckIntentLease, currentInverseCheckIntentBorrow, currentInverseCheckIntentObserve,
+		currentInverseCheckIntentCompare, currentInverseCheckAbsence:
+		return true
+	default:
+		return false
+	}
+}
+
+func (check *currentInverseCheck) record(next currentInverseCheck) {
+	if check != nil {
+		*check = next
+	}
+}
+
+type currentInverseCheckError struct {
+	check currentInverseCheck
+	cause error
+}
+
+func (e *currentInverseCheckError) Error() string { return e.cause.Error() }
+func (e *currentInverseCheckError) Unwrap() error { return e.cause }
+
+func (q *windowsProductSuccessorQuiescence) verifyHeld(ctx context.Context, check *currentInverseCheck) error {
+	var nativeStage *windowsProductQuiescenceAcquisitionStage
+	if check != nil {
+		stage := windowsProductQuiescenceAtNativeIdentity
+		nativeStage = &stage
+	}
+	if err := q.verifyNative(ctx, nativeStage); err != nil {
+		if nativeStage != nil {
+			switch *nativeStage {
+			case windowsProductQuiescenceAtNativeJournal:
+				check.record(currentInverseCheckNativeJournal)
+			case windowsProductQuiescenceAtSuccessorBank:
+				check.record(currentInverseCheckSuccessorBank)
+			default:
+				check.record(currentInverseCheckNativeIdentity)
+			}
+		}
 		return err
 	}
+	check.record(currentInverseCheckReservations)
 	if q.guiLease == nil || q.supervisor == nil || q.intentLease == nil {
 		return errors.New("original quiescence reservations incomplete")
 	}
+	check.record(currentInverseCheckSupervisor)
 	if err := q.supervisor.ValidateQuietObservedHeld(ctx, filepath.Join(q.stateDir, "supervisor.lock")); err != nil {
 		return err
 	}
+	check.record(currentInverseCheckIntentLease)
 	if err := q.intentLease.ValidateHeld(ctx, q.intentPath); err != nil {
 		return err
 	}
+	check.record(currentInverseCheckIntentBorrow)
 	return q.intentLease.Borrow(ctx, q.intentPath, func() error {
+		check.record(currentInverseCheckIntentObserve)
 		observed, err := api.ObserveSupervisorRuntimeIntent(ctx, q.intentPath, q.now())
 		if err != nil {
 			return err
 		}
+		check.record(currentInverseCheckIntentCompare)
 		if observed == nil || observed.SHA256 != q.intent.SHA256 || observed.StopSHA256 != q.intent.StopSHA256 || observed.Generation != q.intent.Generation || !reflect.DeepEqual(observed.Ports, q.intent.Ports) || !reflect.DeepEqual(observed.Stopped, q.intent.Stopped) {
 			return errors.New("current runtime intent/cohort/stops changed")
 		}
-		return q.absent(ctx)
+		check.record(currentInverseCheckAbsence)
+		if err := q.absent(ctx); err != nil {
+			return err
+		}
+		check.record(currentInverseCheckIntentBorrow)
+		return nil
 	})
 }
 
@@ -364,10 +432,14 @@ func (q *windowsProductSuccessorQuiescence) leave(err error) {
 }
 func (q *windowsProductSuccessorQuiescence) VerifyForInverse(ctx context.Context) (retErr error) {
 	if err := q.enter(windowsProductQuiescenceInverseReady); err != nil {
-		return err
+		return &currentInverseCheckError{check: currentInverseCheckPhase, cause: err}
 	}
 	defer func() { q.leave(retErr) }()
-	return q.verifyHeld(ctx)
+	var check currentInverseCheck
+	if err := q.verifyHeld(ctx, &check); err != nil {
+		return &currentInverseCheckError{check: check, cause: err}
+	}
+	return nil
 }
 func (q *windowsProductSuccessorQuiescence) WithIntentInverse(ctx context.Context, body func(*api.StateFileObservedLease) error) (retErr error) {
 	if body == nil {
@@ -381,7 +453,7 @@ func (q *windowsProductSuccessorQuiescence) WithIntentInverse(ctx context.Contex
 	q.phase = windowsProductQuiescenceIntentInverse
 	q.mu.Unlock()
 	// No q mutex is held across original owner operations or the callback.
-	retErr = q.verifyHeld(ctx)
+	retErr = q.verifyHeld(ctx, nil)
 	if retErr == nil {
 		retErr = q.intentLease.Borrow(ctx, q.intentPath, func() error { return body(q.intentLease) })
 	}

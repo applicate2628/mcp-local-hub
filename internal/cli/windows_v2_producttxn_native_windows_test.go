@@ -536,6 +536,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 		"wrong_or_missing_admission_has_no_effects",
 		"pretransfer_prior_closes_before_stage",
 		"launcher_last_predecision_inverse",
+		"current_inverse_after_intent_failure",
 		"commit_decided_cold_forward_and_repeat",
 		"commit_decided_cold_cleanup_exact_slots",
 		"guard_veto",
@@ -627,7 +628,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			pretransferClose := phase == "pretransfer_prior_closes_before_stage"
 			exactCleanupSlots := phase == "commit_decided_cold_cleanup_exact_slots"
 			var prior map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2
-			if inverse || pretransferClose || exactCleanupSlots {
+			if inverse || pretransferClose || exactCleanupSlots || phase == "current_inverse_after_intent_failure" {
 				prior = v2TxnSeedPrior(t, input, dst, seed)
 			}
 			if inverse {
@@ -713,6 +714,11 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 					}
 				}
 				v2TxnAssertFixtureRoot(t, target, dst)
+				return
+			}
+
+			if phase == "current_inverse_after_intent_failure" {
+				v2TxnAssertInverseDiagnosticAfterPrefix(t, ctx, txn, stagedFiles)
 				return
 			}
 
@@ -1027,4 +1033,107 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			t.Log("one durable V2 decision received by fresh cold owner without an inverse or repeated effects")
 		})
 	}
+}
+
+// This fixture enters only the original file-move owner. No runtime recovery,
+// task restore, or supervisor invocation is part of the injected failure.
+func v2TxnAssertInverseDiagnosticAfterPrefix(t *testing.T, ctx context.Context, txn *WindowsProductTxn, staged map[string]binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) {
+	t.Helper()
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.promoteCurrentEntryBundle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	o := txn.Opts
+	journalPath := filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)
+	journal, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := windowsProductRecoveryRequest{Context: ctx, JournalAllowance: o.JournalAllowance,
+		StateDir: o.StateDir, CanonicalEntryPath: o.CanonicalEntryPath, ProductPath: o.ProductPath, IdentityPath: o.IdentityPath}
+	s, err := prepareCurrentCanonicalRecoverySource(req, boundWindowsProductRecoveryDefaults(req), journalPath, journal, canonicalRecoveryRollback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2
+	closeOwners := func() error {
+		if !s.active {
+			return nil
+		}
+		defer func() { s.active = false }()
+		return errors.Join(s.closeCurrentMembers(prior, successor), s.closeCurrentDirectories())
+	}
+	t.Cleanup(func() {
+		if err := closeOwners(); err != nil {
+			t.Error(err)
+		}
+	})
+	prior, err = s.acquireCurrentSide(ctx, binaryadmission.WindowsCanonicalRecoveryPriorV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err = s.acquireCurrentSide(ctx, binaryadmission.WindowsCanonicalRecoverySuccessorV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := journal.EntryBundle.Expected.CanonicalEntryRelativePath
+	second := journal.EntryBundle.Expected.ProductRelativePath
+	firstAside := *currentEntryMember(journal.EntryBundle, first).SuccessorAsideRelative
+	secondAside := *currentEntryMember(journal.EntryBundle, second).SuccessorAsideRelative
+	private := &os.PathError{Op: "PRIVATE_ARGV", Path: "PRIVATE_PATH", Err: os.ErrPermission}
+	checks := 0
+	s.beforeCurrentInverse = func(context.Context) error {
+		checks++
+		if checks == 2 {
+			return &currentInverseCheckError{check: currentInverseCheckIntentLease, cause: private}
+		}
+		return nil
+	}
+	if err := s.moveCurrentRecoveryOriginal(ctx, successor, false, first, firstAside); err != nil {
+		t.Fatal(err)
+	}
+	err = s.moveCurrentRecoveryOriginal(ctx, successor, false, second, secondAside)
+	public := committedRecoveryCommandError("E_WINDOWS_PRODUCT_RECOVERY_PENDING", "recover pending prior settlement", err)
+	want := "E_WINDOWS_PRODUCT_RECOVERY_PENDING: recover pending prior settlement; recovery_result=OWNER_ERROR; inverse_stage=VERIFY_AFTER_MOVE_INTENT; inverse_moves_received=1; inverse_check=INTENT_RESERVATION"
+	if checks != 2 || !errors.Is(public, private) || !errors.Is(public, os.ErrPermission) || public.Error() != want {
+		t.Fatalf("inverse cause, exact progress, or safe location was lost: %v", public)
+	}
+	durable, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moves := durable.EntryBundle.Moves
+	firstNew := len(journal.EntryBundle.Moves)
+	if len(moves) != firstNew+2 {
+		t.Fatalf("expected one received result and one pending intent, got %d extra rows", len(moves)-firstNew)
+	}
+	a, b := moves[firstNew], moves[firstNew+1]
+	if a.Member != first || !a.Attempted || !a.NativeStatusKnown || !a.Applied || !a.Readback ||
+		b.Member != second || b.Attempted || b.NativeStatusKnown || b.Applied || b.Readback {
+		t.Fatal("durable journal did not retain the received prefix and the unattempted next move")
+	}
+	if err := closeOwners(); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(o.CanonicalEntryPath)
+	for _, moved := range []struct{ member, relative string }{{first, firstAside}, {second, second}} {
+		path := filepath.Join(root, filepath.FromSlash(moved.relative))
+		original := staged[moved.member]
+		if v2TxnFixtureIdentity(t, path) != original.NativeIdentity || v2TxnFixtureDigest(mustReadFile(t, path)) != original.File.SHA256 {
+			t.Fatal("completion changed an original identity or its bytes")
+		}
+	}
+	for _, absent := range []string{first, secondAside} {
+		if err := v2TxnFixtureAbsent(filepath.Join(root, filepath.FromSlash(absent))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Log("one native original inverse result received, next durable intent refused before effect, next file unchanged")
 }
