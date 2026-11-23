@@ -1585,6 +1585,9 @@ func projectCurrentRecoveryJournal(j windowsProductRecoveryJournalV3, purpose bi
 		return result, ErrWindowsProductRecoveryIdentity
 	}
 	e := j.EntryBundle
+	if err := requireCurrentEntryNativeRetention(e); err != nil {
+		return result, err
+	}
 	targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntry.Target)
 	if err != nil {
 		return result, err

@@ -2476,7 +2476,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 				!(guiOwned && j.Phase == WindowsProductRecoverySettledRollback)) || j.PriorFleetReaped || j.QuiescenceReceiptSHA256 != "" {
 				return errors.New("invalid initial prepared V3 recovery form")
 			}
-			return nil
+			return requireCurrentEntryNativeRetention(j.EntryBundle)
 		}
 		legacy := windowsProductPairRecoveryJournal{
 			Schema: WindowsProductPairRecoverySchemaV2,
@@ -2500,7 +2500,7 @@ func validateWindowsProductRecoveryJournalV3(j windowsProductRecoveryJournalV3) 
 		j.PriorFleetReaped || j.Quiescence != nil || j.QuiescenceReceiptSHA256 != "" {
 		return errors.New("non-upgrade V3 recovery contains quiescence state")
 	}
-	return nil
+	return requireCurrentEntryNativeRetention(j.EntryBundle)
 }
 
 func validateWindowsProductPreSettlementV3(observation windowsProductQuiescenceObservationV1, frozen []windowsProductIntentPortV1, guiOwned bool) error {

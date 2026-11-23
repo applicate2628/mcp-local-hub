@@ -44,11 +44,19 @@ type windowsCanonicalEntryBundleJournalV2 struct {
 	BeforeKind      binaryadmission.WindowsCanonicalEntryBeforeKindV2                `json:"before_kind"`
 	BeforeDirectory *binaryadmission.WindowsCanonicalEntryPayloadDirectorySnapshotV1 `json:"before_directory"`
 	BeforeInventory *binaryadmission.RuntimeInventoryV1                              `json:"before_inventory"`
+	Retained        *windowsCanonicalEntryRetainedRuntimeV2                          `json:"retained,omitempty"`
 	StagedDirectory *binaryadmission.WindowsCanonicalEntryPayloadDirectorySnapshotV1 `json:"staged_directory"`
 	Disposition     windowsCanonicalEntryDispositionV2                               `json:"disposition"`
 	Effect          string                                                           `json:"effect"`
 	Members         []windowsCanonicalEntryMemberJournalV2                           `json:"members"`
 	Directories     []windowsCanonicalEntryDirectoryJournalV2                        `json:"directories"`
+}
+
+// The native aggregate binds original file and parent identities and their
+// content facts. This journal value alone does not supply native authority.
+type windowsCanonicalEntryRetainedRuntimeV2 struct {
+	MembersSHA256 string   `json:"members_sha256"`
+	Singletons    []string `json:"singletons"`
 }
 
 type windowsCanonicalEntryMemberJournalV2 = binaryadmission.WindowsCanonicalEntryMemberRecoveryPlanV2
@@ -179,6 +187,10 @@ func decodeStrictCanonicalProductRecord(raw []byte, target any) error {
 // Strict receiving belongs to the existing entry codec. Unlike encoding/json's
 // default matching, required decoded keys are exact, unique and non-null.
 func canonicalCurrentObject(raw []byte, names ...string) (map[string]json.RawMessage, error) {
+	return canonicalCurrentObjectWithOptional(raw, "", names...)
+}
+
+func canonicalCurrentObjectWithOptional(raw []byte, optional string, names ...string) (map[string]json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	start, err := d.Token()
 	if err != nil || start != json.Delim('{') {
@@ -195,7 +207,7 @@ func canonicalCurrentObject(raw []byte, names ...string) (map[string]json.RawMes
 			return nil, err
 		}
 		name, ok := t.(string)
-		if !ok || !wanted[name] {
+		if !ok || !wanted[name] && (optional == "" || name != optional) {
 			return nil, errors.New("unknown or inexact current entry field")
 		}
 		if _, ok := fields[name]; ok {
@@ -220,7 +232,11 @@ func canonicalCurrentObject(raw []byte, names ...string) (map[string]json.RawMes
 	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.Join(err, errors.New("trailing current entry evidence"))
 	}
-	if len(fields) != len(wanted) {
+	requiredCount := len(fields)
+	if _, ok := fields[optional]; optional != "" && ok {
+		requiredCount--
+	}
+	if requiredCount != len(wanted) {
 		return nil, errors.New("required current entry field missing")
 	}
 	return fields, nil
@@ -248,9 +264,14 @@ func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
 			return err
 		}
 	}
-	b, err := object(f["bundle"], false, "relative_path", "before_kind", "before_directory", "before_inventory", "staged_directory", "disposition", "effect", "members", "directories")
+	b, err := canonicalCurrentObjectWithOptional(f["bundle"], "retained", "relative_path", "before_kind", "before_directory", "before_inventory", "staged_directory", "disposition", "effect", "members", "directories")
 	if err != nil {
 		return err
+	}
+	if retained := b["retained"]; retained != nil {
+		if _, err := canonicalCurrentObject(retained, "members_sha256", "singletons"); err != nil {
+			return err
+		}
 	}
 	identity := func(raw json.RawMessage) error {
 		_, err := object(raw, false, "volume_serial_number", "file_index_high", "file_index_low", "creation_time")
@@ -2715,8 +2736,23 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 	if len(e.Bundle.Members) == 0 || e.Moves == nil || e.Cleanup == nil || e.Bundle.Directories == nil {
 		return errors.New("current member evidence arrays missing")
 	}
+	var retainedFiles map[string]bool
+	var retainedDirectories map[string]string
+	if e.Bundle.Retained != nil {
+		retainedFiles, retainedDirectories, err = currentEntryRetainedRuntime(e)
+		if err != nil {
+			return err
+		}
+		for key := range retainedFiles {
+			delete(newFiles, key)
+			delete(priorFiles, key)
+		}
+	}
 	seenPaths := map[string]string{}
 	memberKeys := map[string]bool{}
+	for key := range retainedFiles {
+		memberKeys[strings.ToLower(key)] = true
+	}
 	identities := map[binaryadmission.WindowsCanonicalEntryFileIdentityV2]bool{}
 	for _, row := range e.Bundle.Members {
 		key := strings.ToLower(row.Member)
@@ -2817,7 +2853,17 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 				return errors.New("current directory evidence is not an original parent chain")
 			}
 		}
-		directories[strings.ToLower(d.RelativePath)] = d.DirectoryIdentity
+		key := strings.ToLower(d.RelativePath)
+		if retained, ok := retainedDirectories[key]; ok {
+			if d.RelativePath != retained || d.Created || row.State != "retained" || row.Disposition != nil {
+				return errors.New("current retained runtime directory has changed or disposal evidence")
+			}
+			if d.RelativePath == e.Bundle.RelativePath &&
+				(d.DirectoryIdentity != e.Bundle.BeforeDirectory.DirectoryIdentity || d.ParentIdentity != e.Bundle.BeforeDirectory.ParentIdentity) {
+				return errors.New("retained runtime is not bound to the original bundle directory")
+			}
+		}
+		directories[key] = d.DirectoryIdentity
 		switch row.State {
 		case "retained":
 			if d.Created {
@@ -2835,11 +2881,17 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 			return errors.New("unknown current directory state")
 		}
 	}
+	for key := range retainedDirectories {
+		if _, ok := directories[key]; !ok {
+			return errors.New("current retained runtime directory or parent evidence missing")
+		}
+	}
 	if e.Bundle.BeforeDirectory != nil {
 		d := e.Bundle.BeforeDirectory
 		if d.Created || !sameWindowsProductPath(d.Root, root) || d.RelativePath != e.Bundle.RelativePath {
 			return errors.New("prior bundle container context disagrees")
 		}
+
 	}
 	if e.PriorRuntime != nil {
 		r := e.PriorRuntime
@@ -2906,6 +2958,95 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 		return errors.New("unknown current disposition state")
 	}
 	return nil
+}
+
+var errCurrentEntryRuntimeRetentionUnavailable = errors.New("native current runtime retention witness unavailable")
+
+func requireCurrentEntryNativeRetention(e *windowsCanonicalEntrySetJournalV2) error {
+	if e != nil && e.Bundle.Retained != nil {
+		// The current native reader cannot receive a selective bank. Keep
+		// the original V3 record pending instead of dropping its witness.
+		return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
+	}
+	return nil
+}
+
+func currentEntryRetainedRuntime(e *windowsCanonicalEntrySetJournalV2) (files map[string]bool, directories map[string]string, err error) {
+	witness := e.Bundle.Retained
+	if e.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 ||
+		e.Bundle.BeforeInventory == nil || e.Bundle.BeforeDirectory == nil ||
+		witness == nil || !validLowerHexSHA256(witness.MembersSHA256) || witness.Singletons == nil {
+		return nil, nil, errors.New("retained runtime requires original bundle and native witness")
+	}
+	index, err := binaryadmission.ParseRuntimePayload(e.Expected.RuntimePayloadBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	relativeIndex, ok := strings.CutPrefix(e.Expected.RuntimePayload.Path, e.Bundle.RelativePath+"/")
+	if !ok || !currentEntryRelative(relativeIndex) {
+		return nil, nil, errors.New("retained runtime index is outside its original bundle")
+	}
+	prior := make(map[string]binaryadmission.RuntimeObjectV1, len(e.Bundle.BeforeInventory.Objects))
+	for _, object := range e.Bundle.BeforeInventory.Objects {
+		prior[object.Path] = object
+	}
+	oldIndex := prior[relativeIndex]
+	if oldIndex.Kind != "file" || oldIndex.Size == nil || *oldIndex.Size != int64(len(e.Expected.RuntimePayloadBytes)) ||
+		oldIndex.SHA256 != binaryadmission.RuntimeDigest(e.Expected.RuntimePayloadBytes) {
+		return nil, nil, errors.New("retained runtime index differs from original bundle inventory")
+	}
+	next := make(map[string]binaryadmission.RuntimeObjectV1, len(e.Expected.BundleInventory))
+	for _, object := range e.Expected.BundleInventory {
+		next[object.Path] = object
+	}
+
+	files, directories = make(map[string]bool), make(map[string]string)
+	retain := func(object binaryadmission.RuntimeObjectV1) {
+		relative := path.Join(e.Bundle.RelativePath, object.Path)
+		if object.Kind == "file" {
+			files[relative] = true
+			relative = path.Dir(relative)
+		}
+		for ; relative != "."; relative = path.Dir(relative) {
+			directories[strings.ToLower(relative)] = relative
+		}
+	}
+	for _, component := range index.Components {
+		// The generation parent includes the descriptor and inventory that
+		// are siblings of the component's declared runtime root.
+		root := path.Dir(component.Root)
+		prefix := root + "/"
+		if next[root].Kind != "directory" {
+			return nil, nil, errors.New("retained runtime generation directory missing")
+		}
+		for key, object := range next {
+			if key == root || strings.HasPrefix(key, prefix) {
+				if !reflect.DeepEqual(prior[key], object) {
+					return nil, nil, errors.New("retained runtime generation inventory changed")
+				}
+				retain(object)
+			}
+		}
+		for key := range prior {
+			if (key == root || strings.HasPrefix(key, prefix)) && next[key].Kind == "" {
+				return nil, nil, errors.New("foreign object in original retained runtime generation")
+			}
+		}
+	}
+	last := ""
+	for _, key := range witness.Singletons {
+		if key <= last || key != e.Expected.RuntimePayload.Path && key != e.Expected.IdentityRelativePath {
+			return nil, nil, errors.New("invalid retained runtime singleton selection")
+		}
+		last = key
+		relative, _ := strings.CutPrefix(key, e.Bundle.RelativePath+"/")
+		object := next[relative]
+		if object.Kind != "file" || !reflect.DeepEqual(prior[relative], object) {
+			return nil, nil, errors.New("retained runtime singleton differs from original bundle inventory")
+		}
+		retain(object)
+	}
+	return files, directories, nil
 }
 
 func currentEntryMoveLocations(e *windowsCanonicalEntrySetJournalV2) (map[string]map[string]bool, error) {

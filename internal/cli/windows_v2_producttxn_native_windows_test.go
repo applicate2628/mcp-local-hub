@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -537,6 +539,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 		"pretransfer_prior_closes_before_stage",
 		"launcher_last_predecision_inverse",
 		"current_inverse_after_intent_failure",
+		"retained_runtime_requires_native_witness",
 		"commit_decided_cold_forward_and_repeat",
 		"commit_decided_cold_cleanup_exact_slots",
 		"guard_veto",
@@ -627,8 +630,9 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				phase == "guard_nil_without_write" || phase == "guard_writer_and_release_errors"
 			pretransferClose := phase == "pretransfer_prior_closes_before_stage"
 			exactCleanupSlots := phase == "commit_decided_cold_cleanup_exact_slots"
+			retainedRuntime := phase == "retained_runtime_requires_native_witness"
 			var prior map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2
-			if inverse || pretransferClose || exactCleanupSlots || phase == "current_inverse_after_intent_failure" {
+			if inverse || pretransferClose || exactCleanupSlots || retainedRuntime || phase == "current_inverse_after_intent_failure" {
 				prior = v2TxnSeedPrior(t, input, dst, seed)
 			}
 			if inverse {
@@ -668,6 +672,10 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				t.Fatal("Product stage member unavailable")
 			}
 
+			if retainedRuntime {
+				v2TxnAssertRetainedRuntimeRequiresNativeWitness(t, ctx, txn, journalPath)
+				return
+			}
 			if pretransferClose {
 				carrier := txn.Opts.EntryBundle
 				originalPrior, err := carrier.acquirePrior(ctx)
@@ -1037,6 +1045,137 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 
 // This fixture enters only the original file-move owner. No runtime recovery,
 // task restore, or supervisor invocation is part of the injected failure.
+func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string) {
+	t.Helper()
+	txn.Opts.Mode = WindowsProductPairModeUpgrade
+	txn.Opts.FrozenPorts = []windowsProductIntentPortV1{}
+	txn.Opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		GUIOwner:   windowsProductGUIOwnerConfirmedAbsent,
+		Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent},
+		Ports:      []windowsProductPortSettlementV1{}, SupervisorLockReleased: true,
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	before := mustReadFile(t, journalPath)
+	old, err := decodeWindowsProductRecoveryJournalV3(before)
+	if err != nil || old.Phase != WindowsProductRecoveryPrepared || old.Quiescence != nil || old.EntryBundle.Bundle.Retained != nil {
+		t.Fatal("existing exact BUNDLE prepared record did not round trip", err)
+	}
+	if encoded, err := encodeWindowsProductRecoveryJournalV3(old); err != nil || !bytes.Equal(encoded, before) {
+		t.Fatal("existing exact-member wire bytes changed", err)
+	}
+	makeSparse := func(t *testing.T) windowsProductRecoveryJournalV3 {
+		t.Helper()
+		j, err := decodeWindowsProductRecoveryJournalV3(before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := j.EntryBundle
+		e.Bundle.Retained = &windowsCanonicalEntryRetainedRuntimeV2{
+			MembersSHA256: strings.Repeat("a", 64),
+			Singletons:    []string{e.Expected.RuntimePayload.Path},
+		}
+		files, _, err := currentEntryRetainedRuntime(e)
+		if err != nil || len(files) != 9 {
+			t.Fatal("exact fixture must select eight component files and one index", err)
+		}
+		changed := e.Bundle.Members[:0]
+		for _, row := range e.Bundle.Members {
+			if !files[row.Member] {
+				changed = append(changed, row)
+			}
+		}
+		e.Bundle.Members = changed
+		for _, key := range []string{e.Expected.CanonicalEntryRelativePath, e.Expected.ProductRelativePath, e.Expected.IdentityRelativePath} {
+			if row := currentEntryMember(e, key); row == nil || row.Prior == nil || row.Staged == nil {
+				t.Fatal("a required changed core file lost its original rows")
+			}
+		}
+		return j
+	}
+	sparse := makeSparse(t)
+	raw, err := json.Marshal(sparse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var typed windowsProductRecoveryJournalV3
+	if err := decodeStrictCanonicalProductRecord(raw, &typed); err != nil {
+		t.Fatal("strict V3 retained wire did not receive typed evidence", err)
+	}
+	if err := validateCanonicalEntryBundleJournal(typed); err != nil {
+		t.Fatal("valid selective V3 structure was not recognized", err)
+	}
+	if _, err := decodeWindowsProductRecoveryJournalV3(raw); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) {
+		t.Fatal("selective prepared V3 did not refuse without native recovery", err)
+	}
+	projection, err := projectCurrentRecoveryJournal(typed, binaryadmission.WindowsCanonicalRecoveryRollbackV2)
+	if !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) || projection.Members != nil {
+		t.Fatal("selective recovery projected a witness-free native bank", err)
+	}
+	writes, reads := 0, 0
+	err = persistWindowsProductRecoveryJournalV3(ctx, txn.Opts.JournalAllowance, journalPath, typed,
+		func(string, []byte) error { writes++; return nil },
+		func(string) ([]byte, error) { reads++; return nil, nil })
+	if !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) || writes != 0 || reads != 0 {
+		t.Fatal("selective warm writer reached effects without native retention", err)
+	}
+	for _, tc := range []struct {
+		name    string
+		corrupt func(*windowsCanonicalEntrySetJournalV2)
+	}{
+		{"missing witness", func(e *windowsCanonicalEntrySetJournalV2) { e.Bundle.Retained = nil }},
+		{"invalid digest", func(e *windowsCanonicalEntrySetJournalV2) { e.Bundle.Retained.MembersSHA256 = "" }},
+		{"foreign singleton", func(e *windowsCanonicalEntrySetJournalV2) {
+			e.Bundle.Retained.Singletons = []string{e.Expected.ProductRelativePath}
+		}},
+		{"changed old index", func(e *windowsCanonicalEntrySetJournalV2) {
+			for i := range e.Bundle.BeforeInventory.Objects {
+				if e.Bundle.BeforeInventory.Objects[i].Path == path.Base(e.Expected.RuntimePayload.Path) {
+					e.Bundle.BeforeInventory.Objects[i].SHA256 = strings.Repeat("0", 64)
+				}
+			}
+		}},
+		{"foreign component leaf", func(e *windowsCanonicalEntrySetJournalV2) {
+			payload, err := binaryadmission.ParseRuntimePayload(e.Expected.RuntimePayloadBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n := int64(1)
+			original := &e.Bundle.BeforeInventory.Objects
+			*original = append(*original, binaryadmission.RuntimeObjectV1{Path: path.Join(payload.Components[0].Root, "fixture-foreign"), Kind: "file", Size: &n, SHA256: strings.Repeat("b", 64)})
+			sort.Slice(*original, func(i, j int) bool { return (*original)[i].Path < (*original)[j].Path })
+		}},
+		{"retained directory scheduled for disposal", func(e *windowsCanonicalEntrySetJournalV2) {
+			for i := range e.Bundle.Directories {
+				if e.Bundle.Directories[i].Original.RelativePath == e.Bundle.RelativePath {
+					e.Bundle.Directories[i].State = "dispose_intent"
+				}
+			}
+		}},
+		{"retained file selected for move", func(e *windowsCanonicalEntrySetJournalV2) {
+			e.Moves = append(e.Moves, windowsCanonicalEntryMoveRecordV2{Member: e.Expected.RuntimePayload.Path, Prior: true,
+				SourceRelative: e.Expected.RuntimePayload.Path, DestinationRelative: "fixture-aside.stage"})
+		}},
+		{"retained file selected for cleanup", func(e *windowsCanonicalEntrySetJournalV2) {
+			e.Cleanup = append(e.Cleanup, windowsCanonicalEntryCleanupV2{Member: e.Expected.RuntimePayload.Path, TransactionID: e.TransactionID,
+				Side: "prior", ExpectedSHA256: e.Expected.RuntimePayload.SHA256, SourceRelative: "fixture-aside.stage",
+				State: "discard_intent", Purpose: binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			j := makeSparse(t)
+			tc.corrupt(j.EntryBundle)
+			if err := validateCanonicalEntryBundleJournal(j); err == nil {
+				t.Fatal("corrupted selective V3 was accepted")
+			}
+		})
+	}
+	if !bytes.Equal(mustReadFile(t, journalPath), before) {
+		t.Fatal("refused journal admission changed the exact prepared record")
+	}
+}
+
 func v2TxnAssertInverseDiagnosticAfterPrefix(t *testing.T, ctx context.Context, txn *WindowsProductTxn, staged map[string]binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) {
 	t.Helper()
 	if err := txn.Prepare(); err != nil {
