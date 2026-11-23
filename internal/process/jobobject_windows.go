@@ -645,7 +645,10 @@ func (j *Job) observeCurrentJobPolicyCore(timeoutMs uint32, original containedJo
 			add("member_list", listErr)
 		} else {
 			seen := make(map[uint32]struct{}, len(list.PIDs))
-			if uint32(len(list.PIDs)) != list.Assigned || (len(list.PIDs) == 0 && (!borrowed || initial.ActiveProcesses != 0)) {
+			// Accounting and the member list are separate observations; members can
+			// exit between them. Empty capture still requires the original handle
+			// and the later same-Job accounting and wait proof below.
+			if uint32(len(list.PIDs)) != list.Assigned || (len(list.PIDs) == 0 && !borrowed) {
 				add("member_list", fmt.Errorf("incomplete Job member list assigned=%d listed=%d", list.Assigned, len(list.PIDs)))
 			}
 			for _, pid := range list.PIDs {
@@ -695,6 +698,21 @@ func (j *Job) observeCurrentJobPolicyCore(timeoutMs uint32, original containedJo
 			}
 			h, openErr := ops.openProcess(pid)
 			if openErr != nil || h == 0 {
+				// A non-root member can disappear between the Job list and OpenProcess.
+				// Only a fresh empty list from this original Job permits the existing
+				// current-cohort proof to continue; the errno alone proves no closure.
+				if borrowed && pid != original.pid && h == 0 && errors.Is(openErr, windows.ERROR_INVALID_PARAMETER) {
+					current, listErr := ops.listMembers(j)
+					if listErr == nil && current.Assigned == 0 && len(current.PIDs) == 0 {
+						// No handle was captured for this member. Never promote current
+						// closure to strict lifetime coverage, even if counts matched.
+						observation.strictFailure = errors.Join(observation.strictFailure, &JobTerminationProofError{
+							Stage: "member_handle",
+							Cause: fmt.Errorf("pid=%d capture unavailable after empty original Job query: %w", pid, openErr),
+						})
+						continue
+					}
+				}
 				if openErr == nil {
 					openErr = errors.New("zero member handle")
 				}

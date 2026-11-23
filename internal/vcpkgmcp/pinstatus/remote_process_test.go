@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 const remoteProcessHelperEnv = "MCPHUB_PINSTATUS_REMOTE_PROCESS_HELPER"
@@ -37,6 +39,7 @@ func TestRemoteRefsProcessHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		grandchild := exec.Command(exe, "-test.run=^TestRemoteRefsProcessHelper$")
+		process.NoConsole(grandchild)
 		grandchild.Env = append(os.Environ(), remoteProcessHelperEnv+"=hold")
 		grandchild.Stdout = os.Stdout
 		grandchild.Stderr = os.Stderr

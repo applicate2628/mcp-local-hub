@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestAssertJSONGoldenStableAndReadOnly(t *testing.T) {
@@ -84,6 +86,7 @@ func TestAssertJSONGoldenRejectsWithoutUpdating(t *testing.T) {
 				}
 			}
 			cmd := exec.Command(executable, "-test.run=^TestAssertJSONGoldenRejectsWithoutUpdating$", "-test.timeout=10s")
+			process.NoConsole(cmd)
 			cmd.Env = append(os.Environ(), modeKey+"="+tc.name, pathKey+"="+path)
 			output, err := cmd.CombinedOutput()
 			if err == nil || !strings.Contains(string(output), tc.message) {
