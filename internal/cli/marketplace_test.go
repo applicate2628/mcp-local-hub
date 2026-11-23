@@ -22,11 +22,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func TestMarketplaceSearch_HappyPath(t *testing.T) {
@@ -406,5 +408,57 @@ func TestMarketplaceRefresh_ReportsDocsOnlyCount(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "docs-only pointer") {
 		t.Errorf("refresh output missing docs-only pointer count\n---\n%s", out)
+	}
+}
+
+func TestMarketplaceExplicitV3Trail(t *testing.T) {
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(`{"schema_version":"3","entries":[{"id":"trail","name":"Trail MCP","summary":"Project-scoped code navigation tools.","kind":"project-provider","service":"trail","package":{"manager":"npm","name":"@trailhq/trail-code","bin":"trail","channel":"latest"}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
+	registry := api.MarketplaceTestRegistryURL("/explicit-trail-v3.json")
+
+	for _, tc := range []struct {
+		command string
+		want    []string
+	}{
+		{"search", []string{"trail", "project-provider", "Project-scoped code navigation tools."}},
+		{"show", []string{"Kind:       project-provider", "Service:    trail", "@trailhq/trail-code", "Binary:     trail", "Channel:    latest"}},
+		{"generate", nil},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			cmd := newMarketplaceCmd()
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{tc.command, "trail", "--registry", registry})
+			err := cmd.ExecuteContext(context.Background())
+			if tc.command == "generate" {
+				if err == nil || !strings.Contains(err.Error(), "project provider") || stdout.Len() != 0 {
+					t.Fatalf("generate err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: %v, stderr=%q", tc.command, err, stderr.String())
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout.String(), want) {
+					t.Errorf("stdout missing %q: %q", want, stdout.String())
+				}
+			}
+			for _, forbidden := range []string{"Transport:", "Command:", "Env:"} {
+				if strings.Contains(stdout.String(), forbidden) {
+					t.Errorf("stdout contains %q: %q", forbidden, stdout.String())
+				}
+			}
+		})
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("registry requests=%d, want 1 across search, show, and generate", got)
 	}
 }

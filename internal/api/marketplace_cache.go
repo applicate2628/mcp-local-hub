@@ -210,42 +210,6 @@ func isMarketplaceCacheFresh(cf *marketplaceCacheFile) bool {
 	return age < marketplaceCacheTTL
 }
 
-// marketplaceCacheCatalogKeyPresence pulls the nested `catalog` sub-object out
-// of the raw cache bytes and runs it through the SAME per-entry key-presence
-// decoder the fresh-fetch parser uses (catalogEntryNewKeyPresence), so the
-// forward-compat gate enforces raw KEY PRESENCE on the cache path too. Returns a
-// nil slice (presence info unavailable → value-based inner guard) when the
-// `catalog` key is absent or not a JSON object; that is not an error, because a
-// cache file without a catalog object has no new keys to reject here.
-func marketplaceCacheCatalogKeyPresence(raw []byte) ([]map[string]json.RawMessage, error) {
-	var shell struct {
-		Catalog json.RawMessage `json:"catalog"`
-	}
-	if err := json.Unmarshal(raw, &shell); err != nil {
-		return nil, fmt.Errorf("re-decode catalog for key-presence check: %w", err)
-	}
-	if len(shell.Catalog) == 0 {
-		return nil, nil
-	}
-	return catalogEntryNewKeyPresence(shell.Catalog)
-}
-
-// marketplaceCacheDocsOnlyPresent reports whether the nested cache `catalog`
-// sub-object carries the top-level docs_only key (S4 v2-gate on the cache path). A
-// missing/empty catalog object means the key is absent.
-func marketplaceCacheDocsOnlyPresent(raw []byte) (bool, error) {
-	var shell struct {
-		Catalog json.RawMessage `json:"catalog"`
-	}
-	if err := json.Unmarshal(raw, &shell); err != nil {
-		return false, fmt.Errorf("re-decode catalog for docs_only presence check: %w", err)
-	}
-	if len(shell.Catalog) == 0 {
-		return false, nil
-	}
-	return catalogTopLevelKeyPresent(shell.Catalog, "docs_only")
-}
-
 func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	raw, err := readHubMcpStateFile(marketplaceCacheFileLeaf)
 	if err != nil {
@@ -271,24 +235,28 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err := json.Unmarshal(raw, &managedPresence); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: observe managed recipe members: %w", err)
 	}
-	// Extract the nested `catalog` sub-object's raw bytes so the forward-compat
-	// gate can reject on raw KEY PRESENCE (codex r7 P2) even on the cache path —
-	// a tampered cache file could carry a v1 catalog with `availability:""` /
-	// `vendored_source:null` that the typed decode alone would not catch. A nil
-	// presence (catalog key absent / malformed) falls back to the value-based
-	// inner guard, which is correct: there is then no new key to reject.
-	presence, err := marketplaceCacheCatalogKeyPresence(raw)
+	// Ordinary gates still see the final raw object. Provider admission also
+	// needs every preceding occurrence, since the typed cache decoder merges
+	// repeated catalog members into the same struct.
+	var rawCache struct {
+		Catalog catalogMemberOccurrences `json:"catalog"`
+	}
+	if err := json.Unmarshal(raw, &rawCache); err != nil {
+		return nil, fmt.Errorf("validate cache catalog: observe catalog members: %w", err)
+	}
+	rawCatalog := json.RawMessage("null")
+	if len(rawCache.Catalog) != 0 {
+		rawCatalog = rawCache.Catalog[len(rawCache.Catalog)-1]
+	}
+	presence, err := catalogEntryNewKeyPresence(rawCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
-	// S4: detect the docs_only top-level key in the nested cache `catalog` object so
-	// the docs_only v2-gate fires on the cache path too (a tampered cache could carry
-	// a v1 catalog with docs_only present).
-	docsOnlyPresent, err := marketplaceCacheDocsOnlyPresent(raw)
+	docsOnlyPresent, err := catalogTopLevelKeyPresent(rawCatalog, "docs_only")
 	if err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cf.Catalog, presence, docsOnlyPresent, managedPresence.Catalog); err != nil {
+	if err := validateMarketplaceCatalog(&cf.Catalog, presence, docsOnlyPresent, managedPresence.Catalog, rawCache.Catalog); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
 	if cf.SourceURL != "" {

@@ -18,7 +18,7 @@ import (
 )
 
 // MarketplaceCatalogSchemaVersion is the baseline catalog schema. V2 adds the
-// D-2/D-3 metadata, and V3 adds the compiled managed_recipe selector. The parser
+// D-2/D-3 metadata. V3 adds managed_recipe and descriptive project providers. The parser
 // accepts all three; each additive field family remains gated to its first schema.
 const (
 	MarketplaceCatalogSchemaVersion   = "1"
@@ -42,7 +42,7 @@ const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applica
 // schema_version values this build parses", consumed by both the catalog parser
 // (validateMarketplaceCatalog) and the on-disk cache validator (readMarketplaceCache)
 // so the two read paths can never diverge on the accepted set. It accepts the
-// baseline v1, metadata v2, and managed-recipe v3.
+// baseline v1, metadata v2, and managed recipes and project providers in v3.
 func marketplaceSchemaVersionAccepted(v string) bool {
 	return v == MarketplaceCatalogSchemaVersion || v == MarketplaceCatalogSchemaVersionV2 || v == MarketplaceCatalogSchemaVersionV3
 }
@@ -92,13 +92,19 @@ type MarketplaceEntry struct {
 	Summary    string            `json:"summary,omitempty"`
 	Homepage   string            `json:"homepage,omitempty"`
 	ReadmeURL  string            `json:"readme_url,omitempty"`
-	Transport  string            `json:"transport"`
+	Transport  string            `json:"transport,omitempty"`
 	Command    string            `json:"command,omitempty"`
 	Args       []string          `json:"args,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
 	URL        string            `json:"url,omitempty"`
 	Categories []string          `json:"categories,omitempty"`
 	License    string            `json:"license,omitempty"`
+
+	// Project-provider fields are populated by catalog admission. Ordinary
+	// rows may use these JSON keys as opaque metadata.
+	Kind    string                     `json:"-"`
+	Service string                     `json:"-"`
+	Package *MarketplaceProjectPackage `json:"-"`
 
 	// ManagedRecipe selects a compiled, Hub-owned recipe. It is never a command
 	// source; the recipe supplies command, args, and env after validation.
@@ -233,11 +239,6 @@ func ParseMarketplaceCatalogStrict(raw []byte) (*MarketplaceCatalog, error) {
 func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*MarketplaceCatalog, error) {
 	var cat MarketplaceCatalog
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	if strictUnknownFields {
-		// Author-side only: catch typo'd keys in the repo's own catalog. The
-		// deployed-client fetch path leaves this off for additive forward-compat.
-		dec.DisallowUnknownFields()
-	}
 	if err := dec.Decode(&cat); err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
@@ -269,10 +270,50 @@ func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*Marketplace
 	if err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cat, presence, docsOnlyPresent, managedPresence); err != nil {
+	if err := validateMarketplaceCatalog(&cat, presence, docsOnlyPresent, managedPresence, []json.RawMessage{raw}); err != nil {
 		return nil, err
 	}
+	if strictUnknownFields {
+		if err := checkStrictMarketplaceCatalog(raw, &cat); err != nil {
+			return nil, fmt.Errorf("decode catalog: %w", err)
+		}
+	}
 	return &cat, nil
+}
+
+// checkStrictMarketplaceCatalog checks authoring keys on the original bytes.
+// Provider rows have already passed their exact raw key checks. The primary
+// typed decode still owns JSON type errors and ordinary duplicate semantics.
+func checkStrictMarketplaceCatalog(raw []byte, cat *MarketplaceCatalog) error {
+	var shape struct {
+		MarketplaceCatalog
+		Entries catalogMemberOccurrences `json:"entries"`
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&shape); err != nil {
+		return err
+	}
+	for _, rawEntries := range shape.Entries {
+		var rows []json.RawMessage
+		if err := json.Unmarshal(rawEntries, &rows); err != nil {
+			return err
+		}
+		for i, rawRow := range rows {
+			// A provider declaration requires one unambiguous entries array,
+			// so in that case only, the typed entry aligns with every raw row.
+			if i < len(cat.Entries) && cat.Entries[i].Kind == MarketplaceProjectProviderKind {
+				continue
+			}
+			var ordinary MarketplaceEntry
+			entryDec := json.NewDecoder(strings.NewReader(string(rawRow)))
+			entryDec.DisallowUnknownFields()
+			if err := entryDec.Decode(&ordinary); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // catalogTopLevelKeyPresent reports whether the catalog's top-level JSON object
@@ -357,7 +398,7 @@ func (p *jsonMemberPresence) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage, docsOnlyPresent bool, managedPresence managedRecipeCatalogPresence) error {
+func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage, docsOnlyPresent bool, managedPresence managedRecipeCatalogPresence, rawCatalogs []json.RawMessage) error {
 	if !marketplaceSchemaVersionAccepted(cat.SchemaVersion) {
 		return fmt.Errorf("schema_version %q: this build only accepts %q, %q, or %q",
 			cat.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2, MarketplaceCatalogSchemaVersionV3)
@@ -376,10 +417,14 @@ func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]j
 	if len(cat.Entries) != len(managedPresence.Entries) {
 		return fmt.Errorf("managed_recipe presence does not match catalog entries")
 	}
+	providers, err := marketplaceProjectProviderRows(rawCatalogs, len(cat.Entries))
+	if err != nil {
+		return fmt.Errorf("catalog provider evidence: %w", err)
+	}
 	seen := map[string]bool{}
 	for i := range cat.Entries {
 		e := &cat.Entries[i]
-		if err := validateMarketplaceEntry(e, cat.SchemaVersion, entryNewKeyPresence(presence, i), managedPresence.Entries[i]); err != nil {
+		if err := validateMarketplaceEntry(e, cat.SchemaVersion, entryNewKeyPresence(presence, i), managedPresence.Entries[i], providers[i]); err != nil {
 			return fmt.Errorf("entry %d (id=%q): %w", i, e.ID, err)
 		}
 		if seen[e.ID] {
@@ -502,7 +547,7 @@ func validateManagedRecipeCompatibility(e *MarketplaceEntry, schemaVersion strin
 	return nil
 }
 
-func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presence map[string]json.RawMessage, managedPresence managedRecipeEntryPresence) error {
+func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presence map[string]json.RawMessage, managedPresence managedRecipeEntryPresence, rawProvider json.RawMessage) error {
 	if err := validateManagedRecipeCompatibility(e, schemaVersion, managedPresence); err != nil {
 		return err
 	}
@@ -517,6 +562,9 @@ func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presenc
 	// later — including the reserved-aggregate-name guard from r15.
 	if err := CheckManifestName(e.ID); err != nil {
 		return fmt.Errorf("id %q fails manifest-name gate: %w", e.ID, err)
+	}
+	if rawProvider != nil {
+		return validateMarketplaceProjectProvider(e, schemaVersion, rawProvider)
 	}
 	if e.ManagedRecipe == "" {
 		switch e.Transport {

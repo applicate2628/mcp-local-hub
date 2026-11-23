@@ -96,10 +96,14 @@ func newMarketplaceSearchCmd() *cobra.Command {
 				// control bytes and ESC before writing to a terminal
 				// so a hostile catalog cannot inject escape sequences
 				// or corrupt scripts that parse the table.
+				transport := e.Transport
+				if e.Kind == api.MarketplaceProjectProviderKind {
+					transport = e.Kind
+				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 					sanitizeCatalogField(e.ID),
 					sanitizeCatalogField(e.Name),
-					sanitizeCatalogField(e.Transport),
+					sanitizeCatalogField(transport),
 					sanitizeCatalogField(strings.Join(e.Categories, ",")),
 					sanitizeCatalogField(e.Summary),
 				)
@@ -158,7 +162,15 @@ func newMarketplaceShowCmd() *cobra.Command {
 				// control characters via name/summary/etc.
 				fmt.Fprintf(out, "ID:         %s\n", sanitizeCatalogField(e.ID))
 				fmt.Fprintf(out, "Name:       %s\n", sanitizeCatalogField(e.Name))
-				fmt.Fprintf(out, "Transport:  %s\n", sanitizeCatalogField(e.Transport))
+				if e.Kind == api.MarketplaceProjectProviderKind {
+					fmt.Fprintf(out, "Kind:       %s\n", sanitizeCatalogField(e.Kind))
+					fmt.Fprintf(out, "Service:    %s\n", sanitizeCatalogField(e.Service))
+					fmt.Fprintf(out, "Package:    %s (%s)\n", sanitizeCatalogField(e.Package.Name), sanitizeCatalogField(e.Package.Manager))
+					fmt.Fprintf(out, "Binary:     %s\n", sanitizeCatalogField(e.Package.Bin))
+					fmt.Fprintf(out, "Channel:    %s\n", sanitizeCatalogField(e.Package.Channel))
+				} else {
+					fmt.Fprintf(out, "Transport:  %s\n", sanitizeCatalogField(e.Transport))
+				}
 				if e.Command != "" {
 					cmdLine := sanitizeCatalogField(e.Command)
 					if len(e.Args) > 0 {

@@ -27,6 +27,9 @@ type GenerateOpts struct {
 // Returns (yaml, warnings, error). Warnings are operator-facing
 // stderr lines; the YAML is operator-facing stdout content.
 func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []string, error) {
+	if e.Kind == MarketplaceProjectProviderKind {
+		return "", nil, fmt.Errorf("entry %q describes a project provider and cannot generate a server manifest", e.ID)
+	}
 	switch e.Transport {
 	case "stdio":
 		return generateCommandDraft(e, opts, config.TransportStdioBridge)
