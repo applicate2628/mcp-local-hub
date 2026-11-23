@@ -51,32 +51,10 @@ func installSchedulerRecoveryTasks(err error) []string {
 	return names
 }
 
-// verifyInstallTaskDefinitionBeforeDelete refuses an observed change after the
-// durable snapshot was captured. It grants no atomic generation ownership:
-// another writer can still replace the task between this read and Delete, and
-// an identical-XML replacement cannot be distinguished by this observation.
-func verifyInstallTaskDefinitionBeforeDelete(s interface {
-	ExportXML(string) ([]byte, error)
-}, name string, priorXML []byte) error {
-	current, err := s.ExportXML(name)
-	if err != nil {
-		return fmt.Errorf("read current definition: %w", err)
-	}
-	if len(current) == 0 {
-		return errors.New("empty current definition; deletion refused")
-	}
-	if !bytes.Equal(current, priorXML) {
-		return errors.New("current definition changed; deletion refused")
-	}
-	return nil
-}
-
-// installTaskMutationFailure observes the prior definition or absence after a
-// failed current-step mutation. An error alone does not establish its outcome.
-// Reuse the scheduler recovery owner unless that prior state is observed;
-// never retry, delete an occupant, or restore by name in this classifier.
-// Like the later rollback's checks, this is a definition observation, not an
-// atomic object-generation or whole-process-tree settlement guarantee.
+// installTaskMutationFailure observes a failed current-step mutation. Only a
+// confirmed absent name can settle an operation whose prior state was absent.
+// Matching XML does not settle a prior generation or prove a failed operation
+// succeeded. Never retry, delete an occupant, or restore by name here.
 func installTaskMutationFailure(s interface {
 	ExportXML(string) ([]byte, error)
 }, name string, priorXML []byte, cause error) error {
@@ -85,8 +63,6 @@ func installTaskMutationFailure(s interface {
 		if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
 			return cause
 		}
-	} else if readErr == nil && bytes.Equal(current, priorXML) {
-		return cause
 	}
 	if readErr != nil {
 		cause = errors.Join(cause, fmt.Errorf("observe task %s after failed mutation: %w", name, readErr))
@@ -94,104 +70,22 @@ func installTaskMutationFailure(s interface {
 	return &InstallSchedulerRollbackIncompleteError{Tasks: []string{name}, cause: cause}
 }
 
-// installTaskRollback captures one acknowledged creation in this execution.
-// createdXML is an observation, not native ownership or an object-generation
-// receipt. A replacement before that capture, between comparison and Delete,
-// or with identical XML remains outside this bounded comparison contract.
-type installTaskRollback struct {
-	name         string
-	priorXML     []byte
-	createdXML   []byte
-	snapshotPath string
-	creator      scheduler.XMLCreator
-}
-
-func (r *installTaskRollback) rollback(s scheduler.Scheduler) error {
-	if len(r.createdXML) == 0 {
-		return r.failure("verify created definition", errors.New("created definition was not captured; task retained"))
-	}
-	current, readErr := s.ExportXML(r.name)
+// rollbackInstallTaskCreation can confirm absence, but cannot remove the
+// occupant of a task name. An acknowledged Create and identical XML do not
+// establish exclusive generation ownership. Retain the current observation for
+// recovery and propagate read/storage failures with the ownership refusal.
+func rollbackInstallTaskCreation(s interface {
+	ExportXML(string) ([]byte, error)
+}, name string) error {
+	current, readErr := s.ExportXML(name)
 	if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
-		if len(r.priorXML) == 0 {
-			return nil
-		}
-		return r.restore(s)
+		return nil
 	}
 	if readErr != nil {
-		return r.failure("read current definition", readErr)
+		return fmt.Errorf("rollback scheduler task %s: %w", name, errors.Join(ErrSchedulerReplacementUnowned, readErr))
 	}
 	if len(current) == 0 {
-		return r.failure("read current definition", errors.New("empty successful export; task retained"))
+		return fmt.Errorf("rollback scheduler task %s: %w", name, errors.Join(ErrSchedulerReplacementUnowned, errors.New("empty successful export; task absence was not confirmed")))
 	}
-	if len(r.priorXML) > 0 && bytes.Equal(current, r.priorXML) {
-		return nil
-	}
-	if !bytes.Equal(current, r.createdXML) {
-		return r.failure("compare current definition", errors.New("current definition changed; task retained"))
-	}
-	// Capability is required before removing an observed candidate, not after.
-	if len(r.priorXML) > 0 && r.creator == nil {
-		return r.failure("restore capability", scheduler.ErrNotImplemented)
-	}
-	// This read/check followed by name-based Delete is not atomic. In particular,
-	// an external writer in this interval is not excluded by the manifest lease.
-	if err := s.Delete(r.name); err != nil {
-		return r.failure("delete candidate; outcome not established", err)
-	}
-	remaining, absenceErr := s.ExportXML(r.name)
-	if !errors.Is(absenceErr, scheduler.ErrTaskNotFound) || len(remaining) != 0 {
-		return r.failure("confirm absence after delete", errors.Join(absenceErr, errors.New("task absence was not confirmed; no restoration attempted")))
-	}
-	if len(r.priorXML) == 0 {
-		return nil
-	}
-	return r.restore(s)
-}
-
-// rollbackPruned restores an acknowledged deletion without removing an
-// occupant. This is separate from rollback: missing createdXML there means
-// a failed post-create capture, not a pruned task. The read is not atomic;
-// create-only semantics protect a new occupant after an absence observation.
-func (r *installTaskRollback) rollbackPruned(s interface {
-	ExportXML(string) ([]byte, error)
-}) error {
-	current, readErr := s.ExportXML(r.name)
-	if readErr == nil && bytes.Equal(current, r.priorXML) {
-		return nil
-	}
-	if errors.Is(readErr, scheduler.ErrTaskNotFound) && len(current) == 0 {
-		return r.restore(s)
-	}
-	if readErr != nil {
-		return r.failure("read pruned task before restoration", readErr)
-	}
-	return r.failure("verify pruned task absence", errors.New("task absence was not confirmed; no restoration attempted"))
-}
-
-func (r *installTaskRollback) restore(s interface {
-	ExportXML(string) ([]byte, error)
-}) error {
-	if r.creator == nil {
-		return r.failure("restore capability", scheduler.ErrNotImplemented)
-	}
-	// Native create-only semantics decide occupancy at the mutation. Never use
-	// ImportXML, retry, or delete an occupant after a conflict/uncertain result.
-	if err := r.creator.CreateXMLIfAbsent(r.name, r.priorXML); err != nil {
-		return r.failure("register prior definition without replacement", err)
-	}
-	restored, readErr := s.ExportXML(r.name)
-	if readErr != nil {
-		return r.failure("read restored definition", readErr)
-	}
-	if !bytes.Equal(restored, r.priorXML) {
-		return r.failure("verify restored definition", errors.New("registered definition does not match the retained prior XML; task retained"))
-	}
-	return nil
-}
-
-func (r *installTaskRollback) failure(phase string, cause error) error {
-	if r.snapshotPath != "" {
-		return fmt.Errorf("rollback scheduler task %s (%s; recovery snapshot retained at %q): %w", r.name, phase, r.snapshotPath, cause)
-	}
-	return fmt.Errorf("rollback scheduler task %s (%s): %w", r.name, phase, cause)
+	return fmt.Errorf("rollback scheduler task %s: %w", name, refuseSchedulerTaskReplacement(name, bytes.Clone(current)))
 }

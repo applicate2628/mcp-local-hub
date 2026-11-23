@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// ErrSchedulerReplacementUnowned means a replacement was refused before any
-// scheduler mutation. The backend does not provide exclusive authority over the
+// ErrSchedulerReplacementUnowned means a destructive replacement or deletion
+// was refused. The backend does not provide exclusive authority over the
 // observed registration; an XML snapshot or a cooperating lock cannot grant it.
 var ErrSchedulerReplacementUnowned = errors.New("exclusive ownership of the existing scheduler task generation is unavailable")
 

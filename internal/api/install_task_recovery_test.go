@@ -114,100 +114,39 @@ func readInstallRecoverySnapshot(t *testing.T, root, name string, xml []byte) st
 	return paths[0]
 }
 
-func TestExecuteInstallToCurrentTaskRecovery(t *testing.T) {
+func TestExecuteInstallToExistingTaskRefusesBeforeRecovery(t *testing.T) {
 	const name = "mcp-local-hub-recovery-default"
-	priorXML := []byte("<Task>prior-Привет-🙂</Task>")
-	createCause := errors.New("fixture: create failed")
-	restoreCause := errors.New("fixture: recovery reply unavailable")
-	for _, tc := range []struct {
-		name          string
-		createWrites  []byte
-		restoreWrites []byte
-		restoreErr    error
-		wantXML       []byte
-		wantErr       error
-	}{
-		{name: "restored", wantXML: priorXML},
-		{name: "external_occupant", createWrites: []byte("external"), wantXML: []byte("external"), wantErr: errInstallRecoveryOccupied},
-		{name: "create_applied_reply_lost", createWrites: []byte("candidate"), wantXML: []byte("candidate"), wantErr: errInstallRecoveryOccupied},
-		{name: "restore_rejected", restoreErr: restoreCause, wantErr: restoreCause},
-		{name: "restore_applied_reply_lost", restoreWrites: priorXML, restoreErr: restoreCause, wantXML: priorXML, wantErr: restoreCause},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	prior := []byte("<Task>prior-Привет-🙂</Task>")
+	createCause, restoreCause := errors.New("fixture: create reply lost"), errors.New("fixture: restore reply lost")
+	for _, scenario := range []string{"plain", "create_applied_reply_lost", "restore_applied_reply_lost", "without_xml_creator"} {
+		t.Run(scenario, func(t *testing.T) {
 			root := hardenedTempDir(t)
 			f := newInstallFakeScheduler()
-			f.tasks[name], f.xml[name] = true, priorXML
-			s := &installRecoveryScheduler{fakeScheduler: f, createErr: createCause, createWrites: tc.createWrites, restoreWrites: tc.restoreWrites, restoreErr: tc.restoreErr}
-			plan := installRecoveryPlan(t, s, root, name)
+			f.tasks[name], f.xml[name] = true, bytes.Clone(prior)
+			s := &installRecoveryScheduler{fakeScheduler: f, createErr: createCause, restoreErr: restoreCause}
+			if scenario == "create_applied_reply_lost" {
+				s.createWrites = []byte("candidate")
+			}
+			if scenario == "restore_applied_reply_lost" {
+				s.restoreWrites = bytes.Clone(prior)
+			}
+			var backend scheduler.Scheduler = s
+			if scenario == "without_xml_creator" {
+				backend = struct{ scheduler.Scheduler }{s}
+			}
+			plan := installRecoveryPlan(t, backend, root, name)
 			var output bytes.Buffer
 			err := executeInstallTo(&output, &config.ServerManifest{Name: "recovery"}, plan, 0, false, nil, true, false)
-			if !errors.Is(err, createCause) || (tc.wantErr != nil && !errors.Is(err, tc.wantErr)) {
-				t.Errorf("RECOVERY-CAUSES: got %v, want original and recovery causes", err)
+			var refused *SchedulerReplacementRefusedError
+			if !errors.Is(err, ErrSchedulerReplacementUnowned) || !errors.As(err, &refused) || refused.TaskName != name || errors.Is(err, createCause) || errors.Is(err, restoreCause) {
+				t.Fatalf("RECOVERY-REFUSAL: %v", err)
 			}
-			if !bytes.Equal(f.xml[name], tc.wantXML) || f.tasks[name] != (tc.wantXML != nil) || s.createAttempts != 1 || len(s.restoreNames) != 1 || s.restoreNames[0] != name || len(f.deleteNames) != 1 || f.deleteNames[0] != name || len(f.importNames) != 0 || f.runCount != 0 {
-				t.Errorf("RECOVERY-STATE: current task or operation sequence differs; delete=%v restore=%v create=%d import=%v run=%d", f.deleteNames, s.restoreNames, s.createAttempts, f.importNames, f.runCount)
+			if !f.tasks[name] || !bytes.Equal(f.xml[name], prior) || s.createAttempts != 0 || len(s.restoreNames) != 0 || len(f.deleteNames) != 0 || len(f.importNames) != 0 || f.runCount != 0 {
+				t.Fatalf("RECOVERY-STATE: delete=%v restore=%v create=%d", f.deleteNames, s.restoreNames, s.createAttempts)
 			}
-			path := readInstallRecoverySnapshot(t, root, name, priorXML)
-			if err == nil || !strings.Contains(err.Error(), strconv.Quote(path)) || strings.Contains(output.String(), "Scheduler task created") || strings.Contains(output.String(), "Install complete") {
-				t.Errorf("RECOVERY-DIAGNOSTIC: failure lost snapshot reference or reported install success: %v", err)
-			}
-			if tc.wantErr != nil && strings.Contains(err.Error(), "prior definition registered again") {
-				t.Error("RECOVERY-DIAGNOSTIC: uncertain restoration reported as acknowledged")
-			}
-		})
-	}
-}
-
-func TestExecuteInstallToRecoveryCapabilityRequired(t *testing.T) {
-	const name = "mcp-local-hub-recovery-no-capability"
-	root := hardenedTempDir(t)
-	f := newInstallFakeScheduler()
-	priorXML := []byte("<Task>prior</Task>")
-	f.tasks[name], f.xml[name] = true, priorXML
-	// Expose only the existing Scheduler interface, hiding the optional method.
-	s := struct{ scheduler.Scheduler }{f}
-	plan := installRecoveryPlan(t, s, root, name)
-	err := executeInstallTo(io.Discard, &config.ServerManifest{Name: "recovery"}, plan, 0, false, nil, true, false)
-	if !errors.Is(err, scheduler.ErrNotImplemented) || !bytes.Equal(f.xml[name], priorXML) || len(f.deleteNames) != 0 || f.createCount != 0 {
-		t.Errorf("RECOVERY-CAPABILITY: unsupported backend changed prior task or lost typed cause: %v", err)
-	}
-	paths, _ := filepath.Glob(filepath.Join(root, "scheduler-recovery-*.json"))
-	if len(paths) != 0 {
-		t.Error("RECOVERY-CAPABILITY: saved snapshot for unsupported backend")
-	}
-}
-
-func TestExecuteInstallToRecoverySnapshotBeforeDelete(t *testing.T) {
-	const name = "mcp-local-hub-recovery-order"
-	priorXML := []byte("<Task>before delete</Task>")
-	for _, failDelete := range []bool{false, true} {
-		label := "replacement_succeeds"
-		if failDelete {
-			label = "delete_fails"
-		}
-		t.Run(label, func(t *testing.T) {
-			root := hardenedTempDir(t)
-			f := newInstallFakeScheduler()
-			f.tasks[name], f.xml[name] = true, priorXML
-			cause := errors.New("fixture: delete failed")
-			if failDelete {
-				f.failDeleteErr = cause
-			}
-			s := &installRecoveryScheduler{fakeScheduler: f}
-			s.beforeDelete = func() { readInstallRecoverySnapshot(t, root, name, priorXML) }
-			plan := installRecoveryPlan(t, s, root, name)
-			var output bytes.Buffer
-			err := executeInstallTo(&output, &config.ServerManifest{Name: "recovery"}, plan, 0, false, nil, true, false)
-			path := readInstallRecoverySnapshot(t, root, name, priorXML)
-			if failDelete {
-				if !errors.Is(err, cause) || !strings.Contains(err.Error(), strconv.Quote(path)) || s.createAttempts != 0 || !bytes.Equal(f.xml[name], priorXML) {
-					t.Errorf("RECOVERY-DELETE: got %v; create attempts %d", err, s.createAttempts)
-				}
-			} else if err != nil || !strings.Contains(output.String(), path) || s.createAttempts != 1 {
-				t.Errorf("RECOVERY-SUCCESS: lost retained snapshot or failed replacement: %v", err)
-			}
-			if len(s.restoreNames) != 0 || len(f.importNames) != 0 || f.runCount != 0 {
-				t.Error("RECOVERY-ORDER: unexpected recovery, replacing import or Run")
+			path := readInstallRecoverySnapshot(t, root, name, prior)
+			if refused.SnapshotPath != path || !strings.Contains(err.Error(), strconv.Quote(path)) || strings.Contains(output.String(), "Install complete") {
+				t.Fatalf("RECOVERY-SNAPSHOT: err=%v path=%s", err, path)
 			}
 		})
 	}

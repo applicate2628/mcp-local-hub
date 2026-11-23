@@ -133,7 +133,7 @@ func TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask(t *testing.T)
 	}
 }
 
-func TestExecuteInstallToDeleteFailurePreservesTask(t *testing.T) {
+func TestExecuteInstallToUnownedDeletionRefusalPreservesTask(t *testing.T) {
 	const name = "mcp-local-hub-snapshot-delete"
 	priorXML := []byte("<Task>original</Task>")
 	cause := errors.New("delete denied")
@@ -142,10 +142,10 @@ func TestExecuteInstallToDeleteFailurePreservesTask(t *testing.T) {
 	s := &installSnapshotScheduler{fakeScheduler: f, name: name, snapshot: priorXML, deleteErr: cause}
 	plan := installSnapshotPlan(t, s, name)
 	err := executeInstallTo(io.Discard, &config.ServerManifest{Name: "snapshot"}, plan, 0, false, nil, true, false)
-	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "delete task "+name) {
+	if !errors.Is(err, ErrSchedulerReplacementUnowned) || errors.Is(err, cause) || !strings.Contains(err.Error(), name) {
 		t.Errorf("delete refusal = %v, want named cause", err)
 	}
-	if !f.tasks[name] || !bytes.Equal(f.xml[name], priorXML) || len(f.deleteNames) != 1 || f.deleteNames[0] != name || f.createCount != 0 || len(f.importNames) != 0 || f.runCount != 0 {
+	if !f.tasks[name] || !bytes.Equal(f.xml[name], priorXML) || len(f.deleteNames) != 0 || f.createCount != 0 || len(f.importNames) != 0 || f.runCount != 0 {
 		t.Errorf("failed delete continued replacement: tasks=%v xml=%q delete=%v create=%d import=%v run=%d", f.tasks, f.xml[name], f.deleteNames, f.createCount, f.importNames, f.runCount)
 	}
 }
@@ -153,13 +153,11 @@ func TestExecuteInstallToDeleteFailurePreservesTask(t *testing.T) {
 func TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask(t *testing.T) {
 	const first = "mcp-local-hub-snapshot-first"
 	const blocked = "mcp-local-hub-snapshot-blocked"
-	priorXML := []byte("<Task>prior first task</Task>")
 	blockedXML := []byte("<Task>blocked task</Task>")
 	cause := errors.New("replacement blocked")
-	for _, phase := range []string{"export", "delete"} {
+	for _, phase := range []string{"export", "ownership"} {
 		t.Run(phase, func(t *testing.T) {
 			f := newInstallFakeScheduler()
-			f.tasks[first], f.xml[first] = true, priorXML
 			f.tasks[blocked], f.xml[blocked] = true, blockedXML
 			s := &installSnapshotScheduler{fakeScheduler: f, name: blocked, snapshot: blockedXML}
 			if phase == "export" {
@@ -169,10 +167,10 @@ func TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask(t *testing.T) {
 			}
 			plan := installSnapshotPlan(t, s, first, blocked)
 			err := executeInstallTo(io.Discard, &config.ServerManifest{Name: "snapshot"}, plan, 0, false, nil, true, false)
-			if !errors.Is(err, cause) {
-				t.Errorf("blocked replacement = %v, want original cause", err)
+			if !errors.Is(err, ErrSchedulerReplacementUnowned) || (phase == "export" && !errors.Is(err, cause)) {
+				t.Errorf("blocked replacement = %v, want original and rollback causes", err)
 			}
-			if !f.tasks[first] || !bytes.Equal(f.xml[first], priorXML) || !f.tasks[blocked] || !bytes.Equal(f.xml[blocked], blockedXML) || f.createCount != 1 || len(f.importNames) != 0 || f.runCount != 0 {
+			if !f.tasks[first] || len(f.xml[first]) == 0 || len(f.deleteNames) != 0 || !f.tasks[blocked] || !bytes.Equal(f.xml[blocked], blockedXML) || f.createCount != 1 || len(f.importNames) != 0 || f.runCount != 0 {
 				t.Errorf("earlier task not restored or blocked task changed: tasks=%v xml=%q create=%d import=%v run=%d", f.tasks, f.xml, f.createCount, f.importNames, f.runCount)
 			}
 		})

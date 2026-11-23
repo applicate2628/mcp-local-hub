@@ -3845,11 +3845,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		} else if t.Trigger == "Weekly Sun 03:00" {
 			spec.WeeklyTrigger = &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
 		}
-		// Keep the prior definition before any deletion. Recovery of a failed
-		// Create must be conditional at the scheduler: an error can follow an
-		// applied creation, or another writer can occupy the name meanwhile.
-		var recovery scheduler.XMLCreator
-		var snapshotPath string
+		// An observed definition is not authority over the registration. The
+		// backend has no generation-conditional deletion, so replacement is
+		// refused even when a later export would return identical XML.
 		priorXML, exportErr := sch.ExportXML(spec.Name)
 		if exportErr != nil {
 			if !errors.Is(exportErr, scheduler.ErrTaskNotFound) || len(priorXML) != 0 {
@@ -3859,53 +3857,24 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			if len(priorXML) == 0 {
 				return failAfterRollback(fmt.Errorf("snapshot task %s before replacement: empty XML snapshot", spec.Name))
 			}
-			priorXML = bytes.Clone(priorXML)
-			var ok bool
-			recovery, ok = sch.(scheduler.XMLCreator)
-			if !ok {
-				return failAfterRollback(fmt.Errorf("restore task %s without replacement: %w", spec.Name, scheduler.ErrNotImplemented))
-			}
-			var err error
-			snapshotPath, err = retainInstallTaskSnapshot(spec.Name, priorXML)
-			if err != nil {
-				return failAfterRollback(fmt.Errorf("retain recovery snapshot for task %s at %q before replacement: %w", spec.Name, snapshotPath, err))
-			}
-			fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
-			if err := verifyInstallTaskDefinitionBeforeDelete(sch, spec.Name, priorXML); err != nil {
-				return failAfterRollback(fmt.Errorf("revalidate task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err))
-			}
-			if err := sch.Delete(spec.Name); err != nil {
-				cause := fmt.Errorf("delete task %s before replacement (recovery snapshot retained at %q): %w", spec.Name, snapshotPath, err)
-				return failAfterRollback(installTaskMutationFailure(sch, spec.Name, priorXML, cause))
-			}
+			return failAfterRollback(refuseSchedulerTaskReplacement(spec.Name, bytes.Clone(priorXML)))
 		}
+		// Create itself must reject an occupied name. A failed reply can follow
+		// an applied creation: observe it without retrying or compensating by name.
 		if err := sch.Create(spec); err != nil {
-			if recovery != nil {
-				return failAfterRollback(&InstallTaskRecoveryError{
-					TaskName: spec.Name, SnapshotPath: snapshotPath, Cause: err,
-					Recovery: recovery.CreateXMLIfAbsent(spec.Name, priorXML),
-				})
-			}
 			cause := fmt.Errorf("create task %s: %w", spec.Name, err)
 			return failAfterRollback(installTaskMutationFailure(sch, spec.Name, nil, cause))
 		}
-		compensation := &installTaskRollback{
-			name: spec.Name, priorXML: priorXML, snapshotPath: snapshotPath, creator: recovery,
-		}
-		// Arm before the fallible post-create export. Without that observation,
-		// compensation reports an incomplete rollback and never deletes by name.
+		// Arm before the fallible post-create export. A later failure must
+		// retain this task's recovery domain unless absence is observed.
 		rollback = append(rollback, func() {
-			if err := compensation.rollback(sch); err != nil {
+			if err := rollbackInstallTaskCreation(sch, spec.Name); err != nil {
 				rollbackSchedulerErrors = append(rollbackSchedulerErrors, err)
-				rollbackSchedulerTasks = append(rollbackSchedulerTasks, compensation.name)
+				rollbackSchedulerTasks = append(rollbackSchedulerTasks, spec.Name)
 				fmt.Fprintf(w, "  rollback: scheduler task recovery unconfirmed: %v\n", err)
 				return
 			}
-			if len(compensation.priorXML) > 0 {
-				fmt.Fprintf(w, "  rollback: prior scheduler definition confirmed: %s\n", compensation.name)
-			} else {
-				fmt.Fprintf(w, "  rollback: scheduler task absence confirmed: %s\n", compensation.name)
-			}
+			fmt.Fprintf(w, "  rollback: scheduler task absence confirmed: %s\n", spec.Name)
 		})
 		createdXML, createdExportErr := sch.ExportXML(spec.Name)
 		if createdExportErr != nil {
@@ -3914,7 +3883,6 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		if len(createdXML) == 0 {
 			return failAfterRollback(fmt.Errorf("capture task %s after acknowledged creation: empty XML snapshot", spec.Name))
 		}
-		compensation.createdXML = bytes.Clone(createdXML)
 		createdTasks = append(createdTasks, createdTask{spec: spec, trigger: t.Trigger})
 		fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", spec.Name)
 	}
@@ -3934,24 +3902,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		for _, t := range p.SchedulerTasks {
 			planned[t.Name] = struct{}{}
 		}
-		pruneRollbacks, perr := pruneObsoleteServerTasks(sch, m.Name, planned, w)
-		// Arm completed prunes even when a later deletion has an uncertain
-		// outcome. Their failures belong to the same scheduler recovery owner.
-		for _, restorePruned := range pruneRollbacks {
-			rollback = append(rollback, func() {
-				if err := restorePruned(); err != nil {
-					rollbackSchedulerErrors = append(rollbackSchedulerErrors, err)
-					rollbackSchedulerTasks = append(rollbackSchedulerTasks, installSchedulerRecoveryTasks(err)...)
-					fmt.Fprintf(w, "  rollback: scheduler task recovery unconfirmed: %v\n", err)
-				}
-			})
-		}
-		if perr != nil {
-			if len(installSchedulerRecoveryTasks(perr)) > 0 {
-				return failAfterRollback(perr)
-			}
-			// A failed initial enumeration has not changed any task.
-			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", perr)
+		if err := pruneObsoleteServerTasks(sch, m.Name, planned, w); err != nil {
+			// Enumeration and refused pruning do not mutate registrations.
+			fmt.Fprintf(w, "\u26a0 Task reconciliation skipped: %v\n", err)
 		}
 	}
 	// 2. Backup + update client configs.
@@ -4258,12 +4211,10 @@ func codexInstallSourceTransport(prior *clients.MCPEntry) (clients.CodexTranspor
 }
 
 // schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks
-// needs. scheduler.Scheduler satisfies it via its full method set; keeping
-// the interface narrow lets tests supply a minimal fake without implementing
-// Create / Run / Status / Stop.
+// needs. It deliberately exposes no task mutation: server-name ownership and
+// XML observations cannot authorize generation deletion.
 type schedulerLister interface {
 	List(prefix string) ([]scheduler.TaskStatus, error)
-	Delete(name string) error
 	ExportXML(name string) ([]byte, error)
 }
 
@@ -4305,25 +4256,17 @@ func buildPruneSetForReconcile(intent *SupervisorIntentFile) map[string]struct{}
 	return planned
 }
 
-// pruneObsoleteServerTasks deletes scheduler tasks whose Name starts with
-// "mcp-local-hub-<server>-" and are absent from `planned`. Returns one
-// error-returning rollback closure per acknowledged deletion. Each retains a
-// durable pre-delete snapshot and restores only an observed absent name with
-// the backend's create-only operation. Callers must arm all returned closures,
-// including on error, and retain their scheduler recovery failures.
-//
-// Only safe to call for full installs. Partial installs (one daemon) would
-// see sibling-daemon tasks as "not in plan" and incorrectly prune them.
-//
-// Pre-delete refusals and failed deletions with the prior definition still
-// observed are warnings. An unconfirmed failed mutation stops further pruning
-// and returns the existing incomplete-recovery error. An acknowledged Delete
-// is not an atomic generation or whole-process-tree settlement guarantee.
-func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) ([]func() error, error) {
+// pruneObsoleteServerTasks reports obsolete tasks, retaining their observed
+// definitions when possible. The backend cannot condition deletion on an owned
+// generation, so it refuses every destructive prune. A matching server prefix,
+// manifest lease, or identical XML does not exclude another scheduler writer.
+// Optional reconciliation continues with named warnings and no compensation.
+// Only full installs may classify siblings as obsolete.
+func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[string]struct{}, w io.Writer) error {
 	prefix := "mcp-local-hub-" + server + "-"
 	existing, err := sch.List(prefix)
 	if err != nil {
-		return nil, fmt.Errorf("list tasks for %s: %w", server, err)
+		return fmt.Errorf("list tasks for %s: %w", server, err)
 	}
 	// FIX 2 (bot PR #288 hyphen-family): `planned` holds only THIS server's own
 	// tasks, so a sibling's task (e.g. `\mcp-local-hub-demo-alpha-beta`, owned by
@@ -4332,7 +4275,6 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 	// and skip any task a LONGER installed server name also prefixes — the
 	// longest-installed-prefix disambiguator owns it.
 	installed := installedServerNameSet()
-	var rollbacks []func() error
 	for _, task := range existing {
 		// Windows Task Scheduler prefixes names with a leading backslash
 		// (the task-folder separator). Strip it before prefix/equality
@@ -4349,54 +4291,18 @@ func pruneObsoleteServerTasks(sch schedulerLister, server string, planned map[st
 		if !taskOwnedByServerExactOrLongestPrefix(task.Name, server, installed) {
 			continue
 		}
-		// Require a nonempty snapshot before deletion so a later install
-		// failure can restore this task. The backend owns the XML format.
 		priorXML, xerr := sch.ExportXML(name)
 		if xerr == nil && len(priorXML) == 0 {
 			xerr = errors.New("empty XML snapshot")
 		}
 		if xerr != nil {
-			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: cannot snapshot for rollback: %v\n", name, xerr)
+			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: cannot retain observed definition: %v\n", name, xerr)
 			continue
 		}
-		priorXML = bytes.Clone(priorXML)
-		recovery, ok := sch.(scheduler.XMLCreator)
-		if !ok {
-			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: restore without replacement: %v\n", name, scheduler.ErrNotImplemented)
-			continue
-		}
-		snapshotPath, snapshotErr := retainInstallTaskSnapshot(name, priorXML)
-		if snapshotErr != nil {
-			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: retain recovery snapshot at %q: %v\n", name, snapshotPath, snapshotErr)
-			continue
-		}
-		fmt.Fprintf(w, "  scheduler recovery snapshot: %s\n", snapshotPath)
-		if err := verifyInstallTaskDefinitionBeforeDelete(sch, name, priorXML); err != nil {
-			fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: revalidate before deletion (recovery snapshot retained at %q): %v\n", name, snapshotPath, err)
-			continue
-		}
-		if derr := sch.Delete(name); derr != nil {
-			cause := fmt.Errorf("delete obsolete task %s (recovery snapshot retained at %q): %w", name, snapshotPath, derr)
-			mutationErr := installTaskMutationFailure(sch, name, priorXML, cause)
-			if len(installSchedulerRecoveryTasks(mutationErr)) > 0 {
-				return rollbacks, mutationErr
-			}
-			fmt.Fprintf(w, "\u26a0 Failed to prune obsolete scheduler task %s: %v\n", name, mutationErr)
-			continue
-		}
-		fmt.Fprintf(w, "\u2713 Scheduler task removed (obsolete): %s\n", name)
-		compensation := &installTaskRollback{
-			name: name, priorXML: priorXML, snapshotPath: snapshotPath, creator: recovery,
-		}
-		rollbacks = append(rollbacks, func() error {
-			if err := compensation.rollbackPruned(sch); err != nil {
-				return &InstallSchedulerRollbackIncompleteError{Tasks: []string{compensation.name}, cause: err}
-			}
-			fmt.Fprintf(w, "  rollback: prior scheduler definition confirmed: %s\n", compensation.name)
-			return nil
-		})
+		refusal := refuseSchedulerTaskReplacement(name, bytes.Clone(priorXML))
+		fmt.Fprintf(w, "\u26a0 Skipped pruning obsolete scheduler task %s: %v\n", name, refusal)
 	}
-	return rollbacks, nil
+	return nil
 }
 
 // clientConfigPath returns the absolute path to the named client's config.
