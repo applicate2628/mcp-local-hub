@@ -459,6 +459,7 @@ type stagedWindowsCanonicalEntrySetV2 struct {
 	closeRequested     bool
 	closeError         error
 	selective          bool
+	stageOwnsPrior     bool
 	original           *binaryadmission.StagedWindowsCanonicalEntrySetV2
 	prior              *binaryadmission.WindowsCanonicalEntryPriorSetV2
 	priorAttempted     bool
@@ -466,17 +467,24 @@ type stagedWindowsCanonicalEntrySetV2 struct {
 	directorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2
 }
 
-// stageRetainingCurrentEntryBundle receives the pair from the same native
-// Stage. Callers close a non-nil carrier even on partial stage failure.
-func stageRetainingCurrentEntryBundle(ctx context.Context, source *binaryadmission.WindowsCanonicalEntrySetV2, target string) (*stagedWindowsCanonicalEntrySetV2, error) {
-	stage, prior, err := source.StageRetainingEqualRuntime(ctx, target)
+// stageCurrentEntryBundleForUpgrade receives the same native stage and prior
+// pair even when preparation is partial. The caller closes any returned stage.
+func stageCurrentEntryBundleForUpgrade(ctx context.Context, source *binaryadmission.WindowsCanonicalEntrySetV2, target string) (*stagedWindowsCanonicalEntrySetV2, error) {
+	stage, prior, err := source.StageForUpgrade(ctx, target)
 	if stage == nil {
-		return nil, errors.Join(err, errors.New("original selective stage unavailable"))
+		return nil, errors.Join(err, errors.New("original upgrade stage unavailable"))
 	}
 	if err == nil && prior == nil {
-		err = errors.New("original selective prior unavailable")
+		err = errors.New("original upgrade prior unavailable")
 	}
-	return &stagedWindowsCanonicalEntrySetV2{selective: true, original: stage, prior: prior, priorAttempted: true, priorError: err}, err
+	return &stagedWindowsCanonicalEntrySetV2{
+		stageOwnsPrior: true,
+		selective:      err == nil && stage.RetainsRuntime(),
+		original:       stage,
+		prior:          prior,
+		priorAttempted: true,
+		priorError:     err,
+	}, err
 }
 
 func (s *stagedWindowsCanonicalEntrySetV2) acquirePrior(ctx context.Context) (*binaryadmission.WindowsCanonicalEntryPriorSetV2, error) {
@@ -554,6 +562,11 @@ func currentStageProductPath(stage *binaryadmission.StagedWindowsCanonicalEntryS
 			}
 			return filepath.Join(filepath.Dir(targets.CanonicalEntryPath), filepath.FromSlash(member.File.Path)), nil
 		}
+	}
+	if stage.RetainsRuntime() {
+		// The native selector left Product in place. The exact witness and
+		// held Product are checked with the original cohort before use.
+		return "", nil
 	}
 	return "", errors.New("current original stage has no Product member")
 }
@@ -821,7 +834,7 @@ func currentBundleDisposition(e *windowsCanonicalEntrySetJournalV2) windowsProdu
 			result = windowsProductTargetCreate
 			continue
 		}
-		if row.Staged == nil || row.Prior.File.SHA256 != row.Staged.File.SHA256 {
+		if e.Bundle.Retained != nil || row.Staged == nil || row.Prior.File.SHA256 != row.Staged.File.SHA256 {
 			return windowsProductTargetReplace
 		}
 	}
@@ -1110,6 +1123,9 @@ func closeCurrentEntryFiles(source *stagedWindowsCanonicalEntrySetV2, beforeStag
 	if source == nil {
 		return nil
 	}
+	if source.stageOwnsPrior {
+		return source.original.CloseMembers()
+	}
 	var priorErr, stageErr error
 	if source.prior != nil {
 		// The unpublished BUNDLE stage uses the original guarded parent
@@ -1172,8 +1188,10 @@ func (source *stagedWindowsCanonicalEntrySetV2) closeWithStageObservation(before
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	source.closeRequested = true
-	if source.selective {
-		// Selective Stage receives its own prior and shared lenders.
+	if source.stageOwnsPrior {
+		if beforeStageClose != nil {
+			beforeStageClose()
+		}
 		source.closeError = errors.Join(source.closeError, source.original.Close())
 		return source.closeError
 	}
@@ -1382,17 +1400,19 @@ func (t *WindowsProductTxn) settleUnpublishedCurrentPreparation(transferred bool
 	if !present && inspectErr == nil && transferred {
 		p.journal.EntryBundle.Bundle.Disposition.State = "rolled-back"
 		cleanupErr = t.cleanupCurrentEntryFiles(false, false)
-	}
-	closeErr := closeCurrentEntryFiles(t.Opts.EntryBundle, nil)
-	if !present && inspectErr == nil && transferred && cleanupErr == nil && closeErr == nil {
-		cleanupErr = t.disposeCurrentEntryDirectories(false)
+		if cleanupErr == nil {
+			cleanupErr = closeCurrentEntryFiles(t.Opts.EntryBundle, nil)
+		}
+		if cleanupErr == nil {
+			cleanupErr = t.disposeCurrentEntryDirectories(false)
+		}
 	}
 	// Once a writer was entered, a failed write never implies publication absence.
 	// Positive same-fence absence above is the only unpublished cleanup path.
 	if present || inspectErr != nil {
 		p.journal.EntryBundle.Bundle.Disposition.State = "retained"
 	}
-	return errors.Join(inspectErr, cleanupErr, closeErr, closeCurrentEntryOwners(t.Opts.EntryBundle))
+	return errors.Join(inspectErr, cleanupErr, closeCurrentEntryOwners(t.Opts.EntryBundle))
 }
 
 func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
@@ -1538,6 +1558,9 @@ func reconcileStagedCurrentEntryNoop(ctx context.Context, stateDir string, mode 
 	if err != nil {
 		return false, err
 	}
+	if source.selective && len(members) != 0 {
+		return false, nil
+	}
 	prior, err := source.acquirePrior(ctx)
 	if err != nil {
 		return false, err
@@ -1546,24 +1569,37 @@ func reconcileStagedCurrentEntryNoop(ctx context.Context, stateDir string, mode 
 	if err != nil {
 		return false, err
 	}
-	if observation.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 || len(members) != len(observation.Members) {
+	if observation.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 {
 		return false, nil
 	}
-	old := make(map[string]string, len(observation.Members))
-	for _, member := range observation.Members {
-		old[member.Member] = member.File.SHA256
-	}
-	for _, member := range members {
-		if old[member.Member] != member.File.SHA256 {
+	if source.selective {
+		if _, _, err := source.qualifyRetainedPlan(ctx, snapshot, observation, members); err != nil {
+			return false, err
+		}
+	} else {
+		if len(members) != len(observation.Members) {
 			return false, nil
+		}
+		old := make(map[string]string, len(observation.Members))
+		for _, member := range observation.Members {
+			old[member.Member] = member.File.SHA256
+		}
+		for _, member := range members {
+			if old[member.Member] != member.File.SHA256 {
+				return false, nil
+			}
 		}
 	}
 	if err := prior.VerifyUnchanged(ctx); err != nil {
 		return false, err
 	}
+	var receiptMismatch error
+	if source.selective {
+		receiptMismatch = errors.New("zero-change current upgrade requires a matching V3 receipt")
+	}
 	raw, err := api.ReadStateFileInodeAnchored(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json"))
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, receiptMismatch
 	}
 	if err != nil {
 		return false, err
@@ -1574,11 +1610,11 @@ func reconcileStagedCurrentEntryNoop(ctx context.Context, stateDir string, mode 
 	}
 	r := decoded.V3
 	if r == nil || r.EntryBundle == nil || r.EntrySet != nil || r.Admission != UpgradeAdmissionCanonicalEntryProductV2 || !windowsProductPairReceiptModeMatches(r.Mode, mode) {
-		return false, nil
+		return false, receiptMismatch
 	}
 	e := r.EntryBundle
 	if r.Artifact.SHA256 != snapshot.Product.SHA256 || e.BuildID != snapshot.BuildID || e.RegistryProjectionSHA256 != snapshot.RegistryProjectionSHA256 || e.CanonicalEntrySHA256 != snapshot.CanonicalEntry.SHA256 || e.IdentitySHA256 != snapshot.Identity.SHA256 || !sameWindowsProductPath(e.CanonicalEntryPath, targets.CanonicalEntryPath) || !sameWindowsProductPath(e.ProductPath, targets.ProductPath) || !sameWindowsProductPath(e.IdentityPath, targets.IdentityPath) {
-		return false, nil
+		return false, receiptMismatch
 	}
 	actual, err := source.original.PublishedSnapshot(ctx)
 	if err != nil {
@@ -3158,8 +3194,8 @@ var errCurrentEntryRuntimeRetentionUnavailable = errors.New("native current runt
 
 func requireCurrentEntryNativeRetention(e *windowsCanonicalEntrySetJournalV2) error {
 	if e != nil && e.Bundle.Retained != nil {
-		// The warm producer cannot yet authorize the first selective write.
-		// Cold recovery receives its witness through the original V3 record.
+		// This generic writer has neither the original selective stage nor a
+		// sealed current recovery source.
 		return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
 	}
 	return nil

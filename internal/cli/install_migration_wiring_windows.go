@@ -1824,14 +1824,16 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	var successorSource windowsCanonicalSuccessorRuntimeSource
 	var priorRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
 	if current {
-		stage, err := original.Stage(ctx, target)
-		if stage != nil {
-			request.EntryBundle = &stagedWindowsCanonicalEntrySetV2{original: stage}
-			defer api.ReleaseAndJoin(&retErr, request.EntryBundle.Close, "close upgrade original entry-set carrier")
+		carrier, err := stageCurrentEntryBundleForUpgrade(ctx, original, target)
+		if carrier != nil {
+			request.EntryBundle = carrier
+			defer api.ReleaseAndJoin(&retErr, carrier.Close, "close upgrade original entry-set carrier")
 		}
-		if err != nil || stage == nil {
-			return errors.Join(err, errors.New("upgrade original entry-set stage unavailable"))
+		if err != nil {
+			return err
 		}
+
+		stage := carrier.original
 		request.StagedProduct, err = currentStageProductPath(stage)
 		if err != nil {
 			return err
@@ -1937,10 +1939,10 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		return errors.New("upgrade complete-set transaction unavailable")
 	}
 	var same bool
-	if current {
-		same, err = reconcileWindowsCurrentEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntryBundle, productTxn.Opts.Tasks)
-	} else {
+	if !current {
 		same, err = reconcileWindowsCanonicalEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntrySet, productTxn.Opts.Tasks)
+	} else {
+		same, err = reconcileWindowsCurrentEntryNoop(ctx, stateDir, WindowsProductPairModeUpgrade, request.EntryBundle, productTxn.Opts.Tasks)
 	}
 	if err != nil {
 		return err

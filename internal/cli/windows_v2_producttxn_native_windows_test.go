@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf16"
 
 	"golang.org/x/sys/windows"
 
@@ -538,6 +541,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 	for _, phase := range []string{
 		"wrong_or_missing_admission_has_no_effects",
 		"pretransfer_prior_closes_before_stage",
+		"upgrade_full_selector_first_write_absent",
 		"launcher_last_predecision_inverse",
 		"current_inverse_after_intent_failure",
 		"retained_runtime_requires_native_witness",
@@ -641,8 +645,18 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			stage, err := source.Stage(ctx, dst.CanonicalEntryPath)
-			txn.Opts.EntryBundle.original = stage
+			firstWriteAbsent := phase == "upgrade_full_selector_first_write_absent"
+			var stage *binaryadmission.StagedWindowsCanonicalEntrySetV2
+			if firstWriteAbsent {
+				carrier, stageErr := stageCurrentEntryBundleForUpgrade(ctx, source, dst.CanonicalEntryPath)
+				txn.Opts.EntryBundle, err = carrier, stageErr
+				if carrier != nil {
+					stage = carrier.original
+				}
+			} else {
+				stage, err = source.Stage(ctx, dst.CanonicalEntryPath)
+				txn.Opts.EntryBundle.original = stage
+			}
 			t.Cleanup(func() {
 				if err := txn.Close(); err != nil {
 					t.Error(err)
@@ -673,6 +687,46 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				t.Fatal("Product stage member unavailable")
 			}
 
+			if firstWriteAbsent {
+				carrier := txn.Opts.EntryBundle
+				if carrier.selective || !carrier.stageOwnsPrior || carrier.prior == nil {
+					t.Fatal("absent target did not select the native full pair")
+				}
+				cut := errors.New("first writer deliberately leaves both journal names absent")
+				writes := 0
+				txn.Opts.Deps.WriteRecoveryJournal = func(name string, raw []byte) error {
+					writes++
+					journal, err := decodeWindowsProductRecoveryJournalV3(raw)
+					if err != nil {
+						return err
+					}
+					if name != journalPath || journal.EntryBundle == nil ||
+						journal.EntryBundle.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeAbsentV2 ||
+						!journal.EntryBundle.Bundle.Disposition.Transferred || !stage.Disposition().Transferred ||
+						len(journal.EntryBundle.Bundle.Directories) == 0 || len(journal.EntryBundle.Moves) != 0 {
+						t.Fatal("first write lacks the exact transferred stage or directory evidence")
+					}
+					return cut
+				}
+				if err := txn.Prepare(); !errors.Is(err, cut) || writes != 1 {
+					t.Fatal("first writer failure was not received exactly once", err, writes)
+				}
+				for _, d := range txn.prepared.journal.EntryBundle.Bundle.Directories {
+					if !d.Original.Created || d.State != "absence_received" || d.Disposition == nil || !d.Disposition.Applied || !d.Disposition.Readback {
+						t.Fatal("original created directory did not settle before lender closure", d.State)
+					}
+				}
+				entries, err := os.ReadDir(target)
+				if err != nil || len(entries) != 0 || !stage.Disposition().CloseEntered || stage.Disposition().CloseError != nil ||
+					!carrier.prior.Disposition().CloseEntered || carrier.prior.Disposition().CloseError != nil ||
+					tasks.exports != 1 || tasks.rewrites != 0 || tasks.restores != 0 || len(events) != 0 {
+					t.Fatal("unpublished full pair did not settle at the first-write boundary", err)
+				}
+				if err := v2TxnFixtureAbsent(journalPath); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			if retainedRuntime {
 				v2TxnAssertRetainedRuntimeRequiresNativeWitness(t, ctx, txn, journalPath)
 				return
@@ -1044,19 +1098,21 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 	}
 }
 
-// This fixture enters only the original file-move owner. No runtime recovery,
-// task restore, or supervisor invocation is part of the injected failure.
 func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	input, seed, _ := v2TxnFixtureInput(t)
 	for _, tc := range []struct {
-		name            string
-		changedIdentity bool
-		changedProduct  bool
-		changedAttrs    bool
+		name                 string
+		changedIdentity      bool
+		changedProduct       bool
+		changedLauncher      bool
+		changedLauncherAttrs bool
+		changedAttrs         bool
 	}{
 		{name: "all_equal"},
 		{name: "identity_bytes_changed", changedIdentity: true},
 		{name: "product_and_identity_changed", changedProduct: true},
+		{name: "launcher_product_and_identity_changed", changedLauncher: true, changedProduct: true},
+		{name: "launcher_attributes_and_identity_changed_product_retained", changedLauncherAttrs: true, changedIdentity: true},
 		{name: "identity_attributes_changed", changedAttrs: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1069,13 +1125,44 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 			priorIDs := v2TxnSeedPrior(t, input, dst, seed)
 			oldIdentity := seed.IdentityBytes
 			oldProduct := mustReadFile(t, dst.ProductPath)
-			if tc.changedProduct {
-				oldProduct = append(oldProduct, []byte("fixture original Product")...)
-				if err := os.WriteFile(dst.ProductPath, oldProduct, 0600); err != nil {
+			oldLauncher := mustReadFile(t, dst.CanonicalEntryPath)
+			if tc.changedLauncher {
+				oldLauncher = append(oldLauncher, []byte("fixture original Launcher")...)
+				if err := os.WriteFile(dst.CanonicalEntryPath, oldLauncher, 0600); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if tc.changedLauncherAttrs {
+				p, err := windows.UTF16PtrFromString(dst.CanonicalEntryPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := windows.SetFileAttributes(p, windows.FILE_ATTRIBUTE_HIDDEN); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.changedProduct {
+				oldProduct = append(oldProduct, []byte("fixture original Product")...)
 				identity, err := binaryadmission.ParseWindowsProductIdentityV2(oldIdentity)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.changedLauncher {
+					// The fixture's Product VERSIONINFO embeds the Launcher digest.
+					// Replace only that exact fixed-width UTF-16 field in the predecessor.
+					digest := v2TxnFixtureDigest(oldLauncher)
+					encodedBefore, err := binary.Append(nil, binary.LittleEndian, utf16.Encode([]rune(identity.LauncherSHA256)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					encodedAfter, err := binary.Append(nil, binary.LittleEndian, utf16.Encode([]rune(digest)))
+					if err != nil || bytes.Count(oldProduct, encodedBefore) != 1 || len(encodedAfter) != len(encodedBefore) {
+						t.Fatal("synthetic predecessor lacks the exact build-issued Launcher digest", err)
+					}
+					oldProduct = bytes.Replace(oldProduct, encodedBefore, encodedAfter, 1)
+					identity.LauncherSHA256 = digest
+				}
+				if err := os.WriteFile(dst.ProductPath, oldProduct, 0600); err != nil {
 					t.Fatal(err)
 				}
 				identity.SHA256 = v2TxnFixtureDigest(oldProduct)
@@ -1116,7 +1203,7 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			carrier, err := stageRetainingCurrentEntryBundle(ctx, source, dst.CanonicalEntryPath)
+			carrier, err := stageCurrentEntryBundleForUpgrade(ctx, source, dst.CanonicalEntryPath)
 			if carrier != nil {
 				t.Cleanup(func() {
 					if err := carrier.Close(); err != nil {
@@ -1145,17 +1232,19 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 			case tc.changedIdentity || tc.changedAttrs:
 				wantCount, wantDisposition = 1, windowsProductTargetReplace
 			}
+			if tc.changedLauncher || tc.changedLauncherAttrs {
+				wantCount++
+				wantDisposition = windowsProductTargetReplace
+			}
 			if len(members) != wantCount || len(physical)-len(initial) != wantCount {
 				t.Fatal("native Stage created files beyond the actual changed bytes")
 			}
 			opts := WindowsProductTxnOpts{Context: ctx, EntryBundle: carrier, Mode: WindowsProductPairModeUpgrade,
 				CanonicalEntryPath: dst.CanonicalEntryPath, ProductPath: dst.ProductPath, IdentityPath: dst.IdentityPath,
 				LegacyWindowlessPath: filepath.Join(target, "mcphub-windowless.exe")}
-			if tc.changedProduct {
-				opts.StagedProduct, err = currentStageProductPath(carrier.original)
-				if err != nil {
-					t.Fatal(err)
-				}
+			opts.StagedProduct, err = currentStageProductPath(carrier.original)
+			if err != nil || (opts.StagedProduct != "") != tc.changedProduct {
+				t.Fatal("selector returned an inexact issued Product stage", err)
 			}
 			preflight, err := inspectCurrentEntryPreflight(opts)
 			if err != nil || preflight.Disposition.CLI != wantDisposition || !preflight.PriorCLI.Present {
@@ -1171,10 +1260,10 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 				t.Fatal("selective journal plan lost its original native witness", err)
 			}
 			if len(arm.Bundle.Members) != wantCount || len(plan.stagedLocations) != wantCount || len(plan.priorLocations) != wantCount ||
-				arm.StagedEntry != (windowsProductRecoveryStagedV3{}) ||
+				(arm.StagedEntry != (windowsProductRecoveryStagedV3{})) != (tc.changedLauncher || tc.changedLauncherAttrs) ||
 				(currentEntryMember(arm, arm.Expected.ProductRelativePath) != nil) != tc.changedProduct ||
-				currentEntryMember(arm, arm.Expected.CanonicalEntryRelativePath) != nil ||
-				!arm.CanonicalEntry.PriorPresent || arm.CanonicalEntry.PriorSHA256 != seed.CanonicalEntry.SHA256 ||
+				(currentEntryMember(arm, arm.Expected.CanonicalEntryRelativePath) != nil) != (tc.changedLauncher || tc.changedLauncherAttrs) ||
+				!arm.CanonicalEntry.PriorPresent || arm.CanonicalEntry.PriorSHA256 != v2TxnFixtureDigest(oldLauncher) ||
 				arm.PriorRuntime == nil || !arm.PriorRuntime.Present || arm.PriorRuntime.Path != dst.ProductPath {
 				t.Fatal("selective plan fabricated a retained core file stage or lost the exact prior")
 			}
@@ -1196,15 +1285,19 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 						!sameWindowsProductPath(opts.StagedProduct, filepath.Join(target, filepath.FromSlash(row.Staged.File.Path))) {
 						t.Fatal("changed Product did not carry the exact issued staged path and bytes")
 					}
+				case seed.CanonicalEntryRelativePath:
+					if !(tc.changedLauncher || tc.changedLauncherAttrs) || row.Staged.File.SHA256 != seed.CanonicalEntry.SHA256 ||
+						row.Prior.File.SHA256 != v2TxnFixtureDigest(oldLauncher) ||
+						tc.changedLauncherAttrs && row.Prior.Attributes == row.Staged.Attributes {
+						t.Fatal("changed Launcher did not carry the exact issued stage and prior bytes")
+					}
 				default:
-					t.Fatal("unexpected runtime or Launcher stage")
+					t.Fatal("unexpected runtime stage")
 				}
 			}
-			var tasks v2TxnFixtureTasks
-			txn := &WindowsProductTxn{Opts: opts}
-			txn.Opts.Tasks = &tasks
-			if err := txn.Prepare(); !errors.Is(err, errCurrentEntryRuntimeRetentionUnavailable) || txn.prepared != nil || tasks.exports != 0 {
-				t.Fatal("unintegrated selective plan crossed the mutation boundary", err)
+			if tc.changedProduct || tc.changedLauncher || tc.changedLauncherAttrs {
+				v2TxnRunSelectiveUpgrade(t, input, seed, opts, preflight, arm.Bundle.Retained, members, priorIDs)
+				return
 			}
 			if err := carrier.Close(); err != nil {
 				t.Fatal(err)
@@ -1225,8 +1318,149 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	}
 }
 
-// This fixture tests selective V3 receiving without granting the warm producer
-// native authority for its first selective journal write.
+func v2TxnRunSelectiveUpgrade(t *testing.T, input binaryadmission.WindowsCanonicalEntrySetTargetsV2, seed binaryadmission.WindowsCanonicalEntrySetSnapshotV2, opts WindowsProductTxnOpts, preflight windowsProductPairPreflightV1, witness *windowsCanonicalEntryRetainedRuntimeV2, staged []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, priorIDs map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2) {
+	t.Helper()
+	state := apitest.HardenedTempDir(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(state))
+	tasks := &v2TxnFixtureTasks{root: apitest.HardenedDir(t, filepath.Join(state, "tasks")), currentXML: "<Task>fixture prior</Task>"}
+	opts.StateDir, opts.Tasks, opts.JournalAllowance = state, tasks, productJournalFixtureAllowance()
+	opts.ReceiptV3Path, opts.ReceiptV2Path = filepath.Join(state, UpgradeReceiptSchemaV3+".json"), filepath.Join(state, UpgradeReceiptSchemaV2+".json")
+	opts.FrozenPorts = []windowsProductIntentPortV1{}
+	opts.PreSettlement = &windowsProductQuiescenceObservationV1{
+		GUIOwner: windowsProductGUIOwnerConfirmedAbsent, Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent},
+		Ports: []windowsProductPortSettlementV1{}, SupervisorLockReleased: true,
+	}
+	opts.ReplacementAuthority.Disposition = preflight.Disposition
+	receipt := &windowsProductQuiescenceReceiptV1{
+		ReceiptID: "private-selective-upgrade", Scope: windowsProductQuiescenceScopeV1, ObservationSHA256: v2TxnFixtureDigest([]byte("fixture observation")),
+		CanonicalCLIPath: opts.ProductPath, CanonicalWindowlessPath: opts.LegacyWindowlessPath,
+		PriorCLI: preflight.PriorCLI, PriorWindowless: preflight.PriorWindowless,
+		GUIOwner: opts.PreSettlement.GUIOwner, Supervisor: opts.PreSettlement.Supervisor,
+		Ports: opts.PreSettlement.Ports, SupervisorLockReleased: true, SettledAtUTC: time.Unix(1, 0).UTC(),
+	}
+	txn := &WindowsProductTxn{Opts: opts, constructorStore: tasks}
+	journalPath := filepath.Join(state, WindowsProductRecoveryFileLeafV3)
+	var prepared, settled windowsProductRecoveryJournalV3
+	txn.Opts.Deps.WriteRecoveryJournal = func(name string, raw []byte) error {
+		j, err := decodeWindowsProductRecoveryJournalV3(raw)
+		if err != nil {
+			return err
+		}
+		if name != journalPath || !reflect.DeepEqual(j.EntryBundle.Bundle.Retained, witness) {
+			return errors.New("selective writer changed recovery destination or witness")
+		}
+		if prepared.TransactionID == "" {
+			if j.Phase != WindowsProductRecoveryPrepared || len(j.EntryBundle.Moves) != 0 || tasks.rewrites != 0 ||
+				!opts.EntryBundle.original.Disposition().Transferred || !bytes.Equal(raw, txn.prepared.entryBundle.firstJournalBytes) {
+				return errors.New("first selective write preceded native transfer or followed an effect")
+			}
+			if opts.StagedProduct == "" && (j.Staged != (windowsProductRecoveryStagedV3{}) ||
+				!bytes.Contains(raw, []byte("\"staged\": null"))) {
+				return errors.New("retained Product acquired staged journal evidence")
+			}
+			prepared = j
+		}
+		if j.Phase == WindowsProductRecoverySettledCommit {
+			settled = j
+		}
+		return api.WriteStateFileBytesAtomic(name, raw)
+	}
+	txn.Opts.Deps.PublishCommitted = windowsProductEventPublisher(state)
+	runtimeVerified := false
+	txn.Opts.Deps.WaitSupervisorReady = func(ctx context.Context, path string, artifact binaryadmission.WindowsArtifact) error {
+		runtime, err := opts.EntryBundle.original.SuccessorRuntimeProduct(ctx)
+		if err != nil {
+			return err
+		}
+		if runtime.Artifact().Path != path || runtime.Artifact().SHA256 != artifact.SHA256 {
+			return errors.New("published successor runtime differs from the changed Product")
+		}
+		err = runtime.ValidateOriginal(ctx)
+		runtimeVerified = err == nil
+		return err
+	}
+	if err := txn.Prepare(); err != nil || !bytes.Equal(mustReadFile(t, journalPath), txn.prepared.entryBundle.firstJournalBytes) {
+		t.Fatal("first selective V3 write/readback differed", err)
+	}
+	txn.Opts.ReplacementAuthority.Quiescence = receipt
+	result, err := txn.Run(opts.Context)
+	if err != nil || result.Outcome != WindowsProductPairCommittedOutcome || !runtimeVerified || settled.TransactionID != prepared.TransactionID ||
+		len(settled.EntryBundle.Moves) != 2*len(staged) || len(settled.EntryBundle.Cleanup) != len(staged) ||
+		tasks.exports != 1 || tasks.rewrites != 1 || tasks.restores != 0 || tasks.discards != 1 {
+		t.Fatal("synthetic selective upgrade did not commit and clean its changed pair", err)
+	}
+	changed := make(map[string]bool, len(staged))
+	root := filepath.Dir(opts.CanonicalEntryPath)
+	for _, member := range staged {
+		final := filepath.Join(root, filepath.FromSlash(member.Member))
+		changed[member.Member] = true
+		delete(priorIDs, final)
+		if v2TxnFixtureIdentity(t, final) != member.NativeIdentity ||
+			v2TxnFixtureDigest(mustReadFile(t, final)) != member.File.SHA256 {
+			t.Fatal("changed final differs from the original staged file", member.Member)
+		}
+	}
+	for name, id := range priorIDs {
+		if v2TxnFixtureIdentity(t, name) != id {
+			t.Fatal("retained file moved or was replaced", filepath.Base(name))
+		}
+	}
+	for _, move := range settled.EntryBundle.Moves {
+		if !changed[move.Member] || !move.Applied || !move.Readback {
+			t.Fatal("move touched a retained or inexact member", move.Member)
+		}
+	}
+	for _, cleanup := range settled.EntryBundle.Cleanup {
+		if !changed[cleanup.Member] || cleanup.State != "absence_received" ||
+			v2TxnFixtureAbsent(filepath.Join(root, filepath.FromSlash(cleanup.SourceRelative))) != nil {
+			t.Fatal("changed original's cleanup is unverified", cleanup.Member)
+		}
+	}
+	if err := v2TxnFixtureAbsent(journalPath); err != nil {
+		t.Fatal(err)
+	}
+	if opts.StagedProduct == "" {
+		source, err := binaryadmission.AcquireWindowsCanonicalEntrySetV2(opts.Context, input, seed)
+		if source != nil {
+			t.Cleanup(func() {
+				if err := source.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		repeated, err := stageCurrentEntryBundleForUpgrade(opts.Context, source, opts.CanonicalEntryPath)
+		if repeated != nil {
+			t.Cleanup(func() {
+				if err := repeated.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if path, err := currentStageProductPath(repeated.original); err != nil || path != "" {
+			t.Fatal("zero-change repeated upgrade produced a Product stage", err)
+		}
+		repeatTasks := &v2TxnFixtureTasks{root: apitest.HardenedDir(t, filepath.Join(state, "repeat-tasks")), currentXML: tasks.currentXML}
+		same, err := reconcileWindowsCurrentEntryNoop(opts.Context, state, opts.Mode, repeated, repeatTasks)
+		if err != nil || !same || repeatTasks.exports != 1 || repeatTasks.rewrites != 0 || repeatTasks.discards != 1 ||
+			repeated.original.Disposition().Transferred {
+			t.Fatal("zero-change upgrade did not receive the original receipt and Task readback as a no-op", err)
+		}
+		missingState := apitest.HardenedTempDir(t)
+		same, err = reconcileWindowsCurrentEntryNoop(opts.Context, missingState, opts.Mode, repeated, repeatTasks)
+		if same || err == nil || !strings.Contains(err.Error(), "matching V3 receipt") || repeatTasks.exports != 1 {
+			t.Fatal("missing receipt allowed a zero-change upgrade to continue", err)
+		}
+	}
+}
+
+// This fixture independently tests strict V3 receiving and a generic writer
+// without native ownership.
 func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string) {
 	t.Helper()
 	txn.Opts.Mode = WindowsProductPairModeUpgrade
@@ -1496,9 +1730,8 @@ func v2TxnAssertRetainedRuntimeRequiresNativeWitness(t *testing.T, ctx context.C
 
 func v2TxnAssertSelectiveCommittedRecovery(t *testing.T, ctx context.Context, txn *WindowsProductTxn, journalPath string, journal windowsProductRecoveryJournalV3) {
 	t.Helper()
-	// Use the exact native evidence from the unmodified prior bundle. The test
-	// authors a synthetic commit decision because the warm selective writer
-	// remains gated. It performs no live Product or Scheduler operation.
+	// Use exact native evidence from the unmodified prior bundle to isolate
+	// cold committed recovery at both durable checkpoints.
 	launcher := journal.EntryBundle.Expected.CanonicalEntryRelativePath
 	plan := currentEntryMember(journal.EntryBundle, launcher)
 	if plan == nil || plan.PriorAsideRelative == nil {

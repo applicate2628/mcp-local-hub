@@ -52,7 +52,8 @@ func newWindowsProductTxnWith(
 	if req.Context == nil {
 		req.Context = context.Background()
 	}
-	if req.StateDir == "" || req.ProductPath == "" || req.LegacyWindowlessPath == "" || req.StagedProduct == "" {
+	missingStage := req.StagedProduct == "" && (req.EntryBundle == nil || !req.EntryBundle.selective)
+	if req.StateDir == "" || req.ProductPath == "" || req.LegacyWindowlessPath == "" || missingStage {
 		return nil, errors.New("Windows product wiring: state and artifact paths are required")
 	}
 	if req.EntrySet != nil && req.EntryBundle != nil {

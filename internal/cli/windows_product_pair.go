@@ -701,9 +701,7 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if t.prepareError != nil {
 		return t.prepareError
 	}
-	if t.Opts.EntryBundle != nil && t.Opts.EntryBundle.selective {
-		return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
-	}
+
 	if t.prepared != nil {
 		return requireWindowsProductWithoutBackendHold(t.prepared.journalContext, t.Opts.StateDir)
 	}
@@ -724,8 +722,9 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 	if o.ReceiptV2Path == "" {
 		o.ReceiptV2Path = filepath.Join(o.StateDir, UpgradeReceiptSchemaV2+".json")
 	}
+	productStageValid := cleanAbsolutePath(o.StagedProduct) || o.StagedProduct == "" && o.EntryBundle != nil && o.EntryBundle.selective
 	if o.Tasks == nil || !cleanAbsolutePath(o.StateDir) || !cleanAbsolutePath(o.ProductPath) ||
-		!cleanAbsolutePath(o.LegacyWindowlessPath) || !cleanAbsolutePath(o.StagedProduct) ||
+		!cleanAbsolutePath(o.LegacyWindowlessPath) || !productStageValid ||
 		!cleanAbsolutePath(o.ReceiptV3Path) || !cleanAbsolutePath(o.ReceiptV2Path) {
 		return errors.New("Windows product transaction: state, task, and artifact paths are required")
 	}
@@ -872,9 +871,11 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 			V2: recoveryReceiptFromSnapshot(v2Prior),
 		},
 		Tasks:         tasks,
-		Staged:        windowsProductRecoveryStagedV3{Path: o.StagedProduct, SHA256: staged.SHA256},
 		FrozenPorts:   projectWindowsProductFrozenPorts(o.FrozenPorts),
 		PreSettlement: projectWindowsProductPreSettlement(o.PreSettlement),
+	}
+	if o.StagedProduct != "" {
+		journal.Staged = windowsProductRecoveryStagedV3{Path: o.StagedProduct, SHA256: staged.SHA256}
 	}
 	if o.Mode == WindowsProductPairModeUpgrade && o.PreSettlement != nil &&
 		o.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
@@ -924,7 +925,7 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 		arm.Bundle.Disposition.State = "transferred"
 		arm.Bundle.Disposition.Transferred = true
 		attempt.EntryBundle = &arm
-		frozen, err := encodeWindowsProductRecoveryJournalV3(attempt)
+		frozen, err := encodeReceivedWindowsProductRecoveryJournalV3(attempt)
 		if err != nil {
 			return err
 		}
@@ -932,7 +933,15 @@ func (t *WindowsProductTxn) Prepare() (retErr error) {
 			return err
 		}
 		bundleState.firstJournalBytes = append([]byte(nil), frozen...)
-		snapshot, err := o.EntryBundle.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		var snapshot binaryadmission.WindowsCanonicalEntrySetSnapshotV2
+		if witness := arm.Bundle.Retained; witness != nil {
+			snapshot, err = o.EntryBundle.original.TakeRetainingForTransaction(o.Context, o.CanonicalEntryPath, binaryadmission.WindowsCanonicalEntryRetainedMembersV2{
+				MembersSHA256: witness.MembersSHA256,
+				Singletons:    witness.Singletons,
+			})
+		} else {
+			snapshot, err = o.EntryBundle.original.TakeForTransaction(o.Context, o.CanonicalEntryPath)
+		}
 		if err != nil {
 			return err
 		}
@@ -1348,7 +1357,14 @@ func sameWindowsProductIdentity(a, b binaryadmission.WindowsArtifact) bool {
 
 func (t *WindowsProductTxn) persistProductJournal() error {
 	p := t.prepared
-	raw, err := encodeWindowsProductRecoveryJournalV3(p.journal)
+	if e := p.journal.EntryBundle; e != nil && e.Bundle.Retained != nil {
+		if p.entryBundle == nil || p.entryBundle.source == nil || !p.entryBundle.source.selective ||
+			!p.entryBundle.source.original.Disposition().Transferred {
+			p.attemptedJournalBytes = nil
+			return errors.Join(ErrWindowsProductRecoveryPending, errCurrentEntryRuntimeRetentionUnavailable)
+		}
+	}
+	raw, err := encodeReceivedWindowsProductRecoveryJournalV3(p.journal)
 	p.attemptedJournalBytes = append([]byte(nil), raw...)
 	if err != nil {
 		return err
@@ -2673,8 +2689,9 @@ func encodeWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournal
 	return raw, nil
 }
 
-// The cold owner uses this codec only for its sealed, validated original and
-// the ensuing journal updates. It does not grant first-journal write authority.
+// The current transaction freezes these bytes before Take and checks the
+// transfer before writing. The cold source uses the same codec for its sealed
+// original and validated updates.
 func encodeReceivedWindowsProductRecoveryJournalV3(journal windowsProductRecoveryJournalV3) ([]byte, error) {
 	if err := validateWindowsProductRecoveryJournalV3(journal); err != nil {
 		return nil, err
