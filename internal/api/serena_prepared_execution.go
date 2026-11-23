@@ -17,6 +17,8 @@ import (
 // and qualified file from the single input owner. It never resolves PATH,
 // merges secrets, chooses a version or renews a work/cleanup budget.
 type preparedSerenaInvocation struct {
+	// Only installed metadata executables borrow the original generation.
+	executableTree           *SerenaOwnedTree
 	OperationID              string
 	Executable               PreparedSerenaFile
 	Args                     []string
@@ -32,17 +34,33 @@ type preparedSerenaCommandResult struct {
 	Receipt process.ContainedStreamReceiptV1
 	// Private in-memory data for the bounded receipt/metadata parser only.
 	Stdout, Stderr []byte
+	// Only the original invocation records entry to the contained factory.
+	// This is local resource custody, not a child-settlement receipt.
+	containedAttempted bool
 }
 
 func runPreparedSerenaInvocation(ctx context.Context, r preparedSerenaInvocation) (result preparedSerenaCommandResult, err error) {
 	if !preparedSerenaID(r.OperationID) || !preparedSerenaFile(r.Executable) || len(r.Environment) == 0 || !filepath.IsAbs(r.WorkingDir) || !preparedSerenaDigest(r.PolicySHA256) || r.StdoutLimit <= 0 || r.StderrLimit <= 0 {
 		return result, errors.New("SERENA_PREPARED_INVOCATION_INVALID")
 	}
-	if err = revalidatePreparedSerenaFile(ctx, r.Executable); err != nil {
+	if r.executableTree != nil {
+		if r.executableTree.request.OperationID != r.OperationID {
+			return result, errors.New("SERENA_PREPARED_EXECUTABLE_GENERATION_DRIFT")
+		}
+		root, rootErr := r.executableTree.WorkingDirectory(ctx)
+		if rootErr != nil || root != r.WorkingDir {
+			return result, errors.Join(rootErr, errors.New("SERENA_PREPARED_EXECUTABLE_WORKING_DIRECTORY_DRIFT"))
+		}
+		err = revalidatePreparedSerenaOwnedFile(ctx, r.executableTree, r.Executable)
+	} else {
+		err = revalidatePreparedSerenaFile(ctx, r.Executable)
+	}
+	if err != nil {
 		return result, err
 	}
 	cmd := &exec.Cmd{Path: r.Executable.Path, Args: append([]string{r.Executable.Path}, r.Args...), Env: append([]string(nil), r.Environment...), Dir: r.WorkingDir}
 	var stdout, stderr bytes.Buffer
+	result.containedAttempted = true
 	result.Receipt, err = process.RunContainedStreamObserved(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: r.CleanupLimit, AbsoluteCleanupDeadline: r.AbsoluteCleanupDeadline, StdoutByteLimit: r.StdoutLimit, StderrByteLimit: r.StderrLimit, Stderr: &stderr}, func(reader io.Reader) error { _, e := io.Copy(&stdout, reader); return e })
 	// Do not access a borrowed sink while its worker remains unjoined.
 	if result.Receipt.IOSettlement.Stdout.WorkerComplete {

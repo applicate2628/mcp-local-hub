@@ -1,0 +1,132 @@
+{
+  "schema": "serena-review-evidence-v1",
+  "mode": "publisher",
+  "verified_source_parent": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+  "source_file_sha256": {
+    "tools/test-serena-publisher/main_windows.go": "0c788a30199fc17235860f32a40791c47a748a21c0ef550edd10b3ca2b760646",
+    "tools/test-serena-publisher/main_windows_test.go": "e6a8ec8823fb2e6aafe0db52d45c061a5030a8ad453948ab1d6cca21e9adc7df"
+  },
+  "archive": {
+    "file": "logs.zip",
+    "bytes": 15879,
+    "sha256": "86fd4be6bf6fef814dc703f1ae02ccf3a558b528d61e5f825948cf501a35897a"
+  },
+  "members": {
+    "checks/gofmt.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/gofmt.stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/green-package-race.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/green-package-race.stdout.log": {
+      "bytes": 41447,
+      "sha256": "075ac04276b1e293850fa50edb6f53dfaaf3e63ba1552779bf4fc8a792d9b943"
+    },
+    "checks/private-telemetry-off.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/private-telemetry-off.stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/receipt.json": {
+      "bytes": 3579,
+      "sha256": "b48e17620761ab7b4d715f6fa9c791bd452edb4b48a85640bbaf8666fbde7b61"
+    },
+    "checks/red-environment.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/red-environment.stdout.log": {
+      "bytes": 2525,
+      "sha256": "1e085290ed211339f2a65bc4803d13b8c75425f9c1e63d67a5f23030d61c0eb8"
+    },
+    "checks/review.patch": {
+      "bytes": 2187,
+      "sha256": "b704d993632e8d2feef0b3818b99e7442c5ee783167bf71d4c4036c9879b87e5"
+    },
+    "checks/vet.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checks/vet.stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "scripts/run-serena-native-20261118.py": {
+      "bytes": 13295,
+      "sha256": "de8c445508d2741e262ace490e16f779702e99c52d7481edb06b607b8ddac6d3"
+    },
+    "scripts/verify-serena-telemetry-20261118.py": {
+      "bytes": 5887,
+      "sha256": "4240f8b637feb1a8b9a8283329670cfcf75a42011615df972bea8dc69e72125d"
+    },
+    "telemetry/probe.json": {
+      "bytes": 575,
+      "sha256": "9bee13be6b010b1a365405dc721e849e7a814b5dc313499d9260029b680294a2"
+    },
+    "telemetry/raw/after/external/mode": {
+      "bytes": 5,
+      "sha256": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6"
+    },
+    "telemetry/raw/after/work/appdata/go/telemetry/mode": {
+      "bytes": 14,
+      "sha256": "b96c7ff689b1fedb79c82979e208c5795609e7f8bad2afb37f0be624bfef7722"
+    },
+    "telemetry/raw/before/external/local/go@go1.27.4-go1.27.4-windows-amd64-2026-11-18.v1.count": {
+      "bytes": 16384,
+      "sha256": "1e24197ac733721652df83ef51555b9b86fb3e2c5f4015c9e7a8ad62b1783a89"
+    },
+    "telemetry/raw/before/external/local/weekends": {
+      "bytes": 2,
+      "sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+    },
+    "telemetry/raw/before/external/mode": {
+      "bytes": 5,
+      "sha256": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6"
+    },
+    "telemetry/raw/before/work/appdata/go/telemetry/mode": {
+      "bytes": 14,
+      "sha256": "b96c7ff689b1fedb79c82979e208c5795609e7f8bad2afb37f0be624bfef7722"
+    },
+    "telemetry/telemetry-after-off.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-after-off.stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-after-version.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-after-version.stdout.log": {
+      "bytes": 34,
+      "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+    },
+    "telemetry/telemetry-before-off.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-before-off.stdout.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-before-version.stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "telemetry/telemetry-before-version.stdout.log": {
+      "bytes": 34,
+      "sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14"
+    }
+  }
+}

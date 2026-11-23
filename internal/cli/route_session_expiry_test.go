@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/mcproute"
 
 	"github.com/spf13/cobra"
 )
@@ -249,7 +249,7 @@ func TestRouteDaemon_BackendLossReconcileUsesRouteOwnedStores(t *testing.T) {
 	t.Cleanup(func() {
 		routeDialSupervisorIPCStatus = previousDial
 		routeLifecycleAuditFn = previousAudit
-		gui.SetSerenaBackendStatusFn(nil)
+		mcproute.SetSerenaBackendStatusFn(nil)
 	})
 
 	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{}}}`
@@ -326,7 +326,7 @@ func TestRouteDaemon_BackendLossReconcileUsesRouteOwnedStores(t *testing.T) {
 	}
 }
 
-func routePost(t *testing.T, s *gui.Server, body, sessionID string) *httptest.ResponseRecorder {
+func routePost(t *testing.T, s *mcproute.WorkspaceRoutes, body, sessionID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/serena/mcp", strings.NewReader(body))
 	req.Host = "127.0.0.1:19321"

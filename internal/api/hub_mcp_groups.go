@@ -398,6 +398,21 @@ func writeGroupsLocked(cfg GroupsConfig) error {
 	if i, err := checkGroupNamesUnique(cfg.Groups); err != nil {
 		return fmt.Errorf("group[%d]: %w", i, err)
 	}
+	projects, err := readHubProjectAuthority()
+	if err != nil {
+		return err
+	}
+	if len(projects.Groups) != 0 {
+		declared := make(map[string]bool, len(cfg.Groups))
+		for _, group := range cfg.Groups {
+			declared[group.Name] = true
+		}
+		for _, enrollment := range projects.Groups {
+			if !declared[enrollment.Group] {
+				return errHubProjectAuthority
+			}
+		}
+	}
 	payload, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal groups.yaml: %w", err)

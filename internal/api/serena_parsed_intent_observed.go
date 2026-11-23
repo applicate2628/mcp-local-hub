@@ -67,8 +67,10 @@ func (s *PreparedSerenaConsumerInvocation) publishParsedIntentObserved(ctx conte
 	}
 	input := s.parsedIntentPrecondition(beforeDefined, beforeSHA)
 	observation, err := MutateSupervisorIntentLockHeldObserved(ctx, s.io.IntentPath, input, lease, func(current *SupervisorIntentFile) (bool, error) {
-		replacement := cloneSupervisorIntentFile(desired)
-		replacement.IntentGeneration = current.IntentGeneration
+		replacement, err := cloneSupervisorIntentReplacement(current, desired)
+		if err != nil {
+			return false, err
+		}
 		if reflect.DeepEqual(current, replacement) {
 			return false, nil
 		}

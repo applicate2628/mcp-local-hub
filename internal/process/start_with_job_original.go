@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // AtCreateJobProcess is the capability transferred by the existing at-create
@@ -59,6 +60,30 @@ func (p *AtCreateJobProcess) WaitOriginal() OriginalRootWait {
 // ObserveOriginal receives the same Job before handle release. Every call
 // receives the cached action; it never renews the supplied absolute deadline.
 func (p *AtCreateJobProcess) ObserveOriginal(ctx context.Context, natural bool) (ContainedNativeSnapshot, error) {
+	return p.observeOriginal(ctx, func(ctx context.Context) (ContainedNativeSnapshot, error) {
+		return p.observer.settleContained(ctx, natural)
+	})
+}
+
+// ObserveOriginalAfterEOF allows the remaining members of this original Job
+// to exit during the caller's existing EOF grace. It is called after the
+// original root wait and uses the same terminal action and receipt owner.
+func (p *AtCreateJobProcess) ObserveOriginalAfterEOF(ctx context.Context, grace time.Time) (ContainedNativeSnapshot, error) {
+	if p == nil {
+		return ContainedNativeSnapshot{}, ErrContainmentUnavailable
+	}
+	owner, ok := p.observer.(interface {
+		settleContainedAfterEOF(context.Context, time.Time) (ContainedNativeSnapshot, error)
+	})
+	if !ok {
+		return ContainedNativeSnapshot{}, ErrContainmentUnavailable
+	}
+	return p.observeOriginal(ctx, func(ctx context.Context) (ContainedNativeSnapshot, error) {
+		return owner.settleContainedAfterEOF(ctx, grace)
+	})
+}
+
+func (p *AtCreateJobProcess) observeOriginal(ctx context.Context, settle func(context.Context) (ContainedNativeSnapshot, error)) (ContainedNativeSnapshot, error) {
 	if p == nil || p.observer == nil {
 		return ContainedNativeSnapshot{}, ErrContainmentUnavailable
 	}
@@ -69,7 +94,7 @@ func (p *AtCreateJobProcess) ObserveOriginal(ctx context.Context, natural bool) 
 		}
 		defer permit.finish()
 		ctx = withOriginalMemberTerminalPermit(ctx, permit)
-		result, settleErr := p.observer.settleContained(ctx, natural)
+		result, settleErr := settle(ctx)
 		if !permit.nativeWasEntered() {
 			return result, settleErr
 		}

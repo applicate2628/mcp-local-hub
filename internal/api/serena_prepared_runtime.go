@@ -108,6 +108,8 @@ func (c PreparedSerenaExecutionClosure) complete(id string) bool {
 }
 
 type PreparedSerenaInstallation struct {
+	// Transient original custody; never part of the Ready file identity.
+	generation       *SerenaOwnedTree
 	Closure          PreparedSerenaExecutionClosure
 	SourceSHA256     string
 	ResolutionSHA256 string

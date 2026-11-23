@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -237,7 +239,11 @@ func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) erro
 // same non-reentrant settingsMu and may also need this settings-file flock.
 // Resolve every settings-derived value before calling this helper, or derive it
 // from the raw map passed to the hook.
-func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) (err error) {
+func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) error {
+	return mutateSettingsMapLockedThen(path, readRawSettingsMap, mutate, after)
+}
+
+func mutateSettingsMapLockedThen(path string, read func(string) (map[string]string, error), mutate func(map[string]string) error, after func(map[string]string) error) (err error) {
 	lockPath := path + ".lock"
 	// Check before settingsMu so a known ghost holder never waits behind an
 	// unrelated in-process writer. lockLeafLedgered rechecks after the mutex.
@@ -257,7 +263,7 @@ func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) 
 	applied := false
 	defer func() { releaseAndJoinApplied(&err, release, "release settings flock", applied) }()
 
-	raw, err := readRawSettingsMap(path)
+	raw, err := read(path)
 	if err != nil {
 		return err
 	}
@@ -293,7 +299,7 @@ func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) 
 	}
 	applied = true
 	if after != nil {
-		persisted, readErr := readRawSettingsMap(path)
+		persisted, readErr := read(path)
 		if readErr != nil {
 			return fmt.Errorf("re-read persisted settings file: %w", readErr)
 		}
@@ -351,17 +357,40 @@ func migrateLegacyKeys(raw map[string]string) {
 // A4-b's GUI editor) are preserved verbatim. Returns an empty map if
 // the file does not exist.
 func readRawSettingsMap(path string) (map[string]string, error) {
-	out := map[string]string{}
+	out, present, err := readRawSettingsMapPresence(path)
+	if !present && os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	return out, err
+}
+
+// Presence comes from the same inode-anchored read as the decoded map.
+func readRawSettingsMapPresence(path string) (map[string]string, bool, error) {
 	data, err := readStateFileInodeAnchored(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return out, nil
-		}
-		return nil, err
+		return nil, !os.IsNotExist(err), err
 	}
+	out := map[string]string{}
 	if err := yaml.Unmarshal(data, &out); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	migrateLegacyKeys(out)
-	return out, nil
+	return out, true, nil
+}
+
+var errInvalidSettingsDocument = errors.New("cannot verify complete settings document")
+
+// Protected settings consumers must verify the full stream before using or
+// exporting values from its only document. Keep decoder diagnostics private.
+func decodeSingleSettingsDocument(data []byte) (map[string]string, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	raw := map[string]string{}
+	if err := decoder.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
+		return nil, errInvalidSettingsDocument
+	}
+	var trailing yaml.Node
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, errInvalidSettingsDocument
+	}
+	return raw, nil
 }

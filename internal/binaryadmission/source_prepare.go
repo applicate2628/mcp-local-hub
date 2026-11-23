@@ -546,6 +546,14 @@ func preparePublisherSource(ctx context.Context, request PublisherSourcePreparat
 	}{"reused-graphify-source-snapshot-v1", map[string]snapshotFile{}}
 	inputs := map[string]os.FileInfo{}
 	dirty := false
+	// A clean selection must include every committed path, even when all
+	// remaining physical bytes still match their committed blobs.
+	for name := range base {
+		if _, selected := index[name]; !selected {
+			dirty = true
+			break
+		}
+	}
 	createdDirs := map[string]bool{}
 	for _, name := range names {
 		raw, info, err := readPublisherSourceRelative(ctx, checkout, name)

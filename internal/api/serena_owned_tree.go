@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
+	"time"
 )
 
 type SerenaTreeLimits struct {
@@ -29,6 +31,8 @@ type SerenaOwnedTreeRequest struct {
 	OperationID, GenerationID, Kind string
 	QualificationID                 string
 	Limits                          SerenaTreeLimits
+	// Captured at acquisition from the operation's existing cleanup window.
+	AbsoluteCleanupDeadline time.Time
 	// Only same-attempt opaque generation capabilities qualify surviving links.
 	survivors []*SerenaOwnedTree
 }
@@ -99,12 +103,45 @@ type SerenaOwnedTree struct {
 	platform serenaTreePlatform
 }
 
+// Disposable attempts keep a compact locator beneath the same namespace.
+// Both identities are hashed in full and retained in the original request and
+// operation record; the full digest is only a locator, not ownership authority.
+// The fixed domain and NUL separators are unambiguous for validated inputs.
+func serenaOwnedTreeLocation(r SerenaOwnedTreeRequest) (parent, leaf string) {
+	switch r.Kind {
+	case "attempt":
+		leaf = preparedSerenaHash([]byte("serena-owned-attempt-v1\x00" + r.PackageIdentitySHA256 + "\x00" + r.OperationID))
+		return filepath.Join(r.Namespace, "a"), leaf
+	case "qualification":
+		return filepath.Join(r.Namespace, r.PackageIdentitySHA256, "qualifications"), r.QualificationID
+	default:
+		return filepath.Join(r.Namespace, r.PackageIdentitySHA256, "generations"), r.GenerationID
+	}
+}
+
 func AcquireSerenaOwnedTree(ctx context.Context, r SerenaOwnedTreeRequest) (*SerenaOwnedTree, error) {
 	if ctx == nil || !preparedSerenaDigest(r.PackageIdentitySHA256) || !preparedSerenaID(r.OperationID) || !preparedSerenaID(r.GenerationID) || !r.Limits.valid() || (r.Kind != "generation" && r.Kind != "attempt" && r.Kind != "qualification") || (r.Kind == "qualification" && !preparedSerenaID(r.QualificationID)) || (r.Kind != "qualification" && r.QualificationID != "") {
 		return nil, errors.New("SERENA_TREE_REQUEST_INVALID")
 	}
+	if err := validateSerenaTreeCleanupContext(ctx, r.AbsoluteCleanupDeadline); err != nil {
+		return nil, err
+	}
 	return acquireSerenaTreePlatform(ctx, r)
 }
+func validateSerenaTreeCleanupContext(ctx context.Context, bound time.Time) error {
+	if ctx == nil || bound.IsZero() {
+		return errors.New("SERENA_TREE_CLEANUP_DEADLINE_REQUIRED")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, finite := ctx.Deadline()
+	if !finite || deadline.After(bound) {
+		return errors.New("SERENA_TREE_CLEANUP_DEADLINE_RENEWED")
+	}
+	return nil
+}
+
 func (t *SerenaOwnedTree) Inventory(ctx context.Context) (SerenaTreeInventory, error) {
 	if t == nil || t.platform == nil {
 		return SerenaTreeInventory{}, errors.New("SERENA_TREE_CAPABILITY_MISSING")

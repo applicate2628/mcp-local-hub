@@ -260,7 +260,8 @@ func (r PreparedSerenaQualificationRequest) validate(ctx context.Context, receiv
 	if err != nil {
 		return err
 	}
-	if !preparedSerenaFile(r.Roots.Generation) || !preparedSerenaFile(r.Roots.Attempt) || r.Roots.Generation.Path != filepath.Join(r.Request.Namespace, key, "generations", r.Request.GenerationID) || r.Roots.Attempt.Path != filepath.Join(r.Request.Namespace, key, "attempts", r.Request.OperationID) || !r.Installation.Closure.complete(r.Request.OperationID) || !r.Installation.Closure.RootExitKnown || r.Installation.Closure.RootExitCode != 0 || !preparedSerenaFile(r.Installation.Entrypoint) || !preparedSerenaDigest(r.Installation.InventorySHA256) {
+	attemptParent, attemptLeaf := serenaOwnedTreeLocation(SerenaOwnedTreeRequest{Namespace: r.Request.Namespace, PackageIdentitySHA256: key, OperationID: r.Request.OperationID, GenerationID: r.Request.GenerationID, Kind: "attempt", Limits: r.Request.OwnedTreeLimits})
+	if !preparedSerenaFile(r.Roots.Generation) || !preparedSerenaFile(r.Roots.Attempt) || r.Roots.Generation.Path != filepath.Join(r.Request.Namespace, key, "generations", r.Request.GenerationID) || r.Roots.Attempt.Path != filepath.Join(attemptParent, attemptLeaf) || !r.Installation.Closure.complete(r.Request.OperationID) || !r.Installation.Closure.RootExitKnown || r.Installation.Closure.RootExitCode != 0 || !preparedSerenaFile(r.Installation.Entrypoint) || !preparedSerenaDigest(r.Installation.InventorySHA256) {
 		return errors.New("SERENA_UNPUBLISHED_INSTALLATION_UNQUALIFIED")
 	}
 	if err = ctx.Err(); err != nil {
@@ -280,5 +281,8 @@ func ValidateUnpublishedSerenaQualificationRequest(ctx context.Context, r Prepar
 	if err := r.validate(ctx, false); err != nil {
 		return err
 	}
-	return revalidatePreparedSerenaFile(ctx, r.Installation.Entrypoint)
+	if err := validatePreparedSerenaGeneration(ctx, r.Installation.generation, r.Request, r.Roots.Generation); err != nil {
+		return err
+	}
+	return revalidatePreparedSerenaOwnedFile(ctx, r.Installation.generation, r.Installation.Entrypoint)
 }
