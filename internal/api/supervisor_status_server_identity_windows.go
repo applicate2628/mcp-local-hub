@@ -8,7 +8,8 @@ import (
 	"io"
 	"net"
 	"time"
-	"unsafe"
+
+	"mcp-local-hub/internal/process"
 
 	"golang.org/x/sys/windows"
 )
@@ -22,16 +23,11 @@ func ObserveSupervisorStatusServerIdentityV1(conn net.Conn) (SupervisorProcessId
 }
 
 func observeSupervisorStatusServerIdentityV1(conn net.Conn, checked bool) (SupervisorProcessIdentityV1, error) {
-	var zero SupervisorProcessIdentityV1
-	fdConn, ok := conn.(interface{ Fd() uintptr })
-	if !ok {
-		return zero, fmt.Errorf("supervisor pipe connection does not expose a kernel handle")
+	mode := process.WindowsIdentityLegacyCompatibility
+	if checked {
+		mode = process.WindowsIdentityCheckedCompatibility
 	}
-	var pid uint32
-	if err := windows.GetNamedPipeServerProcessId(windows.Handle(fdConn.Fd()), &pid); err != nil || pid == 0 {
-		return zero, fmt.Errorf("query supervisor pipe server PID: %w", err)
-	}
-	return observeSupervisorProcessIdentityV1(int(pid), checked)
+	return projectSupervisorProcessIdentityV1(process.ObserveWindowsPipeServerIdentity(conn, mode), checked)
 }
 
 // ObserveSupervisorIPCClientIdentityV1 reads the peer of this same accepted
@@ -48,7 +44,16 @@ func ObserveSupervisorIPCClientIdentityV1(conn net.Conn) (SupervisorProcessIdent
 	if pid == 0 {
 		return SupervisorProcessIdentityV1{}, fmt.Errorf("supervisor pipe client has no PID")
 	}
-	return observeSupervisorProcessIdentityV1(int(pid), true)
+	return projectSupervisorProcessIdentityV1(process.ObserveWindowsProcessIdentity(pid, process.WindowsIdentityCheckedCompatibility), true)
+}
+
+func ObserveSupervisorIPCClientIdentityObserved(conn net.Conn) (SupervisorProcessIdentityV1, *process.WindowsIdentityObservation, error) {
+	observation := process.ObserveWindowsPipeClientIdentityObserved(conn)
+	identity, err := projectSupervisorProcessIdentityV1(observation, true)
+	if err == nil {
+		err = observation.ValidateObservedPrincipal()
+	}
+	return identity, &observation, err
 }
 
 // ObserveSupervisorProcessIdentityV1 observes native process data. It conveys no
@@ -57,110 +62,106 @@ func ObserveSupervisorProcessIdentityV1(pid int) (SupervisorProcessIdentityV1, e
 	if pid <= 0 {
 		return SupervisorProcessIdentityV1{}, fmt.Errorf("%w: original process required", ErrSupervisorControlPeerIdentity)
 	}
-	return observeSupervisorProcessIdentityV1(pid, true)
+	identity, err := projectSupervisorProcessIdentityV1(process.ObserveWindowsProcessIdentity(uint32(pid), process.WindowsIdentityCheckedCompatibility), true)
+	if err == nil {
+		identity.PID = pid
+	}
+	return identity, err
 }
 
-// Both the existing CST observer and strict creator/connection projections use
-// this one capture body. Only the strict projection receives closure errors.
-func observeSupervisorProcessIdentityV1(pid int, checked bool) (identity SupervisorProcessIdentityV1, retErr error) {
-	var zero SupervisorProcessIdentityV1
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		if checked && h != 0 {
-			err = errors.Join(err, windows.CloseHandle(h))
-		}
-		return zero, fmt.Errorf("open supervisor pipe server PID: %w", err)
-	}
-	defer func() {
-		closeErr := windows.CloseHandle(h)
+func projectSupervisorProcessIdentityV1(observation process.WindowsIdentityObservation, checked bool) (SupervisorProcessIdentityV1, error) {
+	processClose, tokenClose := observation.ProcessClose, observation.TokenClose
+	var err error
+	if failure := observation.QueryError; failure != nil {
+		cause := failure.Cause
+		// On an unsuccessful open, the temporary close belongs inside the
+		// open error. Closures after successful opens follow the query error.
 		if checked {
-			retErr = errors.Join(retErr, closeErr)
-			if retErr != nil {
-				identity = zero
+			switch failure.Query {
+			case process.WindowsIdentityOpenProcess:
+				if processClose.Attempted {
+					cause = errors.Join(cause, processClose.Err)
+					processClose.Attempted = false
+				}
+			case process.WindowsIdentityOpenToken:
+				if tokenClose.Attempted {
+					cause = errors.Join(cause, tokenClose.Err)
+					tokenClose.Attempted = false
+				}
 			}
 		}
-	}()
-	image, err := querySupervisorStatusImageWithResult(h, checked)
+		err = supervisorProcessIdentityQueryError(failure.Query, cause, checked)
+	}
+	if checked && tokenClose.Attempted {
+		err = errors.Join(err, tokenClose.Err)
+	}
+	if checked && processClose.Attempted {
+		err = errors.Join(err, processClose.Err)
+	}
 	if err != nil {
-		return zero, err
+		return SupervisorProcessIdentityV1{}, err
 	}
-	var creation, exit, kernel, user windows.Filetime
-	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
-		return zero, fmt.Errorf("query supervisor process times: %w", err)
-	}
-	var token windows.Token
-	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &token); err != nil {
-		if checked && token != 0 {
-			err = errors.Join(err, token.Close())
-		}
-		return zero, fmt.Errorf("open supervisor process token: %w", err)
-	}
-	defer func() {
-		closeErr := token.Close()
-		if checked {
-			retErr = errors.Join(retErr, closeErr)
-		}
-	}()
-	tokenUser, err := token.GetTokenUser()
-	if err != nil {
-		return zero, fmt.Errorf("query supervisor token user: %w", err)
-	}
-	var session uint32
-	if err := windows.ProcessIdToSessionId(uint32(pid), &session); err != nil {
-		return zero, fmt.Errorf("query supervisor session: %w", err)
-	}
-	integrity, err := supervisorStatusTokenIntegrityRID(token)
-	if err != nil {
-		return zero, err
+	identity := observation.Identity
+	creation := windows.Filetime{
+		HighDateTime: uint32(identity.NativeBirthFILETIME >> 32),
+		LowDateTime:  uint32(identity.NativeBirthFILETIME),
 	}
 	return SupervisorProcessIdentityV1{
-		PID:          int(pid),
+		PID:          int(identity.PID),
 		CreationTime: time.Unix(0, creation.Nanoseconds()).UTC().Format(time.RFC3339Nano),
-		UserSID:      tokenUser.User.Sid.String(),
-		SessionID:    session,
-		IntegrityRID: integrity,
-		ImagePath:    image,
+		UserSID:      identity.UserSID,
+		SessionID:    identity.SessionID,
+		IntegrityRID: identity.IntegrityRID,
+		ImagePath:    identity.ImagePath,
 	}, nil
 }
 
-func querySupervisorStatusImage(h windows.Handle) (string, error) {
-	return querySupervisorStatusImageWithResult(h, false)
+func supervisorProcessIdentityQueryError(query process.WindowsIdentityQuery, cause error, checked bool) error {
+	switch query {
+	case process.WindowsIdentityPipeHandle:
+		return fmt.Errorf("supervisor pipe connection does not expose a kernel handle")
+	case process.WindowsIdentityPipeServerPID:
+		return fmt.Errorf("query supervisor pipe server PID: %w", cause)
+	case process.WindowsIdentityOpenProcess:
+		return fmt.Errorf("open supervisor pipe server PID: %w", cause)
+	case process.WindowsIdentityImage:
+		if checked {
+			return fmt.Errorf("query supervisor image path: %w", cause)
+		}
+		return fmt.Errorf("query supervisor image path")
+	case process.WindowsIdentityProcessTimes:
+		return fmt.Errorf("query supervisor process times: %w", cause)
+	case process.WindowsIdentityOpenToken:
+		return fmt.Errorf("open supervisor process token: %w", cause)
+	case process.WindowsIdentityTokenUser:
+		return fmt.Errorf("query supervisor token user: %w", cause)
+	case process.WindowsIdentitySession:
+		return fmt.Errorf("query supervisor session: %w", cause)
+	case process.WindowsIdentityIntegritySize:
+		return fmt.Errorf("size supervisor token integrity: %w", cause)
+	case process.WindowsIdentityIntegrityQuery:
+		return fmt.Errorf("query supervisor token integrity: %w", cause)
+	case process.WindowsIdentityIntegrityRID:
+		return fmt.Errorf("supervisor integrity SID has no RID")
+	default:
+		return fmt.Errorf("query supervisor process identity (%s): %w", query, cause)
+	}
 }
 
-func querySupervisorStatusImageWithResult(h windows.Handle, checked bool) (string, error) {
-	var lastErr error
-	for size := uint32(windows.MAX_PATH); size <= 32768; size *= 2 {
-		buf := make([]uint16, size)
-		n := size
-		if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err == nil {
-			return windows.UTF16ToString(buf[:n]), nil
-		} else {
-			lastErr = err
-		}
+func querySupervisorStatusImage(h windows.Handle) (string, error) {
+	image, err := process.QueryWindowsIdentityImageCompatible(h)
+	if err != nil {
+		return "", supervisorProcessIdentityQueryError(process.WindowsIdentityImage, err, false)
 	}
-	if checked {
-		return "", fmt.Errorf("query supervisor image path: %w", lastErr)
-	}
-	return "", fmt.Errorf("query supervisor image path")
+	return image, nil
 }
 
 func supervisorStatusTokenIntegrityRID(token windows.Token) (uint32, error) {
-	var needed uint32
-	err := windows.GetTokenInformation(token, windows.TokenIntegrityLevel, nil, 0, &needed)
-	if err != windows.ERROR_INSUFFICIENT_BUFFER || needed == 0 {
-		return 0, fmt.Errorf("size supervisor token integrity: %w", err)
+	rid, err := process.QueryWindowsIdentityIntegrityRID(token)
+	if err != nil {
+		return 0, supervisorProcessIdentityQueryError(err.Query, err.Cause, false)
 	}
-	buf := make([]byte, needed)
-	if err := windows.GetTokenInformation(token, windows.TokenIntegrityLevel, &buf[0], needed, &needed); err != nil {
-		return 0, fmt.Errorf("query supervisor token integrity: %w", err)
-	}
-	ml := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0]))
-	sid := ml.Label.Sid
-	count := sid.SubAuthorityCount()
-	if count == 0 {
-		return 0, fmt.Errorf("supervisor integrity SID has no RID")
-	}
-	return sid.SubAuthority(uint32(count - 1)), nil
+	return rid, nil
 }
 
 func aggregateRoutePeerClosed(err error) bool {

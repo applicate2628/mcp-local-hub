@@ -10,3 +10,7 @@ import (
 func ObserveOriginalLoopbackTCPRowsObserved(context.Context) (*LoopbackTCPRowsObservation, error) {
 	return nil, errors.New("ORIGINAL_TCP_QUERY_PLATFORM_UNQUALIFIED")
 }
+
+func observeOriginalLoopbackTCPFrame(context.Context) (*LoopbackTCPRowsObservation, error) {
+	return nil, errors.New("ORIGINAL_TCP_QUERY_PLATFORM_UNQUALIFIED")
+}

@@ -7,26 +7,15 @@ import (
 	"context"
 	"errors"
 	"io"
-	"mcp-local-hub/internal/process"
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func ObserveOriginalLoopbackTCPRowsObserved(ctx context.Context) (o *LoopbackTCPRowsObservation, retErr error) {
-	if ctx == nil || ctx.Err() != nil {
-		return nil, errors.New("ORIGINAL_TCP_QUERY_CONTEXT_INVALID")
-	}
-	end, finite := ctx.Deadline()
-	if !finite {
-		return nil, errors.New("ORIGINAL_TCP_QUERY_DEADLINE_REQUIRED")
-	}
-	// Same installed netstat selection and argv as the existing Windows scanner.
-	path, err := exec.LookPath("netstat")
-	if err != nil {
-		return nil, err
-	}
-	path, err = filepath.Abs(path)
+	path, end, err := originalLoopbackTCPSource(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -34,24 +23,95 @@ func ObserveOriginalLoopbackTCPRowsObserved(ctx context.Context) (o *LoopbackTCP
 	if err != nil {
 		return nil, err
 	}
-	cmd := &exec.Cmd{Path: file.Path, Args: []string{file.Path, "-ano"}}
-	var stdout, stderr bytes.Buffer
-	o = &LoopbackTCPRowsObservation{issuer: &struct{ marker byte }{1}, sourceSHA256: file.SHA256}
-	remaining := time.Until(end)
-	if remaining <= 0 {
-		return o, context.DeadlineExceeded
+	o = &LoopbackTCPRowsObservation{issuer: &struct{ marker byte }{1}}
+	defer func() {
+		o.err, o.finalized = retErr, true
+		o.raw, o.stderr = nil, nil
+	}()
+	o, retErr = runOriginalLoopbackTCPFrame(ctx, end, time.Until(end), file, o, process.RunContainedStreamObserved)
+	if retErr != nil {
+		return o, retErr
 	}
-	o.receipt, retErr = process.RunContainedStreamObserved(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: remaining, AbsoluteCleanupDeadline: end, StdoutByteLimit: 64 << 20, StderrByteLimit: 8 << 20, Stderr: &stderr}, func(r io.Reader) error { _, err := io.Copy(&stdout, r); return err })
-	defer func() { o.err = retErr }()
-	if retErr != nil || !o.receipt.RootWaitKnown || o.receipt.RootExitCode != 0 || !o.receipt.NativeSettlement.Complete() || !o.receipt.IOSettlement.Complete() {
-		return o, errors.Join(retErr, errors.New("ORIGINAL_TCP_QUERY_CUSTODY_PENDING"))
-	}
-	raw := append([]byte(nil), stdout.Bytes()...)
-	o.frameSHA256 = preparedSerenaHash(raw)
-	o.rows, retErr = parseOriginalLoopbackTCPRows(raw)
+	o.rows, retErr = parseOriginalLoopbackTCPRows(o.raw)
 	if retErr != nil {
 		return o, retErr
 	}
 	o.receiptSHA256, retErr = tcpObservedReceiptSHA(o)
 	return o, errors.Join(retErr, ctx.Err())
+}
+
+func observeOriginalLoopbackTCPFrame(ctx context.Context) (o *LoopbackTCPRowsObservation, retErr error) {
+	o = &LoopbackTCPRowsObservation{issuer: &struct{ marker byte }{1}}
+	defer func() { o.err, o.finalized = retErr, true }()
+	path, end, err := originalLoopbackTCPSource(ctx)
+	if err != nil {
+		return o, err
+	}
+	return observeQualifiedLoopbackTCPFrame(ctx, end, path, o, qualifyPreparedSerenaExecutableObserved, process.RunContainedStreamObserved)
+}
+
+func originalLoopbackTCPSource(ctx context.Context) (string, time.Time, error) {
+	if ctx == nil || ctx.Err() != nil {
+		return "", time.Time{}, errors.New("ORIGINAL_TCP_QUERY_CONTEXT_INVALID")
+	}
+	end, finite := ctx.Deadline()
+	if !finite {
+		return "", time.Time{}, errors.New("ORIGINAL_TCP_QUERY_DEADLINE_REQUIRED")
+	}
+	// Same installed netstat selection and argv as the existing Windows scanner.
+	path, err := exec.LookPath("netstat")
+	if err != nil {
+		return "", end, err
+	}
+	path, err = filepath.Abs(path)
+	return path, end, err
+}
+
+func observeQualifiedLoopbackTCPFrame(ctx context.Context, end time.Time, path string, o *LoopbackTCPRowsObservation,
+	qualify func(context.Context, string, int64) (PreparedSerenaFile, *preparedSerenaExecutableObservation, error),
+	run func(context.Context, *exec.Cmd, process.ContainedStreamOptions, func(io.Reader) error) (process.ContainedStreamReceiptV1, error)) (*LoopbackTCPRowsObservation, error) {
+	file, qualification, err := qualify(ctx, path, 64<<20)
+	o.qualification = qualification
+	if err != nil {
+		return o, err
+	}
+	if !qualification.ResourcesFinalized() {
+		return o, errors.New("ORIGINAL_TCP_EXECUTABLE_CLOSURE_PENDING")
+	}
+	if err := ctx.Err(); err != nil {
+		return o, err
+	}
+	o, err = runOriginalLoopbackTCPFrame(ctx, end, time.Until(end).Truncate(time.Millisecond), file, o, run)
+	if err != nil {
+		return o, err
+	}
+	return o, ctx.Err()
+}
+
+func runOriginalLoopbackTCPFrame(ctx context.Context, end time.Time, remaining time.Duration, file PreparedSerenaFile, o *LoopbackTCPRowsObservation,
+	run func(context.Context, *exec.Cmd, process.ContainedStreamOptions, func(io.Reader) error) (process.ContainedStreamReceiptV1, error)) (*LoopbackTCPRowsObservation, error) {
+	o.sourceSHA256 = file.SHA256
+	if remaining <= 0 {
+		return o, context.DeadlineExceeded
+	}
+	cmd := &exec.Cmd{Path: file.Path, Args: []string{file.Path, "-ano"}}
+	var stdout, stderr bytes.Buffer
+	o.runEntered = true
+	receipt, err := run(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: remaining, AbsoluteCleanupDeadline: end, StdoutByteLimit: 64 << 20, StderrByteLimit: 8 << 20, Stderr: &stderr}, func(r io.Reader) error { _, err := io.Copy(&stdout, r); return err })
+	o.receipt = receipt
+	if receipt.IOSettlement.Stdout.WorkerComplete {
+		o.raw = bytes.Clone(stdout.Bytes())
+		o.frameSHA256 = preparedSerenaHash(o.raw)
+	} else if receipt.IOSettlement.Stdout.WorkerStarted {
+		o.stdoutPending = &stdout
+	}
+	if receipt.IOSettlement.Stderr.WorkerComplete {
+		o.stderr = bytes.Clone(stderr.Bytes())
+	} else if receipt.IOSettlement.Stderr.WorkerStarted {
+		o.stderrPending = &stderr
+	}
+	if err != nil || !receipt.RootWaitKnown || receipt.RootExitCode != 0 || !receipt.NativeSettlement.Complete() || !receipt.IOSettlement.Complete() {
+		return o, errors.Join(err, errors.New("ORIGINAL_TCP_QUERY_CUSTODY_PENDING"))
+	}
+	return o, nil
 }

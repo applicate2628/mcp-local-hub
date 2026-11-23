@@ -103,6 +103,13 @@ func (o *WindowsCanonicalEntrySetV1) openAbsoluteWithOptions(name string, direct
 // Share only original namespace/handle acquisition across semantic domains.
 // Borrowing is supplied solely by the existing V1 transaction directory owner.
 func canonicalEntryOpenAbsolute(name string, directory bool, leafShare, directoryDisposition uint32, retain func(windows.Handle, string, bool) (*canonicalEntryNativeFile, error), borrow func(*canonicalEntryNativeFile, string) (*canonicalEntryNativeFile, bool, error)) (*canonicalEntryNativeFile, error) {
+	return canonicalEntryOpenAbsoluteWithOpen(name, directory, leafShare, directoryDisposition, retain, borrow, canonicalEntryOpenNative)
+}
+
+func canonicalEntryOpenAbsoluteWithOpen(name string, directory bool, leafShare, directoryDisposition uint32,
+	retain func(windows.Handle, string, bool) (*canonicalEntryNativeFile, error),
+	borrow func(*canonicalEntryNativeFile, string) (*canonicalEntryNativeFile, bool, error),
+	open func(windows.Handle, string, bool, uint32, uint32, uint32) (windows.Handle, error)) (*canonicalEntryNativeFile, error) {
 	volume, parts, err := nativeCanonicalEntryPathParts(name)
 	if err != nil {
 		return nil, err
@@ -111,7 +118,7 @@ func canonicalEntryOpenAbsolute(name string, directory bool, leafShare, director
 	if strings.HasPrefix(volume, `\\`) {
 		anchor = `\??\UNC\` + strings.TrimPrefix(volume, `\\`) + `\`
 	}
-	h, err := canonicalEntryOpenNative(0, anchor, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN)
+	h, err := open(0, anchor, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +148,7 @@ func canonicalEntryOpenAbsolute(name string, directory bool, leafShare, director
 			share = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE
 			disposition = directoryDisposition
 		}
-		h, err = canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), part, isDir, access, share, disposition)
+		h, err = open(windows.Handle(parent.file.Fd()), part, isDir, access, share, disposition)
 		if err != nil {
 			return nil, fmt.Errorf("open original component %q: %w", part, err)
 		}
@@ -499,25 +506,9 @@ func verifyCanonicalEntryProductProcessImage(product *canonicalEntryNativeFile, 
 }
 
 func verifyCanonicalEntryProductProcessImageInNamespace(product *canonicalEntryNativeFile, borrowedProcessHandle uintptr, leafShare uint32, payloadDirectoryLink *canonicalEntryPayloadDirectoryLinkV1, memberDirectories *canonicalEntryMemberDirectoriesV2) error {
-	if borrowedProcessHandle == 0 || windows.Handle(borrowedProcessHandle) == windows.InvalidHandle {
-		return errors.New("missing original process handle")
-	}
-	var actualImagePath string
-	for size := uint32(256); ; {
-		buf := make([]uint16, int(size))
-		n := size
-		err := windows.QueryFullProcessImageName(windows.Handle(borrowedProcessHandle), 0, &buf[0], &n)
-		if err == nil {
-			actualImagePath = windows.UTF16ToString(buf[:n])
-			break
-		}
-		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
-			return err
-		}
-		if uint64(size)*2 > uint64(^uint32(0)) || uint64(size)*2 > uint64(int(^uint(0)>>1)) {
-			return err
-		}
-		size *= 2
+	actualImagePath, err := queryCanonicalEntryProcessImagePath(borrowedProcessHandle)
+	if err != nil {
+		return err
 	}
 	probe := &WindowsCanonicalEntrySetV1{payloadDirectoryLink: payloadDirectoryLink, memberDirectories: memberDirectories}
 	f, err := probe.openAbsoluteWithOptions(actualImagePath, false, leafShare, windows.FILE_OPEN)
@@ -525,6 +516,27 @@ func verifyCanonicalEntryProductProcessImageInNamespace(product *canonicalEntryN
 		err = errors.New("actual original process image differs from retained Product")
 	}
 	return errors.Join(err, probe.Close())
+}
+
+func queryCanonicalEntryProcessImagePath(borrowedProcessHandle uintptr) (string, error) {
+	if borrowedProcessHandle == 0 || windows.Handle(borrowedProcessHandle) == windows.InvalidHandle {
+		return "", errors.New("missing original process handle")
+	}
+	for size := uint32(256); ; {
+		buf := make([]uint16, int(size))
+		n := size
+		err := windows.QueryFullProcessImageName(windows.Handle(borrowedProcessHandle), 0, &buf[0], &n)
+		if err == nil {
+			return windows.UTF16ToString(buf[:n]), nil
+		}
+		if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+			return "", err
+		}
+		if uint64(size)*2 > uint64(^uint32(0)) || uint64(size)*2 > uint64(int(^uint(0)>>1)) {
+			return "", err
+		}
+		size *= 2
+	}
 }
 
 func (o *WindowsCanonicalEntrySetV1) Close() error {

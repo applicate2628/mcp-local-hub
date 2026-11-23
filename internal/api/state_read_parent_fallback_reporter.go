@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"sort"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -26,23 +29,27 @@ const (
 // every process start emits a fresh first observation. Caller-owned audit
 // sinks bypass it and retain their per-call diagnostic contract.
 //
-// reportMu serializes a decision with its corresponding best-effort write so
-// concurrent observations cannot lose suppressed counts. stateMu never covers
-// I/O: log rotation and its flock remain outside the reporter state lock.
+// reportGate serializes the cached state and corresponding best-effort
+// writes. A bound read can cancel its wait for ordinary log I/O.
 type stateReadParentFallbackReporter struct {
-	reportMu sync.Mutex
-	stateMu  sync.Mutex
+	reportGate *semaphore.Weighted
 
 	now   func() time.Time
-	sink  func(level, event string, fields map[string]any) error
+	sink  stateReadFallbackSink
 	limit int
 	seq   uint64
 
-	entries map[string]*stateReadParentFallbackEntry
+	entries map[stateReadFallbackKey]*stateReadParentFallbackEntry
+}
+
+type stateReadFallbackKey struct {
+	namespaceSHA256 string // Empty only for the ordinary sink.
+	path            string
+	fingerprint     string
 }
 
 type stateReadParentFallbackEntry struct {
-	key         string
+	key         stateReadFallbackKey
 	level       string
 	event       string
 	fields      map[string]any
@@ -51,13 +58,15 @@ type stateReadParentFallbackEntry struct {
 	touched     uint64
 }
 
+type stateReadFallbackSink func(level, event string, fields map[string]any) error
+
 type stateReadParentFallbackObservation struct {
 	level  string
 	event  string
 	fields map[string]any
 }
 
-func newStateReadParentFallbackReporter(now func() time.Time, sink func(level, event string, fields map[string]any) error, limit int) *stateReadParentFallbackReporter {
+func newStateReadParentFallbackReporter(now func() time.Time, sink stateReadFallbackSink, limit int) *stateReadParentFallbackReporter {
 	if now == nil {
 		now = time.Now
 	}
@@ -68,7 +77,8 @@ func newStateReadParentFallbackReporter(now func() time.Time, sink func(level, e
 		limit = stateReadFallbackReporterCap
 	}
 	return &stateReadParentFallbackReporter{
-		now: now, sink: sink, limit: limit, entries: make(map[string]*stateReadParentFallbackEntry),
+		reportGate: semaphore.NewWeighted(1),
+		now:        now, sink: sink, limit: limit, entries: make(map[stateReadFallbackKey]*stateReadParentFallbackEntry),
 	}
 }
 
@@ -95,17 +105,33 @@ func (r *stateReadParentFallbackReporter) observeClean(path string) error {
 // a read/exec reason; keeping that set together prevents one reason from being
 // misclassified as the other's transition.
 func (r *stateReadParentFallbackReporter) observeParentFallbacks(path string, observations []stateReadParentFallbackObservation) error {
-	desired := make(map[string]stateReadParentFallbackObservation, len(observations))
-	ordered := make([]string, 0, len(observations))
+	return r.observeParentFallbacksWithSink(context.Background(), "", r.sink, path, observations)
+}
+
+func (r *stateReadParentFallbackReporter) observeParentFallbacksWithSink(ctx context.Context, namespaceSHA256 string, sink stateReadFallbackSink, path string, observations []stateReadParentFallbackObservation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	emit := func(level, event string, fields map[string]any) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return sink(level, event, fields)
+	}
+	desired := make(map[stateReadFallbackKey]stateReadParentFallbackObservation, len(observations))
+	ordered := make([]stateReadFallbackKey, 0, len(observations))
 	for _, observation := range observations {
 		observedPath, fingerprint, ok := stateReadParentFallbackIdentity(observation.fields)
 		if !ok || observedPath != path {
-			if err := r.sink(observation.level, observation.event, observation.fields); err != nil {
+			if namespaceSHA256 != "" {
+				return errors.New("state read fallback does not match bound observation path")
+			}
+			if err := emit(observation.level, observation.event, observation.fields); err != nil {
 				return err
 			}
 			continue
 		}
-		key := stateReadParentFallbackKey(observedPath, fingerprint)
+		key := stateReadFallbackKey{namespaceSHA256: namespaceSHA256, path: observedPath, fingerprint: fingerprint}
 		if _, exists := desired[key]; !exists {
 			desired[key] = observation
 			ordered = append(ordered, key)
@@ -113,12 +139,12 @@ func (r *stateReadParentFallbackReporter) observeParentFallbacks(path string, ob
 	}
 	now := r.now().UTC()
 
-	r.reportMu.Lock()
-	defer r.reportMu.Unlock()
+	if err := r.reportGate.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer r.reportGate.Release(1)
 
-	r.stateMu.Lock()
-	prior := r.entriesForPathLocked(path)
-	r.stateMu.Unlock()
+	prior := r.entriesForPath(namespaceSHA256, path)
 	finalAggregation := stateReadFallbackAggregationTransition
 	if len(desired) == 0 {
 		finalAggregation = stateReadFallbackAggregationSettled
@@ -127,99 +153,99 @@ func (r *stateReadParentFallbackReporter) observeParentFallbacks(path string, ob
 		if _, stillObserved := desired[entry.key]; stillObserved {
 			continue
 		}
-		if err := r.emitAndRemove(entry, finalAggregation); err != nil {
+		if err := r.emitAndRemove(emit, entry, finalAggregation); err != nil {
 			return err
 		}
 	}
 	for _, key := range ordered {
-		if err := r.observeOne(key, desired[key], now); err != nil {
+		if err := r.observeOne(ctx, emit, key, desired[key], now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *stateReadParentFallbackReporter) observeOne(key string, observation stateReadParentFallbackObservation, now time.Time) error {
-	r.stateMu.Lock()
+func (r *stateReadParentFallbackReporter) observeOne(ctx context.Context, emit stateReadFallbackSink, key stateReadFallbackKey, observation stateReadParentFallbackObservation, now time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entry := r.entries[key]
 	if entry == nil {
-		victim := r.leastRecentlyTouchedLocked()
-		if victim != nil && len(r.entries) >= r.limit {
-			victimFields := stateReadFallbackAggregateFields(victim.fields, victim.suppressed, stateReadFallbackAggregationEvicted)
-			r.stateMu.Unlock()
-			if err := r.sink(victim.level, victim.event, victimFields); err != nil {
+		full, victim := r.capacityForDomain(key.namespaceSHA256)
+		if full && victim == nil {
+			// The bound pool is full of other roots. Emit under the current
+			// authority and leave their cached warnings for their own sinks.
+			return emit(observation.level, observation.event, observation.fields)
+		}
+		if full {
+			if err := r.emitAndRemove(emit, victim, stateReadFallbackAggregationEvicted); err != nil {
 				return err
 			}
-			r.stateMu.Lock()
-			delete(r.entries, victim.key)
 		}
-		r.seq++
 		entry = &stateReadParentFallbackEntry{
 			key: key, level: observation.level, event: observation.event, fields: cloneStateReadFallbackFields(observation.fields),
-			lastEmitted: now, touched: r.seq,
+			lastEmitted: now,
 		}
-		r.entries[key] = entry
-		r.stateMu.Unlock()
-		if err := r.sink(observation.level, observation.event, observation.fields); err != nil {
-			r.stateMu.Lock()
-			if r.entries[key] == entry {
-				delete(r.entries, key)
-			}
-			r.stateMu.Unlock()
+		if err := emit(observation.level, observation.event, observation.fields); err != nil {
 			return err
 		}
+		r.seq++
+		entry.touched = r.seq
+		r.entries[key] = entry
 		return nil
 	}
 
+	suppressed := entry.suppressed + 1
+	var err error
+	if now.Sub(entry.lastEmitted) >= stateReadFallbackReportInterval {
+		periodic := stateReadFallbackAggregateFields(entry.fields, suppressed, stateReadFallbackAggregationPeriodic)
+		err = emit(entry.level, entry.event, periodic)
+		if err != nil && ctx.Err() != nil {
+			return err
+		}
+		if err == nil {
+			entry.lastEmitted = now
+			suppressed = 0
+		}
+	}
 	r.seq++
 	entry.touched = r.seq
-	entry.suppressed++
-	if now.Sub(entry.lastEmitted) < stateReadFallbackReportInterval {
-		r.stateMu.Unlock()
-		return nil
-	}
-	periodic := stateReadFallbackAggregateFields(entry.fields, entry.suppressed, stateReadFallbackAggregationPeriodic)
-	r.stateMu.Unlock()
-	if err := r.sink(entry.level, entry.event, periodic); err != nil {
-		return err
-	}
-	r.stateMu.Lock()
-	entry.lastEmitted = now
-	entry.suppressed = 0
-	r.stateMu.Unlock()
-	return nil
+	entry.suppressed = suppressed
+	return err
 }
 
-func (r *stateReadParentFallbackReporter) emitAndRemove(entry *stateReadParentFallbackEntry, aggregation string) error {
+func (r *stateReadParentFallbackReporter) emitAndRemove(emit stateReadFallbackSink, entry *stateReadParentFallbackEntry, aggregation string) error {
 	fields := stateReadFallbackAggregateFields(entry.fields, entry.suppressed, aggregation)
-	if err := r.sink(entry.level, entry.event, fields); err != nil {
+	if err := emit(entry.level, entry.event, fields); err != nil {
 		return err
 	}
-	r.stateMu.Lock()
-	if r.entries[entry.key] == entry {
-		delete(r.entries, entry.key)
-	}
-	r.stateMu.Unlock()
+	delete(r.entries, entry.key)
 	return nil
 }
 
-func (r *stateReadParentFallbackReporter) leastRecentlyTouchedLocked() *stateReadParentFallbackEntry {
+// The ordinary domain has its own capacity. All bound domains share one
+// additional capacity, and an eviction must stay within the current domain.
+func (r *stateReadParentFallbackReporter) capacityForDomain(namespaceSHA256 string) (full bool, victim *stateReadParentFallbackEntry) {
 	if len(r.entries) < r.limit {
-		return nil
+		return false, nil
 	}
-	var victim *stateReadParentFallbackEntry
-	for _, entry := range r.entries {
-		if victim == nil || entry.touched < victim.touched {
+	count := 0
+	for key, entry := range r.entries {
+		if (key.namespaceSHA256 == "") != (namespaceSHA256 == "") {
+			continue
+		}
+		count++
+		if key.namespaceSHA256 == namespaceSHA256 && (victim == nil || entry.touched < victim.touched) {
 			victim = entry
 		}
 	}
-	return victim
+	return count >= r.limit, victim
 }
 
-func (r *stateReadParentFallbackReporter) entriesForPathLocked(path string) []*stateReadParentFallbackEntry {
+func (r *stateReadParentFallbackReporter) entriesForPath(namespaceSHA256, path string) []*stateReadParentFallbackEntry {
 	entries := make([]*stateReadParentFallbackEntry, 0)
-	for _, entry := range r.entries {
-		if stateReadFallbackPath(entry.fields) == path {
+	for key, entry := range r.entries {
+		if key.namespaceSHA256 == namespaceSHA256 && key.path == path {
 			entries = append(entries, entry)
 		}
 	}
@@ -227,7 +253,7 @@ func (r *stateReadParentFallbackReporter) entriesForPathLocked(path string) []*s
 		if entries[i].touched != entries[j].touched {
 			return entries[i].touched < entries[j].touched
 		}
-		return entries[i].key < entries[j].key
+		return entries[i].key.fingerprint < entries[j].key.fingerprint
 	})
 	return entries
 }
@@ -248,10 +274,6 @@ func stateReadParentFallbackIdentity(fields map[string]any) (path, fingerprint s
 func stateReadFallbackPath(fields map[string]any) string {
 	path, _ := fields["path"].(string)
 	return path
-}
-
-func stateReadParentFallbackKey(path, fingerprint string) string {
-	return path + "\x00" + fingerprint
 }
 
 func stateReadFallbackAggregateFields(fields map[string]any, suppressed int, aggregation string) map[string]any {

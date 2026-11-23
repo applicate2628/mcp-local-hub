@@ -31,6 +31,7 @@ type StateReadPolicyObservation struct {
 	stateDir        string
 	deadline        time.Time
 	deadlineDefined bool
+	finalized       bool
 }
 
 func StateReadPolicyEnvironmentIdentity() string {
@@ -77,13 +78,24 @@ func (p *StateReadPolicyObservation) Validate(ctx context.Context, effectiveEnvI
 	return nil
 }
 
+func (p *StateReadPolicyObservation) ResourcesFinalized() bool {
+	return p != nil && p.issuer != nil && p.finalized &&
+		(p.resolution == nil || p.resolution.ResourcesFinalized()) &&
+		(p.bootstrap == nil || p.bootstrap.ResourcesFinalized())
+}
+
 // This is the same policy owner and same ENV-only/no-audit bootstrap core.
 // It never promotes the legacy process scalar cache into a close observation.
-func ResolveStateReadPolicyObserved(ctx context.Context) (policy *StateReadPolicyObservation, retErr error) {
+func ResolveStateReadPolicyObserved(ctx context.Context) (*StateReadPolicyObservation, error) {
+	return resolveStateReadPolicyObserved(ctx, nil)
+}
+
+func resolveStateReadPolicyObserved(ctx context.Context, bound *StateDirResolutionObservation) (policy *StateReadPolicyObservation, retErr error) {
 	environment := os.Getenv(RequireSingleUserHomeEnv)
 	value := strings.ToLower(strings.TrimSpace(environment))
 	envStrict := value == "1" || value == "true"
 	policy = &StateReadPolicyObservation{issuer: &stateFileReadIssuer{marker: 1}, view: StateReadPolicySnapshotV1{Schema: "state-read-policy-observation-v1", Version: 1, EffectiveStrict: true, EnvIdentitySHA256: stateFileReadObservationDigest([]byte(environment)), IntentState: "anomalous", CleanupFailures: make([]StateFileReadFailureV1, 0)}}
+	defer func() { policy.finalized = true }()
 	if ctx == nil {
 		policy.view.FirstCause = &StateFileReadFailureV1{Code: "POLICY_CONTEXT_REQUIRED", Stage: "input", Slot: ""}
 		return policy, errors.New("original policy context required")
@@ -93,13 +105,17 @@ func ResolveStateReadPolicyObserved(ctx context.Context) (policy *StateReadPolic
 		policy.view.FirstCause = &StateFileReadFailureV1{Code: "POLICY_CONTEXT_FAILED", Stage: "input", Slot: ""}
 		return policy, err
 	}
-	stateDir, resolution, err := ResolveDaemonStateDirObserved(ctx)
-	policy.resolution = resolution
-	policy.stateDir = stateDir
-	if err != nil {
-		policy.view.FirstCause = &StateFileReadFailureV1{Code: "POLICY_NAMESPACE_UNAVAILABLE", Stage: "resolve", Slot: ""}
-		return policy, err
+	if bound == nil {
+		var err error
+		policy.stateDir, policy.resolution, err = ResolveDaemonStateDirObserved(ctx)
+		if err != nil {
+			policy.view.FirstCause = &StateFileReadFailureV1{Code: "POLICY_NAMESPACE_UNAVAILABLE", Stage: "resolve", Slot: ""}
+			return policy, err
+		}
+	} else {
+		policy.stateDir, policy.resolution = bound.path, bound
 	}
+	stateDir, resolution := policy.stateDir, policy.resolution
 	if err := resolution.Validate(ctx, stateDir); err != nil {
 		policy.view.FirstCause = &StateFileReadFailureV1{Code: "POLICY_NAMESPACE_CLOSURE_UNKNOWN", Stage: "resolve", Slot: "known-folder"}
 		return policy, err

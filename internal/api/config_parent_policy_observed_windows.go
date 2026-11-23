@@ -61,7 +61,11 @@ func queryConfigParentDirectoryIdentity(h windows.Handle) (ConfigParentDirectory
 	return identity, nil
 }
 
-func SecureConfigLockParentPolicyObserved(ctx context.Context, dir string, createMissing bool) (exists bool, observation *ConfigParentPolicyObservation, retErr error) {
+func SecureConfigLockParentPolicyObserved(ctx context.Context, dir string, createMissing bool) (bool, *ConfigParentPolicyObservation, error) {
+	return secureConfigLockParentPolicyObserved(ctx, dir, createMissing, nil)
+}
+
+func secureConfigLockParentPolicyObserved(ctx context.Context, dir string, createMissing bool, resolution *StateDirResolutionObservation) (exists bool, observation *ConfigParentPolicyObservation, retErr error) {
 	o := &ConfigParentPolicyObservation{issuer: &stateFileReadIssuer{marker: 1}, path: dir, createMissing: createMissing, view: ConfigParentPolicySnapshotV1{Schema: "config-parent-policy-observation-v1", Version: 1, PathSHA256: stateFileReadObservationDigest([]byte(dir)), CreateMissing: createMissing, CreatedComponents: []string{}, Resources: []StateFileReadResourceSnapshotV1{}, CleanupErrors: []StateFileReadFailureV1{}, GateDisposition: "unavailable"}}
 	observation = o
 	b := newStateFileReadBuilder(ctx, dir, 0)
@@ -106,7 +110,7 @@ func SecureConfigLockParentPolicyObserved(ctx context.Context, dir string, creat
 		o.primaryErr = errors.New("canonical absolute parent path required")
 		return
 	}
-	policy, err := ResolveStateReadPolicyObserved(ctx)
+	policy, err := resolveStateReadPolicyObserved(ctx, resolution)
 	o.policy = policy
 	if err != nil {
 		o.primaryErr = err

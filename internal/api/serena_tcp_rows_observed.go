@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,40 @@ type LoopbackTCPRowsObservation struct {
 	rows                                     []OriginalLoopbackTCPRowV1
 	sourceSHA256, frameSHA256, receiptSHA256 string
 	err                                      error
+	raw                                      []byte
+	stderr                                   []byte
+	stdoutPending, stderrPending             *bytes.Buffer
+	qualification                            interface{ ResourcesFinalized() bool }
+	runEntered, finalized                    bool
+}
+
+func (o *LoopbackTCPRowsObservation) ResourcesFinalized() bool {
+	return o != nil && o.issuer != nil && o.finalized &&
+		(o.qualification == nil || o.qualification.ResourcesFinalized()) &&
+		(!o.runEntered || o.receipt.ResourcesFinalized())
+}
+
+// ObserveOriginalLoopbackPortOwnerObserved consumes the same original frame
+// as strict Serena rows, using the existing first IPv4 LISTENING match.
+func ObserveOriginalLoopbackPortOwnerObserved(ctx context.Context, port int) (int, bool, *LoopbackTCPRowsObservation, error) {
+	if port <= 0 || port > 65535 {
+		return 0, false, nil, errors.New("original TCP port is out of range")
+	}
+	original, err := observeOriginalLoopbackTCPFrame(ctx)
+	if err != nil {
+		return 0, false, original, err
+	}
+	pid, found := firstOriginalLoopbackFrameOwner(original.raw, port)
+	return pid, found, original, ctx.Err()
+}
+
+func firstOriginalLoopbackFrameOwner(raw []byte, port int) (int, bool) {
+	for line := range strings.SplitSeq(string(raw), "\n") {
+		if pid, ok := netstatLinePIDForLoopbackPort(line, port); ok {
+			return pid, true
+		}
+	}
+	return 0, false
 }
 
 func (o *LoopbackTCPRowsObservation) Validate(ctx context.Context) error {

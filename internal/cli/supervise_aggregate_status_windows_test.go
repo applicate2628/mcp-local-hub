@@ -78,6 +78,33 @@ func (r *routeAggregateReadTrace) Read(p []byte) (int, error) {
 }
 
 func TestRouteAggregateStatusNativePeers(t *testing.T) {
+	testRouteAggregateStatusNativePeers(t, "")
+}
+
+func TestRouteAggregateStatusNativeFrameCounts(t *testing.T) {
+	for _, mode := range []string{"zero_and_full", "partial"} {
+		t.Run(mode, func(t *testing.T) { testRouteAggregateStatusNativePeers(t, mode) })
+	}
+}
+
+func TestRouteAggregateStatusNativeFrameCountsSecurity(t *testing.T) {
+	for _, mode := range []string{"expired_apply_verify", "zero_peer_check_timeout"} {
+		t.Run(mode, func(t *testing.T) { testRouteAggregateStatusNativePeers(t, mode) })
+	}
+}
+
+func TestRouteAggregateApplyWaitsForOriginalAttach(t *testing.T) {
+	for _, mode := range []string{"ready", "cancel", "expiry", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			testRouteAggregateStatusNativePeers(t, "apply_before_ack_"+mode)
+		})
+	}
+}
+
+func testRouteAggregateStatusNativePeers(t *testing.T, mode string) {
+	t.Helper()
+	fullFaults := mode == "zero_and_full"
+	attachCase, delayedAttach := strings.CutPrefix(mode, "apply_before_ack_")
 	deadline, finite := t.Deadline()
 	if !finite {
 		t.Fatal("aggregate status transport test requires its runner deadline")
@@ -113,6 +140,10 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
+	partialStarted := make(chan struct{})
+	partialRelease := make(chan struct{})
+	releasePartial := sync.OnceFunc(func() { close(partialRelease) })
+	defer releasePartial()
 
 	operation, err := creators.begin(api.BuiltinRouteTaskName)
 	if err != nil {
@@ -121,7 +152,8 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	exe := owner.launch.Peer.ImagePath
 	fixtureDir := t.TempDir()
 	cmd := exec.Command(exe, "-test.run=^TestRouteAggregateStatusNativeChild$", "-test.timeout=20s")
-	cmd.Env = append(os.Environ(), routeAggregateFixtureChild+"="+fixtureDir)
+	cmd.Env = append(os.Environ(), routeAggregateFixtureChild+"="+fixtureDir,
+		"MCPHUB_AGGREGATE_STATUS_TEST_VERIFY="+mode)
 	creators.prepareRouteAggregateLaunch(operation, api.BuildBuiltinRouteDaemon(exe, api.DefaultMCPFrontPort), cmd)
 	if operation.routeAggregateStarted == nil {
 		t.Fatal("canonical route launch was not admitted")
@@ -167,11 +199,37 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	t.Cleanup(func() { _ = eventLog.Close() })
 	session := newIPCSession(listener, nil)
 	session.acceptDone = make(chan struct{})
+	deps := ipcDispatchDeps{daemonCreators: creators, runtimeTracker: tracker, events: eventLog}
+	pipe := &routeAggregateFixtureAcceptor{
+		SupervisorIPCListener: listener,
+		partialStarted:        partialStarted, partialRelease: partialRelease,
+		operatorResult: make(chan error, 1), operatorDeps: deps, session: session,
+		expiredWrite: make(chan struct{}),
+	}
+	applyWaiting, advanceWait := make(chan struct{}), make(chan struct{})
+	allowWait := sync.OnceFunc(func() { close(advanceWait) })
+	ackStarted, ackRelease := make(chan struct{}), make(chan struct{})
+	allowAck := sync.OnceFunc(func() { close(ackRelease) })
+	if delayedAttach {
+		defer allowWait()
+		defer allowAck()
+		reconcileReady, intentFilesLoaded := &atomic.Bool{}, &atomic.Bool{}
+		reconcileReady.Store(true)
+		intentFilesLoaded.Store(true)
+		deps.stateDir, deps.reconcileReady, deps.intentFilesLoaded = stateDir, reconcileReady, intentFilesLoaded
+		pipe.operatorDeps = deps
+		pipe.attachAckStarted, pipe.attachAckRelease = ackStarted, ackRelease
+		pipe.holdAttachAck.Store(true)
+		owner.beforeApplyWait = sync.OnceFunc(func() {
+			close(applyWaiting)
+			if attachCase == "replacement" {
+				<-advanceWait
+			}
+		})
+	}
 	go func() {
 		defer close(session.acceptDone)
-		acceptIPCConnectionsWithSession(listener, ipcDispatchDeps{
-			daemonCreators: creators, runtimeTracker: tracker, events: eventLog,
-		}, session)
+		acceptIPCConnectionsWithSession(pipe, deps, session)
 	}()
 	t.Cleanup(session.stop)
 
@@ -198,30 +256,23 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 			}
 		}
 	}
-	first := waitBinding(nil)
-	heldCleanup.Store(first)
-
-	query := func(qctx context.Context) (api.RouteAggregateStatus, error) {
-		return api.QuerySupervisorAggregateStatus(qctx, stateDir, lock.Owner(), owner.launch.Peer, func(context.Context) error {
-			got, err := api.ReadOccupiedSupervisorLockOwner(stateDir)
-			if err != nil || got != lock.Owner() {
-				return fmt.Errorf("original singleton changed: %w", err)
-			}
-			return nil
-		})
-	}
-	expectLive := func() {
-		t.Helper()
-		status, err := query(ctx)
-		if err != nil || status != (api.RouteAggregateStatus{Ownership: api.RouteAggregateNotOwner, Generation: operation.generation}) {
-			t.Fatalf("live original route result = %+v, error = %v", status, err)
+	defer func() {
+		if t.Failed() || settled {
+			return
 		}
-	}
-	expectLive()
-	expectLive()
-	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-2")); err != nil {
-		t.Fatal(err)
-	}
+		if err := os.WriteFile(filepath.Join(fixtureDir, "release"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		root, err := creator.WaitCreatorRoot()
+		if err != nil || !root.Known || root.ExitCode != 0 {
+			t.Fatalf("original route fixture exit: %+v, %v", root, err)
+		}
+		result, err := creator.CompleteCreatorAfterExit(ctx, true)
+		if err != nil || result.Closure() == nil {
+			t.Fatalf("original route fixture closure: %v", err)
+		}
+		settled = true
+	}()
 
 	dialFixture := func() (net.Conn, *json.Decoder) {
 		t.Helper()
@@ -240,6 +291,374 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 		}
 		return conn, decoder
 	}
+
+	if delayedAttach {
+		select {
+		case <-ackStarted:
+		case <-ctx.Done():
+			t.Fatal("original attachment did not reach its held acknowledgment", ctx.Err())
+		}
+		creators.mu.Lock()
+		held := owner.binding
+		provedOriginal := held != nil && held.operation == operation && !held.ready
+		creators.mu.Unlock()
+		if !provedOriginal {
+			t.Fatal("fixture did not hold the actual original attach acknowledgment")
+		}
+		conn, decoder := dialFixture()
+		if err := json.NewEncoder(conn).Encode(api.IPCRequest{Version: 1, ID: 27, Cmd: "status"}); err != nil {
+			t.Fatal(err)
+		}
+		var legacy api.IPCResponse
+		if err := decoder.Decode(&legacy); err != nil || legacy.ID != 27 || !legacy.OK || legacy.Error != nil {
+			t.Fatalf("ordinary supervisor readiness query failed: %v", err)
+		}
+		_ = conn.Close()
+		result, _ := legacy.Result.(map[string]any)
+		if result["reconcile_ready"] != true {
+			t.Fatal("ordinary supervisor readiness was not true during the held Route ACK")
+		}
+
+		selection := api.RouteAggregateApply{ReceiptSHA256: strings.Repeat("ab", 32), EndpointSHA256: strings.Repeat("cd", 32)}
+		type applyOutcome struct {
+			status api.RouteAggregateStatus
+			err    error
+		}
+		finished := make(chan applyOutcome, 1)
+		operator, cancelOperator := context.WithCancel(ctx)
+		defer cancelOperator()
+		pipe.captureNextOperator.Store(true)
+		if attachCase == "expiry" {
+			conn, _ := dialFixture()
+			defer conn.Close()
+			// Keep the real marked connection open until the server's own
+			// absolute deadline. A client timer must not supply this result.
+			if err := conn.SetDeadline(deadline); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(api.IPCRequest{Version: 1, ID: 28, Cmd: api.SupervisorAggregateApplyCommand,
+				Args: map[string]any{"receipt_sha256": selection.ReceiptSHA256, "endpoint_sha256": selection.EndpointSHA256}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := append([]byte{api.OperatorAggregateStatusMarker}, body...)
+			frame = append(frame, '\n')
+			if n, err := conn.Write(frame); err != nil || n != len(frame) {
+				t.Fatalf("write exact marked Apply: %d bytes, %v", n, err)
+			}
+		} else {
+			go func() {
+				status, err := api.ApplySupervisorAggregate(operator, stateDir, lock.Owner(), owner.launch.Peer, func(context.Context) error {
+					current, err := api.ReadOccupiedSupervisorLockOwner(stateDir)
+					if err != nil || current != lock.Owner() {
+						return errors.Join(errors.New("fixture Supervisor owner changed"), err)
+					}
+					return nil
+				}, selection)
+				finished <- applyOutcome{status, err}
+			}()
+		}
+
+		select {
+		case <-applyWaiting:
+		case result := <-finished:
+			t.Fatalf("Apply completed before its original ACK was released: %+v", result)
+		case err := <-pipe.operatorResult:
+			t.Fatal("server returned before the original attach wait", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		creators.mu.Lock()
+		unreserved := owner.binding == held && !held.ready && held.pending == nil
+		creators.mu.Unlock()
+		if !unreserved || pipe.challengeWrites.Load() != 0 {
+			t.Fatal("Apply reserved or wrote before the original attach ACK")
+		}
+
+		switch attachCase {
+		case "ready":
+			allowAck()
+		case "cancel":
+			cancelOperator()
+		case "replacement":
+			if err := os.WriteFile(filepath.Join(fixtureDir, "release"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			root, err := creator.WaitCreatorRoot()
+			if err != nil || !root.Known || root.ExitCode != 0 {
+				t.Fatalf("original Route fixture exit: %+v, %v", root, err)
+			}
+			terminal, err := creator.CompleteCreatorAfterExit(ctx, true)
+			if err != nil || terminal.Closure() == nil {
+				t.Fatalf("original Route fixture closure: %v", err)
+			}
+			settled = true
+			creators.mu.Lock()
+			operation.root, operation.terminal = root, terminal
+			creators.mu.Unlock()
+			creators.retireRouteAggregateBinding(operation)
+			replacement, err := creators.begin(api.BuiltinRouteTaskName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer creators.endStart(replacement, errors.New("replacement fixture stopped before process creation"))
+			allowWait()
+		}
+
+		if attachCase != "expiry" {
+			select {
+			case result := <-finished:
+				switch attachCase {
+				case "ready":
+					want := api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Generation: operation.generation, Revision: 1, Effective: "ready"}
+					if result.err != nil || result.status != want {
+						t.Fatalf("one original Apply proof = %+v, want %+v", result, want)
+					}
+				case "cancel":
+					if !errors.Is(result.err, context.Canceled) || result.status != (api.RouteAggregateStatus{}) {
+						t.Fatalf("canceled operator received %+v", result)
+					}
+				case "replacement":
+					if result.err == nil || result.err.Error() != "OPERATOR_AGGREGATE_PEER_CHANGED" ||
+						result.status != (api.RouteAggregateStatus{}) {
+						t.Fatalf("replacement operator received %+v", result)
+					}
+				}
+			case <-ctx.Done():
+				t.Fatal("operator did not settle", ctx.Err())
+			}
+		}
+		select {
+		case serverErr := <-pipe.operatorResult:
+			switch attachCase {
+			case "ready", "replacement":
+				if serverErr != nil {
+					t.Fatal("server failed sending the terminal result", serverErr)
+				}
+			case "cancel":
+				if !errors.Is(serverErr, context.Canceled) {
+					t.Fatal("server retained the canceled Apply", serverErr)
+				}
+			case "expiry":
+				if !errors.Is(serverErr, context.DeadlineExceeded) {
+					t.Fatal("server lost the original Apply deadline", serverErr)
+				}
+			}
+		case <-ctx.Done():
+			t.Fatal("server Apply handler did not settle", ctx.Err())
+		}
+		if attachCase == "cancel" {
+			allowAck()
+			if waitBinding(nil) != held {
+				t.Fatal("pre-ACK cancellation detached the same original Route")
+			}
+		} else if attachCase == "expiry" {
+			// The native attach clock started before the Apply clock. Its
+			// own timeout may already have closed this still-unacked pipe.
+			allowAck()
+		}
+		wantWrites := int32(0)
+		if attachCase == "ready" {
+			wantWrites = 1
+		}
+		creators.mu.Lock()
+		idle := held.pending == nil
+		creators.mu.Unlock()
+		if writes := pipe.challengeWrites.Load(); !idle || writes != wantWrites {
+			t.Fatalf("original Apply slot idle=%t, challenge writes=%d, want=%d", idle, writes, wantWrites)
+		}
+		return
+	}
+	first := waitBinding(nil)
+	heldCleanup.Store(first)
+
+	waitFinished := func(q *routeAggregateQuery) {
+		t.Helper()
+		select {
+		case <-q.finished:
+		case <-ctx.Done():
+			t.Fatal("original query did not settle", ctx.Err())
+		}
+	}
+	awaitObservation := func(revision uint64, b *routeAggregateBinding) *routeAggregateQuery {
+		t.Helper()
+		if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, fmt.Sprintf("observation-%d", revision))); err != nil {
+			t.Fatal(err)
+		}
+		creators.mu.Lock()
+		q := b.pending
+		creators.mu.Unlock()
+		if q == nil {
+			t.Fatalf("revision %d escaped its original slot", revision)
+		}
+		return q
+	}
+	cancelObservedOperator := func(cancel context.CancelFunc, finished <-chan error) {
+		t.Helper()
+		cancel()
+		for _, result := range []<-chan error{finished, pipe.operatorResult} {
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("marked operator cancellation = %v", err)
+				}
+			case <-ctx.Done():
+				t.Fatal("marked operator did not return while its proof was held", ctx.Err())
+			}
+		}
+	}
+
+	query := func(qctx context.Context) (api.RouteAggregateStatus, error) {
+		return api.QuerySupervisorAggregateStatus(qctx, stateDir, lock.Owner(), owner.launch.Peer, func(context.Context) error {
+			got, err := api.ReadOccupiedSupervisorLockOwner(stateDir)
+			if err != nil || got != lock.Owner() {
+				return fmt.Errorf("original singleton changed: %w", err)
+			}
+			return nil
+		})
+	}
+	statusAtRevision := func(revision uint64) api.RouteAggregateStatus {
+		return api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Generation: operation.generation, Revision: revision, Effective: "ready"}
+	}
+	expectLive := func(revision uint64) {
+		t.Helper()
+		status, err := query(ctx)
+		want := statusAtRevision(revision)
+		if err != nil || status != want {
+			t.Fatalf("live original route result = %+v, want %+v, error = %v", status, want, err)
+		}
+	}
+	if mode == "expired_apply_verify" {
+		defer releaseOldCleanup()
+		defer releasePartial()
+		pipe.writeFault.Store(routeAggregateFixtureVerifyDeadline)
+		digest := strings.Repeat("ab", 32)
+		selection := api.RouteAggregateApply{ReceiptSHA256: digest, EndpointSHA256: digest}
+		finished := make(chan error, 1)
+		go func() {
+			_, err := creators.exchangeRouteAggregate(ctx, 102, tracker, &selection)
+			finished <- err
+		}()
+		verifyResult := func(name, want string) {
+			t.Helper()
+			got, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, name))
+			if err != nil || string(got) != want {
+				t.Fatalf("original Route verify %s = %q, %v, want %q", name, got, err, want)
+			}
+		}
+		verifyResult("verify-before", "accepted")
+		select {
+		case <-pipe.expiredWrite:
+		case <-ctx.Done():
+			t.Fatal("Apply frame did not reach its original native deadline", ctx.Err())
+		}
+		creators.mu.Lock()
+		pending := first.pending
+		stillBound := owner.binding == first && pending != nil && pending.challenge.Apply != nil
+		creators.mu.Unlock()
+		if !stillBound {
+			t.Fatal("fixture lost the original Apply slot while the writer was held")
+		}
+		if err := os.WriteFile(filepath.Join(fixtureDir, "verify-expired"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		verifyResult("verify-after", "OPERATOR_AGGREGATE_PEER_CHANGED")
+		releasePartial()
+		select {
+		case err := <-finished:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expired Apply owner returned %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		t.Log("original Route verified its live Apply nonce; the same kernel peer, nonce and generation were refused after the original deadline with its writer still held")
+		return
+	}
+	if fullFaults || mode == "zero_peer_check_timeout" {
+		pipe.writeFault.Store(routeAggregateFixtureZero)
+		got, err := creators.exchangeRouteAggregate(ctx, 100, tracker, nil)
+		creators.mu.Lock()
+		originalIdle := owner.binding == first && first.pending == nil
+		creators.mu.Unlock()
+		if !errors.Is(err, io.ErrShortWrite) || !originalIdle || got != (api.RouteAggregateStatus{}) {
+			t.Fatalf("zero-delivery refusal = %+v, %v, original idle=%t", got, err, originalIdle)
+		}
+		t.Log("confirmed zero bytes, refusal retained and original slot released")
+	}
+	expectLive(1)
+	if mode == "zero_peer_check_timeout" {
+		defer releaseOldCleanup()
+		pipe.writeFault.Store(routeAggregateFixtureExpiredZero)
+		got, err := creators.exchangeRouteAggregate(ctx, 103, tracker, nil)
+		creators.mu.Lock()
+		stillBound := owner.binding == first
+		creators.mu.Unlock()
+		if !errors.Is(err, io.ErrShortWrite) || !errors.Is(err, context.DeadlineExceeded) || stillBound || got != (api.RouteAggregateStatus{}) {
+			t.Fatalf("zero bytes with exhausted peer check = %+v, %v, original still bound=%t", got, err, stillBound)
+		}
+		select {
+		case <-cleanupEntered:
+		case <-ctx.Done():
+			t.Fatal("original zero-byte attachment did not enter teardown", ctx.Err())
+		}
+		next := waitBinding(first)
+		expectLive(2)
+		releaseOldCleanup()
+		select {
+		case <-first.done:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		creators.mu.Lock()
+		preserved := owner.binding == next
+		creators.mu.Unlock()
+		if !preserved {
+			t.Fatal("old zero-byte settlement retired the successor")
+		}
+		t.Log("zero-byte refusal with unconfirmed peer preserved the short-write and deadline causes, retired only the original transport, and preserved the successor")
+		return
+	}
+	expectLive(2)
+	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	if mode == "partial" {
+		pipe.writeFault.Store(routeAggregateFixturePartial)
+		got, err := creators.exchangeRouteAggregate(ctx, 101, tracker, nil)
+		if !errors.Is(err, errRouteAggregateFixtureWrite) || got != (api.RouteAggregateStatus{}) {
+			t.Fatalf("partial write = %+v, %v", got, err)
+		}
+		select {
+		case <-cleanupEntered:
+		case <-ctx.Done():
+			t.Fatal("short frame survived on the original transport", ctx.Err())
+		}
+		if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "retired-1")); err != nil {
+			t.Fatal(err)
+		}
+		next := waitBinding(first)
+		if err := os.WriteFile(filepath.Join(fixtureDir, "allow-third"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		expectLive(3)
+		releaseOldCleanup()
+		select {
+		case <-first.done:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		creators.mu.Lock()
+		preserved := owner.binding == next
+		creators.mu.Unlock()
+		if !preserved {
+			t.Fatal("partial-frame cleanup removed the successor")
+		}
+		t.Log("native prefix escaped once, rejected without application or replay; original cleanup preserved its successor")
+		return
+	}
+
 	conn, decoder := dialFixture()
 	if _, err := conn.Write([]byte{api.RouteAggregateStatusMarker}); err != nil {
 		t.Fatal(err)
@@ -271,16 +690,34 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	operator, cancelOperator := context.WithCancel(ctx)
 	defer cancelOperator()
 	finished := make(chan error, 1)
+	pipe.writeFault.Store(routeAggregateFixtureSplit)
+	if fullFaults {
+		pipe.writeFault.Store(routeAggregateFixtureSplitFullError)
+	}
+	pipe.captureNextOperator.Store(true)
 	go func() {
 		_, err := query(operator)
 		finished <- err
 	}()
-	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-3")); err != nil {
-		t.Fatal(err)
+	select {
+	case <-partialStarted:
+	case <-ctx.Done():
+		t.Fatal("original pipe did not write the partial challenge", ctx.Err())
 	}
-	if _, err := query(ctx); err == nil || err.Error() != "OPERATOR_AGGREGATE_BUSY" {
-		t.Fatalf("parallel operator query did not receive busy: %v", err)
+	creators.mu.Lock()
+	partialQuery := first.pending
+	startedWithoutProof := partialQuery != nil && !partialQuery.deadline.IsZero() && !partialQuery.received
+	creators.mu.Unlock()
+	if !startedWithoutProof {
+		t.Fatal("original frame did not reserve its in-flight query")
 	}
+	expectBusy := func() {
+		t.Helper()
+		if _, err := query(ctx); err == nil || err.Error() != "OPERATOR_AGGREGATE_BUSY" {
+			t.Fatalf("parallel operator query did not receive busy: %v", err)
+		}
+	}
+	expectBusy()
 
 	// The actual IPC dispatcher still accepts ordinary multi-frame requests
 	// while the route is blocked on the original live query.
@@ -304,14 +741,96 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	}
 	_ = conn.Close()
 
-	cancelOperator()
-	select {
-	case err := <-finished:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("operator cancel = %v", err)
+	cancelObservedOperator(cancelOperator, finished)
+	expectOriginal := func() bool {
+		t.Helper()
+		creators.mu.Lock()
+		bound, pending := owner.binding == first, first.pending != nil
+		creators.mu.Unlock()
+		if !bound {
+			t.Fatal("operator cancellation removed the original binding")
 		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+		select {
+		case <-cleanupEntered:
+			t.Fatal("operator cancellation detached the original handler")
+		default:
+		}
+		if _, err := os.Stat(filepath.Join(fixtureDir, "retired-1")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("operator cancellation retired Route control: %v", err)
+		}
+		return pending
+	}
+	expectOriginal()
+	creators.mu.Lock()
+	sameInFlightQuery := first.pending == partialQuery && !partialQuery.deadline.IsZero() && !partialQuery.received
+	creators.mu.Unlock()
+	if !sameInFlightQuery {
+		t.Fatal("server operator cancellation changed the partial frame's original request slot")
+	}
+	expectBusy()
+	releasePartial()
+	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-3")); err != nil {
+		t.Fatal("Route did not receive the completed original frame", err)
+	}
+	expectBusy()
+	if err := os.WriteFile(filepath.Join(fixtureDir, "allow-third"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFinished(partialQuery)
+	if want := statusAtRevision(3); partialQuery.err != nil || partialQuery.status != want {
+		t.Fatalf("original late proof = %+v, want %+v, error = %v", partialQuery.status, want, partialQuery.err)
+	}
+	if fullFaults && !errors.Is(partialQuery.writeErr, errRouteAggregateFixtureWrite) {
+		t.Fatalf("exact revision 3 proof lost original full-write error: %v", partialQuery.writeErr)
+	}
+	if expectOriginal() {
+		t.Fatal("the exact late proof did not release its request slot")
+	}
+	expectLive(4)
+	expectOriginal()
+	t.Log("the marked server operator returned canceled with the native frame tail held; its exact revision 3 proof drained before revision 4 used the same attachment without Retire")
+
+	// A different request stalls Route control through the original
+	// attachment budget. Its native peer loss still retires and reattaches.
+	timeoutCaller := ctx
+	if fullFaults {
+		var cancelTimeoutCaller context.CancelFunc
+		timeoutCaller, cancelTimeoutCaller = context.WithCancel(ctx)
+		defer cancelTimeoutCaller()
+		pipe.writeFault.Store(routeAggregateFixtureExpiredFull)
+		pipe.captureNextOperator.Store(true)
+		go func() {
+			_, err := query(timeoutCaller)
+			finished <- err
+		}()
+		q := awaitObservation(5, first)
+		cancelObservedOperator(cancelTimeoutCaller, finished)
+		expectBusy()
+		select {
+		case <-pipe.expiredWrite:
+		case <-ctx.Done():
+			t.Fatal("full-write fixture did not reach the original native deadline", ctx.Err())
+		}
+		settleDeadline := time.NewTimer(api.SupervisorAggregateStatusTimeout / 2)
+		defer settleDeadline.Stop()
+		select {
+		case <-q.finished:
+		case <-settleDeadline.C:
+			t.Fatal("worker restarted the original deadline or waited for its own reader")
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if !errors.Is(q.err, context.DeadlineExceeded) || !errors.Is(q.err, errRouteAggregateFixtureWrite) ||
+			q.status != (api.RouteAggregateStatus{}) {
+			t.Fatalf("missing exact reply = %+v, %v", q.status, q.err)
+		}
+		t.Log("no reply after marked caller exit: original write deadline settled the same slot with both causes")
+	} else {
+		go func() {
+			_, err := query(ctx)
+			finished <- err
+		}()
+		awaitObservation(5, first)
 	}
 	select {
 	case <-cleanupEntered:
@@ -323,11 +842,24 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 		t.Fatal("old handler settled before the cleanup barrier")
 	default:
 	}
-	if err := os.WriteFile(filepath.Join(fixtureDir, "allow-third"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(fixtureDir, "allow-fifth"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "retired-1")); err != nil {
+		t.Fatal("genuine attachment timeout did not retire Route control", err)
+	}
 	next := waitBinding(first)
-	expectLive()
+	expectLive(6)
+	if !fullFaults {
+		select {
+		case err := <-finished:
+			if err == nil {
+				t.Fatal("stalled original attachment reported success")
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
 	releaseOldCleanup()
 	select {
 	case <-first.done:
@@ -340,21 +872,23 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	if replacement != next {
 		t.Fatal("old cleanup removed the replacement")
 	}
-	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-4")); err != nil {
-		t.Fatal(err)
-	}
-	if first == next {
-		t.Fatal("a canceled binding was reused")
-	}
+	t.Log("the native attachment timeout retired Route control; delayed old cleanup preserved the reattachment")
 
 	// Hold the exact old-generation reply, advance the runtime generation,
 	// then verify there is no successful final from the replaced binding.
+	peerCaller, cancelPeerCaller := context.WithCancel(ctx)
+	defer cancelPeerCaller()
+	if fullFaults {
+		pipe.writeFault.Store(routeAggregateFixtureFullError)
+		pipe.captureNextOperator.Store(true)
+	}
 	go func() {
-		_, err := query(ctx)
+		_, err := query(peerCaller)
 		finished <- err
 	}()
-	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "observation-5")); err != nil {
-		t.Fatal(err)
+	peerQuery := awaitObservation(7, next)
+	if fullFaults {
+		cancelObservedOperator(cancelPeerCaller, finished)
 	}
 	creators.mu.Lock()
 	newGeneration := tracker.MarkSpawned(api.BuiltinRouteTaskName, original.PID, birth)
@@ -362,21 +896,33 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	if newGeneration == operation.generation {
 		t.Fatal("fixture retained the old generation")
 	}
-	if err := os.WriteFile(filepath.Join(fixtureDir, "allow-fifth"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(fixtureDir, "allow-seventh"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case err := <-finished:
-		if err == nil || err.Error() != "OPERATOR_AGGREGATE_PEER_CHANGED" {
-			t.Fatalf("old-generation result survived replacement: %v", err)
+	if fullFaults {
+		waitFinished(peerQuery)
+		if !peerQuery.received || peerQuery.status != (api.RouteAggregateStatus{}) ||
+			!errors.Is(peerQuery.err, errAggregatePeerChanged) || !errors.Is(peerQuery.err, errRouteAggregateFixtureWrite) {
+			t.Fatalf("late old-generation proof = %+v, %v, read=%t", peerQuery.status, peerQuery.err, peerQuery.received)
 		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+		t.Log("the sole reader correlated the late proof after caller exit; original peer revalidation denied the changed generation")
+	} else {
+		select {
+		case err := <-finished:
+			if err == nil || err.Error() != "OPERATOR_AGGREGATE_PEER_CHANGED" {
+				t.Fatalf("old-generation result survived replacement: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 	}
 	select {
 	case <-next.done:
 	case <-ctx.Done():
 		t.Fatal("replaced generation resource was not settled", ctx.Err())
+	}
+	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "retired-2")); err != nil {
+		t.Fatal("changed generation did not retire Route control", err)
 	}
 
 	wrong := api.SupervisorLockOwner{PID: original.PID, StartedAt: original.CreationTime}
@@ -387,18 +933,149 @@ func TestRouteAggregateStatusNativePeers(t *testing.T) {
 	if !errors.Is(err, api.ErrSupervisorControlPeerIdentity) {
 		t.Fatalf("wrong server was not refused on the connected pipe: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(fixtureDir, "release"), nil, 0o600); err != nil {
-		t.Fatal(err)
+
+}
+
+type routeAggregateFixtureAcceptor struct {
+	*SupervisorIPCListener
+	writeFault          atomic.Uint32
+	challengeWrites     atomic.Int32
+	holdAttachAck       atomic.Bool
+	attachAckStarted    chan struct{}
+	attachAckRelease    chan struct{}
+	expiredWrite        chan struct{}
+	partialStarted      chan struct{}
+	partialRelease      chan struct{}
+	captureNextOperator atomic.Bool
+	operatorResult      chan error
+	operatorDeps        ipcDispatchDeps
+	session             *ipcSession
+}
+
+func (a *routeAggregateFixtureAcceptor) Accept() (net.Conn, error) {
+	for {
+		raw, err := a.SupervisorIPCListener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		conn := &routeAggregateFixtureConn{Conn: raw, acceptor: a}
+		if !a.captureNextOperator.CompareAndSwap(true, false) {
+			return conn, nil
+		}
+		// The ordinary dispatcher discards the handler's return value.
+		// Receive it directly for the one marked native test connection.
+		owned := &aggregateIPCConn{Conn: conn}
+		if !a.session.register(owned) {
+			_ = owned.Close()
+			a.operatorResult <- net.ErrClosed
+			continue
+		}
+		go func() {
+			defer a.session.finish(owned)
+			defer owned.Close()
+			a.operatorResult <- a.serveMarkedOperator(owned)
+		}()
 	}
-	root, err := creator.WaitCreatorRoot()
-	if err != nil || !root.Known || root.ExitCode != 0 {
-		t.Fatalf("original route fixture exit: %+v, %v", root, err)
+}
+
+func (a *routeAggregateFixtureAcceptor) serveMarkedOperator(conn net.Conn) error {
+	if err := a.WriteHello(conn); err != nil {
+		return err
 	}
-	result, err := creator.CompleteCreatorAfterExit(ctx, true)
-	if err != nil || result.Closure() == nil {
-		t.Fatalf("original route fixture closure: %v", err)
+	if err := conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout)); err != nil {
+		return err
 	}
-	settled = true
+	marker, err := readSupervisorIPCFirstByte(conn)
+	if err != nil {
+		return err
+	}
+	if marker[0] != api.OperatorAggregateStatusMarker {
+		return fmt.Errorf("expected the marked operator fixture, got marker %d", marker[0])
+	}
+	return serveOperatorAggregateStatus(conn, a.operatorDeps)
+}
+
+type routeAggregateFixtureConn struct {
+	net.Conn
+	acceptor      *routeAggregateFixtureAcceptor
+	writeDeadline time.Time
+}
+
+func (c *routeAggregateFixtureConn) Fd() uintptr {
+	return c.Conn.(interface{ Fd() uintptr }).Fd()
+}
+
+const (
+	routeAggregateFixtureSplit uint32 = iota + 1
+	routeAggregateFixtureZero
+	routeAggregateFixturePartial
+	routeAggregateFixtureSplitFullError
+	routeAggregateFixtureFullError
+	routeAggregateFixtureExpiredFull
+	routeAggregateFixtureVerifyDeadline
+	routeAggregateFixtureExpiredZero
+)
+
+var errRouteAggregateFixtureWrite = errors.New("fixture route write result")
+
+func (c *routeAggregateFixtureConn) SetWriteDeadline(deadline time.Time) error {
+	c.writeDeadline = deadline
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *routeAggregateFixtureConn) Write(frame []byte) (int, error) {
+	if bytes.Contains(frame, []byte("\"result\":{\"generation\":")) &&
+		c.acceptor.holdAttachAck.CompareAndSwap(true, false) {
+		close(c.acceptor.attachAckStarted)
+		<-c.acceptor.attachAckRelease
+	}
+	if !bytes.Contains(frame, []byte(`"challenge":`)) {
+		return c.Conn.Write(frame)
+	}
+	a := c.acceptor
+	a.challengeWrites.Add(1)
+	fault := a.writeFault.Swap(0)
+	switch fault {
+	case routeAggregateFixtureZero, routeAggregateFixtureExpiredZero:
+		if fault == routeAggregateFixtureExpiredZero {
+			<-time.After(time.Until(c.writeDeadline))
+		}
+		return 0, io.ErrShortWrite
+	case routeAggregateFixturePartial, routeAggregateFixtureSplit, routeAggregateFixtureSplitFullError:
+		prefix := len(frame) / 2
+		n, err := c.Conn.Write(frame[:prefix])
+		if err != nil {
+			return n, err
+		}
+		if n != prefix {
+			return n, io.ErrShortWrite
+		}
+		if fault == routeAggregateFixturePartial {
+			return n, errRouteAggregateFixtureWrite
+		}
+		close(a.partialStarted)
+		<-a.partialRelease
+		rest, err := c.Conn.Write(frame[n:])
+		if fault == routeAggregateFixtureSplitFullError && err == nil && n+rest == len(frame) {
+			err = errRouteAggregateFixtureWrite
+		}
+		return n + rest, err
+	case routeAggregateFixtureFullError, routeAggregateFixtureExpiredFull, routeAggregateFixtureVerifyDeadline:
+		n, err := c.Conn.Write(frame)
+		if err != nil || n != len(frame) {
+			return n, err
+		}
+		if fault == routeAggregateFixtureExpiredFull || fault == routeAggregateFixtureVerifyDeadline {
+			<-time.After(time.Until(c.writeDeadline))
+			close(a.expiredWrite)
+			if fault == routeAggregateFixtureVerifyDeadline {
+				<-a.partialRelease
+			}
+		}
+		return n, errRouteAggregateFixtureWrite
+	default:
+		return c.Conn.Write(frame)
+	}
 }
 
 func TestRouteAggregateStatusNativeChild(t *testing.T) {
@@ -419,20 +1096,64 @@ func TestRouteAggregateStatusNativeChild(t *testing.T) {
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", launch.StateDir)
 	serveDone := make(chan error, 1)
 	go func() {
-		var observed int
-		serveDone <- api.ServeRouteAggregateStatus(ctx, launch, func() string {
-			observed++
-			if err := os.WriteFile(filepath.Join(fixtureDir, fmt.Sprintf("observation-%d", observed)), nil, 0o600); err != nil {
-				t.Error(err)
-			}
-			switch observed {
-			case 3, 5:
-				gate := map[int]string{3: "allow-third", 5: "allow-fifth"}
-				if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, gate[observed])); err != nil {
+		var observed, retired int
+		serveDone <- api.ServeRouteAggregateControl(ctx, launch, api.RouteAggregateControl{
+			Status: func() api.RouteAggregateStatus {
+				observed++
+				if err := os.WriteFile(filepath.Join(fixtureDir, fmt.Sprintf("observation-%d", observed)), nil, 0o600); err != nil {
 					t.Error(err)
 				}
-			}
-			return api.RouteAggregateNotOwner
+				gates := map[int]string{3: "allow-third", 5: "allow-fifth", 7: "allow-seventh"}
+				if gate, ok := gates[observed]; ok {
+					if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, gate)); err != nil {
+						t.Error(err)
+					}
+				}
+				return api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Revision: uint64(observed), Effective: "ready"}
+			},
+			Apply: func(applyCtx, _ context.Context, challenge api.RouteAggregateStatusChallenge) api.RouteAggregateStatus {
+				mode := os.Getenv("MCPHUB_AGGREGATE_STATUS_TEST_VERIFY")
+				if mode == "apply_before_ack_ready" {
+					apply := challenge.Apply
+					if apply == nil || apply.ReceiptSHA256 != strings.Repeat("ab", 32) ||
+						apply.EndpointSHA256 != strings.Repeat("cd", 32) {
+						t.Error("original Route received a different Apply selection")
+						return api.RouteAggregateStatus{}
+					}
+					if err := api.VerifyRouteAggregateGeneration(applyCtx, launch, challenge); err != nil {
+						t.Error("original Route could not verify its Apply nonce", err)
+						return api.RouteAggregateStatus{}
+					}
+					return api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Revision: 1, Effective: "ready"}
+				}
+				if mode != "expired_apply_verify" {
+					t.Error("unexpected Apply challenge in the isolated fixture")
+					return api.RouteAggregateStatus{}
+				}
+				verify := func(name string) {
+					result := "accepted"
+					// The test sends a fresh verifier connection after the original
+					// operation expires. Authorization must come from its owner.
+					if err := api.VerifyRouteAggregateGeneration(ctx, launch, challenge); err != nil {
+						result = err.Error()
+					}
+					if err := os.WriteFile(filepath.Join(fixtureDir, name), []byte(result), 0o600); err != nil {
+						t.Error(err)
+					}
+				}
+				verify("verify-before")
+				if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "verify-expired")); err != nil {
+					t.Error(err)
+					return api.RouteAggregateStatus{}
+				}
+				verify("verify-after")
+				return api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Revision: 1, Effective: "ready"}
+			},
+			Retire: func(context.Context) api.RouteAggregateRetirement {
+				retired++
+				err := os.WriteFile(filepath.Join(fixtureDir, fmt.Sprintf("retired-%d", retired)), nil, 0o600)
+				return api.RouteAggregateRetirement{Err: err}
+			},
 		})
 	}()
 	if _, err := waitRouteAggregateFixtureFile(ctx, filepath.Join(fixtureDir, "release")); err != nil {
@@ -440,7 +1161,11 @@ func TestRouteAggregateStatusNativeChild(t *testing.T) {
 	}
 	cancel()
 	if err := <-serveDone; err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, winio.ErrTimeout) && !errors.Is(err, io.EOF) {
-		t.Fatal(err)
+		mode := os.Getenv("MCPHUB_AGGREGATE_STATUS_TEST_VERIFY")
+		if mode != "apply_before_ack_expiry" ||
+			(!errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, os.ErrDeadlineExceeded)) {
+			t.Fatal(err)
+		}
 	}
 }
 

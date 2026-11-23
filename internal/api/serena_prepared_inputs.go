@@ -133,7 +133,7 @@ func BuildSerenaPreparationInputs(ctx context.Context, manifest *config.ServerMa
 	if metadataErr != nil {
 		return result, metadataErr
 	}
-	if metadataErr = preflightSerenaPreparationIntentMetadata(work, namespace, admission.OperationID, preparedSerenaHash(metadataRequestRaw), publisherSource.Epoch()); metadataErr != nil {
+	if metadataErr = preflightSerenaPreparationIntentMetadata(work, rootObservation, admission.OperationID, preparedSerenaHash(metadataRequestRaw), publisherSource.Epoch()); metadataErr != nil {
 		return result, metadataErr
 	}
 	// Reuse the actual discovery order, then the existing exec.LookPath native

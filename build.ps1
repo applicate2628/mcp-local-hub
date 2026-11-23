@@ -30,12 +30,42 @@ param(
     [string]$ReleaseVersion,
     [string]$ReleaseCommit,
     [string]$ReleaseBuildDate,
-    [string]$SourceSnapshotPath
+    [string]$SourceSnapshotPath,
+    [string]$RuntimeArchiveDirectory,
+    [switch]$CurrentWindowsPackage
 )
 
 $ErrorActionPreference = "Stop"
 
-$version = "0.4.65"
+if ($CurrentWindowsPackage) {
+    if ($TestStateIsolatedProduct) {
+        throw "CurrentWindowsPackage cannot be combined with TestStateIsolatedProduct"
+    }
+    if ($WindowsTargetArch -cne "amd64") {
+        throw "CurrentWindowsPackage requires WindowsTargetArch amd64"
+    }
+    # Validate operand paths on the build host, independent of the PE target.
+    $windowsBuildHost = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    foreach ($pathOperand in @("SourceSnapshotPath", "RuntimeArchiveDirectory")) {
+        $inputPath = [string]$PSBoundParameters[$pathOperand]
+        if (-not [IO.Path]::IsPathRooted($inputPath) -or
+            ($windowsBuildHost -and $inputPath -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
+            throw "CurrentWindowsPackage requires an explicit absolute $pathOperand"
+        }
+    }
+    $SourceSnapshotPath = [IO.Path]::GetFullPath($SourceSnapshotPath)
+    $RuntimeArchiveDirectory = [IO.Path]::GetFullPath($RuntimeArchiveDirectory)
+    $snapshotInput = Get-Item -LiteralPath $SourceSnapshotPath -Force
+    $archiveInput = Get-Item -LiteralPath $RuntimeArchiveDirectory -Force
+    if ($snapshotInput.PSIsContainer -or -not $archiveInput.PSIsContainer -or
+        (($snapshotInput.Attributes -bor $archiveInput.Attributes) -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "CurrentWindowsPackage requires an ordinary source snapshot file and runtime archive directory"
+    }
+} elseif ($PSBoundParameters.ContainsKey("RuntimeArchiveDirectory")) {
+    throw "RuntimeArchiveDirectory requires CurrentWindowsPackage"
+}
+
+$version = "0.4.66"
 try { $commit = (git -C $PSScriptRoot rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -130,10 +160,11 @@ if (-not [string]::IsNullOrEmpty($SourceSnapshotPath)) {
     $publisherSource = Get-VerifiedPublisherSourceInput
 }
 $contractPath = Join-Path $PSScriptRoot "windows-product-artifacts.json"
-$contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
+$contractBytes = [IO.File]::ReadAllBytes($contractPath)
+$contract = [Text.UTF8Encoding]::new($false, $true).GetString($contractBytes) | ConvertFrom-Json
 $registryProducts = @($contract.artifacts | Where-Object { $_.role -ceq "product" })
 $registryLaunchers = @($contract.artifacts | Where-Object { $_.role -ceq "launcher" })
-if ($contract.schemaVersion -ne 3 -or @($contract.artifacts).Count -ne 2 -or
+if (($contract.schemaVersion -ne 3 -and $contract.schemaVersion -ne 4) -or @($contract.artifacts).Count -ne 2 -or
     $registryProducts.Count -ne 1 -or $registryLaunchers.Count -ne 1 -or
     $registryProducts[0].filename -cne "mcphub-product/mcphub.exe" -or
     $registryProducts[0].source -cne "./cmd/mcphub" -or $registryProducts[0].subsystem -ne 2 -or
@@ -141,9 +172,13 @@ if ($contract.schemaVersion -ne 3 -or @($contract.artifacts).Count -ne 2 -or
     $registryLaunchers[0].filename -cne "mcphub.exe" -or
     $registryLaunchers[0].source -cne "./cmd/mcphub-launcher" -or $registryLaunchers[0].subsystem -ne 3 -or
     $registryLaunchers[0].productMetadata -or -not $registryLaunchers[0].npmPayload -or $registryLaunchers[0].npmBin -or
-    $contract.identityManifest.schema -cne "windows-product-identity-v1" -or
+    ($contract.schemaVersion -eq 3 -and $contract.identityManifest.schema -cne "windows-product-identity-v1") -or
+    ($contract.schemaVersion -eq 4 -and $contract.identityManifest.schema -cne "windows-product-identity-v2") -or
     $contract.identityManifest.filename -cne "windows-product-identity.json") {
-    throw "Windows schema3 requires one root CUI entry, nested GUI Product and identity-v1"
+    throw "Windows registry requires its explicit schema3/V1 or schema4/V2 CUI entry and nested GUI Product"
+}
+if ($contract.schemaVersion -eq 3 -and $contract.PSObject.Properties.Name -ccontains "runtimePayload") {
+    throw "Windows schema3 registry cannot contain a current runtime extension"
 }
 $entrySetBuildID = [Guid]::NewGuid().ToString("N")
 $productRelativePath = [string]$registryProducts[0].filename
@@ -151,6 +186,58 @@ $entryRelativePath = [string]$registryLaunchers[0].filename
 $canonicalEntryReverseProjection = "../" + $entryRelativePath
 $unreceivedEntryHash = "<actual-launcher-sha256>"
 $templateComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
+# The same executable roles serve the separate explicit output domains.
+# Only the current package receives compiled V4 and staged-runtime evidence.
+$bundleBuild = [bool]$CurrentWindowsPackage
+$runtimePlan = $null
+$compiledWindowsProductRegistryBase64 = $null
+if ($bundleBuild) {
+    if ($contract.schemaVersion -ne 4 -or $null -eq $publisherSource -or
+        $contract.runtimePayload.schema -cne "hub-runtime-payload-v1" -or
+        $contract.runtimePayload.filename -cne "mcphub-product/runtime-payload.json" -or
+        (@($contract.runtimePayload.releaseDescriptors) -join ',') -cne "runtimes/python/release.yaml,runtimes/uv/release.yaml") {
+        throw "CurrentWindowsPackage requires the prepared Windows V4 runtime registry"
+    }
+    $compiledWindowsProductRegistryBase64 = [Convert]::ToBase64String($contractBytes)
+    $runtimeProductDirectory = [IO.Path]::GetDirectoryName($productRelativePath)
+    $runtimeOutput = [IO.Path]::GetFullPath((Join-Path $outDir $runtimeProductDirectory))
+    $runtimeRelativePath = [IO.Path]::GetFileName([string]$contract.runtimePayload.filename)
+    $runtimePlan = [ordered]@{
+        schema = "hub-runtime-payload-v1"
+        filename = $runtimeRelativePath
+        output = (Join-Path $runtimeOutput $runtimeRelativePath)
+        releaseDescriptors = @($contract.runtimePayload.releaseDescriptors)
+        stageCommand = [ordered]@{
+            executable = "go"
+            argv = @("run", "./tools/windows-product-validate", "--stage-runtime",
+                "--source-root", $PSScriptRoot, "--source-snapshot", $SourceSnapshotPath,
+                "--runtime-output", $runtimeOutput, "--runtime-archives", $RuntimeArchiveDirectory)
+        }
+    }
+    if ($PrintPlanJson) {
+        $runtimePlan.precompileStagingRequired = $true
+    } else {
+        # The Stage owner receives both pinned local archives and prepared
+        # source before authorizing creation of its own output directory.
+        Push-Location -LiteralPath $PSScriptRoot
+        try {
+            $runtimeStageArgs = @($runtimePlan.stageCommand.argv)
+            $runtimeRows = @(& go @runtimeStageArgs)
+            if ($LASTEXITCODE -ne 0) { throw "RUNTIME_STAGING_FAILED: exit=$LASTEXITCODE" }
+            if ($runtimeRows.Count -ne 1) { throw "RUNTIME_STAGING_RESULT_INVALID" }
+            $runtimeResult = [string]$runtimeRows[0] | ConvertFrom-Json
+            if ($runtimeResult.schema -cne "hub-runtime-staging-v1" -or
+                [string]$runtimeResult.runtime_payload_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                [int]$runtimeResult.file_count -le 0) { throw "RUNTIME_STAGING_RESULT_INVALID" }
+            $runtimePayloadSHA256 = [string]$runtimeResult.runtime_payload_sha256
+            if ((Get-FileHash -LiteralPath $runtimePlan.output -Algorithm SHA256).Hash.ToLowerInvariant() -cne $runtimePayloadSHA256) {
+                throw "RUNTIME_STAGING_RESULT_INVALID: original index digest differs from the Stage receipt"
+            }
+            $runtimePlan.sha256 = $runtimePayloadSHA256
+        } finally { Pop-Location }
+    }
+}
+
 $artifacts = @(
     foreach ($artifact in $contract.artifacts) {
         if ($artifact.subsystem -notin @(2, 3)) {
@@ -173,6 +260,9 @@ $artifacts = @(
             $flags += "-X main.expectedCanonicalEntrySHA256=$unreceivedEntryHash"
             $flags += "-X main.canonicalEntryReverseProjection=$canonicalEntryReverseProjection"
         }
+        if ($bundleBuild) {
+            $flags += "-X mcp-local-hub/internal/binaryadmission.compiledWindowsProductRegistryBase64=$compiledWindowsProductRegistryBase64"
+        }
         if ($artifact.subsystem -eq 2) {
             $flags += "-H windowsgui"
         }
@@ -191,7 +281,18 @@ $artifacts = @(
                 $originalComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json") | ConvertFrom-Json).StringFileInfo.Comments
                 if ($originalComments.Contains("mcphub-source-v1;sha256=")) { throw "PUBLISHER_SOURCE_TABLE_INVALID: template already stamped" }
                 $versionInfo.Comments = $originalComments + [char]10 + "mcphub-source-v1;sha256=$($publisherSource.source_epoch)"
+                if ($bundleBuild) {
+                    if ($originalComments.Contains("mcphub-runtime-")) { throw "RUNTIME_BUILD_TEMPLATE_ALREADY_MARKED" }
+                    $markerDigest = if ($PrintPlanJson) { "<precompile-runtime-payload-sha256>" } else { $runtimePayloadSHA256 }
+                    $versionInfo.Comments += [char]10 + "mcphub-runtime-v1;sha256=$markerDigest"
+                }
             }
+        }
+        $artifactOutput = "$outDir/$($artifact.filename)"
+        if ($bundleBuild) {
+            # Current validation receives the actual fully qualified native path
+            # for each executable, shared by all its artifact/validator consumers.
+            $artifactOutput = [IO.Path]::GetFullPath([IO.Path]::Combine($outputAbsolute, [string]$artifact.filename))
         }
         [ordered]@{
             role = [string]$artifact.role
@@ -203,7 +304,7 @@ $artifacts = @(
             npmBin = [bool]$artifact.npmBin
             ldflags = ($flags -join " ")
             versionInfo = $versionInfo
-            output = "$outDir/$($artifact.filename)"
+            output = $artifactOutput
         }
     }
 )
@@ -227,10 +328,16 @@ $resourceGeneratorArgs = @("-64")
 if ($effectiveWindowsTargetArch -eq "arm64") {
     $resourceGeneratorArgs += "-arm"
 }
+$identityRelativePath = [string]$contract.identityManifest.filename
+$identitySchema = "windows-product-identity-v1"
+if ($bundleBuild) {
+    $identityRelativePath = ([IO.Path]::Combine([IO.Path]::GetDirectoryName($productRelativePath), $identityRelativePath)).Replace([IO.Path]::DirectorySeparatorChar, [char]'/')
+    $identitySchema = [string]$contract.identityManifest.schema
+}
 $identityManifest = [ordered]@{
-    schema = [string]$contract.identityManifest.schema
+    schema = $identitySchema
     filename = [string]$contract.identityManifest.filename
-    output = "$outDir/$($contract.identityManifest.filename)"
+    output = "$outDir/$identityRelativePath"
 }
 $admissionCommand = [ordered]@{
     executable = "go"
@@ -251,15 +358,27 @@ $retiredOutputFiles = @("mcphub-windowless.exe", "mcphub-pe-admit.exe")
 if ($null -ne $publisherSource) {
     $admissionCommand.argv += @("--expected-source-epoch", [string]$publisherSource.source_epoch)
 }
+if ($bundleBuild) {
+    $admissionCommand.argv += @("--helper", $launcherArtifacts[0].output, "--runtime-payload", $runtimeRelativePath,
+        "--source-root", $PSScriptRoot, "--source-snapshot", $SourceSnapshotPath)
+}
+$entryBuildPath = if ($bundleBuild) {
+    $launcherArtifacts[0].output
+} else {
+    [IO.Path]::GetFullPath($launcherArtifacts[0].output)
+}
 $entrySetAdmissionCommand = [ordered]@{
     executable = "go"
     argv = @("run", "./tools/windows-product-validate",
-        "--validate-entry-set-build", [IO.Path]::GetFullPath($launcherArtifacts[0].output),
+        "--validate-entry-set-build", $entryBuildPath,
         "--expected-entry-set-build-id", $entrySetBuildID,
         "--expected-canonical-entry-sha256", $unreceivedEntryHash,
         "--canonical-entry-reverse-projection", $canonicalEntryReverseProjection,
         "--expected-version", $version, "--expected-commit", $commit,
         "--expected-build-date", $buildDate)
+}
+if ($bundleBuild) {
+    $entrySetAdmissionCommand.argv += @("--source-root", $PSScriptRoot, "--source-snapshot", $SourceSnapshotPath, "--runtime-payload", $runtimeRelativePath)
 }
 $buildTags = @()
 if ($null -ne $publisherSource) {
@@ -282,7 +401,7 @@ $plan = [ordered]@{
     identityManifest = $identityManifest
     admissionCommand = $admissionCommand
     entrySetBuildID = $entrySetBuildID
-    canonicalEntry = [ordered]@{ entryRelativePath = $entryRelativePath; productRelativePath = $productRelativePath; identityRelativePath = [string]$contract.identityManifest.filename; reverseProjection = $canonicalEntryReverseProjection; expectedCanonicalEntrySHA256 = $null; received = $false; buildOrder = @("launcher", "product") }
+    canonicalEntry = [ordered]@{ entryRelativePath = $entryRelativePath; productRelativePath = $productRelativePath; identityRelativePath = $identityRelativePath; reverseProjection = $canonicalEntryReverseProjection; expectedCanonicalEntrySHA256 = $null; received = $false; buildOrder = @("launcher", "product") }
     entrySetAdmissionCommand = $entrySetAdmissionCommand
     retiredOutputFiles = $retiredOutputFiles
 }
@@ -293,6 +412,8 @@ if ($null -ne $publisherSource) {
         file_count = [int]$publisherSource.file_count
     }
 }
+
+if ($bundleBuild) { $plan.runtimePayload = $runtimePlan }
 
 if ($PrintPlanJson) {
     $plan | ConvertTo-Json -Depth 6
@@ -308,7 +429,7 @@ foreach ($retiredFilename in $retiredOutputFiles) {
         Remove-Item -LiteralPath $retiredPath -Force
     }
 }
-$identityManifestPath = Join-Path $outDir $identityManifest.filename
+$identityManifestPath = Join-Path $outDir $identityRelativePath
 if (Test-Path -LiteralPath $identityManifestPath) {
     Remove-Item -LiteralPath $identityManifestPath -Force
 }
@@ -564,6 +685,15 @@ $candidateHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.T
 if ([string]$identity.sha256 -cne $candidateHash) {
     Write-Error "windows product identity SHA-256 does not match the built product"
     exit 1
+}
+if ($bundleBuild) {
+    $helperHash = (Get-FileHash -LiteralPath $launcherArtifacts[0].output -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($helperHash -cne $plan.canonicalEntry.expectedCanonicalEntrySHA256) { throw "launcher changed during validation" }
+    if ($bundleBuild -and (
+        [string]$identity.source_epoch -cne [string]$publisherSource.source_epoch -or
+        [string]$identity.launcher_sha256 -cne $helperHash -or
+        [string]$identity.runtime_payload_path -cne $runtimeRelativePath -or
+        [string]$identity.runtime_payload_sha256 -cne $runtimePayloadSHA256)) { throw "RUNTIME_PRODUCT_IDENTITY_MISMATCH" }
 }
 [IO.File]::WriteAllText(
     $identityManifestPath,

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"golang.org/x/sys/windows"
 	"mcp-local-hub/internal/clients"
@@ -29,7 +30,29 @@ func WriteStateFileBytesAtomicObserved(req clients.ConfigWriteRequest) (observat
 	}
 	return observation, retErr
 }
-func WriteStateFileBytesLockHeldObserved(req clients.ConfigWriteRequest, lease *StateFileObservedLease) (observation *StateFilePublicationObservation, retErr error) {
+
+type statePublicationReadback func(context.Context, string, int64, func(uintptr, []byte) error) ([]byte, *StateFileReadObservation, error)
+
+func WriteStateFileBytesLockHeldObserved(req clients.ConfigWriteRequest, lease *StateFileObservedLease) (*StateFilePublicationObservation, error) {
+	return writeStateFileBytesLockHeldObserved(req, lease, readStateFileInodeAnchoredObservedWithLeafCapture)
+}
+
+// The Route owner uses the same single internal readback. It additionally
+// receives closure from an existing optional relax audit if that path runs.
+func WriteStateFileRouteAdmissionLockHeldObserved(req clients.ConfigWriteRequest, lease *StateFileObservedLease) (*StateFilePublicationObservation, error) {
+	if req.ExpectedSnapshot == nil || req.FreshCreationEvidence != nil || req.BeforeObservedReplace == nil {
+		return nil, errors.New("original Route journal replacement required")
+	}
+	return writeStateFileBytesLockHeldObserved(req, lease, readStateRouteAdmissionPublication)
+}
+
+func readStateRouteAdmissionPublication(ctx context.Context, path string, maxBytes int64,
+	captureLeaf func(uintptr, []byte) error) ([]byte, *StateFileReadObservation, error) {
+	return readStateFileInodeAnchoredObservedWithAudit(ctx, path, maxBytes, captureLeaf, nil, stateFileReadRetainRaw, true)
+}
+
+func writeStateFileBytesLockHeldObserved(req clients.ConfigWriteRequest, lease *StateFileObservedLease,
+	readBack statePublicationReadback) (observation *StateFilePublicationObservation, retErr error) {
 	capture := newStateFileIOCapture()
 	observation = &StateFilePublicationObservation{capture: capture, request: req, path: req.Path, sha256: preparedSerenaHash(req.Contents), operation: "write", lease: lease}
 	observation.request.Contents = append([]byte(nil), req.Contents...)
@@ -44,36 +67,7 @@ func WriteStateFileBytesLockHeldObserved(req clients.ConfigWriteRequest, lease *
 		return observation, errors.New("STATE_OBSERVED_DEADLINE_REQUIRED")
 	}
 	receiveReadback := func() error {
-		observation.readbackAttempted = true
-		var captureLeaf func(uintptr, []byte) error
-		if observation.fresh != nil && observation.fresh.role == string(SupervisorIntentLeaf) {
-			if _, ok := observation.fresh.source.(*SupervisorStateNamespaceObservation); !ok {
-				return errors.New("STATE_INTENT_FRESH_SOURCE_MISMATCH")
-			}
-			captureLeaf = func(handle uintptr, raw []byte) error {
-				object, err := serenaTreeHandleIdentity(windows.Handle(handle), nil)
-				if err != nil {
-					return err
-				}
-				if object.Directory || object.Links != 1 || object.Bytes != int64(len(raw)) || object.Device == "" || object.FileID == "" {
-					return errors.New("STATE_INTENT_PUBLISHED_OBJECT_UNQUALIFIED")
-				}
-				observation.publishedObject = &stateFilePublishedObject{writer: observation, object: object, sha256: preparedSerenaHash(raw)}
-				return nil
-			}
-		}
-		raw, readback, readErr := readStateFileInodeAnchoredObservedWithLeafCapture(req.Context, req.Path, int64(len(req.Contents)), captureLeaf)
-		observation.readback = readback
-		observation.readbackRaw = append([]byte(nil), raw...)
-		if readErr != nil {
-			return readErr
-		}
-		if readback == nil {
-			return errors.New("STATE_OBSERVED_READBACK_UNDEFINED")
-		}
-		validateErr := readback.Validate(req.Context, req.Path, int64(len(req.Contents)), raw, observation.sha256)
-		observation.readbackQualified = validateErr == nil
-		return validateErr
+		return receiveStateFilePublicationReadback(observation, req, readBack)
 	}
 	retErr = lease.Borrow(req.Context, req.Path, func() error {
 		if req.ExpectedSnapshot != nil && req.FreshCreationEvidence != nil {
@@ -113,4 +107,37 @@ func WriteStateFileBytesLockHeldObserved(req clients.ConfigWriteRequest, lease *
 		return receiveReadback()
 	})
 	return observation, retErr
+}
+
+func receiveStateFilePublicationReadback(observation *StateFilePublicationObservation, req clients.ConfigWriteRequest, readBack statePublicationReadback) error {
+	observation.readbackAttempted = true
+	var captureLeaf func(uintptr, []byte) error
+	if observation.fresh != nil && observation.fresh.role == string(SupervisorIntentLeaf) {
+		if _, ok := observation.fresh.source.(*SupervisorStateNamespaceObservation); !ok {
+			return errors.New("STATE_INTENT_FRESH_SOURCE_MISMATCH")
+		}
+		captureLeaf = func(handle uintptr, raw []byte) error {
+			object, err := serenaTreeHandleIdentity(windows.Handle(handle), nil)
+			if err != nil {
+				return err
+			}
+			if object.Directory || object.Links != 1 || object.Bytes != int64(len(raw)) || object.Device == "" || object.FileID == "" {
+				return errors.New("STATE_INTENT_PUBLISHED_OBJECT_UNQUALIFIED")
+			}
+			observation.publishedObject = &stateFilePublishedObject{writer: observation, object: object, sha256: preparedSerenaHash(raw)}
+			return nil
+		}
+	}
+	raw, readback, readErr := readBack(req.Context, req.Path, int64(len(req.Contents)), captureLeaf)
+	observation.readback = readback
+	observation.readbackRaw = append([]byte(nil), raw...)
+	if readErr != nil {
+		return readErr
+	}
+	if readback == nil {
+		return errors.New("STATE_OBSERVED_READBACK_UNDEFINED")
+	}
+	validateErr := readback.Validate(req.Context, req.Path, int64(len(req.Contents)), raw, observation.sha256)
+	observation.readbackQualified = validateErr == nil
+	return validateErr
 }

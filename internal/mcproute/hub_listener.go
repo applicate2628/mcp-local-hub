@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,11 +33,39 @@ type HubListener struct {
 	endpoint       api.HubEndpoint
 	listenerCancel context.CancelFunc
 	alive          atomic.Bool
+	serveDone      chan struct{}
+	serveErr       error // published before serveDone closes
+	watchersDone   chan struct{}
+
+	admissionMu  sync.Mutex
+	admitting    bool
+	stopping     bool
+	requests     int
+	requestsDone chan struct{}
+	strict       bool
+	closeOnce    sync.Once
+	closeErr     error
+
+	socket         *hubAcceptObservation
+	unserved       *api.HubMcpBindResult
+	retireMu       sync.Mutex
+	retirement     *hubRetirementEpisode
+	firstRetireErr error
+	drained        bool
+}
+
+type hubRetirementEpisode struct {
+	done   chan struct{}
+	result api.RouteAggregateRetirement
 }
 
 // HubListenerOptions carries the existing restart and health behavior of
 // callers that already own aggregate activation.
 type HubListenerOptions struct {
+	// BindExisting receives the original Product apply boundary. It must
+	// settle its native bind guard before the caller waits for Serve.
+	BindExisting                       func(context.Context, func() error) (*api.HubMcpBindResult, error)
+	Lifetime                           context.Context
 	PreservePortOnReloadHandlerFailure bool
 	ReloadHandler                      func(context.Context) (*api.InternalReloadHandler, error)
 	HealthProbeInterval                time.Duration
@@ -82,13 +111,26 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	// ~10 ms (acquireHubMcpLockContext retry cadence). Without this,
 	// the goroutine would block on flock indefinitely past Start's
 	// shutdown budget.
-	res, berr := api.BindHubMcpListener(
-		ctx,
-		clients.SupportedClientNames(),
-		func() error { return validateParticipatingManifestsForHubBind(a) },
-	)
+	validate := func() error { return validateParticipatingManifestsForHubBind(a) }
+	strict := opts.BindExisting != nil
+	var res *api.HubMcpBindResult
+	var berr error
+	if strict {
+		res, berr = opts.BindExisting(ctx, validate)
+	} else {
+		res, berr = api.BindHubMcpListener(ctx, clients.SupportedClientNames(), validate)
+	}
 	if berr != nil {
+		if strict {
+			return failUnservedHubStart(ctx, res, fmt.Errorf("hub-mcp: %w", berr))
+		}
 		return nil, fmt.Errorf("hub-mcp: %w", berr)
+	}
+	if res == nil || res.Listener == nil {
+		return nil, errors.New("original aggregate bind returned no listener")
+	}
+	if strict && res.Reload == nil {
+		return nil, errors.Join(errors.New("original aggregate bind returned no reload authority"), res.Listener.Close())
 	}
 	ln := res.Listener
 	ep := res.Endpoint
@@ -114,7 +156,10 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	// behavior that existed before this wiring (empty participants), not a
 	// crash. Surface it as a structured warn so the dormant-aggregate
 	// condition is observable rather than silent.
-	if perr := PublishHubResolverSnapshot(ctx, a); perr != nil {
+	if perr := publishHubResolverSnapshot(ctx, a, strict); perr != nil {
+		if strict {
+			return failUnservedHubStart(ctx, res, perr)
+		}
 		_ = api.LogHubMcpEvent("warn", "resolver-snapshot-publish-failed", map[string]any{
 			"port": port,
 			"err":  perr.Error(),
@@ -131,7 +176,11 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	// listener refuses to come up with a silently-broken
 	// /internal/reload-tokens. Rollback the bound listener so we
 	// don't leave a half-initialized hub server running.
-	reload, reloadErr := opts.ReloadHandler(ctx)
+	reload := res.Reload
+	var reloadErr error
+	if !strict {
+		reload, reloadErr = opts.ReloadHandler(ctx)
+	}
 	if reloadErr != nil {
 		_ = ln.Close()
 		store.Close()
@@ -231,7 +280,23 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	// JSON-RPC body. Reject path-traversal / collapsed-slash inputs
 	// directly with empty-body 404, matching every other gate-2
 	// path-shape failure surface.
+	listener := &HubListener{
+		store: store, reload: reload, endpoint: ep, strict: strict,
+		serveDone: make(chan struct{}), watchersDone: make(chan struct{}),
+		requestsDone: make(chan struct{}), admitting: !strict,
+	}
 	muxedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strict {
+			listener.admissionMu.Lock()
+			if !listener.admitting {
+				listener.admissionMu.Unlock()
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			listener.requests++
+			listener.admissionMu.Unlock()
+			defer listener.finishRequest()
+		}
 		if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -239,42 +304,171 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 		mux.ServeHTTP(w, r)
 	})
 
-	srv := newHubMcpHTTPServer(muxedHandler)
-
-	listenerCtx, listenerCancel := context.WithCancel(ctx)
-	listener := &HubListener{
-		srv: srv, store: store, reload: reload, endpoint: ep, listenerCancel: listenerCancel,
+	listener.srv = newHubMcpHTTPServer(muxedHandler)
+	lifetime := opts.Lifetime
+	if lifetime == nil {
+		lifetime = ctx
 	}
+	listenerCtx, listenerCancel := context.WithCancel(lifetime)
+	listener.listenerCancel = listenerCancel
 	listener.alive.Store(true)
 
 	// Share the same supervisor status observations as existing API consumers.
-	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(listenerCtx)
+	var watchers sync.WaitGroup
+	watchers.Go(func() {
+		api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(listenerCtx)
+	})
 	healthWatcher := api.NewHubListenerHealthWatcher(port, opts.HealthProbeInterval)
 	healthWatcher.SetOnUnresponsive(opts.OnUnresponsive)
 	healthWatcher.SetOnRecovered(opts.OnRecovered)
-	go healthWatcher.Run(listenerCtx)
-	go listener.serve(ln, opts.OnServeFailure)
+	watchers.Go(func() { healthWatcher.Run(listenerCtx) })
+	go func() {
+		watchers.Wait()
+		close(listener.watchersDone)
+	}()
+	if strict {
+		entered := make(chan struct{})
+		listener.socket = &hubAcceptObservation{Listener: ln, entered: entered}
+		go func() {
+			listener.serve(listener.socket, opts.OnServeFailure)
+			// Spontaneous Serve completion can start the original retirement,
+			// but only an admitted owner may advance a finished pending attempt.
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), api.SupervisorAggregateStatusTimeout)
+			defer cancel()
+			listener.retireOriginal(stopCtx, false)
+		}()
+		select {
+		case <-ctx.Done():
+			return listener.failServeStart(ctx, ctx.Err())
+		case <-listener.serveDone:
+			return listener.failServeStart(ctx, errors.New("aggregate Serve exited before readiness"))
+		case <-entered:
+		}
+		if err := api.VerifyExistingHubMcpServingInputs(ctx, ep); err != nil {
+			return listener.failServeStart(ctx, err)
+		}
+		listener.admissionMu.Lock()
+		listener.admitting = !listener.stopping && listener.Alive() && ctx.Err() == nil && listenerCtx.Err() == nil
+		ready := listener.admitting
+		listener.admissionMu.Unlock()
+		if !ready {
+			return listener.failServeStart(ctx, errors.New("aggregate Serve or its owner ended during readiness"))
+		}
+	} else {
+		go listener.serve(ln, opts.OnServeFailure)
+	}
 	_ = api.LogHubMcpEvent("info", "hub-listener-up", map[string]any{"port": port})
 	return listener, nil
+}
+
+func failUnservedHubStart(ctx context.Context, bind *api.HubMcpBindResult, cause error) (*HubListener, error) {
+	if bind == nil {
+		return nil, cause
+	}
+	// A bind-side failure already attempted cleanup in its original H scope.
+	// Return that custody to the attachment for explicit retirement.
+	if !bind.CleanupPending() {
+		cause = errors.Join(cause, bind.CloseUnserved(ctx))
+	}
+	if bind.CleanupPending() {
+		return &HubListener{strict: true, unserved: bind, firstRetireErr: cause}, cause
+	}
+	return nil, cause
+}
+
+func (c *HubListener) failServeStart(ctx context.Context, cause error) (*HubListener, error) {
+	retirement := c.retireOriginal(ctx, false)
+	err := errors.Join(cause, retirement.Err)
+	if !retirement.Settled() {
+		return c, err
+	}
+	return nil, err
 }
 
 // Endpoint returns the endpoint accepted by the serialized bind transaction.
 func (c *HubListener) Endpoint() api.HubEndpoint { return c.endpoint }
 
+// VerifyOriginalReload checks ownership of the fixed reload leaf under the
+// original H lock used to confirm the current Route.
+func (c *HubListener) VerifyOriginalReload(state *api.HubRouteState) error {
+	return c.reload.VerifyOriginalReload(state)
+}
+
 // Alive reports whether Serve is active.
 func (c *HubListener) Alive() bool { return c.alive.Load() }
 
-func (c *HubListener) serve(ln net.Listener, onFailure func(error)) {
-	defer c.alive.Store(false)
-	if err := c.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		c.alive.Store(false)
-		if onFailure != nil {
-			onFailure(err)
+type hubAcceptObservation struct {
+	net.Listener
+	enterOnce sync.Once
+	entered   chan struct{}
+	closeOnce sync.Once
+	closeErr  error
+
+	ownerCloseStarted   atomic.Bool
+	acceptSawOwnerClose bool
+}
+
+func (l *hubAcceptObservation) Accept() (net.Conn, error) {
+	l.enterOnce.Do(func() { close(l.entered) })
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		l.acceptSawOwnerClose = l.ownerCloseStarted.Load()
+	}
+	return conn, err
+}
+
+func (l *hubAcceptObservation) Close() error { return l.close(false) }
+
+func (l *hubAcceptObservation) close(owner bool) error {
+	l.closeOnce.Do(func() {
+		l.ownerCloseStarted.Store(owner)
+		l.closeErr = l.Listener.Close()
+	})
+	return l.closeErr
+}
+
+func onlyNetClosed(err error) bool {
+	for err != nil {
+		if err == net.ErrClosed {
+			return true
 		}
-		_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
-			"port": c.endpoint.Port,
-			"err":  err.Error(),
-		})
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
+func (c *HubListener) serve(ln net.Listener, onFailure func(error)) {
+	if !c.strict {
+		defer close(c.serveDone)
+	}
+	err := c.srv.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) ||
+		(c.socket != nil && c.socket.acceptSawOwnerClose && c.socket.closeErr == nil && onlyNetClosed(err)) {
+		err = nil
+	}
+	c.alive.Store(false)
+	c.serveErr = err
+	if c.strict {
+		close(c.serveDone)
+	}
+	if err == nil {
+		return
+	}
+	if onFailure != nil {
+		onFailure(err)
+	}
+	_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
+		"port": c.endpoint.Port,
+		"err":  err.Error(),
+	})
+}
+
+func (c *HubListener) finishRequest() {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	c.requests--
+	if c.stopping && c.requests == 0 {
+		close(c.requestsDone)
 	}
 }
 
@@ -290,9 +484,145 @@ func newHubMcpHTTPServer(handler http.Handler) *http.Server {
 // Shutdown cancels the watchers and drains the HTTP server, then closes the
 // session store and removes the reload control token.
 func (c *HubListener) Shutdown(parentCtx context.Context) {
+	_ = c.ShutdownObserved(parentCtx)
+}
+
+// ShutdownObserved receives the original Serve and cleanup outputs.
+func (c *HubListener) ShutdownObserved(ctx context.Context) error {
 	if c == nil {
-		return
+		return nil
 	}
+	if c.strict {
+		return c.retireOriginal(ctx, false).Err
+	}
+	c.closeOnce.Do(func() { c.closeErr = c.shutdown(ctx) })
+	return c.closeErr
+}
+
+// RetireOriginal advances only the outstanding original strict resources.
+func (c *HubListener) RetireOriginal(ctx context.Context) api.RouteAggregateRetirement {
+	return c.retireOriginal(ctx, true)
+}
+
+func (c *HubListener) retireOriginal(ctx context.Context, advance bool) api.RouteAggregateRetirement {
+	c.retireMu.Lock()
+	if old := c.retirement; old != nil {
+		select {
+		case <-old.done:
+			if !advance || old.result.Settled() {
+				c.retireMu.Unlock()
+				return old.result
+			}
+		default:
+			c.retireMu.Unlock()
+			<-old.done
+			return old.result
+		}
+	}
+	episode := &hubRetirementEpisode{done: make(chan struct{})}
+	c.retirement = episode
+	c.retireMu.Unlock()
+
+	episode.result = c.advanceOriginalRetirement(ctx)
+	close(episode.done)
+	return episode.result
+}
+
+func (c *HubListener) advanceOriginalRetirement(ctx context.Context) api.RouteAggregateRetirement {
+	record := func(err error) {
+		if c.firstRetireErr == nil {
+			c.firstRetireErr = err
+		}
+	}
+	report := func(resource string, current error) api.RouteAggregateRetirement {
+		record(current)
+		err := c.firstRetireErr
+		if current != nil && !errors.Is(err, current) {
+			err = errors.Join(err, current)
+		}
+		if c.serveDone != nil {
+			select {
+			case <-c.serveDone:
+				if c.serveErr != nil && !errors.Is(err, c.serveErr) {
+					err = errors.Join(err, c.serveErr)
+				}
+			default:
+			}
+		}
+		return api.RouteAggregateRetirement{Pending: resource, Err: err}
+	}
+	if c.unserved != nil {
+		if err := c.unserved.CloseUnserved(ctx); err != nil {
+			return report("original unserved Hub socket or reload file", err)
+		}
+		return report("", nil)
+	}
+
+	c.admissionMu.Lock()
+	firstStop := !c.stopping
+	if firstStop {
+		c.admitting = false
+		c.stopping = true
+		if c.requests == 0 {
+			close(c.requestsDone)
+		}
+	}
+	c.admissionMu.Unlock()
+	if firstStop {
+		c.listenerCancel()
+		record(c.socket.close(true))
+	}
+	if err := waitOriginalHubTerminal(ctx, c.serveDone); err != nil {
+		return report("original Hub Serve", err)
+	}
+	record(c.serveErr)
+	if err := c.socket.closeErr; err != nil && !onlyNetClosed(err) {
+		return report("original Hub TCP listener", err)
+	}
+	if !c.drained {
+		// Go waits for listenerGroup in both calls. The original Serve has
+		// now unregistered its sole listener, even on the force path.
+		if err := c.srv.Shutdown(ctx); err != nil {
+			record(err)
+			if err := c.srv.Close(); err != nil {
+				return report("original Hub HTTP drain", err)
+			}
+		}
+		c.drained = true
+	}
+	if err := waitOriginalHubTerminal(ctx, c.requestsDone); err != nil {
+		return report("original Hub requests", err)
+	}
+	if err := waitOriginalHubTerminal(ctx, c.watchersDone); err != nil {
+		return report("original Hub watchers", err)
+	}
+	if err := c.store.CloseContext(ctx); err != nil {
+		return report("original Hub session sweeper", err)
+	}
+	if err := c.reload.ShutdownOriginal(ctx); err != nil {
+		return report("original Hub reload file", err)
+	}
+	return report("", nil)
+}
+
+func waitOriginalHubTerminal(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *HubListener) shutdown(parentCtx context.Context) (retErr error) {
+	c.admissionMu.Lock()
+	c.admitting = false
+	c.admissionMu.Unlock()
 	if c.listenerCancel != nil {
 		c.listenerCancel()
 	}
@@ -323,9 +653,10 @@ func (c *HubListener) Shutdown(parentCtx context.Context) {
 			// past the 5s graceful budget). Call srv.Close() to
 			// force-close active connections so request goroutines
 			// can unwind before the process exits.
-			_ = c.srv.Close()
+			retErr = errors.Join(retErr, err, c.srv.Close())
 		}
 	}
+
 	if c.store != nil {
 		c.store.Close()
 	}
@@ -338,12 +669,14 @@ func (c *HubListener) Shutdown(parentCtx context.Context) {
 		// is already cleared, so leaving the on-disk file behind is
 		// harmless — the next hub start regenerates it under flock.
 		if err := c.reload.Shutdown(shutCtx); err != nil {
+			retErr = errors.Join(retErr, err)
 			_ = api.LogHubMcpEvent("warn", "hub-control-token-cleanup-incomplete", map[string]any{
 				"port": c.endpoint.Port,
 				"err":  err.Error(),
 			})
 		}
 	}
+	return retErr
 }
 
 // validateParticipatingManifestsForHubBind iterates every server
@@ -417,6 +750,10 @@ func validateParticipatingManifestsForHubBind(a *api.API) error {
 // non-fatal to the bind (logs a warn) so a single bad manifest degrades
 // to the dormant-aggregate behavior, never a failed gui startup.
 func PublishHubResolverSnapshot(ctx context.Context, a *api.API) error {
+	return publishHubResolverSnapshot(ctx, a, false)
+}
+
+func publishHubResolverSnapshot(ctx context.Context, a *api.API, fixed bool) error {
 	if a == nil {
 		return nil
 	}
@@ -477,5 +814,8 @@ func PublishHubResolverSnapshot(ctx context.Context, a *api.API) error {
 	// bindings still publish exactly as before. A token-ensure failure is
 	// surfaced (deferred — the snapshot publishes first) so the GUI mutation
 	// tail reports restart_required rather than a false full success.
+	if fixed {
+		return api.PublishExistingGroupsSnapshotLocked(ctx, scanManifests)
+	}
 	return api.PublishGroupsSnapshotLocked(ctx, scanManifests)
 }

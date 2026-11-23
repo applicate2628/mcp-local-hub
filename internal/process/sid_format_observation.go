@@ -38,8 +38,14 @@ type SIDFormatObservation struct {
 	inputRead              func() ([]byte, error)
 	value                  string
 	allocation             uintptr
+	allocationUncertain    bool
 	primaryErr, cleanupErr error
 	finalized              bool
+}
+
+func (o *SIDFormatObservation) ResourcesFinalized() bool {
+	return o != nil && o.issuer != nil && o.finalized && !o.allocationUncertain &&
+		(!o.view.AllocationAcquired || o.view.FreeAttempted && o.view.FreeDefined && o.view.Freed)
 }
 
 func sidFormatObservationDigest(raw []byte) string {

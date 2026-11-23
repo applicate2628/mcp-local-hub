@@ -8,6 +8,31 @@ import (
 	"errors"
 )
 
+// WindowsIdentityClose is the temporary native handle's first observed close.
+type WindowsIdentityClose struct {
+	Acquired  bool
+	Attempted bool
+	Returned  bool
+	Err       error
+	native    uintptr
+}
+
+func (o WindowsIdentityClose) ResourcesFinalized() bool {
+	return !o.Acquired || o.Attempted && o.Returned && o.Err == nil
+}
+
+type OriginalOwnerSIDObservation struct {
+	TokenClose WindowsIdentityClose
+	Formatting *SIDFormatObservation
+	err        error
+	finalized  bool
+}
+
+func (o *OriginalOwnerSIDObservation) ResourcesFinalized() bool {
+	return o != nil && o.finalized && o.TokenClose.ResourcesFinalized() &&
+		(o.Formatting == nil || o.Formatting.ResourcesFinalized())
+}
+
 // CreatorIdentity is a read-only capability minted by the original retained
 // creator. It transfers neither native handles nor permission to reconstruct
 // process ownership from a PID or a tracker timestamp.
@@ -43,7 +68,30 @@ type provisionalCreatorIdentityObserver interface {
 	observeCreatorIdentity(context.Context) (CreatorIdentitySnapshot, error)
 }
 
+type CreatorIdentityObservation struct {
+	owner     *ProvisionalProcess
+	partial   CreatorIdentitySnapshot
+	principal *OriginalOwnerSIDObservation
+	err       error
+	finalized bool
+}
+
+func (o *CreatorIdentityObservation) ResourcesFinalized() bool {
+	return o != nil && o.finalized && (o.principal == nil || o.principal.ResourcesFinalized())
+}
+
+func (p *ProvisionalProcess) ObserveCreatorIdentityObserved(ctx context.Context) (*CreatorIdentity, *CreatorIdentityObservation, error) {
+	observation := &CreatorIdentityObservation{owner: p}
+	identity, err := p.observeCreatorIdentity(ctx, observation)
+	observation.err, observation.finalized = err, true
+	return identity, observation, err
+}
+
 func (p *ProvisionalProcess) ObserveCreatorIdentity(ctx context.Context) (*CreatorIdentity, error) {
+	return p.observeCreatorIdentity(ctx, nil)
+}
+
+func (p *ProvisionalProcess) observeCreatorIdentity(ctx context.Context, evidence *CreatorIdentityObservation) (*CreatorIdentity, error) {
 	if err := creatorClosureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -73,7 +121,19 @@ func (p *ProvisionalProcess) ObserveCreatorIdentity(ctx context.Context) (*Creat
 	p.mu.Unlock()
 	held = false
 	defer func() { p.mu.Lock(); p.identityInFlight = false; p.mu.Unlock() }()
-	view, err := observer.observeCreatorIdentity(ctx)
+	var view CreatorIdentitySnapshot
+	var err error
+	if evidence != nil {
+		observed, ok := p.owner.(interface {
+			observeCreatorIdentityWithReceipt(context.Context, *CreatorIdentityObservation) (CreatorIdentitySnapshot, error)
+		})
+		if !ok {
+			return nil, creatorClosureUnavailable(errors.New("original observed creator identity unsupported"))
+		}
+		view, err = observed.observeCreatorIdentityWithReceipt(ctx, evidence)
+	} else {
+		view, err = observer.observeCreatorIdentity(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +143,19 @@ func (p *ProvisionalProcess) ObserveCreatorIdentity(ctx context.Context) (*Creat
 	if err := creatorClosureContext(ctx); err != nil {
 		return nil, err
 	}
-	sidObserver, ok := p.owner.(interface{ creatorSIDFormatObservation() *SIDFormatObservation })
-	if !ok {
-		return nil, creatorClosureUnavailable(errors.New("original SID formatting slot unavailable"))
+	var sidFormatting *SIDFormatObservation
+	if evidence != nil {
+		if evidence.principal == nil {
+			return nil, creatorClosureUnavailable(errors.New("original observed SID formatting unavailable"))
+		}
+		sidFormatting = evidence.principal.Formatting
+	} else {
+		sidObserver, ok := p.owner.(interface{ creatorSIDFormatObservation() *SIDFormatObservation })
+		if !ok {
+			return nil, creatorClosureUnavailable(errors.New("original SID formatting slot unavailable"))
+		}
+		sidFormatting = sidObserver.creatorSIDFormatObservation()
 	}
-	sidFormatting := sidObserver.creatorSIDFormatObservation()
 	if err := sidFormatting.Validate(view.OwnerSID); err != nil {
 		return nil, err
 	}

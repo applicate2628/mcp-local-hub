@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"syscall"
@@ -39,6 +40,9 @@ import (
 type HubMcpBindResult struct {
 	Listener net.Listener
 	Endpoint HubEndpoint
+	Reload   *InternalReloadHandler
+
+	cleanupPending bool
 }
 
 // hubMcpListenerBindError marks only a confirmed socket bind refusal on the
@@ -103,6 +107,7 @@ func HubMcpListenerBindFailurePort(err error) (port int, ok bool) {
 // startup (internal/gui/server.go) MUST pass the Server.Start ctx so
 // ctx cancellation tears down the goroutine promptly.
 func BindHubMcpListener(ctx context.Context, clients []string, validateManifests func() error) (*HubMcpBindResult, error) {
+
 	// codex bot phase4 r19 P2 closure on PR #158: normalize a nil
 	// ctx to context.Background() so the subsequent ctx.Err() checks
 	// between bind steps (r13) don't nil-deref. acquireHubMcpLockContext
@@ -154,7 +159,6 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 	if lerr != nil && !isMissingEndpointErr(lerr) {
 		return nil, fmt.Errorf("load endpoint: %w", lerr)
 	}
-
 	if cerr := ctx.Err(); cerr != nil {
 		return nil, fmt.Errorf("hub-mcp bind canceled before manifest validation: %w", cerr)
 	}
@@ -269,4 +273,176 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 	locked = false
 
 	return &HubMcpBindResult{Listener: ln, Endpoint: persistedEp}, nil
+}
+
+// BindExistingHubMcpListener transfers the fixed listener and its reload
+// handler together. A non-nil result with an error owns only outstanding
+// cleanup. The caller retains Product/peer authority and the saved ON lease
+// while this operation uses the same protected H scope.
+func (s *HubRouteState) BindExistingHubMcpListener(selected HubRouteEndpointSelection, qualification HubRouteQualification) (result *HubMcpBindResult, err error) {
+	err = s.use(func(c *hubRouteStateCore) (retErr error) {
+		if selected.owner != c {
+			return errHubRouteStateChanged
+		}
+		if err := c.matchQualification(selected, qualification); err != nil {
+			return err
+		}
+		if err := c.native.checkAbsent(hubMcpControlTokenFileLeaf); err != nil {
+			return err
+		}
+		tokens, err := loadHubTokensLocked()
+		if err != nil {
+			return err
+		}
+		if len(tokens.Tokens) == 0 {
+			return errors.New("fixed aggregate requires existing ordinary authorization")
+		}
+		owner, err := c.newReloadOwner()
+		if err != nil {
+			return err
+		}
+		address := fmt.Sprintf("127.0.0.1:%d", selected.Endpoint().Port)
+		ln, err := NewListenerWithSOExclusiveContext(c.ctx, address)
+		if err != nil {
+			return fmt.Errorf("bind %s: %w", address, err)
+		}
+		acquired := &HubMcpBindResult{Listener: ln}
+		reload := &InternalReloadHandler{original: owner}
+		defer func() {
+			if result != nil {
+				return
+			}
+			closeErr := acquired.closeUnservedSocket()
+			if owner.leaf.present {
+				acquired.Reload = reload
+				if closeErr == nil {
+					closeErr = c.native.removeOwnedReload(owner.leaf)
+					if closeErr == nil {
+						acquired.Reload = nil
+					}
+				}
+			}
+			if closeErr != nil {
+				acquired.cleanupPending = true
+				result = acquired
+				retErr = errors.Join(retErr, closeErr)
+			}
+		}()
+		if err := c.native.publishObserved(c.ctx, hubMcpControlTokenFileLeaf, hubRouteLeaf{}, owner.payload, hubRouteReloadLimit, &owner.leaf); err != nil {
+			return err
+		}
+		ordinary, err := replaceHubTokenAuthorization(tokens)
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(tokens.Tokens, ordinary.Tokens) {
+			return errors.New("fixed aggregate requires existing ordinary authorization")
+		}
+		ep, err := c.publishEndpoint(selected, qualification.TransactionID)
+		if err != nil {
+			return err
+		}
+		if err := c.ctx.Err(); err != nil {
+			return err
+		}
+		reload.controlTok.Store(&owner.token)
+		acquired.Endpoint = ep
+		acquired.Reload = reload
+		result = acquired
+		return nil
+	})
+	return result, err
+}
+
+// CleanupPending reports whether a failed cleanup retained exact ownership
+// for the original Route retirement.
+func (r *HubMcpBindResult) CleanupPending() bool { return r.cleanupPending }
+
+func (r *HubMcpBindResult) closeUnservedSocket() error {
+	if r.Listener == nil {
+		return nil
+	}
+	if err := r.Listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	r.Listener = nil
+	return nil
+}
+
+// CloseUnserved settles the original fixed bind once the caller has withdrawn
+// its transfer to Serve. A failed cleanup retains only unsettled ownership.
+func (r *HubMcpBindResult) CloseUnserved(ctx context.Context) error {
+	if r.Reload != nil {
+		r.Reload.controlTok.Store(nil)
+	}
+	if err := r.closeUnservedSocket(); err != nil {
+		r.cleanupPending = true
+		return err
+	}
+	if r.Reload != nil {
+		if err := r.Reload.ShutdownOriginal(ctx); err != nil {
+			r.cleanupPending = true
+			return err
+		}
+		r.Reload = nil
+	}
+	r.cleanupPending = false
+	return nil
+}
+
+// VerifyExistingHubMcpServingInputs proves the current process owns the saved
+// endpoint and its currently published authorization is entirely ordinary.
+func VerifyExistingHubMcpServingInputs(ctx context.Context, expected HubEndpoint) error {
+	ep, err := LoadHubEndpoint()
+	if err != nil {
+		return err
+	}
+	if ep.Port != expected.Port || ep.InstanceID != expected.InstanceID || ep.PID != os.Getpid() {
+		return errors.New("aggregate serving endpoint differs from the original bind")
+	}
+	pid, found, err := LoopbackPortOwnerPIDContext(ctx, ep.Port)
+	if err != nil {
+		return err
+	}
+	if !found || pid != ep.PID {
+		return errors.New("original aggregate listener does not own its saved socket")
+	}
+	tokens, err := loadHubTokensLocked()
+	if err != nil {
+		return err
+	}
+	ordinary := CurrentTokenTable()
+	if len(ordinary.Tokens) == 0 || !maps.Equal(tokens.Tokens, ordinary.Tokens) {
+		return errors.New("current ordinary authorization differs from the saved aggregate table")
+	}
+	snapshot := LoadResolverSnapshot()
+	if snapshot != nil {
+		for scope, refs := range snapshot.Bindings {
+			if len(refs) > 0 && ordinary.Tokens[scope] != "" {
+				return ctx.Err()
+			}
+		}
+	}
+	return errors.New("aggregate has no ordinary authorized resolver binding")
+}
+
+// VerifyAbsentPriorHubMcpOwner receives the saved H scope under the existing
+// aggregate lock. The caller independently owns the Product/GUI reservation.
+func VerifyAbsentPriorHubMcpOwner(ctx context.Context, saved HubEndpoint) (retErr error) {
+	lk, err := acquireHubMcpLockContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lk.Unlock()) }()
+	endpoint, err := loadHubEndpointLocked()
+	if err != nil || endpoint != saved || saved.Port <= 0 || saved.InstanceID == "" {
+		return errors.Join(errors.New("saved original aggregate endpoint changed or unavailable"), err)
+	}
+	if _, bound, err := LoopbackPortOwnerPIDContext(ctx, saved.Port); err != nil || bound {
+		return errors.Join(errors.New("original prior aggregate listener absence unconfirmed"), err)
+	}
+	if _, err := ReadHubMcpControlToken(); !isHubMcpStateMissingErr(err) {
+		return errors.Join(errors.New("original prior aggregate reload authority remains or is unknown"), err)
+	}
+	return ctx.Err()
 }

@@ -260,19 +260,35 @@ func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
 // ReadSupervisorIntentIfPresentObserved accepts only a qualified missing leaf
 // as absence. A caller that requires exclusion holds the original intent lease.
 func ReadSupervisorIntentIfPresentObserved(ctx context.Context, path string) (*SupervisorIntentFile, error) {
+	intent, _, _, err := observeSupervisorIntentWithReader(ctx, path, ReadStateFileInodeAnchoredObserved)
+	return intent, err
+}
+
+// ObserveSupervisorIntentForRouteAdmission binds the decoded intent and digest
+// to the bytes from the same existing observed reader.
+func ObserveSupervisorIntentForRouteAdmission(ctx context.Context, path string) (*SupervisorIntentFile, string, *StateFileReadObservation, error) {
+	return observeSupervisorIntentWithReader(ctx, path, ReadStateFileRouteAdmissionObserved)
+}
+
+func observeSupervisorIntentWithReader(ctx context.Context, path string,
+	read func(context.Context, string, int64) ([]byte, *StateFileReadObservation, error)) (*SupervisorIntentFile, string, *StateFileReadObservation, error) {
 	cap := stateFileReadCapBytes(path)
-	raw, reader, err := ReadStateFileInodeAnchoredObserved(ctx, path, cap)
+	raw, reader, err := read(ctx, path, cap)
 	if err != nil {
 		if absenceErr := reader.ValidateAbsence(ctx, path, StateFileReadLeafNotFound); absenceErr != nil {
-			return nil, errors.Join(err, absenceErr)
+			return nil, "", reader, errors.Join(err, absenceErr)
 		}
-		return nil, nil
+		return nil, "", reader, nil
 	}
-	if err := reader.Validate(ctx, path, cap, raw, stateFileReadObservationDigest(raw)); err != nil {
-		return nil, err
+	digest := stateFileReadObservationDigest(raw)
+	if err := reader.Validate(ctx, path, cap, raw, digest); err != nil {
+		return nil, "", reader, err
 	}
 	intent, _, err := decodeSupervisorIntentFile(path, raw)
-	return intent, err
+	if err != nil {
+		return nil, "", reader, err
+	}
+	return intent, digest, reader, nil
 }
 
 var ErrSupervisorRuntimeIntentUnavailable = errors.New("current supervisor runtime intent unavailable")

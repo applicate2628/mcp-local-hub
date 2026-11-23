@@ -323,6 +323,10 @@ func setSuperviseTestExitCh(ch chan struct{}) func() {
 // here are no-op audit-only stubs so the supervisor binary is testable
 // end-to-end at this phase without depending on those later layers.
 func newSuperviseCmd() *cobra.Command {
+	return newSuperviseCmdWithEntryInput(windowsCanonicalEntryCommandInput{})
+}
+
+func newSuperviseCmdWithEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	var (
 		noIPC               bool
 		strictMode          bool
@@ -363,7 +367,7 @@ running (or liveness is undeterminable) it is a no-op. Always exits 0.
 			if ensureAlive {
 				return runEnsureAliveFromState(cmd.Context())
 			}
-			return runSupervise(cmd.Context(), noIPC, strictMode, strictJobProtection)
+			return runSuperviseWithIPCOptions(cmd.Context(), noIPC, strictMode, strictJobProtection, ipcRunOptions{entryInput: input})
 		},
 	}
 	// Operator-facing manual trigger for the goroutine-stack capture. It is
@@ -658,6 +662,7 @@ type runningProcessIdentity struct {
 // function returns, by which point the restore has already sent it to the
 // detached void.
 type ipcRunOptions struct {
+	entryInput          windowsCanonicalEntryCommandInput
 	afterAccept         func(net.Conn, error)
 	beforeHandlerDone   func(net.Conn)
 	afterStopSeal       func()
@@ -713,7 +718,7 @@ func (s *ipcSession) stop() {
 
 	_ = s.listener.Close()
 	for _, conn := range conns {
-		_ = conn.Close()
+		closeAcceptedIPCConn(conn)
 	}
 	if s.acceptDone != nil {
 		<-s.acceptDone // includes the existing ipc-accept-exit emission
@@ -1143,7 +1148,12 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 	// Closure-capture pattern (same as triggerGracefulExit below):
 	// the closure reads the variable's CURRENT value each call.
 	var ctrl *supervisorController
+	daemonCreators := &daemonCreatorRecords{}
 	recoveryOps := newMCPFrontRouteActivationRecoveryOps(api.NewAPI(), stateDir, events)
+	recoveryOps.queryOriginal = func(ctx context.Context) (api.RouteAggregateStatus, api.SupervisorLockOwner, error) {
+		status, err := daemonCreators.exchangeRouteAggregate(ctx, 1, runtimeTracker, nil)
+		return status, lk.Owner(), err
+	}
 	mcpFrontRecoveryDriver := startMCPFrontRouteActivationRecoveryDriver(loopCtx, events, func(recoveryCtx context.Context) {
 		_ = recoverMCPFrontRouteActivation(recoveryCtx, stateDir, recoveryOps)
 	})
@@ -1157,13 +1167,14 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 	// (multi-frame) and `exit{graceful: true}` so the migration
 	// rollback path + v0.5 upgrade flow no longer fall through to the
 	// force-kill fallback on every invocation.
-	daemonCreators := &daemonCreatorRecords{}
 	if !noIPC {
 		if runtime.GOOS == "windows" {
 			var err error
 			daemonCreators.routeAggregate, err = newRouteAggregateSupervisor(loopCtx, stateDir, lk.Owner())
 			if err != nil {
 				_ = events.Emit(api.SupervisorEvent{Severity: "warn", Source: "ipc", Event: "route-aggregate-status-unavailable", Body: map[string]any{"err": err.Error()}})
+			} else {
+				daemonCreators.routeAggregate.entryInput = options.entryInput
 			}
 		}
 		pipePath := defaultPipePath(stateDir)
@@ -2090,7 +2101,7 @@ func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps,
 			handlerDeps.aggregateConn = retainedConn
 		}
 		if session != nil && !session.register(retainedConn) {
-			_ = retainedConn.Close()
+			closeAcceptedIPCConn(retainedConn)
 			continue
 		}
 		go func() {
@@ -2101,7 +2112,7 @@ func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps,
 			if deps.beforeHandlerDone != nil {
 				defer deps.beforeHandlerDone(conn)
 			}
-			serveIPCConn(conn, listener, handlerDeps, ipcAcceptTiming{
+			serveIPCConn(retainedConn, listener, handlerDeps, ipcAcceptTiming{
 				acceptedAt:  acceptedAt,
 				acceptDwell: acceptedAt.Sub(enteredAccept),
 			})
@@ -2133,7 +2144,7 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, tim
 	// stallDumpTrigger.maybeArmOnHello.
 	deps.stallDump.maybeArmOnHello(timing, err)
 	if err != nil {
-		_ = conn.Close()
+		closeAcceptedIPCConn(conn)
 		// Non-blocking emit (TryEmit): the conn is already reaped, and
 		// the accept loop keeps spawning one goroutine per connection —
 		// so under a same-user hello-failure flood the emit MUST NOT
@@ -2186,7 +2197,7 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, tim
 // The response body is NOT logged (may contain operator-visible state that
 // doesn't belong in the long-lived audit channel); just the verb + correlation id.
 func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
-	defer func() { _ = conn.Close() }()
+	defer closeAcceptedIPCConn(conn)
 	if err := conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout)); err != nil {
 		return
 	}
@@ -2205,6 +2216,9 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	case api.OperatorAggregateStatusMarker:
 		_ = serveOperatorAggregateStatus(conn, deps)
 		return
+	}
+	if owned, ok := conn.(*aggregateIPCConn); ok {
+		conn = owned.Conn // ordinary dispatch keeps its original transport view
 	}
 
 	// Replay the discriminator byte verbatim before entering the original
@@ -2632,16 +2646,33 @@ func parseTimeoutMs(args map[string]any, key string, def int) int {
 // writes it to conn. Returns the connection-write error so the caller
 // can decide whether to tear down the connection (write failures
 // typically indicate the client closed prematurely).
-func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
+type ipcFrameWriteObservation struct {
+	encoded   int
+	written   int
+	attempted bool
+	encodeErr error
+	writeErr  error
+}
+
+func writeIPCFrameObserved(conn net.Conn, resp api.IPCResponse) (out ipcFrameWriteObservation) {
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return fmt.Errorf("marshal response: %w", err)
+		out.encodeErr = fmt.Errorf("marshal response: %w", err)
+		return out
 	}
 	body = append(body, '\n')
-	if _, err := conn.Write(body); err != nil {
-		return err
+	out.encoded = len(body)
+	out.attempted = true
+	out.written, out.writeErr = conn.Write(body)
+	return out
+}
+
+func writeIPCFrame(conn net.Conn, resp api.IPCResponse) error {
+	out := writeIPCFrameObserved(conn, resp)
+	if out.encodeErr != nil {
+		return out.encodeErr
 	}
-	return nil
+	return out.writeErr
 }
 
 // loadOverlayAtStartup reads `daemon-env-overrides.yaml` once at
@@ -3753,6 +3784,7 @@ type daemonCreatorOperation struct {
 	complete           bool
 
 	routeAggregateStarted chan struct{}
+	routeDescriptorSHA256 string
 }
 
 func (r *daemonCreatorRecords) begin(task string) (*daemonCreatorOperation, error) {
@@ -3767,6 +3799,9 @@ func (r *daemonCreatorRecords) begin(task string) (*daemonCreatorOperation, erro
 	r.next++
 	operation := &daemonCreatorOperation{id: r.next, task: task, role: "daemon", starting: true, stdio: "not-configured-by-this-creator"}
 	r.operations = append(r.operations, operation)
+	if r.routeAggregate != nil && task == api.BuiltinRouteTaskName {
+		r.routeAggregate.notifyChangedLocked()
+	}
 	return operation, nil
 }
 
@@ -3787,6 +3822,9 @@ func (r *daemonCreatorRecords) endStart(operation *daemonCreatorOperation, err e
 	operation.startupErr = err
 	if operation.routeAggregateStarted != nil {
 		close(operation.routeAggregateStarted)
+	}
+	if r.routeAggregate != nil && operation.task == api.BuiltinRouteTaskName {
+		r.routeAggregate.notifyChangedLocked()
 	}
 }
 

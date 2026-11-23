@@ -296,6 +296,47 @@ func TestOwnedIsolatedStdioSessionStateAndStderr(t *testing.T) {
 	}
 }
 
+func TestOwnedIsolatedStdioInitializeIDIsSessionScoped(t *testing.T) {
+	p, _ := nativeIsolatedStdio(t, "cooperative", 2)
+	p.limits.MaxRequestIDs = 1
+	sid := ownedIsolatedInit(t, p, "hub")
+
+	if w := ownedIsolatedRequest(p, http.MethodPost, "hub", sid, `{"jsonrpc":"2.0","id":1,"method":"tools/call"}`); w.Code != http.StatusBadRequest ||
+		w.Body.String() != "request id already used\n" {
+		t.Fatalf("initialize ID reuse: status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	w := ownedIsolatedRequest(p, http.MethodPost, "hub", sid, `{"jsonrpc":"2.0","id":"1","method":"tools/call"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"1"`) ||
+		!strings.Contains(w.Body.String(), `"count":1`) {
+		t.Fatalf("first post-init provider call with string ID: status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	if fresh := ownedIsolatedInit(t, p, "hub"); fresh == sid {
+		t.Fatal("fresh initialize reused the first session ID")
+	}
+	if w := ownedIsolatedRequest(p, http.MethodPost, "hub", sid, `{"jsonrpc":"2.0","id":2,"method":"tools/call"}`); w.Code != http.StatusNotFound ||
+		w.Body.String() != "unknown session id\n" {
+		t.Fatalf("request past post-init ID capacity: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+func TestOwnedIsolatedStdioInitializeCancellationPreservesRequestCapacity(t *testing.T) {
+	p, _ := nativeIsolatedStdio(t, "cooperative", 1)
+	p.limits.MaxRequestIDs = 1
+	sid := ownedIsolatedInit(t, p, "hub")
+
+	cancel := `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}`
+	if w := ownedIsolatedRequest(p, http.MethodPost, "hub", sid, cancel); w.Code != http.StatusAccepted || w.Body.Len() != 0 {
+		t.Fatalf("initialize cancellation: status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	w := ownedIsolatedRequest(p, http.MethodPost, "hub", sid, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"tools":[]`) {
+		t.Fatalf("ordinary request after initialize cancellation: status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
 func TestOwnedIsolatedStdioCancelFenceAndForcedSettlement(t *testing.T) {
 	p, _ := nativeIsolatedStdio(t, "ignore-eof", 1)
 	sid := ownedIsolatedInit(t, p, "hub")

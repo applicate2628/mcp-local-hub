@@ -68,7 +68,7 @@ func frontendSnapshotWithHiddenFixture(t *testing.T, hidden map[string][]string)
 		// manual fixture mirrors it (else /g/frontend 404s before routing).
 		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 	return memSD, timeSD, fsSD
 }
 
@@ -218,7 +218,7 @@ func TestGroupsPhase5a_RepublishedHiddenToolRevokesExistingSession(t *testing.T)
 	// Republish the current resolver snapshot with the SAME group daemon
 	// bindings but a new tools_hidden filter. daemonStillBound remains true;
 	// only the per-tool visibility revalidation should reject the stale route.
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen: 2,
 		Bindings: map[string][]canonicalDaemonRef{
 			GroupScopeKey("frontend"): {
@@ -276,7 +276,7 @@ func TestGroupsPhase5a_RepublishedHiddenToolDropsFromNextToolsList(t *testing.T)
 		t.Fatalf("pre-republish tools/list did not expose memory__write; body=%s", wL.Body.String())
 	}
 
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen: 2,
 		Bindings: map[string][]canonicalDaemonRef{
 			GroupScopeKey("frontend"): {

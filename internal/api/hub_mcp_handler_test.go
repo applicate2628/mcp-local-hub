@@ -20,15 +20,20 @@ import (
 	"time"
 )
 
-// fakeToken is a 64-lower-hex token used by tests that need a
-// shape-valid value. Distinct from realToken so we can verify
-// shape-passes-but-compare-fails paths.
-const fakeToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+// Both fixtures pass the lowercase-hex shape gate. The published token and
+// the wrong-token probe differ, and case-folding always changes the shape.
+var (
+	fakeToken = newHubMcpTestToken('a')
+	realToken = newHubMcpTestToken('b')
+)
 
-// realToken is a 64-lower-hex token published into liveTokenTable
-// before each test via publishTestTokenTable. Distinct from fakeToken
-// so token-shape passes but the constant-time compare can reject.
-const realToken = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef0123"
+func newHubMcpTestToken(prefix byte) string {
+	token, err := generateHexToken()
+	if err != nil {
+		panic("generate Hub MCP test token: " + err.Error())
+	}
+	return string(prefix) + token[1:]
+}
 
 // realInstanceID is the 64-hex InstanceID handlers compare against via
 // gate 5. Tests that need a positive instance-id match send this value;
@@ -378,6 +383,11 @@ func TestHandlerToolsListMetaUsesCachedInstanceIDWhenEndpointFileUnreadable(t *t
 	sess.IntendedParticipants = []canonicalDaemonRef{ref}
 	sess.InitSuccesses[ref] = "d1-sid"
 	sess.DaemonProtoVer[ref] = "2025-11-25"
+	previous := LoadResolverSnapshot()
+	t.Cleanup(func() { PublishResolverSnapshot(previous) })
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {ref}},
+	})
 
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	req := authedRequest(t, http.MethodPost, "/clients/claude-code/mcp", body)
@@ -654,7 +664,7 @@ func TestHandlerToolsListUsesSessionCachedInstanceID(t *testing.T) {
 
 	d1 := newStubDaemon(t, "d1-sid")
 	ref := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: d1.port}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": {ref}},
 	})

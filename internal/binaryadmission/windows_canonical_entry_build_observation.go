@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // BuildObservation is portable build DATA. It owns no native admission,
@@ -74,6 +73,48 @@ func currentCanonicalEntryBuildFileV1(root *os.Root, file canonicalEntryBuildFil
 	return nil
 }
 
+func openCanonicalEntryBuildFiles(ctx context.Context, root *os.Root, paths ...string) (files []canonicalEntryBuildFileV1, err error) {
+	for _, relative := range paths {
+		if err = ctx.Err(); err != nil {
+			return files, err
+		}
+		before, infoErr := publisherSourceRelativeInfo(root, relative)
+		if infoErr != nil {
+			return files, infoErr
+		}
+		if !before.Mode().IsRegular() || publisherSourceReparse(before) {
+			return files, errors.New("build artifact is not an ordinary regular file")
+		}
+		f, openErr := root.Open(filepath.FromSlash(relative))
+		if openErr != nil {
+			return files, openErr
+		}
+		files = append(files, canonicalEntryBuildFileV1{file: f, relative: relative})
+		held, statErr := f.Stat()
+		if statErr != nil {
+			return files, statErr
+		}
+		if !held.Mode().IsRegular() || !os.SameFile(before, held) || held.Size() != before.Size() {
+			return files, errors.New("build artifact changed during original open")
+		}
+		native, nativeErr := observeCanonicalEntryBuildFileV1(f)
+		if nativeErr != nil {
+			return files, nativeErr
+		}
+		for _, prior := range files[:len(files)-1] {
+			if os.SameFile(prior.info, held) || prior.native.Device == native.Device && prior.native.Index == native.Index {
+				return files, errors.New("build artifact roles alias the same original object")
+			}
+		}
+		files[len(files)-1].info = held
+		files[len(files)-1].native = native
+		if err = currentCanonicalEntryBuildFileV1(root, files[len(files)-1]); err != nil {
+			return files, err
+		}
+	}
+	return files, nil
+}
+
 // Check reads the complete settled build output through retained ordinary files
 // and the same strict PE/VERSIONINFO/Comments/identity/registry codecs used by
 // native admission. It never substitutes for a native Windows owner or silently
@@ -104,43 +145,9 @@ func CheckWindowsCanonicalEntryBuildV1(ctx context.Context, entryPath string, bi
 		}
 		retErr = errors.Join(retErr, root.Close())
 	}()
-	for _, relative := range []string{WindowsCanonicalEntryRelativePathV1, WindowsCanonicalProductRelativePathV1, WindowsCanonicalIdentityRelativePathV1} {
-		if err = ctx.Err(); err != nil {
-			return observation, err
-		}
-		before, infoErr := publisherSourceRelativeInfo(root, relative)
-		if infoErr != nil {
-			return observation, infoErr
-		}
-		if !before.Mode().IsRegular() || publisherSourceReparse(before) {
-			return observation, errors.New("build artifact is not an ordinary regular file")
-		}
-		f, openErr := root.Open(filepath.FromSlash(relative))
-		if openErr != nil {
-			return observation, openErr
-		}
-		files = append(files, canonicalEntryBuildFileV1{file: f, relative: relative})
-		held, statErr := f.Stat()
-		if statErr != nil {
-			return observation, statErr
-		}
-		if !held.Mode().IsRegular() || !os.SameFile(before, held) || held.Size() != before.Size() {
-			return observation, errors.New("build artifact changed during original open")
-		}
-		native, nativeErr := observeCanonicalEntryBuildFileV1(f)
-		if nativeErr != nil {
-			return observation, nativeErr
-		}
-		for _, prior := range files[:len(files)-1] {
-			if os.SameFile(prior.info, held) || prior.native.Device == native.Device && prior.native.Index == native.Index {
-				return observation, errors.New("build artifact roles alias the same original object")
-			}
-		}
-		files[len(files)-1].info = held
-		files[len(files)-1].native = native
-		if err = currentCanonicalEntryBuildFileV1(root, files[len(files)-1]); err != nil {
-			return observation, err
-		}
+	files, err = openCanonicalEntryBuildFiles(ctx, root, WindowsCanonicalEntryRelativePathV1, WindowsCanonicalProductRelativePathV1, WindowsCanonicalIdentityRelativePathV1)
+	if err != nil {
+		return observation, err
 	}
 	if err = publisherSourceRootUnchanged(root, rootPath, rootInfo); err != nil {
 		return observation, err
@@ -161,23 +168,15 @@ func CheckWindowsCanonicalEntryBuildV1(ctx context.Context, entryPath string, bi
 	if err != nil {
 		return observation, err
 	}
-	existingComments, actualBinding, err := ParseWindowsCanonicalEntryCommentsV1(metadata.Comments)
+	comments, err := checkWindowsLegacyProductBuildComments(metadata.Comments)
 	if err != nil {
 		return observation, err
 	}
-	if actualBinding != binding {
-		return observation, errors.New("build Product differs from original issued entry binding")
+	if !comments.hasEntry {
+		return observation, ErrWindowsCanonicalEntryBindingMissing
 	}
-	// Source epoch is optional build DATA. Namespace presence, rather than an
-	// error-message match, distinguishes absence from malformed metadata. The
-	// canonical suffix was already strictly decoded once above; present source
-	// metadata must pass its existing strict owner without text normalization.
-	var epoch string
-	if strings.Contains(strings.ToLower(existingComments), "mcphub-source-") {
-		epoch, err = parsePublisherSourceComments(existingComments)
-		if err != nil {
-			return observation, err
-		}
+	if comments.entry != binding {
+		return observation, errors.New("build Product differs from original issued entry binding")
 	}
 	entryHash, err := hashCanonicalEntryBuildFileV1(ctx, entry)
 	if err != nil {
@@ -221,5 +220,5 @@ func CheckWindowsCanonicalEntryBuildV1(ctx context.Context, entryPath string, bi
 	if err = ctx.Err(); err != nil {
 		return observation, err
 	}
-	return WindowsCanonicalEntryBuildObservationV1{snapshot, epoch}, nil
+	return WindowsCanonicalEntryBuildObservationV1{snapshot, comments.sourceEpoch}, nil
 }

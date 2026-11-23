@@ -59,6 +59,38 @@ func AcquireUpgradeFence(ctx context.Context, stateDir string) (*UpgradeFenceLea
 	}
 }
 
+// AcquireUpgradeFenceBound borrows the same fence leaf and byte range from
+// the held native namespace. An attempted bound acquisition cannot fall back.
+func AcquireUpgradeFenceBound(ctx context.Context, stateDir string, namespace *WindowsProductStateNamespace) (*UpgradeFenceLease, error) {
+	if ctx == nil {
+		return nil, errors.New("upgrade fence context is nil")
+	}
+	lockPath := filepath.Join(stateDir, UpgradeTransactionLockFileLeaf)
+	option, err := namespace.BoundLockOption(ctx, lockPath, UpgradeTransactionLockFileLeaf)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := acquireLedgeredObservedLeaf(ctx, lockPath, lockPath, option)
+	if err != nil {
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			namespace.RetainAfterUnconfirmedRelease(err)
+		}
+		return nil, err
+	}
+	release := func() error {
+		closeResult, err := owner.CloseObserved()
+		if err == nil {
+			err = closeResult.Validate(owner)
+		}
+		namespace.RetainAfterUnconfirmedRelease(err)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, release())
+	}
+	return &UpgradeFenceLease{release: release}, nil
+}
+
 // TryAcquireUpgradeFence attempts the fence once without waiting. A busy fence
 // returns (nil, false, nil); an unverifiable or poisoned leaf returns an error.
 func TryAcquireUpgradeFence(ctx context.Context, stateDir string) (*UpgradeFenceLease, bool, error) {

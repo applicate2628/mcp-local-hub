@@ -68,9 +68,50 @@ func AcquireStateFileObservedLease(ctx context.Context, statePath string) (*Stat
 	return acquireStateFileObservedLease(ctx, statePath)
 }
 
+// TryAcquireStateFileObservedLease uses the existing leaf ledger and one
+// nonwaiting native attempt. A returned partial lease still owns its close.
+func TryAcquireStateFileObservedLease(ctx context.Context, statePath string) (*StateFileObservedLease, error) {
+	path, err := observedStateFileLeasePath(statePath)
+	if err != nil {
+		return nil, err
+	}
+	return tryAcquireLedgeredObservedLeaf(ctx, path, supervisorIntentLockPath(path))
+}
+
+func tryAcquireLedgeredObservedLeaf(ctx context.Context, path, lockPath string, opts ...flock.Option) (*StateFileObservedLease, error) {
+	if ctx == nil {
+		return nil, errors.New("original lease acquisition context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	gate := ledgeredLeafGate(lockPath)
+	if !gate.TryLock() {
+		return nil, errors.New("original state lease is busy")
+	}
+	if err := unconfirmedLockRelease(lockPath); err != nil {
+		gate.Unlock()
+		return nil, err
+	}
+	lease := &StateFileObservedLease{issuer: &stateFileLeaseIssuer{marker: 1}, path: path,
+		lockPath: lockPath, owner: flock.New(lockPath, opts...), gateRelease: gate.Unlock}
+	var err error
+	lease.acquisition, err = lease.owner.TryLockObserved(ctx)
+	if !lease.acquisition.Attempted {
+		// Nothing native was acquired. Releasing the local gate is not a
+		// failed native close and must not poison the shared ledger.
+		gate.Unlock()
+		return nil, errors.Join(err, errors.New("original state lease acquisition preempted"))
+	}
+	if err != nil || !lease.acquisition.Returned || !lease.acquisition.Held || lease.acquisition.Generation == 0 {
+		return lease, errors.Join(err, errors.New("original state lease acquisition incomplete"))
+	}
+	return lease, nil
+}
+
 // Acquisition shares the legacy ledger's gate and poison entry. Context
 // cancellation applies to both metadata contention and the original flock.
-func acquireStateFileObservedLease(ctx context.Context, statePath string) (*StateFileObservedLease, error) {
+func acquireStateFileObservedLease(ctx context.Context, statePath string, opts ...flock.Option) (*StateFileObservedLease, error) {
 	if ctx == nil {
 		return nil, errors.New("original lease acquisition context required")
 	}
@@ -81,7 +122,12 @@ func acquireStateFileObservedLease(ctx context.Context, statePath string) (*Stat
 	if err != nil {
 		return nil, err
 	}
-	lockPath := supervisorIntentLockPath(path)
+	return acquireLedgeredObservedLeaf(ctx, path, supervisorIntentLockPath(path), opts...)
+}
+
+// acquireLedgeredObservedLeaf owns the original descriptor, ledger gate and
+// observed release. State-file callers additionally bind the borrowed path.
+func acquireLedgeredObservedLeaf(ctx context.Context, path, lockPath string, opts ...flock.Option) (*StateFileObservedLease, error) {
 	gate := ledgeredLeafGate(lockPath)
 	for !gate.TryLock() {
 		timer := time.NewTimer(stateFileLockPollInterval)
@@ -100,7 +146,8 @@ func acquireStateFileObservedLease(ctx context.Context, statePath string) (*Stat
 		gate.Unlock()
 		return nil, err
 	}
-	lease := &StateFileObservedLease{issuer: &stateFileLeaseIssuer{marker: 1}, path: path, lockPath: lockPath, owner: flock.New(lockPath), gateRelease: gate.Unlock}
+	lease := &StateFileObservedLease{issuer: &stateFileLeaseIssuer{marker: 1}, path: path, lockPath: lockPath, owner: flock.New(lockPath, opts...), gateRelease: gate.Unlock}
+	var err error
 	lease.acquisition, err = lease.owner.TryLockContextObserved(ctx, stateFileLockPollInterval)
 	if err != nil || !lease.acquisition.Attempted || !lease.acquisition.Returned || !lease.acquisition.Held {
 		_, closeErr := lease.CloseObserved()
@@ -119,6 +166,10 @@ func (lease *StateFileObservedLease) AcquisitionObservation() flock.AcquisitionO
 }
 
 func (lease *StateFileObservedLease) validateHeldLocked(ctx context.Context, path string) error {
+	return lease.validateHeldAtLockPathLocked(ctx, path, supervisorIntentLockPath(path))
+}
+
+func (lease *StateFileObservedLease) validateHeldAtLockPathLocked(ctx context.Context, path, lockPath string) error {
 	if ctx == nil {
 		return errors.New("original lease borrower context required")
 	}
@@ -129,7 +180,7 @@ func (lease *StateFileObservedLease) validateHeldLocked(ctx context.Context, pat
 	if err != nil {
 		return err
 	}
-	if lease.issuer == nil || lease.owner == nil || canonical != lease.path || supervisorIntentLockPath(canonical) != lease.lockPath || lease.acquisition.Generation == 0 || !lease.acquisition.Attempted || !lease.acquisition.Returned || !lease.acquisition.Held || lease.acquisition.Error != nil || lease.closeRequested || lease.closeObservation != nil || !lease.owner.Locked() {
+	if lease.issuer == nil || lease.owner == nil || canonical != lease.path || lockPath != lease.lockPath || lease.acquisition.Generation == 0 || !lease.acquisition.Attempted || !lease.acquisition.Returned || !lease.acquisition.Held || lease.acquisition.Error != nil || lease.closeRequested || lease.closeObservation != nil || !lease.owner.Locked() {
 		return errors.New("original observed lease is not held for this state path")
 	}
 	return unconfirmedLockRelease(lease.lockPath)

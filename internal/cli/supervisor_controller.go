@@ -44,10 +44,11 @@ import (
 
 // supervisorController is the long-lived runtime owner.
 type supervisorController struct {
-	intentCache *IntentCache
-	eventLoop   *api.EventLoop
-	tracker     *DaemonRuntimeTracker
-	smStates    sync.Map // taskName -> api.SMState
+	routeAdmission *routeAdmissionReservation // event-loop only
+	intentCache    *IntentCache
+	eventLoop      *api.EventLoop
+	tracker        *DaemonRuntimeTracker
+	smStates       sync.Map // taskName -> api.SMState
 	// respawnArmEpoch is a single controller-wide, monotonic, never-reset backoff-arm
 	// epoch. respawnArmGen maps each task -> the LATEST epoch it armed at, for the
 	// fire-time compare. armRespawnBackoffTimer takes the next epoch
@@ -1340,6 +1341,7 @@ func (c *supervisorController) applyReapSnapshot(previous map[string]struct{}, u
 	if c == nil || c.intentCache == nil {
 		return nil
 	}
+	c.checkRouteAdmissionIntent(updated, stops)
 
 	// Step 1: re-diff against the CURRENT cache at handling time (#614). `next` is
 	// the authoritative present-set from the fresh snapshot; `current` is what the
@@ -2896,6 +2898,11 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 			c.handleStopBatchOnLoop(request)
 		}
 		return
+	case evRouteActivationAdmission:
+		if request, ok := ev.Body[routeAdmissionRequestKey].(routeAdmissionLoopRequest); ok {
+			c.handleRouteAdmissionOnLoop(request)
+		}
+		return
 	case evStopSettlementRecovery:
 		c.stopSettlementRecoveryArmed.Delete(canonicalSupervisorTaskName(ev.TaskName))
 		target, ok := c.recoverStopReceiptOnLoop(ev.TaskName)
@@ -3315,6 +3322,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// took effect. The SM transition matched (matched=true), so smStates
 	// reflects the new state immediately; persistence is a separate axis.
 	if currentState == api.StRunning && newState != api.StRunning {
+		c.conflictRouteAdmission(ev.TaskName)
 		// FIX-5b: a daemon leaving continuous StRunning restarts its stabilize-dwell
 		// clock HERE, on the transition — not only when a later dwell tick samples a
 		// non-Running state. This closes the leave-and-reenter-between-ticks hole that
@@ -3505,6 +3513,9 @@ func (c *supervisorController) executeSideEffect(
 ) error {
 	if c == nil || d == nil {
 		return nil
+	}
+	if strings.Contains(side, "create-process") || strings.Contains(side, "issue terminate") {
+		c.conflictRouteAdmission(d.TaskName)
 	}
 
 	switch newState {

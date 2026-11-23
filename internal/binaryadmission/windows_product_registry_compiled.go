@@ -28,7 +28,7 @@ func parseCompiledWindowsProductRegistry(encoded string) (WindowsProductRegistry
 	if err != nil || base64.StdEncoding.EncodeToString(raw) != encoded {
 		return zero, errors.Join(errors.New("compiled current Windows Product registry base64 is invalid"), err)
 	}
-	registry, err := parseWindowsProductRegistryV4(raw)
+	registry, err := ParseWindowsProductRegistryV4(raw)
 	if err != nil {
 		return zero, err
 	}

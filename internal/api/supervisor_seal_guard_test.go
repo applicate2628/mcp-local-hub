@@ -139,10 +139,11 @@ func sealAssignmentsBeforeRun(t *testing.T, fset *token.FileSet) map[string]bool
 		if !ok || fd.Name.Name != "TestMain" || fd.Body == nil {
 			continue
 		}
-		for _, stmt := range fd.Body.List {
-			if isMRunAssign(stmt) {
-				break // everything after m.Run() is a restore, not a seal
-			}
+		boundary, err := testMainRunBoundary(fd.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range fd.Body.List[:boundary] {
 			as, ok := stmt.(*ast.AssignStmt)
 			if !ok {
 				continue
@@ -153,8 +154,44 @@ func sealAssignmentsBeforeRun(t *testing.T, fset *token.FileSet) map[string]bool
 				}
 			}
 		}
+		return sealed
 	}
-	return sealed
+	t.Fatal("seal guard could not find TestMain")
+	return nil
+}
+
+// testMainRunBoundary counts all references to m.Run, including nested
+// calls and method values. The single receiver use also rules out aliasing or
+// handing the test runner to another function.
+func testMainRunBoundary(body *ast.BlockStmt) (int, error) {
+	references, receiverUses := 0, 0
+	ast.Inspect(body, func(node ast.Node) bool {
+		switch found := node.(type) {
+		case *ast.SelectorExpr:
+			if isTestMainRunMethod(found) {
+				references++
+			}
+		case *ast.Ident:
+			if found.Name == "m" {
+				receiverUses++
+			}
+		}
+		return true
+	})
+	if references != 1 || receiverUses != 1 {
+		return 0, fmt.Errorf("TestMain must use m only for one m.Run call, found %d references and %d receiver uses", references, receiverUses)
+	}
+	for index, stmt := range body.List {
+		if isMRunAssign(stmt) {
+			return index, nil
+		}
+	}
+	return 0, fmt.Errorf("TestMain must invoke m.Run in one top-level assignment")
+}
+
+func isTestMainRunMethod(sel *ast.SelectorExpr) bool {
+	id, ok := ast.Unparen(sel.X).(*ast.Ident)
+	return ok && id.Name == "m" && sel.Sel.Name == "Run"
 }
 
 // isMRunAssign reports whether a statement is `... = m.Run()` — the boundary
@@ -165,18 +202,42 @@ func isMRunAssign(stmt ast.Stmt) bool {
 		return false
 	}
 	for _, rhs := range as.Rhs {
-		call, ok := rhs.(*ast.CallExpr)
+		call, ok := ast.Unparen(rhs).(*ast.CallExpr)
 		if !ok {
 			continue
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if ok && sel.Sel.Name == "Run" {
-			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "m" {
-				return true
-			}
+		sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+		if ok && isTestMainRunMethod(sel) {
+			return true
 		}
 	}
 	return false
+}
+
+func TestSealGuardRequiresSingleTopLevelTestMainRun(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		reject     bool
+	}{
+		{name: "direct", body: "seal = nil; code := m.Run(); _ = code"},
+		{name: "nested before", body: "if marker { m.Run() }; code := m.Run(); _ = code", reject: true},
+		{name: "nested after", body: "code := m.Run(); _ = code; func() { (m.Run)() }()", reject: true},
+		{name: "nested only", body: "if marker { code := m.Run(); _ = code }", reject: true},
+		{name: "stored method", body: "run := m.Run; code := m.Run(); _, _ = run, code", reject: true},
+		{name: "aliased receiver", body: "runner := m; if marker { runner.Run() }; code := m.Run(); _ = code", reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := parser.ParseFile(token.NewFileSet(), "fixture.go", "package api; func TestMain(m *testing.M) { "+tc.body+" }", parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := f.Decls[0].(*ast.FuncDecl).Body
+			index, err := testMainRunBoundary(body)
+			if (err != nil) != tc.reject || (err == nil && index != 1) {
+				t.Fatalf("TestMain run boundary=%d error=%v, want rejected=%v", index, err, tc.reject)
+			}
+		})
+	}
 }
 
 // referencesLiveSeamSink reports whether an expression references a live-seam sink

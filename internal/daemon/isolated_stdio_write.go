@@ -88,14 +88,18 @@ func (s *isolatedStdioSession) beginPOST(w http.ResponseWriter, r *http.Request,
 		http.Error(w, "unknown session id", http.StatusNotFound)
 		return nil, false
 	}
-	op := s.operationLocked(id)
+	isInitializeID := id == s.initializeID
+	var op *isolatedStdioOperation
+	if !isInitializeID {
+		op = s.operationLocked(id)
+	}
 	switch {
+	case isInitializeID || op != nil && op.seen:
+		p.mu.Unlock()
+		http.Error(w, "request id already used", http.StatusBadRequest)
 	case op == nil:
 		p.mu.Unlock()
 		http.Error(w, "unknown session id", http.StatusNotFound)
-	case op.seen:
-		p.mu.Unlock()
-		http.Error(w, "request id already used", http.StatusBadRequest)
 	default:
 		op.seen = true
 		canceled := op.canceled
@@ -131,7 +135,7 @@ func (s *isolatedStdioSession) cancelPOST(w http.ResponseWriter, r *http.Request
 	}
 	var childID int64
 	p.mu.Lock()
-	if s.activeLocked() && p.allowed(r, s.role) {
+	if s.activeLocked() && p.allowed(r, s.role) && id != s.initializeID {
 		op := s.operationLocked(id)
 		if op != nil && !op.canceled {
 			op.canceled = true

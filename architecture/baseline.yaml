@@ -12505,20 +12505,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 1
-    - fingerprint: 66aa2c139d7a9a8f63aeb09863c60706eba8cf8eea8d13a6c5629c2a3210c485
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestLister.ManifestList
-        line: 320
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 66b66a5e3bb7cf7a1c85c27230d7fa7b250761e194044ca2960976444575642b
       kind: history_comment
       location:
@@ -12709,20 +12695,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 2
-    - fingerprint: 6842ac72d8e1be0944e78e5d14aa1e76a7f0aacda6a20b9696989a121a2aff6d
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestPresence.ManifestExists
-        line: 306
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 686cc37e556e456741ca78e65f6d43a14bc546c30d0ff8df1cbb7eebc4e26805
       kind: history_comment
       location:
@@ -16869,20 +16841,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: GUI handlers become thin adapters over process-scoped application services.
-    - fingerprint: 8a177f66eab2784270b7c113f4d1f0b00542b471d38ea1266f2abb0a0d848a7d
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestValidator.ManifestValidate
-        line: 293
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 8a4082c03e88ec2f5890b1422fa212d56a88fbba304dd6a587ebbbf5422edc2a
       kind: mutable_global
       location:
@@ -22845,20 +22803,6 @@ entries:
       work_package: WP-11C
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
-    - fingerprint: bae8c75bbf3a838740cd10b9043bdf6da334baff95d4d34d81dcf6f5c6e8aa68
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestEditor.ManifestEditWithHash
-        line: 313
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: baec184ff5b9dcc1ebd761aba8f2d72619b16d7cda0e487f1b5577c83336f3ef
       kind: mutable_global
       location:
@@ -23407,20 +23351,6 @@ entries:
         path: internal/gui/adopt.go
         symbol: buildGUIAdoptPlan
         line: 130
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: beb70d485bbe7b0e16fc31b848e2dfd634eae4e0a921e4304c9b7bfd24a1eeb2
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestDeleter.ManifestDelete
-        line: 327
       evidence: mcp-local-hub/internal/api.NewAPI
       metric: 1
       message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
@@ -24069,20 +23999,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
       max_metric: 3
-    - fingerprint: c68604a1a100ec4a66f31c53660c3cf424d50412c383d8398a3ca9e296ef6666
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestCreator.ManifestCreate
-        line: 285
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: c6a0ef2ecdc1efb3d9c4e08198d48b85a1b6393f5d7c29184f340c64638e970d
       kind: api_construction
       location:
@@ -30148,20 +30064,6 @@ entries:
       work_package: WP-11B
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
-      max_metric: 1
-    - fingerprint: f5b25fba0b9f9d9446daad4ff897e9dab5bb4afab4482262483840bc08d98926
-      kind: api_construction
-      location:
-        path: internal/gui/server.go
-        symbol: realManifestGetter.ManifestGetWithHash
-        line: 300
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
       max_metric: 1
     - fingerprint: f5c306bfc3e038f2247925bb6a3f2bb3814198f42d50baba93897ee3391e7fda
       kind: file_budget

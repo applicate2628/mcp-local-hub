@@ -107,6 +107,8 @@ func formatSIDObservedWithOperations(sid *windows.SID, ops sidFormatOperations) 
 	if err != nil {
 		primary("SID_FORMAT_CONVERSION_FAILED", err)
 		if text != nil {
+			o.allocation = uintptr(unsafe.Pointer(text))
+			o.allocationUncertain = true
 			primary("SID_FORMAT_PARTIAL_ALLOCATION_UNKNOWN", errors.New("failed conversion cannot qualify partial output allocation for free"))
 		}
 		return

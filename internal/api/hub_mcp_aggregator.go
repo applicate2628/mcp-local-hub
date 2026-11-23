@@ -89,6 +89,8 @@ type daemonHTTPError struct {
 func (e *daemonHTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
 
 var errHubSessionDeletedDuringReinit = errors.New("hub session deleted during daemon reinit")
+var errHubDaemonAdmission = errors.New("daemon endpoint unavailable")
+var errHubDaemonRedirect = errors.New("daemon redirect failed")
 
 // isRetriableTransportFailure reports whether err is a TRANSPORT-level failure
 // where the request demonstrably never reached the daemon — connection refused
@@ -98,7 +100,7 @@ var errHubSessionDeletedDuringReinit = errors.New("hub session deleted during da
 //   - timeouts / context deadline (ambiguous — the request may have landed),
 //   - any other error (conservative: never retry an unclassified failure).
 func isRetriableTransportFailure(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, errHubDaemonAdmission) || errors.Is(err, errHubDaemonRedirect) {
 		return false
 	}
 	var httpErr *daemonHTTPError
@@ -192,7 +194,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			sid, negotiated, err := initializeDaemonSession(ctx, ref, protoVer)
+			sid, negotiated, err := initializeDaemonSession(ctx, hubDaemonRequest{ref: ref, scope: sess.ScopeKey}, protoVer)
 			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
 	}
@@ -207,6 +209,10 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		sess.DaemonProtoVer = make(map[canonicalDaemonRef]string)
 	}
 	for _, r := range results {
+		if r.err == nil && (sess.deleteStarted || !LoadResolverSnapshot().allowsOrdinaryBinding(sess.ScopeKey, r.ref)) {
+			deleteUncachedDaemonSession(r.ref, r.sessionID, r.negotiatedProto)
+			r.err = errHubDaemonAdmission
+		}
 		if r.err != nil {
 			sess.InitFailures = append(sess.InitFailures, DaemonFailure{
 				Server: r.ref.Server,
@@ -228,9 +234,9 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 	return body, nil
 }
 
-func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoVer string) (sid, negotiated string, err error) {
+func initializeDaemonSession(ctx context.Context, target hubDaemonRequest, protoVer string) (sid, negotiated string, err error) {
 	initCtx, initCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-	sid, negotiated, err = postInitialize(initCtx, ref, protoVer)
+	sid, negotiated, err = postInitialize(initCtx, target, protoVer)
 	initCancel()
 	if err != nil {
 		return "", "", err
@@ -241,7 +247,7 @@ func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoV
 	// that cannot be used; delete it with the negotiated protocol header and
 	// report initialize-stage failure instead of caching a half-initialized SID.
 	notifyCtx, notifyCancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
-	notifyErr := postInitialized(notifyCtx, ref, sid, negotiated)
+	notifyErr := postInitialized(notifyCtx, target, sid, negotiated)
 	notifyCancel()
 	if notifyErr == nil {
 		return sid, negotiated, nil
@@ -251,11 +257,7 @@ func initializeDaemonSession(ctx context.Context, ref canonicalDaemonRef, protoV
 	// request's response on a background-ctx timeout. The DELETE runs on a
 	// detached goroutine with its own bounded ctx (independent of the caller's
 	// ctx, which is about to return) — best-effort by contract.
-	go func(ref canonicalDaemonRef, sid, negotiated string) {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
-		defer cleanupCancel()
-		_ = bestEffortDeleteDaemonSession(cleanupCtx, ref, sid, negotiated)
-	}(ref, sid, negotiated)
+	deleteUncachedDaemonSession(target.ref, sid, negotiated)
 	return "", "", fmt.Errorf("notifications/initialized: %w", notifyErr)
 }
 
@@ -324,14 +326,17 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		allowEmptyKnown = strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) && liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
 	}
 
-	results := fanOutToolsList(ctx, successes)
+	results := fanOutToolsList(ctx, sess.ScopeKey, successes)
 	// Re-read only the visibility filter from the latest published resolver
 	// snapshot. The fan-out bindings above stay from the captured inputs, but a
 	// tools_hidden republish only narrows what enters result.tools and RouteMap;
 	// it never routes a tool to a daemon that was not already queried.
-	hiddenSnapshot := current
-	if live := LoadResolverSnapshot(); live != nil {
-		hiddenSnapshot = live
+	hiddenSnapshot := LoadResolverSnapshot()
+	for i := range results {
+		if results[i].err == nil && !hiddenSnapshot.allowsOrdinaryBinding(sess.ScopeKey, results[i].ref) {
+			results[i].err = errHubDaemonAdmission
+			results[i].tools = nil
+		}
 	}
 	hiddenSet := buildHiddenToolSet(snapshotHiddenToolsForScope(hiddenSnapshot, sess.ScopeKey))
 	// hiddenSnapshot is the freshest published resolver snapshot (or `current`
@@ -473,7 +478,7 @@ type daemonInitState struct {
 // Each successes entry carries the daemon's negotiated MCP protocol
 // version (codex bot r17 P1 closure on PR #157); postToolsList uses
 // it as the MCP-Protocol-Version header.
-func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemonInitState) []listResult {
+func fanOutToolsList(ctx context.Context, scope string, successes map[canonicalDaemonRef]daemonInitState) []listResult {
 	results := make([]listResult, 0, len(successes))
 	var resultsMu sync.Mutex
 
@@ -488,7 +493,7 @@ func fanOutToolsList(ctx context.Context, successes map[canonicalDaemonRef]daemo
 			defer func() { <-sem }()
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonListTimeout)
 			defer cancel()
-			tools, err := postToolsList(subCtx, ref, state.SessionID, state.ProtocolVersion)
+			tools, err := postToolsList(subCtx, hubDaemonRequest{ref: ref, scope: scope}, state.SessionID, state.ProtocolVersion)
 			r := listResult{ref: ref, err: err}
 			if err == nil {
 				r.tools = nameSpaceTools(ref, tools)
@@ -868,7 +873,7 @@ func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, p
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
 		liveRef, stillBound := liveDaemonBinding(current, sess.ScopeKey, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
-		if !stillBound {
+		if !stillBound || !current.allowsOrdinaryEndpoint(liveRef) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -924,8 +929,10 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// AND postToolsCall below target the daemon the sid was actually minted for —
 	// otherwise a fresh moved-port sid would be dispatched to the stale ref.Port
 	// (Codex #500 r6 P2). A same-port daemon resolves back to the original port.
-	var resolvedPort int
-	daemonSID, daemonProto, resolvedPort = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	daemonSID, daemonProto, resolvedPort, err := sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	if err != nil {
+		return buildJSONRPCError(clientReqID, -32000, "tools/call failed: "+err.Error(), nil)
+	}
 	ref.Port = resolvedPort
 
 	// Build the rewritten body. params.name → RawName.
@@ -975,7 +982,7 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// codex bot r17 P1 closure on PR #157: tools/call uses the
 	// DAEMON-NEGOTIATED protocol version, not the session-level
 	// requested one.
-	body, err := postToolsCall(subCtx, ref, daemonSID, daemonProto, daemonReqID, rewrittenParams)
+	body, err := postToolsCall(subCtx, hubDaemonRequest{ref: canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}, scope: sess.ScopeKey}, daemonSID, daemonProto, daemonReqID, rewrittenParams)
 	if err != nil {
 		// Hot-swap (a) self-heal: ONLY on a transport failure (the daemon was
 		// restarted out from under the cached session — the request never
@@ -1006,8 +1013,8 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 // response; (nil, false) when the re-init or the retry itself failed (the caller
 // then returns the original -32000). Hard-capped at one attempt; never recurses.
 func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
-	initState, port, ok := s.reinitDaemonSession(ctx, ref)
-	if !ok {
+	initState, port, err := s.reinitDaemonSession(ctx, ref)
+	if err != nil {
 		return nil, false // daemon still down → caller returns the original -32000
 	}
 	sid, proto := initState.SessionID, initState.ProtocolVersion
@@ -1028,9 +1035,8 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 		StartedAt:       time.Now(),
 	})
 
-	retryRef := ref
-	retryRef.Port = port
-	body, callErr := postToolsCall(ctx, retryRef, sid, proto, retryReqID, params)
+	target := hubDaemonRequest{ref: canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}, scope: s.ScopeKey}
+	body, callErr := postToolsCall(ctx, target, sid, proto, retryReqID, params)
 	if callErr != nil {
 		return nil, false // hard count 1 — never retry again
 	}
@@ -1049,9 +1055,9 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // step. See the loop below and work-items/decisions/2026-07-04-generation-
 // stamped-hub-cache.md.
 
-func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string, int) {
+func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string, int, error) {
 	if _, ok := s.stalePortStateFor(ref.Port); !ok {
-		return daemonSID, daemonProto, ref.Port // port never restarted → the caller's sid is current
+		return daemonSID, daemonProto, ref.Port, nil // port never restarted → the caller's sid is current
 	}
 
 	// Freshness is a monotone generation compare, safe WITHOUT holding a lock
@@ -1112,7 +1118,7 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 			if freshProto == "" {
 				freshProto = sessProto
 			}
-			return freshSID, freshProto, port
+			return freshSID, freshProto, port, nil
 		}
 
 		if attempt >= maxProactiveReinitAttempts {
@@ -1127,12 +1133,15 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 				if freshProto == "" {
 					freshProto = sessProto
 				}
-				return freshSID, freshProto, port
+				return freshSID, freshProto, port, nil
 			}
 			break
 		}
 
-		if _, _, ok := s.reinitDaemonSession(ctx, ref); !ok {
+		if _, _, err := s.reinitDaemonSession(ctx, ref); err != nil {
+			if errors.Is(err, errHubDaemonAdmission) {
+				return "", "", 0, errHubDaemonAdmission
+			}
 			// reinit failed → dispatch proceeds with the caller's cached sid and the
 			// reactive selfHealRetry path backstops it.
 			//
@@ -1166,13 +1175,13 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
 				"server": ref.Server, "daemon": ref.Daemon, "port": port,
 			})
-			return daemonSID, daemonProto, ref.Port
+			return daemonSID, daemonProto, ref.Port, nil
 		}
 	}
 	// Exhaustion break (no cached sid after the reinit storm): same invariant —
 	// the caller's old sid is returned with its own minting port (ref.Port), not
 	// the last-resolved port.
-	return daemonSID, daemonProto, ref.Port
+	return daemonSID, daemonProto, ref.Port, nil
 }
 
 // maxProactiveReinitAttempts bounds refreshStalePortBeforeDispatch's reuse/reinit
@@ -1187,17 +1196,17 @@ const maxProactiveReinitAttempts = 3
 // session mu (the same writer discipline AggregateInitialize uses). The
 // initialize is coalesced per (Server,Daemon) via singleflight so a mass restart
 // affecting many sessions/calls cannot trigger an init-storm. Returns the fresh
-// (sid, proto, port, true), or ("","",0,false) if the daemon is still
-// unreachable. SHARED by the (a) failure-driven self-heal (selfHealRetry) and the
+// session and its port, or the original error. Shared by failure-driven
+// self-heal (selfHealRetry) and the
 // (b) event-driven proactive re-init (the supervisor-state restart watcher).
-func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (daemonInitState, int, bool) {
+func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (daemonInitState, int, error) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
 	state, err := s.reinitializeDaemonBinding(ctx, daemonRef)
 	if err != nil {
-		return daemonInitState{}, 0, false
+		return daemonInitState{}, 0, err
 	}
-	return state, port, true
+	return state, port, nil
 }
 
 func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitState, bool) {
@@ -1242,7 +1251,7 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 			flightGen = st.generation
 			st.mu.Unlock()
 		}
-		sid, negotiated, err := initializeDaemonSession(context.Background(), daemonRef, protoVer)
+		sid, negotiated, err := initializeDaemonSession(context.Background(), hubDaemonRequest{ref: daemonRef, scope: s.ScopeKey}, protoVer)
 		if err != nil {
 			return nil, err
 		}
@@ -1254,10 +1263,10 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 		// also removes the need for a detached-drain goroutine: the handshake always
 		// caches, so a completed reinit never orphans a session. If a session DELETE
 		// is in progress the result is not cacheable → best-effort DELETE it.
-		proto, cached := s.cacheReinitResult(daemonRef, sid, negotiated, protoVer, flightGen)
-		if !cached {
-			s.deleteUncachedReinitResult(daemonRef, sid, proto)
-			return nil, errHubSessionDeletedDuringReinit
+		proto, cacheErr := s.cacheReinitResult(daemonRef, sid, negotiated, protoVer, flightGen)
+		if cacheErr != nil {
+			deleteUncachedDaemonSession(daemonRef, sid, proto)
+			return nil, cacheErr
 		}
 		return initResult{sid: sid, proto: proto}, nil
 	})
@@ -1290,7 +1299,7 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 // not cacheable: the caller must best-effort DELETE it so the DELETE intent holds.
 // Falls back to the session-requested protoVer when the daemon emitted no
 // negotiated version. Returns the effective proto and whether it was cached.
-func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, flightGen uint64) (string, bool) {
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, flightGen uint64) (string, error) {
 	proto := negotiated
 	if proto == "" {
 		proto = protoVer
@@ -1299,7 +1308,11 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	s.mu.Lock()
 	if s.deleteStarted {
 		s.mu.Unlock()
-		return proto, false
+		return proto, errHubSessionDeletedDuringReinit
+	}
+	if !LoadResolverSnapshot().allowsOrdinaryBinding(s.ScopeKey, daemonRef) {
+		s.mu.Unlock()
+		return proto, errHubDaemonAdmission
 	}
 	if s.InitSuccesses == nil {
 		s.InitSuccesses = map[canonicalDaemonRef]string{}
@@ -1331,14 +1344,14 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	return proto, true
+	return proto, nil
 }
 
 func sameDaemonIdentity(a, b canonicalDaemonRef) bool {
 	return a.Server == b.Server && a.Daemon == b.Daemon
 }
 
-func (s *hubSession) deleteUncachedReinitResult(daemonRef canonicalDaemonRef, sid, proto string) {
+func deleteUncachedDaemonSession(daemonRef canonicalDaemonRef, sid, proto string) {
 	go func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
 		defer cleanupCancel()
@@ -1502,8 +1515,72 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
-	raw, _, hdr, err := doDaemonPostSized(ctx, port, body, daemonSID, protoVer, timeout, expectResponse)
+type hubDaemonRequest struct {
+	ref      canonicalDaemonRef
+	scope    string
+	captured bool // cancellation and retirement keep their exact owned endpoint
+}
+
+func (t hubDaemonRequest) allowed() bool {
+	snapshot := LoadResolverSnapshot()
+	if t.captured {
+		return snapshot.allowsOrdinaryEndpoint(t.ref)
+	}
+	return snapshot.allowsOrdinaryBinding(t.scope, t.ref)
+}
+
+type hubDaemonTransportOutcome uint8
+
+const (
+	hubDaemonRedirectSeen hubDaemonTransportOutcome = iota + 1
+	hubDaemonAdmissionRefused
+)
+
+// One transport instance belongs to one Client.Do call and its serial hops.
+type hubDaemonTransport struct {
+	target    hubDaemonRequest
+	scheme    string
+	host      string
+	transport http.RoundTripper
+	outcome   hubDaemonTransportOutcome
+}
+
+func (t *hubDaemonTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != t.scheme || req.URL.Host != t.host || req.URL.User != nil || !t.target.allowed() {
+		t.outcome = hubDaemonAdmissionRefused
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, errHubDaemonAdmission
+	}
+	resp, err := t.transport.RoundTrip(req)
+	// Observe the response before the Client examines Location. It owns
+	// redirect eligibility and count, including failures before the next hop.
+	if err == nil && resp != nil && resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.Header.Get("Location") != "" {
+		t.outcome = hubDaemonRedirectSeen
+	}
+	return resp, err
+}
+
+// The original Client policy controls timeouts and redirect count. Each actual
+// hop still needs current authority at the same origin before transport.
+func doHubDaemonRequest(req *http.Request, target hubDaemonRequest, timeout time.Duration) (*http.Response, error) {
+	transport := &hubDaemonTransport{target: target, scheme: req.URL.Scheme, host: req.URL.Host, transport: http.DefaultTransport}
+	client := &http.Client{Timeout: timeout, Transport: transport}
+	resp, err := client.Do(req)
+	switch {
+	case transport.outcome == hubDaemonAdmissionRefused || errors.Is(err, errHubDaemonAdmission):
+		// The Client may replace the refusal with a timeout and include its URL.
+		return resp, errHubDaemonAdmission
+	case err != nil && transport.outcome == hubDaemonRedirectSeen:
+		return resp, errHubDaemonRedirect
+	default:
+		return resp, err
+	}
+}
+
+func doDaemonPost(ctx context.Context, target hubDaemonRequest, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
+	raw, _, hdr, err := doDaemonPostSized(ctx, target, body, daemonSID, protoVer, timeout, expectResponse)
 	return raw, hdr, err
 }
 
@@ -1513,8 +1590,8 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 // caller draining pagination can enforce a cumulative read budget that a
 // framing-padded SSE daemon cannot evade (bot PR #517 r4). doDaemonPost keeps
 // its original signature for the other five callers.
-func doDaemonPostSized(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) (payload []byte, bytesRead int, header http.Header, err error) {
-	url := clients.HubLoopbackURL(port, "/mcp")
+func doDaemonPostSized(ctx context.Context, target hubDaemonRequest, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) (payload []byte, bytesRead int, header http.Header, err error) {
+	url := clients.HubLoopbackURL(target.ref.Port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, nil, err
@@ -1527,8 +1604,7 @@ func doDaemonPostSized(ctx context.Context, port int, body []byte, daemonSID, pr
 	if protoVer != "" {
 		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := doHubDaemonRequest(req, target, timeout)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -1599,7 +1675,7 @@ func doDaemonPostSized(ctx context.Context, port int, body []byte, daemonSID, pr
 // (Phase 4 will receive this from the client handshake) cannot
 // corrupt the outbound JSON. codex bot r8 P2 closure on PR #157.
 // Same shape as postCancellation in this file.
-func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string) (sid string, negotiated string, err error) {
+func postInitialize(ctx context.Context, target hubDaemonRequest, protoVer string) (sid string, negotiated string, err error) {
 	hubVer, _, _ := buildinfo.Get()
 	envelope := struct {
 		JSONRPC string `json:"jsonrpc"`
@@ -1626,7 +1702,7 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 	if err != nil {
 		return "", "", fmt.Errorf("marshal initialize envelope: %w", err)
 	}
-	raw, hdr, err := doDaemonPost(ctx, ref.Port, body, "", "", PerDaemonInitTimeout, true)
+	raw, hdr, err := doDaemonPost(ctx, target, body, "", "", PerDaemonInitTimeout, true)
 	if err != nil {
 		return "", "", err
 	}
@@ -1712,6 +1788,7 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 //   - a generous page backstop (maxToolsListPages) — last resort for an
 //     always-new-cursor empty-page loop; PerDaemonListTimeout (10s) is the
 //     primary bound there.
+//
 // Page COUNT is deliberately NOT the primary limit: an MCP server may choose
 // page_size=1, so a legitimate 101-tool daemon pages 101 times (the old cap of
 // 100 wrongly failed it).
@@ -1721,7 +1798,7 @@ const maxToolsListPages = 10000
 // across ALL pages. var (not const) so tests can lower it.
 var maxToolsListTotalBytes = maxAggregatorResponseBytes
 
-func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
+func postToolsList(ctx context.Context, target hubDaemonRequest, daemonSID, protoVer string) ([]json.RawMessage, error) {
 	// MCP `tools/list` is paginated: a daemon MAY return a `nextCursor` and
 	// expects the client to re-request with `params.cursor` until the cursor
 	// is absent. The hub must drain every page server-side before publishing
@@ -1752,7 +1829,7 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 		if err != nil {
 			return nil, fmt.Errorf("marshal tools/list request: %w", err)
 		}
-		raw, bytesRead, _, err := doDaemonPostSized(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
+		raw, bytesRead, _, err := doDaemonPostSized(ctx, target, body, daemonSID, protoVer, PerDaemonListTimeout, true)
 		if err != nil {
 			return nil, err
 		}
@@ -1823,12 +1900,12 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 // body (the caller rewrites the response id back to the client's
 // id; we keep the raw form here so partial-failure surfaces have
 // access to any structured error payload).
-func postToolsCall(ctx context.Context, ref canonicalToolRef, daemonSID, protoVer string, daemonReqID, params json.RawMessage) ([]byte, error) {
+func postToolsCall(ctx context.Context, target hubDaemonRequest, daemonSID, protoVer string, daemonReqID, params json.RawMessage) ([]byte, error) {
 	body, err := buildToolsCallEnvelope(daemonReqID, params)
 	if err != nil {
 		return nil, err
 	}
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerCallWallClockCap, true)
+	raw, _, err := doDaemonPost(ctx, target, body, daemonSID, protoVer, PerCallWallClockCap, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1860,7 +1937,7 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 	// daemon emitting text/event-stream by default (common with
 	// streamable endpoints) doesn't trip the readSSEResponse error
 	// path. codex bot r16 P1 closure on PR #157.
-	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
+	if _, _, err := doDaemonPost(ctx, hubDaemonRequest{ref: ref, captured: true}, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
 		return err
 	}
 	return nil
@@ -1870,12 +1947,12 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 // a successful initialize. Per MCP lifecycle the client MUST send
 // this notification before issuing any other method calls; callers
 // decide whether failure is best-effort or initialize-fatal.
-func postInitialized(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
+func postInitialized(ctx context.Context, target hubDaemonRequest, daemonSID, protoVer string) error {
 	body := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 	// expectResponse=false: notifications/initialized has no response
 	// per JSON-RPC spec. Same rationale as postCancellation above
 	// (codex bot r16 P1 closure on PR #157).
-	if _, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
+	if _, _, err := doDaemonPost(ctx, target, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
 		return err
 	}
 	return nil

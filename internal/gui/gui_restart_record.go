@@ -180,10 +180,28 @@ func NewHandoffMarkerStore(stateDir string, deadlines RestartDeadlines) *Handoff
 // Read returns nil,nil when no marker exists. Unknown versions, malformed
 // schema, unsafe paths, and I/O failures return no record plus a typed error.
 func (s *HandoffMarkerStore) Read() (*HandoffMarkerRecord, error) {
+	return s.read(context.Background(), nil)
+}
+
+// ReadBound observes the original marker under its own original bound lock.
+// The owning store retains the same deadline, decoder and clean absence rule.
+func (s *HandoffMarkerStore) ReadBound(ctx context.Context, namespace *api.WindowsProductStateNamespace) (*HandoffMarkerRecord, error) {
+	if namespace == nil || ctx == nil {
+		return nil, newHandoffMarkerError("read", HandoffMarkerFailureRead, errors.New("original marker namespace required"))
+	}
+	return s.read(ctx, namespace)
+}
+
+func (s *HandoffMarkerStore) read(ctx context.Context, namespace *api.WindowsProductStateNamespace) (*HandoffMarkerRecord, error) {
 	var record *HandoffMarkerRecord
-	err := s.withRecordLock("read", HandoffMarkerFailureRead, func() error {
+	err := s.withRecordLockIn(ctx, namespace, "read", HandoffMarkerFailureRead, func() error {
 		var err error
-		record, err = s.readLockHeld()
+		if namespace == nil {
+			record, err = s.readLockHeld()
+			return err
+		}
+		raw, readErr := namespace.ReadBoundFile(ctx, s.path, handoffMarkerFileLeaf)
+		record, err = decodeHandoffMarkerRead(s.path, raw, readErr)
 		return err
 	})
 	if err != nil {
@@ -348,6 +366,10 @@ func (s *HandoffMarkerStore) update(operation, generation string, expectedSequen
 }
 
 func (s *HandoffMarkerStore) withRecordLock(operation string, failureID HandoffMarkerFailureID, fn func() error) error {
+	return s.withRecordLockIn(context.Background(), nil, operation, failureID, fn)
+}
+
+func (s *HandoffMarkerStore) withRecordLockIn(ctx context.Context, namespace *api.WindowsProductStateNamespace, operation string, failureID HandoffMarkerFailureID, fn func() error) error {
 	if s == nil {
 		return newHandoffMarkerError(operation, failureID, errors.New("store is nil"))
 	}
@@ -363,18 +385,29 @@ func (s *HandoffMarkerStore) withRecordLock(operation string, failureID HandoffM
 	if s.deadlines.RecordLock <= 0 {
 		return newHandoffMarkerError(operation, failureID, errors.New("restart record-lock deadline must be positive"))
 	}
-	if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
-		return newHandoffMarkerError(operation, failureID, fmt.Errorf("create state directory: %w", err))
+	if namespace == nil {
+		if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
+			return newHandoffMarkerError(operation, failureID, fmt.Errorf("create state directory: %w", err))
+		}
 	}
-
-	lockPath := s.path + ".lock"
-	lock := flock.New(lockPath)
-	// Bounded acquire: a wedged lock holder must fail closed after RecordLock,
-	// not block this caller forever (Phase-I bounded-hold invariant).
-	lockCtx, cancelLock := context.WithTimeout(context.Background(), s.deadlines.RecordLock)
+	// Bounded acquire: preserve the GUI record-lock owner and deadline.
+	lockCtx, cancelLock := context.WithTimeout(ctx, s.deadlines.RecordLock)
 	defer cancelLock()
+	lockPath := s.path + ".lock"
+	var opts []flock.Option
+	if namespace != nil {
+		option, err := namespace.BoundLockOption(lockCtx, lockPath, handoffMarkerFileLeaf+".lock")
+		if err != nil {
+			return newHandoffMarkerError(operation, failureID, err)
+		}
+		opts = append(opts, option)
+	}
+	lock := flock.New(lockPath, opts...)
 	locked, lockErr := lock.TryLockContext(lockCtx, handoffRecordLockRetry)
 	if lockErr != nil {
+		if errors.Is(lockErr, flock.ErrOpenedFileCloseUnconfirmed) {
+			namespace.RetainAfterUnconfirmedRelease(lockErr)
+		}
 		return newHandoffMarkerError(operation, failureID, fmt.Errorf("acquire record lock %s: %w", lockPath, lockErr))
 	}
 	if !locked {
@@ -383,6 +416,10 @@ func (s *HandoffMarkerStore) withRecordLock(operation string, failureID HandoffM
 
 	opErr := fn()
 	unlockErr := lock.Unlock()
+	if namespace != nil {
+		namespace.RetainAfterUnconfirmedRelease(unlockErr)
+		opErr = errors.Join(opErr, unlockErr)
+	}
 	if opErr != nil {
 		return newHandoffMarkerError(operation, failureID, opErr)
 	}
@@ -394,11 +431,15 @@ func (s *HandoffMarkerStore) withRecordLock(operation string, failureID HandoffM
 
 func (s *HandoffMarkerStore) readLockHeld() (*HandoffMarkerRecord, error) {
 	raw, err := api.ReadStateFileInodeAnchored(s.path)
+	return decodeHandoffMarkerRead(s.path, raw, err)
+}
+
+func decodeHandoffMarkerRead(path string, raw []byte, err error) (*HandoffMarkerRecord, error) {
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", s.path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(raw))

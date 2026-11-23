@@ -132,6 +132,49 @@ func readPublisherSourceOpenedFile(ctx context.Context, lstat os.FileInfo, open 
 }
 
 func VerifyPublisherSourceSnapshot(ctx context.Context, sourceRoot string, rawSnapshot []byte) (PublisherSourceInput, error) {
+	return verifyPublisherSourceSnapshot(ctx, sourceRoot, rawSnapshot, nil)
+}
+
+// ReadPublisherSourceSnapshotFiles is the same source owner's file receiving
+// route. The snapshot is outside its captured export, as in source-only mode.
+func ReadPublisherSourceSnapshotFiles(ctx context.Context, sourceRoot, snapshotPath string, names []string) (PublisherSourceInput, map[string][]byte, error) {
+	if !filepath.IsAbs(sourceRoot) || !filepath.IsAbs(snapshotPath) {
+		return PublisherSourceInput{}, nil, ErrPublisherSourceTableInvalid
+	}
+	rel, err := filepath.Rel(sourceRoot, snapshotPath)
+	if err != nil && strings.EqualFold(filepath.VolumeName(sourceRoot), filepath.VolumeName(snapshotPath)) || err == nil && (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+		return PublisherSourceInput{}, nil, errors.Join(ErrPublisherSourceTableInvalid, errors.New("snapshot must be outside source"))
+	}
+	raw, err := readPublisherSourceFile(ctx, snapshotPath)
+	if err != nil {
+		return PublisherSourceInput{}, nil, err
+	}
+	return VerifyPublisherSourceSnapshotFiles(ctx, sourceRoot, raw, names)
+}
+
+// VerifyPublisherSourceSnapshotFiles captures selected bytes during the SAME
+// physical/hash verification. Returned bytes are data, not native authority.
+// Pack validation uses this to bind generated metadata to the compiled epoch,
+// rather than trusting a mutable package directory or duplicating its generator.
+func VerifyPublisherSourceSnapshotFiles(ctx context.Context, sourceRoot string, rawSnapshot []byte, names []string) (PublisherSourceInput, map[string][]byte, error) {
+	captured := map[string][]byte{}
+	for _, name := range names {
+		if !publisherSourcePathValid(name) {
+			return PublisherSourceInput{}, nil, ErrPublisherSourceTableInvalid
+		}
+		if _, ok := captured[name]; ok {
+			return PublisherSourceInput{}, nil, ErrPublisherSourceTableInvalid
+		}
+		captured[name] = nil
+	}
+	input, err := verifyPublisherSourceSnapshot(ctx, sourceRoot, rawSnapshot, captured)
+	if err != nil {
+		return PublisherSourceInput{}, nil, err
+	}
+	return input, captured, nil
+}
+
+func verifyPublisherSourceSnapshot(ctx context.Context, sourceRoot string, rawSnapshot []byte, captured map[string][]byte) (PublisherSourceInput, error) {
 	fail := func(err error) (PublisherSourceInput, error) {
 		return PublisherSourceInput{}, errors.Join(ErrPublisherSourceTableInvalid, err)
 	}
@@ -232,6 +275,9 @@ func VerifyPublisherSourceSnapshot(ctx context.Context, sourceRoot string, rawSn
 		if hex.EncodeToString(h[:]) != hash {
 			return fmt.Errorf("changed source file")
 		}
+		if _, wanted := captured[rel]; wanted {
+			captured[rel] = raw
+		}
 		seen[rel] = true
 		return nil
 	})
@@ -240,6 +286,11 @@ func VerifyPublisherSourceSnapshot(ctx context.Context, sourceRoot string, rawSn
 	}
 	if len(seen) != len(filesTable) {
 		return fail(errors.New("missing source file"))
+	}
+	for name := range captured {
+		if !seen[name] {
+			return fail(errors.New("required source file missing"))
+		}
 	}
 	// Resolver/embed closure admission belongs to Root's original input owner
 	// before helper compilation. This verifier proves only the SAME selected

@@ -258,7 +258,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if dryRun {
 					return fmt.Errorf("--reconcile-mcp-front does not support --dry-run yet (it always proves route liveness before writing; use --rollback to reverse a run)")
 				}
-				return runReconcileMCPFront(cmd, rollbackMCPFront)
+				return runReconcileMCPFrontWithEntryInput(cmd, rollbackMCPFront, input)
 			}
 			// NOTE: the `--rollback requires --reconcile-mcp-front` gate is
 			// NOT repeated here — it now runs at the TOP of RunE, before any

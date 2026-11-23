@@ -585,3 +585,15 @@ func TestHubListenerOrdinaryAggregateLifecycle(t *testing.T) {
 	}
 	t.Log("loopback lifecycle: initialize, initialized, tools/list, useful downstream tools/call, DELETE, reload 204/429, listener settled")
 }
+
+func TestSupervisedAggregateGUICannotBindOrRestart(t *testing.T) {
+	server := &Server{cfg: Config{SupervisedAggregate: true}}
+	ctx := context.Background()
+	components, err := startHubMcpListenerWithOptions(ctx, true, nil, startHubMcpListenerOptions{server: server})
+	if err != nil || components != nil {
+		t.Fatalf("supervised Product GUI admitted local aggregate bind: %v", err)
+	}
+	if got := restartHubListenerWithOutcome(ctx, server, hubListenerRestartDriverOptions{}); got != hubListenerRestartStopDriver {
+		t.Fatalf("supervised Product GUI admitted aggregate restart: %v", got)
+	}
+}

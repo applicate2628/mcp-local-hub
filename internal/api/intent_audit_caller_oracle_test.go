@@ -1,148 +1,227 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
-// callerStartTimeChildStateDirEnv, when set, makes this test binary act as a
-// child that emits ONE intent-audit row into the given state dir after a
-// deliberate delay, then exits. Consumed by the package TestMain
-// (main_test.go) before m.Run().
-const callerStartTimeChildStateDirEnv = "MCPHUB_TEST_CALLER_START_TIME_CHILD_STATEDIR"
+const (
+	callerStartTimeOracleSelector = "-test.run=^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$"
+	callerStartTimeOracleDelay    = 3 * time.Second
+	callerStartTimeOracleTask     = `\mcp-local-hub-oracle-probe`
+	callerStartTimeOracleAction   = "set-intent"
+	callerStartTimeChildRole      = "caller-start-time-oracle"
+	callerStartTimeChildDelayEnv  = "MCPHUB_TEST_CALLER_START_TIME_CHILD_DELAY_MS"
+	callerStartTimeTestEnvPrefix  = "MCPHUB_TEST_"
 
-// callerStartTimeChildDelayEnv is the delay (in milliseconds) the child waits
-// between process start and emitting. The delay is the load-bearing part of
-// the oracle — see the test doc.
-const callerStartTimeChildDelayEnv = "MCPHUB_TEST_CALLER_START_TIME_CHILD_DELAY_MS"
+	// The established test-helper key is also used by sibling conflict
+	// guards. Its value is now an exact role marker, never a filesystem path.
+	callerStartTimeChildStateDirEnv = "MCPHUB_TEST_CALLER_START_TIME_CHILD_STATEDIR"
+)
 
-// runCallerStartTimeOracleChild is the child body invoked from TestMain.
-// Never returns.
-func runCallerStartTimeOracleChild(stateDir string) {
-	delayMS, _ := strconv.Atoi(os.Getenv(callerStartTimeChildDelayEnv))
+func callerStartTimeOracleDelayValue() string {
+	return strconv.FormatInt(callerStartTimeOracleDelay.Milliseconds(), 10)
+}
 
-	// Redirect state resolution to the parent-chosen dir so the child writes
-	// its audit row where the parent can read it.
-	daemonStateRootOverride = stateDir
+func callerStartTimeOracleRoleKey(name string) bool {
+	name = strings.ToUpper(name)
+	return name == callerStartTimeChildStateDirEnv || name == callerStartTimeChildDelayEnv ||
+		strings.HasPrefix(name, callerStartTimeTestEnvPrefix) &&
+			(strings.HasSuffix(name, "_CHILD") || strings.HasSuffix(name, "_HELPER"))
+}
 
-	// Wait BEFORE emitting. This is what separates "process start time" from
-	// "time at emit" — without it the two are indistinguishable in a freshly
-	// spawned process and the oracle would be vacuous.
-	time.Sleep(time.Duration(delayMS) * time.Millisecond)
+// classifyCallerStartTimeOracle validates only the early oracle role. Other
+// test selectors keep the ordinary sealed TestMain path.
+func classifyCallerStartTimeOracle(args, environ []string) (bool, error) {
+	exactSelector := len(args) == 1 && args[0] == callerStartTimeOracleSelector
+	var role, delay string
+	var roleSeen, delaySeen, conflicting bool
+	for _, entry := range environ {
+		name, value, defined := strings.Cut(entry, "=")
+		switch strings.ToUpper(name) {
+		case callerStartTimeChildStateDirEnv:
+			conflicting = conflicting || roleSeen || !defined || name != callerStartTimeChildStateDirEnv
+			role, roleSeen = value, true
+		case callerStartTimeChildDelayEnv:
+			conflicting = conflicting || delaySeen || !defined || name != callerStartTimeChildDelayEnv
+			delay, delaySeen = value, true
+		default:
+			// This child has a closed test-control envelope. An ordinary
+			// test environment stays independent of the early role gate.
+			conflicting = conflicting || callerStartTimeOracleRoleKey(name)
+		}
+	}
+	if !roleSeen && !delaySeen && (!exactSelector || !conflicting) {
+		return false, nil
+	}
+	if !exactSelector || conflicting || !roleSeen || !delaySeen ||
+		role != callerStartTimeChildRole || delay != callerStartTimeOracleDelayValue() {
+		return false, errors.New("internal/api TestMain: invalid caller-start-time oracle child invocation")
+	}
+	return true, nil
+}
 
+func runCallerStartTimeOracleChild(stdout io.Writer) error {
+	raw, err := captureCallerStartTimeOracleRow()
+	if err != nil {
+		return err
+	}
+	n, err := stdout.Write(raw)
+	if err == nil && n != len(raw) {
+		err = io.ErrShortWrite
+	}
+	return err
+}
+
+func captureCallerStartTimeOracleRow() (row []byte, retErr error) {
+	root, err := os.MkdirTemp("", "mcphub-caller-start-time-oracle-*")
+	if err != nil {
+		return nil, err
+	}
+	previousRoot := daemonStateRootOverride
+	daemonStateRootOverride = root
+	defer func() {
+		daemonStateRootOverride = previousRoot
+		retErr = errors.Join(retErr, apitest.RemoveTestMainRoot(root))
+	}()
+	if err := apitest.HardenedDirForTestMain(root); err != nil {
+		return nil, fmt.Errorf("harden caller-start-time oracle root: %w", err)
+	}
+
+	// Separate process birth from the actual audit append time.
+	time.Sleep(callerStartTimeOracleDelay)
 	if err := NewAPI().AppendIntentAudit(NewIntentAuditEntry(
-		WithAction("set-intent"),
-		WithTask(`\mcp-local-hub-oracle-probe`),
+		WithAction(callerStartTimeOracleAction),
+		WithTask(callerStartTimeOracleTask),
 	)); err != nil {
-		os.Exit(3)
+		return nil, fmt.Errorf("append caller-start-time oracle row: %w", err)
 	}
-	os.Exit(0)
+	row, err = os.ReadFile(filepath.Join(root, intentAuditFileLeaf))
+	if err != nil {
+		return nil, fmt.Errorf("read caller-start-time oracle row: %w", err)
+	}
+	if len(row) == 0 {
+		return nil, errors.New("caller-start-time oracle audit append produced no row")
+	}
+	return row, nil
 }
 
-// TestIntentAudit_CallerStartTimeAgainstIndependentOracle verifies
-// caller_start_time against a source that is NOT the code under test.
-//
-// WHY THIS EXISTS. The sibling assertion in
-// TestIntentAudit_CallerFieldsPopulated compares the emitted value with
-// CallerStartTime() — the very helper that produced it. That is a consistency
-// check with a blind spot: if CallerStartTime itself regressed (a bad
-// process-time conversion, or one of its documented fallbacks returning
-// time.Now()), both sides agree and the test passes while the audit log
-// carries a wrong process start time. Adversarial review confirmed the hole by
-// mutating CallerStartTime to time.Now() and watching an isolated run SURVIVE.
-//
-// THE ORACLE: the PARENT's wall clock, sampled immediately before spawning a
-// child. The child's true start time is necessarily within a few milliseconds
-// of that sample, and the parent's clock is entirely independent of the
-// process-time API under test.
-//
-// THE DELAY IS LOAD-BEARING. A fresh child would have start-time close to now,
-// so a time.Now() regression would still fall inside any spawn-window bound
-// and survive. The child therefore SLEEPS before emitting: a correct
-// implementation still reports approximately the spawn time, while a
-// time.Now() fallback reports approximately spawn+delay. The upper bound sits
-// well below the delay, so the two are decisively separated.
-//
-// DURATION-INDEPENDENT BY CONSTRUCTION. The window is anchored to this test's
-// own spawn instant, never to wall-clock-now at assert time, so it cannot
-// regress into the suite-runtime budget that made the original plus/minus-2min
-// -of-now assertion a time bomb.
+// TestIntentAudit_CallerStartTimeAgainstIndependentOracle compares the actual
+// audit value with the parent's wall clock immediately before process start.
+// Waiting before append separates process birth from a time.Now fallback.
+// The accepted window is anchored to this spawn, independent of suite age.
 func TestIntentAudit_CallerStartTimeAgainstIndependentOracle(t *testing.T) {
-	const childDelay = 3 * time.Second
+	switch runtime.GOOS {
+	case "windows", "linux", "darwin":
+	default:
+		t.Skip("native process start time is unavailable on this platform")
+	}
 
-	stateDir := t.TempDir()
-
-	// The oracle sample. Taken as late as possible before spawn.
-	before := time.Now().UTC()
-
-	cmd := exec.Command(os.Args[0], "-test.run=TestIntentAudit_CallerStartTimeAgainstIndependentOracle")
-	cmd.Env = append(os.Environ(),
-		callerStartTimeChildStateDirEnv+"="+stateDir,
-		callerStartTimeChildDelayEnv+"="+strconv.Itoa(int(childDelay/time.Millisecond)),
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, exe, callerStartTimeOracleSelector)
+	for _, entry := range cmd.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !callerStartTimeOracleRoleKey(name) {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env,
+		callerStartTimeChildStateDirEnv+"="+callerStartTimeChildRole,
+		callerStartTimeChildDelayEnv+"="+callerStartTimeOracleDelayValue(),
 	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("oracle child failed: %v\noutput:\n%s", err, out)
-	}
+	before := time.Now().UTC()
+	row, err := cmd.Output()
 	after := time.Now().UTC()
-
-	if elapsed := after.Sub(before); elapsed < childDelay {
-		t.Fatalf("child returned in %v, less than its %v delay - the delay did not take effect, so the oracle would be vacuous", elapsed, childDelay)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(stateDir, intentAuditFileLeaf))
 	if err != nil {
-		t.Fatalf("read child audit log: %v\nchild output:\n%s", err, out)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			t.Fatalf("oracle child failed: %v\nchild stderr:\n%s", err, exitErr.Stderr)
+		}
+		t.Fatalf("oracle child failed: %v", err)
 	}
-	var got map[string]any
-	if err := json.Unmarshal(firstJSONLine(t, raw), &got); err != nil {
-		t.Fatalf("json: %v", err)
+	if elapsed := after.Sub(before); elapsed < callerStartTimeOracleDelay {
+		t.Fatalf("child returned in %v before its %v oracle delay", elapsed, callerStartTimeOracleDelay)
+	}
+	var got struct {
+		CallerPID       int    `json:"caller_pid"`
+		CallerStartTime string `json:"caller_start_time"`
+		Task            string `json:"task"`
+		Action          string `json:"action"`
+	}
+	if err := json.Unmarshal(row, &got); err != nil {
+		t.Fatalf("decode one oracle audit row: %v", err)
+	}
+	if got.CallerPID != cmd.Process.Pid || got.Task != callerStartTimeOracleTask || got.Action != callerStartTimeOracleAction {
+		t.Fatal("audit row does not match the original oracle child and action")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, got.CallerStartTime)
+	if err != nil || parsed.IsZero() {
+		t.Fatalf("oracle child did not emit a valid nonzero caller_start_time: %v", err)
 	}
 
-	tsRaw, _ := got["caller_start_time"].(string)
-	if tsRaw == "" {
-		t.Fatalf("child emitted no caller_start_time; body = %v", got)
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, tsRaw)
-	if err != nil {
-		t.Fatalf("caller_start_time not RFC3339Nano: %v (raw=%q)", err, tsRaw)
-	}
-
-	// Lower bound: generous, absorbing per-OS whole-second truncation of the
-	// start time (which can round DOWN below the sample).
+	// Include OS whole-second rounding. The upper bound stays below the
+	// append delay, so a time.Now-at-append regression cannot pass.
 	lower := before.Add(-3 * time.Second)
-	// Upper bound: comfortably above real spawn latency, and decisively BELOW
-	// before+childDelay so a time.Now()-at-emit regression cannot pass.
-	upper := before.Add(childDelay / 2)
-
+	upper := before.Add(callerStartTimeOracleDelay / 2)
 	if parsed.Before(lower) || parsed.After(upper) {
-		t.Errorf("caller_start_time = %v is outside the independent window [%v, %v].\n"+
-			"The child was spawned at %v and emitted %v later. A value near %v indicates "+
-			"CallerStartTime returned the time AT EMIT (a time.Now() fallback) rather than "+
-			"the process START time.",
-			parsed, lower, upper, before, childDelay, before.Add(childDelay))
+		t.Errorf("caller_start_time %v outside the independent spawn window [%v, %v]", parsed, lower, upper)
 	}
 }
 
-// firstJSONLine returns the first non-empty line of a JSON-Lines file.
-func firstJSONLine(t *testing.T, raw []byte) []byte {
-	t.Helper()
-	for start := 0; start < len(raw); {
-		end := start
-		for end < len(raw) && raw[end] != '\n' {
-			end++
-		}
-		line := raw[start:end]
-		if len(line) > 0 {
-			return line
-		}
-		start = end + 1
+func TestCallerStartTimeOracleAdmission(t *testing.T) {
+	selector := []string{callerStartTimeOracleSelector}
+	role := callerStartTimeChildStateDirEnv + "=" + callerStartTimeChildRole
+	delay := callerStartTimeChildDelayEnv + "=" + callerStartTimeOracleDelayValue()
+	foreign := readinessOriginalChildEnv + "=1"
+	for _, tc := range []struct {
+		name      string
+		args, env []string
+		child     bool
+		reject    bool
+	}{
+		{name: "ordinary suite"},
+		{name: "ordinary parent", args: selector, env: []string{"PATH=fixture", "MCPHUB_TEST_SETTING=fixture"}},
+		{name: "ordinary separate role", args: []string{"-test.run=^TestSupervisorReadinessOriginalChild$"}, env: []string{foreign}},
+		{name: "exact child", args: selector, env: []string{role, delay}, child: true},
+		{name: "old destination", args: selector, env: []string{callerStartTimeChildStateDirEnv + "=foreign-directory", delay}, reject: true},
+		{name: "role only", args: selector, env: []string{role}, reject: true},
+		{name: "delay only", args: selector, env: []string{delay}, reject: true},
+		{name: "empty role", args: selector, env: []string{callerStartTimeChildStateDirEnv + "=", delay}, reject: true},
+		{name: "unchecked delay forms", args: selector, env: []string{role, callerStartTimeChildDelayEnv + "=0"}, reject: true},
+		{name: "non-numeric delay", args: selector, env: []string{role, callerStartTimeChildDelayEnv + "=immediate"}, reject: true},
+		{name: "nested selector argument", args: []string{callerStartTimeOracleSelector, "-test.run=.*"}, env: []string{role, delay}, reject: true},
+		{name: "unanchored selector", args: []string{"-test.run=TestIntentAudit_CallerStartTimeAgainstIndependentOracle"}, env: []string{role, delay}, reject: true},
+		{name: "duplicate role", args: selector, env: []string{role, delay, role}, reject: true},
+		{name: "foreign role", args: selector, env: []string{role, delay, foreign}, reject: true},
+		{name: "foreign role only", args: selector, env: []string{foreign}, reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child, err := classifyCallerStartTimeOracle(tc.args, tc.env)
+			if child != tc.child || (err != nil) != tc.reject {
+				t.Fatalf("child=%v error=%v, want child=%v rejected=%v", child, err, tc.child, tc.reject)
+			}
+		})
 	}
-	t.Fatalf("no JSON line found in %d bytes", len(raw))
-	return nil
 }

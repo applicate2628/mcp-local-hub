@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -623,6 +624,8 @@ type WindowsProductTxn struct {
 	prepared            *windowsProductPreparedTxn
 	prepareError        error
 	constructorStore    interface{ Close() error }
+	// The guard may call the original decision writer synchronously once.
+	aroundCommitDecision func(context.Context, func() error) error
 }
 
 // inspectWindowsProductRecoveryLeaves observes both exact Product recovery
@@ -1128,17 +1131,23 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 		return WindowsProductCommitted{}, t.rollback(err)
 	}
 	priorBytes := append([]byte(nil), p.lastJournalBytes...)
-	p.journal.Phase = WindowsProductRecoveryCommitDecided
-	if err := t.persistProductJournal(); err != nil {
-		commitBytes := append([]byte(nil), p.attemptedJournalBytes...)
-		decision, readErr := t.readCommitDecision(priorBytes, commitBytes)
+	attempted, confirmed, decisionErr := t.recordProductCommitDecision(ctx)
+	if decisionErr != nil {
+		if !attempted {
+			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("before commit-decided V3 recovery phase: %w", decisionErr))
+		}
+		decision := productDecisionCommit
+		var readErr error
+		if !confirmed {
+			decision, readErr = t.readCommitDecision(priorBytes, p.attemptedJournalBytes)
+		}
 		if decision == productDecisionPrior {
 			previous, decodeErr := decodeWindowsProductRecoveryJournalV3(priorBytes)
 			if decodeErr != nil {
-				return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: prior decision snapshot invalid", ErrWindowsProductRecoveryPending), err, decodeErr)
+				return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: prior decision snapshot invalid", ErrWindowsProductRecoveryPending), decisionErr, decodeErr)
 			}
 			p.journal = previous
-			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("persist commit-decided V3 recovery phase: %w", err))
+			return WindowsProductCommitted{}, t.rollback(fmt.Errorf("persist commit-decided V3 recovery phase: %w", decisionErr))
 		}
 		// Unknown never grants inverse or abort authority. Only this already-bound
 		// original launch may be received, after the owner freshly revalidates it.
@@ -1147,7 +1156,7 @@ func (t *WindowsProductTxn) Run(ctx context.Context) (result WindowsProductCommi
 		if decision == productDecisionCommit {
 			label = "commit decision persisted; forward recovery remains pending"
 		}
-		return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: %s", ErrWindowsProductRecoveryPending, label), err, readErr, receiveErr)
+		return WindowsProductCommitted{}, errors.Join(fmt.Errorf("%w: %s", ErrWindowsProductRecoveryPending, label), decisionErr, readErr, receiveErr)
 	}
 	if err := t.receiveProductSuccessor(ctx); err != nil {
 		return WindowsProductCommitted{}, fmt.Errorf("%w: committed successor control handoff: %w", ErrWindowsProductCleanupPending, err)
@@ -1361,6 +1370,54 @@ const (
 	productDecisionPrior
 	productDecisionCommit
 )
+
+// recordProductCommitDecision keeps the original writer inside the optional
+// guard and closes its callback before the transaction classifies the result.
+func (t *WindowsProductTxn) recordProductCommitDecision(ctx context.Context) (attempted, confirmed bool, err error) {
+	persist := func() error {
+		t.prepared.journal.Phase = WindowsProductRecoveryCommitDecided
+		return t.persistProductJournal()
+	}
+	guard := t.aroundCommitDecision
+	if guard == nil {
+		err := persist()
+		return true, err == nil, err
+	}
+
+	var mu sync.Mutex
+	var closed bool
+	var writeErr error
+	write := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if closed {
+			return errors.New("Product commit decision callback has closed")
+		}
+		if attempted {
+			return errors.New("Product commit decision was already attempted")
+		}
+		attempted = true
+		writeErr = persist()
+		return writeErr
+	}
+	guardErr := func() error {
+		// Closing also receives the outcome of any writer that already entered.
+		defer func() {
+			mu.Lock()
+			closed = true
+			mu.Unlock()
+		}()
+		return guard(ctx, write)
+	}()
+
+	if !attempted && guardErr == nil {
+		guardErr = errors.New("Product commit decision guard did not invoke the original writer")
+	}
+	if writeErr != nil && !errors.Is(guardErr, writeErr) {
+		guardErr = errors.Join(writeErr, guardErr)
+	}
+	return attempted, attempted && writeErr == nil, guardErr
+}
 
 func (t *WindowsProductTxn) readCommitDecision(priorBytes, commitBytes []byte) (productCommitDecision, error) {
 	if len(priorBytes) == 0 || len(commitBytes) == 0 || bytes.Equal(priorBytes, commitBytes) {

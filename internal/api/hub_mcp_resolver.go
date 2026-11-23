@@ -33,7 +33,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync/atomic"
 
 	"mcp-local-hub/internal/config"
@@ -71,6 +74,10 @@ type canonicalToolRef struct {
 type ResolverSnapshot struct {
 	Gen      int64
 	Bindings map[string][]canonicalDaemonRef
+
+	// ordinaryEndpoints includes unbound registrations. Scope removal alone
+	// must not prevent retirement of a session on its captured ordinary owner.
+	ordinaryEndpoints map[int]canonicalDaemonRef
 
 	// ToolsHidden is the FINE-GRAINED per-tool visibility filter for
 	// group scope keys (groups/namespaces Phase 5a, operator decision 3).
@@ -223,8 +230,9 @@ func BuildResolverSnapshotFromManifests(manifests []config.ServerManifest) *Reso
 func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManifest, groups []Group) *ResolverSnapshot {
 	gen := resolverGen.Add(1)
 	snap := &ResolverSnapshot{
-		Gen:      gen,
-		Bindings: make(map[string][]canonicalDaemonRef),
+		Gen:               gen,
+		Bindings:          make(map[string][]canonicalDaemonRef),
+		ordinaryEndpoints: ordinaryHubEndpointOwners(manifests),
 	}
 	// codex bot r10 P2 closure on PR #157: dedupe (scopeKey, ref) pairs
 	// so a manifest that accidentally repeats a ClientBinding row (no
@@ -397,6 +405,54 @@ func BuildResolverSnapshotFromManifestsAndGroups(manifests []config.ServerManife
 	return snap
 }
 
+// ordinaryHubEndpointOwners requires one exact ordinary owner for each port.
+// Check all registrations, including providers with no current Hub binding.
+func ordinaryHubEndpointOwners(manifests []config.ServerManifest) map[int]canonicalDaemonRef {
+	owners := make(map[int]canonicalDaemonRef)
+	byIdentity := make(map[canonicalDaemonRef]int)
+	blocked := make(map[int]bool)
+	for _, manifest := range manifests {
+		for _, daemon := range manifest.Daemons {
+			port := daemon.Port
+			if port <= 0 || port > 65535 {
+				continue
+			}
+			identity := canonicalDaemonRef{Server: manifest.Name, Daemon: daemon.Name}
+			ref := identity
+			ref.Port = port
+			if prior, ok := byIdentity[identity]; ok && prior != port {
+				blocked[prior] = true
+				blocked[port] = true
+			}
+			byIdentity[identity] = port
+			if prior, ok := owners[port]; ok && prior != ref {
+				blocked[port] = true
+			}
+			owners[port] = ref
+			if identity.Server == "" || identity.Daemon == "" ||
+				(daemon.MCPStdioState != "" && (daemon.MCPStdioState != config.MCPStdioStateShared || manifest.Transport != config.TransportStdioBridge)) {
+				blocked[port] = true
+			}
+		}
+	}
+	for port := range blocked {
+		delete(owners, port)
+	}
+	return owners
+}
+
+func (s *ResolverSnapshot) allowsOrdinaryEndpoint(ref canonicalDaemonRef) bool {
+	if s == nil {
+		return false
+	}
+	owner, ok := s.ordinaryEndpoints[ref.Port]
+	return ok && owner == ref
+}
+
+func (s *ResolverSnapshot) allowsOrdinaryBinding(scope string, ref canonicalDaemonRef) bool {
+	return scope != "" && s.allowsOrdinaryEndpoint(ref) && slices.Contains(s.Bindings[scope], ref)
+}
+
 // BumpResolverOnManifestChange rebuilds + publishes a fresh snapshot
 // from the supplied manifests. Convenience wrapper called by the
 // install reconciler (Phase 5) and manifest-mutating callers. Groups-free
@@ -469,11 +525,26 @@ func publishResolverSnapshotWithGroupActiveSetStatus(manifests []config.ServerMa
 // first (bindings live), then the token error is returned so the caller can
 // surface restart_required (without the row the /g/ route cannot auth).
 func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.ServerManifest, error)) error {
+	return publishGroupsSnapshotLocked(ctx, scan, false)
+}
+
+// PublishExistingGroupsSnapshotLocked uses the same snapshot owner without
+// generating, rotating, or pruning any of the fixed authorization inputs.
+func PublishExistingGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.ServerManifest, error)) error {
+	return publishGroupsSnapshotLocked(ctx, scan, true)
+}
+
+func publishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.ServerManifest, error), fixed bool) (retErr error) {
 	lk, err := acquireHubMcpLockContext(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lk.Unlock() }()
+	defer func() {
+		err := lk.Unlock()
+		if fixed {
+			retErr = errors.Join(retErr, err)
+		}
+	}()
 
 	// R4-3: scan UNDER the held lock so scan+publish is one atomic critical
 	// section. A scan failure aborts WITHOUT publishing or changing the
@@ -489,6 +560,30 @@ func PublishGroupsSnapshotLocked(ctx context.Context, scan func() ([]config.Serv
 			"err": gerr.Error(),
 		})
 		return fmt.Errorf("load groups.yaml under hub-mcp.lock: %w", gerr)
+	}
+
+	if fixed {
+		tokens, err := loadHubTokensLocked()
+		if err != nil {
+			return err
+		}
+		ordinary, err := replaceHubTokenAuthorization(tokens)
+		if err != nil {
+			return err
+		}
+		if len(ordinary.Tokens) == 0 || !maps.Equal(tokens.Tokens, ordinary.Tokens) {
+			return fmt.Errorf("fixed aggregate requires existing ordinary authorization")
+		}
+		for _, group := range cfg.Groups {
+			if ordinary.Tokens[GroupScopeKeyPrefix+group.Name] == "" {
+				return fmt.Errorf("fixed aggregate group lacks existing ordinary authorization")
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		BumpResolverOnConfigChange(manifests, cfg.Groups)
+		return nil
 	}
 
 	// Capture the prior published active set for live-session preservation and

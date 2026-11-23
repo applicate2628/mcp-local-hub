@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
@@ -103,6 +105,20 @@ func ReadGUIOwnerRecord(path string) (GUIOwnerRecord, error) {
 	if err != nil {
 		return GUIOwnerRecord{}, err
 	}
+	return decodeGUIOwnerRecord(b)
+}
+
+// ReadGUIOwnerRecordBound reads the owner's original leaf relative to the
+// retained state parent, then uses the unchanged GUI record decoder.
+func ReadGUIOwnerRecordBound(ctx context.Context, namespace *api.WindowsProductStateNamespace, path string) (GUIOwnerRecord, error) {
+	data, err := namespace.ReadBoundFile(ctx, path, PidportFileLeaf)
+	if err != nil {
+		return GUIOwnerRecord{}, err
+	}
+	return decodeGUIOwnerRecord(data)
+}
+
+func decodeGUIOwnerRecord(b []byte) (GUIOwnerRecord, error) {
 	trimmed := strings.TrimSpace(string(b))
 	if !strings.HasPrefix(trimmed, "{") {
 		parts := strings.Fields(trimmed)
@@ -331,6 +347,20 @@ func (l *GUIOwnerLifecycle) TerminalSettle() error {
 // active record with no listener.
 func AcquireSingleInstanceLockOnlyAt(pidportPath string) (*SingleInstanceLock, error) {
 	return tryAcquireSingleInstanceLockAt(pidportPath)
+}
+
+// AcquireSingleInstanceLockOnlyBoundAt keeps the existing singleton owner
+// and uses only the original native lock leaf in the retained namespace.
+func AcquireSingleInstanceLockOnlyBoundAt(ctx context.Context, namespace *api.WindowsProductStateNamespace, pidportPath string) (*SingleInstanceLock, error) {
+	option, err := namespace.BoundLockOption(ctx, pidportPath+".lock", PidportFileLeaf+".lock")
+	if err != nil {
+		return nil, err
+	}
+	lease, err := tryAcquireSingleInstanceLockAt(pidportPath, option)
+	if errors.Is(err, flock.ErrOpenedFileCloseUnconfirmed) {
+		namespace.RetainAfterUnconfirmedRelease(err)
+	}
+	return lease, err
 }
 
 // VerifyGUIOwnerListener is the composition-side proof for operations that

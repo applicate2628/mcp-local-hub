@@ -245,6 +245,29 @@ func (a *API) WithMCPFrontRouteDaemonTargetLeaseIn(ctx context.Context, path str
 	})
 }
 
+func mcpFrontRoutingLockPath(settingsPath string) string {
+	return settingsPath + ".routing-target.lock"
+}
+
+// TryAcquireMCPFrontRoutingTargetObserved is an exclusive one-attempt borrow
+// of the same routing-target lease used by epoch readers and writers.
+func TryAcquireMCPFrontRoutingTargetObserved(ctx context.Context, settingsPath string) (*StateFileObservedLease, error) {
+	path, err := observedStateFileLeasePath(settingsPath)
+	if err != nil {
+		return nil, err
+	}
+	return tryAcquireLedgeredObservedLeaf(ctx, path, mcpFrontRoutingLockPath(path), flock.SetPermissions(0o600))
+}
+
+func ValidateMCPFrontRoutingTargetObserved(ctx context.Context, settingsPath string, lease *StateFileObservedLease) error {
+	if lease == nil {
+		return errors.New("original observed routing-target lease required")
+	}
+	lease.mu.Lock()
+	defer lease.mu.Unlock()
+	return lease.validateHeldAtLockPathLocked(ctx, settingsPath, mcpFrontRoutingLockPath(settingsPath))
+}
+
 func withMCPFrontRoutingFileLease(ctx context.Context, settingsPath string, exclusive bool, work func() error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -255,7 +278,7 @@ func withMCPFrontRoutingFileLease(ctx context.Context, settingsPath string, excl
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
 		return fmt.Errorf("mkdir routing lease dir: %w", err)
 	}
-	leasePath := settingsPath + ".routing-target.lock"
+	leasePath := mcpFrontRoutingLockPath(settingsPath)
 	lease := flock.New(leasePath, flock.SetPermissions(0o600))
 	locked := false
 	if exclusive {
@@ -315,6 +338,33 @@ func (a *API) ResolveClientRoutingTargetIn(path string) (ClientRoutingTarget, er
 
 func (a *API) MCPFrontRoutingTargetSnapshot() (MCPFrontRoutingTargetSnapshot, error) {
 	return a.MCPFrontRoutingTargetSnapshotIn(SettingsPath())
+}
+
+// ObserveMCPFrontRouteAdmissionSettings derives the incumbent epoch and the
+// requested port from the same current settings bytes. It never takes a
+// writer lease or materializes a default settings document.
+func ObserveMCPFrontRouteAdmissionSettings(ctx context.Context, path string) (MCPFrontRoutingTargetSnapshot, int, string, *StateFileReadObservation, error) {
+	var zero MCPFrontRoutingTargetSnapshot
+	cap := stateFileReadCapBytes(path)
+	raw, receipt, err := ReadStateFileRouteAdmissionObserved(ctx, path, cap)
+	if err != nil {
+		return zero, 0, "", receipt, err
+	}
+	digest := stateFileReadObservationDigest(raw)
+	if err := receipt.Validate(ctx, path, cap, raw, digest); err != nil {
+		return zero, 0, "", receipt, err
+	}
+	settings, err := decodeSingleSettingsDocument(raw)
+	if err != nil {
+		return zero, 0, "", receipt, err
+	}
+	migrateLegacyKeys(settings)
+	epoch, err := mcpFrontRoutingSnapshotFromRaw(settings)
+	if err != nil {
+		return zero, 0, "", receipt, err
+	}
+	port, err := routingPortFromRaw(settings, MCPFrontPortSettingKey)
+	return epoch, port, digest, receipt, err
 }
 
 func (a *API) MCPFrontRoutingTargetSnapshotIn(path string) (MCPFrontRoutingTargetSnapshot, error) {

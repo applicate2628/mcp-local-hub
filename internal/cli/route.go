@@ -39,6 +39,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -133,7 +134,7 @@ func startRouteSerenaBackendLossReconcile(ctx context.Context, s *mcproute.Works
 	go runSerenaBackendLossReconcileTicker(ctx, s, interval)
 }
 
-func newRouteCmd() *cobra.Command {
+func newRouteCmdWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	var port int
 	cmd := &cobra.Command{
 		Use:   "route",
@@ -175,7 +176,7 @@ and RestartV3 handoff are untouched.`,
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			return runRoute(ctx, cmd, port)
+			return runRoute(ctx, cmd, port, input)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", DefaultRouteDaemonPort,
@@ -267,7 +268,10 @@ func runRouteSessionExpiry(ctx context.Context, s *mcproute.WorkspaceRoutes, sto
 
 // runRoute binds before constructing the router so the Host and Origin
 // guards receive the actual port when the listener uses --port 0.
-func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
+func runRoute(ctx context.Context, cmd *cobra.Command, port int, input windowsCanonicalEntryCommandInput) (retErr error) {
+	if productUsesSupervisedAggregate() {
+		api.SupervisorIPCStatusFn = api.DialSupervisorIPCStatus
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return fmt.Errorf("bind route daemon listener on port %d: %w", port, err)
@@ -311,10 +315,10 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.Serve(ln) }()
 
-	// This composition owns only the workspace HTTP server. The separate
-	// aggregate remains owned by the legacy GUI composition.
-	stopAggregateStatus := startRouteAggregateStatus(ctx, cmd.ErrOrStderr(), func() string { return api.RouteAggregateNotOwner })
-	defer stopAggregateStatus()
+	stopAggregateStatus := startRouteAggregateStatus(ctx, cmd.ErrOrStderr(), func(launch api.RouteAggregateLaunch) api.RouteAggregateControl {
+		return newRouteAggregateControl(launch, input)
+	})
+	defer func() { retErr = errors.Join(retErr, stopAggregateStatus()) }()
 
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"mcphub route: serving /serena/mcp + /lsp/<language>/mcp on 127.0.0.1:%d (pid %d)\n",

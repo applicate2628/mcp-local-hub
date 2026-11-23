@@ -101,6 +101,52 @@ func HoldPIDForObservation(pid int) (HeldPIDObservation, error) {
 	return &heldPIDObservation{heldPIDJobObservation: base, ownerSID: processHandleOwnerUserSID, wait: windows.WaitForSingleObject}, nil
 }
 
+type HeldPIDAcquisitionObservation struct {
+	transferred bool
+	partial     WindowsIdentityClose
+	openErr     error
+	finalized   bool
+}
+
+// ResourcesFinalized covers temporary open failure only. A transferred
+// handle remains the caller's separately retained close obligation.
+func (o *HeldPIDAcquisitionObservation) ResourcesFinalized() bool {
+	return o != nil && o.finalized && (o.transferred || o.partial.ResourcesFinalized())
+}
+
+func HoldPIDForObservationObserved(pid int) (HeldPIDObservation, *HeldPIDAcquisitionObservation, error) {
+	observed := &HeldPIDAcquisitionObservation{}
+	var native windows.Handle
+	base, err := holdPIDForJobObservationWithAccess(pid, windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE,
+		func(access uint32, inherit bool, target uint32) (windows.Handle, error) {
+			native, observed.openErr = windows.OpenProcess(access, inherit, target)
+			return native, observed.openErr
+		}, verifyHandleIdentity, processInAnyJob, windows.CloseHandle)
+	if err != nil && native != 0 && native != windows.InvalidHandle {
+		observed.partial = closeWindowsIdentityHandle(uintptr(native), func() error { return windows.CloseHandle(native) })
+		err = errors.Join(err, observed.partial.Err)
+	}
+	observed.finalized = true
+	if err != nil || base == nil || native == 0 || native == windows.InvalidHandle {
+		return nil, observed, errors.Join(err, errors.New("original held process unavailable"))
+	}
+	observed.transferred = true
+	return &heldPIDObservation{heldPIDJobObservation: base, ownerSID: processHandleOwnerUserSID, wait: windows.WaitForSingleObject}, observed, nil
+}
+
+func ObserveHeldPIDOwnerSID(held HeldPIDObservation) (string, *OriginalOwnerSIDObservation, error) {
+	h, ok := held.(*heldPIDObservation)
+	if !ok || h == nil || h.heldPIDJobObservation == nil {
+		return "", &OriginalOwnerSIDObservation{finalized: true}, errors.New("process: original held observation required")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handle == 0 {
+		return "", &OriginalOwnerSIDObservation{finalized: true}, errors.New("process: held observation is closed")
+	}
+	return observeProcessHandleOwnerSID(h.handle)
+}
+
 func (h *heldPIDObservation) OwnerSID() (string, error) {
 	if h == nil || h.heldPIDJobObservation == nil {
 		return "", errors.New("process: held observation is closed")
@@ -788,7 +834,7 @@ func queryProcessImagePath(h windows.Handle) (string, error) {
 		}
 		size *= 2
 		if size > 32768 {
-			return "", fmt.Errorf("image path exceeds 32768 UTF-16 code units")
+			return "", fmt.Errorf("image path exceeds 32768 UTF-16 code units: %w", err)
 		}
 	}
 }

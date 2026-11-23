@@ -39,6 +39,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -83,7 +84,7 @@ func TestRefreshStalePortDoesNotFreezeStoreDuringReinit(t *testing.T) {
 	t.Cleanup(store.Close)
 
 	// sess1: the session whose stale port triggers the (blocked) proactive reinit.
-	sess1 := sessionWithParticipants(blockingDaemon)
+	sess1 := sessionWithParticipants(t, blockingDaemon)
 	sess1.ClientSessionID = "freeze-sess-A"
 	ref := sess1.IntendedParticipants[0] // {srv1, claude-code, port}
 	sess1.InitSuccesses[ref] = oldSID
@@ -237,7 +238,7 @@ func TestRefreshStalePortLoopReinitsPastMidFlightRestart(t *testing.T) {
 	}
 	port := daemon.port
 
-	sess := sessionWithParticipants(daemon)
+	sess := sessionWithParticipants(t, daemon)
 	ref := sess.IntendedParticipants[0]
 	sess.InitSuccesses[ref] = oldSID
 	sess.DaemonProtoVer[ref] = proto
@@ -249,7 +250,7 @@ func TestRefreshStalePortLoopReinitsPastMidFlightRestart(t *testing.T) {
 
 	returned := make(chan string, 1)
 	go func() {
-		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+		sid, _, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 		returned <- sid
 	}()
 
@@ -301,7 +302,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 
 	t.Run("fresh_stamp_reuses_no_dial", func(t *testing.T) {
 		daemon := newStubDaemon(t, reinitSID)
-		sess := sessionWithParticipants(daemon)
+		sess := sessionWithParticipants(t, daemon)
 		ref := sess.IntendedParticipants[0]
 		callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: daemon.port, RawName: "read"}
 		sess.InitSuccesses[ref] = cachedSID
@@ -313,7 +314,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp == curGen
 		sess.mu.Unlock()
 
-		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		sid, _, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
 		if sid != cachedSID {
 			t.Fatalf("fresh stamp (>= curGen) must REUSE the cached sid; got %q want %q", sid, cachedSID)
 		}
@@ -324,7 +325,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 
 	t.Run("stale_stamp_reinits_once", func(t *testing.T) {
 		daemon := newStubDaemon(t, reinitSID)
-		sess := sessionWithParticipants(daemon)
+		sess := sessionWithParticipants(t, daemon)
 		ref := sess.IntendedParticipants[0]
 		callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: daemon.port, RawName: "read"}
 		sess.InitSuccesses[ref] = cachedSID
@@ -337,7 +338,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp 1 < curGen 2
 		sess.mu.Unlock()
 
-		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		sid, _, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
 		if sid != reinitSID {
 			t.Fatalf("stale stamp (< curGen) must REINIT; got %q want fresh %q", sid, reinitSID)
 		}
@@ -380,7 +381,7 @@ func TestRefreshStalePortExhaustionReturnsFreshestCached(t *testing.T) {
 	}
 	port := daemon.port
 
-	sess = sessionWithParticipants(daemon)
+	sess = sessionWithParticipants(t, daemon)
 	ref := sess.IntendedParticipants[0]
 	sess.InitSuccesses[ref] = callerSID
 	sess.DaemonProtoVer[ref] = proto
@@ -389,7 +390,7 @@ func TestRefreshStalePortExhaustionReturnsFreshestCached(t *testing.T) {
 	}
 	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
 
-	sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
+	sid, _, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
 
 	// Exhausted after maxProactiveReinitAttempts reinits. The returned sid must be a
 	// reinit RESULT (the freshest cached), never the caller's original snapshot.
@@ -424,7 +425,7 @@ func TestRefreshStalePortConvergesWhenDaemonMovedPort(t *testing.T) {
 	daemon := newStubDaemon(t, freshSID) // runs at the NEW (moved-to) port
 	newPort := daemon.port
 
-	sess := sessionWithParticipants() // build the (Server,Daemon) binding manually
+	sess := sessionWithParticipants(t) // build the (Server,Daemon) binding manually
 	sess.ScopeKey = "claude-code"
 	oldRef := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
 	sess.InitSuccesses[oldRef] = oldSID
@@ -433,13 +434,13 @@ func TestRefreshStalePortConvergesWhenDaemonMovedPort(t *testing.T) {
 		t.Fatalf("setup: old port %d not tracked", oldPort)
 	}
 	// Live resolver snapshot: the daemon moved (srv1,claude-code) → newPort.
-	resolverSnapshot.Store(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
 	})
 
 	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
-	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+	sid, _, resolvedPort, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 
 	if sid != freshSID {
 		t.Fatalf("moved-port reinit did not converge to the fresh sid; got %q want %q", sid, freshSID)
@@ -474,7 +475,7 @@ func TestDispatchToolsCallPostsToResolvedMovedPort(t *testing.T) {
 	newDaemon := newStubDaemon(t, freshSID) // the moved-to daemon: serves reinit + tools/call
 	newPort := newDaemon.port
 
-	sess := sessionWithParticipants()
+	sess := sessionWithParticipants(t)
 	sess.ScopeKey = "claude-code"
 	sess.ProtocolVersion = proto
 	oldKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
@@ -484,7 +485,7 @@ func TestDispatchToolsCallPostsToResolvedMovedPort(t *testing.T) {
 		t.Fatalf("setup: old port %d not tracked", oldPort)
 	}
 	// Live resolver: (srv1,claude-code) now bound to newPort.
-	resolverSnapshot.Store(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
 	})
@@ -540,7 +541,7 @@ func TestRefreshStalePortReinitFailReturnsOriginalPort(t *testing.T) {
 	}
 	newPort := movedDaemon.port
 
-	sess := sessionWithParticipants()
+	sess := sessionWithParticipants(t)
 	sess.ScopeKey = "claude-code"
 	sess.ProtocolVersion = proto
 	oldKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
@@ -549,13 +550,13 @@ func TestRefreshStalePortReinitFailReturnsOriginalPort(t *testing.T) {
 	if !sess.markStalePort(oldPort) {
 		t.Fatalf("setup: old port %d not tracked", oldPort)
 	}
-	resolverSnapshot.Store(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
 	})
 
 	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
-	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+	sid, _, resolvedPort, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 
 	if sid != oldSID {
 		t.Fatalf("reinit-fail must return the caller's original sid; got %q want %q", sid, oldSID)
@@ -568,16 +569,10 @@ func TestRefreshStalePortReinitFailReturnsOriginalPort(t *testing.T) {
 	}
 }
 
-// TestRefreshStalePortExhaustionBreakReturnsOriginalPort pins the SECOND changed
-// return (the exhaustion-break path) for the same Codex #500 r7 P2 / fable r8
-// pairing invariant. It engineers a restart STORM: the daemon port flips on every
-// successful handshake, so the sameDaemonIdentity cache sweep deletes the previous
-// pass's cached sid and the freshness re-check always misses — the loop reinits on
-// every pass and never converges. After maxProactiveReinitAttempts it breaks with
-// hasSID == false and must return the caller's original sid paired with ref.Port
-// (not the last-resolved port). Reverting only the exhaustion-break return line to
-// the resolved port is caught here but NOT by the reinit-fail test above.
-func TestRefreshStalePortExhaustionBreakReturnsOriginalPort(t *testing.T) {
+// TestRefreshStalePortMoveDuringHandshakeRefusesDispatch checks terminal refusal
+// when the resolver changes after initialize starts and the endpoint no longer
+// has authority for notifications/initialized.
+func TestRefreshStalePortMoveDuringHandshakeRefusesDispatch(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
 
@@ -588,12 +583,12 @@ func TestRefreshStalePortExhaustionBreakReturnsOriginalPort(t *testing.T) {
 	daemonB := newStubDaemon(t, "unused")
 	portA, portB := daemonA.port, daemonB.port
 
-	sess := sessionWithParticipants()
+	sess := sessionWithParticipants(t)
 	sess.ScopeKey = "claude-code"
 	sess.ProtocolVersion = proto
 
 	setResolver := func(p int) {
-		resolverSnapshot.Store(&ResolverSnapshot{
+		publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 			Gen:      1,
 			Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: p}}},
 		})
@@ -604,8 +599,7 @@ func TestRefreshStalePortExhaustionBreakReturnsOriginalPort(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 	}
-	// Each handshake succeeds AND flips the resolver to the OTHER port, so the next
-	// pass resolves a port whose cache the sweep just deleted → perpetual miss.
+	// The initialize response arrives after routing has moved to the other port.
 	daemonA.onInit = func(w http.ResponseWriter, r *http.Request) { setResolver(portB); writeInitOK(w, "sid-a") }
 	daemonB.onInit = func(w http.ResponseWriter, r *http.Request) { setResolver(portA); writeInitOK(w, "sid-b") }
 
@@ -622,16 +616,12 @@ func TestRefreshStalePortExhaustionBreakReturnsOriginalPort(t *testing.T) {
 	setResolver(portA)
 
 	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: portA, RawName: "read"}
-	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
+	sid, daemonProto, resolvedPort, err := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
 
-	if sid != callerSID {
-		t.Fatalf("exhaustion-break must return the caller's original sid; got %q want %q", sid, callerSID)
+	if !errors.Is(err, errHubDaemonAdmission) || sid != "" || daemonProto != "" || resolvedPort != 0 {
+		t.Fatalf("policy refusal returned dispatch data: SID=%q protocol=%q port=%d error=%v", sid, daemonProto, resolvedPort, err)
 	}
-	if resolvedPort != portA {
-		t.Fatalf("exhaustion-break returned port %d; want the original ref.Port %d, not a last-resolved port", resolvedPort, portA)
-	}
-	// The storm reinits every pass up to the bound (never converging).
-	if got := daemonA.initCount.Load() + daemonB.initCount.Load(); got != maxProactiveReinitAttempts {
-		t.Fatalf("expected %d handshakes across the reinit storm; got %d", maxProactiveReinitAttempts, got)
+	if got := daemonA.initCount.Load() + daemonB.initCount.Load(); got != 1 || daemonA.notifyCount.Load() != 0 {
+		t.Fatalf("expected one admitted initialize and no stale notification; got %d initializes", got)
 	}
 }

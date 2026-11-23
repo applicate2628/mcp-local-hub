@@ -299,6 +299,78 @@ func (c GUIOwnerControl) GUIStopIncludesDaemons() bool {
 	return strings.HasSuffix(c.StopCause, "-and-stop-all")
 }
 
+// WithSavedHubEndpointGateIn reads the typed saved gate under the existing
+// preferences lease. The callback may not reenter that lease.
+func (a *API) WithSavedHubEndpointGateIn(ctx context.Context, path string, use func(bool) error) error {
+	return a.withSavedHubEndpointGate(ctx, path, nil, use)
+}
+
+// WithSavedHubEndpointGateBoundIn reads one settings document through the
+// held Product namespace. Qualified callers acquire H before this borrow.
+func (a *API) WithSavedHubEndpointGateBoundIn(ctx context.Context, path string, namespace *WindowsProductStateNamespace, use func(bool) error) error {
+	if namespace == nil {
+		return errors.New("original Product namespace required for saved Hub endpoint gate")
+	}
+	return a.withSavedHubEndpointGate(ctx, path, namespace, use)
+}
+
+func (a *API) withSavedHubEndpointGate(ctx context.Context, path string, namespace *WindowsProductStateNamespace, use func(bool) error) (retErr error) {
+	if ctx == nil || use == nil {
+		return errors.New("saved Hub endpoint gate context and callback required")
+	}
+	var opts []flock.Option
+	if namespace != nil {
+		option, err := namespace.BoundLockOption(ctx, supervisorIntentLockPath(path), guiPreferencesFileLeaf+".lock")
+		if err != nil {
+			return err
+		}
+		opts = append(opts, option)
+	}
+	lease, err := acquireStateFileObservedLease(ctx, path, opts...)
+	if err != nil {
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			namespace.RetainAfterUnconfirmedRelease(err)
+		}
+		return err
+	}
+	defer func() {
+		received, closeErr := lease.CloseObserved()
+		if closeErr == nil {
+			closeErr = received.Validate(lease)
+		}
+		namespace.RetainAfterUnconfirmedRelease(closeErr)
+		retErr = errors.Join(retErr, closeErr)
+	}()
+	return lease.Borrow(ctx, path, func() error {
+		var raw map[string]string
+		var err error
+		if namespace == nil {
+			raw, _, err = readSettingsMapPresence(path, decodeSingleSettingsDocument)
+		} else {
+			data, readErr := namespace.ReadBoundFile(ctx, path, guiPreferencesFileLeaf)
+			raw, _, err = decodeSettingsMapPresence(data, readErr, decodeSingleSettingsDocument)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		def := findDef("gui_server.hub_endpoint_enabled")
+		if def == nil || def.Type != TypeBool {
+			return errors.New("saved Hub endpoint gate has no boolean registry definition")
+		}
+		value, present := raw[def.Key]
+		if !present {
+			value = def.Default
+		}
+		if err := validate(def, value); err != nil {
+			return fmt.Errorf("invalid saved Hub endpoint gate: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return use(value == "true")
+	})
+}
+
 // RequiredGUIOwnerControlObservation preserves required-leaf presence and every
 // original acquisition/read/close outcome. It issues no mutation authority.
 type RequiredGUIOwnerControlObservation struct {

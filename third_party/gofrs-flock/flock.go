@@ -43,6 +43,15 @@ func SetPermissions(perm fs.FileMode) Option {
 	}
 }
 
+// ErrOpenedFileCloseUnconfirmed marks failed closure of a supplied original file.
+var ErrOpenedFileCloseUnconfirmed = errors.New("flock original supplied file close unconfirmed")
+
+// SetFileOpener lets an owning caller supply an already verified original
+// descriptor. The returned file transfers to Flock, including its closure.
+func SetFileOpener(open func(path string, flag int) (*os.File, error)) Option {
+	return func(f *Flock) { f.fileOpener = open }
+}
+
 // Flock is the struct type to handle file locking. All fields are unexported,
 // with access to some of the fields provided by getter methods (Path() and Locked()).
 type Flock struct {
@@ -56,6 +65,8 @@ type Flock struct {
 	flag int
 	// perm is the OS permissions to set on the file.
 	perm               fs.FileMode
+	fileOpener         func(string, int) (*os.File, error)
+	openerCloseErr     error
 	observed           *observedAcquisition
 	observedGeneration uint64
 	observedPending    error
@@ -193,10 +204,21 @@ func (f *Flock) setFh(flag int) error {
 		f.observedGeneration++
 		f.observed = nil
 	}
-	// open a new os.File instance
-	fh, err := os.OpenFile(f.path, flag, f.perm)
+	if f.openerCloseErr != nil {
+		return f.openerCloseErr
+	}
+	var fh *os.File
+	var err error
+	if f.fileOpener != nil {
+		fh, err = f.fileOpener(f.path, flag)
+	} else {
+		fh, err = os.OpenFile(f.path, flag, f.perm)
+	}
 	if err != nil {
 		return err
+	}
+	if fh == nil {
+		return errors.New("flock opener returned no original file")
 	}
 
 	// set the file handle on the struct
@@ -222,6 +244,9 @@ func (f *Flock) resetFh() {
 		closeErr = f.observedCloseFile(file)
 	} else {
 		closeErr = file.Close()
+	}
+	if f.fileOpener != nil && closeErr != nil {
+		f.openerCloseErr = errors.Join(f.openerCloseErr, ErrOpenedFileCloseUnconfirmed, closeErr)
 	}
 	if f.observed != nil {
 		f.observed.closeAttempts++

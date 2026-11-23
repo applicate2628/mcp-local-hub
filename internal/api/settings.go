@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -106,20 +107,22 @@ func (a *API) withWeeklyScheduleSettings(mode weeklyScheduleSettingsMode, desire
 	return fn(current, rollback)
 }
 
+const guiPreferencesFileLeaf = "gui-preferences.yaml"
+
 // SettingsPath returns the canonical preferences file location (in the
 // per-user data dir — same as secrets).
 func SettingsPath() string {
 	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		return filepath.Join(v, "mcp-local-hub", "gui-preferences.yaml")
+		return filepath.Join(v, "mcp-local-hub", guiPreferencesFileLeaf)
 	}
 	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
-		return filepath.Join(v, "mcp-local-hub", "gui-preferences.yaml")
+		return filepath.Join(v, "mcp-local-hub", guiPreferencesFileLeaf)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "gui-preferences.yaml"
+		return guiPreferencesFileLeaf
 	}
-	return filepath.Join(home, ".local", "share", "mcp-local-hub", "gui-preferences.yaml")
+	return filepath.Join(home, ".local", "share", "mcp-local-hub", guiPreferencesFileLeaf)
 }
 
 // SettingsList returns the schema-resolved snapshot: every registry key
@@ -241,6 +244,25 @@ func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) erro
 // from the raw map passed to the hook.
 func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) error {
 	return mutateSettingsMapLockedThen(path, readRawSettingsMap, mutate, after)
+}
+
+// TryAcquireBoundSettingsObserved keeps the existing settings mutex and
+// settings-file ledger together. The original observed lease closes both.
+func TryAcquireBoundSettingsObserved(ctx context.Context, path string) (*StateFileObservedLease, error) {
+	if !settingsMu.TryLock() {
+		return nil, errors.New("bound settings owner is busy")
+	}
+	lease, err := TryAcquireStateFileObservedLease(ctx, path)
+	if lease == nil {
+		settingsMu.Unlock()
+		return nil, err
+	}
+	releaseGate := lease.gateRelease
+	lease.gateRelease = func() {
+		releaseGate()
+		settingsMu.Unlock()
+	}
+	return lease, err
 }
 
 func mutateSettingsMapLockedThen(path string, read func(string) (map[string]string, error), mutate func(map[string]string) error, after func(map[string]string) error) (err error) {
@@ -366,12 +388,24 @@ func readRawSettingsMap(path string) (map[string]string, error) {
 
 // Presence comes from the same inode-anchored read as the decoded map.
 func readRawSettingsMapPresence(path string) (map[string]string, bool, error) {
+	return readSettingsMapPresence(path, func(data []byte) (map[string]string, error) {
+		out := map[string]string{}
+		err := yaml.Unmarshal(data, &out)
+		return out, err
+	})
+}
+
+func readSettingsMapPresence(path string, decode func([]byte) (map[string]string, error)) (map[string]string, bool, error) {
 	data, err := readStateFileInodeAnchored(path)
+	return decodeSettingsMapPresence(data, err, decode)
+}
+
+func decodeSettingsMapPresence(data []byte, err error, decode func([]byte) (map[string]string, error)) (map[string]string, bool, error) {
 	if err != nil {
 		return nil, !os.IsNotExist(err), err
 	}
-	out := map[string]string{}
-	if err := yaml.Unmarshal(data, &out); err != nil {
+	out, err := decode(data)
+	if err != nil {
 		return nil, true, err
 	}
 	migrateLegacyKeys(out)

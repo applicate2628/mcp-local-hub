@@ -19,7 +19,8 @@ func canonicalEntryTestBinding(t *testing.T) WindowsCanonicalEntryBuildBindingV1
 
 func TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch(t *testing.T) {
 	b := canonicalEntryTestBinding(t)
-	existing := "original\r\nComments\r\n\nmcphub-source-v1;sha256=" + strings.Repeat("c", 64)
+	sourceLine := "\nmcphub-source-v1;sha256=" + strings.Repeat("c", 64)
+	existing := "original\r\nComments\r\n" + sourceLine
 	encoded, err := EncodeWindowsCanonicalEntryCommentsV1(existing, b)
 	if err != nil {
 		t.Fatal(err)
@@ -35,6 +36,24 @@ func TestCanonicalEntryCommentsPreservesExactPriorAndSourceEpoch(t *testing.T) {
 	legacyEpoch, err := parsePublisherSourceComments(existing)
 	if err != nil || legacyEpoch != epoch {
 		t.Fatalf("legacy epoch=%q error=%v", legacyEpoch, err)
+	}
+	runtimeLine := "\nmcphub-runtime-v1;sha256=" + strings.Repeat("d", 64)
+	normalV2, err := EncodeWindowsCanonicalEntryCommentsV1(existing+runtimeLine, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := parsePublisherSourceComments(normalV2); err != nil || got != epoch {
+		t.Fatalf("V2 publisher epoch=%q error=%v", got, err)
+	}
+	if _, err := parsePublisherSourceComments("original"); err == nil || err.Error() != "PUBLISHER_SOURCE_EPOCH_UNMARKED" {
+		t.Fatalf("unmarked publisher Comments error=%v", err)
+	}
+	heldV2, err := EncodeWindowsCanonicalEntryCommentsV1("original\n"+windowsBackendRunHoldMarkerV1+sourceLine+runtimeLine, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parsePublisherSourceComments(heldV2); !errors.Is(err, ErrWindowsBackendRunHoldUnverified) {
+		t.Fatalf("backend run hold publisher Comments error=%v", err)
 	}
 	if _, _, err := ParseWindowsCanonicalEntryCommentsV1(existing); !errors.Is(err, ErrWindowsCanonicalEntryBindingMissing) {
 		t.Fatalf("legacy error=%v", err)

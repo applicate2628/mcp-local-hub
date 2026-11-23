@@ -33,3 +33,5 @@ require (
 )
 
 replace github.com/gofrs/flock v0.13.0 => ./third_party/gofrs-flock
+
+replace github.com/Microsoft/go-winio v0.6.2 => ./third_party/go-winio

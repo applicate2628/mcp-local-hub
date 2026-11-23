@@ -13,3 +13,6 @@ func WriteStateFileBytesAtomicObserved(clients.ConfigWriteRequest) (*StateFilePu
 func WriteStateFileBytesLockHeldObserved(clients.ConfigWriteRequest, *StateFileObservedLease) (*StateFilePublicationObservation, error) {
 	return nil, errors.New("STATE_OBSERVED_WRITER_PLATFORM_UNQUALIFIED")
 }
+func WriteStateFileRouteAdmissionLockHeldObserved(clients.ConfigWriteRequest, *StateFileObservedLease) (*StateFilePublicationObservation, error) {
+	return nil, errors.New("STATE_OBSERVED_WRITER_PLATFORM_UNQUALIFIED")
+}

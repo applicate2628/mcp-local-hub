@@ -310,7 +310,7 @@ func TestCharacterizeResolveToolsCallRouteOutOfScopeKeysOnSessClient(t *testing.
 	current := &ResolverSnapshot{Gen: 2, Bindings: map[string][]canonicalDaemonRef{
 		"codex-cli": {{Server: "srv1", Daemon: "claude-code", Port: 9101}},
 	}}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
@@ -346,7 +346,7 @@ func TestCharacterizeResolveToolsCallRouteSameClientKeyStillBound(t *testing.T) 
 	current := &ResolverSnapshot{Gen: 2, Bindings: map[string][]canonicalDaemonRef{
 		"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: 9101}},
 	}}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
 	if err != nil {
@@ -375,7 +375,7 @@ func TestCharacterizeResolveToolsCallRouteSamePointerSkipsRevalidation(t *testin
 	// Snapshot binds NO client at all; if revalidation ran it would
 	// refuse. The same-pointer guard must skip it.
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{}}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess := &hubSession{ScopeKey: "claude-code", InitSuccesses: map[canonicalDaemonRef]string{}}
 	sess.RouteMap.Store(&map[string]canonicalToolRef{"srv1__read": ref})
@@ -416,7 +416,7 @@ func TestCharacterizeResolveToolsCallRouteResolvesTargetPort(t *testing.T) {
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
 		"claude-code": {daemonKey},
 	}}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 	sess.SnapshotAtInit = LoadResolverSnapshot()
 
 	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
@@ -456,7 +456,7 @@ func TestCharacterizeResolveToolsCallRouteNoDaemonSID(t *testing.T) {
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
 		"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: 9101}},
 	}}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 	sess.SnapshotAtInit = LoadResolverSnapshot()
 
 	target, err := resolveToolsCallRoute(context.Background(), sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read"}`))
@@ -504,7 +504,7 @@ func TestCharacterizeDispatchToolsCallIgnoresScopeKey(t *testing.T) {
 	// self-heal port re-resolution (currentDaemonPort) inside dispatch
 	// finds the same live port for either scope key.
 	resetResolverForTest(t)
-	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{
 		"claude-code": {daemonKey},
 		"codex-cli":   {daemonKey},
 	}})

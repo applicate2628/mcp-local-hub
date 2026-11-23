@@ -375,6 +375,86 @@ func TestProjectMCPFrontRouteActivation_RejectsThirdDescriptorWithoutMutation(t 
 	}
 }
 
+func TestMCPFrontLinkedActivationRecoversOnlyItsOriginal(t *testing.T) {
+	from := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFront, Generation: 3, Port: 9555}
+	to := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: 4, Port: 9556}
+	selection := api.RouteActivationSelection{FromEpoch: from, ToEpoch: to, DescriptorSHA256: strings.Repeat("a", 64),
+		Supervisor: api.SupervisorLockOwner{PID: 42, StartedAt: "2026-01-01T00:00:00Z"}, PriorGeneration: 6}
+	original := api.RouteActivationOriginal{Selection: selection, Generation: 7,
+		Creator: api.SupervisorLockOwner{PID: 43, StartedAt: "2026-01-01T00:00:01Z"}}
+	observation := original
+	query := func(context.Context) (api.RouteAggregateStatus, api.SupervisorLockOwner, error) {
+		return api.RouteAggregateStatus{Ownership: api.RouteAggregateNotOwner, Generation: observation.Generation, Activation: &observation},
+			selection.Supervisor, nil
+	}
+	ctx := t.Context()
+	report := mcpFrontReconcileReport{Version: mcpFrontReconcileVersion5, SnapshotComplete: true, Generation: from.Generation,
+		Rows: map[string]mcpFrontReconcileRow{}, ActivePlan: &mcpFrontReconcilePlan{Generation: from.Generation, Port: from.Port},
+		Settled: true, RouteActivation: &mcpFrontRouteActivation{Phase: mcpFrontRouteActivationPrepared, FromEpoch: from, ToEpoch: to, Selection: &selection}}
+	readPrepared := func(string) (*mcpFrontReconcileReport, error) { return &report, nil }
+	noReplay := func(context.Context) error {
+		t.Error("linked activation tried to reconcile another process")
+		return nil
+	}
+	recovery := mcpFrontRouteActivationRecoveryOps{readReport: readPrepared, queryOriginal: query, reconcile: noReplay,
+		routingState: func() (api.MCPFrontRoutingTargetSnapshot, error) { return from, nil }}
+	if recovered, err := recoverMCPFrontRouteActivationLocked(ctx, "fixture.json", recovery); recovered != nil || err == nil || !strings.Contains(err.Error(), "original remains live") {
+		t.Fatalf("live prepared original should await its exact forward plan: %v", err)
+	}
+	observation.Selection.FromEpoch.Generation++
+	observation.Selection.ToEpoch.Generation++
+	if recovered, err := recoverMCPFrontRouteActivationLocked(ctx, "fixture.json", recovery); recovered != nil || err == nil || !strings.Contains(err.Error(), "differs from prepared selection") {
+		t.Fatalf("same port with a different epoch received original credit: %v", err)
+	}
+	observation = original
+
+	journal := &mcpFrontReconcileJournal{reportPath: "fixture.json", record: mcpFrontReconcileReport{
+		Version: mcpFrontReconcileVersion5, SnapshotComplete: true, Generation: to.Generation,
+		Rows: map[string]mcpFrontReconcileRow{}, ActivePlan: &mcpFrontReconcilePlan{Generation: to.Generation, Port: to.Port},
+		RouteOriginal: &original,
+	}}
+	routing := from
+	var durable mcpFrontReconcileReport
+	var transitions, writes int
+	beforeCAS := errors.New("fixture CAS interrupted")
+	ops := mcpFrontGenerationAdmissionOps{
+		routingState: func() (api.MCPFrontRoutingTargetSnapshot, error) { return routing, nil },
+		persist: func(_ string, report *mcpFrontReconcileReport) error {
+			writes++
+			durable = *report
+			return nil
+		},
+		readReport:    func(string) (*mcpFrontReconcileReport, error) { return &durable, nil },
+		queryOriginal: query,
+		transition: func(_ context.Context, expected, next api.MCPFrontRoutingTargetSnapshot) error {
+			transitions++
+			if durable.RouteOriginal == nil || *durable.RouteOriginal != original || durable.GenerationAdmission == nil ||
+				expected != from || next != to {
+				t.Fatal("generation CAS entered before durable exact original proof")
+			}
+			if transitions == 1 {
+				return beforeCAS
+			}
+			routing = next
+			return nil
+		},
+	}
+	decision := mcpFrontGenerationDecision{Admission: true, FromEpoch: from, ToEpoch: to}
+	if err := admitMCPFrontGeneration(ctx, journal, decision, ops); !errors.Is(err, beforeCAS) ||
+		routing != from || writes != 1 || durable.GenerationAdmission == nil || durable.RouteOriginal == nil {
+		t.Fatalf("interrupted CAS did not retain the original proof: %v", err)
+	}
+	observation.Creator = api.SupervisorLockOwner{PID: 44, StartedAt: "2026-01-01T00:00:02Z"}
+	if err := reconcileMCPFrontGenerationAdmission(ctx, journal.reportPath, &journal.record, ops); err == nil || transitions != 1 || writes != 1 {
+		t.Fatalf("same epoch with a replaced creator advanced the original receipt: %v", err)
+	}
+	observation = original
+	if err := reconcileMCPFrontGenerationAdmission(ctx, journal.reportPath, &journal.record, ops); err != nil ||
+		transitions != 2 || routing != to || durable.GenerationAdmission != nil || durable.RouteOriginal == nil || *durable.RouteOriginal != original {
+		t.Fatalf("exact original recovery did not settle admission with its retained receipt: %v", err)
+	}
+}
+
 func TestActivateMCPFrontRoute_StagesDescriptorBeforePreflight(t *testing.T) {
 	var order []string
 	err := activateMCPFrontRoute(context.Background(), 9555, mcpFrontRouteActivationOps{

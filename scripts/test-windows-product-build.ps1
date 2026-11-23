@@ -419,9 +419,17 @@ foreach ($arch in @("amd64", "arm64")) {
 }
 
 $publishWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".github/workflows/npm-publish.yml")
-if ($publishWorkflow -notmatch "(?m)^\s*node-version:\s*'\d+\.\d+\.\d+'\s*$" -or
+$nodeMinimumMatch = [regex]::Match($publishWorkflow, '(?m)^\s*PUBLISH_NODE_MIN_VERSION:\s*''(?<version>\d+\.\d+\.\d+)''\s*$')
+if (-not $nodeMinimumMatch.Success -or
+    $publishWorkflow -notmatch '(?m)^\s*node-version:\s*''>=\$\{\{\s*env\.PUBLISH_NODE_MIN_VERSION\s*\}\}''\s*$' -or
     $publishWorkflow -notmatch "(?m)^\s*package-manager-cache:\s*false\s*$") {
-    throw "npm publish workflow must select a reproducible Node distribution with package-manager caching disabled"
+    throw "npm publish workflow must select Node using the declared minimum with package-manager caching disabled"
+}
+$goModule = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'go.mod')
+$goMinimumMatch = [regex]::Match($goModule, '(?m)^go[ \t]+(?<version>\d+\.\d+\.\d+)[ \t]*\r?$')
+if (-not $goMinimumMatch.Success -or
+    $publishWorkflow -notmatch "(?m)^\s*go-version:\s*'>=$([regex]::Escape($goMinimumMatch.Groups['version'].Value))'\s*$") {
+    throw "npm publish workflow must select Go using the module's declared minimum"
 }
 if ($publishWorkflow -notmatch 'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' -or
     $publishWorkflow -notmatch "(?m)^\s*runs-on:\s*ubuntu-latest\s*$" -or
@@ -458,12 +466,17 @@ if (-not $toolchainProgramMatch.Success -or
 $toolchainProgram = [regex]::Replace($toolchainProgramMatch.Groups['program'].Value, '(?m)^ {10}', '')
 $toolchainNode = Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1
 function Test-PublishingToolchainGate {
-    param([string[]]$Versions, [string]$ExpectedError = '')
+    param(
+        [string[]]$Versions,
+        [string]$ExpectedError = '',
+        [string]$NodeMinimum = $nodeMinimumMatch.Groups['version'].Value
+    )
     # Expected rejection diagnostics are captured; their nonzero exit remains required.
     $ErrorActionPreference = 'Continue'
     # JSON preserves empty arguments even under Windows PowerShell 5.1.
     $versionArguments = ConvertTo-Json -InputObject @($Versions) -Compress
-    $testProgram = "process.argv = [process.argv[0], '-', ...$versionArguments];`n$toolchainProgram"
+    $minimumArgument = ConvertTo-Json -InputObject $NodeMinimum -Compress
+    $testProgram = "process.env.PUBLISH_NODE_MIN_VERSION = $minimumArgument;`nprocess.argv = [process.argv[0], '-', ...$versionArguments];`n$toolchainProgram"
     $diagnostic = ($testProgram | & $toolchainNode.Source - 2>&1 | Out-String)
     $exitCode = $LASTEXITCODE
     if (($ExpectedError -eq '' -and $exitCode -ne 0) -or
@@ -488,27 +501,26 @@ foreach ($value in @('', '22', '22.14', '022.14.0', '22.14.0-01', '22.14.0 trail
 Test-PublishingToolchainGate -Versions @('v22.14.0', '') -ExpectedError 'npm version is missing or malformed'
 Test-PublishingToolchainGate -Versions @() -ExpectedError 'Node version is missing or malformed'
 Test-PublishingToolchainGate -Versions @('v22.14.0') -ExpectedError 'npm version is missing or malformed'
+Test-PublishingToolchainGate -Versions @('v24.21.0', '11.19.0') -NodeMinimum '' -ExpectedError 'Node minimum is missing or malformed'
+Test-PublishingToolchainGate -Versions @('v24.21.0', '11.19.0') -NodeMinimum '22.14' -ExpectedError 'Node minimum is missing or malformed'
 if ($publishWorkflow -notmatch "(?s)push:\s*\n\s*tags:\s*\n\s*- 'v\*\.\*\.\*'" -or
     $publishWorkflow -notmatch "(?s)workflow_dispatch:.+dry_run:.+default:\s*true" -or
     $publishWorkflow -notmatch "\^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+" -or
     $publishWorkflow -notmatch 'case "\$V" in \*-\*\) TAG="--tag beta"' -or
-    @([regex]::Matches($publishWorkflow, 'npm publish --provenance --access public')).Count -ne 2) {
+    @([regex]::Matches($publishWorkflow, 'npm publish "\$(?:PLATFORM|META)_ARCHIVE" --provenance --access public')).Count -ne 2) {
     throw "npm publish workflow must preserve trigger, dry-run, semver, beta-tag, and provenance behavior"
 }
 $publishStep = $publishWorkflow.Substring($publishStepStart)
-$platformLoops = @([regex]::Matches($publishStep, '(?ms)^ {10}for d in \$TARGETS; do\r?\n.*?^ {10}done[ \t]*\r?$'))
-$platformPublishPattern = '(?m)^ {12}\( cd "npm/packages/\$d" && npm publish --provenance --access public \$TAG \$DRY \)\s*$'
-$metaPublishPattern = '(?m)^ {10}\( cd npm && npm publish --provenance --access public \$TAG \$DRY \)\s*$'
-$platformPublishes = @([regex]::Matches($publishStep, $platformPublishPattern))
-$metaPublishes = @([regex]::Matches($publishStep, $metaPublishPattern))
-if ($publishStep -match '\|\|\s*true' -or $platformPublishes.Count -ne 1 -or $metaPublishes.Count -ne 1) {
-    throw "npm publish workflow must use exactly two direct unmasked fail-propagating publish commands"
-}
-if ($platformLoops.Count -ne 1 -or
-    $platformPublishes[0].Index -le $platformLoops[0].Index -or
-    $platformPublishes[0].Index -ge ($platformLoops[0].Index + $platformLoops[0].Length) -or
-    $metaPublishes[0].Index -le ($platformLoops[0].Index + $platformLoops[0].Length)) {
-    throw "npm publish workflow must publish platform packages inside the catalog loop and the meta package after it"
+$platformPublish = [regex]::Match($publishStep, '(?m)^ {10}npm publish "\$PLATFORM_ARCHIVE" --provenance --access public \$TAG \$DRY[ \t]*\r?$')
+$metaPublish = [regex]::Match($publishStep, '(?m)^ {10}npm publish "\$META_ARCHIVE" --provenance --access public \$TAG \$DRY[ \t]*\r?$')
+$archiveChecks = [regex]::Match($publishStep, '(?m)^ {10}verify_archive "\$PLATFORM_ARCHIVE" "applicate2628-mcp-local-hub-win32-x64-\$V\.tgz" "\$PLATFORM_ARCHIVE_SHA256"\r?\n {10}verify_archive "\$META_ARCHIVE" "mcp-local-hub-\$V\.tgz" "\$META_ARCHIVE_SHA256"[ \t]*\r?$')
+$metaChecks = [regex]::Matches($publishStep, '(?m)^ {10}verify_archive "\$META_ARCHIVE" "mcp-local-hub-\$V\.tgz" "\$META_ARCHIVE_SHA256"[ \t]*\r?$')
+if ($publishStep -notmatch '(?m)^ {8}shell: bash[ \t]*\r?$' -or
+    $publishStep -match '\|\|\s*true' -or -not $archiveChecks.Success -or
+    -not $platformPublish.Success -or -not $metaPublish.Success -or
+    $archiveChecks.Index -ge $platformPublish.Index -or $metaChecks.Count -ne 2 -or
+    $metaChecks[1].Index -le $platformPublish.Index -or $metaChecks[1].Index -ge $metaPublish.Index) {
+    throw "npm publish workflow must preflight both archives and recheck the pending meta after the platform publish"
 }
 if ($publishWorkflow -match [regex]::Escape("go generate ./cmd/mcphub")) {
     throw "npm publish workflow must not call the retired go:generate resource path"
@@ -516,25 +528,38 @@ if ($publishWorkflow -match [regex]::Escape("go generate ./cmd/mcphub")) {
 if ($publishWorkflow -notmatch 'COMMIT="\$\(git rev-parse HEAD\)"') {
     throw "npm publish workflow must capture the full Windows release commit"
 }
-$packageSetStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: package_set[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
-$targetAdmissionPattern = '(?m)^ {10}TARGETS="\$\(node -e "process\.stdout\.write\(Object\.keys\(require\(''\./npm/lib/platform-binary''\)\.PACKAGE_BY_PLATFORM\)\.join\('' ''\)\)"\)"\r?\n {10}if \[ "\$TARGETS" != "win32-x64" \]; then\r?\n {12}echo "::error::[^"\r\n]*"; exit 1\r?\n {10}fi\r?\n {10}echo "targets=\$TARGETS" >> "\$GITHUB_OUTPUT"[ \t]*\r?$'
-if ($packageSetStep -notmatch $targetAdmissionPattern -or
-    $publishStep -notmatch '(?m)^ {10}TARGETS: \$\{\{ steps\.package_set\.outputs\.targets \}\}[ \t]*\r?$') {
+$packageSetStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name: Set package versions \+ regenerate platform packages\r?\n.*?(?=^ {6}- name:|\z)').Value
+$targetAdmissionPattern = '(?m)^ {10}TARGETS="\$\(node -e "process\.stdout\.write\(Object\.keys\(require\(''\./npm/lib/platform-binary''\)\.PACKAGE_BY_PLATFORM\)\.join\('' ''\)\)"\)"\r?\n {10}if \[ "\$TARGETS" != "win32-x64" \]; then\r?\n {12}echo "::error::[^"\r\n]*"; exit 1\r?\n {10}fi[ \t]*\r?$'
+if ($packageSetStep -notmatch $targetAdmissionPattern) {
     throw "npm publish workflow must publish only the admitted Windows x64 catalog target"
 }
-if ($publishWorkflow -notmatch '(?s)build\.ps1.+-WindowsTargetArch.+-ReleaseVersion.+-ReleaseCommit.+-ReleaseBuildDate') {
-    throw "npm publish workflow must delegate Windows payload generation to build.ps1 with the captured tuple"
-}
 $nativeBuildStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: native[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
-$directWindowsBuildPattern = '(?m)^ {14}win32-x64\)\r?\n {16}\(\r?\n {18}cd "\$SOURCE_EXPORT"\r?\n {18}pwsh -NoProfile -File \./build\.ps1 \\\r?\n {20}-WindowsTargetArch amd64 \\\r?\n {20}-OutputDirectory "\$CHECKOUT/npm/packages/\$d/bin" \\\r?\n {20}-ReleaseVersion "\$V" \\\r?\n {20}-ReleaseCommit "\$COMMIT" \\\r?\n {20}-ReleaseBuildDate "\$DATE" \\\r?\n {20}-SourceSnapshotPath "\$SOURCE_SNAPSHOT"\r?\n {16}\)\r?\n {16};;[ \t]*\r?$'
+$fetchPlan = [regex]::Match($nativeBuildStep, '(?m)^ {12}go run \./tools/windows-product-validate --runtime-fetch-plan \\\r?\n {14}--source-root "\$SOURCE_EXPORT" \\\r?\n {14}--source-snapshot "\$SOURCE_SNAPSHOT" \\\r?\n {14}--expected-source-epoch "\$SOURCE_EPOCH"\r?\n {10}\) > "\$RUNTIME_PLAN"[ \t]*\r?$')
+$fetchProgram = $nativeBuildStep.IndexOf('RUNTIME_PLAN="$RUNTIME_PLAN" RUNTIME_ARCHIVES=')
+$planEncoding = $nativeBuildStep.IndexOf("!raw.equals(Buffer.from(JSON.stringify(plan) + '\n'))")
+$downloadLoop = $nativeBuildStep.IndexOf('for (const archive of archives) await download(archive);')
+if (-not $fetchPlan.Success -or $fetchProgram -le $fetchPlan.Index -or
+    $planEncoding -le $fetchProgram -or $downloadLoop -le $planEncoding) {
+    throw "npm publish workflow must obtain and verify the compact runtime plan from the original prepared source before acquisition"
+}
+$directWindowsBuildPattern = '(?m)^ {10}\(\r?\n {12}cd "\$SOURCE_EXPORT"\r?\n {12}pwsh -NoProfile -File \./build\.ps1 \\\r?\n {14}-CurrentWindowsPackage \\\r?\n {14}-WindowsTargetArch amd64 \\\r?\n {14}-OutputDirectory "\$PLATFORM_STAGE/bin" \\\r?\n {14}-ReleaseVersion "\$V" \\\r?\n {14}-ReleaseCommit "\$COMMIT" \\\r?\n {14}-ReleaseBuildDate "\$DATE" \\\r?\n {14}-SourceSnapshotPath "\$SOURCE_SNAPSHOT" \\\r?\n {14}-RuntimeArchiveDirectory "\$RUNTIME_ARCHIVES"\r?\n {10}\)[ \t]*\r?$'
 if ($nativeBuildStep -notmatch '(?m)^ {8}shell: bash[ \t]*\r?$' -or
     $nativeBuildStep -notmatch $directWindowsBuildPattern) {
-    throw "npm publish workflow must run the snapshot-bound Windows build as an unmasked Bash subshell"
+    throw "npm publish workflow must run the snapshot-bound Windows V4 build as an unmasked Bash subshell"
 }
-if ($publishWorkflow -notmatch 'tools/windows-product-validate' -or
-    $publishWorkflow -match 'mcphub-pe-admit') {
-    throw "npm publish workflow must use only the repository product validator"
+$platformPackStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: platform_pack[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
+$packValidationPattern = '(?m)^ {12}go run \./tools/windows-product-validate \\\r?\n {14}--candidate "\$PLATFORM_STAGE/bin/mcphub-product/mcphub\.exe" \\\r?\n {14}--helper "\$PLATFORM_STAGE/bin/mcphub\.exe" \\\r?\n {14}--expected-version "\$VERSION" \\\r?\n {14}--expected-commit "\$COMMIT" \\\r?\n {14}--expected-build-date "\$BUILD_DATE" \\\r?\n {14}--expected-source-epoch "\$SOURCE_EPOCH" \\\r?\n {14}--runtime-payload runtime-payload\.json \\\r?\n {14}--pack "\$ARCHIVE" \\\r?\n {14}--pack-source-root "\$SOURCE_EXPORT" \\\r?\n {14}--pack-source-snapshot "\$SOURCE_SNAPSHOT"[ \t]*\r?$'
+if ($platformPackStep -notmatch $packValidationPattern -or $publishWorkflow -match 'mcphub-pe-admit') {
+    throw "npm publish workflow must use the repository product validator on the actual Windows V4 archive and original prepared source"
 }
+$metaPackStep = [regex]::Match($publishWorkflow, '(?ms)^ {6}- name:[^\r\n]*\r?\n {8}id: meta_pack[ \t]*\r?\n.*?(?=^ {6}- name:|\z)').Value
+$metaValidationPattern = '(?m)^ {12}go run \./tools/windows-product-validate --meta-pack "\$ARCHIVE" \\\r?\n {14}--pack-source-root "\$SOURCE_EXPORT" \\\r?\n {14}--pack-source-snapshot "\$SOURCE_SNAPSHOT" \\\r?\n {14}--expected-source-epoch "\$SOURCE_EPOCH" \\\r?\n {14}--expected-version "\$VERSION"\r?\n {10}\) > "\$PACK_OWNER/verification\.json"[ \t]*\r?$'
+$metaEncoding = $metaPackStep.IndexOf("!raw.equals(Buffer.from(JSON.stringify(receipt) + '\n'))")
+$metaDigest = $metaPackStep.IndexOf('process.stdout.write(receipt.archive_sha256)')
+if ($metaPackStep -notmatch $metaValidationPattern -or $metaEncoding -lt 0 -or $metaDigest -le $metaEncoding) {
+    throw "npm publish workflow must check the compact meta verifier receipt before forwarding its digest"
+}
+
 
 $encodingProbe = Join-Path $scratchRoot "windows-build-json-encoding-$PID-$([Guid]::NewGuid().ToString('N'))"
 try {

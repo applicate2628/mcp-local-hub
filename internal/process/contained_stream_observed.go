@@ -98,7 +98,50 @@ type ContainedStreamReceiptV1 struct {
 	NativeSettlement           *ContainedProcessSettlement
 	IOSettlement               ContainedIOSettlement
 	PrimaryError, CleanupError error
+	setupEntered               bool
+	setup                      *ContainedSetupObservation
+	setupIO                    [5]*ownedCloser
 }
+
+type ContainedSetupObservation struct {
+	owner               containedChild
+	job                 *Job
+	jobClose            ContainedStreamSlot
+	attributes          ProcThreadAttributeListCloseObservation
+	nativeCreateEntered bool
+	nativeCreatePartial bool
+}
+
+// ResourcesFinalized is factual native/IO settlement, not an exit, parser,
+// or successful launch receipt.
+func (r ContainedStreamReceiptV1) ResourcesFinalized() bool {
+	for _, slot := range []ContainedStreamSlot{r.IOSettlement.Stdin, r.IOSettlement.StdoutRead, r.IOSettlement.StdoutWrite,
+		r.IOSettlement.StderrRead, r.IOSettlement.StderrWrite} {
+		if slot.Acquired && (!slot.CloseAttempted || !slot.Closed || slot.CloseError != nil) {
+			return false
+		}
+	}
+	for _, stream := range []ContainedIOStream{r.IOSettlement.Stdout, r.IOSettlement.Stderr} {
+		if stream.WorkerStarted && !stream.WorkerComplete {
+			return false
+		}
+	}
+	if !r.setupEntered {
+		return true
+	}
+	s := r.setup
+	if s == nil || s.owner == nil || s.nativeCreatePartial ||
+		(s.jobClose.Acquired && (!s.jobClose.CloseAttempted || !s.jobClose.Closed || s.jobClose.CloseError != nil)) ||
+		(s.attributes.Allocated && !s.attributes.Complete()) {
+		return false
+	}
+	if !s.nativeCreateEntered {
+		return true
+	}
+	native := r.NativeSettlement.Snapshot()
+	return native.HandlesClosed && (native.NoChildKnown || native.RootWaitKnown && native.MembersExited && native.AccountingKnown && native.FinalActive == 0)
+}
+
 type containedObservedChild interface {
 	prepareContainedObservation()
 	containedCreated() bool
@@ -112,7 +155,7 @@ type containedObservedChild interface {
 // The caller owns and closes the borrowed output sinks after this return.
 func RunContainedStreamObserved(ctx context.Context, cmd *exec.Cmd, options ContainedStreamOptions, consumeStdout func(io.Reader) error) (ContainedStreamReceiptV1, error) {
 	var receipt ContainedStreamReceiptV1
-	err := runContainedStreamCore(ctx, cmd, options, consumeStdout, defaultContainedStreamDependencies(), &receipt)
+	err := runContainedStreamCore(ctx, cmd, options, consumeStdout, observedContainedStreamDependencies(), &receipt)
 	return receipt, err
 }
 

@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "identityManifest": {
-    "schema": "windows-product-identity-v1",
+    "schema": "windows-product-identity-v2",
     "filename": "windows-product-identity.json"
   },
   "artifacts": [
@@ -23,5 +23,13 @@
       "npmPayload": true,
       "npmBin": false
     }
-  ]
+  ],
+  "runtimePayload": {
+    "schema": "hub-runtime-payload-v1",
+    "releaseDescriptors": [
+      "runtimes/python/release.yaml",
+      "runtimes/uv/release.yaml"
+    ],
+    "filename": "mcphub-product/runtime-payload.json"
+  }
 }

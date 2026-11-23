@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 func TestCLITestBinaryRejectsMalformedHelperDispatch(t *testing.T) {
@@ -50,12 +53,15 @@ func withoutCLITestHelperEnvironment(env []string) []string {
 		forensicsSinkChildEnv,
 		forensicsSinkChildModeEnv,
 		cliProductionArgvHelperEnv,
+		concurrentSecretsRootEnv,
 	}
+	keys = append(keys, obsoleteConcurrentSecretsHelperEnv[:]...)
 	result := make([]string, 0, len(env))
 	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
 		keep := true
 		for _, key := range keys {
-			if len(entry) > len(key) && entry[:len(key)+1] == key+"=" {
+			if strings.EqualFold(name, key) {
 				keep = false
 				break
 			}
@@ -65,6 +71,60 @@ func withoutCLITestHelperEnvironment(env []string) []string {
 		}
 	}
 	return result
+}
+
+func TestCLITestHelperDispatchConcurrentSecretsRole(t *testing.T) {
+	base, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		t.Fatal("resolve fixture temp-base syntax")
+	}
+	root := filepath.Join(base, concurrentSecretsDirPrefix+"fixture", concurrentSecretsStateLeaf)
+	selector := []string{"fixture-test-binary", concurrentSecretsSelector}
+	validEnv := map[string]string{concurrentSecretsRootEnv: root, api.RequireSingleUserHomeEnv: "1"}
+	for _, tc := range []struct {
+		name           string
+		args           []string
+		env            map[string]string
+		reject, child  bool
+		ordinaryHelper bool
+	}{
+		{name: "same selector ordinary parent", args: selector},
+		{name: "exact fixture child", args: selector, env: validEnv, child: true},
+		{name: "existing separate role", args: []string{"fixture-test-binary", "-test.run=^TestFormatChildExit_RealProcessShowsExitCode$"},
+			env: map[string]string{"MCPHUB_TEST_CHILD_EXIT_CODE": "42"}, ordinaryHelper: true},
+		{name: "empty root is malformed", args: selector, env: map[string]string{concurrentSecretsRootEnv: "", api.RequireSingleUserHomeEnv: "1"}, reject: true},
+		{name: "missing strict policy", args: selector, env: map[string]string{concurrentSecretsRootEnv: root}, reject: true},
+		{name: "relative root", args: selector, env: map[string]string{concurrentSecretsRootEnv: concurrentSecretsStateLeaf, api.RequireSingleUserHomeEnv: "1"}, reject: true},
+		{name: "non-fixture root", args: selector, env: map[string]string{concurrentSecretsRootEnv: filepath.Join(base, concurrentSecretsStateLeaf), api.RequireSingleUserHomeEnv: "1"}, reject: true},
+		{name: "unanchored selector", args: []string{"fixture-test-binary", "-test.run=TestSecretsConcurrentSetHelperProcess"}, env: validEnv, reject: true},
+		{name: "extra args", args: append(append([]string(nil), selector...), "-test.v"), env: validEnv, reject: true},
+		{name: "conflicting role", args: selector, env: map[string]string{
+			concurrentSecretsRootEnv: root, api.RequireSingleUserHomeEnv: "1", "MCPHUB_TEST_CHILD_EXIT_CODE": "42",
+		}, reject: true},
+		{name: "legacy partial envelope", args: selector, env: map[string]string{obsoleteConcurrentSecretsHelperEnv[2]: ""}, reject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dispatch := classifyCLITestHelperDispatch(tc.args, func(key string) (string, bool) {
+				value, ok := tc.env[key]
+				return value, ok
+			})
+			if dispatch.invalid != tc.reject || dispatch.runSelectedTest != (tc.child || tc.ordinaryHelper) ||
+				(dispatch.concurrentSecretsRoot != "") != tc.child {
+				t.Fatal("unexpected concurrent fixture admission")
+			}
+		})
+	}
+}
+
+func TestWithoutCLITestHelperEnvironmentStripsConcurrentSecretsControls(t *testing.T) {
+	env := []string{"PATH=fixture", strings.ToLower(concurrentSecretsRootEnv) + "=fixture", "MCPHUB_PID_MATCH_HELPER=1"}
+	for _, key := range obsoleteConcurrentSecretsHelperEnv {
+		env = append(env, key+"=fixture")
+	}
+	filtered := withoutCLITestHelperEnvironment(env)
+	if len(filtered) != 1 || filtered[0] != "PATH=fixture" {
+		t.Fatal("helper environment did not discard role controls")
+	}
 }
 
 func cliTestStateRoots(t *testing.T) map[string]struct{} {

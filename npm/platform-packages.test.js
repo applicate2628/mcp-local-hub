@@ -8,6 +8,7 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const SCRATCH = path.join(ROOT, ".scratch");
+const WINIO_LICENSE = ["third_party", "go-winio", "LICENSE"];
 
 function withScratch(prefix, fn) {
   fs.mkdirSync(SCRATCH, { recursive: true });
@@ -19,7 +20,7 @@ function withScratch(prefix, fn) {
   }
 }
 
-function generateFixture(fixtureRoot) {
+function prepareGeneratorFixture(fixtureRoot, projectContract = (contract) => contract) {
   const npmDir = path.join(fixtureRoot, "npm");
   fs.mkdirSync(npmDir, { recursive: true });
   fs.copyFileSync(
@@ -28,9 +29,16 @@ function generateFixture(fixtureRoot) {
   );
   fs.copyFileSync(path.join(__dirname, "package.json"), path.join(npmDir, "package.json"));
   const contract = path.join(ROOT, "windows-product-artifacts.json");
-  if (fs.existsSync(contract)) {
-    fs.copyFileSync(contract, path.join(fixtureRoot, "windows-product-artifacts.json"));
-  }
+  const projection = projectContract(JSON.parse(fs.readFileSync(contract, "utf8")));
+  fs.writeFileSync(path.join(fixtureRoot, "windows-product-artifacts.json"), JSON.stringify(projection));
+  return npmDir;
+}
+
+function generateFixture(fixtureRoot, projectContract = (contract) => contract) {
+  const npmDir = prepareGeneratorFixture(fixtureRoot, projectContract);
+  const fixtureLicense = path.join(fixtureRoot, ...WINIO_LICENSE);
+  fs.mkdirSync(path.dirname(fixtureLicense), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, ...WINIO_LICENSE), fixtureLicense);
   const result = spawnSync(process.execPath, [path.join(npmDir, "generate-platform-packages.js")], {
     cwd: fixtureRoot,
     encoding: "utf8",
@@ -39,7 +47,42 @@ function generateFixture(fixtureRoot) {
   return npmDir;
 }
 
-test("generator emits the waiting entry, nested GUI product, and V1 identity", () => {
+function assertWinIOLicense(npmDir) {
+  const original = fs.readFileSync(path.join(ROOT, ...WINIO_LICENSE));
+  const readme = fs.readFileSync(path.join(npmDir, "packages", "win32-x64", "README.md"));
+  const notice = Buffer.concat([
+    Buffer.from("The Windows Product includes go-winio under the MIT License.\n\n```text\n"),
+    original,
+    Buffer.from("```\n"),
+  ]);
+  assert.ok(readme.includes(notice), "Windows Product README must contain the original WinIO license bytes");
+}
+
+test("generator rejects a missing or invalid WinIO license before creating packages", () => {
+  const cases = [
+    { license: null, diagnostic: /ENOENT[^\n]*go-winio[\\/]LICENSE/ },
+    { license: Buffer.from([0xff]), diagnostic: /go-winio LICENSE must contain valid UTF-8 text/ },
+  ];
+  for (const { license, diagnostic } of cases) {
+    withScratch("npm-platform-license-preflight-", (fixtureRoot) => {
+      const npmDir = prepareGeneratorFixture(fixtureRoot);
+      if (license !== null) {
+        const fixtureLicense = path.join(fixtureRoot, ...WINIO_LICENSE);
+        fs.mkdirSync(path.dirname(fixtureLicense), { recursive: true });
+        fs.writeFileSync(fixtureLicense, license);
+      }
+      const result = spawnSync(process.execPath, [path.join(npmDir, "generate-platform-packages.js")], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      assert.notStrictEqual(result.status, 0);
+      assert.match(result.stderr, diagnostic);
+      assert.strictEqual(fs.existsSync(path.join(npmDir, "packages")), false);
+    });
+  }
+});
+
+test("generator emits the waiting entry and complete nested Product projection", () => {
   withScratch("npm-platform-generator-", (fixtureRoot) => {
     const npmDir = generateFixture(fixtureRoot);
     const manifest = JSON.parse(
@@ -48,12 +91,40 @@ test("generator emits the waiting entry, nested GUI product, and V1 identity", (
     assert.deepStrictEqual(manifest.os, ["win32"]);
     assert.deepStrictEqual(manifest.cpu, ["x64"]);
     assert.strictEqual(Object.hasOwn(manifest, "bin"), false);
+    assert.strictEqual(manifest.mcphubProduct, "bin/mcphub-product/mcphub.exe");
+    assert.strictEqual(manifest.license, "SEE LICENSE IN README.md");
+    assert.deepStrictEqual(manifest.files, [
+      "bin/mcphub-product/mcphub.exe",
+      "bin/mcphub.exe",
+      "bin/mcphub-product/windows-product-identity.json",
+      "bin/mcphub-product/runtime-payload.json",
+      "bin/mcphub-product/runtimes/",
+      "README.md",
+    ]);
+    assertWinIOLicense(npmDir);
+  });
+});
+
+test("generator preserves the legacy V1 package projection for a schema 3 registry", () => {
+  withScratch("npm-platform-legacy-generator-", (fixtureRoot) => {
+    const npmDir = generateFixture(fixtureRoot, (contract) => {
+      contract.schemaVersion = 3;
+      contract.identityManifest.schema = "windows-product-identity-v1";
+      delete contract.runtimePayload;
+      return contract;
+    });
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(npmDir, "packages", "win32-x64", "package.json"), "utf8"),
+    );
+    assert.strictEqual(Object.hasOwn(manifest, "mcphubProduct"), false);
+    assert.strictEqual(manifest.license, require("./package.json").license);
     assert.deepStrictEqual(manifest.files, [
       "bin/mcphub-product/mcphub.exe",
       "bin/mcphub.exe",
       "bin/windows-product-identity.json",
       "README.md",
     ]);
+    assertWinIOLicense(npmDir);
   });
 });
 
@@ -89,7 +160,7 @@ test("generator rejects a stale generated target directory", () => {
   });
 });
 
-test("npm pack dry-run exposes only the Windows x64 native payload", () => {
+test("npm pack includes the nested Windows x64 runtime and excludes unlisted payloads", () => {
   withScratch("npm-platform-pack-", (fixtureRoot) => {
     const npmDir = generateFixture(fixtureRoot);
     const npmCli = process.env.npm_execpath;
@@ -97,12 +168,22 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
     for (const target of ["win32-x64"]) {
       const packageDir = path.join(npmDir, "packages", target);
       const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, "package.json"), "utf8"));
-      const expectedNative = ["bin/mcphub-product/mcphub.exe", "bin/mcphub.exe", "bin/windows-product-identity.json"];
+      const runtimeRoot = "bin/mcphub-product/runtimes";
+      const expectedNative = [
+        "bin/mcphub-product/mcphub.exe",
+        "bin/mcphub.exe",
+        `${runtimeRoot}/python/${"1".repeat(64)}/root/python.exe`,
+        `${runtimeRoot}/uv/${"2".repeat(64)}/root/uv.exe`,
+        "bin/mcphub-product/runtime-payload.json",
+        "bin/mcphub-product/windows-product-identity.json",
+      ].sort();
       for (const relative of expectedNative) {
         const nativePath = path.join(packageDir, ...relative.split("/"));
         fs.mkdirSync(path.dirname(nativePath), { recursive: true });
         fs.writeFileSync(nativePath, `synthetic payload for ${target}/${relative}\n`);
       }
+      fs.writeFileSync(path.join(packageDir, "bin", "windows-product-identity.json"), "stale V1 identity\n");
+      fs.writeFileSync(path.join(packageDir, "bin", "mcphub-product", "unlisted.txt"), "unlisted Product data\n");
       // Development SDKs and their bundled CLI must remain outside Product
       // supply even when a developer environment is present beside/in a package.
       for (const scope of [fixtureRoot, npmDir, packageDir]) {
@@ -136,7 +217,7 @@ test("npm pack dry-run exposes only the Windows x64 native payload", () => {
       assert.deepStrictEqual(actualNative, expectedNative, target);
       assert.deepStrictEqual(
         result[0].files.map((entry) => entry.path).sort(),
-        ["README.md", "bin/mcphub-product/mcphub.exe", "bin/mcphub.exe", "bin/windows-product-identity.json", "package.json"],
+        ["README.md", ...expectedNative, "package.json"],
       );
       const metaPack = spawnSync(process.execPath, [npmCli, "pack", "--dry-run", "--json", "--ignore-scripts"], {
         cwd: npmDir,
@@ -161,10 +242,15 @@ test("Windows artifact contract freezes filenames, roles, sources, subsystems, a
     fs.readFileSync(path.join(ROOT, "windows-product-artifacts.json"), "utf8"),
   );
   assert.deepStrictEqual(contract, {
-    schemaVersion: 3,
+    schemaVersion: 4,
     identityManifest: {
       filename: "windows-product-identity.json",
-      schema: "windows-product-identity-v1",
+      schema: "windows-product-identity-v2",
+    },
+    runtimePayload: {
+      schema: "hub-runtime-payload-v1",
+      releaseDescriptors: ["runtimes/python/release.yaml", "runtimes/uv/release.yaml"],
+      filename: "mcphub-product/runtime-payload.json",
     },
     artifacts: [
       {
@@ -198,8 +284,13 @@ test("generator refuses a swapped or incomplete Windows entry set", () => {
       (contract) => { contract.artifacts.pop(); },
       (contract) => { contract.artifacts[0].filename = "mcphub.exe"; },
       (contract) => { contract.artifacts[1].subsystem = 2; },
-      (contract) => { contract.identityManifest.schema = "windows-product-identity-v2"; },
-      (contract) => { contract.runtimePayload = {}; },
+      (contract) => { contract.identityManifest.schema = "windows-product-identity-v1"; },
+      (contract) => { delete contract.runtimePayload; },
+      (contract) => { contract.runtimePayload.filename = "runtime-payload.json"; },
+      (contract) => { delete contract.runtimePayload.releaseDescriptors; },
+      (contract) => { contract.runtimePayload.releaseDescriptors = []; },
+      (contract) => { contract.runtimePayload.releaseDescriptors.reverse(); },
+      (contract) => { contract.runtimePayload.releaseDescriptors[1] = "runtimes/other/release.yaml"; },
     ]) {
       const contract = structuredClone(original);
       mutate(contract);
@@ -208,7 +299,7 @@ test("generator refuses a swapped or incomplete Windows entry set", () => {
         cwd: fixtureRoot, encoding: "utf8",
       });
       assert.notStrictEqual(result.status, 0);
-      assert.match(result.stderr, /schemaVersion 3/);
+      assert.match(result.stderr, /windows-product-artifacts\.json must declare/);
     }
   });
 });

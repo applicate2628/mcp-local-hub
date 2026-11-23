@@ -54,6 +54,12 @@ func (o *StateDirResolutionObservation) Snapshot() StateDirResolutionSnapshotV1 
 	return v
 }
 
+func (o *StateDirResolutionObservation) ResourcesFinalized() bool {
+	return o != nil && o.issuer != nil && o.finalized &&
+		(!o.view.AllocationAcquired || o.view.FreeCalled && o.view.FreeReturned) &&
+		(o.formatting == nil || o.formatting.ResourcesFinalized())
+}
+
 func (o *StateDirResolutionObservation) Validate(ctx context.Context, resolvedPath string) error {
 	if o == nil || o.issuer == nil || ctx == nil || !o.finalized || !o.finishedInBound || !o.view.Complete || resolvedPath == "" || o.path != resolvedPath || o.view.PathSHA256 != stateFileReadObservationDigest([]byte(resolvedPath)) || o.view.SourceSHA256 == "" || !o.view.HRESULTDefined || o.view.HRESULT == nil || int32(*o.view.HRESULT) < 0 || !o.view.DecodeSucceeded || !o.view.AllocationAcquired || !o.view.FreeCalled || !o.view.FreeReturned || o.view.ReleaseKind != "CoTaskMemFree-void" {
 		return errors.New("original closed canonical state resolver required")

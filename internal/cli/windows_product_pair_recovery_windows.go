@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -86,6 +87,8 @@ type windowsProductRecoveryRequest struct {
 	// Optional command admission controls; legacy recovery retains its contract.
 	ExpectedJournalSHA256                   string
 	RequirePriorSettlementOnSettledRollback bool
+	// An ordinary aggregate-ON command may settle only a current headless upgrade.
+	RequireCurrentHeadlessUpgrade bool
 }
 
 type windowsProductRecoveryDeps struct {
@@ -175,7 +178,7 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	d := boundWindowsProductRecoveryDefaults(req)
 	v3Path := filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3)
 	legacyPath := filepath.Join(req.StateDir, WindowsProductPairRecoveryFileLeaf)
-	_, v3Err := d.ReadJournal(v3Path)
+	v3Raw, v3Err := d.ReadJournal(v3Path)
 	_, legacyErr := d.ReadJournal(legacyPath)
 	if v3Err != nil && !windowsProductJournalCleanAbsence(v3Err) {
 		return nil, fmt.Errorf("%w: read V3 journal: %w", ErrWindowsProductRecoveryIdentity, v3Err)
@@ -194,6 +197,9 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		return nil, fmt.Errorf("%w: legacy and V3 recovery journals coexist", ErrWindowsProductRecoveryIdentity)
 	}
 	if legacyPresent {
+		if req.RequireCurrentHeadlessUpgrade {
+			return nil, fmt.Errorf("%w: ordinary aggregate recovery requires a current V3 upgrade journal", ErrWindowsProductRecoveryIdentity)
+		}
 		if _, err := reconcileWindowsProductPairRecovery(req.Legacy); err != nil {
 			return nil, err
 		}
@@ -219,6 +225,9 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 			return nil, fmt.Errorf("%w: expected V3 journal changed before recovery", ErrWindowsProductRecoveryIdentity)
 		}
 	}
+	if req.RequireCurrentHeadlessUpgrade && !bytes.Equal(raw, v3Raw) {
+		return nil, fmt.Errorf("%w: V3 journal changed before ordinary aggregate recovery", ErrWindowsProductRecoveryIdentity)
+	}
 	journal, err := decodeWindowsProductRecoveryJournalV3(raw)
 	if err == nil {
 		err = resolveCanonicalRecoveryRequest(&req, journal)
@@ -227,7 +236,37 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 		!sameWindowsRecoveryPath(journal.LegacyWindowless.Target, req.LegacyWindowlessPath) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V3.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV3+".json")) ||
 		!sameWindowsRecoveryPath(journal.Receipts.V2.Path, filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json")) {
+		if req.RequireCurrentHeadlessUpgrade && err != nil {
+			return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch: %w", ErrWindowsProductRecoveryIdentity, err)
+		}
 		return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch", ErrWindowsProductRecoveryIdentity)
+	}
+	if req.RequireCurrentHeadlessUpgrade {
+		if journal.EntryBundle == nil || journal.Mode != WindowsProductPairModeUpgrade ||
+			journal.PreSettlement == nil || journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedAbsent {
+			return nil, fmt.Errorf("%w: ordinary aggregate recovery requires a current headless V3 upgrade", ErrWindowsProductRecoveryIdentity)
+		}
+		defer func() {
+			if retErr != nil {
+				return
+			}
+			want := WindowsProductPairRecoverySettledRollback
+			if journal.Phase == WindowsProductRecoveryCommitDecided || journal.Phase == WindowsProductRecoverySettledCommit {
+				want = WindowsProductPairRecoverySettledCommit
+			}
+			if result == nil || result.TransactionID != journal.TransactionID || result.Outcome != want {
+				retErr = fmt.Errorf("%w: ordinary aggregate recovery did not settle its original transaction", ErrWindowsProductRecoveryPending)
+				return
+			}
+			for _, path := range []string{v3Path, legacyPath} {
+				if _, err := d.ReadJournal(path); !windowsProductJournalCleanAbsence(err) {
+					if err == nil {
+						err = errors.New("journal is still present")
+					}
+					retErr = errors.Join(retErr, fmt.Errorf("%w: verify settled journal absence (%s): %w", ErrWindowsProductRecoveryPending, filepath.Base(path), err))
+				}
+			}
+		}()
 	}
 	if err := requireWindowsProductWithoutBackendHold(req.Context, req.StateDir); err != nil {
 		return nil, err

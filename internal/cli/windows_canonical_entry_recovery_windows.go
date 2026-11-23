@@ -61,11 +61,15 @@ func (s *windowsCanonicalJournalRecoverySource) ValidateOriginalRecovery(ctx con
 	if err := s.validateOriginalRecoveryState(ctx); err != nil {
 		return err
 	}
-	current, err := s.deps.readJournalContext(ctx, s.path)
+	return s.validateOriginalRecoveryBytes(ctx, s.path, s.raw)
+}
+
+func (s *windowsCanonicalJournalRecoverySource) validateOriginalRecoveryBytes(ctx context.Context, path string, raw []byte) error {
+	current, err := s.deps.readJournalContext(ctx, path)
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(current, s.raw) {
+	if !bytes.Equal(current, raw) {
 		return fmt.Errorf("%w: original recovery journal changed", ErrWindowsProductRecoveryIdentity)
 	}
 	return ctx.Err()
@@ -104,7 +108,50 @@ func (s *windowsCanonicalJournalRecoverySource) validateOriginalRecoveryState(ct
 // Filesystem currentness is received by full protected reads at both boundaries;
 // this is neither an atomic journal snapshot nor credit for any native effect.
 func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryReadScope(ctx context.Context, body func(func(context.Context) error) error) error {
-	if err := s.ValidateOriginalRecovery(ctx); err != nil {
+	return s.withCanonicalRecoveryReadScope(ctx, s.ValidateOriginalRecovery, nil, body)
+}
+
+// WithCanonicalRecoveryCleanupReadScope projects the requested bank's cleanup
+// input inside the original journal read window. It grants no effect authority.
+func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryCleanupReadScope(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1, purpose binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2, body func(func(context.Context) error, binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
+	if s == nil || body == nil || (side != binaryadmission.WindowsCanonicalRecoveryPriorV1 && side != binaryadmission.WindowsCanonicalRecoverySuccessorV1) ||
+		(purpose != binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 && (purpose != binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 || side != binaryadmission.WindowsCanonicalRecoverySuccessorV1)) {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	journal, path, raw := s.journal, s.path, s.raw
+	pinned := func() error {
+		// The source replaces its owned raw bytes and detached journal together
+		// after successful persistence. Each installed raw generation is immutable.
+		if s.path != path || len(raw) == 0 || len(s.raw) != len(raw) || &s.raw[0] != &raw[0] ||
+			s.journal.EntryBundle != journal.EntryBundle || s.journal.Phase != journal.Phase ||
+			s.journal.TransactionID != journal.TransactionID || s.purpose != windowsCanonicalRecoveryPurpose(purpose) {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		return nil
+	}
+	boundaryRead := func(ctx context.Context) error {
+		if err := s.validateOriginalRecoveryState(ctx); err != nil {
+			return err
+		}
+		return s.validateOriginalRecoveryBytes(ctx, path, raw)
+	}
+	return s.withCanonicalRecoveryReadScope(ctx, boundaryRead, pinned, func(check func(context.Context) error) error {
+		if err := check(ctx); err != nil {
+			return err
+		}
+		input, err := projectCurrentRecoveryJournal(journal, purpose)
+		if err != nil {
+			return err
+		}
+		if err = check(ctx); err != nil {
+			return err
+		}
+		return body(check, input)
+	})
+}
+
+func (s *windowsCanonicalJournalRecoverySource) withCanonicalRecoveryReadScope(ctx context.Context, boundaryRead func(context.Context) error, pinned func() error, body func(func(context.Context) error) error) error {
+	if err := boundaryRead(ctx); err != nil {
 		return err
 	}
 	if body == nil || s.journal.EntryBundle == nil {
@@ -135,6 +182,9 @@ func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryReadScope(c
 		if s.journal.EntryBundle != version || s.journal.Phase != phase || s.purpose != purpose {
 			return ErrWindowsProductRecoveryIdentity
 		}
+		if pinned != nil {
+			return pinned()
+		}
 		return nil
 	}
 	check := func(useCtx context.Context) error {
@@ -153,7 +203,11 @@ func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryReadScope(c
 	stateErr := state(ctx)
 	receivedCheckErr := checkErr
 	mu.Unlock()
-	return errors.Join(bodyErr, receivedCheckErr, stateErr, s.ValidateOriginalRecovery(ctx))
+	closeErr := boundaryRead(ctx)
+	if pinned != nil {
+		stateErr = errors.Join(stateErr, state(ctx))
+	}
+	return errors.Join(bodyErr, receivedCheckErr, stateErr, closeErr)
 }
 
 func (s *windowsCanonicalJournalRecoverySource) WithOriginalRecoveryInput(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1, use func(binaryadmission.WindowsCanonicalRecoveryTargetsV1, binaryadmission.WindowsCanonicalRecoveryLocationsV1) error) error {
@@ -896,6 +950,12 @@ func cloneCurrentRecoveryJournal(j windowsProductRecoveryJournalV3) (windowsProd
 	return decodeWindowsProductRecoveryJournalV3(raw)
 }
 
+// After a successful persistCurrent, raw and journal are detached, matching
+// snapshots. Decode the retained bytes to detach the next edit again.
+func (s *windowsCanonicalJournalRecoverySource) clonePersistedCurrentJournal() (windowsProductRecoveryJournalV3, error) {
+	return decodeWindowsProductRecoveryJournalV3(s.raw)
+}
+
 // These two callback boundaries lend detached data, never the accepted graph.
 func (s *windowsCanonicalJournalRecoverySource) acquireCurrentSuccessorQuiescence(ctx context.Context, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2) (*windowsProductSuccessorQuiescence, error) {
 	journal, err := cloneCurrentRecoveryJournal(s.journal)
@@ -1144,7 +1204,7 @@ func (s *windowsCanonicalJournalRecoverySource) moveCurrentRecoveryOriginal(ctx 
 	actual, callErr := owner.MoveOriginal(ctx, member, destination)
 	s.memberResults = append(s.memberResults, actual)
 	s.memberErrors = append(s.memberErrors, callErr)
-	next, cloneErr := cloneCurrentRecoveryJournal(s.journal)
+	next, cloneErr := s.clonePersistedCurrentJournal()
 	if cloneErr != nil {
 		return errors.Join(callErr, actual.Error, actual.CloseError, cloneErr)
 	}
@@ -1169,8 +1229,10 @@ func currentCleanupIndex(e *windowsCanonicalEntrySetJournalV2, side, member stri
 
 func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.Context, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2, prior bool) error {
 	side := "unused-successor"
+	nativeSide := binaryadmission.WindowsCanonicalRecoverySuccessorV1
 	if prior {
 		side = "prior"
+		nativeSide = binaryadmission.WindowsCanonicalRecoveryPriorV1
 	}
 	purpose := binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2(s.purpose)
 	if purpose != binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 && purpose != binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 {
@@ -1188,7 +1250,7 @@ func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.C
 		if expected == nil {
 			continue
 		}
-		observation, present, err := currentRecoveryMember(ctx, owner, plan.Member)
+		observation, present, err := owner.ObserveCleanupMember(ctx, nativeSide, purpose, *expected)
 		if err != nil {
 			return err
 		}
@@ -1201,7 +1263,7 @@ func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.C
 			if row.Purpose != purpose || row.TransactionID != s.journal.TransactionID || (row.State != "discard_intent" && row.State != "absence_received") {
 				return ErrWindowsProductRecoveryIdentity
 			}
-			// Ready native acquisition/Members received this exact purpose-bound
+			// The native owner received this exact purpose-bound
 			// absence. No unavailable historical syscall/status is fabricated.
 			if row.State != "absence_received" {
 				next, err := cloneCurrentRecoveryJournal(s.journal)
@@ -1215,14 +1277,15 @@ func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.C
 			}
 			continue
 		}
+		if observation.Member != plan.Member || observation.NativeIdentity != expected.NativeIdentity || observation.File.SHA256 != expected.File.SHA256 ||
+			observation.Size != expected.Size || observation.Attributes != expected.Attributes {
+			return ErrWindowsProductRecoveryIdentity
+		}
 		if observation.File.Path == plan.Member {
-			if !prior {
+			if !prior && purpose == binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 {
 				continue
 			}
-			return errors.New("committed prior original remains at a protected final name")
-		}
-		if observation.NativeIdentity != expected.NativeIdentity || observation.File.SHA256 != expected.File.SHA256 {
-			return ErrWindowsProductRecoveryIdentity
+			return errors.New("cleanup original remains at a protected final name")
 		}
 		next, err := cloneCurrentRecoveryJournal(s.journal)
 		if err != nil {
@@ -1244,7 +1307,7 @@ func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.C
 		actual, callErr := owner.DiscardOriginal(ctx, plan.Member, observation.File.Path)
 		s.memberResults = append(s.memberResults, actual)
 		s.memberErrors = append(s.memberErrors, callErr)
-		next, cloneErr := cloneCurrentRecoveryJournal(s.journal)
+		next, cloneErr := s.clonePersistedCurrentJournal()
 		if cloneErr != nil {
 			return errors.Join(callErr, actual.Error, actual.CloseError, cloneErr)
 		}
@@ -1256,6 +1319,30 @@ func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentSide(ctx context.C
 		}
 	}
 	return nil
+}
+
+func (s *windowsCanonicalJournalRecoverySource) cleanupCurrentMembers(ctx context.Context, prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2) error {
+	purpose := binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2(s.purpose)
+	if err := errors.Join(prior.VerifyUnchanged(ctx), successor.VerifyUnchanged(ctx)); err != nil {
+		return err
+	}
+	if purpose == binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 {
+		if err := s.cleanupCurrentSide(ctx, prior, true); err != nil {
+			return err
+		}
+	}
+	if err := s.cleanupCurrentSide(ctx, successor, false); err != nil {
+		return err
+	}
+	if err := errors.Join(prior.VerifyUnchanged(ctx), successor.VerifyUnchanged(ctx)); err != nil {
+		return err
+	}
+	if purpose == binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2 {
+		if err := prior.VerifyCleanupAbsences(ctx, binaryadmission.WindowsCanonicalRecoveryPriorV1, purpose); err != nil {
+			return err
+		}
+	}
+	return successor.VerifyCleanupAbsences(ctx, binaryadmission.WindowsCanonicalRecoverySuccessorV1, purpose)
 }
 
 func (s *windowsCanonicalJournalRecoverySource) settleCurrentDirectories(ctx context.Context, dispose bool) error {
@@ -1289,7 +1376,7 @@ func (s *windowsCanonicalJournalRecoverySource) settleCurrentDirectories(ctx con
 					actual, callErr := owner.DisposeOriginalIfEmpty(ctx)
 					s.memberResults = append(s.memberResults, actual)
 					s.memberErrors = append(s.memberErrors, callErr)
-					next, err := cloneCurrentRecoveryJournal(s.journal)
+					next, err := s.clonePersistedCurrentJournal()
 					if err != nil {
 						effectErr = errors.Join(callErr, actual.Error, actual.CloseError, err)
 					} else {
@@ -1421,11 +1508,8 @@ func cleanupColdCurrentCanonicalOriginals(req windowsProductRecoveryRequest, d w
 		return err
 	}
 	ctx := context.WithoutCancel(req.Context)
-	if err := s.cleanupCurrentSide(ctx, prior, true); err != nil {
-		return err
-	}
-	if err := s.cleanupCurrentSide(ctx, successor, false); err != nil {
-		return err
+	if err := s.cleanupCurrentMembers(ctx, prior, successor); err != nil {
+		return errors.Join(ErrWindowsProductCleanupPending, err)
 	}
 	if err := s.closeCurrentMembers(prior, successor); err != nil {
 		return err
@@ -1663,7 +1747,7 @@ func rollbackCurrentCanonicalEntryRecovery(req windowsProductRecoveryRequest, d 
 		s.purpose = canonicalRecoveryRollbackCleanup
 	}
 	ctx := context.WithoutCancel(req.Context)
-	if err = s.cleanupCurrentSide(ctx, successor, false); err != nil {
+	if err = s.cleanupCurrentMembers(ctx, prior, successor); err != nil {
 		return nil, errors.Join(ErrWindowsProductCleanupPending, err)
 	}
 	if err = s.closeCurrentMembers(prior, successor); err != nil {

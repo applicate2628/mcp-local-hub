@@ -295,7 +295,13 @@ func runContainedStreamCore(
 		if receipt == nil {
 			return
 		}
+		if owner, ok := child.(interface {
+			containedSetupObservation() *ContainedSetupObservation
+		}); ok {
+			receipt.setup = owner.containedSetupObservation()
+		}
 		receipt.IOSettlement = ContainedIOSettlement{Stdin: stdinCloser.snapshot(), StdoutRead: stdoutReadCloser.snapshot(), StdoutWrite: stdoutWriteCloser.snapshot(), StderrRead: stderrReadCloser.snapshot(), StderrWrite: stderrWriteCloser.snapshot(), Stdout: stdoutCount.snapshot(stdoutCompleted, stdoutErr), Stderr: stderrCount.snapshot(stderrCompleted, stderrErr)}
+		receipt.setupIO = [5]*ownedCloser{stdinCloser, stdoutReadCloser, stdoutWriteCloser, stderrReadCloser, stderrWriteCloser}
 		receipt.RootWaitKnown = waitCompleted && finalWait.exited
 		receipt.RootExitCode = finalWait.exitCode
 		receipt.RootExitError = finalWait.err
@@ -335,8 +341,17 @@ func runContainedStreamCore(
 		}
 	}
 
+	if receipt != nil {
+		receipt.setupEntered = true
+	}
 	child, err = deps.newChild(cmd)
 	if err != nil {
+		if receipt != nil && child != nil {
+			if original, ok := child.(containedObservedChild); ok {
+				original.prepareContainedObservation()
+			}
+			return containedError(ContainedStageContainment, errors.Join(ErrContainmentUnavailable, err), child.close())
+		}
 		return &ContainedRunError{
 			Stage: ContainedStageContainment,
 			Cause: errors.Join(ErrContainmentUnavailable, err),
@@ -380,19 +395,15 @@ func runContainedStreamCore(
 	if receipt != nil {
 		observe.prepareContainedObservation()
 	}
+	_, setupObserved := child.(interface {
+		containedSetupObservation() *ContainedSetupObservation
+	})
 
 	stdoutRead, stdoutWrite, err := deps.pipe()
-	if err != nil {
-		return containedError(
-			ContainedStagePipeSetup,
-			err,
-			closeOwned(childCloser),
-		)
+	if receipt != nil && setupObserved {
+		stdoutReadCloser = ownCloser(stdoutRead)
+		stdoutWriteCloser = ownCloser(stdoutWrite)
 	}
-	stdoutReadCloser = ownCloser(stdoutRead)
-	stdoutWriteCloser = ownCloser(stdoutWrite)
-
-	stderrRead, stderrWrite, err := deps.pipe()
 	if err != nil {
 		return containedError(
 			ContainedStagePipeSetup,
@@ -400,10 +411,14 @@ func runContainedStreamCore(
 			closeOwned(stdoutWriteCloser, stdoutReadCloser, childCloser),
 		)
 	}
-	stderrReadCloser = ownCloser(stderrRead)
-	stderrWriteCloser = ownCloser(stderrWrite)
+	stdoutReadCloser = ownCloser(stdoutRead)
+	stdoutWriteCloser = ownCloser(stdoutWrite)
 
-	stdin, err := deps.openNull()
+	stderrRead, stderrWrite, err := deps.pipe()
+	if receipt != nil && setupObserved {
+		stderrReadCloser = ownCloser(stderrRead)
+		stderrWriteCloser = ownCloser(stderrWrite)
+	}
 	if err != nil {
 		return containedError(
 			ContainedStagePipeSetup,
@@ -411,12 +426,39 @@ func runContainedStreamCore(
 			closeOwned(stderrWriteCloser, stderrReadCloser, stdoutWriteCloser, stdoutReadCloser, childCloser),
 		)
 	}
+	stderrReadCloser = ownCloser(stderrRead)
+	stderrWriteCloser = ownCloser(stderrWrite)
+
+	stdin, err := deps.openNull()
+	if receipt != nil && setupObserved {
+		stdinCloser = ownCloser(stdin)
+	}
+	if err != nil {
+		return containedError(
+			ContainedStagePipeSetup,
+			err,
+			closeOwned(stdinCloser, stderrWriteCloser, stderrReadCloser, stdoutWriteCloser, stdoutReadCloser, childCloser),
+		)
+	}
 	stdinCloser = ownCloser(stdin)
 
 	if receipt != nil {
+		if err := ctx.Err(); err != nil {
+			return containedError(ContainedStageStart, err,
+				closeOwned(stdinCloser, stderrWriteCloser, stderrReadCloser, stdoutWriteCloser, stdoutReadCloser, childCloser))
+		}
 		receipt.StartAttempted = true
 	}
-	if err := child.start(cmd, stdin, stdoutWrite, stderrWrite); err != nil {
+	var startErr error
+	observedStart, hasObservedStart := child.(interface {
+		startObserved(context.Context, *exec.Cmd, containedInputFile, containedWriteFile, containedWriteFile) error
+	})
+	if receipt != nil && hasObservedStart {
+		startErr = observedStart.startObserved(ctx, cmd, stdin, stdoutWrite, stderrWrite)
+	} else {
+		startErr = child.start(cmd, stdin, stdoutWrite, stderrWrite)
+	}
+	if err := startErr; err != nil {
 		stage := ContainedStageStart
 		cause := err
 		var platformErr *containedPlatformError

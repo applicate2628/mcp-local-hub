@@ -353,6 +353,20 @@ func secureWriteClientConfigToResolvedParentObserved(dirHandle windows.Handle, p
 		cleanup()
 		return err
 	}
+	if guard != nil && guard.BeforeObservedReplace != nil {
+		if observation == nil || guard.ExpectedSnapshot == nil || guard.Context == nil {
+			cleanup()
+			return errors.New("observed replacement guard requires a captured writer")
+		}
+		if err := guard.BeforeObservedReplace(guard.Context); err != nil {
+			cleanup()
+			return err
+		}
+		if err := guard.Context.Err(); err != nil {
+			cleanup()
+			return err
+		}
+	}
 	if observation != nil {
 		observation.rename.entered = true
 	}

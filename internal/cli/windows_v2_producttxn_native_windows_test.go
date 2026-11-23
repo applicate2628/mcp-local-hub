@@ -24,10 +24,10 @@ import (
 )
 
 type v2TxnFixtureTasks struct {
-	root                         string
+	root                        string
 	currentXML, priorXML        string
 	exports, rewrites, restores int
-	closes, discards             int
+	closes, discards            int
 }
 
 func (f *v2TxnFixtureTasks) InventoryExport() error {
@@ -254,13 +254,295 @@ func v2TxnPromotionNames(journal windowsProductRecoveryJournalV3) ([]string, err
 	return moves, nil
 }
 
+func v2TxnAssertPersistedJournalClone(t *testing.T, raw []byte) {
+	t.Helper()
+
+	// Preserve the valid V2 fixture while exercising both representations of
+	// the replacement rune that the journal reader accepts.
+	raw = bytes.Replace(raw, []byte("\"close_error\": null"), []byte("\"close_error\": \"fixture \xff \\ufffd\""), 1)
+	raw = append([]byte(" \t"), raw...)
+	accepted, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized := accepted.EntryBundle.Bundle.Disposition.CloseError
+	if normalized == nil || *normalized != "fixture \ufffd \ufffd" {
+		t.Fatal("fixture did not exercise diagnostic normalization")
+	}
+
+	source := windowsCanonicalJournalRecoverySource{journal: accepted, raw: raw}
+	want, err := cloneCurrentRecoveryJournal(accepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := source.clonePersistedCurrentJournal()
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatal("persisted clone differs from the encode/decode clone", err)
+	}
+	wantBytes, err := encodeWindowsProductRecoveryJournalV3(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotBytes, err := encodeWindowsProductRecoveryJournalV3(got)
+	if err != nil || !bytes.Equal(gotBytes, wantBytes) || bytes.Equal(gotBytes, raw) {
+		t.Fatal("persisted clone changed the canonical encoding of the admitted input", err)
+	}
+
+	*got.EntryBundle.Bundle.Disposition.CloseError = "changed"
+	got.EntryBundle.Expected.IdentityBytes[0] ^= 0xff
+	again, err := source.clonePersistedCurrentJournal()
+	if err != nil || !reflect.DeepEqual(again, want) || !reflect.DeepEqual(source.journal, want) {
+		t.Fatal("caller edits escaped the detached journal clone", err)
+	}
+}
+
+type v2TxnCleanupReadBoundaryProbe struct {
+	*windowsCanonicalJournalRecoverySource
+	afterSelected func() error
+}
+
+func (s *v2TxnCleanupReadBoundaryProbe) WithCanonicalRecoveryCleanupReadScope(ctx context.Context, side binaryadmission.WindowsCanonicalRecoverySideV1, purpose binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2, body func(func(context.Context) error, binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
+	return s.windowsCanonicalJournalRecoverySource.WithCanonicalRecoveryCleanupReadScope(ctx, side, purpose, func(check func(context.Context) error, input binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error {
+		if err := body(check, input); err != nil {
+			return err
+		}
+		return s.afterSelected()
+	})
+}
+
+func v2TxnAssertCleanupScopeClosingDrift(t *testing.T, req windowsProductRecoveryRequest, journalPath string, decision windowsProductRecoveryJournalV3, expected binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) {
+	t.Helper()
+	const side = binaryadmission.WindowsCanonicalRecoveryPriorV1
+	const purpose = binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2
+	evidence := &windowsProductJournalReadEvidence{}
+	req.journalReadEvidence = evidence
+	s, err := prepareCurrentCanonicalRecoverySource(req, req.Deps, journalPath, decision, canonicalRecoveryCommittedCleanup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := bytes.Clone(s.raw)
+	drift := append(bytes.Clone(raw), '\n')
+	var owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2
+	var driftWritten bool
+	defer func() {
+		var restoreErr error
+		if driftWritten {
+			restoreErr = api.WriteStateFileBytesAtomic(journalPath, raw)
+		}
+		if err := errors.Join(restoreErr, s.closeCurrentMembers(owner), s.closeCurrentDirectories()); err != nil {
+			t.Error(err)
+		}
+		s.active = false
+	}()
+	readsBefore, selected := 0, 0
+	probe := &v2TxnCleanupReadBoundaryProbe{
+		windowsCanonicalJournalRecoverySource: s,
+		afterSelected: func() error {
+			selected++
+			if len(evidence.outcomes) != readsBefore+1 {
+				return errors.New("native read used a nested protected journal read")
+			}
+			err := api.WriteStateFileBytesAtomic(journalPath, drift)
+			driftWritten = err == nil
+			return err
+		},
+	}
+	owner, err = binaryadmission.AcquireWindowsCanonicalEntryForRecoveryV2(req.Context, probe, side)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readsBefore = len(evidence.outcomes)
+	got, present, err := owner.ObserveCleanupMember(req.Context, side, purpose, expected)
+	if selected != 1 || err == nil || !errors.Is(err, ErrWindowsProductRecoveryIdentity) || !strings.Contains(err.Error(), "original recovery journal changed") ||
+		present || got != (binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}) {
+		t.Fatalf("closing read published a drifted observation: selected=%d present=%v err=%v", selected, present, err)
+	}
+	if err := s.cleanupCurrentSide(req.Context, owner, true); err == nil {
+		t.Fatal("failed native observation allowed subsequent cleanup")
+	}
+	reads := evidence.outcomes[readsBefore:]
+	if len(reads) != 2 || len(owner.Disposition().Cleanup) != 0 || !bytes.Equal(mustReadFile(t, journalPath), drift) {
+		t.Fatalf("drift attempt advanced past the two protected reads or performed a cleanup effect: reads=%d", len(reads))
+	}
+	for _, observed := range reads {
+		if observed.path != journalPath || observed.phase != string(decision.Phase) || observed.original == nil || observed.readError != nil {
+			t.Fatal("missing original protected read evidence", observed.readError)
+		}
+	}
+}
+
+func v2TxnAssertColdCleanupExactSlots(t *testing.T, req windowsProductRecoveryRequest, journalPath string, decision windowsProductRecoveryJournalV3) {
+	t.Helper()
+	const member = binaryadmission.WindowsCanonicalEntryRelativePathV1
+	const side = binaryadmission.WindowsCanonicalRecoveryPriorV1
+	const purpose = binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2
+	plan := currentEntryMember(decision.EntryBundle, member)
+	if plan == nil || plan.Prior == nil || plan.Staged == nil || plan.PriorAsideRelative == nil {
+		t.Fatal("fixture did not publish over a distinct original launcher")
+	}
+	expected := *plan.Prior
+	if !t.Run("closing_read_refuses_raw_drift", func(t *testing.T) {
+		v2TxnAssertCleanupScopeClosingDrift(t, req, journalPath, decision, expected)
+	}) {
+		t.FailNow()
+	}
+	relative := *plan.PriorAsideRelative
+	slot := filepath.Join(filepath.Dir(req.CanonicalEntryPath), relative)
+	body := mustReadFile(t, slot)
+	foreign := filepath.Join(filepath.Dir(req.StateDir), "same-byte-foreign")
+	if err := os.WriteFile(foreign, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	foreignID := v2TxnFixtureIdentity(t, foreign)
+	if foreignID == expected.NativeIdentity || v2TxnFixtureDigest(body) != expected.File.SHA256 {
+		t.Fatal("foreign fixture must have the same bytes and a distinct original identity")
+	}
+
+	withPrior := func(check func(*windowsCanonicalJournalRecoverySource, *binaryadmission.WindowsCanonicalEntryRecoverySetV2)) {
+		t.Helper()
+		j, err := v2TxnReadFixtureJournal(journalPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := prepareCurrentCanonicalRecoverySource(req, req.Deps, journalPath, j, canonicalRecoveryCommittedCleanup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := s.acquireCurrentSide(req.Context, side)
+		defer func() {
+			if err := errors.Join(s.closeCurrentMembers(owner), s.closeCurrentDirectories()); err != nil {
+				t.Error(err)
+			}
+			s.active = false
+		}()
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(s, owner)
+	}
+	checkAbsent := func(owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2) {
+		t.Helper()
+		got, present, err := owner.ObserveCleanupMember(req.Context, side, purpose, expected)
+		if err != nil || present || got != (binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}) {
+			t.Fatalf("exact original absence yielded %+v present=%v err=%v", got, present, err)
+		}
+	}
+	withPrior(func(s *windowsCanonicalJournalRecoverySource, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2) {
+		got, present, err := owner.ObserveCleanupMember(req.Context, side, purpose, expected)
+		if err != nil || !present || got.NativeIdentity != expected.NativeIdentity || got.File.Path != relative {
+			t.Fatalf("selected original aside yielded %+v present=%v err=%v", got, present, err)
+		}
+		next, err := cloneCurrentRecoveryJournal(s.journal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.EntryBundle.Cleanup = append(next.EntryBundle.Cleanup, windowsCanonicalEntryCleanupV2{
+			TransactionID: decision.TransactionID, Side: "prior", Member: member, SourceRelative: relative,
+			ExpectedSHA256: expected.File.SHA256, State: "discard_intent", Purpose: purpose,
+		})
+		if err := s.persistCurrent(next); err != nil {
+			t.Fatal(err)
+		}
+		result, err := owner.DiscardOriginal(req.Context, member, relative)
+		if err := canonicalEntryDiscardResultError(result, err, member, relative); err != nil {
+			t.Fatal(err)
+		}
+		checkAbsent(owner)
+		// Leave the durable intent intact to exercise cold receiving of the
+		// exact native absence after the first owner has closed.
+	})
+	withPrior(func(_ *windowsCanonicalJournalRecoverySource, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2) {
+		checkAbsent(owner)
+	})
+	for _, change := range []func(*binaryadmission.WindowsCanonicalEntryMemberEvidenceV2){
+		func(e *binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) {
+			e.NativeIdentity = plan.Staged.NativeIdentity
+		},
+		func(e *binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) {
+			e.File.SHA256 = strings.Repeat("0", 64)
+		},
+		func(e *binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) { e.Member = "unissued.fixture" },
+	} {
+		withPrior(func(_ *windowsCanonicalJournalRecoverySource, owner *binaryadmission.WindowsCanonicalEntryRecoverySetV2) {
+			wrong := expected
+			change(&wrong)
+			if got, present, err := owner.ObserveCleanupMember(req.Context, side, purpose, wrong); err == nil || present || got != (binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}) {
+				t.Fatalf("wrong original was credited: %+v present=%v err=%v", got, present, err)
+			}
+		})
+	}
+
+	var priorAbsence string
+	req.ExpectedJournalSHA256 = v2TxnFixtureDigest(mustReadFile(t, journalPath))
+	req.Deps.WriteJournal = func(path string, raw []byte) error {
+		if err := api.WriteStateFileBytesAtomic(path, raw); err != nil {
+			return err
+		}
+		if priorAbsence != "" {
+			return nil
+		}
+		j, err := v2TxnReadFixtureJournal(path)
+		if err != nil {
+			return err
+		}
+		index := currentCleanupIndex(j.EntryBundle, "prior", member)
+		if index < 0 || j.EntryBundle.Cleanup[index].State != "absence_received" {
+			return nil
+		}
+		for _, row := range j.EntryBundle.Cleanup {
+			if row.Side == "prior" && row.Member != member && row.State == "absence_received" {
+				if err := v2TxnFixtureAbsent(slot); err != nil {
+					return err
+				}
+				if err := os.Rename(foreign, slot); err != nil {
+					return err
+				}
+				priorAbsence = row.SourceRelative
+				break
+			}
+		}
+		return nil
+	}
+	settled, err := reconcileWindowsProductRecovery(req)
+	if settled != nil || !errors.Is(err, ErrWindowsProductCleanupPending) || !strings.Contains(err.Error(), "cleanup slot is occupied after absence readback") || priorAbsence == "" {
+		t.Fatalf("foreign replacement did not hold cold recovery pending: replaced=%t result=%+v err=%v", priorAbsence != "", settled, err)
+	}
+	if !bytes.Equal(mustReadFile(t, slot), body) || v2TxnFixtureIdentity(t, slot) != foreignID {
+		t.Fatal("cleanup changed the same-byte foreign replacement")
+	}
+	if err := v2TxnFixtureAbsent(filepath.Join(filepath.Dir(slot), filepath.FromSlash(priorAbsence))); err != nil {
+		t.Fatal("cleanup lost an earlier native absence", err)
+	}
+	pending, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil || pending.Phase != WindowsProductRecoveryCommitDecided || pending.TransactionID != decision.TransactionID {
+		t.Fatal("cleanup lost or settled its committed-decision journal", err)
+	}
+	index := currentCleanupIndex(pending.EntryBundle, "prior", member)
+	if index < 0 || pending.EntryBundle.Cleanup[index].State != "absence_received" {
+		t.Fatal("cleanup erased its earlier exact durable absence")
+	}
+	if v2TxnFixtureIdentity(t, req.CanonicalEntryPath) != plan.Staged.NativeIdentity {
+		t.Fatal("cleanup touched the protected committed launcher")
+	}
+}
+
 func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 	input, seed, binding := v2TxnFixtureInput(t)
 	deadline, finite := t.Deadline()
 	if !finite {
 		t.Fatal("native V2 transaction fixture requires a runner deadline")
 	}
-	for _, phase := range []string{"wrong_or_missing_admission_has_no_effects", "launcher_last_predecision_inverse", "commit_decided_cold_forward_and_repeat"} {
+	for _, phase := range []string{
+		"wrong_or_missing_admission_has_no_effects",
+		"pretransfer_prior_closes_before_stage",
+		"launcher_last_predecision_inverse",
+		"commit_decided_cold_forward_and_repeat",
+		"commit_decided_cold_cleanup_exact_slots",
+		"guard_veto",
+		"guard_nil_without_write",
+		"guard_writer_and_release_errors",
+		"guard_release_error_after_commit",
+	} {
 		t.Run(phase, func(t *testing.T) {
 			ctx, cancel := context.WithDeadline(t.Context(), deadline)
 			t.Cleanup(cancel)
@@ -340,9 +622,15 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			inverse := phase == "launcher_last_predecision_inverse" || phase == "guard_veto" ||
+				phase == "guard_nil_without_write" || phase == "guard_writer_and_release_errors"
+			pretransferClose := phase == "pretransfer_prior_closes_before_stage"
+			exactCleanupSlots := phase == "commit_decided_cold_cleanup_exact_slots"
 			var prior map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2
-			if phase == "launcher_last_predecision_inverse" {
+			if inverse || pretransferClose || exactCleanupSlots {
 				prior = v2TxnSeedPrior(t, input, dst, seed)
+			}
+			if inverse {
 				if err := os.WriteFile(convertedReceiptPath, []byte("retained fixture receipt"), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -379,9 +667,108 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				t.Fatal("Product stage member unavailable")
 			}
 
+			if pretransferClose {
+				carrier := txn.Opts.EntryBundle
+				originalPrior, err := carrier.acquirePrior(ctx)
+				if err != nil || originalPrior == nil {
+					t.Fatal("original BUNDLE prior unavailable", err)
+				}
+				before, err := originalPrior.Observation(ctx)
+				if err != nil || before.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 || len(stage.Directories()) == 0 {
+					t.Fatal("pre-transfer fixture lacks an admitted original BUNDLE and lenders", err)
+				}
+				observations := 0
+				closeErr := carrier.closeWithStageObservation(func() {
+					observations++
+					priorClose := originalPrior.Disposition()
+					if !priorClose.CloseEntered || priorClose.CloseError != nil {
+						t.Error("original prior did not close successfully before Stage", priorClose.CloseError)
+					}
+					if stageClose := stage.Disposition(); stageClose.CloseEntered || stageClose.Transferred {
+						t.Error("fixture did not observe the unpublished Stage before its original Close")
+					}
+				})
+				if closeErr != nil || observations != 1 {
+					t.Fatalf("original carrier close observations=%d error=%v", observations, closeErr)
+				}
+				stageClose := stage.Disposition()
+				if !stageClose.CloseEntered || stageClose.Transferred || stageClose.CloseError != nil ||
+					stageClose.OriginalOwnerPending || len(stageClose.Cleanup) != len(stagedFiles) {
+					t.Fatal("original Stage or its directory lenders did not settle", stageClose.CloseError)
+				}
+				for _, result := range stageClose.Cleanup {
+					if !result.Applied || !result.Readback || result.Error != nil || result.CloseError != nil {
+						t.Fatalf("original staged member %q failed native removal/readback: %v", result.Member, errors.Join(result.Error, result.CloseError))
+					}
+				}
+				for member, staged := range stagedFiles {
+					final := filepath.Join(target, filepath.FromSlash(member))
+					identity, exists := prior[final]
+					if !exists || identity == staged.NativeIdentity || v2TxnFixtureIdentity(t, final) != identity ||
+						v2TxnFixtureDigest(mustReadFile(t, final)) != staged.File.SHA256 {
+						t.Fatalf("pre-transfer close changed or aliased original final member %q", member)
+					}
+					if err := v2TxnFixtureAbsent(filepath.Join(target, filepath.FromSlash(staged.File.Path))); err != nil {
+						t.Fatal(err)
+					}
+				}
+				v2TxnAssertFixtureRoot(t, target, dst)
+				return
+			}
+
 			var txnID string
 			cut := errors.New("stop private V2 transaction at selected boundary")
 			var observed []WindowsProductStage
+			veto := errors.New("refuse private V2 commit before the writer")
+			writeFailure := errors.New("private commit writer kept the prior bytes")
+			releaseFailure := errors.New("release private decision guard")
+			decisionWrites := 0
+			txn.Opts.Deps.WriteRecoveryJournal = func(path string, raw []byte) error {
+				journal, err := decodeWindowsProductRecoveryJournalV3(raw)
+				if err != nil {
+					return err
+				}
+				if journal.Phase == WindowsProductRecoveryCommitDecided {
+					decisionWrites++
+					if phase == "guard_writer_and_release_errors" {
+						return writeFailure
+					}
+				}
+				return api.WriteStateFileBytesAtomic(path, raw)
+			}
+			var ready, retired bool
+			var lateWrite func() error
+			if strings.HasPrefix(phase, "guard_") {
+				txn.aroundCommitDecision = func(_ context.Context, write func() error) error {
+					journal, err := v2TxnReadFixtureJournal(journalPath)
+					if err != nil || !ready || !retired || journal.Phase != WindowsProductRecoverySuccessorStarting ||
+						journal.TransactionID != txnID || decisionWrites != 0 {
+						t.Error("guard entered before readiness, retirement and the original decision", err)
+						return errors.New("invalid private guard entry")
+					}
+					lateWrite = write
+					switch phase {
+					case "guard_veto":
+						return veto
+					case "guard_nil_without_write":
+						return nil
+					case "guard_writer_and_release_errors":
+						if err := write(); !errors.Is(err, writeFailure) {
+							t.Error("callback did not return the original writer cause", err)
+						}
+					case "guard_release_error_after_commit":
+						if err := write(); err != nil {
+							return err
+						}
+						decisionBytes := mustReadFile(t, journalPath)
+						if err := write(); err == nil || decisionWrites != 1 ||
+							!bytes.Equal(decisionBytes, mustReadFile(t, journalPath)) {
+							t.Error("repeated callback changed the confirmed decision", err)
+						}
+					}
+					return releaseFailure
+				}
+			}
 			txn.Opts.Deps.Fault = func(at WindowsProductStage) error {
 				switch at {
 				case WindowsProductStageIdentityPromoted, WindowsProductStageProductPromoted:
@@ -429,8 +816,12 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 					if phase == "launcher_last_predecision_inverse" {
 						return cut
 					}
+				case WindowsProductStageSupervisorReady:
+					ready = true
+				case WindowsProductStageLegacyRetired:
+					retired = true
 				case WindowsProductStageCommitDecided:
-					if phase == "commit_decided_cold_forward_and_repeat" {
+					if phase == "commit_decided_cold_forward_and_repeat" || exactCleanupSlots {
 						return cut
 					}
 				}
@@ -445,14 +836,57 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				tasks.exports != 1 || tasks.rewrites != 0 {
 				t.Fatal("native V2 Prepare did not persist the exact pre-move journal", err)
 			}
+			if phase == "commit_decided_cold_forward_and_repeat" {
+				t.Run("persisted_journal_clone", func(t *testing.T) {
+					v2TxnAssertPersistedJournalClone(t, mustReadFile(t, journalPath))
+				})
+			}
 			txnID = prepared.TransactionID
 			_, runErr := txn.Run(ctx)
 			wantOrder := []WindowsProductStage{WindowsProductStageIdentityPromoted, WindowsProductStageProductPromoted, WindowsProductStageCanonicalEntryPromoted}
 			if !reflect.DeepEqual(observed, wantOrder) || txnID == "" || tasks.exports != 1 || tasks.rewrites != 1 {
 				t.Fatal("real V2 publication/readback or Task rewrite was not reached", observed, runErr)
 			}
-			if phase == "launcher_last_predecision_inverse" {
-				if !errors.Is(runErr, cut) || errors.Is(runErr, ErrWindowsProductRecoveryPending) ||
+			wantDecisionWrites := 1
+			if inverse && phase != "guard_writer_and_release_errors" {
+				wantDecisionWrites = 0
+			}
+			if lateWrite != nil {
+				if err := lateWrite(); err == nil {
+					t.Fatal("saved callback remained usable after the guard returned")
+				}
+			}
+			if decisionWrites != wantDecisionWrites || (strings.HasPrefix(phase, "guard_") && lateWrite == nil) {
+				t.Fatalf("original commit writer entered %d times, want %d: %v", decisionWrites, wantDecisionWrites, runErr)
+			}
+			switch phase {
+			case "launcher_last_predecision_inverse":
+				if !errors.Is(runErr, cut) {
+					t.Fatal("unguarded predecision failure lost its cause", runErr)
+				}
+			case "guard_veto":
+				if !errors.Is(runErr, veto) {
+					t.Fatal("guard veto lost its cause", runErr)
+				}
+			case "guard_nil_without_write":
+				if runErr == nil || !strings.Contains(runErr.Error(), "guard did not invoke the original writer") {
+					t.Fatal("guard returned success without writing the decision", runErr)
+				}
+			case "guard_writer_and_release_errors":
+				if !errors.Is(runErr, writeFailure) || !errors.Is(runErr, releaseFailure) {
+					t.Fatal("inverse lost a writer or release cause", runErr)
+				}
+			case "guard_release_error_after_commit":
+				if !errors.Is(runErr, ErrWindowsProductRecoveryPending) || !errors.Is(runErr, releaseFailure) {
+					t.Fatal("confirmed decision lost forward recovery or the release cause", runErr)
+				}
+			case "commit_decided_cold_forward_and_repeat", "commit_decided_cold_cleanup_exact_slots":
+				if !errors.Is(runErr, ErrWindowsProductCleanupPending) || !strings.Contains(runErr.Error(), cut.Error()) {
+					t.Fatal("unguarded confirmed decision did not retain its cleanup cause", runErr)
+				}
+			}
+			if inverse {
+				if errors.Is(runErr, ErrWindowsProductRecoveryPending) ||
 					tasks.restores != 1 || tasks.currentXML != priorTask || tasks.discards != 1 || len(events) != 0 {
 					t.Fatal("predecision did not restore the original V2 Task state and settle", runErr)
 				}
@@ -477,8 +911,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				return
 			}
 
-			if !errors.Is(runErr, ErrWindowsProductCleanupPending) || !strings.Contains(runErr.Error(), cut.Error()) ||
-				tasks.restores != 0 || tasks.discards != 0 || len(events) != 0 {
+			if tasks.restores != 0 || tasks.currentXML == priorTask || tasks.discards != 0 || len(events) != 0 {
 				t.Fatal("durable decision did not retain one forward transaction", runErr)
 			}
 			decision, err := v2TxnReadFixtureJournal(journalPath)
@@ -490,8 +923,8 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			}
 			for member, staged := range stagedFiles {
 				path := filepath.Join(target, filepath.FromSlash(member))
-				if v2TxnFixtureIdentity(t, path) != staged.NativeIdentity {
-					t.Fatalf("commit decision did not retain the moved native source %s", member)
+				if v2TxnFixtureIdentity(t, path) != staged.NativeIdentity || v2TxnFixtureDigest(mustReadFile(t, path)) != staged.File.SHA256 {
+					t.Fatalf("commit decision did not retain the moved native source and bytes %s", member)
 				}
 			}
 
@@ -500,7 +933,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			req := windowsProductRecoveryRequest{
 				Context: ctx, JournalAllowance: allowance, StateDir: state, CanonicalEntryPath: dst.CanonicalEntryPath,
 				ProductPath: dst.ProductPath, IdentityPath: dst.IdentityPath, LegacyWindowlessPath: txn.Opts.LegacyWindowlessPath,
-				Legacy: windowsProductPairRecoveryRequest{Context: ctx, JournalAllowance: allowance, StateDir: state},
+				Legacy:                windowsProductPairRecoveryRequest{Context: ctx, JournalAllowance: allowance, StateDir: state},
 				ExpectedJournalSHA256: v2TxnFixtureDigest(mustReadFile(t, journalPath)),
 				ObserveSuccessorReady: func(_ context.Context, path, digest string) (bool, error) {
 					if path != dst.ProductPath || digest != stagedSnapshot.Product.SHA256 {
@@ -529,6 +962,16 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 					},
 					PublishCommitted: publish,
 				},
+			}
+			if exactCleanupSlots {
+				v2TxnAssertColdCleanupExactSlots(t, req, journalPath, decision)
+				if reopens != 1 || cold.discards != 0 || cold.closes != 1 || len(events) != 0 {
+					t.Fatal("pending cleanup consumed Task custody or emitted a committed event")
+				}
+				if err := v2TxnFixtureAbsent(receiptPath); err != nil {
+					t.Fatal(err)
+				}
+				return
 			}
 			settled, err := reconcileWindowsProductRecovery(req)
 			if err != nil || settled == nil || settled.Outcome != WindowsProductPairRecoverySettledCommit ||

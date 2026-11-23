@@ -37,6 +37,16 @@ type validatorOptions struct {
 	sourceCheckout                  string
 	sourceSnapshotOutput            string
 	generatedSource                 []string
+	stageRuntime                    bool
+	runtimeFetchPlan                bool
+	runtimePayload                  string
+	runtimeArchives                 string
+	runtimeOutput                   string
+	helper                          string
+	packArchive                     string
+	metaPack                        string
+	packSourceRoot                  string
+	packSourceSnapshot              string
 }
 
 type generatedSourceFlags []string
@@ -77,12 +87,28 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 	flags.StringVar(&options.sourceCheckout, "source-checkout", "", "actual absolute Git checkout directory")
 	flags.StringVar(&options.sourceSnapshotOutput, "source-snapshot-output", "", "fresh absolute outside-export snapshot file")
 	flags.Var((*generatedSourceFlags)(&options.generatedSource), "generated-source", "literal repository-relative additional generated file (repeatable)")
+	flags.BoolVar(&options.stageRuntime, "stage-runtime", false, "stage original local Windows runtime archives")
+	flags.BoolVar(&options.runtimeFetchPlan, "runtime-fetch-plan", false, "read an ordered archive acquisition plan from prepared source")
+	flags.StringVar(&options.runtimePayload, "runtime-payload", "", "current Product-relative runtime index")
+	flags.StringVar(&options.runtimeArchives, "runtime-archives", "", "explicit absolute directory of original local archives")
+	flags.StringVar(&options.runtimeOutput, "runtime-output", "", "explicit absolute staged Product output directory")
+	flags.StringVar(&options.helper, "helper", "", "absolute current launcher matching the Product")
+	flags.StringVar(&options.packArchive, "pack", "", "actual current platform npm tarball")
+	flags.StringVar(&options.metaPack, "meta-pack", "", "actual npm meta tarball")
+	flags.StringVar(&options.packSourceRoot, "pack-source-root", "", "qualified export for pack metadata")
+	flags.StringVar(&options.packSourceSnapshot, "pack-source-snapshot", "", "original prepared source snapshot for pack metadata")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: windows-product-validate --encode-entry-comments <absolute-request.json>")
 		fmt.Fprintln(stderr, "       windows-product-validate --validate-entry-set <absolute-CUI> --expected-entry-set-build-id <id> --expected-canonical-entry-sha256 <sha256> --canonical-entry-reverse-projection <relative> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC>")
 		fmt.Fprintln(stderr, "       windows-product-validate --validate-entry-set-build <absolute-CUI> --expected-entry-set-build-id <id> --expected-canonical-entry-sha256 <sha256> --canonical-entry-reverse-projection <relative> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC> [--expected-source-epoch <epoch>]")
 		fmt.Fprintln(stderr, "Usage: windows-product-validate --candidate <mcphub.exe> --expected-version <version> --expected-commit <commit> --expected-build-date <UTC>")
 		fmt.Fprintln(stderr, "       windows-product-validate --source-snapshot <snapshot> --source-root <source>")
+		fmt.Fprintln(stderr, "       windows-product-validate --stage-runtime --source-root <source> --source-snapshot <snapshot> --runtime-archives <archives> --runtime-output <product-dir>")
+		fmt.Fprintln(stderr, "       windows-product-validate --runtime-fetch-plan --source-root <source> --source-snapshot <snapshot> --expected-source-epoch <epoch>")
+		fmt.Fprintln(stderr, "       windows-product-validate --meta-pack <tarball> --pack-source-root <source> --pack-source-snapshot <snapshot> --expected-source-epoch <epoch> --expected-version <version>")
+		fmt.Fprintln(stderr, "       current entry-set build also requires --source-root <source> --source-snapshot <snapshot> --runtime-payload <index> --expected-source-epoch <epoch>")
+		fmt.Fprintln(stderr, "       current candidate also requires --helper <launcher> --runtime-payload <index> --expected-source-epoch <epoch> --source-root <source> --source-snapshot <snapshot>")
+		fmt.Fprintln(stderr, "       current pack uses --pack <tarball> --pack-source-root <source> --pack-source-snapshot <snapshot> in place of the current candidate source pair")
 		fmt.Fprintln(stderr, "       windows-product-validate --prepare-source <export> --source-checkout <checkout> --source-snapshot-output <snapshot> --expected-commit <commit> [--generated-source <file> ...]")
 	}
 	if err := flags.Parse(args); err != nil {
@@ -91,9 +117,33 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 	}
 	present := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { present[f.Name] = true })
+	if present["runtime-fetch-plan"] {
+		if flags.NArg() != 0 || len(present) != 4 || !options.runtimeFetchPlan || !filepath.IsAbs(options.sourceRoot) ||
+			!filepath.IsAbs(options.sourceSnapshot) || !validExpectedSourceEpoch(options.expectedSourceEpoch) {
+			fmt.Fprintln(stderr, "RUNTIME_FETCH_PLAN_USAGE_INVALID")
+			return validatorOptions{}, false
+		}
+		return options, true
+	}
+	if present["meta-pack"] {
+		if flags.NArg() != 0 || len(present) != 5 || !filepath.IsAbs(options.metaPack) || !filepath.IsAbs(options.packSourceRoot) ||
+			!filepath.IsAbs(options.packSourceSnapshot) || !validExpectedSourceEpoch(options.expectedSourceEpoch) || options.expectedVersion == "" {
+			fmt.Fprintln(stderr, "PACK_META_USAGE_INVALID")
+			return validatorOptions{}, false
+		}
+		return options, true
+	}
 	if present["encode-entry-comments"] {
 		if flags.NArg() != 0 || len(present) != 1 || !filepath.IsAbs(options.encodeEntryComments) {
 			fmt.Fprintln(stderr, "entry comments encoder requires one absolute request and no other mode flags")
+			return validatorOptions{}, false
+		}
+		return options, true
+	}
+	if present["stage-runtime"] || present["runtime-archives"] || present["runtime-output"] {
+		if flags.NArg() != 0 || len(present) != 5 || !options.stageRuntime || !filepath.IsAbs(options.sourceRoot) ||
+			!filepath.IsAbs(options.sourceSnapshot) || !filepath.IsAbs(options.runtimeArchives) || !filepath.IsAbs(options.runtimeOutput) {
+			fmt.Fprintln(stderr, "RUNTIME_STAGE_USAGE_INVALID")
 			return validatorOptions{}, false
 		}
 		return options, true
@@ -115,6 +165,15 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 				return validatorOptions{}, false
 			}
 		}
+		if present["source-root"] || present["source-snapshot"] || present["runtime-payload"] {
+			if mode != "validate-entry-set-build" || !present["expected-source-epoch"] || !filepath.IsAbs(options.sourceRoot) ||
+				!filepath.IsAbs(options.sourceSnapshot) || !binaryadmission.RuntimeRelativePath(options.runtimePayload) {
+				fmt.Fprintln(stderr, "current entry-set build requires complete source/runtime operands and original source epoch")
+				return validatorOptions{}, false
+			}
+			allowed["source-root"], allowed["source-snapshot"], allowed["runtime-payload"] = true, true, true
+			requiredCount += 3
+		}
 		for name := range present {
 			if !allowed[name] {
 				fmt.Fprintln(stderr, "complete entry-set validation cannot mix modes")
@@ -127,14 +186,15 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 		}
 		return options, true
 	}
+	currentFlags := present["helper"] || present["runtime-payload"] || present["pack"] || present["pack-source-root"] || present["pack-source-snapshot"]
 	if present["prepare-source"] || present["source-checkout"] || present["source-snapshot-output"] || present["generated-source"] {
-		if flags.NArg() != 0 || options.prepareSource == "" || options.sourceCheckout == "" || options.sourceSnapshotOutput == "" || !validExpectedCommit(options.expectedCommit) || present["candidate"] || present["expected-version"] || present["expected-build-date"] || present["expected-source-epoch"] || present["source-root"] || present["source-snapshot"] {
+		if flags.NArg() != 0 || options.prepareSource == "" || options.sourceCheckout == "" || options.sourceSnapshotOutput == "" || !validExpectedCommit(options.expectedCommit) || present["candidate"] || present["expected-version"] || present["expected-build-date"] || present["expected-source-epoch"] || present["source-root"] || present["source-snapshot"] || currentFlags {
 			fmt.Fprintln(stderr, "PUBLISHER_SOURCE_TABLE_INVALID: preparation requires complete exclusive operands and a full expected commit")
 			return validatorOptions{}, false
 		}
 		return options, true
 	}
-	if present["source-snapshot"] || present["source-root"] {
+	if !currentFlags && (present["source-snapshot"] || present["source-root"]) {
 		if flags.NArg() != 0 || options.sourceSnapshot == "" || options.sourceRoot == "" || present["candidate"] || present["expected-version"] || present["expected-commit"] || present["expected-build-date"] || present["expected-source-epoch"] {
 			fmt.Fprintln(stderr, "PUBLISHER_SOURCE_TABLE_INVALID: source-only flags are mutually exclusive")
 			return validatorOptions{}, false
@@ -145,6 +205,23 @@ func parseOptions(args []string, stderr io.Writer) (validatorOptions, bool) {
 		fmt.Fprintln(stderr, "all four named flags are required and positional arguments are not accepted")
 		flags.Usage()
 		return validatorOptions{}, false
+	}
+	if currentFlags {
+		if !filepath.IsAbs(options.candidate) || !filepath.IsAbs(options.helper) || !validExpectedSourceEpoch(options.expectedSourceEpoch) ||
+			!binaryadmission.RuntimeRelativePath(options.runtimePayload) {
+			fmt.Fprintln(stderr, "RUNTIME_BUNDLE_USAGE_INVALID")
+			return validatorOptions{}, false
+		}
+		if present["pack"] || present["pack-source-root"] || present["pack-source-snapshot"] {
+			if present["source-root"] || present["source-snapshot"] ||
+				!filepath.IsAbs(options.packArchive) || !filepath.IsAbs(options.packSourceRoot) || !filepath.IsAbs(options.packSourceSnapshot) {
+				fmt.Fprintln(stderr, "PACK_SOURCE_USAGE_INVALID")
+				return validatorOptions{}, false
+			}
+		} else if !filepath.IsAbs(options.sourceRoot) || !filepath.IsAbs(options.sourceSnapshot) {
+			fmt.Fprintln(stderr, "RUNTIME_BUNDLE_SOURCE_USAGE_INVALID")
+			return validatorOptions{}, false
+		}
 	}
 	if !validExpectedCommit(options.expectedCommit) {
 		fmt.Fprintln(stderr, "--expected-commit must be exactly 40 lowercase hexadecimal characters")
@@ -187,6 +264,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 2
 	}
+	if options.runtimeFetchPlan {
+		return runRuntimeFetchPlan(options, stdout, stderr)
+	}
+	if options.metaPack != "" {
+		return runMetaPackVerification(options, stdout, stderr)
+	}
 	if options.encodeEntryComments != "" {
 		return runEntryCommentsEncoder(options.encodeEntryComments, stdout, stderr)
 	}
@@ -205,6 +288,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return 0
+	}
+	if options.stageRuntime {
+		return runRuntimeStaging(options, stdout, stderr)
+	}
+	if options.runtimePayload != "" {
+		return runCurrentProductValidation(options, stdout, stderr)
 	}
 	if options.sourceSnapshot != "" {
 		return runSourceVerification(options, stdout, stderr)
@@ -233,6 +322,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			admitted.Commit,
 			admitted.BuildDate,
 		)
+		return 1
+	}
+
+	if err := binaryadmission.CheckWindowsLegacyProductBuildDomain(options.candidate); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 

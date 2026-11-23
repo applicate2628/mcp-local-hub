@@ -913,18 +913,23 @@ func cleanupCurrentEntryLegacyFiles(o WindowsProductTxnOpts, p *windowsProductPr
 	return nil
 }
 
-func closeCurrentEntryFiles(source *stagedWindowsCanonicalEntrySetV2) error {
+func closeCurrentEntryFiles(source *stagedWindowsCanonicalEntrySetV2, beforeStageClose func()) error {
 	if source == nil {
 		return nil
 	}
-	var causes []error
-	if source.original != nil {
-		causes = append(causes, source.original.Close())
-	}
+	var priorErr, stageErr error
 	if source.prior != nil {
-		causes = append(causes, source.prior.Close())
+		// The unpublished BUNDLE stage uses the original guarded parent
+		// path only after the prior borrower has closed successfully.
+		priorErr = source.prior.Close()
 	}
-	return errors.Join(causes...)
+	if source.original != nil {
+		if beforeStageClose != nil {
+			beforeStageClose()
+		}
+		stageErr = source.original.Close()
+	}
+	return errors.Join(stageErr, priorErr)
 }
 
 func orderedOriginalMemberDirectories(input []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1, snapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2) []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1 {
@@ -964,6 +969,10 @@ func orderedCurrentDirectories(source *stagedWindowsCanonicalEntrySetV2) []*bina
 // deepest-first lenders. Acquisition errors remain with their original caller;
 // closure errors stay sticky while each repeated supported receive still runs.
 func (source *stagedWindowsCanonicalEntrySetV2) Close() error {
+	return source.closeWithStageObservation(nil)
+}
+
+func (source *stagedWindowsCanonicalEntrySetV2) closeWithStageObservation(beforeStageClose func()) error {
 	if source == nil {
 		return nil
 	}
@@ -971,7 +980,11 @@ func (source *stagedWindowsCanonicalEntrySetV2) Close() error {
 	defer source.mu.Unlock()
 	source.closeRequested = true
 	owners := orderedCurrentDirectories(source)
-	err := settleCurrentEntryReferences(func() error { return closeCurrentEntryFiles(source) }, owners, func(owner *binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1) error { return owner.Close() })
+	err := settleCurrentEntryReferences(
+		func() error { return closeCurrentEntryFiles(source, beforeStageClose) },
+		owners,
+		func(owner *binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1) error { return owner.Close() },
+	)
 	source.closeError = errors.Join(source.closeError, err)
 	return source.closeError
 }
@@ -1172,7 +1185,7 @@ func (t *WindowsProductTxn) settleUnpublishedCurrentPreparation(transferred bool
 		p.journal.EntryBundle.Bundle.Disposition.State = "rolled-back"
 		cleanupErr = t.cleanupCurrentEntryFiles(false, false)
 	}
-	closeErr := closeCurrentEntryFiles(t.Opts.EntryBundle)
+	closeErr := closeCurrentEntryFiles(t.Opts.EntryBundle, nil)
 	if !present && inspectErr == nil && transferred && cleanupErr == nil && closeErr == nil {
 		cleanupErr = t.disposeCurrentEntryDirectories(false)
 	}
@@ -1273,7 +1286,7 @@ func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
 	if err := t.cleanupCurrentEntryFiles(false, true); err != nil {
 		return errors.Join(trigger, ErrWindowsProductCleanupPending, err)
 	}
-	if err := closeCurrentEntryFiles(o.EntryBundle); err != nil {
+	if err := closeCurrentEntryFiles(o.EntryBundle, nil); err != nil {
 		return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
 	}
 	if err := t.disposeCurrentEntryDirectories(true); err != nil {

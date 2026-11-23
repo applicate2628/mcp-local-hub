@@ -1,14 +1,23 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/secrets"
 )
 
@@ -25,7 +34,11 @@ import (
 // Returns the state/log dir + the log path.
 func secretsCliAuditEnv(t *testing.T) (stateDir, logPath string) {
 	t.Helper()
-	root := t.TempDir()
+	return secretsCliAuditEnvAt(t, t.TempDir())
+}
+
+func secretsCliAuditEnvAt(t *testing.T, root string) (stateDir, logPath string) {
+	t.Helper()
 	stateDir = filepath.Join(root, "mcp-local-hub")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -310,132 +323,284 @@ func TestCLISecretsEdit_FailedImportEmitsNoAuditEvent(t *testing.T) {
 	}
 }
 
-// TestSecretsConcurrentSetHelperProcess is invoked AS A SUBPROCESS by the
-// editor script in the concurrency test below. When MCPHUB_TEST_CONCURRENT_SET
-// is set, it writes that key (value from MCPHUB_TEST_CONCURRENT_VAL) directly
-// into the PARENT's vault and exits, simulating a concurrent CLI/GUI write that
-// lands on disk WHILE the operator's editor session is open (before
-// `secrets edit` acquires the flock).
-//
-// It uses EXPLICIT vault/key paths passed via MCPHUB_TEST_VAULT_PATH /
-// MCPHUB_TEST_KEY_PATH rather than secrets.Default*Path(): the cli test binary's
-// own TestMain (settings_registry_test.go) re-points LOCALAPPDATA to a fresh
-// per-invocation fence dir, so a subprocess that resolved Default*Path() would
-// write to a DIFFERENT vault than the parent. The explicit paths bypass that
-// re-resolution so the concurrent write lands in the parent's vault.
-func TestSecretsConcurrentSetHelperProcess(t *testing.T) {
-	key := os.Getenv("MCPHUB_TEST_CONCURRENT_SET")
-	if key == "" {
-		return // normal test run, not the helper invocation
-	}
-	val := os.Getenv("MCPHUB_TEST_CONCURRENT_VAL")
-	vaultPath := os.Getenv("MCPHUB_TEST_VAULT_PATH")
-	keyPath := os.Getenv("MCPHUB_TEST_KEY_PATH")
-	err := secrets.WithVaultLock(vaultPath, func() error {
-		v, oerr := secrets.OpenVault(keyPath, vaultPath)
-		if oerr != nil {
-			return oerr
-		}
-		return v.Set(key, val)
-	})
-	if err != nil {
-		os.Stderr.WriteString(err.Error())
-		os.Exit(3)
-	}
-	os.Exit(0)
+const (
+	concurrentSecretsSelector     = "-test.run=^TestSecretsConcurrentSetHelperProcess$"
+	concurrentSecretsRootEnv      = "MCPHUB_TEST_CONCURRENT_STATE_ROOT"
+	concurrentSecretsDirPrefix    = "mcphub-cli-secrets-concurrent-"
+	concurrentSecretsStateLeaf    = "mcp-local-hub"
+	concurrentSecretsFixtureKey   = "CONCURRENT_KEY"
+	concurrentSecretsFixtureValue = "raceval"
+)
+
+// The old child inputs carried independent destinations and values.
+// They conflict with this single-root synthetic role.
+var obsoleteConcurrentSecretsHelperEnv = [...]string{
+	"MCPHUB_TEST_CONCURRENT_SET", "MCPHUB_TEST_CONCURRENT_VAL",
+	"MCPHUB_TEST_VAULT_PATH", "MCPHUB_TEST_KEY_PATH",
 }
 
-// writeConcurrentEditorScript writes a fake $EDITOR that FIRST performs a
-// concurrent vault write (re-invoking this test binary's concurrent-set helper
-// to add concurrentKey into the parent's vault at the EXPLICIT paths) and THEN
-// copies editedYAML over the temp file. The concurrent write therefore commits
-// to disk BEFORE `secrets edit` acquires the flock — exactly the race the
-// under-lock baseline must capture.
-func writeConcurrentEditorScript(t *testing.T, editedYAML, concurrentKey, concurrentVal, vaultPath, keyPath string) string {
-	t.Helper()
-	dir := t.TempDir()
-	yamlFile := filepath.Join(dir, "edited.yaml")
-	if err := os.WriteFile(yamlFile, []byte(editedYAML), 0o600); err != nil {
-		t.Fatal(err)
+func validConcurrentSecretsFixtureRoot(root string) bool {
+	parent := filepath.Base(filepath.Dir(root))
+	return filepath.IsAbs(root) && filepath.Clean(root) == root &&
+		filepath.Base(root) == concurrentSecretsStateLeaf &&
+		strings.HasPrefix(parent, concurrentSecretsDirPrefix) && parent != concurrentSecretsDirPrefix
+}
+
+func concurrentSecretsTempBase() (string, error) {
+	base, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return "", err
 	}
-	self := os.Args[0]
-	if runtime.GOOS == "windows" {
-		script := filepath.Join(dir, "editor.bat")
-		body := "@echo off\r\n" +
-			"set \"MCPHUB_TEST_CONCURRENT_SET=" + concurrentKey + "\"\r\n" +
-			"set \"MCPHUB_TEST_CONCURRENT_VAL=" + concurrentVal + "\"\r\n" +
-			"set \"MCPHUB_TEST_VAULT_PATH=" + vaultPath + "\"\r\n" +
-			"set \"MCPHUB_TEST_KEY_PATH=" + keyPath + "\"\r\n" +
-			"\"" + self + "\" -test.run=^TestSecretsConcurrentSetHelperProcess$ >nul 2>&1\r\n" +
-			"copy /Y \"" + yamlFile + "\" \"%~1\" >nul\r\n"
-		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
-			t.Fatal(err)
+	return filepath.EvalSymlinks(base)
+}
+
+type concurrentSecretsPaths struct {
+	root, key, vault, lock string
+}
+
+func concurrentSecretsFixturePaths(root string) concurrentSecretsPaths {
+	vault := filepath.Join(root, "secrets.age")
+	return concurrentSecretsPaths{root, filepath.Join(root, ".age-key"), vault, vault + ".lock"}
+}
+
+type concurrentSecretsObjectIdentity struct {
+	Volume, File, Creation uint64
+}
+
+type concurrentSecretsFixtureIdentity struct {
+	Root, Key, Vault, Lock concurrentSecretsObjectIdentity
+}
+
+func (expected concurrentSecretsFixtureIdentity) sameScope(actual concurrentSecretsFixtureIdentity) bool {
+	return expected.Root == actual.Root && expected.Key == actual.Key && expected.Lock == actual.Lock
+}
+
+func observeConcurrentSecretsFixture(ctx context.Context, paths concurrentSecretsPaths) (concurrentSecretsFixtureIdentity, os.FileInfo, error) {
+	var result concurrentSecretsFixtureIdentity
+	if !validConcurrentSecretsFixtureRoot(paths.root) || os.Getenv(api.RequireSingleUserHomeEnv) != "1" {
+		return result, nil, errors.New("invalid concurrent secrets fixture root or policy")
+	}
+	base, err := concurrentSecretsTempBase()
+	if err != nil {
+		return result, nil, errors.New("concurrent secrets fixture temp base unavailable")
+	}
+	parent := filepath.Dir(paths.root)
+	relative, err := filepath.Rel(base, parent)
+	if err != nil || relative != filepath.Base(parent) {
+		return result, nil, errors.New("concurrent secrets fixture is outside its temp namespace")
+	}
+	if exists, err := api.SecureVerifyExistingParentDirForConfigLock(ctx, paths.root); err != nil || !exists {
+		return result, nil, errors.New("concurrent secrets fixture directory ownership or path refused")
+	}
+	var lockInfo os.FileInfo
+	for _, object := range []struct {
+		path string
+		dir  bool
+		id   *concurrentSecretsObjectIdentity
+	}{
+		{paths.root, true, &result.Root},
+		{paths.key, false, &result.Key},
+		{paths.vault, false, &result.Vault},
+		{paths.lock, false, &result.Lock},
+	} {
+		identity, info, err := observeConcurrentSecretsObject(object.path, object.dir)
+		if err != nil {
+			return result, nil, errors.New("concurrent secrets fixture object identity refused")
 		}
-		return script
+		*object.id = identity
+		if object.path == paths.lock {
+			lockInfo = info
+		} else if !object.dir && info.Size() == 0 {
+			return result, nil, errors.New("concurrent secrets fixture key or vault is empty")
+		}
 	}
-	script := filepath.Join(dir, "editor.sh")
-	body := "#!/bin/sh\n" +
-		"MCPHUB_TEST_CONCURRENT_SET=" + concurrentKey +
-		" MCPHUB_TEST_CONCURRENT_VAL=" + concurrentVal +
-		" MCPHUB_TEST_VAULT_PATH=\"" + vaultPath + "\"" +
-		" MCPHUB_TEST_KEY_PATH=\"" + keyPath + "\"" +
-		" \"" + self + "\" -test.run=^TestSecretsConcurrentSetHelperProcess$ >/dev/null 2>&1\n" +
-		"cp \"" + yamlFile + "\" \"$1\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+	return result, lockInfo, nil
+}
+
+// The parent keeps the hardened temp fixture private through child completion
+// and import. The lock-handle check binds that fixture's actual acquired lock.
+func withConcurrentSecretsFixtureLock(ctx context.Context, paths concurrentSecretsPaths, expected concurrentSecretsFixtureIdentity) (retErr error) {
+	before, lockInfo, err := observeConcurrentSecretsFixture(ctx, paths)
+	if err != nil {
+		return err
+	}
+	if before != expected {
+		return errors.New("concurrent secrets fixture identity changed before lock")
+	}
+	// Use the vault's existing cross-process lock protocol, but prohibit
+	// creation: this actor can only acquire the prepared original lock.
+	lock := flock.New(paths.lock, flock.SetFlag(os.O_RDWR))
+	if err := lock.Lock(); err != nil {
+		return errors.New("acquire original concurrent secrets fixture lock")
+	}
+	defer func() {
+		if err := lock.Unlock(); err != nil {
+			retErr = errors.Join(retErr, errors.New("release original concurrent secrets fixture lock"))
+		}
+	}()
+	acquired, err := lock.Stat()
+	if err != nil || !os.SameFile(lockInfo, acquired) {
+		return errors.New("concurrent secrets fixture lock identity changed at acquisition")
+	}
+	held, heldLockInfo, err := observeConcurrentSecretsFixture(ctx, paths)
+	if err != nil {
+		return err
+	}
+	if held != expected || !os.SameFile(acquired, heldLockInfo) {
+		return errors.New("concurrent secrets fixture identity changed under lock")
+	}
+	vault, err := secrets.OpenVault(paths.key, paths.vault)
+	if err != nil {
+		return errors.New("open original concurrent secrets fixture vault")
+	}
+	if err := vault.Set(concurrentSecretsFixtureKey, concurrentSecretsFixtureValue); err != nil {
+		return errors.New("update original concurrent secrets fixture vault")
+	}
+	return nil
+}
+
+// The central TestMain selector admits this child before package fixture
+// setup. A marker-free run of the same test remains an ordinary no-op.
+func TestSecretsConcurrentSetHelperProcess(t *testing.T) {
+	dispatch := classifyCLITestHelperDispatch(os.Args, os.LookupEnv)
+	if dispatch.invalid {
+		t.Fatal("invalid concurrent secrets helper dispatch")
+	}
+	if dispatch.concurrentSecretsRoot == "" {
+		return
+	}
+	var expected concurrentSecretsFixtureIdentity
+	if err := binary.Read(os.Stdin, binary.LittleEndian, &expected); err != nil {
+		t.Fatal("receive concurrent secrets fixture identity")
+	}
+	var extra [1]byte
+	if _, err := io.ReadFull(os.Stdin, extra[:]); !errors.Is(err, io.EOF) {
+		t.Fatal("concurrent secrets fixture identity has trailing input")
+	}
+	if err := withConcurrentSecretsFixtureLock(t.Context(), concurrentSecretsFixturePaths(dispatch.concurrentSecretsRoot), expected); err != nil {
 		t.Fatal(err)
 	}
-	return script
+}
+
+// This case's existing editor actor admits the selected child while the
+// editor is open and before import takes the vault lock.
+func editWithConcurrentSecretsFixture(t *testing.T, paths concurrentSecretsPaths, expected concurrentSecretsFixtureIdentity, editedYAML string) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal("resolve concurrent secrets helper executable")
+	}
+	edit := func(path string) error {
+		ctx := t.Context()
+		if deadline, ok := t.Deadline(); ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+			defer cancel()
+		}
+		var proof bytes.Buffer
+		if err := binary.Write(&proof, binary.LittleEndian, expected); err != nil {
+			return errors.New("encode concurrent secrets fixture identity")
+		}
+		cmd := exec.CommandContext(ctx, exe, concurrentSecretsSelector)
+		cmd.Env = append(withoutCLITestHelperEnvironment(cmd.Environ()),
+			concurrentSecretsRootEnv+"="+paths.root,
+			api.RequireSingleUserHomeEnv+"=1",
+		)
+		cmd.Stdin = &proof
+		if err := cmd.Run(); err != nil {
+			return errors.New("concurrent secrets fixture child failed")
+		}
+		actual, _, err := observeConcurrentSecretsFixture(ctx, paths)
+		if err != nil || !expected.sameScope(actual) || actual.Vault == expected.Vault {
+			return errors.New("concurrent secrets fixture child did not replace only its vault")
+		}
+		return os.WriteFile(path, []byte(editedYAML), 0o600)
+	}
+	editor := installEditorTestCommand(t, exe, edit)
+	if runtime.GOOS != "windows" {
+		// Windows installs the callback in installEditorTestCommand.
+		// This case can use the same seam without shell interpolation.
+		originalRun := editorCommandRun
+		t.Cleanup(func() { editorCommandRun = originalRun })
+		editorCommandRun = func(cmd *exec.Cmd) error {
+			if len(cmd.Args) != 2 {
+				return errors.New("concurrent secrets fixture editor args refused")
+			}
+			return edit(cmd.Args[1])
+		}
+	}
+	return editor
 }
 
 // TestCLISecretsEdit_AuditBaselineComputedUnderLock (bot r4 finding 2): the
 // before/after diff that drives the per-key audit events must be computed from
 // the on-disk state captured UNDER the same lock as the ImportYAML — NOT a
 // stale snapshot taken before the editor session. A concurrent write that
-// lands during the edit (here: CONCURRENT_KEY, added by the editor script's
-// helper subprocess before the flock is taken) is wholesale-clobbered by
+// lands during the edit (here: CONCURRENT_KEY, added by the selected fixture
+// subprocess before the flock is taken) is wholesale-clobbered by
 // ImportYAML; the audit MUST report that clobber as secret-deleted. With the
 // pre-fix stale-snapshot baseline the concurrent key was invisible, so the
 // delete went unrecorded — this test fails on the old code and passes on the
 // under-lock baseline.
 func TestCLISecretsEdit_AuditBaselineComputedUnderLock(t *testing.T) {
-	_, logPath := secretsCliAuditEnv(t)
-	initVaultForCliTest(t)
-
-	// Seed one key the operator will keep.
-	if err := runSecretsCmd(t, "keepval", "set", "KEEP_KEY", "--from-stdin"); err != nil {
+	base, err := concurrentSecretsTempBase()
+	if err != nil {
+		t.Fatal("resolve concurrent secrets fixture temp base")
+	}
+	root, err := os.MkdirTemp(base, concurrentSecretsDirPrefix)
+	if err != nil {
+		t.Fatal("create concurrent secrets fixture root")
+	}
+	t.Cleanup(func() {
+		if err := apitest.RemoveTestMainRoot(root); err != nil {
+			t.Error("remove concurrent secrets fixture root")
+		}
+	})
+	apitest.HardenedDir(t, root)
+	stateDir, logPath := secretsCliAuditEnvAt(t, root)
+	apitest.HardenedDir(t, stateDir)
+	t.Setenv(api.RequireSingleUserHomeEnv, "1")
+	paths := concurrentSecretsFixturePaths(stateDir)
+	// Prepare the exact pair and keeper seed under the real vault lock.
+	// Default path discovery is safe only after both fixture leaves exist.
+	if err := secrets.WithVaultLock(paths.vault, func() error {
+		if err := secrets.InitVault(paths.key, paths.vault); err != nil {
+			return err
+		}
+		vault, err := secrets.OpenVault(paths.key, paths.vault)
+		if err != nil {
+			return err
+		}
+		return vault.Set("KEEP_KEY", "keepval")
+	}); err != nil {
+		t.Fatal("initialize and seed exact concurrent secrets fixture")
+	}
+	expected, _, err := observeConcurrentSecretsFixture(t.Context(), paths)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// The operator's edit (derived from the PRE-editor export) keeps only
-	// KEEP_KEY. It does NOT mention CONCURRENT_KEY because that key did not
-	// exist when the export was taken — the editor script adds it concurrently.
-	// Pass the PARENT's resolved vault/key paths so the subprocess writes into
-	// THIS test's vault (not its own TestMain fence).
+	// The exported edit keeps only KEEP_KEY. The selected child adds the
+	// concurrent key to this fixture before the import takes its lock.
 	const editedYAML = "KEEP_KEY: keepval\n"
-	vaultPath, keyPath := secrets.DefaultVaultPath(), secrets.DefaultKeyPath()
-	script := writeConcurrentEditorScript(t, editedYAML, "CONCURRENT_KEY", "raceval", vaultPath, keyPath)
-	editor := installEditorTestCommand(t, script, func(path string) error {
-		if err := secrets.WithVaultLock(vaultPath, func() error {
-			vault, err := secrets.OpenVault(keyPath, vaultPath)
-			if err != nil {
-				return err
-			}
-			return vault.Set("CONCURRENT_KEY", "raceval")
-		}); err != nil {
-			return err
-		}
-		return os.WriteFile(path, []byte(editedYAML), 0o600)
-	})
+	editor := editWithConcurrentSecretsFixture(t, paths, expected, editedYAML)
+	if secrets.DefaultKeyPath() != paths.key || secrets.DefaultVaultPath() != paths.vault {
+		t.Fatal("real editor case did not select the prepared fixture pair")
+	}
 	t.Setenv("EDITOR", editor)
 	cmd := newSecretsCmdReal()
 	cmd.SetArgs([]string{"edit"})
 	cmd.SetOut(&strings.Builder{})
 	cmd.SetErr(&strings.Builder{})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("secrets edit: %v", err)
+		t.Fatal("concurrent secrets fixture edit failed")
+	}
+	final, _, err := observeConcurrentSecretsFixture(t.Context(), paths)
+	if err != nil || !expected.sameScope(final) {
+		t.Fatal("edited fixture lost its original root, key, or lock")
 	}
 
 	raw, err := os.ReadFile(logPath)
@@ -449,7 +614,7 @@ func TestCLISecretsEdit_AuditBaselineComputedUnderLock(t *testing.T) {
 		t.Errorf("under-lock baseline missed the concurrently-added-then-clobbered key (expected secret-deleted CONCURRENT_KEY):\n%s", body)
 	}
 	// No value may leak.
-	if strings.Contains(body, "raceval") || strings.Contains(body, "keepval") {
+	if strings.Contains(body, concurrentSecretsFixtureValue) || strings.Contains(body, "keepval") {
 		t.Errorf("LEAK: a secret value appears in the edit audit log:\n%s", body)
 	}
 }

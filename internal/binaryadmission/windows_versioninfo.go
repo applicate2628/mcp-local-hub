@@ -353,25 +353,17 @@ func parseWindowsBuildIdentity(payload []byte) (windowsBuildIdentityV1, error) {
 }
 
 func parsePublisherSourceComments(comments string) (string, error) {
-	if strings.Contains(comments, canonicalEntryCommentsNamespace) {
-		prior, _, err := ParseWindowsCanonicalEntryCommentsV1(comments)
-		if err != nil {
-			return "", err
-		}
-		comments = prior
+	composition, err := parseWindowsBuildCommentsComposition(comments)
+	if err != nil {
+		return "", err
 	}
-	const marker = "mcphub-source-v1;sha256="
-	if !strings.Contains(comments, marker) {
+	if composition.backendRunHoldV1 {
+		return "", ErrWindowsBackendRunHoldUnverified
+	}
+	if composition.sourceEpoch == "" {
 		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_UNMARKED")
 	}
-	if strings.Count(comments, marker) != 1 {
-		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: duplicate source suffix")
-	}
-	i := strings.Index(comments, marker)
-	if i == 0 || comments[i-1] != '\n' || !validLowerHex(comments[i+len(marker):], 64, 64) {
-		return "", fmt.Errorf("PUBLISHER_SOURCE_EPOCH_MISMATCH: source suffix grammar")
-	}
-	return comments[i+len(marker):], nil
+	return composition.sourceEpoch, nil
 }
 
 // WindowsPublisherSourceIdentity parses only the caller's captured bytes.

@@ -45,12 +45,32 @@ func readStateFileBeneathRootNoFollow(
 	}, step)
 }
 
+// Only final stat and close are injected per invocation. The public readers
+// always supply the native operations; no process-global hook is retained.
+type stateReadBeneathRootNative struct {
+	statFinal func(windows.Handle, *windows.ByHandleFileInformation) error
+	close     func(windows.Handle) error
+}
+
 func readStateFileBeneathRootNoFollowWithPolicy(
 	ctx context.Context,
 	root string,
 	relativeComponents []string,
 	policy stateReadBeneathRootPolicy,
 	step stateReadBeneathRootStepFunc,
+) (result []byte, retErr error) {
+	return readStateFileBeneathRootNoFollowWithNative(ctx, root, relativeComponents, policy, step, stateReadBeneathRootNative{
+		statFinal: windows.GetFileInformationByHandle, close: windows.CloseHandle,
+	})
+}
+
+func readStateFileBeneathRootNoFollowWithNative(
+	ctx context.Context,
+	root string,
+	relativeComponents []string,
+	policy stateReadBeneathRootPolicy,
+	step stateReadBeneathRootStepFunc,
+	native stateReadBeneathRootNative,
 ) (result []byte, retErr error) {
 	if err := validateStateReadBeneathRootInputWithPolicy(root, relativeComponents, policy); err != nil {
 		return nil, err
@@ -62,18 +82,13 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 	if err != nil {
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
 	}
-	if err := refuseReparsePointHandle(rootHandle); err != nil {
-		_ = windows.CloseHandle(rootHandle)
-		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
-	}
 	currentHandle := rootHandle
 	defer func() {
-		if closeErr := windows.CloseHandle(currentHandle); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", "", closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-parent", "", native.close(currentHandle))
 	}()
+	if err := refuseReparsePointHandle(rootHandle); err != nil {
+		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-root", "", err)
+	}
 
 	for i, component := range relativeComponents[:len(relativeComponents)-1] {
 		if err := ctx.Err(); err != nil {
@@ -89,14 +104,14 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, openErr)
 		}
 		if infoErr := refuseReparsePointHandle(nextHandle); infoErr != nil {
-			_ = windows.CloseHandle(nextHandle)
-			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, infoErr)
+			primary := newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-component", component, infoErr)
+			return completeStateReadClose(nil, primary, "close-parent", component, native.close(nextHandle))
 		}
-		if closeErr := windows.CloseHandle(currentHandle); closeErr != nil {
-			_ = windows.CloseHandle(nextHandle)
+		previousHandle := currentHandle
+		currentHandle = nextHandle
+		if closeErr := native.close(previousHandle); closeErr != nil {
 			return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-parent", component, closeErr)
 		}
-		currentHandle = nextHandle
 	}
 	finalComponent := relativeComponents[len(relativeComponents)-1]
 	if err := ctx.Err(); err != nil {
@@ -112,14 +127,10 @@ func readStateFileBeneathRootNoFollowWithPolicy(
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "open-final", finalComponent, err)
 	}
 	defer func() {
-		if closeErr := windows.CloseHandle(finalHandle); closeErr != nil && retErr == nil {
-			zeroStateSecretBytes(result)
-			result = nil
-			retErr = newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "close-final", finalComponent, closeErr)
-		}
+		result, retErr = completeStateReadClose(result, retErr, "close-final", finalComponent, native.close(finalHandle))
 	}()
 	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(finalHandle, &info); err != nil {
+	if err := native.statFinal(finalHandle, &info); err != nil {
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "stat-final", finalComponent, err)
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
@@ -186,10 +197,27 @@ func ntOpenStateReadRelative(parent windows.Handle, name string, desiredAccess u
 
 // The owned-tree mode keeps the same anchored NT open and adds explicit
 // create/share/type policy; legacy readers retain their original policy.
+type stateReadNativeOpenOutcome struct {
+	handle            windows.Handle
+	entered, returned bool
+	err               error
+}
+
+func (o stateReadNativeOpenOutcome) qualifiedHandle() (windows.Handle, error) {
+	if o.err != nil {
+		return windows.InvalidHandle, o.err
+	}
+	return o.handle, nil
+}
+
 func ntOpenStateReadRelativeMode(parent windows.Handle, name string, desiredAccess uint32, directory *bool, disposition, share uint32, sd *windows.SECURITY_DESCRIPTOR) (windows.Handle, error) {
+	return ntOpenStateReadRelativeModeObserved(parent, name, desiredAccess, directory, disposition, share, sd).qualifiedHandle()
+}
+
+func ntOpenStateReadRelativeModeObserved(parent windows.Handle, name string, desiredAccess uint32, directory *bool, disposition, share uint32, sd *windows.SECURITY_DESCRIPTOR) (out stateReadNativeOpenOutcome) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
-		return windows.InvalidHandle, err
+		return stateReadNativeOpenOutcome{err: err}
 	}
 	oa := &windows.OBJECT_ATTRIBUTES{
 		ObjectName: objectName, RootDirectory: parent,
@@ -209,16 +237,15 @@ func ntOpenStateReadRelativeMode(parent windows.Handle, name string, desiredAcce
 	}
 	var iosb windows.IO_STATUS_BLOCK
 	var allocSize int64
-	var handle windows.Handle
-	if err := windows.NtCreateFile(
-		&handle, desiredAccess|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
+	out.entered = true
+	out.err = windows.NtCreateFile(
+		&out.handle, desiredAccess|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
 		windows.FILE_ATTRIBUTE_NORMAL,
 		share,
 		disposition, options, 0, 0,
-	); err != nil {
-		return windows.InvalidHandle, err
-	}
-	return handle, nil
+	)
+	out.returned = true
+	return out
 }
 
 func ntOpenStateReadRoot(root string) (windows.Handle, error) {
@@ -226,6 +253,10 @@ func ntOpenStateReadRoot(root string) (windows.Handle, error) {
 }
 
 func ntOpenStateReadRootMode(root string, access, share uint32) (windows.Handle, error) {
+	return ntOpenStateReadRootModeObserved(root, access, share).qualifiedHandle()
+}
+
+func ntOpenStateReadRootModeObserved(root string, access, share uint32) (out stateReadNativeOpenOutcome) {
 	cleanRoot := filepath.Clean(root)
 	nativeRoot := `\??\` + cleanRoot
 	if strings.HasPrefix(cleanRoot, `\\`) {
@@ -233,7 +264,7 @@ func ntOpenStateReadRootMode(root string, access, share uint32) (windows.Handle,
 	}
 	objectName, err := windows.NewNTUnicodeString(nativeRoot)
 	if err != nil {
-		return windows.InvalidHandle, err
+		return stateReadNativeOpenOutcome{err: err}
 	}
 	oa := &windows.OBJECT_ATTRIBUTES{
 		ObjectName: objectName,
@@ -242,16 +273,15 @@ func ntOpenStateReadRootMode(root string, access, share uint32) (windows.Handle,
 	oa.Length = uint32(unsafe.Sizeof(*oa))
 	var iosb windows.IO_STATUS_BLOCK
 	var allocSize int64
-	var handle windows.Handle
-	if err := windows.NtCreateFile(
-		&handle, access|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
+	out.entered = true
+	out.err = windows.NtCreateFile(
+		&out.handle, access|windows.SYNCHRONIZE, oa, &iosb, &allocSize,
 		windows.FILE_ATTRIBUTE_NORMAL,
 		share,
 		windows.FILE_OPEN,
 		windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT,
 		0, 0,
-	); err != nil {
-		return windows.InvalidHandle, err
-	}
-	return handle, nil
+	)
+	out.returned = true
+	return out
 }

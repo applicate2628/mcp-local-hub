@@ -396,6 +396,94 @@ func ReadOccupiedSupervisorLockOwner(stateDir string) (SupervisorLockOwner, erro
 	return owner, nil
 }
 
+type OccupiedSupervisorLockObservation struct {
+	lock          *flock.Flock
+	acquisition   flock.AcquisitionObservation
+	release       flock.ReleaseObservation
+	policy        *StateReadPolicyObservation
+	readers       []*StateFileReadObservation
+	first, second SupervisorLockOwner
+	finalized     bool
+}
+
+func (o *OccupiedSupervisorLockObservation) ResourcesFinalized() bool {
+	if o == nil || !o.finalized || o.policy != nil && !o.policy.ResourcesFinalized() {
+		return false
+	}
+	a, r := o.acquisition, o.release
+	if a.Attempted && (!r.AcquisitionReturned || r.Generation != a.Generation || !r.AllocatedFilesClosed ||
+		r.Pending || r.Error != nil || a.Held && !r.Complete) {
+		return false
+	}
+	for _, read := range o.readers {
+		if !read.ResourcesFinalized() {
+			return false
+		}
+	}
+	return true
+}
+
+// ObserveOccupiedSupervisorLockOwner uses one original noncreating probe of
+// the same lock plus the existing two sidecar comparisons. Its reads use the
+// canonical observed policy without enabling a fallback audit.
+func ObserveOccupiedSupervisorLockOwner(ctx context.Context, stateDir string) (owner SupervisorLockOwner, o *OccupiedSupervisorLockObservation, retErr error) {
+	o = &OccupiedSupervisorLockObservation{}
+	defer func() { o.finalized = true }()
+	if runtime.GOOS != "windows" {
+		return owner, o, ErrSupervisorControlPeerUnsupported
+	}
+	if ctx == nil || !filepath.IsAbs(stateDir) || filepath.Clean(stateDir) != stateDir {
+		return owner, o, errors.New("absolute supervisor state directory and context required")
+	}
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	o.lock = flock.New(lockPath+".lock", flock.SetFlag(os.O_RDONLY))
+	var probeErr, releaseErr error
+	o.acquisition, probeErr = o.lock.TryLockObserved(ctx)
+	if o.acquisition.Attempted {
+		o.release, releaseErr = o.lock.ReleaseObserved()
+	}
+	if probeErr != nil || releaseErr != nil || !o.acquisition.Attempted || !o.acquisition.Returned ||
+		o.acquisition.Held || o.release.Generation != o.acquisition.Generation || !o.release.AllocatedFilesClosed || o.release.Pending {
+		return owner, o, errors.Join(ErrSupervisorIPCUnavailable, probeErr, releaseErr)
+	}
+	var err error
+	o.policy, err = ResolveStateReadPolicyObserved(ctx)
+	if err != nil {
+		return owner, o, err
+	}
+	read := func(path string) ([]byte, error) {
+		b := newStateFileReadBuilder(ctx, path, stateFileReadCapBytes(path))
+		b.policy = o.policy
+		b.view.PolicyQualified = true
+		b.view.ReadAttempted = true
+		raw, readErr := readStateFileInodeAnchoredWithObservation(b.path, func() bool { return o.policy.view.EffectiveStrict },
+			b.maxBytes, false, false, nil, nil, ctx, b)
+		raw, actual, readErr := b.finish(raw, readErr)
+		o.readers = append(o.readers, actual)
+		if readErr != nil {
+			return nil, readErr
+		}
+		return raw, actual.Validate(ctx, path, b.maxBytes, raw, stateFileReadObservationDigest(raw))
+	}
+	o.first, err = readSupervisorLockOwnerWith(lockPath, read)
+	if err != nil {
+		return owner, o, err
+	}
+	firstBirth, parseErr := time.Parse(time.RFC3339Nano, o.first.StartedAt)
+	if o.first.PID <= 0 || parseErr != nil || firstBirth.IsZero() {
+		return owner, o, ErrSupervisorIPCUnavailable
+	}
+	o.second, err = readSupervisorLockOwnerWith(lockPath, read)
+	if err != nil {
+		return owner, o, err
+	}
+	birth, parseErr := time.Parse(time.RFC3339Nano, o.second.StartedAt)
+	if o.second.PID != o.first.PID || parseErr != nil || birth.IsZero() || !birth.Equal(firstBirth) {
+		return owner, o, ErrSupervisorIPCUnavailable
+	}
+	return o.second, o, ctx.Err()
+}
+
 // supervisorLockProbeLease is the minimal flock surface the probe needs from its
 // TENTATIVE lease. *flock.Flock satisfies it.
 type supervisorLockProbeLease interface {

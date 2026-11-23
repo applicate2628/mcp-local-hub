@@ -47,17 +47,18 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      PUBLISH_NODE_MIN_VERSION: '22.14.0'
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: '1.26.x'
+          go-version: '>=1.26.2'
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          # Reproducible CI distribution choice; support is minimum-only below.
-          node-version: '24.21.0'
+          node-version: '>=${{ env.PUBLISH_NODE_MIN_VERSION }}'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
@@ -70,7 +71,11 @@ jobs:
           // https://docs.npmjs.com/trusted-publishers/ defines these minima.
           try {
             const versions = process.argv.slice(2);
-            for (const [name, raw, minimum] of [['Node', versions[0], [22, 14, 0]], ['npm', versions[1], [11, 5, 1]]]) {
+            const nodeMinimum = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(process.env.PUBLISH_NODE_MIN_VERSION ?? '');
+            if (!nodeMinimum) {
+              throw new Error('Node minimum is missing or malformed');
+            }
+            for (const [name, raw, minimum] of [['Node', versions[0], nodeMinimum.slice(1)], ['npm', versions[1], [11, 5, 1]]]) {
               const match = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(raw ?? '');
               if (!match || (match[4] ?? '').split('.').some((part) => /^0\d+$/.test(part))) {
                 throw new Error(`${name} version is missing or malformed`);
@@ -106,7 +111,6 @@ jobs:
           echo "Publishing version: $V"
 
       - name: Set package versions + regenerate platform packages
-        id: package_set
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -118,14 +122,22 @@ jobs:
           if [ "$TARGETS" != "win32-x64" ]; then
             echo "::error::this release workflow admits only win32-x64; manifest targets: $TARGETS"; exit 1
           fi
-          echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
+          node <<'NODE'
+          const { readWindowsArtifactContract } = require('./npm/generate-platform-packages');
+          const pkg = require('./npm/packages/win32-x64/package.json');
+          const projection = readWindowsArtifactContract();
+          if (!projection.runtime ||
+              pkg.mcphubProduct !== 'bin/' + projection.productPath ||
+              !pkg.files.includes('bin/' + projection.runtime.indexPath)) {
+            throw new Error('expected the current Windows npm package projection');
+          }
+          NODE
 
       - name: Build the admitted Windows x64 payload
         id: native
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          TARGETS: ${{ steps.package_set.outputs.targets }}
         run: |
           V="$VERSION"
           COMMIT="$(git rev-parse HEAD)"
@@ -138,8 +150,8 @@ jobs:
           SOURCE_EXPORT="$SOURCE_OWNER/source"
           SOURCE_SNAPSHOT="$SOURCE_OWNER/source-snapshot.json"
           SOURCE_PREPARATION="$SOURCE_OWNER/preparation.json"
-          # sync-version owns these generated build inputs. Frontend assets
-          # are committed source inputs, selected by the same Go capture.
+          # Capture generated build inputs and npm metadata. The same Go
+          # capture selects the committed frontend assets and package README.
           go run ./tools/windows-product-validate \
             --prepare-source "$SOURCE_EXPORT" \
             --source-checkout "$CHECKOUT" \
@@ -147,7 +159,9 @@ jobs:
             --expected-commit "$COMMIT" \
             --generated-source build.sh \
             --generated-source build.ps1 \
-            --generated-source cmd/mcphub/versioninfo.json > "$SOURCE_PREPARATION"
+            --generated-source cmd/mcphub/versioninfo.json \
+            --generated-source npm/package.json \
+            --generated-source npm/packages/win32-x64/package.json > "$SOURCE_PREPARATION"
           SOURCE_EPOCH="$(SOURCE_PREPARATION="$SOURCE_PREPARATION" EXPECTED_COMMIT="$COMMIT" node <<'NODE'
           const fs = require('node:fs');
           const raw = fs.readFileSync(process.env.SOURCE_PREPARATION, 'utf8');
@@ -173,112 +187,233 @@ jobs:
           process.stdout.write(row.source_input.source_epoch);
           NODE
           )"
-          printf 'source_epoch=%s\n' "$SOURCE_EPOCH" >> "$GITHUB_OUTPUT"
-          for d in $TARGETS; do
-            case "$d" in
-              win32-x64)
-                (
-                  cd "$SOURCE_EXPORT"
-                  pwsh -NoProfile -File ./build.ps1 \
-                    -WindowsTargetArch amd64 \
-                    -OutputDirectory "$CHECKOUT/npm/packages/$d/bin" \
-                    -ReleaseVersion "$V" \
-                    -ReleaseCommit "$COMMIT" \
-                    -ReleaseBuildDate "$DATE" \
-                    -SourceSnapshotPath "$SOURCE_SNAPSHOT"
-                )
-                ;;
-              *) echo "::error::no admitted build route for $d"; exit 1 ;;
-            esac
-            ls -l "npm/packages/$d/bin/"
-          done
+          RUNTIME_PLAN="$SOURCE_OWNER/runtime-fetch-plan.json"
+          (
+            cd "$SOURCE_EXPORT"
+            go run ./tools/windows-product-validate --runtime-fetch-plan \
+              --source-root "$SOURCE_EXPORT" \
+              --source-snapshot "$SOURCE_SNAPSHOT" \
+              --expected-source-epoch "$SOURCE_EPOCH"
+          ) > "$RUNTIME_PLAN"
+          RUNTIME_ARCHIVES="$SOURCE_OWNER/runtime-archives"
+          mkdir "$RUNTIME_ARCHIVES"
+          RUNTIME_PLAN="$RUNTIME_PLAN" RUNTIME_ARCHIVES="$RUNTIME_ARCHIVES" SOURCE_EPOCH="$SOURCE_EPOCH" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { Readable } = require('node:stream');
+          const { pipeline } = require('node:stream/promises');
 
-      - name: Assert the Windows product identity manifest
+          async function download({ component, url, sha, size }) {
+            let response = await fetch(url, { redirect: 'manual' });
+            if (response.status >= 300 && response.status < 400) {
+              const location = response.headers.get('location');
+              await response.body?.cancel();
+              const asset = location && new URL(location, url);
+              if (!asset || asset.origin !== 'https://release-assets.githubusercontent.com' ||
+                  asset.username || asset.password || asset.hash ||
+                  !/^\/github-production-release-asset\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(asset.pathname)) {
+                throw new Error(`invalid GitHub release asset redirect for ${component}`);
+              }
+              response = await fetch(asset, { redirect: 'manual' });
+            }
+            if (response.status !== 200 || !response.body) {
+              await response.body?.cancel();
+              throw new Error(`Windows runtime archive request failed for ${component} (HTTP ${response.status})`);
+            }
+            let received = 0n;
+            await pipeline(Readable.fromWeb(response.body), async function* (chunks) {
+              for await (const chunk of chunks) {
+                received += BigInt(chunk.length);
+                if (received > size) throw new Error(`Windows runtime archive is oversized for ${component}`);
+                yield chunk;
+              }
+              if (received !== size) throw new Error(`Windows runtime archive is incomplete for ${component}`);
+            }, fs.createWriteStream(path.join(process.env.RUNTIME_ARCHIVES, sha), { flags: 'wx' }));
+          }
+
+          async function stageRuntimeArchives() {
+            const repositories = { python: 'python-build-standalone', uv: 'uv' };
+            const components = Object.keys(repositories);
+            const raw = fs.readFileSync(process.env.RUNTIME_PLAN);
+            const plan = JSON.parse(raw.toString('utf8'));
+            const keys = (value, expected) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+              JSON.stringify(Object.keys(value)) === JSON.stringify(expected);
+            if (!keys(plan, ['schema', 'source_epoch', 'archives']) ||
+                plan.schema !== 'windows-runtime-fetch-plan-v1' ||
+                typeof plan.source_epoch !== 'string' || !/^[0-9a-f]{64}$/.test(plan.source_epoch) ||
+                plan.source_epoch !== process.env.SOURCE_EPOCH ||
+                !Array.isArray(plan.archives) || plan.archives.length !== components.length) {
+              throw new Error('invalid Windows runtime acquisition plan');
+            }
+            const free = fs.statfsSync(process.env.RUNTIME_ARCHIVES, { bigint: true });
+            let remaining = free.bavail * free.bsize;
+            const hashes = new Set();
+            // Apply the runner's URL and depot policies to the complete Go
+            // plan before the first request.
+            const archives = plan.archives.map((row, index) => {
+              if (!keys(row, ['component', 'release', 'url', 'sha256', 'size'])) {
+                throw new Error('invalid Windows runtime acquisition plan row');
+              }
+              const { component, release, url, sha256: sha, size } = row;
+              if (component !== components[index] ||
+                  typeof release !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(release) ||
+                  typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha) || hashes.has(sha) ||
+                  typeof size !== 'string' || !/^[1-9][0-9]*$/.test(size) || BigInt(size) > remaining ||
+                  typeof url !== 'string') {
+                throw new Error(`invalid or oversized Windows runtime archive for ${component}`);
+              }
+              const prefix = `https://github.com/astral-sh/${repositories[component]}/releases/download/${release}/`;
+              const filename = url.startsWith(prefix) && url.slice(prefix.length);
+              if (!filename || !/^[A-Za-z0-9](?:[A-Za-z0-9._+-]|%2[Bb])*$/.test(filename)) {
+                throw new Error(`invalid Astral release asset URL for ${component}`);
+              }
+              const bytes = BigInt(size);
+              remaining -= bytes;
+              hashes.add(sha);
+              return { component, url: new URL(prefix + filename), sha, size: bytes };
+            });
+            // The Go encoder emits these ordered ASCII fields on one line.
+            if (!raw.equals(Buffer.from(JSON.stringify(plan) + '\n'))) {
+              throw new Error('invalid Windows runtime acquisition plan encoding');
+            }
+            for (const archive of archives) await download(archive);
+          }
+
+          stageRuntimeArchives().catch((error) => {
+            process.stderr.write('::error::' + error.message + '\n');
+            process.exitCode = 1;
+          });
+          NODE
+
+          PLATFORM_STAGE="$SOURCE_OWNER/platform"
+          mkdir "$PLATFORM_STAGE"
+          cp "$SOURCE_EXPORT/npm/packages/win32-x64/"{package.json,README.md} "$PLATFORM_STAGE/"
+          (
+            cd "$SOURCE_EXPORT"
+            pwsh -NoProfile -File ./build.ps1 \
+              -CurrentWindowsPackage \
+              -WindowsTargetArch amd64 \
+              -OutputDirectory "$PLATFORM_STAGE/bin" \
+              -ReleaseVersion "$V" \
+              -ReleaseCommit "$COMMIT" \
+              -ReleaseBuildDate "$DATE" \
+              -SourceSnapshotPath "$SOURCE_SNAPSHOT" \
+              -RuntimeArchiveDirectory "$RUNTIME_ARCHIVES"
+          )
+          printf 'source_epoch=%s\nsource_export=%s\nsource_snapshot=%s\nplatform_stage=%s\n' \
+            "$SOURCE_EPOCH" "$SOURCE_EXPORT" "$SOURCE_SNAPSHOT" "$PLATFORM_STAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Pack and verify the actual Windows x64 archive
+        id: platform_pack
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           COMMIT: ${{ steps.native.outputs.commit }}
           BUILD_DATE: ${{ steps.native.outputs.build_date }}
           SOURCE_EPOCH: ${{ steps.native.outputs.source_epoch }}
-          TARGETS: ${{ steps.package_set.outputs.targets }}
+          SOURCE_EXPORT: ${{ steps.native.outputs.source_export }}
+          SOURCE_SNAPSHOT: ${{ steps.native.outputs.source_snapshot }}
+          PLATFORM_STAGE: ${{ steps.native.outputs.platform_stage }}
         run: |
-          windows_product_rows() {
-            node <<'NODE'
-          const contract = require('./windows-product-artifacts.json');
-          for (const artifact of contract.artifacts.filter((row) => row.productMetadata === true)) {
-            process.stdout.write(`${artifact.role}\t${artifact.filename}\n`);
-          }
-          NODE
-          }
-          WINDOWS_PRODUCT_ROWS="$RUNNER_TEMP/mcphub-windows-product-artifacts.tsv"
-          windows_product_rows > "$WINDOWS_PRODUCT_ROWS"
-          if [ "$(wc -l < "$WINDOWS_PRODUCT_ROWS")" -ne 1 ]; then
-            echo "::error::Windows artifact contract did not emit exactly one metadata-bearing product row"; exit 1
-          fi
-          for target in $TARGETS; do
-            while IFS=$'\t' read -r role filename; do
-              candidate="npm/packages/$target/bin/$filename"
-              observed="$RUNNER_TEMP/$target-windows-product-identity.json"
-              go run ./tools/windows-product-validate \
-                --candidate "$candidate" \
-                --expected-version "$VERSION" \
-                --expected-commit "$COMMIT" \
-                --expected-build-date "$BUILD_DATE" \
-                --expected-source-epoch "$SOURCE_EPOCH" > "$observed"
-              cmp "$observed" "npm/packages/$target/bin/windows-product-identity.json"
-              echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
-            done < "$WINDOWS_PRODUCT_ROWS"
-          done
-
-      - name: Verify staged npm package payloads
-        shell: bash
-        env:
-          PACK_EVIDENCE: ${{ runner.temp }}/mcphub-pack-evidence
-          TARGETS: ${{ steps.package_set.outputs.targets }}
-        run: |
-          mkdir -p "$PACK_EVIDENCE"
-          for d in $TARGETS; do
-            (cd "npm/packages/$d" && npm pack --dry-run --json) > "$PACK_EVIDENCE/$d.json"
-          done
-          (cd npm && npm pack --dry-run --json) > "$PACK_EVIDENCE/meta.json"
-          node <<'NODE'
+          PACK_OWNER="$(mktemp -d "$RUNNER_TEMP/mcphub-platform-pack.XXXXXX")"
+          (cd "$PLATFORM_STAGE" && npm pack --offline --ignore-scripts --json --pack-destination "$PACK_OWNER") \
+            > "$PACK_OWNER/npm-pack.json"
+          ARCHIVE_FILENAME="$(PACK_OWNER="$PACK_OWNER" node <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');
-          const root = process.env.PACK_EVIDENCE;
-          const contract = require('./windows-product-artifacts.json');
-          const windowsNative = [
-            ...contract.artifacts
-              .filter((artifact) => artifact.npmPayload === true)
-              .map((artifact) => `bin/${artifact.filename}`),
-            `bin/${contract.identityManifest.filename}`,
-          ].sort();
-          const targets = Object.keys(require('./npm/lib/platform-binary').PACKAGE_BY_PLATFORM);
-          if (targets.join(' ') !== process.env.TARGETS) throw new Error('workflow target projection drift');
-          for (const target of targets) {
-            const rows = JSON.parse(fs.readFileSync(path.join(root, `${target}.json`), 'utf8'));
-            if (!Array.isArray(rows) || rows.length !== 1) throw new Error(`${target}: expected one pack result`);
-            const files = rows[0].files.map((f) => f.path);
-            const count = (name) => files.filter((p) => p === name).length;
-            const native = files.filter((p) => p.startsWith('bin/')).sort();
-            if (JSON.stringify(native) !== JSON.stringify(windowsNative) || windowsNative.some((p) => count(p) !== 1)) {
-              throw new Error(`${target}: Windows native payload drift: ${files.join(', ')}`);
-            }
-            process.stdout.write(`${target}: ${files.join(', ')}\n`);
+          const name = '@applicate2628/mcp-local-hub-win32-x64';
+          const version = process.env.VERSION;
+          const filename = 'applicate2628-mcp-local-hub-win32-x64-' + version + '.tgz';
+          const rows = JSON.parse(fs.readFileSync(path.join(process.env.PACK_OWNER, 'npm-pack.json'), 'utf8'));
+          if (!Array.isArray(rows) || rows.length !== 1 ||
+              rows[0].name !== name || rows[0].version !== version || rows[0].filename !== filename) {
+            throw new Error('unexpected Windows platform pack result');
           }
-          const metaRows = JSON.parse(fs.readFileSync(path.join(root, 'meta.json'), 'utf8'));
-          if (!Array.isArray(metaRows) || metaRows.length !== 1) throw new Error('meta: expected one pack result');
-          const metaFiles = metaRows[0].files.map((f) => f.path).sort();
-          const expectedMeta = ['README.md', 'bin/cli.js', 'lib/platform-binary.js', 'package.json', 'scripts/postinstall.js'];
-          if (JSON.stringify(metaFiles) !== JSON.stringify(expectedMeta)) {
-            throw new Error(`meta payload drift: ${metaFiles.join(', ')}`);
-          }
-          const meta = require('./npm/package.json');
-          const deps = meta.optionalDependencies;
-          if (JSON.stringify(deps) !== JSON.stringify({'@applicate2628/mcp-local-hub-win32-x64': meta.version})) {
-            throw new Error(`meta optional dependencies drift: ${JSON.stringify(deps)}`);
-          }
-          process.stdout.write(`meta: ${metaFiles.join(', ')}\n`);
+          process.stdout.write(filename);
           NODE
+          )"
+          ARCHIVE="$PACK_OWNER/$ARCHIVE_FILENAME"
+          (
+            cd "$SOURCE_EXPORT"
+            go run ./tools/windows-product-validate \
+              --candidate "$PLATFORM_STAGE/bin/mcphub-product/mcphub.exe" \
+              --helper "$PLATFORM_STAGE/bin/mcphub.exe" \
+              --expected-version "$VERSION" \
+              --expected-commit "$COMMIT" \
+              --expected-build-date "$BUILD_DATE" \
+              --expected-source-epoch "$SOURCE_EPOCH" \
+              --runtime-payload runtime-payload.json \
+              --pack "$ARCHIVE" \
+              --pack-source-root "$SOURCE_EXPORT" \
+              --pack-source-snapshot "$SOURCE_SNAPSHOT"
+          ) > "$PACK_OWNER/verification.json"
+          ARCHIVE_SHA256="$(sha256sum -- "$ARCHIVE")"
+          ARCHIVE_SHA256="${ARCHIVE_SHA256%% *}"
+          PACK_OWNER="$PACK_OWNER" ARCHIVE_FILENAME="$ARCHIVE_FILENAME" ARCHIVE_SHA256="$ARCHIVE_SHA256" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { PACK_OWNER, ARCHIVE_FILENAME, ARCHIVE_SHA256, PLATFORM_STAGE } = process.env;
+          const row = JSON.parse(fs.readFileSync(path.join(PACK_OWNER, 'verification.json'), 'utf8'));
+          const identity = JSON.parse(fs.readFileSync(
+            path.join(PLATFORM_STAGE, 'bin/mcphub-product/windows-product-identity.json'), 'utf8',
+          ));
+          if (row.schema !== 'windows-runtime-pack-verification-v1' ||
+              row.archive_filename !== ARCHIVE_FILENAME ||
+              row.archive_size !== fs.statSync(path.join(PACK_OWNER, ARCHIVE_FILENAME)).size ||
+              row.archive_sha256 !== ARCHIVE_SHA256 ||
+              JSON.stringify(row.identity) !== JSON.stringify(identity)) {
+            throw new Error('Windows platform verification result does not match the staged product and packed archive');
+          }
+          NODE
+          printf 'archive=%s\nsha256=%s\n' "$ARCHIVE" "$ARCHIVE_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Pack and verify the actual npm meta archive
+        id: meta_pack
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SOURCE_EPOCH: ${{ steps.native.outputs.source_epoch }}
+          SOURCE_EXPORT: ${{ steps.native.outputs.source_export }}
+          SOURCE_SNAPSHOT: ${{ steps.native.outputs.source_snapshot }}
+        run: |
+          PACK_OWNER="$(mktemp -d "$RUNNER_TEMP/mcphub-meta-pack.XXXXXX")"
+          (cd npm && npm pack --offline --ignore-scripts --json --pack-destination "$PACK_OWNER") \
+            > "$PACK_OWNER/npm-pack.json"
+          ARCHIVE_FILENAME="mcp-local-hub-$VERSION.tgz"
+          ARCHIVE="$PACK_OWNER/$ARCHIVE_FILENAME"
+          (
+            cd "$SOURCE_EXPORT"
+            go run ./tools/windows-product-validate --meta-pack "$ARCHIVE" \
+              --pack-source-root "$SOURCE_EXPORT" \
+              --pack-source-snapshot "$SOURCE_SNAPSHOT" \
+              --expected-source-epoch "$SOURCE_EPOCH" \
+              --expected-version "$VERSION"
+          ) > "$PACK_OWNER/verification.json"
+          ARCHIVE_SHA256="$(PACK_OWNER="$PACK_OWNER" ARCHIVE_FILENAME="$ARCHIVE_FILENAME" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { PACK_OWNER, ARCHIVE_FILENAME, VERSION } = process.env;
+          const read = (name) => fs.readFileSync(path.join(PACK_OWNER, name), 'utf8');
+          const rows = JSON.parse(read('npm-pack.json'));
+          if (!Array.isArray(rows) || rows.length !== 1 ||
+              rows[0].name !== 'mcp-local-hub' || rows[0].version !== VERSION ||
+              rows[0].filename !== ARCHIVE_FILENAME) {
+            throw new Error('unexpected npm meta pack result');
+          }
+          const raw = fs.readFileSync(path.join(PACK_OWNER, 'verification.json'));
+          const receipt = JSON.parse(raw.toString('utf8'));
+          if (receipt === null || typeof receipt !== 'object' || Array.isArray(receipt) ||
+              JSON.stringify(Object.keys(receipt)) !== JSON.stringify(['schema', 'archive_filename', 'archive_size', 'archive_sha256']) ||
+              receipt.schema !== 'npm-meta-pack-verification-v1' || receipt.archive_filename !== ARCHIVE_FILENAME ||
+              !Number.isSafeInteger(receipt.archive_size) || receipt.archive_size <= 0 ||
+              typeof receipt.archive_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.archive_sha256) ||
+              !raw.equals(Buffer.from(JSON.stringify(receipt) + '\n'))) {
+            throw new Error('invalid npm meta pack verification result');
+          }
+          process.stdout.write(receipt.archive_sha256);
+          NODE
+          )"
+          printf 'archive=%s\nsha256=%s\n' "$ARCHIVE" "$ARCHIVE_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Publish platform packages, then the meta
         shell: bash
@@ -286,7 +421,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
           VERSION: ${{ steps.ver.outputs.version }}
-          TARGETS: ${{ steps.package_set.outputs.targets }}
+          PLATFORM_ARCHIVE: ${{ steps.platform_pack.outputs.archive }}
+          PLATFORM_ARCHIVE_SHA256: ${{ steps.platform_pack.outputs.sha256 }}
+          META_ARCHIVE: ${{ steps.meta_pack.outputs.archive }}
+          META_ARCHIVE_SHA256: ${{ steps.meta_pack.outputs.sha256 }}
         run: |
           V="$VERSION"
           DRY=""
@@ -296,12 +434,23 @@ jobs:
           fi
           TAG=""
           case "$V" in *-*) TAG="--tag beta";; esac   # prerelease -> beta dist-tag, never latest
+          verify_archive() {
+            local archive="$1" expected_filename="$2" expected_sha256="$3" actual
+            if [[ "${archive##*/}" != "$expected_filename" || ! "$expected_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::invalid verified npm archive identity"; exit 1
+            fi
+            actual="$(sha256sum -- "$archive")"
+            if [ "${actual%% *}" != "$expected_sha256" ]; then
+              echo "::error::the verified npm archive changed"; exit 1
+            fi
+          }
+          verify_archive "$PLATFORM_ARCHIVE" "applicate2628-mcp-local-hub-win32-x64-$V.tgz" "$PLATFORM_ARCHIVE_SHA256"
+          verify_archive "$META_ARCHIVE" "mcp-local-hub-$V.tgz" "$META_ARCHIVE_SHA256"
           # Platform packages FIRST so the meta's optionalDependencies resolve.
-          for d in $TARGETS; do
-            echo "::group::publish @applicate2628/mcp-local-hub-$d"
-            ( cd "npm/packages/$d" && npm publish --provenance --access public $TAG $DRY )
-            echo "::endgroup::"
-          done
+          echo "::group::publish @applicate2628/mcp-local-hub-win32-x64"
+          npm publish "$PLATFORM_ARCHIVE" --provenance --access public $TAG $DRY
+          echo "::endgroup::"
+          verify_archive "$META_ARCHIVE" "mcp-local-hub-$V.tgz" "$META_ARCHIVE_SHA256"
           echo "::group::publish meta mcp-local-hub"
-          ( cd npm && npm publish --provenance --access public $TAG $DRY )
+          npm publish "$META_ARCHIVE" --provenance --access public $TAG $DRY
           echo "::endgroup::"

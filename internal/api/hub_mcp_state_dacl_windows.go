@@ -191,6 +191,10 @@ func windowsDACLAllowlistViolationsFromHandle(h windows.Handle, significantBits 
 }
 
 func windowsDACLAllowlistViolationsFromDescriptor(sd *windows.SECURITY_DESCRIPTOR, significantBits uint32, allowlist []*windows.SID, formatSID func(*windows.SID) string) ([]DACLAllowlistViolation, error) {
+	return windowsDACLAllowlistViolationsWithReadOnlySID(sd, significantBits, allowlist, formatSID, nil)
+}
+
+func windowsDACLAllowlistViolationsWithReadOnlySID(sd *windows.SECURITY_DESCRIPTOR, significantBits uint32, allowlist []*windows.SID, formatSID func(*windows.SID) string, readOnlySID *windows.SID) ([]DACLAllowlistViolation, error) {
 
 	ownerSID, _, err := sd.Owner()
 	if err != nil {
@@ -318,6 +322,12 @@ func windowsDACLAllowlistViolationsFromDescriptor(sd *windows.SECURITY_DESCRIPTO
 			continue
 		}
 		sid := sidFromAce(ace)
+		// File read/execute includes query metadata and synchronization. This
+		// optional principal cannot own the object or receive any other right.
+		const readOnlyRights = uint32(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE | windows.GENERIC_READ | windows.GENERIC_EXECUTE)
+		if readOnlySID != nil && sid != nil && sid.Equals(readOnlySID) && mapped&^readOnlyRights == 0 {
+			continue
+		}
 		if !sidInAllowlist(sid, allowlist) {
 			name := formatSID(sid)
 			violations = append(violations, DACLAllowlistViolation{SID: name, Mask: mapped & significantBits})

@@ -130,7 +130,7 @@ func TestResolveHubScopeKey(t *testing.T) {
 	// truth — mirroring what the production builder records. Only "frontend"
 	// is declared here: "infra" is absent (group-unknown), and the forged
 	// "bad:forged" name fails validateGroupName before the Groups lookup.
-	PublishResolverSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{GroupScopeKey("frontend"): true}})
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{Gen: 1, Groups: map[string]bool{GroupScopeKey("frontend"): true}})
 
 	cases := []struct {
 		name      string
@@ -214,7 +214,7 @@ func frontendSnapshotFixture(t *testing.T) (memSD, timeSD, fsSD *stubDaemon) {
 		// "unknown group" before routing.
 		Groups: map[string]bool{GroupScopeKey("frontend"): true},
 	}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 	return memSD, timeSD, fsSD
 }
 

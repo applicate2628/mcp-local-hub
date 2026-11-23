@@ -329,8 +329,8 @@ func acquireSingleInstanceAt(pidportPath string, port int, resume ...*api.GUIOwn
 // underlying TryLock is deliberately retained instead of Lock: both legacy
 // acquisition and restart-v3 probing remain bounded and never wait forever on
 // another process.
-func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, error) {
-	fl := flock.New(pidportPath + ".lock")
+func tryAcquireSingleInstanceLockAt(pidportPath string, opts ...flock.Option) (*SingleInstanceLock, error) {
+	fl := flock.New(pidportPath+".lock", opts...)
 	ok, err := fl.TryLock()
 	if err != nil {
 		return nil, fmt.Errorf("flock %s: %w", pidportPath+".lock", err)
@@ -390,7 +390,9 @@ func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, er
 // transient also lands here — conservative in the safe direction: a missed
 // recovery tick, never a relaunch against a lock this process still holds.
 func ProbeSingleInstanceLockUnheld(pidportPath string) (unheld bool, err error) {
-	return probeSingleInstanceLockUnheld(pidportPath, tryAcquireSingleInstanceLockAt)
+	return probeSingleInstanceLockUnheld(pidportPath, func(path string) (*SingleInstanceLock, error) {
+		return tryAcquireSingleInstanceLockAt(path)
+	})
 }
 
 // probeSingleInstanceLockUnheld is ProbeSingleInstanceLockUnheld with the

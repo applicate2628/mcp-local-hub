@@ -1,0 +1,118 @@
+{
+  "schema": "hub-runtime-release-v1",
+  "component": "uv",
+  "version": "0.13.9",
+  "release": "0.13.9",
+  "target": "win32-x64",
+  "archive_url": "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-pc-windows-msvc.zip",
+  "archive_sha256": "edd61f7f5728a56cc62455386661860bdfc7bab65872f39b0c25bdcc1d8e1beb",
+  "archive_size": 15567875,
+  "archive_format": "zip",
+  "layout": [
+    {
+      "source": "uv.exe",
+      "destination": "uv.exe"
+    },
+    {
+      "source": "uvw.exe",
+      "destination": "uvw.exe"
+    },
+    {
+      "source": "uvx.exe",
+      "destination": "uvx.exe"
+    }
+  ],
+  "original_artifacts": [
+    {
+      "archive_url": "https://github.com/astral-sh/uv/releases/download/0.13.9/source.tar.gz",
+      "archive_sha256": "9ff3b8467058929c25c6be93805dd14f1ba7f35013edc8146643af0b015231c5"
+    }
+  ],
+  "original_files": [
+    {
+      "source_path": "runtimes/uv/originals/LICENSE-APACHE",
+      "path": "licenses/LICENSE-APACHE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "source_path": "runtimes/uv/originals/LICENSE-MIT",
+      "path": "licenses/LICENSE-MIT",
+      "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-build-frontend/src/pipreqs/LICENSE",
+      "path": "licenses/crates/uv-build-frontend/src/pipreqs/LICENSE",
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-extract/src/vendor/LICENSE",
+      "path": "licenses/crates/uv-extract/src/vendor/LICENSE",
+      "sha256": "b1cf7d681f2b87b1f8b34bb672407d408f4c53a22c7145e7b126dc13816b0231"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-netrc/LICENSE",
+      "path": "licenses/crates/uv-netrc/LICENSE",
+      "sha256": "cd34bce7d85e332b01956deffe29ee74bfb2c02eccf0ee67ff48aaaafb507df1"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-pep440/License-Apache",
+      "path": "licenses/crates/uv-pep440/License-Apache",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-pep440/License-BSD",
+      "path": "licenses/crates/uv-pep440/License-BSD",
+      "sha256": "349881bddbe385d3febd5ab50e36ea781aefee73bda4b0610918fe73fda29322"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-pep508/License-Apache",
+      "path": "licenses/crates/uv-pep508/License-Apache",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-pep508/License-BSD",
+      "path": "licenses/crates/uv-pep508/License-BSD",
+      "sha256": "349881bddbe385d3febd5ab50e36ea781aefee73bda4b0610918fe73fda29322"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-python-interpreter/python/packaging/LICENSE.APACHE",
+      "path": "licenses/crates/uv-python-interpreter/python/packaging/LICENSE.APACHE",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    {
+      "source_path": "runtimes/uv/originals/crates/uv-python-interpreter/python/packaging/LICENSE.BSD",
+      "path": "licenses/crates/uv-python-interpreter/python/packaging/LICENSE.BSD",
+      "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+    }
+  ],
+  "executable": "uv.exe",
+  "native_requirements": [
+    "advapi32.dll",
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "bcrypt.dll",
+    "bcryptprimitives.dll",
+    "cfgmgr32.dll",
+    "crypt32.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "ole32.dll",
+    "oleaut32.dll",
+    "shell32.dll",
+    "user32.dll",
+    "userenv.dll",
+    "ws2_32.dll"
+  ],
+  "licenses": [
+    "licenses/LICENSE-APACHE",
+    "licenses/LICENSE-MIT",
+    "licenses/crates/uv-build-frontend/src/pipreqs/LICENSE",
+    "licenses/crates/uv-extract/src/vendor/LICENSE",
+    "licenses/crates/uv-netrc/LICENSE",
+    "licenses/crates/uv-pep440/License-Apache",
+    "licenses/crates/uv-pep440/License-BSD",
+    "licenses/crates/uv-pep508/License-Apache",
+    "licenses/crates/uv-pep508/License-BSD",
+    "licenses/crates/uv-python-interpreter/python/packaging/LICENSE.APACHE",
+    "licenses/crates/uv-python-interpreter/python/packaging/LICENSE.BSD"
+  ]
+}

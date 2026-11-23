@@ -404,8 +404,9 @@ type HubSessionStore struct {
 	// tests on Windows accumulated parked sweepLoop goroutines whose
 	// teardown latency tripped the 4-minute go-test timeout (see
 	// work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
-	sweepDone chan struct{}
-	closeOnce sync.Once
+	sweepDone     chan struct{}
+	stopSweepOnce sync.Once
+	closeOnce     sync.Once
 }
 
 // NewHubSessionStore returns a store with the supplied bounds. Zero
@@ -453,13 +454,39 @@ func NewHubSessionStore(opts SessionStoreOpts) *HubSessionStore {
 // (work-items/bugs/2026-05-12-internal-api-suite-hangs-on-windows.md).
 func (s *HubSessionStore) Close() {
 	s.closeOnce.Do(func() {
-		if s.sweepStop != nil {
-			s.sweepStop()
-		}
+		s.stopSweep()
 		if s.sweepDone != nil {
 			<-s.sweepDone
 		}
 	})
+}
+
+func (s *HubSessionStore) stopSweep() {
+	s.stopSweepOnce.Do(func() {
+		if s.sweepStop != nil {
+			s.sweepStop()
+		}
+	})
+}
+
+// CloseContext advances the original sweeper shutdown within the caller's
+// retirement deadline. An unfinished wait can later observe the same sweeper.
+func (s *HubSessionStore) CloseContext(ctx context.Context) error {
+	s.stopSweep()
+	if s.sweepDone == nil {
+		return nil
+	}
+	select {
+	case <-s.sweepDone:
+		return nil
+	default:
+	}
+	select {
+	case <-s.sweepDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Create allocates a new hubSession for the given client. Returns

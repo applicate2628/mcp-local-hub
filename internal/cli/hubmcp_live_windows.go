@@ -5,9 +5,11 @@ package cli
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"time"
 
+	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 
 	"mcp-local-hub/internal/api"
@@ -128,6 +130,114 @@ func queryInstalledAggregateStatus(parent context.Context, input windowsCanonica
 
 func aggregateStatusUnavailable(ctx context.Context) error {
 	return errors.Join(ctx.Err(), api.ErrSupervisorIPCUnavailable)
+}
+
+// Hold the actual pipe caller and selected installed Product from open
+// through admission. The durable owner, pipe identity and held handle must
+// still agree each time the Supervisor receives a decision.
+func observeRouteAdmissionNativePipePeer(conn net.Conn) (api.SupervisorProcessIdentityV1, routeAdmissionNativeEvidence, error) {
+	return api.ObserveSupervisorIPCClientIdentityObserved(conn)
+}
+
+func qualifiesObservedRouteOperator(peer, owner api.SupervisorProcessIdentityV1, evidence routeAdmissionNativeEvidence) bool {
+	observed, ok := evidence.(*process.WindowsIdentityObservation)
+	if !ok || peer.UserSID == "" || peer.SessionID == 0 || peer.SessionID != owner.SessionID ||
+		!strings.EqualFold(peer.UserSID, owner.UserSID) || observed.IsLocalSystemPrincipal() {
+		return false
+	}
+	service, _, _, err := windows.LookupSID("", "NT SERVICE\\"+supervisorCstDaemonServiceName)
+	if err != nil {
+		return errors.Is(err, windows.ERROR_NONE_MAPPED)
+	}
+	return !observed.MatchesPrincipalSID(service)
+}
+
+func holdRouteAdmissionOperator(ctx context.Context, conn net.Conn, s *routeAggregateSupervisor, phases *routeAdmissionNativeObservations) (*routeAdmissionOperator, error) {
+	operator := &routeAdmissionOperator{}
+	if s == nil || s.entryInput.bindingErr != nil || s.entryInput.binding.BuildID() == "" {
+		return operator, api.ErrSupervisorControlPeerIdentity
+	}
+	peer, peerEvidence, err := observeRouteAdmissionPeer(conn, phases, "operator-open-pipe")
+	if err != nil || !qualifiesObservedRouteOperator(peer, s.launch.Peer, peerEvidence) || peer.PID <= 0 || peer.PID == s.launch.Owner.PID {
+		return operator, errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+	}
+	_, launcher, err := resolveUpgradeSelfPaths()
+	if err != nil {
+		return operator, err
+	}
+	installed, originalSet, err := binaryadmission.AcquireInstalledWindowsCanonicalEntryDispatchSetV2Observed(ctx, launcher, s.entryInput.binding)
+	phases.add("operator-installed-product", originalSet, err)
+	if installed != nil {
+		operator.productClose = installed.Close
+	}
+	if err != nil {
+		return operator, err
+	}
+	set, err := installed.DispatchSnapshot()
+	if err != nil || !samePath(set.Product.Path, s.launch.Peer.ImagePath) {
+		return operator, errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+	}
+	caller := api.SupervisorLockOwner{PID: peer.PID, StartedAt: peer.CreationTime}
+	held, originalOpen, err := process.HoldPIDForObservationObserved(caller.PID)
+	phases.add("operator-held-open", originalOpen, err)
+	if held != nil {
+		operator.callerClose = held.Close
+	}
+	if err != nil {
+		return operator, err
+	}
+	borrower, ok := held.(process.HeldOriginalProcessHandleBorrower)
+	if !ok {
+		return operator, api.ErrSupervisorControlPeerIdentity
+	}
+	operator.check = func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		owner, originalLock, err := api.ObserveOccupiedSupervisorLockOwner(ctx, s.launch.StateDir)
+		phases.add("operator-occupied-owner", originalLock, err)
+		if err != nil || owner != s.launch.Owner {
+			return errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+		}
+		current, _, err := observeRouteAdmissionPeer(conn, phases, "operator-revalidate-pipe")
+		if err != nil || api.ValidateSupervisorStatusServerIdentityV1(caller, current, s.launch.Peer.UserSID, s.launch.Peer.SessionID, set.Product.Path) != nil {
+			return errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+		}
+		if err := held.VerifyIdentity(process.PIDIdentityProof{
+			PID: caller.PID, ExecutablePath: set.Product.Path, StartedAt: caller.StartedAt, StartTolerance: time.Nanosecond,
+		}); err != nil {
+			return err
+		}
+		sid, originalSID, err := process.ObserveHeldPIDOwnerSID(held)
+		phases.add("operator-held-sid", originalSID, err)
+		if err != nil || !strings.EqualFold(sid, current.UserSID) {
+			return errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+		}
+		wait, err := held.Wait()
+		if err != nil || wait.Result != uint32(windows.WAIT_TIMEOUT) {
+			return errors.Join(api.ErrSupervisorControlPeerIdentity, err)
+		}
+		return borrower.BorrowOriginalProcessHandle(func(handle uintptr) error {
+			originalImage, err := installed.VerifyCurrentProductProcessPathObserved(ctx, handle)
+			phases.add("operator-product-image", originalImage, err)
+			return err
+		})
+	}
+	return operator, operator.check(ctx)
+}
+
+func routeAdmissionPlatformClosedRead(err error) bool { return errors.Is(err, winio.ErrFileClosed) }
+
+// The aggregate wrapper has already returned from its first legacy Close on
+// this accepted pipe. The lower observer receives that original attempt.
+func observeRouteAdmissionNativePipeClose(ctx context.Context, conn net.Conn) (routeAdmissionNativePipeReceipt, error) {
+	original, ok := conn.(interface {
+		CloseObserved(context.Context) (*winio.CloseReceipt, error)
+	})
+	if !ok {
+		return nil, errRouteAdmissionNativePipeCloseUnavailable
+	}
+	return original.CloseObserved(ctx)
 }
 
 func isLiveAggregateSupervisorCommand(commandLine, productPath string) bool {

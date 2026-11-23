@@ -175,6 +175,7 @@ type canonicalEntryMembersV2 struct {
 	acquisitionError           error
 	probeCloseError            error
 	recoveryInput              *WindowsCanonicalEntryMembersRecoveryInputV2
+	recoveryAbsences           map[string]WindowsCanonicalEntryMemberCleanupRecordV2
 	recoverySide               WindowsCanonicalRecoverySideV1
 	captures                   []WindowsCanonicalEntryMemberEvidenceV2
 	moves, cleanup             []WindowsCanonicalEntryMoveResultV1

@@ -143,6 +143,14 @@ type canonicalEntryRecoveryReadScopeSourceV2 interface {
 	WithCanonicalRecoveryReadScope(context.Context, func(func(context.Context) error) error) error
 }
 
+// Cleanup may receive its exact current projection inside the same protected
+// read window. Standalone input receiving remains the fallback for old sources.
+type canonicalEntryRecoveryCleanupReadSourceV2 interface {
+	WithCanonicalRecoveryCleanupReadScope(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error
+}
+
+type canonicalEntryRecoveryReadAcceptanceV2 func(func(context.Context) error, *WindowsCanonicalEntryMembersRecoveryInputV2) error
+
 type canonicalEntryRecoveryReadScopeV2 struct {
 	bank   *canonicalEntryMembersV2
 	source WindowsCanonicalRecoverySourceV2
@@ -172,6 +180,18 @@ func (c *canonicalEntryMembersV2) withRecoveryReadScope(ctx context.Context, bod
 	if !ok {
 		return body(nil)
 	}
+	return c.receiveRecoveryReadScope(ctx, func(accept canonicalEntryRecoveryReadAcceptanceV2) error {
+		return provider.WithCanonicalRecoveryReadScope(ctx, func(check func(context.Context) error) error {
+			return accept(check, nil)
+		})
+	}, func(scope *canonicalEntryRecoveryReadScopeV2, _ *WindowsCanonicalEntryMembersRecoveryInputV2) error {
+		return body(scope)
+	})
+}
+
+func (c *canonicalEntryMembersV2) receiveRecoveryReadScope(ctx context.Context,
+	invoke func(canonicalEntryRecoveryReadAcceptanceV2) error,
+	body func(*canonicalEntryRecoveryReadScopeV2, *WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
 	source, root, directories := c.source, c.root, c.directories
 	var mu sync.Mutex
 	var bodyDone sync.WaitGroup
@@ -182,7 +202,7 @@ func (c *canonicalEntryMembersV2) withRecoveryReadScope(ctx context.Context, bod
 		mu.Unlock()
 	}()
 	var bodyErr error
-	providerErr := provider.WithCanonicalRecoveryReadScope(ctx, func(check func(context.Context) error) error {
+	providerErr := invoke(func(check func(context.Context) error, input *WindowsCanonicalEntryMembersRecoveryInputV2) error {
 		mu.Lock()
 		if !active {
 			mu.Unlock()
@@ -223,7 +243,7 @@ func (c *canonicalEntryMembersV2) withRecoveryReadScope(ctx context.Context, bod
 			bodyErr = errors.Join(bodyErr, err)
 			return bodyErr
 		}
-		err := body(scope)
+		err := body(scope, input)
 		mu.Lock()
 		bodyErr = errors.Join(bodyErr, err)
 		mu.Unlock()
@@ -1976,10 +1996,10 @@ func canonicalRecoveryDirectoryAbsentV2(record WindowsCanonicalEntryMemberDirect
 // A missing descendant is observed only from the nearest still-original
 // parent. Every removed ancestor must have its own authorized disposal row.
 func (c *canonicalEntryMembersV2) recoveryParent(ctx context.Context, l *canonicalEntryRecoveryLineageV2, relative string) (*canonicalEntryNativeFile, string, bool, error) {
-	return c.recoveryParentRead(ctx, l, relative, nil)
+	return c.recoveryParentRead(ctx, l, relative, nil, false)
 }
 
-func (c *canonicalEntryMembersV2) recoveryParentRead(ctx context.Context, l *canonicalEntryRecoveryLineageV2, relative string, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryNativeFile, string, bool, error) {
+func (c *canonicalEntryMembersV2) recoveryParentRead(ctx context.Context, l *canonicalEntryRecoveryLineageV2, relative string, scope *canonicalEntryRecoveryReadScopeV2, requireHeld bool) (*canonicalEntryNativeFile, string, bool, error) {
 	if scope != nil {
 		if err := scope.validateBank(ctx, c); err != nil {
 			return nil, "", false, err
@@ -2024,6 +2044,11 @@ func (c *canonicalEntryMembersV2) recoveryParentRead(ctx context.Context, l *can
 		if err != nil {
 			return nil, "", false, fmt.Errorf("open original recovery parent %q: %w", name, err)
 		}
+		if requireHeld {
+			closeErr := windows.CloseHandle(h)
+			c.probeCloseError = errors.Join(c.probeCloseError, closeErr)
+			return nil, "", false, errors.Join(fmt.Errorf("cleanup slot ancestor %q is present without issued custody", name), closeErr)
+		}
 		next, err := c.root.retain(h, filepath.Join(current.path, part), true)
 		if err != nil {
 			return nil, "", false, err
@@ -2042,7 +2067,7 @@ func (c *canonicalEntryMembersV2) probeRecoveryLocation(ctx context.Context, l *
 }
 
 func (c *canonicalEntryMembersV2) probeRecoveryLocationRead(ctx context.Context, l *canonicalEntryRecoveryLineageV2, relative string, scope *canonicalEntryRecoveryReadScopeV2) (evidence *WindowsCanonicalEntryMemberEvidenceV2, retErr error) {
-	parent, leaf, parentAbsent, err := c.recoveryParentRead(ctx, l, relative, scope)
+	parent, leaf, parentAbsent, err := c.recoveryParentRead(ctx, l, relative, scope, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2328,7 +2353,7 @@ func (c *canonicalEntryMembersV2) probeRecoveryDirectory(ctx context.Context, l 
 }
 
 func (c *canonicalEntryMembersV2) probeRecoveryDirectoryRead(ctx context.Context, l *canonicalEntryRecoveryLineageV2, record WindowsCanonicalEntryMemberDirectoryRecordV2, scope *canonicalEntryRecoveryReadScopeV2) (present bool, retErr error) {
-	parent, leaf, parentAbsent, err := c.recoveryParentRead(ctx, l, record.Original.RelativePath, scope)
+	parent, leaf, parentAbsent, err := c.recoveryParentRead(ctx, l, record.Original.RelativePath, scope, false)
 	if err != nil {
 		return false, err
 	}
@@ -2541,6 +2566,209 @@ func (r *WindowsCanonicalEntryRecoverySetV2) Members(ctx context.Context) ([]Win
 	return out, nil
 }
 
+// withCleanupRead binds observation to the same open bank and the current
+// cleanup phase. A completed inverse may advance its original bank to cleanup.
+func (r *WindowsCanonicalEntryRecoverySetV2) withCleanupRead(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, read func(*canonicalEntryMembersV2, WindowsCanonicalEntryMembersRecoveryInputV2, *canonicalEntryRecoveryReadScopeV2) error) error {
+	if r == nil || r.original == nil || ctx == nil {
+		return errors.New("current recovery owner/context required")
+	}
+	c := &r.original.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.ready || c.closed || c.root == nil || c.root.closed || c.parent == nil || c.parent.file == nil || c.source == nil || c.recoveryInput == nil {
+		return errors.Join(c.acquisitionError, errors.New("current recovery view is not ready/open"))
+	}
+	if side != c.recoverySide || !canonicalRecoveryCleanupPurposeV2(purpose) || side == WindowsCanonicalRecoveryPriorV1 && purpose != WindowsCanonicalRecoveryCommittedForwardV2 {
+		return errors.New("current cleanup side/purpose does not select this recovery owner")
+	}
+	acquired := c.recoveryInput
+	if acquired.Purpose != purpose && !(acquired.Purpose == WindowsCanonicalRecoveryRollbackV2 && purpose == WindowsCanonicalRecoveryRollbackCleanupV2) {
+		return errors.New("current cleanup purpose does not follow the acquired recovery purpose")
+	}
+	receive := func(fresh WindowsCanonicalEntryMembersRecoveryInputV2, scope *canonicalEntryRecoveryReadScopeV2) error {
+		if fresh.Purpose != purpose || !canonicalRecoveryOriginalBindingStableV2(*acquired, fresh) {
+			return errors.New("current cleanup journal no longer binds the acquired recovery owner")
+		}
+		err := read(c, fresh, scope)
+		if scope == nil {
+			err = errors.Join(err, c.source.ValidateOriginalRecovery(ctx))
+		}
+		return errors.Join(err, ctx.Err())
+	}
+	if provider, ok := c.source.(canonicalEntryRecoveryCleanupReadSourceV2); ok {
+		return c.receiveRecoveryReadScope(ctx, func(accept canonicalEntryRecoveryReadAcceptanceV2) error {
+			return provider.WithCanonicalRecoveryCleanupReadScope(ctx, side, purpose, func(check func(context.Context) error, input WindowsCanonicalEntryMembersRecoveryInputV2) error {
+				return accept(check, &input)
+			})
+		}, func(scope *canonicalEntryRecoveryReadScopeV2, input *WindowsCanonicalEntryMembersRecoveryInputV2) error {
+			if err := scope.validateBank(ctx, c); err != nil {
+				return err
+			}
+			return receive(cloneCanonicalEntryMembersRecoveryInputV2(*input), scope)
+		})
+	}
+	return c.withRecoveryReadScope(ctx, func(scope *canonicalEntryRecoveryReadScopeV2) error {
+		var check func(context.Context) error
+		if scope != nil {
+			check = func(ctx context.Context) error { return scope.validateBank(ctx, c) }
+		}
+		fresh, err := receiveCanonicalEntryMembersRecoveryInputReadV2(ctx, c.source, side, check)
+		if err != nil {
+			return err
+		}
+		return receive(fresh, scope)
+	})
+}
+
+func (c *canonicalEntryMembersV2) verifyCleanupAbsence(input WindowsCanonicalEntryMembersRecoveryInputV2, expected WindowsCanonicalEntryMemberEvidenceV2, row WindowsCanonicalEntryMemberCleanupRecordV2) error {
+	side := "unused-successor"
+	if c.recoverySide == WindowsCanonicalRecoveryPriorV1 {
+		side = "prior"
+	}
+	if row.TransactionID != input.TransactionID || row.Purpose != input.Purpose || row.Side != side ||
+		row.Member != expected.Member || row.ExpectedSHA256 != expected.File.SHA256 ||
+		(row.State != "discard_intent" && row.State != "absence_received") ||
+		!publisherSourcePathValid(row.SourceRelative) || canonicalEntryIsFinalRelative(row.SourceRelative) {
+		return errors.New("exact current cleanup absence record not received")
+	}
+	for _, final := range c.root.memberFinalPaths {
+		if strings.EqualFold(final, row.SourceRelative) {
+			return errors.New("cleanup absence record selects a protected final")
+		}
+	}
+	if m := c.members[row.Member]; m != nil {
+		r := m.cleanup
+		if r != nil && r.Applied && r.Readback && r.Member == row.Member && r.SourceRelative == row.SourceRelative &&
+			m.evidence.File.Path == row.SourceRelative && m.evidence.NativeIdentity == expected.NativeIdentity &&
+			m.evidence.File.SHA256 == expected.File.SHA256 && m.evidence.Size == expected.Size && m.evidence.Attributes == expected.Attributes {
+			return nil
+		}
+		return errors.New("original member has no matching applied cleanup readback")
+	}
+	if acquired, ok := c.recoveryAbsences[row.Member]; ok && (acquired.State == "discard_intent" || row.State == "absence_received") {
+		acquired.State = row.State
+		if acquired == row {
+			return nil
+		}
+	}
+	return errors.New("original member has no matching acquired cleanup absence")
+}
+
+// ObserveCleanupMember re-receives only the exact issued cleanup original.
+// A successful absence requires that original's acquired witness or applied
+// native readback and its current durable cleanup row.
+func (r *WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, expected WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	var observation WindowsCanonicalEntryMemberEvidenceV2
+	err := r.withCleanupRead(ctx, side, purpose, func(c *canonicalEntryMembersV2, input WindowsCanonicalEntryMembersRecoveryInputV2, scope *canonicalEntryRecoveryReadScopeV2) error {
+		i := sort.Search(len(input.Members), func(i int) bool { return input.Members[i].Member >= expected.Member })
+		if i == len(input.Members) || input.Members[i].Member != expected.Member {
+			return errors.New("unissued cleanup member key")
+		}
+		issued := input.Members[i].Staged
+		cleanupSide := "unused-successor"
+		if side == WindowsCanonicalRecoveryPriorV1 {
+			issued = input.Members[i].Prior
+			cleanupSide = "prior"
+		}
+		if issued == nil || *issued != expected {
+			return errors.New("cleanup member does not match its issued original")
+		}
+		m := c.members[expected.Member]
+		if m == nil || m.cleanup != nil {
+			var selected *WindowsCanonicalEntryMemberCleanupRecordV2
+			for i := range input.Cleanup {
+				row := &input.Cleanup[i]
+				if row.Member == expected.Member && row.Side == cleanupSide {
+					if selected != nil {
+						return errors.New("cleanup member has more than one current absence record")
+					}
+					selected = row
+				}
+			}
+			if selected == nil {
+				return errors.New("missing current original has no durable cleanup intent")
+			}
+			return c.verifyCleanupAbsence(input, expected, *selected)
+		}
+		actual, err := c.receiveMemberRead(ctx, expected.Member, m.original, expected.File.SHA256, scope)
+		if err != nil {
+			return err
+		}
+		if actual != m.evidence || actual.NativeIdentity != expected.NativeIdentity || actual.Size != expected.Size || actual.Attributes != expected.Attributes {
+			return errors.New("original cleanup member identity, parent, extent, attributes or bytes changed")
+		}
+		observation = actual
+		return nil
+	})
+	if err != nil {
+		return WindowsCanonicalEntryMemberEvidenceV2{}, false, err
+	}
+	return observation, observation.Member != "", nil
+}
+
+// VerifyCleanupAbsences checks the exact disposed slots through the held
+// namespace before the caller closes this bank and settles the journal.
+func (r *WindowsCanonicalEntryRecoverySetV2) VerifyCleanupAbsences(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2) error {
+	return r.withCleanupRead(ctx, side, purpose, func(c *canonicalEntryMembersV2, input WindowsCanonicalEntryMembersRecoveryInputV2, scope *canonicalEntryRecoveryReadScopeV2) error {
+		if !reflect.DeepEqual(c.recoveryInput.Directories, input.Directories) {
+			return errors.New("cleanup slot directory lineage changed after acquisition")
+		}
+		lineage, err := buildCanonicalRecoveryLineageV2(input)
+		if err != nil {
+			return err
+		}
+		for _, original := range lineage.originals {
+			if original.prior != (side == WindowsCanonicalRecoveryPriorV1) {
+				continue
+			}
+			row := original.cleanup
+			if row == nil {
+				m := c.members[original.member]
+				if !original.prior && purpose == WindowsCanonicalRecoveryCommittedForwardV2 &&
+					m != nil && m.cleanup == nil && m.evidence.File.Path == original.member && m.evidence.NativeIdentity == original.original.NativeIdentity {
+					continue
+				}
+				return fmt.Errorf("cleanup member %q lacks a durable absence", original.member)
+			}
+			if row.State != "absence_received" {
+				return fmt.Errorf("cleanup slot %q lacks durable absence readback", row.SourceRelative)
+			}
+			if err := c.verifyCleanupAbsence(input, original.original, *row); err != nil {
+				return fmt.Errorf("cleanup slot %q: %w", row.SourceRelative, err)
+			}
+			if err := c.verifyCleanupSlotAbsent(ctx, lineage, row.SourceRelative, scope); err != nil {
+				return fmt.Errorf("cleanup slot %q: %w", row.SourceRelative, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (c *canonicalEntryMembersV2) verifyCleanupSlotAbsent(ctx context.Context, lineage *canonicalEntryRecoveryLineageV2, relative string, scope *canonicalEntryRecoveryReadScopeV2) error {
+	parent, leaf, parentAbsent, err := c.recoveryParentRead(ctx, lineage, relative, scope, true)
+	if err != nil || parentAbsent {
+		return err
+	}
+	expected, err := canonicalRecoveryParentIdentityV2(lineage, relative)
+	if err != nil {
+		return err
+	}
+	actual, err := canonicalPayloadDirectoryIdentity(parent)
+	if err != nil || actual != expected {
+		return errors.Join(err, errors.New("cleanup slot parent differs from original recorded identity"))
+	}
+	h, err := canonicalEntryOpenNative(windows.Handle(parent.file.Fd()), leaf, false, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+	if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	closeErr := windows.CloseHandle(h)
+	c.probeCloseError = errors.Join(c.probeCloseError, closeErr)
+	return errors.Join(errors.New("cleanup slot is occupied after absence readback"), closeErr)
+}
+
 func (c *canonicalEntryMembersV2) partialRecoveryCaptures() []WindowsCanonicalEntryMemberEvidenceV2 {
 	byMember := map[string]WindowsCanonicalEntryMemberEvidenceV2{}
 	for _, capture := range c.captures {
@@ -2681,6 +2909,7 @@ func AcquireWindowsCanonicalEntryForRecoveryV2(ctx context.Context, source Windo
 		c.acquisitionError = retErr
 		if retErr != nil {
 			c.ready = false
+			c.recoveryAbsences = nil
 		}
 	}()
 	if ctx == nil || source == nil {
@@ -2774,6 +3003,16 @@ func (r *WindowsCanonicalEntryRecoverySetV2) acquireRecoveryRead(ctx context.Con
 	}
 	if err = c.verifyRead(ctx, scope); err != nil {
 		return err
+	}
+	// This index survives only when the enclosing synchronous read scope also
+	// closes successfully and the acquired owner becomes ready.
+	for _, match := range finalMatches {
+		if match.original.prior == (r.side == WindowsCanonicalRecoveryPriorV1) && match.current == nil && match.original.cleanup != nil {
+			if c.recoveryAbsences == nil {
+				c.recoveryAbsences = make(map[string]WindowsCanonicalEntryMemberCleanupRecordV2)
+			}
+			c.recoveryAbsences[match.original.member] = *match.original.cleanup
+		}
 	}
 	return nil
 }

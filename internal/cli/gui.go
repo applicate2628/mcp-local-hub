@@ -279,6 +279,7 @@ func runRestartV3ChildStartup(ctx context.Context, cfg restartV3ChildStartupConf
 	}
 
 	server := gui.NewServer(gui.Config{
+		SupervisedAggregate:             productUsesSupervisedAggregate(),
 		SerenaPreparation:               newSerenaPreparationAssembly(),
 		ProjectServiceLaunchPreparation: newProjectServiceLaunchPreparationReader(),
 		Port:                            cfg.Port,
@@ -951,6 +952,7 @@ func composeGuiServerRestartV3(
 	var s *gui.Server
 	if startup == nil {
 		s = gui.NewServer(gui.Config{
+			SupervisedAggregate:             productUsesSupervisedAggregate(),
 			SerenaPreparation:               newSerenaPreparationAssembly(),
 			ProjectServiceLaunchPreparation: newProjectServiceLaunchPreparationReader(),
 			Port:                            port,

@@ -608,6 +608,19 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 
 	// Capture the current resolver snapshot for the new session.
 	snap := LoadResolverSnapshot()
+	var participants []canonicalDaemonRef
+	if snap != nil {
+		bindings := snap.Bindings[scopeKey]
+		for _, ref := range bindings {
+			if snap.allowsOrdinaryEndpoint(ref) {
+				participants = append(participants, ref)
+			}
+		}
+		if len(bindings) != 0 && len(participants) == 0 {
+			writeJSONRPCErrorStatus(w, reqID, http.StatusServiceUnavailable, -32000, errHubDaemonAdmission.Error(), nil)
+			return
+		}
+	}
 
 	sess, err := h.sessions.Create(scopeKey, negotiatedVersion, snap)
 	if err != nil {
@@ -629,11 +642,7 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	// behavior); for a /g/ request it is "g:<group>", so the SAME lookup
 	// selects the group's member-server daemons (the tool-visibility
 	// narrowing — groups/namespaces Phase 4b).
-	if snap != nil {
-		participants := make([]canonicalDaemonRef, len(snap.Bindings[scopeKey]))
-		copy(participants, snap.Bindings[scopeKey])
-		sess.IntendedParticipants = participants
-	}
+	sess.IntendedParticipants = participants
 
 	respBody, aerr := AggregateInitialize(r.Context(), sess, reqID)
 	if aerr != nil {
@@ -802,8 +811,7 @@ func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, 
 	if protoVer != "" {
 		req.Header.Set("MCP-Protocol-Version", protoVer)
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := doHubDaemonRequest(req, hubDaemonRequest{ref: ref, captured: true}, 5*time.Second)
 	if err != nil {
 		return err
 	}

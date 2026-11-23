@@ -170,6 +170,18 @@ func (o *HubMcpLogObservation) ValidateResourceClosure(ctx context.Context, poli
 	return errors.Join(o.resourceErr, o.effects.policyValidate(ctx, policy))
 }
 
+// ResourcesFinalized is the original optional audit's physical receipt.
+// Successful append or still-live authorization is not required.
+func (o *HubMcpLogObservation) ResourcesFinalized() bool {
+	return o != nil && o.original == o && o.finalized && o.resourceErr == nil &&
+		(!o.view.ParentReceived || o.parent != nil && o.parent.finalized && o.parent.closureErr == nil) &&
+		(!o.view.MutexAcquired || o.mutexReleased) &&
+		(!o.view.FileAcquired || o.fileCloseAttempted && o.fileCloseReturned) &&
+		(!o.acquisition.Attempted || o.lockReturned && o.releaseReturned &&
+			o.release.Generation == o.acquisition.Generation && o.release.AllocatedFilesClosed &&
+			!o.release.Pending && o.release.Error == nil && (!o.acquisition.Held || o.release.Complete))
+}
+
 func LogHubMcpEventObserved(ctx context.Context, policy *StateReadPolicyObservation, level, event string, fields map[string]any) (*HubMcpLogObservation, error) {
 	return logHubMcpEventObservedWithEffects(ctx, policy, level, event, fields, hubMcpLogProductionEffects())
 }

@@ -65,6 +65,9 @@ type ConfigWriteRequest struct {
 	Path                  string
 	Contents              []byte
 	ExpectedSnapshot      *ConfigWriteSnapshot
+	// BeforeObservedReplace is a narrow admission callback at the observed
+	// Windows writer's final checked native rename boundary.
+	BeforeObservedReplace func(context.Context) error
 }
 
 type ConfigWriteFreshCreationEvidence interface {

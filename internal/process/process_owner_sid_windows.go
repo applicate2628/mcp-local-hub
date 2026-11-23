@@ -129,6 +129,43 @@ func processHandleOwnerUserSID(h windows.Handle) (sid *windows.SID, retErr error
 	return sid, nil
 }
 
+// observeProcessHandleOwnerSID borrows the same retained process. It owns
+// the token and observed SID allocation, including partial native returns.
+func observeProcessHandleOwnerSID(h windows.Handle) (string, *OriginalOwnerSIDObservation, error) {
+	return observeProcessHandleOwnerSIDWith(h, windows.OpenProcessToken, func(token windows.Token) error { return token.Close() })
+}
+
+func observeProcessHandleOwnerSIDWith(h windows.Handle, open func(windows.Handle, uint32, *windows.Token) error,
+	close func(windows.Token) error) (value string, observation *OriginalOwnerSIDObservation, retErr error) {
+	observation = &OriginalOwnerSIDObservation{}
+	var token windows.Token
+	defer func() {
+		if token != 0 {
+			observation.TokenClose = closeWindowsIdentityHandle(uintptr(token), func() error { return close(token) })
+			retErr = errors.Join(retErr, observation.TokenClose.Err)
+		}
+		observation.err, observation.finalized = retErr, true
+	}()
+	if err := open(h, windows.TOKEN_QUERY, &token); err != nil {
+		return "", observation, err
+	}
+	if token == 0 {
+		return "", observation, errors.New("original owner token unavailable")
+	}
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return "", observation, err
+	}
+	if user == nil || user.User.Sid == nil {
+		return "", observation, errors.New("original owner SID unavailable")
+	}
+	value, observation.Formatting, err = FormatSIDObserved(user.User.Sid)
+	if err == nil {
+		err = observation.Formatting.ValidateInput(user.User.Sid, value)
+	}
+	return value, observation, err
+}
+
 // openProcessErrIsProcessGone reports whether an OpenProcess failure means the
 // target PID no longer refers to a live process (it exited / was never there),
 // as opposed to a permission/transient failure on a still-live process.

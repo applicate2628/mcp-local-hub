@@ -39,7 +39,14 @@ func supervisorNamespaceLeaf(role SupervisorStateLeafRole) (string, error) {
 		return "", errors.New("SUPERVISOR_NAMESPACE_ROLE_INVALID")
 	}
 }
-func AcquireSupervisorStateNamespaceObserved(ctx context.Context, request SupervisorStateNamespaceRequest) (observation *SupervisorStateNamespaceObservation, retErr error) {
+
+var errSupervisorNamespaceResolutionMismatch = errors.New("SUPERVISOR_NAMESPACE_RESOLUTION_MISMATCH")
+
+func AcquireSupervisorStateNamespaceObserved(ctx context.Context, request SupervisorStateNamespaceRequest) (*SupervisorStateNamespaceObservation, error) {
+	return acquireSupervisorStateNamespaceObserved(ctx, request, nil)
+}
+
+func acquireSupervisorStateNamespaceObserved(ctx context.Context, request SupervisorStateNamespaceRequest, expected *StateDirResolutionObservation) (observation *SupervisorStateNamespaceObservation, retErr error) {
 	if ctx == nil || !preparedSerenaID(request.SourceOperationID) || !preparedSerenaDigest(request.RequestSHA256) || !preparedSerenaID(request.SourceEpoch) || len(request.LeafRoles) == 0 {
 		return nil, errors.New("SUPERVISOR_NAMESPACE_REQUEST_INVALID")
 	}
@@ -66,6 +73,21 @@ func AcquireSupervisorStateNamespaceObserved(ctx context.Context, request Superv
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
 		return nil, errors.New("SUPERVISOR_NAMESPACE_ROOT_INVALID")
 	}
+	if expected != nil {
+		// Qualify the current resolution against the preparation's original
+		// path and principal before the policy read or any platform effects.
+		if err := expected.Validate(ctx, root); err != nil {
+			return nil, errors.Join(errSupervisorNamespaceResolutionMismatch, err)
+		}
+		deadline, _ := ctx.Deadline()
+		if expected.deadlineDefined && deadline.After(expected.deadline) {
+			return nil, errors.New("SUPERVISOR_NAMESPACE_RESOLUTION_DEADLINE_RENEWED")
+		}
+		if resolution.principal != expected.principal || resolution.view.SourceSHA256 != expected.view.SourceSHA256 {
+			return nil, errSupervisorNamespaceResolutionMismatch
+		}
+		resolution = expected
+	}
 	request.LeafRoles = append([]SupervisorStateLeafRole(nil), request.LeafRoles...)
 	observation = &SupervisorStateNamespaceObservation{request: request, root: root, resolution: resolution}
 	defer func() {
@@ -74,14 +96,14 @@ func AcquireSupervisorStateNamespaceObserved(ctx context.Context, request Superv
 			retErr = errors.Join(retErr, closeErr)
 		}
 	}()
-	observation.policy, err = ResolveStateReadPolicyObserved(ctx)
+	observation.policy, err = resolveStateReadPolicyObserved(ctx, expected)
 	if err != nil {
 		return observation, err
 	}
 	if err = observation.policy.Validate(ctx, StateReadPolicyEnvironmentIdentity()); err != nil {
 		return observation, err
 	}
-	observation.platform, retErr = acquireSupervisorStateNamespacePlatform(ctx, observation)
+	observation.platform, retErr = acquireSupervisorStateNamespacePlatform(ctx, observation, expected)
 	return observation, retErr
 }
 func (o *SupervisorStateNamespaceObservation) NamespaceSHA256() string {

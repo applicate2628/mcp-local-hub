@@ -100,7 +100,7 @@ func TestGroupsRound6_LiveEmptiedSuccessOnlyGroupReturnsEmptyKnownTools(t *testi
 		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
 		Groups:   map[string]bool{scope: true},
 	}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{},
 		Groups:   map[string]bool{scope: true},
@@ -142,7 +142,7 @@ func TestGroupsRound6_LiveEmptiedFailureOnlyGroupReturnsEmptyKnownTools(t *testi
 		Bindings: map[string][]canonicalDaemonRef{scope: {ref}},
 		Groups:   map[string]bool{scope: true},
 	}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{},
 		Groups:   map[string]bool{scope: true},
@@ -294,7 +294,7 @@ func TestGroupsRound2_HiddenCollidingToolNeverLeaksViaPartialFailures(t *testing
 		},
 		Groups: map[string]bool{scope: true},
 	}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess := &hubSession{
 		ClientSessionID:      "client-sid-hide-collide",

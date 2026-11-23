@@ -43,6 +43,8 @@ type windowsContainedChild struct {
 	inheritedCloseAttempts            int
 	inheritedHandles                  []originalInheritedHandle
 	attributeOwner                    *procThreadAttributeListObserved
+	nativeCreateEntered               bool
+	nativeCreatePartial               windows.ProcessInformation
 }
 
 func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
@@ -53,7 +55,72 @@ func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
 	return &windowsContainedChild{cmd: cmd, job: job}, nil
 }
 
+func observedContainedStreamDependencies() containedStreamDependencies {
+	return containedStreamDependencies{
+		newChild: func(cmd *exec.Cmd) (containedChild, error) {
+			job, err := NewJobObserved(JobOptions{KillOnClose: true})
+			// Keep even a partial owner returned with Job setup failure.
+			return &windowsContainedChild{cmd: cmd, job: job}, err
+		},
+		pipe:     openContainedPipeObserved,
+		openNull: openContainedNullObserved,
+	}
+}
+
+// The failed wrapper path retains a closable raw owner. It can never be
+// submitted as inherited stdio because acquisition also returns an error.
+type containedUnwrappedHandle struct {
+	handle             windows.Handle
+	ownershipUncertain bool
+}
+
+func (h containedUnwrappedHandle) Fd() uintptr { return uintptr(h.handle) }
+func (h containedUnwrappedHandle) Close() error {
+	if h.ownershipUncertain {
+		return errors.New("failed native stdio call returned an unqualified handle")
+	}
+	return windows.CloseHandle(h.handle)
+}
+func (h containedUnwrappedHandle) Read([]byte) (int, error)  { return 0, os.ErrInvalid }
+func (h containedUnwrappedHandle) Write([]byte) (int, error) { return 0, os.ErrInvalid }
+
+type containedNativeStdio interface {
+	containedReadFile
+	containedWriteFile
+}
+
+func wrapContainedStdio(h windows.Handle, name string, nativeErr error) (containedNativeStdio, error) {
+	if h == 0 || h == windows.InvalidHandle {
+		return nil, errors.New("native stdio handle unavailable")
+	}
+	if nativeErr != nil {
+		return containedUnwrappedHandle{handle: h, ownershipUncertain: true}, errors.New("native stdio ownership unavailable")
+	}
+	f := os.NewFile(uintptr(h), name)
+	if f == nil {
+		return containedUnwrappedHandle{handle: h}, errors.New("native stdio wrapper unavailable")
+	}
+	return f, nil
+}
+
+func openContainedPipeObserved() (containedReadFile, containedWriteFile, error) {
+	var r, w windows.Handle
+	meta := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
+	nativeErr := windows.CreatePipe(&r, &w, meta, 0)
+	reader, readErr := wrapContainedStdio(r, "|0", nativeErr)
+	writer, writeErr := wrapContainedStdio(w, "|1", nativeErr)
+	return reader, writer, errors.Join(nativeErr, readErr, writeErr)
+}
+
+func openContainedNullObserved() (containedInputFile, error) {
+	return openContainedNullMode(true)
+}
+
 func openContainedNull() (containedInputFile, error) {
+	return openContainedNullMode(false)
+}
+
+func openContainedNullMode(observed bool) (containedInputFile, error) {
 	name, err := windows.UTF16PtrFromString("NUL")
 	if err != nil {
 		return nil, err
@@ -71,6 +138,10 @@ func openContainedNull() (containedInputFile, error) {
 		windows.FILE_ATTRIBUTE_NORMAL,
 		0,
 	)
+	if observed {
+		file, wrapErr := wrapContainedStdio(handle, os.DevNull, err)
+		return file, errors.Join(err, wrapErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open null stdin: %w", err)
 	}
@@ -83,6 +154,16 @@ func (c *windowsContainedChild) start(
 	stdout containedWriteFile,
 	stderr containedWriteFile,
 ) (retErr error) {
+	return c.startContained(nil, cmd, stdin, stdout, stderr)
+}
+
+func (c *windowsContainedChild) startObserved(ctx context.Context, cmd *exec.Cmd, stdin containedInputFile,
+	stdout, stderr containedWriteFile) error {
+	return c.startContained(ctx, cmd, stdin, stdout, stderr)
+}
+
+func (c *windowsContainedChild) startContained(ctx context.Context, cmd *exec.Cmd, stdin containedInputFile,
+	stdout, stderr containedWriteFile) (retErr error) {
 	if c == nil || c.job == nil || c.job.Handle() == 0 || cmd == nil || c.cmd != cmd {
 		return fixedContainedError(ContainedStageContainment, errors.New("invalid Windows containment"))
 	}
@@ -168,6 +249,12 @@ func (c *windowsContainedChild) start(
 
 	var pi windows.ProcessInformation
 	creationFlags := containedWindowsCreationFlags()
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fixedContainedError(ContainedStageStart, err)
+		}
+		c.nativeCreateEntered = true
+	}
 	if err := windows.CreateProcess(
 		nil,
 		commandLine,
@@ -180,6 +267,9 @@ func (c *windowsContainedChild) start(
 		&si.StartupInfo,
 		&pi,
 	); err != nil {
+		if ctx != nil {
+			c.nativeCreatePartial = pi
+		}
 		return fixedContainedError(ContainedStageStart, err)
 	}
 	c.process = pi.Process
@@ -214,6 +304,13 @@ func (c *windowsContainedChild) start(
 	}
 	c.original = containedJobOriginal{job: c.job, handle: pi.Process, pid: pi.ProcessId, atCreate: true}
 	return nil
+}
+
+func (c *windowsContainedChild) containedSetupObservation() *ContainedSetupObservation {
+	close := c.job.foregroundCloseObservation()
+	return &ContainedSetupObservation{owner: c, job: c.job, attributes: c.attributeClose, nativeCreateEntered: c.nativeCreateEntered,
+		nativeCreatePartial: c.nativeCreatePartial.Process != 0 || c.nativeCreatePartial.Thread != 0,
+		jobClose:            ContainedStreamSlot{Acquired: close.Acquired, CloseAttempted: close.CloseAttempted, Closed: close.Closed, CloseError: close.Error}}
 }
 
 func containedWindowsCreationFlags() uint32 {

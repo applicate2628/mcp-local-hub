@@ -290,7 +290,7 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // has no *testing.T: we snapshot the prior values and reinstate them before
 // os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
-	dispatch := classifyCLITestHelperDispatch(os.Args, os.Getenv)
+	dispatch := classifyCLITestHelperDispatch(os.Args, os.LookupEnv)
 	if dispatch.invalid {
 		_, _ = os.Stderr.WriteString("internal/cli: invalid test helper dispatch\n")
 		os.Exit(3)
@@ -513,14 +513,25 @@ func TestMain(m *testing.M) {
 const cliProductionArgvHelperEnv = "MCPHUB_TEST_PRODUCTION_ARGV_HELPER"
 
 type cliTestHelperDispatch struct {
-	invalid           bool
-	overlayDump       bool
-	forensicsStateDir string
-	productionArgv    bool
-	runSelectedTest   bool
+	invalid               bool
+	overlayDump           bool
+	forensicsStateDir     string
+	productionArgv        bool
+	runSelectedTest       bool
+	concurrentSecretsRoot string
 }
 
-func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cliTestHelperDispatch {
+func classifyCLITestHelperDispatch(args []string, lookupEnv func(string) (string, bool)) cliTestHelperDispatch {
+	getenv := func(key string) string {
+		value, _ := lookupEnv(key)
+		return value
+	}
+	for _, key := range obsoleteConcurrentSecretsHelperEnv {
+		if _, present := lookupEnv(key); present {
+			return cliTestHelperDispatch{invalid: true}
+		}
+	}
+	concurrentRoot, concurrentActive := lookupEnv(concurrentSecretsRootEnv)
 	selector := ""
 	for _, arg := range args[1:] {
 		if strings.HasPrefix(arg, "-test.run=") {
@@ -543,6 +554,8 @@ func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cl
 		{overlayActive, getenv(overlayMarkerHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(overlayMarkerHelperDumpPathEnv)) && (selector == "^TestSpawnEnvDumpHelper$" || productionArgvMarker == "1" && validCLIOverlayProductionArgv(args))},
 		{getenv(forensicsSinkChildEnv) != "", filepath.IsAbs(getenv(forensicsSinkChildEnv)) && ((selector == "TestSupervisorStderrSink_CapturesRuntimePanic" && getenv(forensicsSinkChildModeEnv) == "") || (selector == "TestSupervisorStderrSink_CapturesMainGoroutinePanic" && getenv(forensicsSinkChildModeEnv) == "main"))},
 		{productionArgvMarker != "" && !overlayActive, productionArgvMarker == "1" && len(args) == 2 && args[1] == "supervise"},
+		{concurrentActive, len(args) == 2 && args[1] == concurrentSecretsSelector &&
+			validConcurrentSecretsFixtureRoot(concurrentRoot) && getenv(api.RequireSingleUserHomeEnv) == "1"},
 	}
 	active := 0
 	selected := -1
@@ -563,6 +576,9 @@ func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cl
 			return cliTestHelperDispatch{invalid: true}
 		}
 		return cliTestHelperDispatch{}
+	}
+	if concurrentActive {
+		return cliTestHelperDispatch{runSelectedTest: true, concurrentSecretsRoot: concurrentRoot}
 	}
 	switch selected {
 	case 4:

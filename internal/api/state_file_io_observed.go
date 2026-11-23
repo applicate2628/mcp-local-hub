@@ -248,7 +248,7 @@ func (o *StateFilePublicationObservation) ResourcesClosed() bool {
 	}
 	// Private same-reader finalization covers cleanup even when its body failed;
 	// copied Snapshot complete flags are not consumed as authority.
-	return o.readback.finalized && o.readback.issuer != nil && o.readback.view.OwnedResourcesComplete && o.readback.view.BorrowedResourcesComplete
+	return o.readback.ResourcesFinalized()
 }
 
 func (o *StateFilePublicationObservation) receiveRecordNamespaceClose(namespace *SerenaRecordNamespaceObservation, proof *StateFileFreshNamespaceCloseObservation) error {
@@ -302,4 +302,23 @@ func (o *StateFilePublicationObservation) SHA256() string {
 		return ""
 	}
 	return o.sha256
+}
+
+// RenameEntered is factual native progress. It grants no publication or
+// cleanup credit, including when the eventual native outcome is unknown.
+func (o *StateFilePublicationObservation) RenameEntered() bool {
+	return o != nil && o.capture != nil && o.capture.rename.entered
+}
+
+// SettledWithoutRename receives only a completed no-replacement outcome.
+// The caller also receives capture and lease close evidence independently.
+func (o *StateFilePublicationObservation) SettledWithoutRename() bool {
+	if o == nil || o.capture == nil || o.RenameEntered() {
+		return false
+	}
+	if len(o.capture.slots) == 0 {
+		// The writer returned before taking any native resource.
+		return o.capture.cleanup == nil && !o.capture.write.entered && !o.capture.flush.entered && !o.readbackAttempted
+	}
+	return o.ResourcesClosed()
 }

@@ -64,6 +64,10 @@ type StateFileReadSnapshotV1 struct {
 }
 
 type stateFileReadIssuer struct{ marker byte }
+type stateFileReadRetention uint8
+
+const stateFileReadRetainRaw stateFileReadRetention = 0
+
 type stateFileReadResource struct {
 	view          StateFileReadResourceSnapshotV1
 	close         func() error
@@ -74,15 +78,20 @@ type stateFileReadResource struct {
 // Only the actual anchored-reader finalizer issues this capability. Its
 // snapshot is data and has no constructor that can reconstruct authority.
 type StateFileReadObservation struct {
-	issuer           *stateFileReadIssuer
-	view             StateFileReadSnapshotV1
-	path             string
-	maxBytes         int64
-	deadline         time.Time
-	deadlineDefined  bool
-	finalized        bool
-	resources        []*stateFileReadResource
-	absenceQualified bool
+	issuer                   *stateFileReadIssuer
+	view                     StateFileReadSnapshotV1
+	path                     string
+	maxBytes                 int64
+	deadline                 time.Time
+	deadlineDefined          bool
+	finalized                bool
+	resources                []*stateFileReadResource
+	absenceQualified         bool
+	self                     *StateFileReadObservation
+	finalizerResourcesClosed bool
+	policy                   *StateReadPolicyObservation
+	borrowed                 []*StateFileReadObservation
+	audits                   []*HubMcpLogObservation
 }
 
 type stateFileReadBuilder struct {
@@ -96,6 +105,7 @@ type stateFileReadBuilder struct {
 	borrowed      []*StateFileReadObservation
 	borrowedErr   error
 	policy        *StateReadPolicyObservation
+	audits        []*HubMcpLogObservation
 	absenceResult error
 	absenceNative error
 }
@@ -221,14 +231,20 @@ func (b *stateFileReadBuilder) finish(raw []byte, primary error) ([]byte, *State
 		b.view.Resources = append(b.view.Resources, resource.view)
 	}
 	borrowedErr := b.borrowedErr
+	resourcesClosed := b.view.OwnedResourcesComplete && b.borrowedErr == nil
 	if b.policy != nil {
 		borrowedErr = errors.Join(borrowedErr, b.policy.Validate(b.ctx, b.policy.view.EnvIdentitySHA256))
+		resourcesClosed = resourcesClosed && b.policy.ResourcesFinalized()
 	}
 	b.view.BorrowedResourcesComplete = borrowedErr == nil
 	for _, borrowed := range b.borrowed {
+		resourcesClosed = resourcesClosed && borrowed.ResourcesFinalized()
 		if borrowed == nil || !borrowed.finalized || !borrowed.view.OwnedResourcesComplete || !borrowed.view.BorrowedResourcesComplete {
 			b.view.BorrowedResourcesComplete = false
 		}
+	}
+	for _, audit := range b.audits {
+		resourcesClosed = resourcesClosed && audit.ResourcesFinalized()
 	}
 	contextErr := b.checkContext()
 	err := errors.Join(primary, errors.Join(cleanup...), borrowedErr, contextErr)
@@ -241,6 +257,11 @@ func (b *stateFileReadBuilder) finish(raw []byte, primary error) ([]byte, *State
 	}
 	absenceQualified := b.absenceResult != nil && b.absenceNative != nil && primary == b.absenceResult && b.view.ReadAttempted && b.view.PolicyQualified && b.view.OwnedResourcesComplete && b.view.BorrowedResourcesComplete && borrowedErr == nil && contextErr == nil && errors.Join(cleanup...) == nil
 	observation := &StateFileReadObservation{issuer: b.issuer, view: copyStateFileReadSnapshot(b.view), path: b.path, maxBytes: b.maxBytes, finalized: true, resources: append([]*stateFileReadResource(nil), b.resources...), absenceQualified: absenceQualified}
+	observation.self = observation
+	observation.finalizerResourcesClosed = resourcesClosed
+	observation.policy = b.policy
+	observation.borrowed = append([]*StateFileReadObservation(nil), b.borrowed...)
+	observation.audits = append([]*HubMcpLogObservation(nil), b.audits...)
 	if b.ctx != nil {
 		observation.deadline, observation.deadlineDefined = b.ctx.Deadline()
 	}
@@ -289,6 +310,12 @@ func (o *StateFileReadObservation) Snapshot() StateFileReadSnapshotV1 {
 		return StateFileReadSnapshotV1{}
 	}
 	return copyStateFileReadSnapshot(o.view)
+}
+
+// ResourcesFinalized follows the original finalizer independently of content
+// qualification and request cancellation.
+func (o *StateFileReadObservation) ResourcesFinalized() bool {
+	return o != nil && o.self == o && o.issuer != nil && o.finalized && o.finalizerResourcesClosed
 }
 
 func (o *StateFileReadObservation) Validate(ctx context.Context, path string, maxBytes int64, raw []byte, expectedSHA256 string) error {
@@ -343,7 +370,20 @@ func ReadStateFileInodeAnchoredObserved(ctx context.Context, path string, maxByt
 	return readStateFileInodeAnchoredObservedWithLeafCapture(ctx, path, maxBytes, nil)
 }
 
+func ReadStateFileRouteAdmissionObserved(ctx context.Context, path string, maxBytes int64) ([]byte, *StateFileReadObservation, error) {
+	return readStateFileInodeAnchoredObservedWithAudit(ctx, path, maxBytes, nil, nil, stateFileReadRetainRaw, true)
+}
+
 func readStateFileInodeAnchoredObservedWithLeafCapture(ctx context.Context, path string, maxBytes int64, capture func(uintptr, []byte) error) ([]byte, *StateFileReadObservation, error) {
+	return readStateFileInodeAnchoredObservedInNamespace(ctx, path, maxBytes, capture, nil)
+}
+
+func readStateFileInodeAnchoredObservedInNamespace(ctx context.Context, path string, maxBytes int64, capture func(uintptr, []byte) error, namespace *SupervisorStateNamespaceObservation) ([]byte, *StateFileReadObservation, error) {
+	return readStateFileInodeAnchoredObservedWithAudit(ctx, path, maxBytes, capture, namespace, stateFileReadRetainRaw, false)
+}
+
+func readStateFileInodeAnchoredObservedWithAudit(ctx context.Context, path string, maxBytes int64, capture func(uintptr, []byte) error,
+	namespace *SupervisorStateNamespaceObservation, retention stateFileReadRetention, routeAudit bool) ([]byte, *StateFileReadObservation, error) {
 	b := newStateFileReadBuilder(ctx, path, maxBytes)
 	b.leafCapture = capture
 	if err := b.checkContext(); err != nil {
@@ -352,10 +392,22 @@ func readStateFileInodeAnchoredObservedWithLeafCapture(ctx context.Context, path
 	if b.view.PathIdentitySHA256 == "" {
 		return b.finish(nil, errors.New(stateFileReadPathCapacityError))
 	}
+	if retention != stateFileReadRetainRaw {
+		return b.finish(nil, errors.New("observed state read retention invalid"))
+	}
 	if err := ValidateStateFileReadCapacity(maxBytes); err != nil {
 		return b.finish(nil, err)
 	}
-	policy, policyErr := ResolveStateReadPolicyObserved(ctx)
+	var resolution *StateDirResolutionObservation
+	var auditDomain string
+	if namespace != nil {
+		auditDomain = namespace.NamespaceSHA256()
+		if err := namespace.ValidateNamespace(ctx, b.path, SupervisorIntentLeaf, auditDomain); err != nil {
+			return b.finish(nil, err)
+		}
+		resolution = namespace.resolution
+	}
+	policy, policyErr := resolveStateReadPolicyObserved(ctx, resolution)
 	b.policy = policy
 	if policy == nil {
 		return b.finish(nil, errors.Join(policyErr, errors.New("original observed state policy unavailable")))
@@ -372,7 +424,36 @@ func readStateFileInodeAnchoredObservedWithLeafCapture(ctx context.Context, path
 	b.view.PolicyQualified = true
 	b.view.ReadAttempted = true
 	effectiveStrict := policy.view.EffectiveStrict
-	raw, err := readStateFileInodeAnchoredWithObservation(b.path, func() bool { return effectiveStrict }, maxBytes, true, false, LogHubMcpEvent, stateReadDefaultParentFallbacksObserved, ctx, b)
+	auditSink := LogHubMcpEvent
+	observeParentFallbacks := stateReadDefaultParentFallbacksObserved
+	if routeAudit {
+		// Retain the original logger receipt for each warning already selected
+		// by the ordinary fallback reporter.
+		auditSink = func(level, event string, fields map[string]any) error {
+			observed, err := LogHubMcpEventObserved(ctx, policy, level, event, fields)
+			b.audits = append(b.audits, observed)
+			return err
+		}
+		observeParentFallbacks = func(path string, observations []stateReadParentFallbackObservation) {
+			_ = defaultStateReadParentFallbackReporter.observeParentFallbacksWithSink(ctx, "", auditSink, path, observations)
+		}
+	} else if namespace != nil {
+		// This read has a qualified namespace and may hold its intent lease.
+		// Use the same policy and deadline for both warning paths.
+		auditSink = func(level, event string, fields map[string]any) error {
+			audit, appendErr := LogHubMcpEventObserved(ctx, policy, level, event, fields)
+			closureErr := audit.ValidateResourceClosure(ctx, policy, level, event)
+			if closureErr != nil {
+				b.borrowedErr = errors.Join(b.borrowedErr, appendErr, closureErr)
+			}
+			// Delivery remains best effort when the logger's resources settled.
+			return errors.Join(appendErr, closureErr)
+		}
+		observeParentFallbacks = func(path string, observations []stateReadParentFallbackObservation) {
+			_ = defaultStateReadParentFallbackReporter.observeParentFallbacksWithSink(ctx, auditDomain, auditSink, path, observations)
+		}
+	}
+	raw, err := readStateFileInodeAnchoredWithObservation(b.path, func() bool { return effectiveStrict }, maxBytes, true, false, auditSink, observeParentFallbacks, ctx, b)
 	return b.finish(raw, err)
 }
 

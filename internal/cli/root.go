@@ -127,7 +127,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 		newRestartCmd(),
 		newStopCmd(),
 		newLogsCmd(),
-		newSuperviseCmd(),
+		newSuperviseCmdWithEntryInput(input),
 	)
 	addGrouped(root, groupSecrets,
 		newSecretsCmd(),
@@ -164,7 +164,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsCons
 	root.AddCommand(
 		cbuild.NewCommand(),
 		newDaemonCmd(),
-		newRouteCmd(),
+		newRouteCmdWithWindowsCanonicalEntryInput(input),
 		newRelayCmd(),
 		newWeeklyRefreshCmd(),
 		newIntentCollapseCmd(),

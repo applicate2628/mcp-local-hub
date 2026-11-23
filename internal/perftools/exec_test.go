@@ -1,21 +1,32 @@
 package perftools
 
 import (
-	"os/exec"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
 
 func TestRunCaptureLimited_EnforcesStdoutLimit(t *testing.T) {
-	bash, err := exec.LookPath("bash")
+	exe, err := os.Executable()
 	if err != nil {
-		t.Skip("bash not on PATH; test needs a portable stdout-producing helper")
+		t.Fatal(err)
 	}
-	_, err = runCaptureLimited(t.Context(), bash, "", []string{"-lc", "printf '1234567890'"}, 5, 1024)
-	if err == nil {
-		t.Fatal("expected output limit error, got nil")
+	t.Setenv(iwyuHelperModeEnv, "helper-iwyu-stderr")
+	args := []string{"-test.run=^TestIWYUHelperProcess$"}
+	env := []string{iwyuHelperModeEnv + "=helper-iwyu-stdout"}
+	want := strings.Repeat("A", 3*1024*1024)
+
+	got, err := runCaptureLimitedWithEnv(t.Context(), exe, "", args, env, len(want)+1024, 1024)
+	if err != nil {
+		t.Fatalf("run stdout fixture with uncapped payload: %v", err)
 	}
-	if !strings.Contains(err.Error(), errOutputLimitExceeded.Error()) {
-		t.Fatalf("expected output limit error, got: %v", err)
+	if got.ExitCode != 0 || len(got.Stderr) != 0 || string(got.Stdout) != want {
+		t.Fatalf("wrong stdout fixture: exit=%d, stdout=%d bytes, stderr=%d bytes", got.ExitCode, len(got.Stdout), len(got.Stderr))
+	}
+
+	got, err = runCaptureLimitedWithEnv(t.Context(), exe, "", args, env, 5, 1024)
+	if !errors.Is(err, errOutputLimitExceeded) || got != nil {
+		t.Fatalf("expected stdout limit error without capture, got result=%t, error=%v", got != nil, err)
 	}
 }

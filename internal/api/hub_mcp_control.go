@@ -57,6 +57,9 @@ import (
 // 1st's outcome (204 if window opened, 429 otherwise).
 const internalReloadCooldown = 5 * time.Second
 
+// Canonical control credential: a 64-hex token and one newline.
+const hubRouteReloadLimit = 65
+
 // InternalReloadHandler implements POST /internal/reload-tokens. Wired
 // onto the hub-mcp listener mux in internal/gui/hub_listener.go.
 type InternalReloadHandler struct {
@@ -71,6 +74,7 @@ type InternalReloadHandler struct {
 	// atomic.Pointer so Shutdown can clear it without racing the
 	// request handler's reads.
 	controlTok atomic.Pointer[string]
+	original   *hubRouteReloadOwner
 }
 
 // NewInternalReloadHandler generates a fresh control token via
@@ -337,6 +341,77 @@ func (h *InternalReloadHandler) Shutdown(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+type hubRouteReloadOwner struct {
+	stateDir string
+	parent   ConfigParentDirectoryIdentityV1
+	lock     ConfigParentDirectoryIdentityV1
+	leaf     hubRouteLeaf
+	token    string
+	payload  []byte
+}
+
+func (c *hubRouteStateCore) newReloadOwner() (*hubRouteReloadOwner, error) {
+	lock, err := c.native.lockIdentity()
+	if err != nil {
+		return nil, err
+	}
+	token, err := generateHexToken()
+	if err != nil {
+		return nil, err
+	}
+	return &hubRouteReloadOwner{stateDir: c.stateDir, parent: c.parent, lock: lock, token: token, payload: []byte(token + "\n")}, nil
+}
+
+func (o *hubRouteReloadOwner) checkNamespace(c *hubRouteStateCore) error {
+	lock, err := c.native.lockIdentity()
+	if err != nil {
+		return err
+	}
+	if c.parent != o.parent || lock != o.lock {
+		return errHubRouteStateChanged
+	}
+	return nil
+}
+
+// VerifyOriginalReload verifies the active handler's exact original lock and
+// token object within the current H scope, without a vacancy check or write.
+func (h *InternalReloadHandler) VerifyOriginalReload(s *HubRouteState) error {
+	if h == nil || h.original == nil || h.controlTok.Load() != &h.original.token {
+		return errHubRouteStateUnavailable
+	}
+	return s.use(func(c *hubRouteStateCore) error {
+		if err := h.original.checkNamespace(c); err != nil {
+			return err
+		}
+		current, err := c.native.read(hubMcpControlTokenFileLeaf, hubRouteReloadLimit)
+		if err != nil {
+			return err
+		}
+		if !current.matches(h.original.leaf) {
+			return errHubRouteStateChanged
+		}
+		return nil
+	})
+}
+
+// ShutdownOriginal withdraws authorization and removes only the exact native
+// reload object published by this fixed bind.
+func (h *InternalReloadHandler) ShutdownOriginal(ctx context.Context) error {
+	h.controlTok.Store(nil)
+	owner := h.original
+	if owner == nil {
+		return errHubRouteStateUnavailable
+	}
+	return WithHubRouteState(ctx, owner.stateDir, owner.parent, func(s *HubRouteState) error {
+		return s.use(func(c *hubRouteStateCore) error {
+			if err := owner.checkNamespace(c); err != nil {
+				return err
+			}
+			return c.native.removeOwnedReload(owner.leaf)
+		})
+	})
 }
 
 // writeHubMcpControlTokenLockedContext writes the control token under

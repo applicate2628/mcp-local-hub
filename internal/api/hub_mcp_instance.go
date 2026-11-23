@@ -161,15 +161,20 @@ func LoadHubEndpoint() (HubEndpoint, error) {
 // empty InstanceID is impossible because we only persist after
 // generating one.
 func loadHubEndpointLocked() (HubEndpoint, error) {
+	ep, _, err := readHubEndpointRecordLocked()
+	return ep, err
+}
+
+func readHubEndpointRecordLocked() (HubEndpoint, []byte, error) {
 	raw, err := readHubMcpStateFile(hubMcpEndpointFileLeaf)
 	if err != nil {
-		return HubEndpoint{}, err
+		return HubEndpoint{}, nil, err
 	}
 	var ep HubEndpoint
 	if uerr := json.Unmarshal(raw, &ep); uerr != nil {
-		return HubEndpoint{}, fmt.Errorf("hub-mcp.endpoint.json corrupt: %w", uerr)
+		return HubEndpoint{}, nil, fmt.Errorf("hub-mcp.endpoint.json corrupt: %w", uerr)
 	}
-	return ep, nil
+	return ep, raw, nil
 }
 
 // RotateHubInstanceID generates a fresh instance_id and rewrites the
@@ -252,10 +257,18 @@ func rotateHubInstanceIDLocked(ctx context.Context) (HubEndpoint, error) {
 // config application and this final acknowledgement, preventing a concurrent
 // rotation from being cleared by an older reconcile transaction.
 //
+// A protected selection must come from the original still-live H scope. A
+// legacy call cannot clear an endpoint carrying a Route witness.
 // A missing endpoint is a no-op: gate-OFF reconcile is valid on a first-run
 // system where no hub endpoint has ever been created.
-func ClearHubReconcilePendingLocked() error {
-	ep, err := loadHubEndpointLocked()
+func ClearHubReconcilePendingLocked(selected ...HubRouteEndpointSelection) error {
+	if len(selected) != 0 {
+		if len(selected) != 1 {
+			return errHubRouteQualifiedAck
+		}
+		return acknowledgeProtectedHubEndpoint(selected[0])
+	}
+	ep, raw, err := readHubEndpointRecordLocked()
 	if err != nil {
 		if isMissingEndpointErr(err) {
 			return nil
@@ -264,6 +277,13 @@ func ClearHubReconcilePendingLocked() error {
 	}
 	if !ep.ReconcilePending {
 		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	if _, witnessed := fields[hubRouteWitnessKey]; witnessed {
+		return errHubRouteQualifiedAck
 	}
 	ep.ReconcilePending = false
 	payload, err := json.Marshal(ep)

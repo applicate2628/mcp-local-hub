@@ -20,7 +20,7 @@ type ConfigWriteCaptureTransaction struct {
 	ctx                           context.Context
 	path                          string
 	snapshot                      *ConfigWriteSnapshot
-	closers                       []func() error
+	resources                     []*configWriteCaptureResource
 	active                        int
 	closeAttempted                bool
 	closeRequested                bool
@@ -28,15 +28,72 @@ type ConfigWriteCaptureTransaction struct {
 	primary, validationCloseError error
 }
 type ConfigWriteParentCloseObservation struct {
-	owner    *ConfigWriteCaptureTransaction
-	snapshot *ConfigWriteSnapshot
-	closed   bool
-	err      error
+	owner     *ConfigWriteCaptureTransaction
+	snapshot  *ConfigWriteSnapshot
+	closed    bool
+	err       error
+	resources []configWriteCaptureResourceClose
+}
+
+type configWriteCaptureResourceClose struct {
+	native    uintptr
+	attempted bool
+	returned  bool
+	err       error
+}
+
+// The capture owns this slot from native acquisition, even if qualification
+// or wrapping fails. Only a successful os.File wrap transfers the close call.
+type configWriteCaptureResource struct {
+	native  uintptr
+	closeFn func() error
+	moved   bool
+	once    sync.Once
+	result  configWriteCaptureResourceClose
+}
+
+func (r *configWriteCaptureResource) transferFile(f *os.File) error {
+	if r == nil || r.moved || f == nil {
+		return errors.New("CONFIG_WRITE_CAPTURE_FILE_TRANSFER_INVALID")
+	}
+	r.moved = true
+	r.closeFn = f.Close
+	return nil
+}
+
+func (r *configWriteCaptureResource) close() configWriteCaptureResourceClose {
+	r.once.Do(func() {
+		r.result.native = r.native
+		r.result.attempted = true
+		r.result.err = r.closeFn()
+		r.result.returned = true
+	})
+	return r.result
+}
+
+func (t *ConfigWriteCaptureTransaction) register(resource *configWriteCaptureResource) {
+	t.mu.Lock()
+	t.resources = append(t.resources, resource)
+	t.mu.Unlock()
 }
 
 func (o *ConfigWriteParentCloseObservation) Validate(snapshot *ConfigWriteSnapshot) error {
 	if o == nil || o.owner == nil || snapshot == nil || o.snapshot != snapshot || !o.closed || o.err != nil {
 		return errors.New("CONFIG_WRITE_PARENT_CLOSE_UNSETTLED")
+	}
+	return nil
+}
+
+// ValidateTransaction proves actual capture closure even when a failed
+// capture never issued a usable snapshot. It conveys no write authority.
+func (o *ConfigWriteParentCloseObservation) ValidateTransaction(t *ConfigWriteCaptureTransaction) error {
+	if o == nil || t == nil || o.owner != t || !o.closed || o.err != nil {
+		return errors.New("CONFIG_WRITE_CAPTURE_CLOSE_UNSETTLED")
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closeObservation != o {
+		return errors.New("CONFIG_WRITE_CAPTURE_CLOSE_UNSETTLED")
 	}
 	return nil
 }
@@ -72,14 +129,17 @@ func (t *ConfigWriteCaptureTransaction) CloseObserved() (*ConfigWriteParentClose
 	}
 	t.closeAttempted = true
 	err := t.validationCloseError
-	closers := append([]func() error(nil), t.closers...)
+	resources := append([]*configWriteCaptureResource(nil), t.resources...)
 	t.mu.Unlock()
-	for i := len(closers) - 1; i >= 0; i-- {
-		err = errors.Join(err, closers[i]())
+	results := make([]configWriteCaptureResourceClose, 0, len(resources))
+	for i := len(resources) - 1; i >= 0; i-- {
+		result := resources[i].close()
+		results = append(results, result)
+		err = errors.Join(err, result.err)
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.closeObservation = &ConfigWriteParentCloseObservation{owner: t, snapshot: t.snapshot, closed: err == nil, err: err}
+	t.closeObservation = &ConfigWriteParentCloseObservation{owner: t, snapshot: t.snapshot, closed: err == nil, err: err, resources: results}
 	return t.closeObservation, err
 }
 func (t *ConfigWriteCaptureTransaction) validateAncestors(expected string) (retErr error) {
@@ -103,10 +163,14 @@ func (t *ConfigWriteCaptureTransaction) validateAncestors(expected string) (retE
 	if err := t.ctx.Err(); err != nil {
 		return err
 	}
-	ids, _, closers, openErr := captureConfigWriteAncestors(t.ctx, t.path)
+	var opened []*configWriteCaptureResource
+	ids, _, openErr := captureConfigWriteAncestors(t.ctx, t.path, func(resource *configWriteCaptureResource) {
+		t.register(resource)
+		opened = append(opened, resource)
+	})
 	var closeErr error
-	for i := len(closers) - 1; i >= 0; i-- {
-		closeErr = errors.Join(closeErr, closers[i]())
+	for i := len(opened) - 1; i >= 0; i-- {
+		closeErr = errors.Join(closeErr, opened[i].close().err)
 	}
 	t.mu.Lock()
 	t.validationCloseError = errors.Join(t.validationCloseError, closeErr)
@@ -119,7 +183,7 @@ func (t *ConfigWriteCaptureTransaction) validateAncestors(expected string) (retE
 	}
 	return t.ctx.Err()
 }
-func captureConfigWriteAncestors(ctx context.Context, path string) (string, uintptr, []func() error, error) {
+func captureConfigWriteAncestors(ctx context.Context, path string, register func(*configWriteCaptureResource)) (string, uintptr, error) {
 	var components []string
 	for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
 		components = append(components, parent)
@@ -128,21 +192,19 @@ func captureConfigWriteAncestors(ctx context.Context, path string) (string, uint
 		}
 	}
 	var ids []string
-	var closers []func() error
 	var parent uintptr
 	for i := len(components) - 1; i >= 0; i-- {
 		if err := ctx.Err(); err != nil {
-			return "", 0, closers, err
+			return "", 0, err
 		}
-		id, h, closeHandle, err := openRemovalDirectoryIdentityObserved(components[i])
+		id, h, _, err := openRemovalDirectoryIdentityObserved(components[i], register)
 		if err != nil {
-			return "", 0, closers, err
+			return "", 0, err
 		}
 		ids = append(ids, id)
-		closers = append(closers, closeHandle)
 		parent = h
 	}
-	return strings.Join(ids, "/"), parent, closers, nil
+	return strings.Join(ids, "/"), parent, nil
 }
 func CaptureStateFileWriteSnapshotObserved(ctx context.Context, path string, maxBytes int64, expectedSHA256 string) (transaction *ConfigWriteCaptureTransaction, err error) {
 	decoded, decodeErr := hex.DecodeString(expectedSHA256)
@@ -160,18 +222,14 @@ func CaptureStateFileWriteSnapshotObserved(ctx context.Context, path string, max
 			err = errors.Join(err, closeErr)
 		}
 	}()
-	ids, parent, closers, err := captureConfigWriteAncestors(ctx, path)
-	transaction.closers = append(transaction.closers, closers...)
+	ids, parent, err := captureConfigWriteAncestors(ctx, path, transaction.register)
 	if err != nil {
 		return transaction, err
 	}
-	file, err := openRemovalSourceFileObserved(path)
+	file, err := openRemovalSourceFileObserved(path, transaction.register)
 	if err != nil {
 		return transaction, err
 	}
-	var once sync.Once
-	var fileCloseErr error
-	transaction.closers = append(transaction.closers, func() error { once.Do(func() { fileCloseErr = file.Close() }); return fileCloseErr })
 	before, err := file.Stat()
 	if err != nil {
 		return transaction, err

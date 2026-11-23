@@ -1,0 +1,1322 @@
+{
+  "schema_version": "3",
+  "generated_at": "2026-06-24T00:00:00Z",
+  "entries": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem MCP server",
+      "summary": "Read and write files in a sandboxed directory.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem@2026.1.14",
+        "${workspaceFolder}"
+      ],
+      "env": {},
+      "categories": [
+        "filesystem",
+        "io"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "git",
+      "name": "Git MCP server",
+      "summary": "Read git repo state (status, log, diff, blame).",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/git/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-git==2026.6.16",
+        "--repository",
+        "${workspaceFolder}"
+      ],
+      "env": {},
+      "categories": [
+        "git",
+        "vcs"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch MCP server",
+      "summary": "Fetch arbitrary HTTP URLs and return content.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/fetch/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--with",
+        "mcp==2.3.0",
+        "mcp-server-fetch@2026.11.18"
+      ],
+      "env": {},
+      "categories": [
+        "http",
+        "io"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite MCP server",
+      "summary": "Query a SQLite database (read-write).",
+      "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers-archived/main/src/sqlite/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-sqlite==2025.4.25",
+        "--db-path",
+        "${workspaceFolder}/db.sqlite"
+      ],
+      "env": {},
+      "categories": [
+        "database",
+        "sql"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright MCP server",
+      "summary": "Browser automation via Playwright (Chromium-headless by default).",
+      "homepage": "https://github.com/microsoft/playwright-mcp",
+      "readme_url": "https://raw.githubusercontent.com/microsoft/playwright-mcp/main/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.77"
+      ],
+      "env": {},
+      "categories": [
+        "browser",
+        "automation"
+      ],
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "context7",
+      "name": "Context7 (Upstash)",
+      "summary": "Library docs lookup via Context7 — remote HTTP server.",
+      "homepage": "https://github.com/upstash/context7",
+      "readme_url": "https://raw.githubusercontent.com/upstash/context7/main/README.md",
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "env": {},
+      "categories": [
+        "docs",
+        "remote"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "qt-docs",
+      "name": "Qt Documentation MCP server",
+      "summary": "Official Qt documentation lookup from The Qt Company — remote HTTP server. Useful for Qt/C++/QML development (Qt Widgets, Qt Quick, modules, classes).",
+      "homepage": "https://qt-docs-mcp.qt.io",
+      "readme_url": "https://qt-docs-mcp.qt.io",
+      "transport": "http",
+      "url": "https://qt-docs-mcp.qt.io/mcp",
+      "env": {},
+      "categories": [
+        "docs",
+        "remote",
+        "qt"
+      ],
+      "license": "Qt"
+    },
+    {
+      "id": "excalidraw",
+      "name": "Excalidraw MCP server",
+      "summary": "Create and manipulate Excalidraw diagrams programmatically — 26 tools for element CRUD, layout, scene awareness, export to PNG/SVG, and Mermaid conversion. Community implementation (yctimlin); the Excalidraw team's official excalidraw/excalidraw-mcp is not npm-published.",
+      "homepage": "https://github.com/yctimlin/mcp_excalidraw",
+      "readme_url": "https://raw.githubusercontent.com/yctimlin/mcp_excalidraw/main/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-excalidraw-server@1.0.7"
+      ],
+      "env": {},
+      "categories": [
+        "diagrams",
+        "drawing",
+        "visualization"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "everything",
+      "name": "Everything MCP server (smoke test)",
+      "summary": "Reference MCP server exercising every protocol feature — use for smoke testing.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/everything/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything@2026.1.26"
+      ],
+      "env": {},
+      "categories": [
+        "debug",
+        "reference"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "memory",
+      "name": "Memory MCP server",
+      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory@2026.1.26"
+      ],
+      "env": {
+        "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
+      },
+      "categories": [
+        "memory",
+        "knowledge-graph"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "time",
+      "name": "Time MCP server",
+      "summary": "Time and timezone utilities — current time, conversions, and timezone-aware calculations.",
+      "homepage": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "readme_url": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@mcpcentral/mcp-time@0.0.5"
+      ],
+      "env": {},
+      "categories": [
+        "time",
+        "utilities"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking MCP server",
+      "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/c799c8552b0f27b7a33a7b9233773da144dddcf5/src/sequentialthinking/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking@2.2.0"
+      ],
+      "env": {},
+      "categories": [
+        "reasoning",
+        "agent"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "serena",
+      "name": "Serena MCP server",
+      "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
+      "homepage": "https://github.com/oraios/serena",
+      "readme_url": "https://raw.githubusercontent.com/oraios/serena/7f7d6245bf96b60fdf4e752a779917372fd1ee6e/README.md",
+      "transport": "native-http",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@7f7d6245bf96b60fdf4e752a779917372fd1ee6e",
+        "serena",
+        "start-mcp-server",
+        "--transport",
+        "streamable-http"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "categories": [
+        "code-intelligence",
+        "lsp",
+        "refactoring"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "paper-search-mcp",
+      "name": "Paper Search MCP server",
+      "summary": "Academic paper search — query arXiv and other sources for research papers and abstracts. Requires Python + uv; set the Unpaywall email secret for full-text resolution.",
+      "homepage": "https://github.com/openags/paper-search-mcp",
+      "readme_url": "https://raw.githubusercontent.com/openags/paper-search-mcp/main/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "paper-search-mcp==0.1.4",
+        "--with",
+        "fastmcp==3.4.7",
+        "--with",
+        "mcp==1.29.0",
+        "python",
+        "-m",
+        "paper_search_mcp.server"
+      ],
+      "env": {
+        "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "secret:unpaywall_email"
+      },
+      "categories": [
+        "research",
+        "papers"
+      ],
+      "license": "MIT"
+    },
+    {
+      "id": "excel",
+      "name": "Excel MCP server (live COM, .NET) — Click-to-Run / Microsoft 365",
+      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. PROBE SCOPE: this row targets a Click-to-Run / Microsoft 365 Excel install (the C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE layout, where the `root\\` segment is the Click-to-Run signature). MSI / volume-license installs lay EXCEL.EXE down WITHOUT the `root\\` segment (…\\Microsoft Office\\Office16\\EXCEL.EXE), so the host-detect probe does NOT cover them in this batch — filepath.Glob has no `**` and the install_probe uses AND-semantics across entries, so it cannot OR the optional `root\\` across two patterns. A file_globs[] OR-group probe model covering Click-to-Run + MSI + macOS is the tracked D-3 follow-up. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Click-to-Run Excel desktop only.",
+      "homepage": "https://github.com/sbroenne/mcp-server-excel",
+      "readme_url": "https://raw.githubusercontent.com/sbroenne/mcp-server-excel/v1.8.70/README.md",
+      "transport": "stdio",
+      "command": "mcp-excel",
+      "args": [],
+      "env": {},
+      "categories": [
+        "engineering",
+        "office",
+        "spreadsheet",
+        "com",
+        "excel"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "mcp-excel"
+        ],
+        "file_globs": [
+          "C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/sbroenne/mcp-server-excel",
+        "pinned_ref": "v1.8.70",
+        "install_cmd": "download mcp-excel.exe from the v1.8.70 release ZIP (https://github.com/sbroenne/mcp-server-excel/releases/tag/v1.8.70), extract to a tools dir, and add that dir to PATH",
+        "run_cmd": "mcp-excel",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "ableton",
+      "name": "Ableton Live MCP server (loopback-safe)",
+      "summary": "Control Ableton Live over a TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. This is the loopback-safe fork applicate2628/ableton-mcp-loopback (a security fork of ahujasid/ableton-mcp, Python, MIT), pinned to an immutable commit and run via uvx from that git source. PROVENANCE: the fork is a focused security+hardening fork — vs upstream it changes the bind to loopback, removes telemetry, and adds NDJSON socket framing, pre-LOM input validation, socket I/O-locking, and finite timeouts + bounded thread cleanup; full tool parity is preserved. It is security-reviewed (independent security gate + deep-review APPROVED). The row pins this reviewed SOURCE commit for the uvx-run MCP server, AND the manually-installed Remote Script must be taken from the SAME pinned commit (not the moving HEAD) — see SETUP. Scope of the guarantee: it covers the fork's reviewed SOURCE commit, NOT the full transitive runtime — a uvx install still resolves Python deps from PyPI (the fork declares mcp[cli]>=1.3.0, not a locked set). Upstream's MIT license + attribution are preserved. The in-Live Remote Script binds 127.0.0.1 (loopback) as a HARD CONSTANT, so Ableton control is NOT reachable from the LAN — the kernel refuses any non-loopback peer, and no firewall rule is needed. This fixes upstream ahujasid/ableton-mcp's HOST=0.0.0.0 bind (LAN-reachable). Full tool parity with upstream: tracks/clips/notes/transport/devices/browser/arrangement/audio-clip. disabled-until-probe: enables only when a SUPPORTED Ableton Live is installed. REQUIRES Ableton Live 10 or newer — upstream advertises 'Ableton Live 10 or newer' and does NOT support Live 9 or earlier; the install probe therefore narrows to Live 10-19 via the glob C:\\ProgramData\\Ableton\\Live 1[0-9]*\\Program\\Ableton Live 1[0-9]*.exe (the 1[0-9] char-class matches Live 10-19 across all editions Suite/Standard/Intro/Lite and EXCLUDES Live 9 and earlier, whose version segment does not begin with '1' followed by a digit), so a host with only an unsupported pre-10 install does not falsely pass admission for a server it cannot drive. Live 20+ (when released) will need a glob update — file_globs[] entries are AND-semantics and cannot OR a second version range, so a second range is a follow-up. macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. SETUP (operator-side, REQUIRED): install the bundled Remote Script — RemoteScript/__init__.py from the PINNED commit, not the moving HEAD (raw: https://raw.githubusercontent.com/applicate2628/ableton-mcp-loopback/12e5e8bad363d86cdffccccca266f775a5f90bbf/RemoteScript/__init__.py) — into your Ableton User Library Remote Scripts folder, then select it in Live (Preferences -> Link/Tempo/MIDI -> Control Surface). NOTE: if your Windows Documents are OneDrive-redirected, your User Library is under OneDrive\\Documents\\Ableton\\User Library, not the plain Documents path — install there. The MCP server connects to the script over loopback TCP 9877; the host-exe probe detects Live, not the script, so verify the script is loaded before use.",
+      "homepage": "https://github.com/applicate2628/ableton-mcp-loopback",
+      "readme_url": "https://raw.githubusercontent.com/applicate2628/ableton-mcp-loopback/12e5e8bad363d86cdffccccca266f775a5f90bbf/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf",
+        "ableton-mcp-loopback"
+      ],
+      "env": {},
+      "categories": [
+        "music",
+        "daw",
+        "ableton"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\ProgramData\\Ableton\\Live 1[0-9]*\\Program\\Ableton Live 1[0-9]*.exe"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/applicate2628/ableton-mcp-loopback",
+        "pinned_ref": "12e5e8bad363d86cdffccccca266f775a5f90bbf",
+        "install_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf ableton-mcp-loopback",
+        "run_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf ableton-mcp-loopback",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "codex-mcp-server",
+      "name": "Codex MCP server (OpenAI Codex CLI)",
+      "summary": "Expose the OpenAI Codex CLI as an MCP server (`codex mcp-server`, stdio) so agents can call codex as a tool (codex() / codex-reply()). Official Codex CLI subcommand — NOT a community fork, so no vendored_source/pin. disabled-until-probe: enables only when the `codex` binary is on PATH. Keep the direct invoke-codex-prompt.sh path for orchestration/commission (file-based, governance); this row is for agents calling codex-as-tool.",
+      "homepage": "https://github.com/openai/codex",
+      "readme_url": "https://raw.githubusercontent.com/openai/codex/main/README.md",
+      "transport": "stdio",
+      "command": "codex",
+      "args": [
+        "mcp-server"
+      ],
+      "env": {},
+      "categories": [
+        "agent",
+        "codex",
+        "coding-agent"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "codex"
+        ]
+      }
+    },
+    {
+      "id": "matlab",
+      "name": "MATLAB MCP server (official, MathWorks)",
+      "summary": "Run MATLAB from an AI client — execute code, scripts, and functions against a live MATLAB process via the official MathWorks Go MCP server (matlab-mcp-server, stdio). OFFICIAL MathWorks server (matlab/matlab-mcp-server, pinned to release v0.11.0) — NOT a community fork, so no vendored_source (like the codex row). Distributed as a self-contained matlab-mcp-server binary: download matlab-mcp-server-windows-x64.exe from the v0.11.0 release and add it to PATH (rename to matlab-mcp-server), OR `go install github.com/matlab/matlab-mcp-server/cmd/matlab-mcp-server@latest`. REQUIRES a host MATLAB R2021a-or-later install ON THE SYSTEM PATH — by default the server finds the first MATLAB on PATH (it can also be pointed at one via --matlab-root / the MW_MCP_SERVER_MATLAB_ROOT env var, but this row sets no args/env so PATH is the only discovery), then drives the live MATLAB engine, so executing MATLAB code runs arbitrary host computation; the operator gates that the same way they gate any code-exec tool. disabled-until-probe: enables only when BOTH the matlab-mcp-server binary AND the `matlab` launcher are on PATH — the probe (binaries: matlab-mcp-server + matlab) AGREES with the server's own PATH discovery, so a MATLAB installed but NOT on PATH does not falsely enable the row. If you keep MATLAB off PATH, pass --matlab-root=<MATLAB root> (or set MW_MCP_SERVER_MATLAB_ROOT) in the manifest after install. License: MathWorks custom (BSD-style, with a clause restricting use to MathWorks products).",
+      "homepage": "https://github.com/matlab/matlab-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/matlab/matlab-mcp-server/v0.11.0/README.md",
+      "transport": "stdio",
+      "command": "matlab-mcp-server",
+      "args": [
+        "--disable-telemetry=true"
+      ],
+      "env": {},
+      "categories": [
+        "engineering",
+        "matlab",
+        "math",
+        "scientific-computing"
+      ],
+      "license": "MathWorks (custom BSD-style, product-use restricted)",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "matlab-mcp-server",
+          "matlab"
+        ]
+      }
+    },
+    {
+      "id": "ansys",
+      "name": "Ansys MAPDL MCP server (PyMAPDL)",
+      "summary": "Drive Ansys MAPDL (Mechanical APDL) from an AI client through PyMAPDL — launch/connect to a MAPDL session and run finite-element analysis. Official Ansys server ansys/pymapdl-mcp (Python, FastMCP, stdio), pinned to release v0.2.1; published on PyPI as ansys-mapdl-mcp, run via uvx with the version pinned in args (like serena's pinned uvx source), so no vendored_source (official Ansys-org package, Apache-2.0). disabled-until-probe: enables only when an Ansys MAPDL install is detected via the version-agnostic glob C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe — the Ansys solver executable is itself version-stamped (ansys241.exe for 2024 R1, etc.) under a v<ver> root (v231/v241/...). REQUIRES Python + uv on PATH and a host Ansys MAPDL install — the MAPDL-launching tools (launch_mapdl_session / connect_to_mapdl / disconnect_from_mapdl) start or attach to the solver and run arbitrary APDL, so the operator gates those raw solver/run tools behind consent the same way as any code-exec surface (D-4). Windows + Ansys MAPDL desktop only in this probe.",
+      "homepage": "https://github.com/ansys/pymapdl-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ansys/pymapdl-mcp/v0.2.1/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "ansys-mapdl-mcp==0.2.1",
+        "ansys-mapdl-mcp"
+      ],
+      "env": {},
+      "categories": [
+        "engineering",
+        "ansys",
+        "fea",
+        "cae",
+        "simulation"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"
+        ]
+      }
+    },
+    {
+      "id": "kicad",
+      "name": "KiCad MCP server",
+      "summary": "Drive KiCad EDA from an AI client — PCB design, DRC, simulation, BOM, DFM, manufacturing — through kicad-cli and the KiCad IPC / SWIG scripting API. Community server oaslananka/kicad-mcp (Python), published to PyPI as kicad-mcp-pro, pinned to v3.14.1 and run via uvx with the version pinned in --from (vendored_source block, community fork, MIT). PRIVACY: telemetry is OFF by default (OTLP export is opt-in to an operator-supplied collector), no telemetry-disable env needed. SAFETY: remote tools are read-only by default; destructive operations (board/schematic writes, manufacturing output) require explicit operator consent. disabled-until-probe: enables when uvx is on PATH AND a host KiCad 10.x install is detected via the glob C:\\Program Files\\KiCad\\1[0-9]*\\bin\\kicad-cli.exe — per the server's compatibility.yaml, kicad-mcp-pro v3.14.1 targets KiCad 10.0.x as the PRIMARY supported line (KiCad 9.x was dropped/EOL after 10.0.0; 8.x is deprecated file-level-only; 7.x unsupported), so the gate matches the 10.x-and-newer roots only. REQUIRES Python 3.13+ and uv on PATH, plus a host KiCad 10.x install. Windows + KiCad desktop only in this probe.",
+      "homepage": "https://github.com/oaslananka/kicad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/oaslananka/kicad-mcp/e0ffa7c6f6c36a1ca9e22917ba2a7c6d60ed3e8a/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "kicad-mcp-pro==3.14.1",
+        "kicad-mcp-pro"
+      ],
+      "env": {},
+      "categories": [
+        "engineering",
+        "eda",
+        "pcb",
+        "electronics"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\KiCad\\1[0-9]*\\bin\\kicad-cli.exe"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/oaslananka/kicad-mcp",
+        "pinned_ref": "e0ffa7c6f6c36a1ca9e22917ba2a7c6d60ed3e8a",
+        "install_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
+        "run_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "suno",
+      "name": "Suno AI Music (AceDataCloud)",
+      "summary": "Local AI music generation via Suno through the AceDataCloud API — runs the official mcp-suno PyPI package locally over stdio with uvx (no hosted endpoint). 27 tools spanning music generation, lyrics, media conversion, persona management, and task queries. REQUIRES an AceDataCloud API token: sign up at https://platform.acedata.cloud and mint a token on the API documentation page, then store it in the mcphub vault as the `acedata_api_token` secret (env ACEDATACLOUD_API_TOKEN = secret:acedata_api_token). The token is a REQUIRED install gate (required_secrets) — the local mcp-suno server hard-exits (exit 1) on startup when the token is unset, so a one-click install with no token is BLOCKED at install rather than crash-looping a daemon that returns 401s.",
+      "homepage": "https://pypi.org/project/mcp-suno/",
+      "readme_url": "https://platform.acedata.cloud/documents/4da95d9d-7722-4a72-857d-bf6be86036e9",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-suno==2026.6.18.0",
+        "mcp-suno"
+      ],
+      "env": {
+        "ACEDATACLOUD_API_TOKEN": "secret:acedata_api_token"
+      },
+      "categories": [
+        "music",
+        "ai",
+        "audio",
+        "generation"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "acedata_api_token"
+      ]
+    },
+    {
+      "id": "onshape",
+      "name": "Onshape MCP server",
+      "summary": "AI-assisted access to your Onshape cloud CAD documents — create sketches, extrude/revolve/sweep/fillet parts, build construction planes, take Part Studio screenshots, export STL/STEP, and write FeatureScript over the full Onshape REST API. Community server altendky/onshape-mcp, dual-licensed Apache-2.0 OR MIT (this row uses Apache-2.0). npx-packaged: the published onshape-mcp@0.4.0 npm package is a thin Node launcher around a per-platform Rust binary, run via `npx --yes onshape-mcp@0.4.0` (version pinned). PROVENANCE: onshape-mcp@0.4.0 is SLSA-provenance-attested and OIDC-published by the maintainer (altendky); the vendored_source pin is the v0.4.0 tag SHA. CLOUD — NO HOST APP: Onshape runs in the browser/cloud, so there is no local CAD install to detect; the install_probe gates only on the npx launcher being present, NOT a host binary. AUTH (two paths): the server's `auto` mode prefers OAuth (a browser login flow it walks you through on first use — no static credentials stored) OR Basic auth via Onshape API keys. To use API keys, store them in the mcphub vault and they wire to env ONSHAPE_MCP_AUTH__ACCESS_KEY = secret:onshape_access_key + ONSHAPE_MCP_AUTH__SECRET_KEY = secret:onshape_secr\u0065t_key. These are OPTIONAL (not a required_secrets install gate) because OAuth is a valid alternative and the server does not hard-exit without API keys — it enters an OAuth-pending state and waits. D-4 CAVEAT: this is a CLOUD API-key (or OAuth) integration that can WRITE to your Onshape CAD documents (create/modify parts, export); supply credentials only through the hub vault, never as plaintext. PLATFORM: the published npm ships win32-x64 + linux/darwin (x64 + arm64) binaries but NOT win32-arm64 — on a Windows ARM64 host the launcher would report unsupported-platform at startup. The install_probe now ARCH-GATES on that supported platform matrix (platforms: windows/amd64, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) in addition to the binaries:[node,npx] Node-launcher check, so on a win-arm64 host the row stays inert (greyed 'probe to enable') instead of installing and then failing at daemon spawn. STATUS: early development — offered to try; some operations work more reliably than others at this stage.",
+      "homepage": "https://github.com/altendky/onshape-mcp",
+      "readme_url": "https://raw.githubusercontent.com/altendky/onshape-mcp/87eb9516df6b30d7a3d07340a1125dc06ed0e2f5/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "onshape-mcp@0.4.0"
+      ],
+      "env": {
+        "ONSHAPE_MCP_AUTH__ACCESS_KEY": "secret:onshape_access_key",
+        "ONSHAPE_MCP_AUTH__SECRET_KEY": "secret:onshape_secr\u0065t_key"
+      },
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical",
+        "cloud"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "node",
+          "npx"
+        ],
+        "platforms": [
+          "windows/amd64",
+          "linux/amd64",
+          "linux/arm64",
+          "darwin/amd64",
+          "darwin/arm64"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/altendky/onshape-mcp",
+        "pinned_ref": "87eb9516df6b30d7a3d07340a1125dc06ed0e2f5",
+        "install_cmd": "npx --yes onshape-mcp@0.4.0",
+        "run_cmd": "npx --yes onshape-mcp@0.4.0",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "reaper",
+      "name": "REAPER MCP server",
+      "summary": "Control the REAPER DAW from an AI client — 58 tools spanning project/transport, tracks, MIDI, items, FX, mixing, mastering, rendering, and audio analysis — driven through python-reapy against the REAPER Lua/Python Object Model. Community server bonfire-systems/reaper-mcp (Python), published to PyPI as reaper-mcp-server and pinned to v0.1.1, run via uvx with the version pinned in --from (vendored_source block, community fork, MIT). SECURITY (LAN exposure — SAME risk class as the Ableton row): the MCP server itself is stdio (`mcp.run(transport=\"stdio\")` — no network listener), BUT the python-reapy distant API it requires runs a server INSIDE REAPER that binds 0.0.0.0 (upstream python-reapy Server.__init__ → `self.bind((\"0.0.0.0\", port))` in reapy/tools/network/server.py — verified), so once the distant API is enabled, REAPER control is reachable from your LAN, not just localhost. Restrict the reapy port to loopback via your firewall, or only run on a trusted network. This is upstream python-reapy's bind (the hub cannot patch the operator-enabled bridge). DESTRUCTIVE WRITE SURFACE: the 58 tools can MODIFY project state and files — save projects, delete tracks/items, import audio, render stems, change FX/mix params — so a one-click install grants an agent write access to your active music projects; work on COPIES/BACKUPS and treat destructive actions with caution. REQUIRED one-time operator setup (uvx install does NOT ship the repo's enable_reapy.py, and uvx does not install python-reapy into REAPER's Python, so use reapy's own canonical setup): SEPARATELY `pip install python-reapy`, then with REAPER OPEN run `python -c \"import reapy; reapy.configure_reaper()\"` (installs the reapy bridge into REAPER and enables the distant API — per the python-reapy README/install guide), then restart REAPER. The host-exe probe detects a REAPER install, NOT whether the distant API is configured, so complete this before first use. MATURITY: Alpha (pyproject Development Status :: 3 - Alpha; thin tests upstream) — offered to try, not all 58 tools are equally battle-tested. disabled-until-probe: enables when uvx is on PATH AND a host REAPER install is detected via the Windows glob C:\\Program Files*\\REAPER*\\reaper.exe (the leading Files* covers BOTH the 64-bit C:\\Program Files and the 32-bit C:\\Program Files (x86) install roots; the default x64 install lands at C:\\Program Files\\REAPER (x64)\\reaper.exe; the trailing-* on REAPER matches the version-suffixed variants). REQUIRES Python 3.10+ and uv on PATH plus a host REAPER install. macOS (/Applications/REAPER*.app) and Linux REAPER paths are NOT covered in this batch — file_globs[] entries are AND-semantics and cannot OR a second install root (same limit as the Ableton row), so a macOS/Linux probe is a follow-up.",
+      "homepage": "https://github.com/bonfire-systems/reaper-mcp",
+      "readme_url": "https://raw.githubusercontent.com/bonfire-systems/reaper-mcp/f0911c23a903b68c51695eeeb6ff21398d4058a6/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "reaper-mcp-server==0.1.1",
+        "reaper-mcp-server"
+      ],
+      "env": {},
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files*\\REAPER*\\reaper.exe"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/bonfire-systems/reaper-mcp",
+        "pinned_ref": "f0911c23a903b68c51695eeeb6ff21398d4058a6",
+        "install_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
+        "run_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana MCP server (official)",
+      "summary": "Drive a Grafana server from an AI client -- search and read dashboards, query Prometheus/Loki/other datasources, manage alerting and incidents, render panel images, and more. OFFICIAL Grafana server (grafana/mcp-grafana, Apache-2.0), pinned to release v0.17.0. The PyPI package mcp-grafana==0.17.0 is a thin Python wheel that bundles the per-platform Go server binary (win/linux/darwin x64+arm64), run via uvx. STDIO by design: the Go binary's default transport is stdio (this row passes -t stdio explicitly to pin it); the SSE / streamable-http modes are opt-in (-t sse / -t streamable-http) and even then bind localhost:8000 (loopback, not 0.0.0.0), so there is no LAN surface. CONFIG BURDEN: this row drives a Grafana SERVER you already run -- set GRAFANA_URL to your instance (defaults to http://localhost:3000) and supply a Grafana service-account token. The token is wired to the mcphub vault as GRAFANA_SERVICE_ACCOUNT_TOKEN = secret:grafana_service_account_token (GRAFANA_API_KEY is the deprecated old env name -- the row uses the current GRAFANA_SERVICE_ACCOUNT_TOKEN). The token is the OPTIONAL-secret posture (not a required_secrets install gate): the server starts without it (auth is enforced per-tool-call at the Grafana API), and read-only tools work against an anonymous-access instance, so a one-click install is not hard-blocked. Supply the token only through the hub vault, never as plaintext. disabled-until-probe: enables when uvx is on PATH.",
+      "homepage": "https://github.com/grafana/mcp-grafana",
+      "readme_url": "https://raw.githubusercontent.com/grafana/mcp-grafana/739be4df43c1b23d9aef3636c50aefae383c3526/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-grafana==0.17.0",
+        "-t",
+        "stdio"
+      ],
+      "env": {
+        "GRAFANA_URL": "http://localhost:3000",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "secret:grafana_service_account_token"
+      },
+      "categories": [
+        "data",
+        "observability",
+        "bi"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/grafana/mcp-grafana",
+        "pinned_ref": "739be4df43c1b23d9aef3636c50aefae383c3526",
+        "install_cmd": "uvx mcp-grafana==0.17.0 -t stdio",
+        "run_cmd": "uvx mcp-grafana==0.17.0 -t stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "tableau",
+      "name": "Tableau MCP server (official)",
+      "summary": "Query and explore your Tableau Server / Tableau Cloud from an AI client -- list and read published data sources, run VizQL queries, browse workbooks, and more. OFFICIAL Tableau server (tableau/tableau-mcp, Apache-2.0), the npm package @tableau/mcp-server pinned to v2.18.1 and run via npx (a Node launcher around build/index.js). NODE REQUIREMENT: @tableau/mcp-server@2.18.1 declares engines.node >= 22.7.5 -- the install probe cannot version-check node, so on a host with an older node (e.g. 20.x) the install completes but the daemon fails at spawn with a clear node-version error. Ensure Node 22.7.5+ is on PATH before installing. STDIO by default: the entry selects stdio unless TRANSPORT=http is set (this row sets no TRANSPORT, so it is stdio); the opt-in http mode binds all interfaces (.listen(port) with no host) and additionally requires OAUTH_ISSUER -- NOT used by this row. REQUIRED config + auth (install BLOCKS until all are set in the mcphub vault): the server hard-exits on startup without SERVER / PAT_NAME / PAT_VALUE, and there is no required-non-secret-config mechanism, so the Tableau instance URL is routed through the required_secrets gate as SERVER = secret:tableau_server_url alongside the PAT (PAT_NAME = secret:tableau_pat_name + PAT_VALUE = secret:tableau_pat_value). This prevents a one-click install from silently shipping a placeholder URL as the live default. SITE_NAME stays an editable literal (empty default = the Default site on Tableau Server; Tableau Cloud needs the site's content URL). Supply the URL + PAT only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/tableau/tableau-mcp",
+      "readme_url": "https://raw.githubusercontent.com/tableau/tableau-mcp/8bafaba8120f4dfb09b7f5b40e9eaab205cadfee/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@tableau/mcp-server@2.18.1"
+      ],
+      "env": {
+        "SERVER": "secret:tableau_server_url",
+        "SITE_NAME": "",
+        "PAT_NAME": "secret:tableau_pat_name",
+        "PAT_VALUE": "secret:tableau_pat_value"
+      },
+      "categories": [
+        "data",
+        "bi",
+        "analytics"
+      ],
+      "license": "Apache-2.0",
+      "required_secrets": [
+        "tableau_server_url",
+        "tableau_pat_name",
+        "tableau_pat_value"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/tableau/tableau-mcp",
+        "pinned_ref": "8bafaba8120f4dfb09b7f5b40e9eaab205cadfee",
+        "install_cmd": "npx -y @tableau/mcp-server@2.18.1",
+        "run_cmd": "npx -y @tableau/mcp-server@2.18.1",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "photoshop",
+      "name": "Adobe Photoshop MCP server",
+      "summary": "Drive Adobe Photoshop from an AI client -- create/open/save documents, add text and solid-color layers, run actions, and inspect the active document -- via the photoshop-python-api COM bridge. Community server loonghao/photoshop-python-api-mcp-server (Python, MIT), published to PyPI as photoshop-mcp-server and pinned to v0.1.11, run via uvx with the version pinned. WINDOWS-ONLY COM: the server talks to a running Photoshop over Windows COM (win32com via pywin32) -- there is NO socket, NO network listener, and NO manual plugin to install (unlike the DAW rows). It is stdio + COM, so loopback-clean by construction. The Adobe classifier and the COM dependency are Windows-only, so the install_probe ARCH-GATES on platforms: [windows/amd64]; on any other OS the row stays inert. AUTO-DETECTS THE INSTALLED PHOTOSHOP: v0.1.11's COM adapter constructs the Photoshop application with no version argument (Session()/Application()), so it connects to whichever Photoshop the COM ProgID resolves to -- the README's PS_VERSION env var is NOT consumed by this pinned version, so the row sets no PS_VERSION (a hardcoded year would be inert and misleading). The probe glob is therefore VERSION-AGNOSTIC -- REQUIRES a host Adobe Photoshop install detected via C:\\Program Files\\Adobe\\Adobe Photoshop *\\Photoshop.exe (the trailing * matches any year-versioned install root, e.g. Adobe Photoshop 2024 / 2025), which now correctly matches the auto-detect behavior for any installed version. Photoshop must be RUNNING for tools to act on a document; the host-exe probe detects the install, not whether Photoshop is open. REQUIRES Python 3.10+ and uv on PATH (the README recommends the --python 3.10 pin, which uv satisfies by fetching a managed CPython 3.10 if needed).",
+      "homepage": "https://github.com/loonghao/photoshop-python-api-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/loonghao/photoshop-python-api-mcp-server/57093383228814d634fef05f494dd13b3dd69a22/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.10",
+        "photoshop-mcp-server==0.1.11"
+      ],
+      "env": {},
+      "categories": [
+        "image-editing",
+        "design",
+        "creative"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\Adobe\\Adobe Photoshop *\\Photoshop.exe"
+        ],
+        "platforms": [
+          "windows/amd64"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/loonghao/photoshop-python-api-mcp-server",
+        "pinned_ref": "57093383228814d634fef05f494dd13b3dd69a22",
+        "install_cmd": "uvx --python 3.10 photoshop-mcp-server==0.1.11",
+        "run_cmd": "uvx --python 3.10 photoshop-mcp-server==0.1.11",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "zotero",
+      "name": "Zotero MCP server",
+      "summary": "Search and read your Zotero reference library from an AI client -- look up items, collections, tags, notes, and full-text content. Community server kujenga/zotero-mcp (Python, MIT), published to PyPI as zotero-mcp and pinned to v0.1.6, run via uvx. LOOPBACK-CLEAN: the server is stdio (default transport stdio; --transport sse is opt-in and not used) and, with ZOTERO_LOCAL=true, acts as a CLIENT to the Zotero desktop application's OWN built-in local API at http://localhost:23119 (verified loopback in the pyzotero dependency) -- NO third-party add-on, NO network listener opened by this server. ZOTERO_LOCAL=true is a literal config value (not a secret), and in local mode ZOTERO_API_KEY / ZOTERO_LIBRARY_ID are NOT required, so this is a clean no-secret row. To enable the local API, run the Zotero 7 desktop app with the local API turned on (Settings -> Advanced). disabled-until-probe: enables when uvx is on PATH; REQUIRES Python 3.11+ and uv plus the Zotero desktop app running for live queries.",
+      "homepage": "https://github.com/kujenga/zotero-mcp",
+      "readme_url": "https://raw.githubusercontent.com/kujenga/zotero-mcp/aeba201601df4a057e14523e7fc02ff9feafd09b/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "zotero-mcp==0.1.6"
+      ],
+      "env": {
+        "ZOTERO_LOCAL": "true"
+      },
+      "categories": [
+        "research",
+        "reference",
+        "pkm"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/kujenga/zotero-mcp",
+        "pinned_ref": "aeba201601df4a057e14523e7fc02ff9feafd09b",
+        "install_cmd": "uvx zotero-mcp==0.1.6",
+        "run_cmd": "uvx zotero-mcp==0.1.6",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "metabase",
+      "name": "Metabase MCP server",
+      "summary": "Query and explore your Metabase BI instance from an AI client -- run questions/cards, browse databases and dashboards, and export card results as CSV/JSON. Community server (NOT official) easecloudio/mcp-metabase-server (Node, MIT), the npm package @easecloudio/mcp-metabase-server pinned to v1.3.0 and run via npx. LOOPBACK-CLEAN: the server uses StdioServerTransport only -- no port bind, no 0.0.0.0, no HTTP listener. READ-ONLY BY DEFAULT: this row sets TOOL_MODE=read (the upstream non-destructive tool set) so a one-click install cannot create/update/delete dashboards, cards, databases, or users; the operator opts into the destructive surface explicitly by editing the manifest to TOOL_MODE=all (everything) or TOOL_MODE=write (incl. create/update/delete). Omitting TOOL_MODE would default upstream to `all`, so the row pins `read`. REQUIRED config + auth (install BLOCKS until both are set in the mcphub vault): the server hard-exits on startup without METABASE_URL, and there is no required-non-secret-config mechanism, so the instance URL is routed through the required_secrets gate as METABASE_URL = secret:metabase_url alongside the API key METABASE_API_KEY = secret:metabase_api_key. This prevents a one-click install from silently shipping a placeholder URL as the live default -- every install must supply the real instance URL + key first. Supply both only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/easecloudio/mcp-metabase-server",
+      "readme_url": "https://raw.githubusercontent.com/easecloudio/mcp-metabase-server/464fc93edd22b40d5edd260c5149202f6a3ea68d/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@easecloudio/mcp-metabase-server@1.3.0"
+      ],
+      "env": {
+        "METABASE_URL": "secret:metabase_url",
+        "METABASE_API_KEY": "secret:metabase_api_key",
+        "TOOL_MODE": "read"
+      },
+      "categories": [
+        "data",
+        "bi",
+        "analytics"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "metabase_url",
+        "metabase_api_key"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/easecloudio/mcp-metabase-server",
+        "pinned_ref": "464fc93edd22b40d5edd260c5149202f6a3ea68d",
+        "install_cmd": "npx -y @easecloudio/mcp-metabase-server@1.3.0",
+        "run_cmd": "npx -y @easecloudio/mcp-metabase-server@1.3.0",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "jupyter",
+      "name": "Jupyter MCP server",
+      "summary": "Drive a running Jupyter (JupyterLab / Jupyter Server) from an AI client -- list and edit notebook cells, execute code, read outputs, and manage kernels. Community server datalayer/jupyter-mcp-server (Python, BSD-3-Clause), published to PyPI as jupyter-mcp-server and pinned to v1.0.2, run via uvx. STDIO-PINNED: the CLI's default transport is stdio, and this row passes --transport stdio EXPLICITLY to pin it -- the alternative streamable-http mode binds host=0.0.0.0 (all interfaces, LAN-reachable) and is NOT used. REQUIRES a RUNNING Jupyter server: set JUPYTER_URL to its URL (defaults to http://localhost:8888) and supply the Jupyter token wired to the mcphub vault as JUPYTER_TOKEN = secret:jupyter_token. The token is the OPTIONAL-secret posture (not a required_secrets gate): the MCP server starts without a reachable Jupyter (it connects lazily), so a one-click install is not hard-blocked, but the tools need the running Jupyter + token to work. The MCP_TOKEN auth knob only applies to the unused streamable-http standalone mode. Supply the token only through the hub vault, never as plaintext. disabled-until-probe: enables when uvx is on PATH (Python 3.10+, uv).",
+      "homepage": "https://github.com/datalayer/jupyter-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/datalayer/jupyter-mcp-server/17db1a7222d679dd52fda331a6480728b062d0b9/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "jupyter-mcp-server==1.0.2",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "JUPYTER_URL": "http://localhost:8888",
+        "JUPYTER_TOKEN": "secret:jupyter_token"
+      },
+      "categories": [
+        "data",
+        "notebook",
+        "dev"
+      ],
+      "license": "BSD-3-Clause",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/datalayer/jupyter-mcp-server",
+        "pinned_ref": "17db1a7222d679dd52fda331a6480728b062d0b9",
+        "install_cmd": "uvx jupyter-mcp-server==1.0.2 --transport stdio",
+        "run_cmd": "uvx jupyter-mcp-server==1.0.2 --transport stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "rmcp",
+      "name": "RMCP -- R statistics MCP server",
+      "summary": "Run R statistical analysis from an AI client -- 52 tools spanning regression, hypothesis testing, time series, and more -- driven through Rscript on PATH. Community server (Python, MIT) published to PyPI as rmcp and pinned to v0.8.1, run via uvx. PROVENANCE: the PyPI rmcp project_urls point to github.com/finite-sample/rmcp (Gaurav Sood), so the vendored_source pins that repo; v0.8.1 has no git tag, so the pin is the HEAD commit that ships version 0.8.1 in its pyproject. STDIO-PINNED: this row runs the `start` subcommand, which is the stdio transport -- the `serve-http --host 0.0.0.0` mode is the opt-in non-default (binds all interfaces, needs the http extras) and is NOT used; plain `start` does not even install the HTTP deps. No secret and no required env. REQUIRES R on PATH (the tools shell out to Rscript); the server starts and degrades gracefully WITHOUT R (it logs a warning and R-dependent tools fail at call time), so the install_probe gates only on uvx -- a host that installs R later does not need to re-probe. disabled-until-probe: enables when uvx is on PATH (Python 3.11+, uv); install R 4.4.0+ separately for the analysis tools.",
+      "homepage": "https://github.com/finite-sample/rmcp",
+      "readme_url": "https://raw.githubusercontent.com/finite-sample/rmcp/389b6ef608a2ebc01b15f7dca3cd7fe71509e406/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "rmcp==0.8.1",
+        "rmcp",
+        "start"
+      ],
+      "env": {},
+      "categories": [
+        "science",
+        "statistics",
+        "data-analysis"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/finite-sample/rmcp",
+        "pinned_ref": "389b6ef608a2ebc01b15f7dca3cd7fe71509e406",
+        "install_cmd": "uvx --from rmcp==0.8.1 rmcp start",
+        "run_cmd": "uvx --from rmcp==0.8.1 rmcp start",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian MCP server",
+      "summary": "Read, search, and edit your Obsidian vault from an AI client -- list files, read/append/patch notes, full-text and JsonLogic search, and manage the periodic-note daily journal -- via Obsidian's Local REST API community plugin. Community server MarkusPfundstein/mcp-obsidian (Python, MIT), published to PyPI as mcp-obsidian and pinned to v0.2.2, run via uvx. LOOPBACK-CLEAN: the MCP server is stdio (mcp.server.stdio) and acts as a CLIENT to the plugin's local API at https://127.0.0.1:27124 (verified loopback default host=127.0.0.1 in obsidian.py) -- it opens NO network listener of its own. PREREQUISITE (REQUIRED, operator-side): the MCP server does NOT talk to Obsidian directly -- it talks to the 'Local REST API' Obsidian COMMUNITY PLUGIN, which you must install once from Obsidian's in-app community-plugin store (Settings -> Community plugins -> Browse -> 'Local REST API') and ENABLE; the plugin then binds 127.0.0.1 and mints the API key you store below. The host-exe probe is not applicable (no separate Obsidian binary on PATH and the gate is the plugin + key), so this row gates on the required secret. REQUIRED SECRET (hard install gate): mcp-obsidian v0.2.2 HARD-EXITS on startup with a ValueError when OBSIDIAN_API_KEY is unset (verified by a clean-cache launch), so the key is routed through the required_secrets gate as OBSIDIAN_API_KEY = secret:obsidian_api_key -- a one-click install with no key is BLOCKED at install rather than crash-looping a daemon. The key is the 'Local REST API' plugin's API key (copy it from the plugin settings). Supply it only through the hub vault, never as plaintext. Obsidian must be RUNNING with the plugin enabled for tools to act.",
+      "homepage": "https://github.com/MarkusPfundstein/mcp-obsidian",
+      "readme_url": "https://raw.githubusercontent.com/MarkusPfundstein/mcp-obsidian/d0c6d9af998a730dd16398cb8593aba31dbf9637/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-obsidian==0.2.2",
+        "mcp-obsidian"
+      ],
+      "env": {
+        "OBSIDIAN_API_KEY": "secret:obsidian_api_key"
+      },
+      "categories": [
+        "pkm",
+        "notes",
+        "productivity"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "obsidian_api_key"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/MarkusPfundstein/mcp-obsidian",
+        "pinned_ref": "d0c6d9af998a730dd16398cb8593aba31dbf9637",
+        "install_cmd": "uvx --from mcp-obsidian==0.2.2 mcp-obsidian",
+        "run_cmd": "uvx --from mcp-obsidian==0.2.2 mcp-obsidian",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "logseq",
+      "name": "Logseq MCP server",
+      "summary": "Query and edit your Logseq graph from an AI client -- read/create/update/delete pages and blocks, search, and journal access -- via Logseq's built-in HTTP API. Community server ergut/mcp-logseq (Python, MIT), published to PyPI as mcp-logseq and pinned to v1.8.0, run via uvx. STDIO-PINNED: the CLI's default transport is already stdio (--transport stdio/http, default stdio) and this row passes --transport stdio EXPLICITLY to pin it; the alternative --transport http mode DEFAULTS to --host 127.0.0.1 (loopback -- the package comments 'never bind to 0.0.0.0 implicitly' and requires an explicit --insecure flag to bind a non-loopback host, verified in __init__.py), so there is no implicit LAN surface. PREREQUISITE (REQUIRED, operator-side, NO plugin needed): Logseq has a BUILT-IN HTTP API -- enable it once in the Logseq desktop app at Settings -> Features -> 'Enable HTTP APIs', then set an authorization token in the HTTP-API panel. The Logseq HTTP API binds localhost (default http://localhost:12315). The host-exe probe is not applicable (the gate is the toggle + token), so this row gates on the required token. REQUIRED SECRET (hard install gate): mcp-logseq v1.8.0 HARD-EXITS on startup with a ValueError when LOGSEQ_API_TOKEN is unset (verified by a clean-cache launch), so the token is routed through the required_secrets gate as LOGSEQ_API_TOKEN = secret:logseq_token -- a one-click install with no token is BLOCKED at install. The LOGSEQ_API_URL has a localhost default (http://localhost:12315), so it stays an EDITABLE literal (not a required secret) -- edit it only if you moved the Logseq HTTP API off the default port. Supply the token only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/ergut/mcp-logseq",
+      "readme_url": "https://raw.githubusercontent.com/ergut/mcp-logseq/v1.8.0/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-logseq==1.8.0",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "LOGSEQ_API_TOKEN": "secret:logseq_token",
+        "LOGSEQ_API_URL": "http://localhost:12315"
+      },
+      "categories": [
+        "pkm",
+        "notes"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "logseq_token"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/ergut/mcp-logseq",
+        "pinned_ref": "v1.8.0",
+        "install_cmd": "uvx mcp-logseq==1.8.0 --transport stdio",
+        "run_cmd": "uvx mcp-logseq==1.8.0 --transport stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "origin-pro",
+      "name": "Origin / OriginPro MCP server",
+      "summary": "Drive OriginLab Origin / OriginPro (scientific graphing + data analysis) from an AI client -- import data, build worksheets, run analysis, and create plots -- via the Origin COM automation server. Community server youngminsw/Origin-Pro-MCP (Python, MIT), published to PyPI as origin-pro-mcp and pinned to v0.1.0, run via uvx. WINDOWS-ONLY COM: the server talks to a running Origin over Windows COM (win32com.client.Dispatch('Origin.ApplicationSI')) -- it is stdio + COM (mcp.run(transport='stdio')), with NO socket, NO network listener, and NO manual plugin to install (loopback-clean by construction, like the photoshop row). The win32com COM bridge is Windows-only, so the install_probe ARCH-GATES on platforms: [windows/amd64]; on any other OS the row stays inert. REQUIRES a host OriginLab Origin/OriginPro install -- detected via the version-agnostic glob C:\\Program Files\\OriginLab\\Origin*\\Origin64.exe (the trailing Origin* matches any year-versioned root, e.g. Origin2024 / Origin2025). Origin must be RUNNING for tools to act; the host-exe probe detects the install, not whether Origin is open. REQUIRES Python + uv on PATH. MATURITY CAVEAT: LOW-maturity, Alpha (Development Status :: 3 - Alpha; ~21 GitHub stars at time of curation, v0.1.0 single release) -- offered to try, verify each operation before relying on it. disabled-until-probe: enables only when uvx AND a host Origin install are present on a windows/amd64 host.",
+      "homepage": "https://github.com/youngminsw/Origin-Pro-MCP",
+      "readme_url": "https://raw.githubusercontent.com/youngminsw/Origin-Pro-MCP/2f1fc76841b8ca3319e2f7d7737943c0e39a9fea/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "origin-pro-mcp==0.1.0"
+      ],
+      "env": {},
+      "categories": [
+        "science",
+        "data-analysis",
+        "plotting"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\OriginLab\\Origin*\\Origin64.exe"
+        ],
+        "platforms": [
+          "windows/amd64"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/youngminsw/Origin-Pro-MCP",
+        "pinned_ref": "2f1fc76841b8ca3319e2f7d7737943c0e39a9fea",
+        "install_cmd": "uvx origin-pro-mcp==0.1.0",
+        "run_cmd": "uvx origin-pro-mcp==0.1.0",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "mcp-cbuild",
+      "name": "CMake build MCP server",
+      "summary": "Run CMake preset listing, configure, build, test, workflow, and cache-validated clean operations; vcpkg tools are optional.",
+      "transport": "stdio",
+      "command": "mcphub",
+      "args": [
+        "cbuild"
+      ],
+      "env": {},
+      "categories": [
+        "build",
+        "cmake",
+        "vcpkg",
+        "engineering"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "mcphub",
+          "cmake"
+        ]
+      }
+    },
+    {
+      "id": "trail",
+      "name": "Trail MCP",
+      "summary": "Project-scoped code navigation tools.",
+      "kind": "project-provider",
+      "service": "trail",
+      "package": {
+        "manager": "npm",
+        "name": "@trailhq/trail-code",
+        "bin": "trail",
+        "channel": "latest"
+      }
+    },
+    {
+      "id": "rea",
+      "name": "REA MCP",
+      "summary": "Project-scoped reverse engineering and binary analysis tools.",
+      "license": "MIT",
+      "kind": "project-provider",
+      "service": "rea",
+      "package": {
+        "manager": "npm",
+        "name": "rea-agents",
+        "bin": "rea",
+        "channel": "latest"
+      }
+    }
+  ],
+  "docs_only": [
+    {
+      "id": "mathematica",
+      "name": "Wolfram Mathematica MCP server (docs-only)",
+      "summary": "Drive a local Wolfram Engine / Mathematica from an AI client -- evaluate Wolfram Language code via wolframscript over stdio. DOCS-ONLY pointer: community server lars20070/mathematica-mcp (Python, MIT) is published to PyPI as mathematica-mcp, but it is VERY LOW maturity (~4 GitHub stars at curation) -- below the bar for a one-click clean row -- so it is offered as a discoverable manual-install pointer with the maturity caveat. It shells out to wolframscript, so it needs a local Wolfram Engine / Mathematica install on PATH.",
+      "homepage": "https://github.com/lars20070/mathematica-mcp",
+      "readme_url": "https://raw.githubusercontent.com/lars20070/mathematica-mcp/main/README.md",
+      "manual_install": "Install via PyPI (mathematica-mcp) per the README, e.g. `uvx mathematica-mcp` once you have reviewed it. Requires a local Wolfram Engine / Mathematica with `wolframscript` on PATH. VERY LOW maturity (~4 stars, single author) -- verify each tool before relying on it; this is why it is a docs-only pointer rather than a one-click row.",
+      "license": "MIT",
+      "categories": [
+        "science",
+        "math"
+      ]
+    },
+    {
+      "id": "word",
+      "name": "Microsoft Word MCP server (docs-only)",
+      "summary": "Create and edit Microsoft Word (.docx) documents from an AI client -- add content, format text, tables, and styles via python-docx. DOCS-ONLY pointer: community server GongRzhe/Office-Word-MCP-Server (Python, MIT), published to PyPI as office-word-mcp-server. The upstream GitHub repo is ARCHIVED (frozen, read-only -- no further fixes will land), so although it is a popular project (~2k stars) the hub offers it as a docs-only pointer rather than tracking a frozen upstream as a one-click row. The operator can still install it manually from PyPI.",
+      "homepage": "https://github.com/GongRzhe/Office-Word-MCP-Server",
+      "readme_url": "https://raw.githubusercontent.com/GongRzhe/Office-Word-MCP-Server/main/README.md",
+      "manual_install": "Install via PyPI (office-word-mcp-server) per the README, e.g. `uvx --from office-word-mcp-server word_mcp_server` (verify the exact entry point in the README). It edits .docx files via python-docx (no host Word install needed). NOTE: the upstream GitHub repo is ARCHIVED/frozen -- it will not receive fixes, so pin a version you have tested and review before relying on it. This is why it is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "office",
+        "documents",
+        "productivity"
+      ]
+    },
+    {
+      "id": "powerpoint",
+      "name": "Microsoft PowerPoint MCP server (docs-only)",
+      "summary": "Create and edit Microsoft PowerPoint (.pptx) presentations from an AI client -- add slides, text, shapes, charts, and images via python-pptx. DOCS-ONLY pointer: community server GongRzhe/Office-PowerPoint-MCP-Server (Python, MIT), published to PyPI as office-powerpoint-mcp-server. The upstream GitHub repo is ARCHIVED (frozen, read-only -- no further fixes), so although it is popular (~1.8k stars) the hub offers it as a docs-only pointer rather than tracking a frozen upstream as a one-click row. The operator can still install it manually from PyPI.",
+      "homepage": "https://github.com/GongRzhe/Office-PowerPoint-MCP-Server",
+      "readme_url": "https://raw.githubusercontent.com/GongRzhe/Office-PowerPoint-MCP-Server/main/README.md",
+      "manual_install": "Install via PyPI (office-powerpoint-mcp-server) per the README, e.g. `uvx --from office-powerpoint-mcp-server ppt_mcp_server` (verify the exact entry point in the README). It edits .pptx files via python-pptx (no host PowerPoint install needed). NOTE: the upstream GitHub repo is ARCHIVED/frozen -- it will not receive fixes, so pin a version you have tested and review before relying on it. This is why it is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "office",
+        "presentations",
+        "productivity"
+      ]
+    },
+    {
+      "id": "blender",
+      "name": "Blender MCP server (docs-only)",
+      "summary": "Drive Blender from an AI client -- create/modify 3D scenes, objects, materials, and run Python in Blender -- over a TCP socket bridge. DOCS-ONLY pointer: community server ahujasid/blender-mcp (Python, MIT, very popular ~23k stars), published to PyPI as blender-mcp. The MCP server runs via uvx, BUT it requires a manual one-time Blender ADD-ON install: you download the repo's addon.py and install + enable it inside Blender (Edit -> Preferences -> Add-ons -> Install), which opens the bridge the MCP server connects to at localhost:9876. Because that add-on load happens inside the host app (the hub cannot perform an in-app add-on install + enable), this is a manual-install pointer.",
+      "homepage": "https://github.com/ahujasid/blender-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ahujasid/blender-mcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Blender add-on -- download addon.py from https://github.com/ahujasid/blender-mcp, then in Blender go to Edit -> Preferences -> Add-ons -> Install, select addon.py, enable it, and start the connection (it listens on localhost:9876); (2) run the MCP server with `uvx blender-mcp`. Requires a local Blender install. The in-app add-on install + enable is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "3d",
+        "modeling",
+        "creative"
+      ]
+    },
+    {
+      "id": "freecad",
+      "name": "FreeCAD MCP server (docs-only)",
+      "summary": "Drive FreeCAD from an AI client -- create/edit parts, sketches, and documents, and run Python in FreeCAD -- over an RPC bridge. DOCS-ONLY pointer: community server neka-nat/freecad-mcp (Python, MIT, ~1.2k stars), published to PyPI as freecad-mcp. It requires a manual one-time workbench install: you COPY the repo's freecad_addon/MCPAddon into FreeCAD's Mod directory, restart FreeCAD, select the 'MCP Addon' workbench and start its RPC server. SECURITY FOOTGUN: the addon's RPC server defaults to localhost but is OPERATOR-TOGGLABLE to 0.0.0.0 (LAN-reachable) via its 'Start RPC Server' dialog -- keep it on localhost unless you firewall the port. Because the workbench copy + restart happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/neka-nat/freecad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/neka-nat/freecad-mcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the workbench -- copy freecad_addon/MCPAddon from https://github.com/neka-nat/freecad-mcp into your FreeCAD Mod directory, restart FreeCAD, switch to the 'MCP Addon' workbench, and click 'Start RPC Server' (KEEP the bind on localhost -- the dialog lets you choose 0.0.0.0, which exposes it to your LAN); (2) run the MCP server with `uvx freecad-mcp`. Requires a local FreeCAD install. The manual workbench copy + the 0.0.0.0 toggle footgun are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ]
+    },
+    {
+      "id": "fusion360",
+      "name": "Autodesk Fusion 360 MCP server (docs-only)",
+      "summary": "Drive Autodesk Fusion 360 from an AI client -- create/modify parametric CAD geometry -- via a Fusion 360 add-in bridge. DOCS-ONLY pointer: community server faust-machines/fusion360-mcp-server (Python, MIT, early ~47 stars), published to PyPI. It requires a manual one-time add-in install: you COPY the repo's Fusion 360 add-in into Fusion's Add-Ins directory and run it from inside Fusion (Utilities -> Add-Ins), which opens the bridge the MCP server connects to at localhost:9876. Because the add-in copy + in-app run happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/faust-machines/fusion360-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/faust-machines/fusion360-mcp-server/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Fusion 360 add-in -- copy the repo's add-in folder from https://github.com/faust-machines/fusion360-mcp-server into your Fusion 360 Add-Ins directory, then in Fusion go to Utilities -> Add-Ins, select it, and Run (it listens on localhost:9876); (2) run the MCP server with `uvx fusion360-mcp-server` (verify the entry point in the README). Requires a local Autodesk Fusion 360 install. The in-app add-in copy + run is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ]
+    },
+    {
+      "id": "rhino",
+      "name": "Rhino (RhinoMCP) MCP server (docs-only)",
+      "summary": "Drive Rhino 3D / Grasshopper from an AI client -- create/modify geometry and run RhinoScript/Python -- over a socket bridge. DOCS-ONLY pointer: community server jingcheng-chen/rhinomcp (Python, MIT, ~777 stars), published to PyPI as rhinomcp. It requires a manual one-time plugin install via Rhino's PACKAGE MANAGER: inside Rhino run the PackageManager command, install the 'rhinomcp' plugin, and start it (it opens a bridge the MCP server connects to at 127.0.0.1:1999 -- loopback). Because the plugin install happens inside Rhino's package manager (the hub cannot drive Rhino's in-app PackageManager), this is a manual-install pointer.",
+      "homepage": "https://github.com/jingcheng-chen/rhinomcp",
+      "readme_url": "https://raw.githubusercontent.com/jingcheng-chen/rhinomcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Rhino plugin -- in Rhino run the `PackageManager` command, search for and install 'rhinomcp', then start it (it listens on 127.0.0.1:1999, loopback); (2) run the MCP server with `uvx rhinomcp`. Requires a local Rhino 3D install. The in-app Package Manager plugin install is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "3d"
+      ]
+    },
+    {
+      "id": "davinci",
+      "name": "DaVinci Resolve MCP server (docs-only)",
+      "summary": "Drive Blackmagic DaVinci Resolve from an AI client -- control the timeline, media pool, color, and rendering -- via Resolve's scripting API. DOCS-ONLY pointer: community server samuelgursky/davinci-resolve-mcp (~1.4k stars, MIT), distributed as a git-clone + bootstrapper rather than a clean one-click package. TWO hard prerequisites: (1) it REQUIRES DaVinci Resolve STUDIO -- the PAID edition; the free edition does NOT expose the external scripting API; (2) you must manually ENABLE external scripting inside Resolve (Preferences -> System -> General -> 'External scripting using' = Local) and set the scripting env vars per the README. Because of the manual scripting-toggle + the paid-Studio requirement, this is a manual-install pointer.",
+      "homepage": "https://github.com/samuelgursky/davinci-resolve-mcp",
+      "readme_url": "https://raw.githubusercontent.com/samuelgursky/davinci-resolve-mcp/main/README.md",
+      "manual_install": "Per the README: (1) you MUST have DaVinci Resolve STUDIO (the PAID edition -- the free edition has no external scripting API); (2) enable external scripting inside Resolve at Preferences -> System -> General -> 'External scripting using' = Local, and set the RESOLVE_SCRIPT_API / RESOLVE_SCRIPT_LIB / PYTHONPATH env vars the README documents; (3) git clone https://github.com/samuelgursky/davinci-resolve-mcp and run its bootstrap/install script. The paid-Studio requirement + the manual scripting toggle are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "video",
+        "editing",
+        "creative"
+      ]
+    },
+    {
+      "id": "audacity",
+      "name": "Audacity MCP server (docs-only)",
+      "summary": "Drive Audacity from an AI client -- record, edit, apply effects, and export audio -- via Audacity's mod-script-pipe scripting interface. DOCS-ONLY pointer: community server xDarkzx/Audacity-MCP (Python, Apache-2.0, early ~47 stars), published to PyPI as audacity-mcp. It requires a manual one-time in-app step: ENABLE the 'mod-script-pipe' module inside Audacity (Edit -> Preferences -> Modules -> set mod-script-pipe to 'Enabled', then restart Audacity) so the named-pipe scripting bridge the MCP server uses is available. Because that module-enable happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/xDarkzx/Audacity-MCP",
+      "readme_url": "https://raw.githubusercontent.com/xDarkzx/Audacity-MCP/main/README.md",
+      "manual_install": "Two steps per the README: (1) enable scripting in Audacity -- go to Edit -> Preferences -> Modules, set 'mod-script-pipe' to Enabled, and restart Audacity (this opens the named-pipe scripting bridge); (2) install + run the MCP server from PyPI (audacity-mcp), e.g. `uvx audacity-mcp` (verify the entry point in the README). Requires a local Audacity install. The in-app mod-script-pipe enable is manual, which is why this is a docs-only pointer.",
+      "license": "Apache-2.0",
+      "categories": [
+        "music",
+        "audio",
+        "editing"
+      ]
+    },
+    {
+      "id": "anki",
+      "name": "Anki MCP server (docs-only)",
+      "summary": "Create and manage Anki flashcards/decks from an AI client -- add notes, browse cards, sync -- via the AnkiConnect add-on's local HTTP API. DOCS-ONLY pointer: the MCP server ankimcp/anki-mcp-server (Node, MIT) is published to npm as @ankimcp/anki-mcp-server, but it depends on the AnkiConnect add-on, which you install INSIDE Anki (Tools -> Add-ons -> Get Add-ons, code 2055492159). DEPENDENCY-HEALTH RISK: the AnkiConnect upstream add-on repo (FooSoft/anki-connect) is ARCHIVED (frozen, read-only) AND carries a NOASSERTION (unclear) license per GitHub's classifier -- so the load-bearing dependency is unmaintained with an ambiguous license. The MCP server itself is MIT, but because of the in-app add-on install AND the archived/ambiguously-licensed AnkiConnect dependency, the hub offers this as a docs-only pointer with the warning rather than a one-click row.",
+      "homepage": "https://github.com/ankimcp/anki-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/ankimcp/anki-mcp-server/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the AnkiConnect add-on inside Anki -- Tools -> Add-ons -> Get Add-ons, enter code 2055492159, restart Anki (it exposes a local HTTP API on 127.0.0.1:8765); (2) run the MCP server with `npx @ankimcp/anki-mcp-server`. Requires a local Anki install. WARNING: AnkiConnect (the required add-on, FooSoft/anki-connect) is ARCHIVED/unmaintained and carries a NOASSERTION/unclear license -- review the dependency-health risk before relying on it. The in-app add-on install + the archived dependency are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "productivity",
+        "education",
+        "flashcards"
+      ]
+    },
+    {
+      "id": "comsol",
+      "name": "COMSOL Multiphysics MCP server (docs-only)",
+      "summary": "Drive COMSOL Multiphysics from an AI client — build/run FEA models via GUI automation. DOCS-ONLY pointer: community server 777gegewu/comsol-mcp is NOT packaged (no PyPI/npm) — it is git-clone + a PowerShell venv bootstrap (setup_venv.ps1 / start_server.ps1), automates COMSOL by pasting into its GUI, and carries hardcoded local paths; it is an unofficial educational project. The hub cannot one-click install it, so this is a manual-install pointer.",
+      "homepage": "https://github.com/777gegewu/comsol-mcp",
+      "readme_url": "https://raw.githubusercontent.com/777gegewu/comsol-mcp/main/README.md",
+      "manual_install": "git clone https://github.com/777gegewu/comsol-mcp, run the PowerShell bootstrap (setup_venv.ps1) to create the venv, edit the hardcoded COMSOL install paths in the config to match your machine, then launch with start_server.ps1. Requires a local COMSOL Multiphysics install. Unofficial/educational, GUI-paste automation — review the README before use.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cae",
+        "simulation"
+      ]
+    },
+    {
+      "id": "solidworks",
+      "name": "SolidWorks MCP server (docs-only)",
+      "summary": "Drive SolidWorks CAD from an AI client over its COM API. DOCS-ONLY pointer: community server vespo92/SolidworksMCP-TS is NOT npx-runnable — it depends on the winax native Node addon, which must be compiled against your toolchain at install (node-gyp/MSVC), and the project is Alpha: its README states most tools are not yet validated against a live SolidWorks. The hub cannot one-click install a native-compile, unvalidated row, so this is a manual-install pointer.",
+      "homepage": "https://github.com/vespo92/SolidworksMCP-TS",
+      "readme_url": "https://raw.githubusercontent.com/vespo92/SolidworksMCP-TS/main/README.md",
+      "manual_install": "git clone https://github.com/vespo92/SolidworksMCP-TS, then `npm install` (this compiles the winax native addon via node-gyp — you need a working MSVC/Build Tools toolchain), `npm run build`, and run the built server. Requires a local Windows SolidWorks install. Alpha: most tools are not yet validated against live SolidWorks — verify each tool before relying on it.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ]
+    },
+    {
+      "id": "autocad",
+      "name": "AutoCAD MCP server (docs-only)",
+      "summary": "Drive AutoCAD from an AI client. DOCS-ONLY pointer: community server puran-water/autocad-mcp is NOT on PyPI and requires a 2-step manual in-application setup — you load its support code inside AutoCAD via the APPLOAD command before the MCP server can connect — and targets AutoCAD LT specifically. Because the load step happens inside the host app (the hub cannot perform an in-app APPLOAD), this is a manual-install pointer.",
+      "homepage": "https://github.com/puran-water/autocad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/puran-water/autocad-mcp/main/README.md",
+      "manual_install": "git clone https://github.com/puran-water/autocad-mcp and follow its README: install the Python deps, then INSIDE AutoCAD run the APPLOAD command to load the project's support code (step 1), and start the MCP server (step 2). Targets AutoCAD LT. The in-app APPLOAD step must be done by hand each session the README describes.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "drawing"
+      ]
+    },
+    {
+      "id": "guitarpro",
+      "name": "Guitar Pro MCP server (docs-only)",
+      "summary": "Generate Guitar Pro tablature from an AI client. DOCS-ONLY pointer: community server quinnjr/guitar-pro-mcp was published to npm then UNPUBLISHED (the guitar-pro-mcp package is a tombstone — `npx guitar-pro-mcp` no longer resolves), so it must be built from a git clone. It generates GP6 (.gp) files only and is an early single-star project. The hub cannot one-click install an unpublished package, so this is a manual-install pointer.",
+      "homepage": "https://github.com/quinnjr/guitar-pro-mcp",
+      "readme_url": "https://raw.githubusercontent.com/quinnjr/guitar-pro-mcp/main/README.md",
+      "manual_install": "The npm package guitar-pro-mcp was unpublished, so install from source: git clone https://github.com/quinnjr/guitar-pro-mcp, `npm install`, `npm run build`, then point your client at the built server. Generates Guitar Pro 6 (.gp) files only. Early project (single star) — try before relying on it.",
+      "license": "ISC",
+      "categories": [
+        "music",
+        "audio"
+      ]
+    },
+    {
+      "id": "flstudio",
+      "name": "FL Studio MCP server (docs-only)",
+      "summary": "Drive FL Studio from an AI client. DOCS-ONLY pointer: community server rosasynthesiz/flstudio-mcp. NOTE the PyPI package fl-studio-mcp@1.0.0 is authored by rosasynthesiz (this repo's owner) — do NOT confuse it with similarly-named FL Studio MCP projects by other authors (karl-andres / calvinw), a real name-collision trap. It is an early single-star, unvalidated, Windows-only project requiring an in-app FL Studio MIDI-controller-script setup, so the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/rosasynthesiz/flstudio-mcp",
+      "readme_url": "https://raw.githubusercontent.com/rosasynthesiz/flstudio-mcp/main/README.md",
+      "manual_install": "Follow the README at https://github.com/rosasynthesiz/flstudio-mcp: install the project (PyPI fl-studio-mcp by author rosasynthesiz — verify the author to avoid the karl-andres/calvinw name collision), then install the bundled FL Studio MIDI-controller script into FL Studio and enable it. Windows + FL Studio only. Early, unvalidated single-star project — verify behavior before use.",
+      "license": "MIT",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ]
+    },
+    {
+      "id": "bitwig",
+      "name": "Bitwig Studio MCP server (docs-only)",
+      "summary": "Drive Bitwig Studio from an AI client over OSC. DOCS-ONLY pointer: community server WeModulate/bitwig-mcp-server is NOT on PyPI and reaches Bitwig through a third-party 'Driven by Moss' OSC controller extension you install into Bitwig separately; the repo is ~14 months stale. The MCP server's own OSC endpoint binds 127.0.0.1 by default (loopback — verified in osc/server.py + settings.py), so it is not a LAN-exposure row, but the multi-piece manual setup (clone + the separate Moss extension) means the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/WeModulate/bitwig-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/WeModulate/bitwig-mcp-server/main/README.md",
+      "manual_install": "Install the third-party 'Driven by Moss' OSC controller extension into Bitwig Studio first (it exposes Bitwig over OSC), then git clone https://github.com/WeModulate/bitwig-mcp-server, install its Python deps, and run the server (its OSC binds 127.0.0.1 by default). Requires Bitwig Studio. Repo is ~14 months stale — verify against your Bitwig version.",
+      "license": "MIT",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ]
+    },
+    {
+      "id": "midi",
+      "name": "MIDI MCP server (docs-only)",
+      "summary": "Generate MIDI files from an AI client. DOCS-ONLY pointer: community server tubone24/midi-mcp-server is a MIDI-FILE GENERATOR (writes .mid files), NOT a live-device/DAW driver, and is NOT published to npm (build from a git clone). SECURITY: its HTTP transport mode calls httpServer.listen(port) with NO host argument, so Node binds 0.0.0.0 — the HTTP endpoint is reachable from your LAN (verified in src/index.ts). RUN IT IN STDIO MODE (the default, no network listener) — only use HTTP mode behind a firewall restricting the port to loopback or on a trusted network. The hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/tubone24/midi-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/tubone24/midi-mcp-server/main/README.md",
+      "manual_install": "git clone https://github.com/tubone24/midi-mcp-server, `npm install`, `npm run build`, then run in STDIO mode (the default — no network listener). It generates .mid files (not a device driver). WARNING: HTTP mode binds 0.0.0.0 (LAN-reachable) — prefer stdio; if you must use HTTP, restrict the port to loopback via your firewall or run only on a trusted network.",
+      "license": "MIT",
+      "categories": [
+        "music",
+        "audio",
+        "generation"
+      ]
+    },
+    {
+      "id": "logicpro",
+      "name": "Logic Pro MCP server (docs-only)",
+      "summary": "Drive Apple Logic Pro from an AI client. DOCS-ONLY pointer: community server MongLong0214/logic-pro-mcp is macOS-ONLY — a Swift binary built with the macOS Accessibility/AppleScript APIs (Package.swift, no PyPI/npm), so it must be compiled on a Mac with Xcode. It is among the more mature DAW MCP repos and drives Logic via macOS Accessibility (it dropped the earlier OSC path, so it is loopback-clean — no network listener). Because it is a macOS-only Swift build the hub cannot one-click install, this is a manual-install pointer.",
+      "homepage": "https://github.com/MongLong0214/logic-pro-mcp",
+      "readme_url": "https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/main/README.md",
+      "manual_install": "macOS only. Install Xcode/Swift toolchain, git clone https://github.com/MongLong0214/logic-pro-mcp, `swift build` (the Package.swift target), and grant the built binary macOS Accessibility permission (System Settings → Privacy & Security → Accessibility) so it can drive Logic Pro. Requires Logic Pro on macOS. Drives via Accessibility (no network listener).",
+      "license": "MIT",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ]
+    },
+    {
+      "id": "cubase",
+      "name": "Cubase MCP server (docs-only)",
+      "summary": "Drive Steinberg Cubase from an AI client. DOCS-ONLY pointer: community server hedidjs/cubase-mcp is macOS-oriented, very early (8 stars, 3 commits, immature), and NOT packaged (requirements.txt, git-clone-only). It controls Cubase over a virtual-MIDI port (a Generic Remote / MIDI mapping you configure inside Cubase — no network socket). Because of the immaturity and the manual in-app virtual-MIDI setup the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/hedidjs/cubase-mcp",
+      "readme_url": "https://raw.githubusercontent.com/hedidjs/cubase-mcp/main/README.md",
+      "manual_install": "git clone https://github.com/hedidjs/cubase-mcp, install the Python deps from requirements.txt, create a virtual-MIDI port and configure Cubase's Generic Remote / MIDI mapping to it (per the README), then run the server. macOS-oriented. Requires Cubase. Very early (3 commits) — try before relying on it.",
+      "license": "MIT",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ]
+    },
+    {
+      "id": "scite",
+      "name": "Scite MCP server (docs-only)",
+      "summary": "Connect an AI client to Scite's scientific-literature database from scite.ai -- full-text search across research papers plus Scite's Smart Citations (which show whether other studies support, contradict, or merely mention a claim). DOCS-ONLY pointer: this is a REMOTE MCP endpoint (https://api.scite.ai/mcp) that requires OAuth sign-in, so it cannot be a one-click clean entries[] row -- the hub never installs it; add it directly in your MCP client and complete the browser OAuth flow. Requires a Scite subscription (7-day trial available). Scite is a proprietary commercial product.",
+      "homepage": "https://scite.ai",
+      "readme_url": "https://scite.ai/mcp",
+      "manual_install": "Scite is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user scite https://api.scite.ai/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize (OAuth 2.0; the client auto-discovers the endpoints from /.well-known/oauth-authorization-server). Requires a Scite subscription (7-day trial available). Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://api.scite.ai/mcp streamable-HTTP URL.",
+      "license": "proprietary",
+      "categories": [
+        "research",
+        "science",
+        "citations"
+      ]
+    },
+    {
+      "id": "consensus",
+      "name": "Consensus MCP server (docs-only)",
+      "summary": "Search over 200M+ peer-reviewed scientific papers from an AI client via Consensus -- an AI research search engine spanning sources such as Semantic Scholar, PubMed, and arXiv. DOCS-ONLY pointer: this is a REMOTE MCP endpoint (https://mcp.consensus.app/mcp) whose supported access is OAuth per client (Claude Code opens the browser OAuth on first tool use; Codex requires `codex mcp login consensus`), so a one-click URL-only install would leave an unauthenticated, non-working server -- the hub never installs it; add it directly in your MCP client and complete the OAuth flow. A no-account free tier may return limited results, but OAuth is the supported access path. Consensus is a proprietary commercial product.",
+      "homepage": "https://consensus.app",
+      "readme_url": "https://docs.consensus.app/docs/mcp",
+      "manual_install": "Consensus is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user consensus https://mcp.consensus.app/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize on first use. In Codex, run `codex mcp login consensus` after adding it to complete OAuth. A no-account free tier may return limited results, but OAuth is the supported access path. Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://mcp.consensus.app/mcp streamable-HTTP URL.",
+      "license": "proprietary",
+      "categories": [
+        "research",
+        "science",
+        "remote"
+      ]
+    },
+    {
+      "id": "graphify",
+      "name": "Graphify MCP server (docs/onboarding)",
+      "summary": "Query a local Graphify knowledge graph from an AI client. Graphify-Labs/graphify (Python, Apache-2.0), published to PyPI as graphifyy and PINNED to v0.9.53. DOCS/ONBOARDING ONLY: the graph JSON path and any environment profile are instance data, so the hub does NOT ship or one-click install a fixed manifest. Install the pinned MCP extra, configure one enabled stdio entry per exact graph/profile identity with command graphify-mcp and the graph JSON as its argument, then adopt that exact entry through the existing transaction. An optional per-call project_path is forwarded with upstream semantics; MCPHub does not turn it into a path-authorization boundary.",
+      "homepage": "https://github.com/Graphify-Labs/graphify",
+      "readme_url": "https://raw.githubusercontent.com/Graphify-Labs/graphify/v0.9.53/README.md",
+      "manual_install": "Install the exact MCP-capable package with `uv tool install \"graphifyy[mcp]==0.9.53\"`. Configure an ENABLED stdio client entry with a unique name, command `graphify-mcp`, and args [`<graph-json>`]; keep that entry's exact environment profile. Preview `mcphub adopt <exact-entry-name> --client <source-client> --port <port> --clients <client-a>,<client-b>`, review the projected command/args/env and omissions, then repeat with `--yes`. Use a distinct entry name and adopt transaction for every graph/profile identity. Roll back with `mcphub de-adopt <exact-entry-name> --yes`. No graph file, pool, path filter, or fixed manifest is installed by this catalog row.",
+      "license": "Apache-2.0",
+      "categories": [
+        "developer-tools",
+        "knowledge-management"
+      ]
+    },
+    {
+      "id": "scholar-search",
+      "name": "Scholar Search MCP server (docs/onboarding)",
+      "summary": "Search academic literature from an AI client via the Semantic Scholar API (and optionally arXiv) -- search papers, fetch paper/author details, citations, references, recommendations, and batch lookups. Community server silung/scholar-search-mcp (Python, MIT), published to PyPI as scholar-search-mcp and PINNED to v0.1.3; the onboarding launch also pins the decorator-compatible MCP SDK to mcp==1.29.0 because Scholar's declared mcp>=0.9.0 range otherwise admits incompatible MCP 2.x releases. DOCS/ONBOARDING ONLY: the hub does NOT one-click install it; configure an exact enabled environment profile and adopt that identity through the existing transaction. This server exposes a WRITE-CAPABLE, DESTRUCTIVE tool `download_arxiv_source` that extracts an arXiv source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> first -- with no per-tool consent gate, an agent could pass output_dir=~ + arxiv_id=.ssh and wipe ~/.ssh even if the download 404s. Only ever pass a safe, dedicated output_dir (never a home/config directory such as ~ or ~/.ssh). Search itself is keyless (the Semantic Scholar API works at the shared public rate limit -- no secret). Requires Python + uv on PATH.",
+      "homepage": "https://github.com/silung/scholar-search-mcp",
+      "readme_url": "https://raw.githubusercontent.com/silung/scholar-search-mcp/master/README.md",
+      "manual_install": "Add an ENABLED stdio entry after reviewing the destructive-tool caveat. Pinned, project-isolated launch: `uv run --no-project --with scholar-search-mcp==0.1.3 --with mcp==1.29.0 python -m scholar_search_mcp` -- both pins are required: Scholar declares mcp>=0.9.0, but its @app.list_tools()/@app.call_tool() integration needs the decorator-compatible MCP 1.29.0 API and fails during import with an unconstrained MCP 2.x resolution. The --no-project flag avoids discovering an ambient Python project/workspace (a global daemon inherits the supervisor cwd; a stray pyproject.toml with an incompatible requires-python would otherwise break the server). Enable the backends with env SCHOLAR_SEARCH_ENABLE_SEMANTIC_SCHOLAR=true and SCHOLAR_SEARCH_ENABLE_ARXIV=true. Preview `mcphub adopt <exact-entry-name> --client <source-client> --port <port> --clients <client-a>,<client-b>`, review the exact args/env and omissions, then repeat with `--yes`; roll back with `mcphub de-adopt <exact-entry-name> --yes`. DESTRUCTIVE-TOOL CAVEAT: this server exposes `download_arxiv_source`, which extracts an arXiv paper's LaTeX/source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> before fetching -- an agent that supplies a sensitive output_dir (e.g. ~ or ~/.ssh) could wipe files there even if the download fails. Only ever pass a safe, dedicated output_dir. Setting env SCHOLAR_ARXIV_SOURCE_DIR only changes the DEFAULT base used when a call OMITS output_dir; it does NOT constrain an explicit output_dir an agent supplies, so it is not a safety gate. Requires Python + uv on PATH.",
+      "license": "MIT",
+      "categories": [
+        "research",
+        "science"
+      ]
+    }
+  ]
+}

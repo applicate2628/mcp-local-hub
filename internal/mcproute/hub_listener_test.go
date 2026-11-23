@@ -34,7 +34,7 @@ func (fatalHubAcceptListener) Close() error   { return nil }
 func (fatalHubAcceptListener) Addr() net.Addr { return &net.TCPAddr{} }
 
 func TestHubListenerServeFailureClearsAlive(t *testing.T) {
-	listener := &HubListener{srv: newHubMcpHTTPServer(http.NewServeMux())}
+	listener := &HubListener{srv: newHubMcpHTTPServer(http.NewServeMux()), serveDone: make(chan struct{})}
 	listener.alive.Store(true)
 	var reported error
 	listener.serve(fatalHubAcceptListener{}, func(err error) {
@@ -45,6 +45,14 @@ func TestHubListenerServeFailureClearsAlive(t *testing.T) {
 	})
 	if listener.Alive() || reported == nil {
 		t.Fatalf("alive=%t, callback error=%v", listener.Alive(), reported)
+	}
+	select {
+	case <-listener.serveDone:
+		if !errors.Is(listener.serveErr, reported) {
+			t.Fatalf("original Serve result=%v, reported=%v", listener.serveErr, reported)
+		}
+	default:
+		t.Fatal("original Serve result not settled")
 	}
 	listener.Shutdown(context.Background())
 }

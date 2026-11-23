@@ -272,7 +272,7 @@ func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartD
 }
 
 func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) hubListenerRestartOutcome {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || s.cfg.SupervisedAggregate {
 		return hubListenerRestartStopDriver
 	}
 
@@ -655,7 +655,7 @@ type startHubMcpListenerOptions struct {
 }
 
 func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.API, opts startHubMcpListenerOptions) (*HubListenerComponents, error) {
-	if !enabled {
+	if !enabled || (opts.server != nil && opts.server.cfg.SupervisedAggregate) {
 		return nil, nil
 	}
 	comp := &HubListenerComponents{}

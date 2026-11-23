@@ -812,13 +812,23 @@ type upgradeGUIExitOps struct {
 	PostExitCheck   func(context.Context, *upgradeGUIHeldTopology) error
 }
 
-func resolveUpgradeGUIOwnerPath() (string, error) {
+// resolveInstalledUpgradeGUIPidportPath selects the deployed GUI name. Bound
+// callers establish the parent and file conditions through their native owners.
+func resolveInstalledUpgradeGUIPidportPath() (string, error) {
 	if os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR") != "" {
 		return "", errors.New("UPGRADE_GUI_LOCK_PATH_MISMATCH: GUI pidport override cannot bind the installed owner")
 	}
 	path, err := gui.PidportPathNoCreate()
 	if err != nil {
 		return "", fmt.Errorf("UPGRADE_GUI_LOCK_PATH_MISMATCH: resolve incumbent GUI owner path: %w", err)
+	}
+	return path, nil
+}
+
+func resolveUpgradeGUIOwnerPath() (string, error) {
+	path, err := resolveInstalledUpgradeGUIPidportPath()
+	if err != nil {
+		return "", err
 	}
 	for _, leaf := range []string{filepath.Dir(path), path, path + ".lock"} {
 		info, err := os.Lstat(leaf)
@@ -1606,10 +1616,18 @@ func runV5UpgradeWindowsWithPathsAndDeps(cmd *cobra.Command, exe, target string,
 	return runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd, exe, target, guiDeps, windowsCanonicalEntryCommandInput{})
 }
 
-// All transaction/rollback/task-close defers must finish before this command
-// boundary projects current policy, releases the GUI lease and outer fence,
-// then reports completion. Earlier failures remain part of the result.
-func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionText string, retErr error, projectCurrentAutorunOff func() error, guiLease gui.OwnedSingleInstanceLease, fence *api.UpgradeFenceLease) error {
+type upgradeProductContinuation struct {
+	namespace *api.WindowsProductStateNamespace
+	apply     func() error
+}
+
+// The transaction, rollback and Task defers finish before this boundary.
+// Receive policy and cleanup before post-release Apply and completion output.
+func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionText string, retErr error, projectCurrentAutorunOff func() error, guiLease gui.OwnedSingleInstanceLease, fence *api.UpgradeFenceLease, next ...upgradeProductContinuation) error {
+	var continuation upgradeProductContinuation
+	if len(next) != 0 {
+		continuation = next[0]
+	}
 	if projectCurrentAutorunOff != nil {
 		if projectionErr := projectCurrentAutorunOff(); projectionErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("v0.5 upgrade: current autorun OFF projection: %w", projectionErr))
@@ -1617,6 +1635,7 @@ func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionTex
 	}
 	if guiLease != nil {
 		if releaseErr := guiLease.ReleaseErr(); releaseErr != nil {
+			continuation.namespace.RetainAfterUnconfirmedRelease(releaseErr)
 			retErr = errors.Join(retErr, fmt.Errorf("UPGRADE_GUI_LEASE_RELEASE_UNCONFIRMED: %w", releaseErr))
 		}
 	}
@@ -1631,8 +1650,17 @@ func finishV5UpgradeWindowsCommand(cmd *cobra.Command, optIn bool, completionTex
 	} else if releaseErr := fence.Release(); releaseErr != nil {
 		retErr = fmt.Errorf("v0.5 upgrade: release upgrade transaction fence: %w", releaseErr)
 	}
+	api.ReleaseAndJoin(&retErr, continuation.namespace.Close, "close original Product state namespace")
+	if continuation.apply != nil {
+		if retErr != nil {
+			return fmt.Errorf("Product upgrade settled. Aggregate apply withheld: %w", retErr)
+		}
+		if err := continuation.apply(); err != nil {
+			return fmt.Errorf("Product upgrade settled. Aggregate apply failed: %w", err)
+		}
+	}
 	if retErr == nil && completionText != "" {
-		if optIn {
+		if optIn || continuation.apply != nil {
 			retErr = writeUpgradeGUICompletion(cmd.OutOrStdout(), completionText)
 		} else {
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), completionText)
@@ -1658,10 +1686,6 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	}
 	evidence := &windowsProductJournalReadEvidence{}
 	defer func() { retErr = withWindowsProductJournalEvidence(retErr, evidence) }()
-	stateDir, err := api.DaemonStateDir()
-	if err != nil {
-		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
-	}
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -1683,8 +1707,35 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		fenceCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
-	fence, err := api.AcquireUpgradeFence(fenceCtx, stateDir)
+	var stateDir string
+	var namespace *api.WindowsProductStateNamespace
+	var namespaceErr error
+	if current && !optIn {
+		// This observation only selects the acquisition. Failure before a
+		// bound fence attempt leaves the ordinary fence permanently non-issuing.
+		wantsBound, gateErr := readSavedAggregateGate()
+		if gateErr == nil && wantsBound {
+			stateDir, namespaceErr = api.DaemonStateDirReadOnly()
+			if namespaceErr == nil {
+				namespace, namespaceErr = api.OpenWindowsProductStateNamespace(fenceCtx, stateDir)
+				if namespace != nil && namespaceErr != nil {
+					return namespaceErr
+				}
+			}
+		}
+	}
+	var fence *api.UpgradeFenceLease
+	if namespace != nil {
+		fence, err = api.AcquireUpgradeFenceBound(fenceCtx, stateDir, namespace)
+	} else {
+		stateDir, err = api.DaemonStateDir()
+		if err != nil {
+			return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
+		}
+		fence, err = api.AcquireUpgradeFence(fenceCtx, stateDir)
+	}
 	if err != nil {
+		api.ReleaseAndJoin(&err, namespace.Close, "close attempted Product state namespace")
 		if optIn {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("UPGRADE_GUI_FENCE_TIMEOUT: %w", err)
@@ -1693,10 +1744,12 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 		return fmt.Errorf("v0.5 upgrade: acquire upgrade transaction fence: %w", err)
 	}
+	continuation := upgradeProductContinuation{namespace: namespace}
 	if err := requireWindowsProductWithoutBackendHold(ctx, stateDir); err != nil {
-		return finishV5UpgradeWindowsCommand(cmd, optIn, "", err, nil, nil, fence)
+		return finishV5UpgradeWindowsCommand(cmd, optIn, "", err, nil, nil, fence, continuation)
 	}
 	var guiLease gui.OwnedSingleInstanceLease
+	var recovered *WindowsProductPairRecoverySettled
 	completionText := ""
 	var projectOnFinish func() error
 	projectCurrentAutorunOff := func() error {
@@ -1712,7 +1765,11 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		})
 	}
 	defer func() {
-		retErr = finishV5UpgradeWindowsCommand(cmd, optIn, completionText, retErr, projectOnFinish, guiLease, fence)
+		retErr = finishV5UpgradeWindowsCommand(cmd, optIn, completionText, retErr, projectOnFinish, guiLease, fence, continuation)
+		if recovered != nil && retErr == nil {
+			message := fmt.Sprintf("UPGRADE_PENDING_RECOVERY_SETTLED: transaction=%s outcome=%s", recovered.TransactionID, recovered.Outcome)
+			retErr = writeUpgradeGUICompletion(cmd.OutOrStdout(), message)
+		}
 	}()
 	if optIn {
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "UPGRADE_GUI_FENCE_HELD: one upgrade fence acquired"); err != nil {
@@ -1732,6 +1789,13 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	} else if err := verifyWindowsLegacyCallerSource(ctx, input.binding); err != nil {
 		return err
 	}
+	var aggregateEnabled bool
+	if current && !optIn {
+		aggregateEnabled, err = readSavedAggregateGate()
+		if err != nil {
+			return fmt.Errorf("read saved aggregate gate before Product transfer: %w", err)
+		}
+	}
 	// Recover or refuse pending publication before staging a new candidate.
 	if !optIn {
 		recoveryRequest, err := windowsCanonicalEntryRecoveryRequestForDomain(ctx, stateDir, target, legacyWindowlessTarget, current, allowance, evidence)
@@ -1741,8 +1805,14 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		if current {
 			bindWindowsProductSuccessorQuiescence(&recoveryRequest, original)
 		}
-		if _, err := reconcileWiredWindowsProductRecovery(recoveryRequest); err != nil {
+		recoveryRequest.RequireCurrentHeadlessUpgrade = aggregateEnabled
+		settled, err := reconcileWiredWindowsProductRecovery(recoveryRequest)
+		if err != nil {
 			return ordinaryWindowsProductRecoveryError(err)
+		}
+		if aggregateEnabled && settled != nil {
+			recovered = settled
+			return nil
 		}
 	} else if present, err := inspectWindowsProductRecoveryLeaves(stateDir); err != nil || present {
 		return fmt.Errorf("UPGRADE_GUI_PENDING_RECOVERY: pending=%v error=%v", present, err)
@@ -1881,6 +1951,20 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		}
 		completionText = string(upgradeGUIAlreadyCurrent)
 		return nil
+	}
+	var aggregateQualification *productAggregateQualification
+	if aggregateEnabled {
+		if namespace == nil {
+			return errors.Join(errors.New("changed aggregate ON Product requires its originally bound state namespace"), namespaceErr)
+		}
+		guiLease, aggregateQualification, err = reserveAbsentPriorAggregate(ctx, stateDir, priorPath, priorRuntime, namespace)
+		if err != nil {
+			return fmt.Errorf("reserve absent prior aggregate before Product transfer: %w", err)
+		}
+		if guiLease == nil || aggregateQualification == nil {
+			return errors.New("prior aggregate GUI reservation unavailable")
+		}
+		productTxn.aroundCommitDecision = aggregateQualification.beforeDecision
 	}
 	if optIn && priorRuntime == nil {
 		return errors.New("UPGRADE_GUI_PRIOR_STATE_UNVERIFIABLE: no original prior runtime exists for GUI-owned stop")
@@ -2051,6 +2135,9 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 	}
 	onProductPrepared := func() error {
 		projectOnFinish = projectCurrentAutorunOff
+		if aggregateQualification != nil {
+			return aggregateQualification.capturePrepared(productTxn)
+		}
 		if emitProductPrepared != nil {
 			return emitProductPrepared()
 		}
@@ -2128,6 +2215,19 @@ func runV5UpgradeWindowsWithPathsAndDepsAndInput(cmd *cobra.Command, exe, target
 		completionText = "UPGRADE_GUI_TXN_SETTLED: requested Product transaction complete"
 	} else {
 		completionText = "v0.5 upgrade complete."
+	}
+	if aggregateQualification != nil {
+		accepted := productTxn.prepared
+		if accepted == nil || accepted != aggregateQualification.prepared ||
+			!accepted.successorForwardOwned || accepted.successorBinding.proof == nil ||
+			accepted.journal.TransactionID != aggregateQualification.next.TransactionID {
+			return errors.New("Product upgraded without the original aggregate successor proof")
+		}
+		binding, transactionID := accepted.successorBinding, accepted.journal.TransactionID
+		endpoint := aggregateQualification.endpoint.Endpoint()
+		continuation.apply = func() error {
+			return applySettledProductAggregate(ctx, stateDir, target, transactionID, input, binding, endpoint)
+		}
 	}
 	return nil
 }

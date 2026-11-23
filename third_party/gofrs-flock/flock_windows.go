@@ -97,7 +97,7 @@ func (f *Flock) unlockLocked() error {
 	// if we aren't locked or if the lockfile instance is nil
 	// just return a nil error because we are unlocked
 	if (!f.l && !f.r) || f.fh == nil {
-		return nil
+		return f.openerCloseErr
 	}
 
 	// mark the file as unlocked
@@ -113,7 +113,7 @@ func (f *Flock) unlockLocked() error {
 
 	f.reset()
 
-	return nil
+	return f.openerCloseErr
 }
 
 // TryLock is the preferred function for taking an exclusive file lock.
@@ -145,7 +145,7 @@ func (f *Flock) TryRLock() (bool, error) {
 	return f.try(&f.r, winLockfileSharedLock, false)
 }
 
-func (f *Flock) try(locked *bool, flag uint32, original bool) (bool, error) {
+func (f *Flock) try(locked *bool, flag uint32, original bool) (_ bool, retErr error) {
 	f.m.Lock()
 	defer f.m.Unlock()
 	if err := f.observedAcquireGuard(original); err != nil {
@@ -161,7 +161,12 @@ func (f *Flock) try(locked *bool, flag uint32, original bool) (bool, error) {
 			return false, err
 		}
 
-		defer f.ensureFhState()
+		defer func() {
+			f.ensureFhState()
+			if f.openerCloseErr != nil {
+				retErr = errors.Join(retErr, f.openerCloseErr)
+			}
+		}()
 	}
 
 	err := windows.LockFileEx(windows.Handle(f.fh.Fd()), flag|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{})

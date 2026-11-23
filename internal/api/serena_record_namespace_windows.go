@@ -39,7 +39,7 @@ func acquireSerenaRecordNamespaceReadPlatform(ctx context.Context, io PreparedSe
 }
 func acquireSerenaRecordNamespacePlatformMode(ctx context.Context, io PreparedSerenaRecordIO, key, path string, create bool) (result *SerenaRecordNamespaceObservation, retErr error) {
 	result = &SerenaRecordNamespaceObservation{io: io, key: key, path: path, readOnly: !create}
-	result.platform, retErr = acquireStateFreshPhysicalNamespace(ctx, result, io.Root, key, create, path, windowsDACLSignificantBits)
+	result.platform, retErr = acquireStateFreshPhysicalNamespace(ctx, result, io.Root, key, create, path, windowsDACLSignificantBits, nil)
 	if retErr == nil {
 		w := result.platform.(*windowsSerenaRecordNamespace)
 		w.runtimeRoot, w.packageRoot = w.parent, w.root
@@ -55,7 +55,7 @@ func acquireSerenaRecordNamespacePlatformMode(ctx context.Context, io PreparedSe
 }
 func acquireSerenaOperationNamespacePlatform(ctx context.Context, io PreparedSerenaRecordIO, key, operationID, path string, create bool) (result *SerenaRecordNamespaceObservation, retErr error) {
 	result = &SerenaRecordNamespaceObservation{io: io, key: key, path: path, role: "prepared-operation", operationID: operationID}
-	result.platform, retErr = acquireStateFreshPhysicalNamespace(ctx, result, filepath.Join(io.Root, key), "operations", create, path, windowsDACLSignificantBits)
+	result.platform, retErr = acquireStateFreshPhysicalNamespace(ctx, result, filepath.Join(io.Root, key), "operations", create, path, windowsDACLSignificantBits, nil)
 	if retErr == nil {
 		w := result.platform.(*windowsSerenaRecordNamespace)
 		defer func() {
@@ -155,25 +155,25 @@ func (w *windowsSerenaRecordNamespace) leafParentDigest(ctx context.Context) (st
 	}
 	return serenaRecordLeafParentDigest(common, role, filepath.Base(source.path), w.rootIdentity)
 }
-func acquireSupervisorStateNamespacePlatform(ctx context.Context, source *SupervisorStateNamespaceObservation) (serenaRecordNamespacePlatform, error) {
+func acquireSupervisorStateNamespacePlatform(ctx context.Context, source *SupervisorStateNamespaceObservation, boundResolution *StateDirResolutionObservation) (serenaRecordNamespacePlatform, error) {
 	mask := windowsDACLWriteOrAdminBits
 	if source.policy.Snapshot().EffectiveStrict {
 		mask = windowsDACLSignificantBits
 	}
-	w, err := acquireStateFreshPhysicalNamespace(ctx, source, filepath.Dir(source.root), filepath.Base(source.root), source.request.CreateMissing, filepath.Join(source.root, "supervisor-state.json"), mask)
+	w, err := acquireStateFreshPhysicalNamespace(ctx, source, filepath.Dir(source.root), filepath.Base(source.root), source.request.CreateMissing, filepath.Join(source.root, "supervisor-state.json"), mask, boundResolution)
 	if err == nil {
 		source.namespaceSHA256, err = supervisorNamespaceDigest(source.root, source.request.SourceEpoch, w.rootIdentity)
 	}
 	return w, err
 }
-func acquireStateFreshPhysicalNamespace(ctx context.Context, source StateFileFreshNamespaceSource, parentPath, key string, create bool, path string, mask uint32) (w *windowsSerenaRecordNamespace, retErr error) {
+func acquireStateFreshPhysicalNamespace(ctx context.Context, source StateFileFreshNamespaceSource, parentPath, key string, create bool, path string, mask uint32, boundResolution *StateDirResolutionObservation) (w *windowsSerenaRecordNamespace, retErr error) {
 	if ctx == nil {
 		return nil, errors.New("SERENA_RECORD_NAMESPACE_CONTEXT_MISSING")
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, errors.New("SERENA_RECORD_NAMESPACE_DEADLINE_MISSING")
 	}
-	parentExists, parentPolicy, parentErr := SecureConfigLockParentPolicyObserved(ctx, parentPath, create)
+	parentExists, parentPolicy, parentErr := secureConfigLockParentPolicyObserved(ctx, parentPath, create, boundResolution)
 	parentValidation := parentPolicy.Validate(ctx, parentPath, create)
 	if parentErr != nil || parentValidation != nil || !parentExists {
 		return nil, errors.Join(parentErr, parentValidation, errors.New("STATE_FRESH_NAMESPACE_PARENT_UNAVAILABLE"))
@@ -198,7 +198,7 @@ func acquireStateFreshPhysicalNamespace(ctx context.Context, source StateFileFre
 	if !namespaceIdentityMatches(w.parentIdentity, parentPolicy.Snapshot().FinalIdentity) {
 		return w, errors.New("STATE_FRESH_NAMESPACE_PARENT_PREFLIGHT_DRIFT")
 	}
-	rootExists, rootPolicy, rootErr := SecureConfigLockParentPolicyObserved(ctx, w.rootPath, create)
+	rootExists, rootPolicy, rootErr := secureConfigLockParentPolicyObserved(ctx, w.rootPath, create, boundResolution)
 	w.rootPolicy = rootPolicy
 	rootValidation := rootPolicy.Validate(ctx, w.rootPath, create)
 	if rootErr != nil || rootValidation != nil || !rootExists {

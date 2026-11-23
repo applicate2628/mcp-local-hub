@@ -36,6 +36,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -219,7 +220,7 @@ func portFromURL(u string) int {
 
 // helper: synthesize a hubSession with two participating daemons
 // pointing at the stubs' ports.
-func sessionWithParticipants(daemons ...*stubDaemon) *hubSession {
+func sessionWithParticipants(t *testing.T, daemons ...*stubDaemon) *hubSession {
 	s := &hubSession{
 		ClientSessionID:  "client-sid-1",
 		ScopeKey:         "claude-code",
@@ -238,7 +239,40 @@ func sessionWithParticipants(daemons ...*stubDaemon) *hubSession {
 		}
 		s.IntendedParticipants = append(s.IntendedParticipants, ref)
 	}
+	previous := LoadResolverSnapshot()
+	t.Cleanup(func() { PublishResolverSnapshot(previous) })
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
+		Bindings: map[string][]canonicalDaemonRef{s.ScopeKey: s.IntendedParticipants},
+	})
 	return s
+}
+
+// Qualify hand-built ordinary snapshots used by the existing transport fixtures.
+// Production admission never infers eligibility from a scope's bindings.
+func publishOrdinaryHubTestSnapshot(snap *ResolverSnapshot) {
+	if snap != nil && snap.ordinaryEndpoints == nil {
+		snap.ordinaryEndpoints = make(map[int]canonicalDaemonRef)
+		for _, refs := range snap.Bindings {
+			for _, ref := range refs {
+				owner, exists := snap.ordinaryEndpoints[ref.Port]
+				if exists && owner != ref {
+					snap.ordinaryEndpoints[ref.Port] = canonicalDaemonRef{}
+				} else {
+					snap.ordinaryEndpoints[ref.Port] = ref
+				}
+			}
+		}
+	}
+	PublishResolverSnapshot(snap)
+}
+
+func ordinaryListTargetForTest(t *testing.T, ref canonicalDaemonRef) hubDaemonRequest {
+	t.Helper()
+	const scope = "claude-code"
+	previous := LoadResolverSnapshot()
+	t.Cleanup(func() { PublishResolverSnapshot(previous) })
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{Bindings: map[string][]canonicalDaemonRef{scope: {ref}}})
+	return hubDaemonRequest{ref: ref, scope: scope}
 }
 
 func TestAggregateInitializePopulatesSuccessesAndFailures(t *testing.T) {
@@ -248,7 +282,7 @@ func TestAggregateInitializePopulatesSuccessesAndFailures(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	sess := sessionWithParticipants(d1, d2)
+	sess := sessionWithParticipants(t, d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -283,7 +317,7 @@ func TestAggregateInitializeDeletesSessionWhenInitializedNotificationFails(t *te
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -313,7 +347,7 @@ func TestAggregateInitializeDeletesSessionWhenInitializedNotificationFails(t *te
 func TestAggregateToolsListMergesAndNamespaces(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	d2 := newStubDaemon(t, "d2-sid")
-	sess := sessionWithParticipants(d1, d2)
+	sess := sessionWithParticipants(t, d1, d2)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -379,7 +413,7 @@ func TestAggregateToolsListReportsAllFailedAsErrorMinus32000(t *testing.T) {
 	d1.onInit = bad
 	d2.onInit = bad
 
-	sess := sessionWithParticipants(d1, d2)
+	sess := sessionWithParticipants(t, d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _ = AggregateInitialize(ctx, sess, json.RawMessage(`1`))
@@ -458,7 +492,7 @@ func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
 	d1.onList = listBad
 	d2.onList = listBad
 
-	sess := sessionWithParticipants(d1, d2)
+	sess := sessionWithParticipants(t, d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -512,7 +546,7 @@ func TestAggregateToolsListAllListFailedReturnsMinus32000(t *testing.T) {
 
 func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -531,7 +565,7 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
 	}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	// Call srv1__read; the daemon should see params.name="read".
 	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
@@ -553,7 +587,7 @@ func TestAggregateToolsCallCanonicalRewrite(t *testing.T) {
 
 func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -576,7 +610,7 @@ func TestAggregateToolsCallStaleResolverRefuses(t *testing.T) {
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": nil},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
 	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
@@ -609,7 +643,7 @@ func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
 
 	scope := GroupScopeKey("removed-live-binding")
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.ScopeKey = scope
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -629,7 +663,7 @@ func TestAggregateToolsListFiltersRemovedLiveBinding(t *testing.T) {
 		Bindings: map[string][]canonicalDaemonRef{scope: nil},
 		Groups:   map[string]bool{scope: true},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	listBefore := d1.listCount.Load()
 	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
@@ -681,7 +715,7 @@ func TestAggregateToolsListDropsMovedBindingWithNoCachedSession(t *testing.T) {
 	stableDaemon := newStubDaemon(t, "d2-sid")     // srv2: unchanged binding → its tools survive
 	newPortDaemon := newStubDaemon(t, "fresh-sid") // the moved-to port; must NEVER be contacted
 
-	sess := sessionWithParticipants(movingDaemon, stableDaemon)
+	sess := sessionWithParticipants(t, movingDaemon, stableDaemon)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -703,7 +737,7 @@ func TestAggregateToolsListDropsMovedBindingWithNoCachedSession(t *testing.T) {
 			},
 		},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	movingListBefore := movingDaemon.listCount.Load()
 	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
@@ -805,7 +839,7 @@ func TestReinitDetachedCachesSessionWhenCallerCancels(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 	}
 
-	sess := sessionWithParticipants(d)
+	sess := sessionWithParticipants(t, d)
 	ref := sess.IntendedParticipants[0]
 
 	// Caller ctx that we cancel while the detached work fn is gated.
@@ -903,7 +937,7 @@ func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 	}
 
-	sess := sessionWithParticipants(d)
+	sess := sessionWithParticipants(t, d)
 	freshRef := sess.IntendedParticipants[0]
 	oldRef := canonicalDaemonRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: oldPort}
 	sess.SnapshotAtInit = &ResolverSnapshot{
@@ -972,12 +1006,15 @@ func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t
 		t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
 	}
 	initAfterCache := d.initCount.Load()
-	sid, proto, _ := sess.refreshStalePortBeforeDispatch(
+	sid, proto, _, refreshErr := sess.refreshStalePortBeforeDispatch(
 		context.Background(),
 		canonicalToolRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: freshRef.Port, RawName: "read"},
 		oldSID,
 		"2025-11-25",
 	)
+	if refreshErr != nil {
+		t.Fatal(refreshErr)
+	}
 	if sid != freshSID {
 		t.Fatalf("post-cache dispatch resolved session id=%q want cached fresh id %q", sid, freshSID)
 	}
@@ -1014,7 +1051,7 @@ func TestReinitPreservesNewerSamePortStaleMarker(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 	}
-	sess := sessionWithParticipants(d)
+	sess := sessionWithParticipants(t, d)
 	ref := sess.IntendedParticipants[0]
 	sess.SnapshotAtInit = &ResolverSnapshot{
 		Gen:      1,
@@ -1101,7 +1138,7 @@ func TestReinitDetachedDoesNotCacheAfterDelete(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d)
+	sess := sessionWithParticipants(t, d)
 	ref := sess.IntendedParticipants[0]
 	sess.InitSuccesses[ref] = oldSID
 	sess.DaemonProtoVer[ref] = "2025-11-25"
@@ -1199,7 +1236,7 @@ func TestEmptyKnownGroupWhenLastParticipantMovedAndDropped(t *testing.T) {
 	// just at a new port) — distinct from the removed-binding case where the scope
 	// has zero bindings. No fresh session is cached for the new port → dropped.
 	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
 		Groups:   map[string]bool{scope: true},
@@ -1254,7 +1291,7 @@ func TestEmptyKnownGroupDropsMovedInitFailureBeforeDecision(t *testing.T) {
 		Groups:               map[string]bool{scope: true},
 		GroupDeclaredMembers: map[string]int{scope: 1}, // group declared one member ("srv1")
 	}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{scope: {movedRef}},
 		Groups:   map[string]bool{scope: true},
@@ -1296,7 +1333,7 @@ func TestAggregateToolsListLiveEmptiedClientReturnsAllFailed(t *testing.T) {
 	t.Cleanup(func() { resetResolverForTest(t) })
 
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -1307,7 +1344,7 @@ func TestAggregateToolsListLiveEmptiedClientReturnsAllFailed(t *testing.T) {
 		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: sess.IntendedParticipants},
 	}
 	sess.SnapshotAtInit = atInit
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: nil},
 	})
@@ -1346,10 +1383,10 @@ func TestAggregateToolsListUsesLiveResolverSnapshotForHiddenTools(t *testing.T) 
 		},
 		Groups: map[string]bool{scope: true},
 	}
-	PublishResolverSnapshot(initial)
+	publishOrdinaryHubTestSnapshot(initial)
 
 	d1.onList = func(w http.ResponseWriter, r *http.Request) {
-		PublishResolverSnapshot(republished)
+		publishOrdinaryHubTestSnapshot(republished)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"must stay hidden"}]}}`))
@@ -1399,7 +1436,7 @@ func TestAggregateToolsListEmptyReasonEmptyGroup(t *testing.T) {
 
 	scope := GroupScopeKey("declared-empty")
 	// Group is KNOWN to the snapshot but binds no daemons (no members).
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:    1,
 		Groups: map[string]bool{scope: true},
 	})
@@ -1460,7 +1497,7 @@ func TestAggregateToolsListEmptyReasonAllMembersUnresolved(t *testing.T) {
 	// init one), so omitting it here would be an unrealistic fixture that
 	// mislabels empty-group.
 	movedRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: newPortDaemon.port}
-	PublishResolverSnapshot(&ResolverSnapshot{
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
 		Gen:                  2,
 		Bindings:             map[string][]canonicalDaemonRef{scope: {movedRef}},
 		Groups:               map[string]bool{scope: true},
@@ -1497,7 +1534,7 @@ func TestAggregateToolsListEmptyReasonAllMembersUnresolved(t *testing.T) {
 // the discriminator is strictly an empty-list annotation.
 func TestAggregateToolsListNonEmptyHasNoEmptyReason(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1536,7 +1573,7 @@ func TestAggregateToolsListEmptyReasonDeclaredGhostMemberIsUnresolvedNotEmpty(t 
 		Groups:               map[string]bool{scope: true},
 		GroupDeclaredMembers: map[string]int{scope: 1},
 	}
-	PublishResolverSnapshot(atInit)
+	publishOrdinaryHubTestSnapshot(atInit)
 
 	sess := &hubSession{
 		ClientSessionID:      "client-sid-declared-ghost",
@@ -1605,7 +1642,7 @@ func TestAggregateToolsListMixedHiddenAndCollisionNotAllToolsHidden(t *testing.T
 		GroupDeclaredMembers: map[string]int{scope: 1},
 		ToolsHidden:          map[string]map[string][]string{scope: {"srv1": {"hideme"}}},
 	}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess := &hubSession{
 		ClientSessionID:      "client-sid-mixed-drop",
@@ -1683,7 +1720,7 @@ func TestAggregateToolsListFailedFanoutWithHiddenNotAllToolsHidden(t *testing.T)
 		GroupDeclaredMembers: map[string]int{scope: 2},
 		ToolsHidden:          map[string]map[string][]string{scope: {"srv1": {"hideme"}}},
 	}
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess := &hubSession{
 		ClientSessionID:      "client-sid-hidden-plus-failure",
@@ -1763,7 +1800,7 @@ func TestAggregateToolsListRepublishedEmptyGroupUsesLiveDeclaredCount(t *testing
 		Groups:               map[string]bool{scope: true},
 		GroupDeclaredMembers: map[string]int{scope: 0},
 	}
-	PublishResolverSnapshot(live)
+	publishOrdinaryHubTestSnapshot(live)
 
 	sess := &hubSession{
 		ClientSessionID:      "client-sid-republished-empty",
@@ -1812,7 +1849,7 @@ func TestAggregateToolsCallMovedNoCachedSessionReturnsMinus32601(t *testing.T) {
 	oldDaemon := newStubDaemon(t, oldSID)
 	newDaemon := newStubDaemon(t, freshSID)
 
-	sess := sessionWithParticipants(oldDaemon)
+	sess := sessionWithParticipants(t, oldDaemon)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -1837,7 +1874,7 @@ func TestAggregateToolsCallMovedNoCachedSessionReturnsMinus32601(t *testing.T) {
 			}},
 		},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	initBefore := newDaemon.initCount.Load()
 	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), json.RawMessage(`{"name":"srv1__read","arguments":{}}`))
@@ -1888,7 +1925,7 @@ func TestAggregateToolsCallMovedWithCachedFreshSessionDispatches(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
 	}
 
-	sess := sessionWithParticipants(oldDaemon)
+	sess := sessionWithParticipants(t, oldDaemon)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -1912,7 +1949,7 @@ func TestAggregateToolsCallMovedWithCachedFreshSessionDispatches(t *testing.T) {
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": {movedRef}},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	// Simulate the same-port restart consumers having already re-handshook the
 	// moved daemon: seed a fresh cached session for the NEW port.
@@ -1956,7 +1993,7 @@ func TestAggregateToolsCallMovedRaceWithDeleteNoResurrection(t *testing.T) {
 	oldDaemon := newStubDaemon(t, "d1-sid")
 	newPortDaemon := newStubDaemon(t, "fresh-sid") // moved-to port; must NEVER be contacted
 
-	sess := sessionWithParticipants(oldDaemon)
+	sess := sessionWithParticipants(t, oldDaemon)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -1989,7 +2026,7 @@ func TestAggregateToolsCallMovedRaceWithDeleteNoResurrection(t *testing.T) {
 		Gen:      2,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": {movedRef}},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	// Race the DELETE against the moved tools/call.
 	var wg sync.WaitGroup
@@ -2039,7 +2076,7 @@ func TestAggregateToolsListRemovedSuccessWithRetainedFailureReturnsAllFailed(t *
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	sess := sessionWithParticipants(d1, d2)
+	sess := sessionWithParticipants(t, d1, d2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -2063,7 +2100,7 @@ func TestAggregateToolsListRemovedSuccessWithRetainedFailureReturnsAllFailed(t *
 			"claude-code": {sess.IntendedParticipants[1]},
 		},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
@@ -2093,7 +2130,7 @@ func TestAggregateToolsListLiveFilterDropsRemovedRoutesAndInitFailures(t *testin
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	sess := sessionWithParticipants(d1, d2, d3)
+	sess := sessionWithParticipants(t, d1, d2, d3)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -2117,7 +2154,7 @@ func TestAggregateToolsListLiveFilterDropsRemovedRoutesAndInitFailures(t *testin
 			"claude-code": {sess.IntendedParticipants[2]},
 		},
 	}
-	PublishResolverSnapshot(current)
+	publishOrdinaryHubTestSnapshot(current)
 
 	body, err := AggregateToolsList(ctx, sess, json.RawMessage(`7`), "")
 	if err != nil {
@@ -2155,7 +2192,7 @@ func TestAggregateToolsListLiveFilterDropsRemovedRoutesAndInitFailures(t *testin
 
 func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -2171,7 +2208,7 @@ func TestAggregateToolsCallUnknownNameReturnsMinus32601(t *testing.T) {
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
 	}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	params := json.RawMessage(`{"name":"bogus__missing","arguments":{}}`)
 	body, err := AggregateToolsCall(ctx, sess, json.RawMessage(`42`), params)
@@ -2214,7 +2251,7 @@ func TestAggregateInitializeConcurrencyBound(t *testing.T) {
 		d.onInit = delay
 		daemons = append(daemons, d)
 	}
-	sess := sessionWithParticipants(daemons...)
+	sess := sessionWithParticipants(t, daemons...)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -2256,7 +2293,7 @@ func TestForwardCancellationKeepsInFlightUntilCompletion(t *testing.T) {
 		notifyMu.Unlock()
 		w.WriteHeader(http.StatusAccepted)
 	}
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.InitSuccesses[sess.IntendedParticipants[0]] = "d1-sid"
 
 	clientReqID := json.RawMessage(`99`)
@@ -2356,7 +2393,7 @@ func TestAggregateInitializeEchoesClientRequestID(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d1 := newStubDaemon(t, "d1-sid")
-			sess := sessionWithParticipants(d1)
+			sess := sessionWithParticipants(t, d1)
 			body, err := AggregateInitialize(context.Background(), sess, tc.reqID)
 			if err != nil {
 				t.Fatalf("AggregateInitialize: %v", err)
@@ -2380,7 +2417,7 @@ func TestAggregateInitializeEchoesClientRequestID(t *testing.T) {
 // rather than overwrite the existing in-flight row.
 func TestAggregateToolsCallRejectsDuplicateInFlightID(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -2466,7 +2503,7 @@ func TestPostInitializeSendsInitializedNotification(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusAccepted)
 	}
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
@@ -2489,7 +2526,7 @@ func TestPostToolsListIncludesProtocolVersionHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`))
 	}
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.ProtocolVersion = "2025-11-25"
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("init: %v", err)
@@ -2535,7 +2572,7 @@ func TestAggregateInitializeFailsOnInitializedNotificationError(t *testing.T) {
 		// Simulate strict daemon that rejects the lifecycle notification.
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
@@ -2572,7 +2609,7 @@ func TestAggregateInitializeDeletesDaemonSessionWhenInitializedNotificationFails
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
@@ -2612,7 +2649,7 @@ func TestAggregateInitializeCleanupSurvivesCanceledClientContext(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
@@ -2663,7 +2700,7 @@ func TestAggregateInitializePersistsFallbackProtocolVersion(t *testing.T) {
 	}
 
 	// Allocate a session with EMPTY ProtocolVersion to trip the fallback.
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.ProtocolVersion = ""
 
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
@@ -2694,7 +2731,7 @@ func TestAggregateInitializePersistsFallbackProtocolVersion(t *testing.T) {
 // scope" even though the resolver state hasn't actually changed.
 func TestAggregateToolsListPreservesRouteMapOnAllFail(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -2945,7 +2982,7 @@ func TestAggregateToolsListDeterministicOrdering(t *testing.T) {
 	// "srv1__zeta" and "srv2__alpha". Sorted alphabetically:
 	// srv1__zeta < srv2__alpha (s-r-v-1 < s-r-v-2).
 	makeSess := func() *hubSession {
-		return sessionWithParticipants(d1, d2)
+		return sessionWithParticipants(t, d1, d2)
 	}
 
 	wantNames := []string{"srv1__zeta", "srv2__alpha"}
@@ -3018,7 +3055,7 @@ func TestAggregateToolsListRejectsMalformedDaemonResponse(t *testing.T) {
 				_, _ = w.Write([]byte(daemonBody))
 			}
 
-			sess := sessionWithParticipants(d1)
+			sess := sessionWithParticipants(t, d1)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3130,7 +3167,7 @@ func TestNegotiatedProtocolVersionPropagates(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.ProtocolVersion = requestedProto
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -3174,7 +3211,7 @@ func TestNegotiatedProtocolVersionPropagates(t *testing.T) {
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants},
 	}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 	if _, err := AggregateToolsCall(ctx, sess, json.RawMessage(`3`), params); err != nil {
 		t.Fatalf("call: %v", err)
 	}
@@ -3227,7 +3264,7 @@ func TestAggregateToolsListIntraDaemonDuplicateNotCollision(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"read","description":"first"},{"name":"read","description":"second"}]}}`))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3339,6 +3376,11 @@ func TestAggregateToolsListNamespaceCollision(t *testing.T) {
 			{Server: "srv1", Daemon: "daemon-b", Port: d2.port},
 		},
 	}
+	previous := LoadResolverSnapshot()
+	t.Cleanup(func() { PublishResolverSnapshot(previous) })
+	publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: sess.IntendedParticipants},
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -3462,7 +3504,7 @@ func TestNotificationsReturnImmediatelyWithoutDrainingBody(t *testing.T) {
 		<-notifyDone
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -3515,7 +3557,7 @@ func TestPostInitializeRejectsMissingResultEnvelope(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1}`))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3569,7 +3611,7 @@ func TestNotificationsAcceptSSEResponseWithoutPayload(t *testing.T) {
 		_, _ = w.Write([]byte(": keepalive\n\n"))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3625,7 +3667,7 @@ func TestPostInitializeEscapesProtocolVersion(t *testing.T) {
 	const hostile = "evil-version-\"};DROP TABLE--\\"
 
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	sess.ProtocolVersion = hostile
 
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
@@ -3676,7 +3718,7 @@ func TestPostInitializeRejectsEmptySessionIDHeader(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	if _, err := AggregateInitialize(context.Background(), sess, json.RawMessage(`1`)); err != nil {
 		t.Fatalf("AggregateInitialize: %v", err)
 	}
@@ -3885,7 +3927,7 @@ func countPerDaemonInitTimeoutWithTimeoutForTest(fn *ast.FuncDecl) int {
 // (no side effect could have run).
 func TestAggregateToolsCall_TransportFailureReturnsMinus32000(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3897,7 +3939,7 @@ func TestAggregateToolsCall_TransportFailureReturnsMinus32000(t *testing.T) {
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	// Take the daemon down AFTER init/list — the tools/call now hits a closed
 	// listener (connection refused = transport failure, request never lands).
@@ -3932,7 +3974,7 @@ func TestAggregateToolsCall_TransportFailureReturnsMinus32000(t *testing.T) {
 // callCount==1 assertion is load-bearing: after (a) lands it must STAY 1.
 func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3944,7 +3986,7 @@ func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	// Daemon receives the tools/call but rejects it with HTTP 400.
 	d1.onCall = func(w http.ResponseWriter, r *http.Request) {
@@ -3978,7 +4020,7 @@ func TestAggregateToolsCall_DaemonHTTPErrorReturnsMinus32000(t *testing.T) {
 func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
 	d2 := newStubDaemon(t, "d2-sid-fresh") // the "restarted" daemon on a new port
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -3988,18 +4030,7 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Publish a snapshot binding srv1/claude-code to d2's port, and set it as
-	// SnapshotAtInit so resolveToolsCallRoute's stale-revalidation is skipped
-	// (current == SnapshotAtInit). The ROUTE map still points at d1's port, so
-	// the first dispatch hits the (closed) d1 and the self-heal re-resolves to
-	// d2 via the snapshot.
-	resetResolverForTest(t)
-	snap := &ResolverSnapshot{
-		Gen:      1,
-		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
-	}
-	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishReplacementOnAdmittedDial(t, d1.port, d2.port)
 
 	// Take d1 down: the first tools/call gets connection-refused (transport).
 	d1.server.Close()
@@ -4021,6 +4052,22 @@ func TestAggregateToolsCall_SelfHealsAfterRestart(t *testing.T) {
 	if got := sess.InFlightCount(); got != 0 {
 		t.Errorf("inFlight=%d after self-heal want 0", got)
 	}
+}
+
+// A transport failure is retryable when the first dial was already admitted.
+// Publish the replacement on entry to the old endpoint's admitted transport.
+func publishReplacementOnAdmittedDial(t *testing.T, original, replacement int) {
+	t.Helper()
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Port() == strconv.Itoa(original) {
+			publishOrdinaryHubTestSnapshot(&ResolverSnapshot{
+				Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: replacement}}},
+			})
+		}
+		return previous.RoundTrip(req)
+	})
 }
 
 func TestReinitDeadlineCapOwnedByInitializeDaemonSession(t *testing.T) {
@@ -4073,7 +4120,7 @@ func TestAggregateToolsCall_SelfHealDeletesReinitSessionWhenInitializedFails(t *
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -4083,14 +4130,7 @@ func TestAggregateToolsCall_SelfHealDeletesReinitSessionWhenInitializedFails(t *
 		t.Fatal(err)
 	}
 
-	resetResolverForTest(t)
-	snap := &ResolverSnapshot{
-		Gen:      1,
-		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
-	}
-	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
-
+	publishReplacementOnAdmittedDial(t, d1.port, d2.port)
 	d1.server.Close()
 
 	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
@@ -4152,14 +4192,14 @@ func TestSelfHealRetryInFlightCancellationUsesReplacementPort(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{
 		Gen:      1,
 		Bindings: map[string][]canonicalDaemonRef{"claude-code": {{Server: "srv1", Daemon: "claude-code", Port: d2.port}}},
 	}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	clientReqID := json.RawMessage(`42`)
 	key, err := newRequestIDKey(clientReqID)
@@ -4227,7 +4267,7 @@ func TestSelfHealRetryInFlightCancellationUsesReplacementPort(t *testing.T) {
 // The mark is consume-once: a second call must NOT re-init again.
 func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	d1 := newStubDaemon(t, "d1-sid")
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -4239,7 +4279,7 @@ func TestAggregateToolsCall_ProactiveReinitOnStalePort(t *testing.T) {
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	initBefore := d1.initCount.Load()
 	// Simulate the supervisor-state watcher observing a restart of d1's port.
@@ -4317,7 +4357,7 @@ func TestAggregateToolsCall_ProactiveReinitDeletesSessionWhenInitializedFails(t 
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"called=read"}]}}`))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -4329,7 +4369,7 @@ func TestAggregateToolsCall_ProactiveReinitDeletesSessionWhenInitializedFails(t 
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess.markStalePort(d1.port)
 	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
@@ -4409,7 +4449,7 @@ func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"daemon","result":{"content":[{"type":"text","text":"ok"}]}}`))
 	}
 
-	sess := sessionWithParticipants(d1)
+	sess := sessionWithParticipants(t, d1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := AggregateInitialize(ctx, sess, json.RawMessage(`1`)); err != nil {
@@ -4421,7 +4461,7 @@ func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.
 	resetResolverForTest(t)
 	snap := &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{"claude-code": sess.IntendedParticipants}}
 	sess.SnapshotAtInit = snap
-	PublishResolverSnapshot(snap)
+	publishOrdinaryHubTestSnapshot(snap)
 
 	sess.markStalePort(d1.port)
 	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
@@ -4527,7 +4567,7 @@ func TestPostToolsListDrainsPaginatedDaemon(t *testing.T) {
 		}
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	tools, err := postToolsList(context.Background(), ref, "pag-sid", "2025-11-25")
+	tools, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "pag-sid", "2025-11-25")
 	if err != nil {
 		t.Fatalf("postToolsList: %v", err)
 	}
@@ -4566,7 +4606,7 @@ func TestPostToolsListRepeatedCursorRejected(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"x"}],"nextCursor":"always"}}`))
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	_, err := postToolsList(context.Background(), ref, "loop-sid", "2025-11-25")
+	_, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "loop-sid", "2025-11-25")
 	if err == nil {
 		t.Fatal("expected repeated-cursor error, got nil")
 	}
@@ -4602,7 +4642,7 @@ func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"` + big + `"}],"nextCursor":"c` + string(rune('0'+page)) + `"}}`))
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	_, err := postToolsList(context.Background(), ref, "bytes-sid", "2025-11-25")
+	_, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "bytes-sid", "2025-11-25")
 	if err == nil {
 		t.Fatal("expected cumulative-byte-cap error, got nil")
 	}
@@ -4647,7 +4687,7 @@ func TestPostToolsListEmptyStringCursorContinues(t *testing.T) {
 		}
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	tools, err := postToolsList(context.Background(), ref, "empty-cursor-sid", "2025-11-25")
+	tools, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "empty-cursor-sid", "2025-11-25")
 	if err != nil {
 		t.Fatalf("postToolsList: %v", err)
 	}
@@ -4681,7 +4721,7 @@ func TestPostToolsListLargeCursorCapped(t *testing.T) {
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[],"nextCursor":"` + bigCursor + `"}}`))
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	_, err := postToolsList(context.Background(), ref, "bigcursor-sid", "2025-11-25")
+	_, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "bigcursor-sid", "2025-11-25")
 	if err == nil {
 		t.Fatal("expected cumulative-byte-cap error from large cursors, got nil")
 	}
@@ -4712,7 +4752,7 @@ func TestPostToolsListSSEFramingCharged(t *testing.T) {
 		_, _ = w.Write([]byte(": " + padding + "\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"a\"}],\"nextCursor\":\"c1\"}}\n\n"))
 	}
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
-	_, err := postToolsList(context.Background(), ref, "sse-sid", "2025-11-25")
+	_, err := postToolsList(context.Background(), ordinaryListTargetForTest(t, ref), "sse-sid", "2025-11-25")
 	if err == nil {
 		t.Fatal("expected cumulative-byte-cap error from SSE framing, got nil")
 	}

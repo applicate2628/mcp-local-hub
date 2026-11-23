@@ -72,6 +72,12 @@ func AcquireWindowsCanonicalEntryForRecoveryV2(context.Context, WindowsCanonical
 func (*WindowsCanonicalEntryRecoverySetV2) Members(context.Context) ([]WindowsCanonicalEntryMemberEvidenceV2, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	return WindowsCanonicalEntryMemberEvidenceV2{}, false, errWindowsCanonicalEntryUnsupported
+}
+func (*WindowsCanonicalEntryRecoverySetV2) VerifyCleanupAbsences(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2) error {
+	return errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntryRecoverySetV2) Directories() []*WindowsCanonicalEntryPayloadDirectoryV1 {
 	return nil
 }

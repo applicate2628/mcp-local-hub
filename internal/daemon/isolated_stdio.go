@@ -59,12 +59,13 @@ type IsolatedStdioSessions struct {
 }
 
 type isolatedStdioSession struct {
-	owner    *IsolatedStdioSessions
-	host     *StdioHost
-	sid      string
-	role     IsolatedStdioRole
-	version  string
-	sequence uint64
+	owner        *IsolatedStdioSessions
+	host         *StdioHost
+	sid          string
+	role         IsolatedStdioRole
+	version      string
+	sequence     uint64
+	initializeID isolatedStdioID
 
 	expires       time.Time
 	stopDeadline  time.Time
@@ -204,7 +205,8 @@ func (p *IsolatedStdioSessions) current(w http.ResponseWriter, r *http.Request, 
 }
 
 func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Request, role IsolatedStdioRole, post stdioPOST) {
-	if _, ok := stdioPrivateID(post.msg["id"], p.limits.MaxIDBytes); !ok ||
+	id, ok := stdioPrivateID(post.msg["id"], p.limits.MaxIDBytes)
+	if !ok ||
 		r.Header.Get("Mcp-Session-Id") != "" || string(post.msg["jsonrpc"]) != `"2.0"` {
 		http.Error(w, "invalid initialize request", http.StatusBadRequest)
 		return
@@ -239,6 +241,7 @@ func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Reques
 	p.nextSequence++
 	s := &isolatedStdioSession{
 		owner: p, host: host, sid: sid, role: role, sequence: p.nextSequence, startCtx: startCtx, cancelStart: cancel,
+		initializeID: id,
 		launchDone: make(chan struct{}), initDone: make(chan struct{}), leaseChanged: make(chan struct{}, 1),
 		revoked: make(chan struct{}), receiptDone: make(chan struct{}), written: make(chan struct{}, 1),
 		requests: make(map[isolatedStdioID]*isolatedStdioOperation),
