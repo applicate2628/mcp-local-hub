@@ -409,21 +409,29 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 	closeErr := windows.ERROR_INVALID_HANDLE
 	otherErr := errors.New("fixture independent identity failure")
 	for _, tc := range []struct {
-		name        string
-		identityErr error
-		waitResult  uint32
-		waitErr     error
-		closeErr    error
-		cancel      bool
-		wantWait    bool
-		wantAbsent  bool
-		wantErrs    []error
-		wantStage   string
-		wantCode    uint32
+		name               string
+		identityErr        error
+		waitResult         uint32
+		waitErr            error
+		windowResult       uint32
+		windowErr          error
+		cancelDuringWindow bool
+		closeErr           error
+		cancel             bool
+		wantWait           bool
+		wantWindow         bool
+		wantAbsent         bool
+		wantErrs           []error
+		wantStage          string
+		wantCode           uint32
 	}{
 		{name: "identity"},
 		{name: "image denied and signaled", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
-		{name: "image denied and live", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{imageErr}, wantStage: "IMAGE", wantCode: 5},
+		{name: "image denied and exits within window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, wantWait: true, wantWindow: true, wantAbsent: true},
+		{name: "image denied and live", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantWindow: true, wantErrs: []error{imageErr}, wantStage: "IMAGE", wantCode: 5},
+		{name: "image denied and timed wait fails", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_FAILED, windowErr: waitErr, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, waitErr}, wantStage: "IMAGE", wantCode: 5},
+		{name: "image denied and canceled during window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, cancelDuringWindow: true, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, context.Canceled}, wantStage: "CONTEXT"},
+		{name: "image denied and failed close after window", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), windowResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantWait: true, wantWindow: true, wantErrs: []error{imageErr, closeErr}, wantStage: "CLOSE", wantCode: 6},
 		{name: "image general failure and signaled", identityErr: generalFailure, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
 		{name: "image general failure and live", identityErr: generalFailure, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{generalFailure}, wantStage: "IMAGE", wantCode: 31},
 		{name: "times failure and signaled", identityErr: timesErr, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
@@ -456,11 +464,21 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 					return processHandleIdentity{ExecutablePath: "fixture.exe", CreationTime: time.Unix(1700000000, 0)}, tc.identityErr
 				},
 				wait: func(gotHandle windows.Handle, timeout uint32) (uint32, error) {
-					calls = append(calls, "wait")
-					if gotHandle != handle || timeout != 0 {
+					if gotHandle != handle {
 						t.Fatalf("wait=(%#x,%d)", gotHandle, timeout)
 					}
-					return tc.waitResult, tc.waitErr
+					if timeout == 0 {
+						calls = append(calls, "wait")
+						return tc.waitResult, tc.waitErr
+					}
+					if !tc.wantWindow || timeout != 10 {
+						t.Fatalf("unexpected timed wait=(%#x,%d)", gotHandle, timeout)
+					}
+					calls = append(calls, "timed wait")
+					if tc.cancelDuringWindow {
+						cancel()
+					}
+					return tc.windowResult, tc.windowErr
 				},
 				close: func(gotHandle windows.Handle) error {
 					calls = append(calls, "close")
@@ -476,6 +494,9 @@ func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
 			wantCalls := "open,identity,close"
 			if tc.wantWait {
 				wantCalls = "open,identity,wait,close"
+			}
+			if tc.wantWindow {
+				wantCalls = "open,identity,wait,timed wait,close"
 			}
 			if strings.Join(calls, ",") != wantCalls {
 				t.Fatalf("calls=%v, want %s", calls, wantCalls)

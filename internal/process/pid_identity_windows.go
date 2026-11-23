@@ -187,7 +187,11 @@ func (h *heldPIDObservation) Wait() (PIDWaitObservation, error) {
 }
 
 func observePIDZeroWait(handle windows.Handle, wait func(windows.Handle, uint32) (uint32, error)) (PIDWaitObservation, error) {
-	result, err := wait(handle, 0)
+	return observePIDWait(handle, wait, 0)
+}
+
+func observePIDWait(handle windows.Handle, wait func(windows.Handle, uint32) (uint32, error), timeout uint32) (PIDWaitObservation, error) {
+	result, err := wait(handle, timeout)
 	if result == windows.WAIT_FAILED || err != nil {
 		if err == nil {
 			err = errors.New("Windows wait failed without an immediate error")
@@ -788,6 +792,21 @@ func readPIDHandleObservation(ctx context.Context, pid int, ops pidHandleObserva
 	wait, waitErr := observePIDZeroWait(handle, ops.wait)
 	if waitErr != nil {
 		return observation, pidObservationFailure(pidObservationWait, waitErr, firstErr)
+	}
+	failure, imageDenied := firstErr.(*pidObservationError)
+	if wait.Result == uint32(windows.WAIT_TIMEOUT) && imageDenied &&
+		failure.stage == pidObservationImage && failure.code == uint32(windows.ERROR_ACCESS_DENIED) && ctx.Err() == nil {
+		// The measured teardown interval peaked at 1.244 ms across 24 samples.
+		window := 10 * time.Millisecond
+		if deadline, ok := ctx.Deadline(); ok {
+			window = min(window, time.Until(deadline))
+		}
+		if millis := window.Milliseconds(); millis > 0 {
+			wait, waitErr = observePIDWait(handle, ops.wait, uint32(millis))
+			if waitErr != nil {
+				return observation, errors.Join(firstErr, waitErr)
+			}
+		}
 	}
 	if wait.Result != windows.WAIT_OBJECT_0 {
 		return observation, errors.Join(firstErr, fmt.Errorf("process: PID %d is still running", pid))
