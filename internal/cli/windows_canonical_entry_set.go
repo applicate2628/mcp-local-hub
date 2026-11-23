@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -20,6 +23,345 @@ import (
 
 const windowsCanonicalEntrySetSchemaV1 = binaryadmission.WindowsCanonicalEntrySetSchemaV1
 const UpgradeAdmissionCanonicalEntryProductV1 = "canonical-entry-product-v1"
+const UpgradeAdmissionCanonicalEntryProductV2 = "canonical-entry-product-v2"
+
+// The current arm shares the existing outer record and entry_set key, while
+// historical V1 values retain their original serializer and meaning.
+type windowsCanonicalEntrySetJournalV2 struct {
+	Schema         string                                             `json:"schema"`
+	TransactionID  string                                             `json:"transaction_id"`
+	CanonicalEntry windowsProductRecoveryArtifactV3                   `json:"canonical_entry"`
+	StagedEntry    windowsProductRecoveryStagedV3                     `json:"staged_entry"`
+	Bundle         windowsCanonicalEntryBundleJournalV2               `json:"bundle"`
+	Expected       binaryadmission.WindowsCanonicalEntrySetSnapshotV2 `json:"expected"`
+	Moves          []windowsCanonicalEntryMoveRecordV2                `json:"moves"`
+	Cleanup        []windowsCanonicalEntryCleanupV2                   `json:"cleanup"`
+	PriorRuntime   *windowsCanonicalEntryRuntimePreimageV1            `json:"prior_runtime"`
+}
+
+type windowsCanonicalEntryBundleJournalV2 struct {
+	RelativePath    string                                                           `json:"relative_path"`
+	BeforeKind      binaryadmission.WindowsCanonicalEntryBeforeKindV2                `json:"before_kind"`
+	BeforeDirectory *binaryadmission.WindowsCanonicalEntryPayloadDirectorySnapshotV1 `json:"before_directory"`
+	BeforeInventory *binaryadmission.RuntimeInventoryV1                              `json:"before_inventory"`
+	StagedDirectory *binaryadmission.WindowsCanonicalEntryPayloadDirectorySnapshotV1 `json:"staged_directory"`
+	Disposition     windowsCanonicalEntryDispositionV2                               `json:"disposition"`
+	Effect          string                                                           `json:"effect"`
+	Members         []windowsCanonicalEntryMemberJournalV2                           `json:"members"`
+	Directories     []windowsCanonicalEntryDirectoryJournalV2                        `json:"directories"`
+}
+
+type windowsCanonicalEntryMemberJournalV2 = binaryadmission.WindowsCanonicalEntryMemberRecoveryPlanV2
+
+type windowsCanonicalEntryDirectoryJournalV2 = binaryadmission.WindowsCanonicalEntryMemberDirectoryRecordV2
+
+type windowsCanonicalEntryDispositionV2 struct {
+	State                string  `json:"state"`
+	Transferred          bool    `json:"transferred"`
+	OriginalOwnerPending bool    `json:"original_owner_pending"`
+	DispositionPending   bool    `json:"disposition_pending"`
+	CloseError           *string `json:"close_error"`
+}
+
+type windowsCanonicalEntryMoveRecordV2 = binaryadmission.WindowsCanonicalEntryMemberMoveRecordV2
+
+type windowsCanonicalEntryCleanupV2 = binaryadmission.WindowsCanonicalEntryMemberCleanupRecordV2
+
+type windowsCanonicalEntrySetReceiptV2 windowsCanonicalEntrySetReceiptV1
+
+func (j windowsProductRecoveryJournalV3) MarshalJSON() ([]byte, error) {
+	type legacy windowsProductRecoveryJournalV3
+	if j.EntryBundle == nil {
+		return json.Marshal(legacy(j))
+	}
+	if j.EntrySet != nil {
+		return nil, errors.New("legacy and current entry arms coexist")
+	}
+	return json.Marshal(struct {
+		legacy
+		EntrySet *windowsCanonicalEntrySetJournalV2 `json:"entry_set"`
+	}{legacy(j), j.EntryBundle})
+}
+
+func (j *windowsProductRecoveryJournalV3) UnmarshalJSON(raw []byte) error {
+	schema, err := canonicalEntryArmSchema(raw)
+	if err != nil {
+		return err
+	}
+	type legacy windowsProductRecoveryJournalV3
+	var base legacy
+	var wire struct {
+		*legacy
+		EntrySet json.RawMessage `json:"entry_set"`
+	}
+	wire.legacy = &base
+	if err = decodeStrictCanonicalProductRecord(raw, &wire); err != nil {
+		return err
+	}
+	switch schema {
+	case "":
+	case windowsCanonicalEntrySetSchemaV1:
+		if err = decodeStrictCanonicalProductRecord(wire.EntrySet, &base.EntrySet); err != nil {
+			return err
+		}
+	case binaryadmission.WindowsCanonicalEntrySetSchemaV2:
+		if err = decodeStrictCanonicalProductRecord(wire.EntrySet, &base.EntryBundle); err != nil {
+			return err
+		}
+	default:
+		return errors.New("unsupported nested canonical entry journal schema")
+	}
+	*j = windowsProductRecoveryJournalV3(base)
+	return nil
+}
+
+func (r UpgradeReceiptV3) MarshalJSON() ([]byte, error) {
+	type legacy UpgradeReceiptV3
+	if r.EntryBundle == nil {
+		return json.Marshal(legacy(r))
+	}
+	if r.EntrySet != nil {
+		return nil, errors.New("legacy and current receipt arms coexist")
+	}
+	return json.Marshal(struct {
+		legacy
+		EntrySet *windowsCanonicalEntrySetReceiptV2 `json:"entry_set"`
+	}{legacy(r), r.EntryBundle})
+}
+
+func (r *UpgradeReceiptV3) UnmarshalJSON(raw []byte) error {
+	schema, err := canonicalEntryArmSchema(raw)
+	if err != nil {
+		return err
+	}
+	type legacy UpgradeReceiptV3
+	var base legacy
+	var wire struct {
+		*legacy
+		EntrySet json.RawMessage `json:"entry_set"`
+	}
+	wire.legacy = &base
+	if err = decodeStrictCanonicalProductRecord(raw, &wire); err != nil {
+		return err
+	}
+	switch schema {
+	case "":
+	case windowsCanonicalEntrySetSchemaV1:
+		if err = decodeStrictCanonicalProductRecord(wire.EntrySet, &base.EntrySet); err != nil {
+			return err
+		}
+	case binaryadmission.WindowsCanonicalEntrySetSchemaV2:
+		if _, err = canonicalCurrentObject(wire.EntrySet, "schema", "transaction_id", "build_id", "registry_projection_sha256", "canonical_entry_path", "canonical_entry_sha256", "product_path", "identity_path", "identity_sha256", "machine"); err != nil {
+			return err
+		}
+		if err = decodeStrictCanonicalProductRecord(wire.EntrySet, &base.EntryBundle); err != nil {
+			return err
+		}
+	default:
+		return errors.New("unsupported nested canonical entry receipt schema")
+	}
+	*r = UpgradeReceiptV3(base)
+	return nil
+}
+
+func decodeStrictCanonicalProductRecord(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return errors.Join(err, errors.New("trailing canonical Product record data"))
+	}
+	return nil
+}
+
+// Strict receiving belongs to the existing entry codec. Unlike encoding/json's
+// default matching, required decoded keys are exact, unique and non-null.
+func canonicalCurrentObject(raw []byte, names ...string) (map[string]json.RawMessage, error) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	start, err := d.Token()
+	if err != nil || start != json.Delim('{') {
+		return nil, errors.Join(err, errors.New("current entry evidence must be an object"))
+	}
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[n] = true
+	}
+	fields := make(map[string]json.RawMessage, len(names))
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := t.(string)
+		if !ok || !wanted[name] {
+			return nil, errors.New("unknown or inexact current entry field")
+		}
+		if _, ok := fields[name]; ok {
+			return nil, errors.New("duplicate current entry field")
+		}
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields[name] = value
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			switch name {
+			case "prior", "staged", "prior_absence", "prior_aside_relative", "successor_aside_relative", "before_directory", "before_inventory", "staged_directory", "disposition", "error", "close_error", "prior_runtime":
+			default:
+				return nil, errors.New("required current entry field is null")
+			}
+		}
+	}
+	if _, err := d.Token(); err != nil {
+		return nil, err
+	}
+	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.Join(err, errors.New("trailing current entry evidence"))
+	}
+	if len(fields) != len(wanted) {
+		return nil, errors.New("required current entry field missing")
+	}
+	return fields, nil
+}
+
+func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
+	f, err := canonicalCurrentObject(raw, "schema", "transaction_id", "canonical_entry", "staged_entry", "bundle", "expected", "moves", "cleanup", "prior_runtime")
+	if err != nil {
+		return err
+	}
+	object := func(raw json.RawMessage, nullable bool, names ...string) (map[string]json.RawMessage, error) {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			if nullable {
+				return nil, nil
+			}
+			return nil, errors.New("required current entry object is null")
+		}
+		return canonicalCurrentObject(raw, names...)
+	}
+	for key, names := range map[string][]string{
+		"canonical_entry": {"target", "prior_present", "prior_sha256", "new_sha256", "baseline_asides"},
+		"staged_entry":    {"path", "sha256"}, "prior_runtime": {"path", "present", "sha256"},
+	} {
+		if _, err := object(f[key], key == "prior_runtime", names...); err != nil {
+			return err
+		}
+	}
+	b, err := object(f["bundle"], false, "relative_path", "before_kind", "before_directory", "before_inventory", "staged_directory", "disposition", "effect", "members", "directories")
+	if err != nil {
+		return err
+	}
+	identity := func(raw json.RawMessage) error {
+		_, err := object(raw, false, "volume_serial_number", "file_index_high", "file_index_low", "creation_time")
+		return err
+	}
+	directory := func(raw json.RawMessage, nullable bool) error {
+		v, err := object(raw, nullable, "schema", "root", "relative_path", "created", "parent_identity", "directory_identity")
+		if err != nil || v == nil {
+			return err
+		}
+		return errors.Join(identity(v["parent_identity"]), identity(v["directory_identity"]))
+	}
+	if err := errors.Join(directory(b["before_directory"], true), directory(b["staged_directory"], true)); err != nil {
+		return err
+	}
+	if !bytes.Equal(bytes.TrimSpace(b["before_inventory"]), []byte("null")) {
+		var compactInventory bytes.Buffer
+		if err := json.Compact(&compactInventory, b["before_inventory"]); err != nil {
+			return err
+		}
+		if _, err := binaryadmission.ParseRuntimeInventory(append(compactInventory.Bytes(), '\n')); err != nil {
+			return err
+		}
+	}
+	if _, err := object(b["disposition"], false, "state", "transferred", "original_owner_pending", "disposition_pending", "close_error"); err != nil {
+		return err
+	}
+	array := func(raw json.RawMessage) ([]json.RawMessage, error) {
+		if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' {
+			return nil, errors.New("required current entry array is null or missing")
+		}
+		var v []json.RawMessage
+		err := json.Unmarshal(raw, &v)
+		return v, err
+	}
+	rows, err := array(b["members"])
+	if err != nil {
+		return err
+	}
+	for _, raw := range rows {
+		v, err := object(raw, false, "member", "prior", "prior_absence", "staged", "prior_aside_relative", "successor_aside_relative")
+		if err != nil {
+			return err
+		}
+		for _, side := range []string{"prior", "staged"} {
+			m, err := object(v[side], true, "member", "file", "native_identity", "parent_identity", "size", "attributes")
+			if err != nil {
+				return err
+			}
+			if m == nil {
+				continue
+			}
+			if _, err := object(m["file"], false, "path", "sha256"); err != nil {
+				return err
+			}
+			if err := errors.Join(identity(m["native_identity"]), identity(m["parent_identity"])); err != nil {
+				return err
+			}
+		}
+		if a, err := object(v["prior_absence"], true, "parent_relative", "parent_identity", "missing_relative"); err != nil {
+			return err
+		} else if a != nil {
+			if err := identity(a["parent_identity"]); err != nil {
+				return err
+			}
+		}
+	}
+	rows, err = array(b["directories"])
+	if err != nil {
+		return err
+	}
+	nativeResultFields := []string{"member", "source_relative", "destination_relative", "attempted", "native_status_known", "native_status", "applied", "readback", "error", "close_error", "original_owner_pending"}
+	moveFields := append([]string{"prior"}, nativeResultFields...)
+	for _, raw := range rows {
+		v, err := object(raw, false, "original", "state", "disposition")
+		if err != nil {
+			return err
+		}
+		if err := directory(v["original"], false); err != nil {
+			return err
+		}
+		if _, err := object(v["disposition"], true, nativeResultFields...); err != nil {
+			return err
+		}
+	}
+	rows, err = array(f["moves"])
+	if err != nil {
+		return err
+	}
+	for _, raw := range rows {
+		if _, err := object(raw, false, moveFields...); err != nil {
+			return err
+		}
+	}
+	rows, err = array(f["cleanup"])
+	if err != nil {
+		return err
+	}
+	for _, raw := range rows {
+		if _, err := object(raw, false, "transaction_id", "side", "member", "source_relative", "expected_sha256", "state", "purpose"); err != nil {
+			return err
+		}
+	}
+	type plain windowsCanonicalEntrySetJournalV2
+	var value plain
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	*e = windowsCanonicalEntrySetJournalV2(value)
+	return nil
+}
 
 // Only an original binary-admission staging owner can supply this carrier.
 // The detached snapshot is journal DATA, never a constructor for this owner.
@@ -28,6 +370,1053 @@ type stagedWindowsCanonicalEntrySetV1 struct {
 	prior          *binaryadmission.WindowsCanonicalEntryPriorSetV1
 	priorAttempted bool
 	priorError     error
+}
+
+type stagedWindowsCanonicalEntrySetV2 struct {
+	mu                 sync.Mutex
+	closeRequested     bool
+	closeError         error
+	original           *binaryadmission.StagedWindowsCanonicalEntrySetV2
+	prior              *binaryadmission.WindowsCanonicalEntryPriorSetV2
+	priorAttempted     bool
+	priorError         error
+	directorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2
+}
+
+func (s *stagedWindowsCanonicalEntrySetV2) acquirePrior(ctx context.Context) (*binaryadmission.WindowsCanonicalEntryPriorSetV2, error) {
+	if s == nil || s.original == nil {
+		return nil, errors.New("original staged current entry set required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeRequested {
+		return s.prior, errors.Join(s.priorError, errors.New("staged current entry carrier is closing"))
+	}
+	if s.priorAttempted {
+		return s.prior, s.priorError
+	}
+	s.priorAttempted = true
+	s.prior, s.priorError = s.original.AcquireOriginalPriorSet(ctx)
+	if s.prior == nil && s.priorError == nil {
+		s.priorError = errors.New("original current prior acquisition returned no owner")
+	}
+	return s.prior, s.priorError
+}
+
+type windowsCanonicalEntryBundlePreparedV2 struct {
+	source                          *stagedWindowsCanonicalEntrySetV2
+	snapshot                        binaryadmission.WindowsCanonicalEntrySetSnapshotV2
+	targets                         binaryadmission.WindowsCanonicalEntrySetTargetsV2
+	observation                     binaryadmission.WindowsCanonicalEntryPriorObservationV2
+	priorLocations, stagedLocations map[string]string
+	nativeResults                   []binaryadmission.WindowsCanonicalEntryMoveResultV1
+	nativeErrors                    []error
+	firstJournalBytes               []byte
+}
+
+func currentPriorSnapshot(ctx context.Context, source *stagedWindowsCanonicalEntrySetV2, target string) (productPairFileSnapshot, error) {
+	result := productPairFileSnapshot{path: target}
+	prior, err := source.acquirePrior(ctx)
+	if err != nil {
+		return result, err
+	}
+	targets, err := source.original.DestinationTargets()
+	if err != nil {
+		return result, err
+	}
+	root := filepath.Dir(targets.CanonicalEntryPath)
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return result, err
+	}
+	relative = filepath.ToSlash(relative)
+	present, body, _, err := prior.ReadOriginal(ctx, relative)
+	result.present, result.body = present, body
+	return result, err
+}
+
+func currentStageProductPath(stage *binaryadmission.StagedWindowsCanonicalEntrySetV2) (string, error) {
+	if stage == nil {
+		return "", errors.New("current original stage required")
+	}
+	snapshot, err := stage.Snapshot()
+	if err != nil {
+		return "", err
+	}
+	targets, err := stage.DestinationTargets()
+	if err != nil {
+		return "", err
+	}
+	members, err := stage.Members()
+	if err != nil {
+		return "", err
+	}
+	for _, member := range members {
+		if member.Member == snapshot.ProductRelativePath {
+			if !currentEntryRelative(member.File.Path) || path.Dir(member.File.Path) != "." || member.File.SHA256 != snapshot.Product.SHA256 {
+				return "", errors.New("current Product has no valid issued flat stage")
+			}
+			return filepath.Join(filepath.Dir(targets.CanonicalEntryPath), filepath.FromSlash(member.File.Path)), nil
+		}
+	}
+	return "", errors.New("current original stage has no Product member")
+}
+
+func prepareCanonicalEntryBundle(o WindowsProductTxnOpts, id string) (*windowsCanonicalEntryBundlePreparedV2, *windowsCanonicalEntrySetJournalV2, error) {
+	if o.EntryBundle == nil {
+		return nil, nil, nil
+	}
+	if o.EntrySet != nil || o.Context == nil || o.EntryBundle.original == nil {
+		return nil, nil, errors.New("one original current entry arm and context required")
+	}
+	source := o.EntryBundle
+	if err := source.original.VerifyUnchanged(o.Context); err != nil {
+		return nil, nil, err
+	}
+	snapshot, err := source.original.Snapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	targets, err := source.original.DestinationTargets()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !sameWindowsProductPath(targets.CanonicalEntryPath, o.CanonicalEntryPath) || !sameWindowsProductPath(targets.ProductPath, o.ProductPath) || !sameWindowsProductPath(targets.IdentityPath, o.IdentityPath) {
+		return nil, nil, errors.New("current stage disagrees with registry-derived transaction targets")
+	}
+	members, err := source.original.Members()
+	if err != nil {
+		return nil, nil, err
+	}
+	prior, err := source.acquirePrior(o.Context)
+	if err != nil {
+		return nil, nil, err
+	}
+	observation, err := prior.Observation(o.Context)
+	if err != nil {
+		return nil, nil, err
+	}
+	state := &windowsCanonicalEntryBundlePreparedV2{source: source, snapshot: snapshot, targets: targets, observation: observation, priorLocations: map[string]string{}, stagedLocations: map[string]string{}}
+	arm := &windowsCanonicalEntrySetJournalV2{Schema: binaryadmission.WindowsCanonicalEntrySetSchemaV2, TransactionID: id, Expected: snapshot, Moves: []windowsCanonicalEntryMoveRecordV2{}, Cleanup: []windowsCanonicalEntryCleanupV2{}, Bundle: windowsCanonicalEntryBundleJournalV2{RelativePath: snapshot.BundleRelativePath, BeforeKind: observation.BeforeKind, BeforeDirectory: observation.BundleDirectory, BeforeInventory: observation.Inventory, Effect: "exact-members", Members: []windowsCanonicalEntryMemberJournalV2{}, Directories: []windowsCanonicalEntryDirectoryJournalV2{}, Disposition: windowsCanonicalEntryDispositionV2{State: "staged", OriginalOwnerPending: true, DispositionPending: true}}}
+	rows := map[string]*windowsCanonicalEntryMemberJournalV2{}
+	for i := range members {
+		member := members[i]
+		if _, duplicate := rows[member.Member]; duplicate {
+			return state, arm, errors.New("duplicate issued current stage member")
+		}
+		rows[member.Member] = &windowsCanonicalEntryMemberJournalV2{Member: member.Member, Staged: &member}
+		state.stagedLocations[member.Member] = member.File.Path
+	}
+	for i := range observation.Members {
+		member := observation.Members[i]
+		row := rows[member.Member]
+		if row == nil {
+			row = &windowsCanonicalEntryMemberJournalV2{Member: member.Member}
+			rows[member.Member] = row
+		}
+		if row.Prior != nil {
+			return state, arm, errors.New("duplicate original current prior member")
+		}
+		row.Prior = &member
+		state.priorLocations[member.Member] = member.File.Path
+	}
+	keys := make([]string, 0, len(rows))
+	for key := range rows {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for i, key := range keys {
+		row := rows[key]
+		if row.Prior != nil {
+			aside := fmt.Sprintf(".mcphub-%s-prior-%d.stage", id, i)
+			row.PriorAsideRelative = &aside
+		} else {
+			absence, ok := observation.Absences[key]
+			if !ok {
+				return state, arm, errors.New("new-only current member has no original absence")
+			}
+			row.PriorAbsence = &absence
+		}
+		if row.Staged != nil {
+			aside := fmt.Sprintf(".mcphub-%s-successor-%d.stage", id, i)
+			row.SuccessorAsideRelative = &aside
+		}
+		arm.Bundle.Members = append(arm.Bundle.Members, *row)
+	}
+	entry := currentEntryMember(arm, snapshot.CanonicalEntryRelativePath)
+	product := currentEntryMember(arm, snapshot.ProductRelativePath)
+	if entry == nil || entry.Staged == nil || product == nil || product.Staged == nil {
+		return state, arm, errors.New("current stage lacks canonical file projections")
+	}
+	root := filepath.Dir(targets.CanonicalEntryPath)
+	if !sameWindowsProductPath(filepath.Join(root, filepath.FromSlash(product.Staged.File.Path)), o.StagedProduct) {
+		return state, arm, errors.New("StagedProduct is not the issued original flat Product stage")
+	}
+	arm.CanonicalEntry = windowsProductRecoveryArtifactV3{Target: targets.CanonicalEntryPath, NewSHA256: entry.Staged.File.SHA256, BaselineAsides: []windowsProductRecoveryAsideV3{}}
+	if entry.Prior != nil {
+		arm.CanonicalEntry.PriorPresent = true
+		arm.CanonicalEntry.PriorSHA256 = entry.Prior.File.SHA256
+	}
+	arm.StagedEntry = windowsProductRecoveryStagedV3{Path: filepath.Join(root, filepath.FromSlash(entry.Staged.File.Path)), SHA256: entry.Staged.File.SHA256}
+	if o.Mode == WindowsProductPairModeUpgrade {
+		view, err := prior.RuntimeProduct(o.Context)
+		if err != nil {
+			return state, arm, err
+		}
+		arm.PriorRuntime = &windowsCanonicalEntryRuntimePreimageV1{Path: targets.CanonicalEntryPath}
+		if view != nil {
+			if err := view.ValidateOriginal(o.Context); err != nil {
+				return state, arm, err
+			}
+			artifact := view.Artifact()
+			arm.PriorRuntime = &windowsCanonicalEntryRuntimePreimageV1{Path: artifact.Path, Present: true, SHA256: artifact.SHA256}
+		}
+	}
+	return state, arm, nil
+}
+
+func (t *WindowsProductTxn) receiveOriginalMemberDirectories() error {
+	p := t.prepared
+	if p.entryBundle == nil {
+		return nil
+	}
+	s := p.entryBundle.source
+	owners, ensureErr := s.original.EnsureOriginalMemberDirectories(t.Opts.Context)
+	// Native bank retains every issued partial reference before errors; this
+	// returned union supplies journal data, never the lifecycle ownership truth.
+	if s.directorySnapshots == nil {
+		s.directorySnapshots = map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2{}
+	}
+	byPath := map[string]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2{}
+	for _, d := range p.entryBundle.observation.Directories {
+		byPath[d.RelativePath] = d
+	}
+	var receiveErrs []error
+	for _, owner := range owners {
+		if owner == nil {
+			receiveErrs = append(receiveErrs, errors.New("nil original current directory owner"))
+			continue
+		}
+		d, err := owner.SnapshotForEntryMembersV2()
+		if err == nil {
+			s.directorySnapshots[owner] = d
+		}
+		receiveErrs = append(receiveErrs, err)
+		if err != nil {
+			continue
+		}
+		if before, ok := byPath[d.RelativePath]; ok && before != d {
+			receiveErrs = append(receiveErrs, errors.New("current ancestor original identities disagree"))
+			continue
+		}
+		byPath[d.RelativePath] = d
+	}
+	keys := make([]string, 0, len(byPath))
+	for key := range byPath {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := strings.Count(keys[i], "/"), strings.Count(keys[j], "/")
+		if a != b {
+			return a < b
+		}
+		return keys[i] < keys[j]
+	})
+	for _, key := range keys {
+		d := byPath[key]
+		state := "retained"
+		if d.Created {
+			state = "created_identity_received"
+		}
+		p.journal.EntryBundle.Bundle.Directories = append(p.journal.EntryBundle.Bundle.Directories, windowsCanonicalEntryDirectoryJournalV2{Original: d, State: state})
+	}
+	return errors.Join(append([]error{ensureErr}, receiveErrs...)...)
+}
+
+func currentBundleDisposition(e *windowsCanonicalEntrySetJournalV2) windowsProductTargetDispositionV1 {
+	result := windowsProductTargetIdentical
+	for _, row := range e.Bundle.Members {
+		if row.Prior == nil {
+			result = windowsProductTargetCreate
+			continue
+		}
+		if row.Staged == nil || row.Prior.File.SHA256 != row.Staged.File.SHA256 {
+			return windowsProductTargetReplace
+		}
+	}
+	return result
+}
+
+func currentNativeResultRecord(result binaryadmission.WindowsCanonicalEntryMoveResultV1) binaryadmission.WindowsCanonicalEntryNativeResultRecordV2 {
+	render := func(err error) *string {
+		if err == nil {
+			return nil
+		}
+		text := err.Error()
+		return &text
+	}
+	return binaryadmission.WindowsCanonicalEntryNativeResultRecordV2{Member: result.Member, SourceRelative: result.SourceRelative, DestinationRelative: result.DestinationRelative, Attempted: result.Attempted, NativeStatusKnown: result.NativeStatusKnown, NativeStatus: result.NativeStatus, Applied: result.Applied, Readback: result.Readback, Error: render(result.Error), CloseError: render(result.CloseError), OriginalOwnerPending: result.OriginalOwnerPending}
+}
+
+func currentMoveRecord(result binaryadmission.WindowsCanonicalEntryMoveResultV1, prior bool, source, destination string) windowsCanonicalEntryMoveRecordV2 {
+	v := currentNativeResultRecord(result)
+	return windowsCanonicalEntryMoveRecordV2{Member: v.Member, Prior: prior, SourceRelative: source, DestinationRelative: destination, Applied: v.Applied, Readback: v.Readback, NativeStatusKnown: v.NativeStatusKnown, NativeStatus: v.NativeStatus, Attempted: v.Attempted, Error: v.Error, CloseError: v.CloseError, OriginalOwnerPending: v.OriginalOwnerPending}
+}
+
+func currentOriginalMemberObservation(ctx context.Context, source *stagedWindowsCanonicalEntrySetV2, prior bool, member string) (binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, error) {
+	if ctx == nil || source == nil || source.original == nil {
+		return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, errors.New("current original observation owner and context required")
+	}
+	if prior {
+		if source.prior == nil {
+			return binaryadmission.WindowsCanonicalEntryMemberEvidenceV2{}, errors.New("current original prior owner required")
+		}
+		return source.prior.ObserveOriginalMember(ctx, member)
+	}
+	return source.original.ObserveOriginalMember(ctx, member)
+}
+
+func (t *WindowsProductTxn) moveCurrentEntryOriginal(ctx context.Context, prior bool, member, destination string) error {
+	p := t.prepared
+	e := p.journal.EntryBundle
+	state := p.entryBundle
+	locations := state.stagedLocations
+	if prior {
+		locations = state.priorLocations
+	}
+	observation, observeErr := currentOriginalMemberObservation(ctx, state.source, prior, member)
+	if observeErr != nil {
+		state.nativeErrors = append(state.nativeErrors, observeErr)
+		return observeErr
+	}
+	row := currentEntryMember(e, member)
+	if row == nil {
+		return errors.New("current move has no issued original")
+	}
+	original := row.Staged
+	if prior {
+		original = row.Prior
+	}
+	if original == nil || observation.NativeIdentity != original.NativeIdentity || observation.File.SHA256 != original.File.SHA256 || observation.Size != original.Size || observation.Attributes != original.Attributes || !currentEntryRelative(observation.File.Path) {
+		return errors.New("current native member observation differs from its original plan")
+	}
+	source := observation.File.Path
+	locations[member] = source
+	e.Moves = append(e.Moves, windowsCanonicalEntryMoveRecordV2{Member: member, Prior: prior, SourceRelative: source, DestinationRelative: destination})
+	index := len(e.Moves) - 1
+	if err := t.persistProductJournal(); err != nil {
+		return err
+	}
+	var result binaryadmission.WindowsCanonicalEntryMoveResultV1
+	var err error
+	if prior {
+		result, err = state.source.prior.MoveOriginal(ctx, member, destination)
+	} else {
+		result, err = state.source.original.MoveOriginal(ctx, member, destination)
+	}
+	state.nativeResults = append(state.nativeResults, result)
+	state.nativeErrors = append(state.nativeErrors, err)
+	record := currentMoveRecord(result, prior, source, destination)
+	record.Member = member
+	e.Moves[index] = record
+	if result.Applied {
+		locations[member] = destination
+	}
+	received := canonicalEntryMoveResultError(result, err, member, destination)
+	if result.SourceRelative != "" && result.SourceRelative != source {
+		received = errors.Join(received, errors.New("native current move source differs from persisted intent"))
+	}
+	return errors.Join(received, t.persistProductJournal())
+}
+
+func currentPromotionOrder(e *windowsCanonicalEntrySetJournalV2, prior bool) []string {
+	keys := []string{}
+	for _, row := range e.Bundle.Members {
+		if prior && row.Prior != nil || !prior && row.Staged != nil {
+			keys = append(keys, row.Member)
+		}
+	}
+	rank := func(key string) int {
+		switch key {
+		case e.Expected.CanonicalEntryRelativePath:
+			return 4
+		case e.Expected.ProductRelativePath:
+			return 3
+		case e.Expected.IdentityRelativePath:
+			return 2
+		case e.Expected.RuntimePayload.Path:
+			return 1
+		default:
+			return 0
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := rank(keys[i]), rank(keys[j])
+		if a != b {
+			if prior {
+				return a > b
+			}
+			return a < b
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func (t *WindowsProductTxn) promoteCurrentEntryBundle(ctx context.Context) error {
+	e := t.prepared.journal.EntryBundle
+	e.Bundle.Disposition.State = "apply-pending"
+	for _, key := range currentPromotionOrder(e, true) {
+		row := currentEntryMember(e, key)
+		if err := t.moveCurrentEntryOriginal(ctx, true, key, *row.PriorAsideRelative); err != nil {
+			return err
+		}
+	}
+	for _, key := range currentPromotionOrder(e, false) {
+		if err := t.moveCurrentEntryOriginal(ctx, false, key, key); err != nil {
+			return err
+		}
+		if t.prepared.deps.Fault != nil {
+			var stage WindowsProductStage
+			switch key {
+			case e.Expected.ProductRelativePath:
+				stage = WindowsProductStageProductPromoted
+			case e.Expected.IdentityRelativePath:
+				stage = WindowsProductStageIdentityPromoted
+			case e.Expected.CanonicalEntryRelativePath:
+				stage = WindowsProductStageCanonicalEntryPromoted
+			}
+			if stage != "" {
+				if err := t.prepared.deps.Fault(stage); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := t.Opts.EntryBundle.original.VerifyUnchanged(ctx); err != nil {
+		return err
+	}
+	actual, err := t.Opts.EntryBundle.original.PublishedSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(actual, e.Expected) {
+		return errors.New("current complete cohort readback differs from original projection")
+	}
+	return nil
+}
+
+func readCanonicalEntryBundle(ctx context.Context, targets binaryadmission.WindowsCanonicalEntrySetTargetsV2, expected binaryadmission.WindowsCanonicalEntrySetSnapshotV2) (actual binaryadmission.WindowsCanonicalEntrySetSnapshotV2, retErr error) {
+	owner, err := binaryadmission.AcquireWindowsCanonicalEntrySetV2(ctx, targets, expected)
+	if owner != nil {
+		defer func() { retErr = errors.Join(retErr, owner.Close()) }()
+	}
+	if err != nil {
+		return actual, err
+	}
+	if owner == nil {
+		return actual, errors.New("current cohort receiving returned no original owner")
+	}
+	return owner.Snapshot()
+}
+
+func inspectCurrentEntryPreflight(o WindowsProductTxnOpts) (result windowsProductPairPreflightV1, retErr error) {
+	if o.Context == nil || o.EntryBundle == nil || o.EntryBundle.original == nil || o.EntrySet != nil {
+		return result, errors.New("one current original entry stage and context required")
+	}
+	if err := o.EntryBundle.original.VerifyUnchanged(o.Context); err != nil {
+		return result, err
+	}
+	snapshot, err := o.EntryBundle.original.Snapshot()
+	if err != nil {
+		return result, err
+	}
+	targets, err := o.EntryBundle.original.DestinationTargets()
+	if err != nil {
+		return result, err
+	}
+	if !sameWindowsProductPath(targets.CanonicalEntryPath, o.CanonicalEntryPath) || !sameWindowsProductPath(targets.ProductPath, o.ProductPath) || !sameWindowsProductPath(targets.IdentityPath, o.IdentityPath) {
+		return result, errors.New("current original target projection differs")
+	}
+	newMembers, err := o.EntryBundle.original.Members()
+	if err != nil {
+		return result, err
+	}
+	prior, err := o.EntryBundle.acquirePrior(o.Context)
+	if err != nil {
+		return result, err
+	}
+	before, err := prior.Observation(o.Context)
+	if err != nil {
+		return result, err
+	}
+	old := map[string]string{}
+	for _, member := range before.Members {
+		old[member.Member] = member.File.SHA256
+	}
+	disposition := windowsProductTargetIdentical
+	productStage := ""
+	for _, member := range newMembers {
+		if member.Member == snapshot.ProductRelativePath {
+			productStage = member.File.Path
+		}
+		digest, present := old[member.Member]
+		if !present {
+			if disposition != windowsProductTargetReplace {
+				disposition = windowsProductTargetCreate
+			}
+		} else if digest != member.File.SHA256 {
+			disposition = windowsProductTargetReplace
+		}
+		delete(old, member.Member)
+	}
+	if len(old) != 0 {
+		disposition = windowsProductTargetReplace
+	}
+	if productStage == "" || !sameWindowsProductPath(filepath.Join(filepath.Dir(targets.CanonicalEntryPath), filepath.FromSlash(productStage)), o.StagedProduct) {
+		return result, errors.New("Product stage is not the issued current original")
+	}
+	view, err := prior.RuntimeProduct(o.Context)
+	if err != nil {
+		return result, err
+	}
+	if view != nil {
+		if err := view.ValidateOriginal(o.Context); err != nil {
+			return result, err
+		}
+		artifact := view.Artifact()
+		result.PriorCLI = windowsProductPreimageV1{Present: true, SHA256: artifact.SHA256}
+	}
+	legacy, err := snapshotProductPairFile(o.LegacyWindowlessPath)
+	if err != nil {
+		return result, err
+	}
+	result.PriorWindowless = windowsProductPreimage(legacy)
+	result.Disposition = windowsProductPairDispositionV1{CLI: disposition, Windowless: windowsProductTargetIdentical}
+	return result, o.Context.Err()
+}
+
+func cleanupCurrentEntryLegacyFiles(o WindowsProductTxnOpts, p *windowsProductPreparedTxn, forward bool) error {
+	if p.legacyRetained != "" {
+		if err := removeBoundWindowsProductFileIfPresent(p.legacyRetained, p.journal.LegacyWindowless.PriorSHA256, p.deps); err != nil {
+			return err
+		}
+	}
+	if len(p.journal.LegacyWindowless.BaselineAsides) != 0 {
+		return errors.Join(ErrWindowsProductCleanupPending, errors.New("legacy original aside custody requires receiving"))
+	}
+	for _, target := range []string{o.LegacyWindowlessPath, filepath.Join(filepath.Dir(o.ProductPath), "mcphub-pe-admit.exe")} {
+		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+			return errors.Join(ErrWindowsProductCleanupPending, fmt.Errorf("retired original target absence unconfirmed: %v", err))
+		}
+	}
+	return nil
+}
+
+func closeCurrentEntryFiles(source *stagedWindowsCanonicalEntrySetV2) error {
+	if source == nil {
+		return nil
+	}
+	var causes []error
+	if source.original != nil {
+		causes = append(causes, source.original.Close())
+	}
+	if source.prior != nil {
+		causes = append(causes, source.prior.Close())
+	}
+	return errors.Join(causes...)
+}
+
+func orderedOriginalMemberDirectories(input []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1, snapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2) []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1 {
+	owners := append([]*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1(nil), input...)
+	for i, j := 0, len(owners)-1; i < j; i, j = i+1, j-1 {
+		owners[i], owners[j] = owners[j], owners[i]
+	}
+	sort.SliceStable(owners, func(i, j int) bool {
+		a, aok := snapshots[owners[i]]
+		b, bok := snapshots[owners[j]]
+		if aok != bok {
+			return !aok
+		}
+		if !aok {
+			return false
+		}
+		ad, bd := strings.Count(a.RelativePath, "/"), strings.Count(b.RelativePath, "/")
+		if ad != bd {
+			return ad > bd
+		}
+		return a.RelativePath > b.RelativePath
+	})
+	return owners
+}
+
+func orderedCurrentDirectories(source *stagedWindowsCanonicalEntrySetV2) []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1 {
+	if source == nil {
+		return nil
+	}
+	if source.original == nil {
+		return nil
+	}
+	return source.original.Directories()
+}
+
+// This sole carrier path receives all member borrowers before the native
+// deepest-first lenders. Acquisition errors remain with their original caller;
+// closure errors stay sticky while each repeated supported receive still runs.
+func (source *stagedWindowsCanonicalEntrySetV2) Close() error {
+	if source == nil {
+		return nil
+	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	source.closeRequested = true
+	owners := orderedCurrentDirectories(source)
+	err := settleCurrentEntryReferences(func() error { return closeCurrentEntryFiles(source) }, owners, func(owner *binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1) error { return owner.Close() })
+	source.closeError = errors.Join(source.closeError, err)
+	return source.closeError
+}
+
+// The order/error-continuation operation is shared by the carrier and its inert
+// failure trace; it introduces no alternate native resource issuer or closer.
+func settleCurrentEntryReferences(members func() error, owners []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1, closeDirectory func(*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1) error) error {
+	causes := []error{members()}
+	for _, owner := range owners {
+		if owner != nil {
+			causes = append(causes, closeDirectory(owner))
+		}
+	}
+	return errors.Join(causes...)
+}
+
+func closeCurrentEntryOwners(source *stagedWindowsCanonicalEntrySetV2) error { return source.Close() }
+
+func (t *WindowsProductTxn) discardCurrentEntryOriginal(prior bool, member, location string, purpose binaryadmission.WindowsCanonicalEntryRecoveryPurposeV2, persist bool) error {
+	p := t.prepared
+	e := p.journal.EntryBundle
+	state := p.entryBundle
+	row := currentEntryMember(e, member)
+	if row == nil {
+		return errors.New("unissued current cleanup member")
+	}
+	original := row.Staged
+	side := "unused-successor"
+	if prior {
+		original = row.Prior
+		side = "prior"
+	}
+	if original == nil || location == member {
+		return errors.New("current cleanup has no nonfinal original")
+	}
+	index := -1
+	for i := range e.Cleanup {
+		v := &e.Cleanup[i]
+		if v.Side == side && v.Member == member {
+			index = i
+			if v.SourceRelative != location || v.Purpose != purpose {
+				return errors.New("current cleanup intent changed")
+			}
+			if v.State == "absence_received" {
+				path := filepath.Join(filepath.Dir(e.CanonicalEntry.Target), filepath.FromSlash(location))
+				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+					return errors.Join(ErrWindowsProductCleanupPending, err, errors.New("received current cleanup absence is now occupied or unreadable"))
+				}
+				return nil
+			}
+			break
+		}
+	}
+	if index < 0 {
+		e.Cleanup = append(e.Cleanup, windowsCanonicalEntryCleanupV2{TransactionID: e.TransactionID, Side: side, Member: member, SourceRelative: location, ExpectedSHA256: original.File.SHA256, State: "retained", Purpose: purpose})
+		index = len(e.Cleanup) - 1
+	}
+	e.Cleanup[index].State = "discard_intent"
+	if persist {
+		if err := t.persistProductJournal(); err != nil {
+			return err
+		}
+	}
+	ctx := context.WithoutCancel(t.Opts.Context)
+	var actual binaryadmission.WindowsCanonicalEntryMoveResultV1
+	var err error
+	if prior {
+		actual, err = state.source.prior.DiscardOriginal(ctx, member, location)
+	} else {
+		actual, err = state.source.original.DiscardOriginal(ctx, member, location)
+	}
+	state.nativeResults = append(state.nativeResults, actual)
+	state.nativeErrors = append(state.nativeErrors, err)
+	if actual.Applied && actual.Readback {
+		e.Cleanup[index].State = "absence_received"
+	}
+	received := canonicalEntryDiscardResultError(actual, err, member, location)
+	if persist {
+		received = errors.Join(received, t.persistProductJournal())
+	}
+	return received
+}
+
+func (t *WindowsProductTxn) cleanupCurrentEntryFiles(committed, persist bool) error {
+	p := t.prepared
+	e := p.journal.EntryBundle
+	purpose := binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2
+	if committed {
+		purpose = binaryadmission.WindowsCanonicalRecoveryCommittedForwardV2
+	}
+	for _, row := range e.Bundle.Members {
+		if row.Staged != nil {
+			location := p.entryBundle.stagedLocations[row.Member]
+			if location != "" && location != row.Member {
+				if err := t.discardCurrentEntryOriginal(false, row.Member, location, purpose, persist); err != nil {
+					return err
+				}
+			}
+		}
+		if committed && row.Prior != nil {
+			location := p.entryBundle.priorLocations[row.Member]
+			if location == row.Member {
+				return errors.New("committed prior original was not displaced")
+			}
+			if err := t.discardCurrentEntryOriginal(true, row.Member, location, purpose, persist); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (t *WindowsProductTxn) disposeCurrentEntryDirectories(persist bool) error {
+	p := t.prepared
+	e := p.journal.EntryBundle
+	var causes []error
+	effectsHeld := false
+	var closeErrors []error
+	for _, owner := range orderedCurrentDirectories(p.entryBundle.source) {
+		if owner == nil {
+			continue
+		}
+		original, known := p.entryBundle.source.directorySnapshots[owner]
+		if !known {
+			var err error
+			original, err = owner.SnapshotForEntryMembersV2()
+			if err != nil {
+				causes = append(causes, err)
+				effectsHeld = true
+			} else {
+				known = true
+			}
+		}
+		if known && original.Created && !effectsHeld {
+			index := -1
+			for k := range e.Bundle.Directories {
+				if e.Bundle.Directories[k].Original == original {
+					index = k
+					break
+				}
+			}
+			if index < 0 {
+				causes = append(causes, errors.New("created current directory lacks exact original evidence"))
+				effectsHeld = true
+			} else if e.Bundle.Directories[index].State == "absence_received" {
+				if _, err := os.Lstat(filepath.Join(original.Root, filepath.FromSlash(original.RelativePath))); !errors.Is(err, os.ErrNotExist) {
+					causes = append(causes, errors.Join(ErrWindowsProductCleanupPending, err))
+					effectsHeld = true
+				}
+			} else {
+				e.Bundle.Directories[index].State = "dispose_intent"
+				var effectErr error
+				if persist {
+					effectErr = t.persistProductJournal()
+				}
+				if effectErr == nil {
+					actual, err := owner.DisposeOriginalIfEmpty(context.WithoutCancel(t.Opts.Context))
+					p.entryBundle.nativeResults = append(p.entryBundle.nativeResults, actual)
+					p.entryBundle.nativeErrors = append(p.entryBundle.nativeErrors, err)
+					record := currentNativeResultRecord(actual)
+					e.Bundle.Directories[index].Disposition = &record
+					if actual.Applied && actual.Readback {
+						e.Bundle.Directories[index].State = "absence_received"
+					}
+					effectErr = canonicalEntryDiscardResultError(actual, err, actual.Member, original.RelativePath)
+					if persist {
+						effectErr = errors.Join(effectErr, t.persistProductJournal())
+					}
+				}
+				if effectErr != nil {
+					causes = append(causes, effectErr)
+					effectsHeld = true
+				}
+			}
+		}
+		// A child lender is closed before its parent can be disposed. Failure
+		// stops further effects, while every remaining resource Close still runs.
+		if err := owner.Close(); err != nil {
+			causes = append(causes, err)
+			closeErrors = append(closeErrors, err)
+			p.entryBundle.nativeErrors = append(p.entryBundle.nativeErrors, err)
+			effectsHeld = true
+		}
+	}
+	if err := errors.Join(closeErrors...); err != nil {
+		rendered := err.Error()
+		e.Bundle.Disposition.CloseError = &rendered
+		e.Bundle.Disposition.OriginalOwnerPending = true
+	}
+	return errors.Join(causes...)
+}
+
+func (t *WindowsProductTxn) settleUnpublishedCurrentPreparation(transferred bool) error {
+	p := t.prepared
+	present, inspectErr := inspectWindowsProductRecoveryLeaves(t.Opts.StateDir)
+	var cleanupErr error
+	if !present && inspectErr == nil && transferred {
+		p.journal.EntryBundle.Bundle.Disposition.State = "rolled-back"
+		cleanupErr = t.cleanupCurrentEntryFiles(false, false)
+	}
+	closeErr := closeCurrentEntryFiles(t.Opts.EntryBundle)
+	if !present && inspectErr == nil && transferred && cleanupErr == nil && closeErr == nil {
+		cleanupErr = t.disposeCurrentEntryDirectories(false)
+	}
+	// Once a writer was entered, a failed write never implies publication absence.
+	// Positive same-fence absence above is the only unpublished cleanup path.
+	if present || inspectErr != nil {
+		p.journal.EntryBundle.Bundle.Disposition.State = "retained"
+	}
+	return errors.Join(inspectErr, cleanupErr, closeErr, closeCurrentEntryOwners(t.Opts.EntryBundle))
+}
+
+func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
+	o, p := t.Opts, t.prepared
+	e := p.journal.EntryBundle
+	ctx := context.WithoutCancel(o.Context)
+	e.Bundle.Disposition.State = "rollback-pending"
+	// The common rollback owner has settled the exact successor before entering.
+	keys := currentPromotionOrder(e, false)
+	for i := len(keys) - 1; i >= 0; i-- {
+		key := keys[i]
+		if p.entryBundle.stagedLocations[key] != key {
+			continue
+		}
+		row := currentEntryMember(e, key)
+		if err := t.moveCurrentEntryOriginal(ctx, false, key, *row.SuccessorAsideRelative); err != nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+		}
+	}
+	keys = currentPromotionOrder(e, true)
+	for i := len(keys) - 1; i >= 0; i-- {
+		key := keys[i]
+		if p.entryBundle.priorLocations[key] == key {
+			continue
+		}
+		if err := t.moveCurrentEntryOriginal(ctx, true, key, key); err != nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+		}
+	}
+	// Selected observations defer unrelated peer checks to settlement. Receive
+	// both original banks before restoring Tasks, receipts or the prior runtime.
+	if o.EntryBundle == nil || o.EntryBundle.prior == nil || o.EntryBundle.original == nil {
+		return errors.Join(trigger, ErrWindowsProductRecoveryPending, errors.New("rollback original member banks required"))
+	}
+	if err := errors.Join(o.EntryBundle.prior.VerifyUnchanged(ctx), o.EntryBundle.original.VerifyUnchanged(ctx)); err != nil {
+		return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+	}
+	if err := o.Tasks.RestoreImport(); err != nil {
+		return errors.Join(trigger, fmt.Errorf("%w: restore exact task XML: %w", ErrWindowsProductPairRecoveryRollback, err))
+	}
+	if err := restoreLegacyWindowlessPreimage(p, o.LegacyWindowlessPath); err != nil {
+		return errors.Join(trigger, err)
+	}
+	for _, snapshot := range []productPairFileSnapshot{p.receiptV3Prior, p.receiptV2Prior} {
+		if err := restoreProductPairFile(snapshot); err != nil {
+			return errors.Join(trigger, err)
+		}
+	}
+	if e.PriorRuntime != nil {
+		view, err := o.EntryBundle.prior.RuntimeProduct(ctx)
+		if err != nil {
+			return errors.Join(trigger, err)
+		}
+		if view != nil {
+			if err := view.ValidateOriginal(ctx); err != nil {
+				return errors.Join(trigger, err)
+			}
+		}
+		if p.journal.PreSettlement != nil && p.journal.PreSettlement.GUIOwner == windowsProductGUIOwnerConfirmedPresent {
+			if p.deps.RecoverPriorSettlement == nil {
+				return errors.Join(trigger, ErrWindowsProductRecoveryPending)
+			}
+			if err := p.deps.RecoverPriorSettlement(p.journal); err != nil {
+				return errors.Join(trigger, err)
+			}
+		} else if p.journal.PriorFleetReaped && view != nil && p.deps.RestartPrior != nil {
+			artifact := view.Artifact()
+			launch, err := p.deps.RestartPrior(artifact.Path)
+			if err != nil {
+				return errors.Join(trigger, err, abortStartedSupervisor(launch))
+			}
+			recoveryCtx, cancel := context.WithTimeout(context.Background(), defaultSupervisorLockReleaseTimeout)
+			err = receiveStartedSupervisor(recoveryCtx, launch, supervisorExpectation(o.StateDir, artifact.Path, artifact.SHA256), func() error {
+				if p.deps.WaitSupervisorReady != nil {
+					return p.deps.WaitSupervisorReady(recoveryCtx, artifact.Path, artifact)
+				}
+				return nil
+			})
+			cancel()
+			if err != nil {
+				return errors.Join(trigger, err)
+			}
+		}
+	}
+	e.Bundle.Disposition.State = "rolled-back"
+	if err := t.persistProductJournal(); err != nil {
+		return errors.Join(trigger, err)
+	}
+	if err := t.cleanupCurrentEntryFiles(false, true); err != nil {
+		return errors.Join(trigger, ErrWindowsProductCleanupPending, err)
+	}
+	if err := closeCurrentEntryFiles(o.EntryBundle); err != nil {
+		return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+	}
+	if err := t.disposeCurrentEntryDirectories(true); err != nil {
+		return errors.Join(trigger, ErrWindowsProductCleanupPending, err)
+	}
+	if err := closeCurrentEntryOwners(o.EntryBundle); err != nil {
+		return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+	}
+	e.Bundle.Disposition.State = "settled"
+	e.Bundle.Disposition.DispositionPending = false
+	e.Bundle.Disposition.OriginalOwnerPending = false
+	p.journal.Phase = WindowsProductRecoverySettledRollback
+	p.journal.TaskSetSHA256 = ""
+	if err := t.persistProductJournal(); err != nil {
+		return errors.Join(trigger, err)
+	}
+	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
+		return errors.Join(trigger, err)
+	}
+	if err := p.deps.RemoveRecoveryJournal(filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)); err != nil {
+		return errors.Join(trigger, err)
+	}
+	return fmt.Errorf("%w; exact current Windows cohort rollback completed", trigger)
+}
+
+func currentEntrySetReceipt(j windowsProductRecoveryJournalV3) *windowsCanonicalEntrySetReceiptV2 {
+	e := j.EntryBundle
+	if e == nil {
+		return nil
+	}
+	s := e.Expected
+	return &windowsCanonicalEntrySetReceiptV2{Schema: e.Schema, TransactionID: j.TransactionID, BuildID: s.BuildID, RegistryProjectionSHA256: s.RegistryProjectionSHA256, CanonicalEntryPath: e.CanonicalEntry.Target, CanonicalEntrySHA256: s.CanonicalEntry.SHA256, ProductPath: j.Product.Target, IdentityPath: s.Identity.Path, IdentitySHA256: s.Identity.SHA256, Machine: s.Machine}
+}
+
+func reconcileStagedCurrentEntryNoop(ctx context.Context, stateDir string, mode WindowsProductPairMode, source *stagedWindowsCanonicalEntrySetV2, reconcile func(UpgradeReceiptV3) error) (bool, error) {
+	if ctx == nil || source == nil || source.original == nil || reconcile == nil {
+		return false, errors.New("original current stage and receiving owner required")
+	}
+	if err := source.original.VerifyUnchanged(ctx); err != nil {
+		return false, err
+	}
+	snapshot, err := source.original.Snapshot()
+	if err != nil {
+		return false, err
+	}
+	targets, err := source.original.DestinationTargets()
+	if err != nil {
+		return false, err
+	}
+	members, err := source.original.Members()
+	if err != nil {
+		return false, err
+	}
+	prior, err := source.acquirePrior(ctx)
+	if err != nil {
+		return false, err
+	}
+	observation, err := prior.Observation(ctx)
+	if err != nil {
+		return false, err
+	}
+	if observation.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 || len(members) != len(observation.Members) {
+		return false, nil
+	}
+	old := make(map[string]string, len(observation.Members))
+	for _, member := range observation.Members {
+		old[member.Member] = member.File.SHA256
+	}
+	for _, member := range members {
+		if old[member.Member] != member.File.SHA256 {
+			return false, nil
+		}
+	}
+	if err := prior.VerifyUnchanged(ctx); err != nil {
+		return false, err
+	}
+	raw, err := api.ReadStateFileInodeAnchored(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	decoded, err := DecodeUpgradeReceipt(raw)
+	if err != nil {
+		return false, err
+	}
+	r := decoded.V3
+	if r == nil || r.EntryBundle == nil || r.EntrySet != nil || r.Admission != UpgradeAdmissionCanonicalEntryProductV2 || !windowsProductPairReceiptModeMatches(r.Mode, mode) {
+		return false, nil
+	}
+	e := r.EntryBundle
+	if r.Artifact.SHA256 != snapshot.Product.SHA256 || e.BuildID != snapshot.BuildID || e.RegistryProjectionSHA256 != snapshot.RegistryProjectionSHA256 || e.CanonicalEntrySHA256 != snapshot.CanonicalEntry.SHA256 || e.IdentitySHA256 != snapshot.Identity.SHA256 || !sameWindowsProductPath(e.CanonicalEntryPath, targets.CanonicalEntryPath) || !sameWindowsProductPath(e.ProductPath, targets.ProductPath) || !sameWindowsProductPath(e.IdentityPath, targets.IdentityPath) {
+		return false, nil
+	}
+	actual, err := source.original.PublishedSnapshot(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !reflect.DeepEqual(actual, snapshot) {
+		return false, errors.New("current complete no-op readback differs from original projection")
+	}
+	if err := reconcile(*r); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func reconcileCurrentEntryCommitReceipt(ctx context.Context, stateDir string, j windowsProductRecoveryJournalV3, d WindowsProductTxnDeps) (bool, error) {
+	if j.EntryBundle == nil || j.EntrySet != nil {
+		return false, errors.New("one current entry journal arm required")
+	}
+	d = withWindowsProductDefaults(d)
+	raw, err := d.ReadReceipt(filepath.Join(stateDir, UpgradeReceiptSchemaV3+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	decoded, err := DecodeUpgradeReceipt(raw)
+	if err != nil {
+		return false, err
+	}
+	r := decoded.V3
+	if r == nil || r.EntryBundle == nil || r.EntrySet != nil || r.Admission != UpgradeAdmissionCanonicalEntryProductV2 {
+		return false, nil
+	}
+	if r.TransactionID != j.TransactionID || r.Artifact.SHA256 != j.Product.NewSHA256 || r.TaskSetSHA256 != j.TaskSetSHA256 || !reflect.DeepEqual(r.EntryBundle, currentEntrySetReceipt(j)) {
+		return false, errors.New("current committed receipt differs from original journal")
+	}
+	targets, err := binaryadmission.CanonicalEntryTargetsV2(j.EntryBundle.CanonicalEntry.Target)
+	if err != nil {
+		return false, err
+	}
+	if _, err := d.AdmitEntryBundle(ctx, targets, j.EntryBundle.Expected); err != nil {
+		return false, err
+	}
+	if d.PublishCommitted == nil {
+		return false, errors.New("current committed publisher unavailable")
+	}
+	_, err = d.PublishCommitted(WindowsProductCommitEvent{Schema: r.Schema, TransactionID: r.TransactionID, Mode: r.Mode, Artifact: r.Artifact, EntryBundle: r.EntryBundle, TaskSetSHA256: r.TaskSetSHA256, Retired: r.Retired, ReceiptSHA256: binaryadmission.RuntimeDigest(raw), InstalledAt: r.InstalledAt})
+	return err == nil, err
 }
 
 func (s *stagedWindowsCanonicalEntrySetV1) acquirePrior(ctx context.Context) (*binaryadmission.WindowsCanonicalEntryPriorSetV1, error) {
@@ -126,6 +1515,12 @@ func canonicalEntrySetJournalTargets(j windowsProductRecoveryJournalV3) (binarya
 }
 
 func validateCanonicalEntrySetJournal(j windowsProductRecoveryJournalV3) error {
+	if j.EntryBundle != nil {
+		if j.EntrySet != nil {
+			return errors.New("legacy and current entry journal arms coexist")
+		}
+		return validateCanonicalEntryBundleJournal(j)
+	}
 	if err := validateOriginalPayloadDirectory(j); err != nil {
 		return err
 	}
@@ -229,6 +1624,27 @@ func canonicalEntrySetReceipt(j windowsProductRecoveryJournalV3) *windowsCanonic
 }
 
 func validateCanonicalEntrySetReceipt(receipt UpgradeReceiptV3) error {
+	if receipt.EntryBundle != nil {
+		if receipt.EntrySet != nil || receipt.Admission != UpgradeAdmissionCanonicalEntryProductV2 {
+			return errors.New("current entry receipt and admission disagree")
+		}
+		e := receipt.EntryBundle
+		if _, err := binaryadmission.NewWindowsCanonicalEntryBuildBindingV1(e.BuildID, e.CanonicalEntrySHA256, binaryadmission.WindowsCanonicalEntryReverseProjectionV1); err != nil {
+			return err
+		}
+		targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntryPath)
+		if err != nil {
+			return err
+		}
+		projection, err := binaryadmission.WindowsCanonicalEntryRegistryProjectionSHA256V2()
+		if err != nil {
+			return fmt.Errorf("current canonical entry registry projection: %w", err)
+		}
+		if e.Schema != binaryadmission.WindowsCanonicalEntrySetSchemaV2 || e.TransactionID != receipt.TransactionID || e.RegistryProjectionSHA256 != projection || !validLowerHexSHA256(e.CanonicalEntrySHA256) || !validLowerHexSHA256(e.IdentitySHA256) || e.Machine != receipt.Artifact.Machine || !sameWindowsProductPath(targets.ProductPath, e.ProductPath) || !sameWindowsProductPath(targets.IdentityPath, e.IdentityPath) {
+			return errors.New("invalid current canonical entry receipt")
+		}
+		return nil
+	}
 	e := receipt.EntrySet
 	if receipt.Admission == UpgradeAdmissionLocalProductV3 {
 		if e != nil {
@@ -695,6 +2111,26 @@ func windowsCanonicalSetDisposition(productPrior productPairFileSnapshot, e *win
 }
 
 func validateWindowsProductTxnReplacementAuthority(o WindowsProductTxnOpts, p *windowsProductPreparedTxn) error {
+	if p.entryBundle != nil {
+		if o.Mode != WindowsProductPairModeUpgrade {
+			return validateWindowsSingleProductReplacementAuthority(o, p.disposition, p.productPrior, p.legacyPrior)
+		}
+		runtime := p.journal.EntryBundle.PriorRuntime
+		if runtime == nil {
+			return ErrWindowsProductPairQuiescenceRequired
+		}
+		prior, err := currentPriorSnapshot(o.Context, o.EntryBundle, runtime.Path)
+		if err != nil {
+			return err
+		}
+		if windowsProductPreimage(prior) != (windowsProductPreimageV1{Present: runtime.Present, SHA256: runtime.SHA256}) {
+			return errors.New("current original prior runtime changed")
+		}
+		projected := o
+		projected.EntryBundle = nil
+		projected.ProductPath = runtime.Path
+		return validateWindowsSingleProductReplacementAuthority(projected, p.disposition, prior, p.legacyPrior)
+	}
 	if p.entrySet == nil {
 		return validateWindowsSingleProductReplacementAuthority(o, p.disposition, p.productPrior, p.legacyPrior)
 	}
@@ -728,56 +2164,78 @@ func verifyLegacyProductPromotion(p *windowsProductPreparedTxn, promotion Window
 	return verifyProductPairPromotion(promotion, p.productPrior)
 }
 
-// Check the reserved member before encoding/json can case-fold a field name
-// or let a later duplicate erase an already observed complete-set arm.
-func validateCanonicalEntryArmJSON(raw []byte) error {
+// Select the exact decoded arm before encoding/json can case-fold a reserved
+// key or let a later duplicate change its typed schema.
+func canonicalEntryArmSchema(raw []byte) (string, error) {
+	entry, err := uniqueCanonicalEntryRecordMember(raw, "entry_set")
+	if err != nil || len(entry) == 0 {
+		return "", err
+	}
+	if bytes.Equal(bytes.TrimSpace(entry), []byte("null")) {
+		return "", errors.New("entry_set must be absent for legacy or a complete object")
+	}
+	schemaRaw, err := uniqueCanonicalEntryRecordMember(entry, "schema")
+	if err != nil {
+		return "", err
+	}
+	var schema string
+	if len(schemaRaw) == 0 {
+		return "", errors.New("nested canonical entry schema required")
+	}
+	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
+		return "", err
+	}
+	if schema != windowsCanonicalEntrySetSchemaV1 && schema != binaryadmission.WindowsCanonicalEntrySetSchemaV2 {
+		return "", errors.New("unsupported nested canonical entry schema")
+	}
+	return schema, nil
+}
+
+func uniqueCanonicalEntryRecordMember(raw []byte, member string) (json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	start, err := decoder.Token()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if start != json.Delim('{') {
-		return errors.New("product record must be a JSON object")
+		return nil, errors.New("product record must be a JSON object")
 	}
-	seen := false
+	var selected json.RawMessage
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		key, ok := token.(string)
 		if !ok {
-			return errors.New("product record member is not a string")
+			return nil, errors.New("product record member is not a string")
 		}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return err
+			return nil, err
 		}
-		if !strings.EqualFold(key, "entry_set") {
+		if !strings.EqualFold(key, member) {
 			continue
 		}
-		if key != "entry_set" {
-			return errors.New("reserved entry_set member spelling is not exact")
+		if key != member {
+			return nil, fmt.Errorf("reserved %s member spelling is not exact", member)
 		}
-		if seen {
-			return errors.New("duplicate decoded entry_set member")
+		if selected != nil {
+			return nil, fmt.Errorf("duplicate decoded %s member", member)
 		}
-		seen = true
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return errors.New("entry_set must be absent for legacy or a complete object")
-		}
+		selected = value
 	}
 	end, err := decoder.Token()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if end != json.Delim('}') {
-		return errors.New("product record object is incomplete")
+		return nil, errors.New("product record object is incomplete")
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.Join(err, errors.New("product record has trailing JSON"))
+		return nil, errors.Join(err, errors.New("product record has trailing JSON"))
 	}
-	return nil
+	return selected, nil
 }
 
 // OriginalOwnerPending describes retained custody, not completion of this
@@ -799,7 +2257,7 @@ func canonicalEntryDiscardResultError(result binaryadmission.WindowsCanonicalEnt
 }
 
 func validateGUIOwnedStopPreimage(journal windowsProductRecoveryJournalV3, receipt windowsProductQuiescenceReceiptV1) error {
-	if journal.EntrySet != nil && journal.EntrySet.PriorRuntime == nil {
+	if hasCanonicalEntryArm(journal) && canonicalJournalPriorRuntime(journal) == nil {
 		return errors.New("complete-set prior runtime projection is missing")
 	}
 	runtime := canonicalRecoveryRuntimeArtifact(journal)
@@ -884,11 +2342,45 @@ func reconcileCanonicalEntryCommitReceipt(ctx context.Context, stateDir string, 
 }
 
 func canonicalRecoveryRuntimeArtifact(j windowsProductRecoveryJournalV3) windowsProductPairRecoveryArtifact {
+	if j.EntryBundle != nil && j.EntryBundle.PriorRuntime != nil {
+		r := j.EntryBundle.PriorRuntime
+		return windowsProductPairRecoveryArtifact{Target: r.Path, PriorPresent: r.Present, PriorSHA256: r.SHA256, NewSHA256: j.Product.NewSHA256}
+	}
 	if j.EntrySet != nil && j.EntrySet.PriorRuntime != nil {
 		r := j.EntrySet.PriorRuntime
 		return windowsProductPairRecoveryArtifact{Target: r.Path, PriorPresent: r.Present, PriorSHA256: r.SHA256, NewSHA256: j.Product.NewSHA256}
 	}
 	return windowsProductPairRecoveryArtifact{Target: j.Product.Target, PriorPresent: j.Product.PriorPresent, PriorSHA256: j.Product.PriorSHA256, NewSHA256: j.Product.NewSHA256}
+}
+
+func hasCanonicalEntryArm(j windowsProductRecoveryJournalV3) bool {
+	return j.EntrySet != nil || j.EntryBundle != nil
+}
+
+func canonicalJournalEntryPath(j windowsProductRecoveryJournalV3) string {
+	if j.EntryBundle != nil {
+		if j.EntrySet != nil {
+			return ""
+		}
+		return j.EntryBundle.CanonicalEntry.Target
+	}
+	if j.EntrySet != nil {
+		return j.EntrySet.CanonicalEntry.Target
+	}
+	return j.Product.Target
+}
+
+func canonicalJournalPriorRuntime(j windowsProductRecoveryJournalV3) *windowsCanonicalEntryRuntimePreimageV1 {
+	if j.EntryBundle != nil {
+		if j.EntrySet != nil {
+			return nil
+		}
+		return j.EntryBundle.PriorRuntime
+	}
+	if j.EntrySet != nil {
+		return j.EntrySet.PriorRuntime
+	}
+	return nil
 }
 
 func reconcileStagedCanonicalEntryNoop(ctx context.Context, stateDir string, mode WindowsProductPairMode, source *stagedWindowsCanonicalEntrySetV1, reconcile func(UpgradeReceiptV3) error) (bool, error) {
@@ -1130,4 +2622,320 @@ func validateOriginalPayloadDirectory(j windowsProductRecoveryJournalV3) error {
 		return errors.New("payload directory native snapshot disagrees with original transaction")
 	}
 	return nil
+}
+
+func currentEntryRelative(value string) bool {
+	return value != "" && value != "." && value != ".." && !strings.ContainsAny(value, "\\:\x00") && !strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "../") && path.Clean(value) == value
+}
+
+func currentEntryMember(e *windowsCanonicalEntrySetJournalV2, member string) *windowsCanonicalEntryMemberJournalV2 {
+	i := sort.Search(len(e.Bundle.Members), func(i int) bool { return e.Bundle.Members[i].Member >= member })
+	if i < len(e.Bundle.Members) && e.Bundle.Members[i].Member == member {
+		return &e.Bundle.Members[i]
+	}
+	return nil
+}
+
+func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) error {
+	e := j.EntryBundle
+	if e == nil || e.Schema != binaryadmission.WindowsCanonicalEntrySetSchemaV2 || e.TransactionID != j.TransactionID || e.Expected.Schema != e.Schema || e.Bundle.Effect != "exact-members" || e.Bundle.StagedDirectory != nil || e.Bundle.RelativePath != e.Expected.BundleRelativePath {
+		return errors.New("invalid current exact-member journal arm")
+	}
+	if err := binaryadmission.ValidateWindowsCanonicalEntrySetSnapshotV2(e.Expected); err != nil {
+		return err
+	}
+	if !e.Bundle.Disposition.Transferred || e.Bundle.Disposition.State == "staged" {
+		return errors.New("current published journal has no transferred disposition")
+	}
+	targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntry.Target)
+	if err != nil {
+		return err
+	}
+	root := filepath.Dir(targets.CanonicalEntryPath)
+	if !sameWindowsProductPath(targets.ProductPath, j.Product.Target) || e.Expected.Product.SHA256 != j.Product.NewSHA256 || e.Expected.CanonicalEntry.SHA256 != e.CanonicalEntry.NewSHA256 || !sameWindowsProductPath(e.Expected.ProductArtifact.Path, targets.ProductPath) || !sameWindowsProductPath(e.Expected.CanonicalEntry.Path, targets.CanonicalEntryPath) || !sameWindowsProductPath(e.Expected.Identity.Path, targets.IdentityPath) || !validRecoveryPreimage(e.CanonicalEntry.PriorPresent, e.CanonicalEntry.PriorSHA256) || e.StagedEntry.SHA256 != e.CanonicalEntry.NewSHA256 {
+		return errors.New("current journal file projections disagree")
+	}
+	newFiles := map[string]binaryadmission.RuntimeObjectV1{e.Expected.CanonicalEntryRelativePath: {Path: e.Expected.CanonicalEntryRelativePath, Kind: "file", SHA256: e.Expected.CanonicalEntry.SHA256}}
+	for _, object := range e.Expected.BundleInventory {
+		if object.Kind == "file" {
+			newFiles[path.Join(e.Bundle.RelativePath, object.Path)] = object
+		}
+	}
+	priorFiles := map[string]string{}
+	switch e.Bundle.BeforeKind {
+	case binaryadmission.WindowsCanonicalEntryBeforeAbsentV2:
+	case binaryadmission.WindowsCanonicalEntryBeforeRootProductV2:
+		priorFiles[e.Expected.CanonicalEntryRelativePath] = e.CanonicalEntry.PriorSHA256
+	case binaryadmission.WindowsCanonicalEntryBeforeLegacyV2:
+		legacy, err := binaryadmission.CanonicalEntryTargetsV1(targets.CanonicalEntryPath)
+		if err != nil {
+			return err
+		}
+		identity, err := filepath.Rel(root, legacy.IdentityPath)
+		if err != nil {
+			return err
+		}
+		priorFiles[e.Expected.CanonicalEntryRelativePath], priorFiles[e.Expected.ProductRelativePath], priorFiles[filepath.ToSlash(identity)] = e.CanonicalEntry.PriorSHA256, j.Product.PriorSHA256, ""
+	case binaryadmission.WindowsCanonicalEntryBeforeBundleV2:
+		if e.Bundle.BeforeInventory == nil {
+			return errors.New("prior current membership inventory missing")
+		}
+		raw, err := binaryadmission.CanonicalRuntimeJSON(*e.Bundle.BeforeInventory)
+		if err != nil {
+			return err
+		}
+		if _, err := binaryadmission.ParseRuntimeInventory(raw); err != nil {
+			return err
+		}
+		priorFiles[e.Expected.CanonicalEntryRelativePath] = e.CanonicalEntry.PriorSHA256
+		for _, object := range e.Bundle.BeforeInventory.Objects {
+			if object.Kind == "file" {
+				priorFiles[path.Join(e.Bundle.RelativePath, object.Path)] = object.SHA256
+			}
+		}
+	default:
+		return errors.New("unknown selected prior kind")
+	}
+	if e.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeBundleV2 && e.Bundle.BeforeInventory != nil {
+		return errors.New("noncurrent prior cannot carry bundle inventory")
+	}
+	if len(e.Bundle.Members) == 0 || e.Moves == nil || e.Cleanup == nil || e.Bundle.Directories == nil {
+		return errors.New("current member evidence arrays missing")
+	}
+	seenPaths := map[string]string{}
+	memberKeys := map[string]bool{}
+	identities := map[binaryadmission.WindowsCanonicalEntryFileIdentityV2]bool{}
+	for _, row := range e.Bundle.Members {
+		key := strings.ToLower(row.Member)
+		if memberKeys[key] {
+			return errors.New("case-aliased current member keys")
+		}
+		memberKeys[key] = true
+	}
+	last := ""
+	for i := range e.Bundle.Members {
+		row := &e.Bundle.Members[i]
+		if !currentEntryRelative(row.Member) || row.Member <= last {
+			return errors.New("current member keys are not canonical and unique")
+		}
+		last = row.Member
+		newObject, isNew := newFiles[row.Member]
+		oldDigest, isPrior := priorFiles[row.Member]
+		if isNew != (row.Staged != nil) || isPrior != (row.Prior != nil) || (!isNew && !isPrior) {
+			return errors.New("current member set differs from selected new/prior membership")
+		}
+		for _, side := range []struct {
+			value *binaryadmission.WindowsCanonicalEntryMemberEvidenceV2
+			prior bool
+		}{{row.Prior, true}, {row.Staged, false}} {
+			v := side.value
+			if v == nil {
+				continue
+			}
+			if v.Member != row.Member || !currentEntryRelative(v.File.Path) || !validLowerHexSHA256(v.File.SHA256) || v.Size < 0 || v.NativeIdentity.CreationTime == 0 || v.ParentIdentity.CreationTime == 0 {
+				return errors.New("invalid original current member evidence")
+			}
+			key := strings.ToLower(v.File.Path)
+			if _, ok := seenPaths[key]; ok {
+				return errors.New("original current member locations alias")
+			}
+			if identities[v.NativeIdentity] {
+				return errors.New("original current file identities alias")
+			}
+			identities[v.NativeIdentity] = true
+			if !side.prior && memberKeys[key] {
+				return errors.New("current stage aliases a selected final name")
+			}
+			seenPaths[key] = row.Member
+			if side.prior {
+				if v.File.Path != row.Member || (oldDigest != "" && oldDigest != v.File.SHA256) {
+					return errors.New("prior current file preimage disagrees")
+				}
+			} else if v.File.SHA256 != newObject.SHA256 || (newObject.Size != nil && v.Size != *newObject.Size) || path.Dir(v.File.Path) != "." || v.File.Path == row.Member {
+				return errors.New("issued current stage disagrees with authenticated file plan")
+			}
+		}
+		if row.Prior != nil {
+			if row.PriorAbsence != nil || row.PriorAsideRelative == nil {
+				return errors.New("prior member has invalid absence/aside evidence")
+			}
+		} else {
+			if row.PriorAbsence == nil || row.PriorAsideRelative != nil || row.PriorAbsence.ParentIdentity.CreationTime == 0 || !currentEntryRelative(row.PriorAbsence.MissingRelative) || (row.PriorAbsence.ParentRelative != "" && !currentEntryRelative(row.PriorAbsence.ParentRelative)) || (row.Member != row.PriorAbsence.MissingRelative && !strings.HasPrefix(row.Member, row.PriorAbsence.MissingRelative+"/")) {
+				return errors.New("new-only member lacks original absence observation")
+			}
+		}
+		if (row.Staged != nil) != (row.SuccessorAsideRelative != nil) {
+			return errors.New("successor aside selection disagrees")
+		}
+		for _, aside := range []*string{row.PriorAsideRelative, row.SuccessorAsideRelative} {
+			if aside == nil {
+				continue
+			}
+			if !currentEntryRelative(*aside) || path.Dir(*aside) != "." || memberKeys[strings.ToLower(*aside)] {
+				return errors.New("issued current aside escaped flat original root")
+			}
+			key := strings.ToLower(*aside)
+			if _, ok := seenPaths[key]; ok {
+				return errors.New("current aside aliases original path")
+			}
+			seenPaths[key] = row.Member
+		}
+		delete(newFiles, row.Member)
+		delete(priorFiles, row.Member)
+	}
+	if len(newFiles) != 0 || len(priorFiles) != 0 {
+		return errors.New("selected current membership incomplete")
+	}
+	locations, err := currentEntryMoveLocations(e)
+	if err != nil {
+		return err
+	}
+	directories := map[string]binaryadmission.WindowsCanonicalEntryDirectoryIdentityV1{}
+	for _, row := range e.Bundle.Directories {
+		d := row.Original
+		if d.Schema != binaryadmission.WindowsCanonicalEntryMemberDirectorySchemaV2 || !sameWindowsProductPath(d.Root, root) || !currentEntryRelative(d.RelativePath) || d.DirectoryIdentity.CreationTime == 0 || d.ParentIdentity.CreationTime == 0 {
+			return errors.New("invalid current original directory evidence")
+		}
+		if _, duplicate := directories[strings.ToLower(d.RelativePath)]; duplicate {
+			return errors.New("duplicate current original directory")
+		}
+		if parent := path.Dir(d.RelativePath); parent != "." {
+			if id, ok := directories[strings.ToLower(parent)]; !ok || id != d.ParentIdentity {
+				return errors.New("current directory evidence is not an original parent chain")
+			}
+		}
+		directories[strings.ToLower(d.RelativePath)] = d.DirectoryIdentity
+		switch row.State {
+		case "retained":
+			if d.Created {
+				return errors.New("created directory has no creation receiving")
+			}
+		case "created_identity_received":
+			if !d.Created {
+				return errors.New("prior directory is marked created")
+			}
+		case "dispose_intent", "absence_received":
+			if !d.Created || j.Phase == WindowsProductRecoveryCommitDecided || j.Phase == WindowsProductRecoverySettledCommit {
+				return errors.New("required/prior current directory cannot be disposed")
+			}
+		default:
+			return errors.New("unknown current directory state")
+		}
+	}
+	if e.Bundle.BeforeDirectory != nil {
+		d := e.Bundle.BeforeDirectory
+		if d.Created || !sameWindowsProductPath(d.Root, root) || d.RelativePath != e.Bundle.RelativePath {
+			return errors.New("prior bundle container context disagrees")
+		}
+	}
+	if e.PriorRuntime != nil {
+		r := e.PriorRuntime
+		member, err := filepath.Rel(root, r.Path)
+		if err != nil {
+			return err
+		}
+		row := currentEntryMember(e, filepath.ToSlash(member))
+		if r.Present {
+			if row == nil || row.Prior == nil || row.Prior.File.SHA256 != r.SHA256 {
+				return errors.New("prior runtime is not an actual original member")
+			}
+		} else if r.SHA256 != "" || e.Bundle.BeforeKind != binaryadmission.WindowsCanonicalEntryBeforeAbsentV2 {
+			return errors.New("prior runtime absence disagrees")
+		}
+	} else if j.Mode == WindowsProductPairModeUpgrade {
+		return errors.New("current upgrade prior runtime projection missing")
+	}
+	cleanupKeys := map[string]bool{}
+	for _, row := range e.Cleanup {
+		key := row.Side + "\x00" + row.Member
+		if cleanupKeys[key] {
+			return errors.New("duplicate current cleanup original")
+		}
+		cleanupKeys[key] = true
+		member := currentEntryMember(e, row.Member)
+		if member == nil || row.TransactionID != j.TransactionID || !validLowerHexSHA256(row.ExpectedSHA256) {
+			return errors.New("invalid current cleanup member")
+		}
+		prior := row.Side == "prior"
+		if row.Side != "prior" && row.Side != "unused-successor" {
+			return errors.New("unknown current cleanup side")
+		}
+		original := member.Staged
+		key = "successor\x00" + row.Member
+		if prior {
+			original = member.Prior
+			key = "prior\x00" + row.Member
+		}
+		if original == nil || original.File.SHA256 != row.ExpectedSHA256 || !locations[key][row.SourceRelative] || row.SourceRelative == row.Member {
+			return errors.New("current cleanup escaped nonfinal original lineage")
+		}
+		switch row.Purpose {
+		case "committed-forward":
+			if j.Phase != WindowsProductRecoveryCommitDecided && j.Phase != WindowsProductRecoverySettledCommit {
+				return errors.New("current committed cleanup decision missing")
+			}
+		case "rollback-cleanup":
+			if prior || e.Bundle.Disposition.State != "rolled-back" && e.Bundle.Disposition.State != "cleanup-pending" && e.Bundle.Disposition.State != "settled" || j.Phase == WindowsProductRecoveryCommitDecided || j.Phase == WindowsProductRecoverySettledCommit {
+				return errors.New("current rollback cleanup decision missing")
+			}
+		default:
+			return errors.New("unknown current cleanup purpose")
+		}
+		switch row.State {
+		case "retained", "discard_intent", "absence_received":
+		default:
+			return errors.New("unknown current cleanup state")
+		}
+	}
+	switch e.Bundle.Disposition.State {
+	case "staged", "transferred", "apply-pending", "committed", "rollback-pending", "rolled-back", "cleanup-pending", "retained", "settled":
+	default:
+		return errors.New("unknown current disposition state")
+	}
+	return nil
+}
+
+func currentEntryMoveLocations(e *windowsCanonicalEntrySetJournalV2) (map[string]map[string]bool, error) {
+	locations := map[string]map[string]bool{}
+	for _, row := range e.Bundle.Members {
+		if row.Prior != nil {
+			locations["prior\x00"+row.Member] = map[string]bool{row.Prior.File.Path: true}
+		}
+		if row.Staged != nil {
+			locations["successor\x00"+row.Member] = map[string]bool{row.Staged.File.Path: true}
+		}
+	}
+	for _, move := range e.Moves {
+		row := currentEntryMember(e, move.Member)
+		if row == nil {
+			return nil, errors.New("move names an unissued current member")
+		}
+		side := "successor"
+		if move.Prior {
+			side = "prior"
+		}
+		key := side + "\x00" + move.Member
+		if !currentEntryRelative(move.SourceRelative) || !locations[key][move.SourceRelative] || !currentEntryRelative(move.DestinationRelative) {
+			return nil, errors.New("move lineage disagrees with legal original locations")
+		}
+		aside := row.SuccessorAsideRelative
+		if move.Prior {
+			aside = row.PriorAsideRelative
+		}
+		if move.DestinationRelative != row.Member && (aside == nil || move.DestinationRelative != *aside) {
+			return nil, errors.New("move destination is not issued final/aside")
+		}
+		if move.Readback && !move.Applied || move.Applied && (!move.Attempted || !move.NativeStatusKnown) || move.NativeStatusKnown && !move.Attempted {
+			return nil, errors.New("impossible current native move outcome")
+		}
+		switch {
+		case move.Applied:
+			locations[key] = map[string]bool{move.DestinationRelative: true}
+		case move.NativeStatusKnown:
+			locations[key] = map[string]bool{move.SourceRelative: true}
+		default:
+			locations[key] = map[string]bool{move.SourceRelative: true, move.DestinationRelative: true}
+		}
+	}
+	return locations, nil
 }

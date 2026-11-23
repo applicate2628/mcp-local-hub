@@ -71,7 +71,11 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 	if err != nil {
 		return roots, err
 	}
-	roots.Attempt, err = preparedSerenaRootFile(filepath.Join(r.Namespace, key, "attempts", r.OperationID), attempt.RootIdentity)
+	attemptPath, err := a.attempt.WorkingDirectory(ctx)
+	if err != nil {
+		return roots, err
+	}
+	roots.Attempt, err = preparedSerenaRootFile(attemptPath, attempt.RootIdentity)
 	if err == nil && a.inputs.execution.buildConstraint {
 		a.buildConstraint, err = acquirePreparedSerenaBuildConstraint(ctx, a.attempt)
 	}

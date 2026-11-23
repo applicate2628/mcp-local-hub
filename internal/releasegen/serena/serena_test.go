@@ -194,34 +194,89 @@ transport: stdio-bridge
 	}
 }
 
-// TestFetchDescriptorRejectsMCP2 catches removal of Fetch's published MCP 1.x
-// upper-bound enforcement even if a caller also rewrites the runtime args.
-func TestFetchDescriptorRejectsMCP2(t *testing.T) {
-	descriptor := FetchDescriptor{
-		SchemaVersion:      1,
-		ServerID:           "fetch",
-		UpstreamRepository: "https://github.com/modelcontextprotocol/servers",
-		Version:            "2026.8.18",
-		SourceCommit:       "644cbe65648f1d6c687b3b647683e1aaa4ed1eba",
-		ReadmePath:         "src/fetch/README.md",
-		Runtime: runtimeDescriptor{
-			Command: "uvx",
-			Args:    []string{"--with", "mcp==2.1.1", "mcp-server-fetch@2026.8.18"},
-		},
-		Artifacts: fetchArtifacts{
-			FetchWheelSHA256: "6642df733a1032e7f37d0f13849af8a944d46c02420d2c070cc14e0948f8fcc2",
-			MCPVersion:       "2.1.1",
-			MCPWheelSHA256:   "f5a075bb611f23d6f4d080c6a1699fa62772eebc562ba9e66b306ddde1c755f7",
-		},
+func TestFetchDescriptorRequiresExactSDKPin(t *testing.T) {
+	root := t.TempDir()
+	writeCurrentNonSerenaFixtures(t, root)
+	historical, err := loadFetchDescriptor(filepath.Join(root, "servers", "fetch", "release.yaml"))
+	if err != nil {
+		t.Fatalf("load historical Fetch descriptor: %v", err)
 	}
-	if err := descriptor.validate(); err == nil || !strings.Contains(err.Error(), "MCP 1.x") {
-		t.Fatalf("Fetch descriptor accepted forbidden MCP 2.x closure: %v", err)
+
+	for _, test := range []struct {
+		name      string
+		fetch     string
+		sdk       string
+		wantError string
+	}{
+		{name: "historical October release", fetch: "2026.10.10", sdk: "1.29.0"},
+		{name: "current release", fetch: "2026.11.18", sdk: "2.3.0"},
+		{name: "another exact SDK pin", fetch: "2026.11.18", sdk: "2.4.5"},
+		{name: "missing SDK pin", fetch: "2026.11.18", wantError: "exact numeric release"},
+		{name: "SDK range", fetch: "2026.11.18", sdk: ">=2.3,<3", wantError: "exact numeric release"},
+		{name: "SDK wildcard", fetch: "2026.11.18", sdk: "2.3.*", wantError: "exact numeric release"},
+		{name: "SDK prerelease", fetch: "2026.11.18", sdk: "2.3.0rc1", wantError: "exact numeric release"},
+		{name: "non-calendar Fetch version", fetch: "1.0.0", sdk: "2.3.0", wantError: "repository or version is not an exact release"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			descriptor := historical
+			descriptor.Version = test.fetch
+			descriptor.Artifacts.MCPVersion = test.sdk
+			descriptor.Runtime.Args = fetchExpectedArgs(descriptor)
+			err := descriptor.validate()
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validate Fetch %s and SDK %s: %v", test.fetch, test.sdk, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validate Fetch %s and SDK %s: got %v, want %q", test.fetch, test.sdk, err, test.wantError)
+			}
+		})
 	}
-	descriptor.Version = "1.0.0"
-	descriptor.Artifacts.MCPVersion = "1.30.0"
-	descriptor.Runtime.Args = []string{"--with", "mcp==1.30.0", "mcp-server-fetch@1.0.0"}
-	if err := descriptor.validate(); err == nil || !strings.Contains(err.Error(), "repository or version is not an exact release") {
-		t.Fatalf("Fetch descriptor accepted a non-calendar outer version: %v", err)
+	for _, test := range []struct {
+		name      string
+		mutate    func(*FetchDescriptor)
+		wantError string
+	}{
+		{"stale runtime args", func(d *FetchDescriptor) { d.Runtime.Args[1] = "mcp==1.28.1" }, "exact package pair"},
+		{"malformed Fetch wheel hash", func(d *FetchDescriptor) { d.Artifacts.FetchWheelSHA256 = "invalid" }, "artifact hashes"},
+		{"malformed SDK wheel hash", func(d *FetchDescriptor) { d.Artifacts.MCPWheelSHA256 = "invalid" }, "artifact hashes"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			descriptor := historical
+			descriptor.Runtime.Args = fetchExpectedArgs(descriptor)
+			test.mutate(&descriptor)
+			if err := descriptor.validate(); err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validate mutated Fetch descriptor: got %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestGenerateRejectsInvalidFetchDescriptorWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	writeCurrentSerenaFixture(t, root)
+	path := filepath.Join(root, "servers", "fetch", "release.yaml")
+	descriptor, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read Fetch descriptor: %v", err)
+	}
+	writeTestFile(t, path, strings.ReplaceAll(string(descriptor), "1.29.0", "1.29.*"))
+	// A stale sibling would be rewritten if generation reached publication.
+	writeTestFile(t, filepath.Join(root, "servers", "sequential-thinking", "README.md"), "stale Sequential release metadata\n")
+	before := snapshotExistingProjectionTargets(t, root)
+	err = Generate(root)
+	if err == nil || !strings.Contains(err.Error(), "RELEASE_GENERATION_FAILED: servers/fetch/release.yaml:") ||
+		!strings.Contains(err.Error(), "exact numeric release") {
+		t.Fatalf("Generate must reject the invalid Fetch descriptor: %v", err)
+	}
+	after := snapshotExistingProjectionTargets(t, root)
+	if len(after) != len(before) {
+		t.Fatalf("failed generation changed target count: before=%d after=%d", len(before), len(after))
+	}
+	for relative, want := range before {
+		if !bytes.Equal(after[relative], want) {
+			t.Errorf("failed generation mutated %s", relative)
+		}
 	}
 }
 
@@ -273,8 +328,8 @@ daemons: [{name: default, port: 9133}]
 			t.Fatalf("generated Fetch manifest lacks %q: %s", required, manifest)
 		}
 	}
-	if bytes.Contains(manifest, []byte("mcp==2.1.1")) || bytes.Contains(manifest, []byte("2026.7.10")) {
-		t.Fatalf("generated Fetch manifest retained a forbidden/stale selection: %s", manifest)
+	if bytes.Contains(manifest, []byte("mcp==1.28.1")) || bytes.Contains(manifest, []byte("2026.7.10")) {
+		t.Fatalf("generated Fetch manifest retained a stale selection: %s", manifest)
 	}
 	assertGeneratedCatalogEntry(t, filepath.Join(root, "marketplace", "v1", "catalog.json"), "fetch",
 		[]string{"--with", "mcp==1.29.0", "mcp-server-fetch@2026.8.18"},
@@ -291,13 +346,14 @@ daemons: [{name: default, port: 9133}]
 		"6642df733a1032e7f37d0f13849af8a944d46c02420d2c070cc14e0948f8fcc2",
 		"f5a075bb611f23d6f4d080c6a1699fa62772eebc562ba9e66b306ddde1c755f7",
 		"644cbe65648f1d6c687b3b647683e1aaa4ed1eba/src/fetch/README.md",
+		"The runtime command selects the exact MCP release recorded above.",
 	} {
 		if !bytes.Contains(readme, []byte(required)) {
 			t.Fatalf("generated Fetch README lacks %q: %s", required, readme)
 		}
 	}
-	if bytes.Contains(readme, []byte("/main/")) || bytes.Contains(readme, []byte("mcp==2.1.1")) {
-		t.Fatalf("generated Fetch README retained a floating or forbidden reference: %s", readme)
+	if bytes.Contains(readme, []byte("/main/")) || bytes.Contains(readme, []byte("MCP 1.x")) {
+		t.Fatalf("generated Fetch README retained a floating reference or SDK major assertion: %s", readme)
 	}
 }
 

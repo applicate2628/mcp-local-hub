@@ -102,6 +102,7 @@ func MutateSupervisorIntentIfChangedReturning(path string, mutate func(*Supervis
 
 func prepareSupervisorIntentMutation(file *SupervisorIntentFile, mutate func(*SupervisorIntentFile) (bool, error)) (*SupervisorIntentFile, bool, error) {
 	file = cloneSupervisorIntentFile(file)
+	hold := file.BackendRunHold.clone()
 	changed := true
 	if mutate != nil {
 		var err error
@@ -109,6 +110,9 @@ func prepareSupervisorIntentMutation(file *SupervisorIntentFile, mutate func(*Su
 		if err != nil {
 			return nil, false, err
 		}
+	}
+	if !reflect.DeepEqual(file.BackendRunHold, hold) {
+		return nil, false, ErrSupervisorBackendHoldInvalid
 	}
 	if !changed {
 		return file, false, nil

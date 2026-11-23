@@ -1,0 +1,12 @@
+[project]
+name = "mcphub-codex-dev"
+version = "0.0.0"
+description = "Private development-only Codex SDK integration checks"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+integration = ["openai-codex"]
+
+[tool.uv]
+package = false

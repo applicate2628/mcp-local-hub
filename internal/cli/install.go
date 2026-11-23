@@ -962,7 +962,29 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 		return curExe, target, nil
 	}
 
-	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	defer func() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			curExe, target = "", ""
+			if !errors.Is(err, ctxErr) {
+				err = errors.Join(err, ctxErr)
+			}
+		}
+	}()
+
+	guiProcs, guiErr := findRunningGUIsOnTargetContext(ctx, a, target)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if guiErr == nil {
+			guiErr = ctxErr
+		}
+		return "", "", guiErr
+	}
 	if guiErr != nil {
 		// Best-effort: the promotion owner still detects a held canonical image
 		// lock if process enumeration is unavailable.
@@ -1001,10 +1023,8 @@ func upgradeGUIOwnedFleetStopRequested(cmd *cobra.Command) bool {
 	return err == nil && requested
 }
 
-// findRunningGUIsOnTargetFn is the production seam for
-// findRunningGUIsOnTarget; tests stub it to return a fixed slice
-// instead of probing the live OS. nil = use real wmic-backed
-// enumeration via api.ListMatchingProcesses.
+// findRunningGUIsOnTargetFn lets tests return process rows without probing
+// the live OS. The default is api.ListMatchingProcessesContext.
 var findRunningGUIsOnTargetFn func(target string) ([]api.ProcessInfo, error)
 
 // upgradeBuildVersionFn is the production seam for the dev-build
@@ -1024,7 +1044,7 @@ func upgradeBuildVersion() string {
 	return v
 }
 
-// findRunningGUIsOnTarget enumerates running mcphub.exe processes
+// findRunningGUIsOnTargetContext enumerates running mcphub.exe processes
 // whose image path equals `target` AND whose first non-image argv
 // element is "gui" (or no args at all — the no-arg launch, i.e. an
 // Explorer double-click OR a bare `mcphub` typed at a terminal, both
@@ -1035,20 +1055,36 @@ func upgradeBuildVersion() string {
 // developer path).
 //
 // Tests can stub findRunningGUIsOnTargetFn to bypass wmic.
-func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, error) {
-	if findRunningGUIsOnTargetFn != nil {
-		return findRunningGUIsOnTargetFn(target)
+func findRunningGUIsOnTargetContext(ctx context.Context, a *api.API, target string) ([]api.ProcessInfo, error) {
+	if ctx == nil {
+		return nil, errors.New("GUI process inventory context required")
 	}
-	procs, err := a.ListMatchingProcesses([]string{"mcphub.exe"})
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(api.ErrProbeTimeout, err)
+	}
+	if findRunningGUIsOnTargetFn != nil {
+		matched, err := findRunningGUIsOnTargetFn(target)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Join(api.ErrProbeTimeout, ctxErr, err)
+		}
+		return matched, err
+	}
+	procs, err := a.ListMatchingProcessesContext(ctx, []string{"mcphub.exe"})
 	if err != nil {
 		return nil, err
 	}
 	var matched []api.ProcessInfo
 	for _, p := range procs {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(api.ErrProbeTimeout, err)
+		}
 		if !cmdlineIsGUIOnTarget(p.Cmdline, target) {
 			continue
 		}
 		matched = append(matched, p)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(api.ErrProbeTimeout, err)
 	}
 	return matched, nil
 }

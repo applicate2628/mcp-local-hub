@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"time"
 )
 
@@ -100,6 +101,22 @@ func (t *SerenaOwnedTree) WorkingDirectory(ctx context.Context) (string, error) 
 type SerenaOwnedTree struct {
 	request  SerenaOwnedTreeRequest
 	platform serenaTreePlatform
+}
+
+// Disposable attempts keep a compact locator beneath the same namespace.
+// Both identities are hashed in full and retained in the original request and
+// operation record; the full digest is only a locator, not ownership authority.
+// The fixed domain and NUL separators are unambiguous for validated inputs.
+func serenaOwnedTreeLocation(r SerenaOwnedTreeRequest) (parent, leaf string) {
+	switch r.Kind {
+	case "attempt":
+		leaf = preparedSerenaHash([]byte("serena-owned-attempt-v1\x00" + r.PackageIdentitySHA256 + "\x00" + r.OperationID))
+		return filepath.Join(r.Namespace, "a"), leaf
+	case "qualification":
+		return filepath.Join(r.Namespace, r.PackageIdentitySHA256, "qualifications"), r.QualificationID
+	default:
+		return filepath.Join(r.Namespace, r.PackageIdentitySHA256, "generations"), r.GenerationID
+	}
 }
 
 func AcquireSerenaOwnedTree(ctx context.Context, r SerenaOwnedTreeRequest) (*SerenaOwnedTree, error) {

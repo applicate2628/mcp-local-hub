@@ -24,9 +24,7 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-// newHubMcpCmd returns the cobra parent command tree. Wired into
-// rootCmd.AddCommand by NewRootCmd in root.go.
-func newHubMcpCmd() *cobra.Command {
+func newHubMcpCmdWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub-mcp",
 		Short: "Hub MCP endpoint operations",
@@ -48,15 +46,30 @@ Subcommands:
   regenerate-instance-id   Rotate the persistent instance id (invalidates
                            every client config — every client must reinstall).`,
 	}
-	c.AddCommand(newHubMcpStatusCmd(), newHubMcpRegenTokenCmd(), newHubMcpRegenInstanceIDCmd())
+	c.AddCommand(newHubMcpStatusCmd(input), newHubMcpRegenTokenCmd(), newHubMcpRegenInstanceIDCmd())
 	return c
 }
 
-func newHubMcpStatusCmd() *cobra.Command {
-	return &cobra.Command{
+func newHubMcpStatusCmd(input windowsCanonicalEntryCommandInput) *cobra.Command {
+	var live bool
+	c := &cobra.Command{
 		Use:   "status",
 		Short: "Show hub-mcp endpoint state (presence-only, no token bytes)",
+		Long: `Show hub-mcp endpoint diagnostics without token bytes.
+
+Use --live to query the running route through the supervisor. A
+route-not-owner result leaves the current GUI aggregate state unknown.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if live {
+				if err := cobra.NoArgs(cmd, args); err != nil {
+					return err
+				}
+				status, err := queryInstalledAggregateStatus(cmd.Context(), input)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
+			}
 			ep, epErr := api.LoadHubEndpoint()
 			// codex bot phase5 r3 P2 closure on PR #160: read tokens
 			// from DISK, not the in-memory cache. A fresh CLI process
@@ -117,6 +130,8 @@ func newHubMcpStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&live, "live", false, "query the running route through the supervisor")
+	return c
 }
 
 func newHubMcpRegenTokenCmd() *cobra.Command {

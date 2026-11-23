@@ -93,17 +93,7 @@ func acquireSerenaTreePlatformMode(ctx context.Context, r SerenaOwnedTreeRequest
 	if !filepath.IsAbs(r.Namespace) || filepath.Clean(r.Namespace) != r.Namespace {
 		return nil, errors.New("SERENA_TREE_NAMESPACE_INVALID")
 	}
-	branch := "generations"
-	leaf := r.GenerationID
-	if r.Kind == "attempt" {
-		branch = "attempts"
-		leaf = r.OperationID
-	}
-	if r.Kind == "qualification" {
-		branch = "qualifications"
-		leaf = r.QualificationID
-	}
-	parentPath := filepath.Join(r.Namespace, r.PackageIdentitySHA256, branch)
+	parentPath, leaf := serenaOwnedTreeLocation(r)
 	exists, parentPolicy, parentErr := SecureConfigLockParentPolicyObserved(ctx, parentPath, !readExisting)
 	if validationErr := parentPolicy.Validate(ctx, parentPath, !readExisting); parentErr != nil || validationErr != nil || !exists {
 		return nil, errors.Join(parentErr, validationErr, errors.New("SERENA_TREE_PARENT_POLICY_UNQUALIFIED"))
@@ -157,14 +147,8 @@ func acquireSerenaTreePlatformMode(ctx context.Context, r SerenaOwnedTreeRequest
 	return result, err
 }
 func (w *windowsSerenaOwnedTree) parentPath() string {
-	branch := "generations"
-	if w.request.Kind == "attempt" {
-		branch = "attempts"
-	}
-	if w.request.Kind == "qualification" {
-		branch = "qualifications"
-	}
-	return filepath.Join(w.request.Namespace, w.request.PackageIdentitySHA256, branch)
+	parent, _ := serenaOwnedTreeLocation(w.request)
+	return parent
 }
 
 func (w *windowsSerenaOwnedTree) checkRoot(ctx context.Context, policy *ConfigParentPolicyObservation, cleanup bool) error {
@@ -184,6 +168,10 @@ func (w *windowsSerenaOwnedTree) checkRoot(ctx context.Context, policy *ConfigPa
 	}
 	if w.creation == nil || !w.creation.finalized || !w.creation.view.OwnedResourcesComplete || !w.creation.view.BorrowedResourcesComplete {
 		return errors.New("SERENA_TREE_ACQUISITION_RESOURCES_PENDING")
+	}
+	_, leaf := serenaOwnedTreeLocation(w.request)
+	if leaf != w.rootName {
+		return errors.New("SERENA_TREE_ROOT_DRIFT")
 	}
 	if err := policy.Validate(ctx, w.parentPath(), !w.readExisting && !cleanup); err != nil {
 		return err

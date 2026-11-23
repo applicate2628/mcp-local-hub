@@ -17,18 +17,13 @@ import (
 	"mcp-local-hub/internal/urlredact"
 )
 
-// MarketplaceCatalogSchemaVersion is the BASELINE catalog schema version a
-// freshly-drafted/written catalog declares (the minimum this build understands).
-// MarketplaceCatalogSchemaVersionV2 is the version that gained the additive D-2/D-3
-// entry metadata (vendored_source / availability / install_probe). Both are
-// ACCEPTED on read (marketplaceSchemaVersionAccepted), so an OLDER released client
-// reading a v1 catalog and a newer client reading a v2 catalog both parse — but the
-// new entry fields are gated to v2 (newCatalogFieldsRequireV2) so a v1 catalog can
-// NEVER carry them, which is what keeps the additive metadata rollout from breaking
-// older v1-only clients (codex r6 finding 2).
+// MarketplaceCatalogSchemaVersion is the baseline catalog schema. V2 adds the
+// D-2/D-3 metadata, and V3 adds the compiled managed_recipe selector. The parser
+// accepts all three; each additive field family remains gated to its first schema.
 const (
 	MarketplaceCatalogSchemaVersion   = "1"
 	MarketplaceCatalogSchemaVersionV2 = "2"
+	MarketplaceCatalogSchemaVersionV3 = "3"
 )
 
 // DefaultMarketplaceRegistryURL is the SINGLE OWNER of the curated-catalog URL
@@ -47,9 +42,9 @@ const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applica
 // schema_version values this build parses", consumed by both the catalog parser
 // (validateMarketplaceCatalog) and the on-disk cache validator (readMarketplaceCache)
 // so the two read paths can never diverge on the accepted set. It accepts the
-// baseline v1 AND the additive-metadata v2.
+// baseline v1, metadata v2, and managed-recipe v3.
 func marketplaceSchemaVersionAccepted(v string) bool {
-	return v == MarketplaceCatalogSchemaVersion || v == MarketplaceCatalogSchemaVersionV2
+	return v == MarketplaceCatalogSchemaVersion || v == MarketplaceCatalogSchemaVersionV2 || v == MarketplaceCatalogSchemaVersionV3
 }
 
 type MarketplaceCatalog struct {
@@ -105,6 +100,10 @@ type MarketplaceEntry struct {
 	Categories []string          `json:"categories,omitempty"`
 	License    string            `json:"license,omitempty"`
 
+	// ManagedRecipe selects a compiled, Hub-owned recipe. It is never a command
+	// source; the recipe supplies command, args, and env after validation.
+	ManagedRecipe string `json:"managed_recipe,omitempty"`
+
 	// VendoredSource (D-2, Tier-0) mirrors config.VendoredSource but JSON-tagged
 	// for catalog.json. ADDITIVE + OPTIONAL: the current catalog entries omit it,
 	// so they parse byte-identically (pointer + omitempty). It is projected into
@@ -126,7 +125,7 @@ type MarketplaceEntry struct {
 	// row installs (the server hard-exits on startup without them). Each key MUST
 	// appear as a `secret:<key>` value in Env (catalog-authoring guard in
 	// validateCatalogVendoredAndAvailability — a typo key can't silently un-gate).
-	// Gated to schema_version 2 (newCatalogFieldKeys), and projected into the
+	// Introduced in schema_version 2 (newCatalogFieldKeys), retained by schema 3, and projected into the
 	// drafted stdio manifest by generateCommandDraft so the persisted manifest's
 	// AdmissionCheck install gate sees it.
 	//
@@ -249,6 +248,10 @@ func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*Marketplace
 		}
 		return nil, fmt.Errorf("decode catalog: trailing bytes after top-level JSON object: %w", err)
 	}
+	var managedPresence managedRecipeCatalogPresence
+	if err := json.Unmarshal(raw, &managedPresence); err != nil {
+		return nil, fmt.Errorf("decode catalog: observe managed recipe members: %w", err)
+	}
 	// Re-decode the SAME bytes into a parallel raw key map per entry so the
 	// forward-compat gate can reject on KEY PRESENCE (codex r7 P2) — a typed
 	// decode of `availability:""` / `vendored_source:null` leaves the field
@@ -266,7 +269,7 @@ func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*Marketplace
 	if err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cat, presence, docsOnlyPresent); err != nil {
+	if err := validateMarketplaceCatalog(&cat, presence, docsOnlyPresent, managedPresence); err != nil {
 		return nil, err
 	}
 	return &cat, nil
@@ -285,12 +288,8 @@ func catalogTopLevelKeyPresent(raw []byte, key string) (bool, error) {
 	return ok, nil
 }
 
-// newCatalogFieldKeys are the additive D-2/D-3 entry keys gated to
-// schema_version 2. The forward-compat gate rejects any of them present in a
-// schema_version < 2 catalog, regardless of value (present-empty, present-null,
-// or populated all count) — so an older v1-only client whose
-// DisallowUnknownFields decoder rejects the WHOLE catalog on the bare KEY never
-// has to face a v1 catalog carrying it.
+// newCatalogFieldKeys are the additive D-2/D-3 entry keys introduced in schema 2.
+// Schema 3 retains these meanings; only schema 1 must reject their key presence.
 var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe", "required_secrets"}
 
 // catalogEntryNewKeyPresence re-decodes the catalog body's `entries` array into
@@ -334,26 +333,53 @@ func entryNewKeyPresence(presence []map[string]json.RawMessage, i int) map[strin
 	return presence[i]
 }
 
-func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage, docsOnlyPresent bool) error {
+// These value structs and slice elements match the typed decoder's container
+// shape so duplicate JSON members merge and reuse entries in the same way.
+type managedRecipeCatalogPresence struct {
+	Entries []managedRecipeEntryPresence `json:"entries"`
+}
+
+type managedRecipeEntryPresence struct {
+	Selector jsonMemberPresence `json:"managed_recipe"`
+	Command  jsonMemberPresence `json:"command"`
+	Args     jsonMemberPresence `json:"args"`
+	Env      jsonMemberPresence `json:"env"`
+}
+
+type jsonMemberPresence struct {
+	Present   bool
+	FinalNull bool
+}
+
+func (p *jsonMemberPresence) UnmarshalJSON(raw []byte) error {
+	p.Present = true
+	p.FinalNull = string(raw) == "null"
+	return nil
+}
+
+func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage, docsOnlyPresent bool, managedPresence managedRecipeCatalogPresence) error {
 	if !marketplaceSchemaVersionAccepted(cat.SchemaVersion) {
-		return fmt.Errorf("schema_version %q: this build only accepts %q or %q",
-			cat.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2)
+		return fmt.Errorf("schema_version %q: this build only accepts %q, %q, or %q",
+			cat.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2, MarketplaceCatalogSchemaVersionV3)
 	}
 	// S4 docs_only v2-gate (the forward-compat-correct gate that REPLACES the prior
 	// per-entry transport gate, bot #446 P1). The docs_only TOP-LEVEL array is a
-	// v2-only addition; a v1 catalog must never carry it. Reject on raw KEY PRESENCE
+	// v2+ addition; a v1 catalog must never carry it. Reject on raw KEY PRESENCE
 	// so a present-empty `docs_only: []` / present-null on a v1 catalog is caught,
 	// not just a populated one — a released v1-only client never saw the key. (A
 	// released client safely IGNORES the unknown top-level key on the fetch path, so
 	// shipping docs_only is forward-compat-safe; this gate only forbids it on a v1
 	// catalog the author should not have written.)
-	if docsOnlyPresent && cat.SchemaVersion != MarketplaceCatalogSchemaVersionV2 {
+	if docsOnlyPresent && cat.SchemaVersion == MarketplaceCatalogSchemaVersion {
 		return fmt.Errorf("docs_only requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
+	}
+	if len(cat.Entries) != len(managedPresence.Entries) {
+		return fmt.Errorf("managed_recipe presence does not match catalog entries")
 	}
 	seen := map[string]bool{}
 	for i := range cat.Entries {
 		e := &cat.Entries[i]
-		if err := validateMarketplaceEntry(e, cat.SchemaVersion, entryNewKeyPresence(presence, i)); err != nil {
+		if err := validateMarketplaceEntry(e, cat.SchemaVersion, entryNewKeyPresence(presence, i), managedPresence.Entries[i]); err != nil {
 			return fmt.Errorf("entry %d (id=%q): %w", i, e.ID, err)
 		}
 		if seen[e.ID] {
@@ -412,7 +438,7 @@ func validateDocsOnlyEntry(d *DocsOnlyEntry) error {
 // v1 catalog can never carry the new keys, so an OLDER v1-only client (whose
 // DisallowUnknownFields decoder would reject the WHOLE catalog on an unknown KEY,
 // regardless of value) never has to face a v1 catalog with them. Tier-1 publishes
-// the new fields under schema_version 2. A v2 catalog imposes no such restriction.
+// the new fields under schema_version 2. A v2 or v3 catalog imposes no such restriction.
 //
 // The AUTHORITATIVE check is KEY PRESENCE in the raw entry JSON (`presence`),
 // because a typed decode of `availability:""` / `vendored_source:null` /
@@ -422,7 +448,7 @@ func validateDocsOnlyEntry(d *DocsOnlyEntry) error {
 // cache path, which validates an already-typed struct with no raw bytes (presence
 // nil): a populated field is still caught there.
 func newCatalogFieldsRequireV2(e *MarketplaceEntry, schemaVersion string, presence map[string]json.RawMessage) error {
-	if schemaVersion == MarketplaceCatalogSchemaVersionV2 {
+	if schemaVersion != MarketplaceCatalogSchemaVersion {
 		return nil
 	}
 	// Authoritative: reject on raw KEY PRESENCE (present-empty / present-null /
@@ -448,7 +474,38 @@ func newCatalogFieldsRequireV2(e *MarketplaceEntry, schemaVersion string, presen
 	return nil
 }
 
-func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presence map[string]json.RawMessage) error {
+// validateManagedRecipeCompatibility is the single selector/override gate shared
+// by fresh catalog decoding and cache re-validation. Presence checks deliberately
+// reject empty and null command overrides too.
+func validateManagedRecipeCompatibility(e *MarketplaceEntry, schemaVersion string, presence managedRecipeEntryPresence) error {
+	if !presence.Selector.Present {
+		if e.ManagedRecipe != "" {
+			return fmt.Errorf("managed_recipe value is missing member presence")
+		}
+		return nil
+	}
+	if schemaVersion != MarketplaceCatalogSchemaVersionV3 {
+		return fmt.Errorf("managed_recipe requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV3)
+	}
+	if presence.Selector.FinalNull {
+		return fmt.Errorf("managed_recipe cannot be null")
+	}
+	if e.ManagedRecipe != "official-trail" {
+		return fmt.Errorf("unknown or empty managed_recipe %q (want %q)", e.ManagedRecipe, "official-trail")
+	}
+	if e.Transport != "stdio" {
+		return fmt.Errorf("managed_recipe %q requires transport %q", e.ManagedRecipe, "stdio")
+	}
+	if presence.Command.Present || presence.Args.Present || presence.Env.Present {
+		return fmt.Errorf("managed_recipe %q cannot be combined with catalog command, args, or env overrides", e.ManagedRecipe)
+	}
+	return nil
+}
+
+func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presence map[string]json.RawMessage, managedPresence managedRecipeEntryPresence) error {
+	if err := validateManagedRecipeCompatibility(e, schemaVersion, managedPresence); err != nil {
+		return err
+	}
 	if e.ID == "" {
 		return fmt.Errorf("missing id")
 	}
@@ -461,24 +518,26 @@ func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presenc
 	if err := CheckManifestName(e.ID); err != nil {
 		return fmt.Errorf("id %q fails manifest-name gate: %w", e.ID, err)
 	}
-	switch e.Transport {
-	case "stdio", "native-http":
-		if e.Command == "" {
-			return fmt.Errorf("%s entry must declare command", e.Transport)
+	if e.ManagedRecipe == "" {
+		switch e.Transport {
+		case "stdio", "native-http":
+			if e.Command == "" {
+				return fmt.Errorf("%s entry must declare command", e.Transport)
+			}
+		case "http":
+			if e.URL == "" {
+				return fmt.Errorf("http entry must declare url")
+			}
+			if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
+				return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", marketplaceCatalogURLForError(e.URL), err)
+			}
+		default:
+			return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
 		}
-	case "http":
-		if e.URL == "" {
-			return fmt.Errorf("http entry must declare url")
-		}
-		if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
-			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", marketplaceCatalogURLForError(e.URL), err)
-		}
-	default:
-		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
 	}
-	// Forward-compat: the additive D-2/D-3 metadata fields are gated to
-	// schema_version 2 so a v1 catalog can never carry keys an older v1-only
-	// client would choke on (codex r6 finding 2).
+	// Forward-compat: the additive D-2/D-3 metadata fields were introduced in
+	// schema_version 2 and remain valid in schema 3; a v1 catalog cannot carry
+	// keys an older v1-only client would choke on (codex r6 finding 2).
 	if err := newCatalogFieldsRequireV2(e, schemaVersion, presence); err != nil {
 		return err
 	}
