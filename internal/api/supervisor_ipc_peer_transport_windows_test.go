@@ -20,6 +20,8 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
+
+	"mcp-local-hub/internal/process"
 )
 
 const peerTransportChildEnv = "MCPHUB_TEST_PEER_TRANSPORT_CHILD"
