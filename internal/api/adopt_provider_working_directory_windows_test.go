@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/process"
 
 	"golang.org/x/sys/windows"
 )
@@ -606,7 +607,7 @@ func buildOwnedProviderWorkingDirectoryHelperForArch(t *testing.T, arch string) 
 	path := filepath.Join(t.TempDir(), "provider-cwd-helper-"+arch+".exe")
 	cmd := exec.Command("go", "build", "-ldflags=-H=windowsgui", "-o", path, "./testdata/provider-cwd-helper")
 	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	process.HideToolConsole(cmd)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build owned provider helper: %v\n%s", err, output)
 	}

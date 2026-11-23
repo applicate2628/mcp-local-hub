@@ -1,0 +1,593 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-11-22T16:28:24.446287+00:00",
+  "repository": "applicate2628/mcp-local-hub",
+  "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "canonical_plan_parent": "4637df8fc3236d9307840d67e993892da1b09ae1",
+  "status": "Scoped corrections published and internally reviewed; A-D remain open",
+  "publications": {
+    "architecture": {
+      "pr": 663,
+      "head": "c7617d1027888271a83c3b724171e1363289995e",
+      "parent": "d39b99db427eee026af12f8120c24477a2d9612a",
+      "archive_sha256": "3c9d3ca51b131b15fd828c2410faf052d8a8cb684ff3a34f2b51ab584f292534",
+      "payload_count": 148,
+      "readback": {
+        "pr": 663,
+        "head": "c7617d1027888271a83c3b724171e1363289995e",
+        "parents": [
+          "d39b99db427eee026af12f8120c24477a2d9612a"
+        ],
+        "tree": "358dd1729c663cdb7fc78af24524825908fb5fbc",
+        "files": [
+          {
+            "path": "architecture/baseline.yaml",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/architecture/baseline.yaml",
+            "bytes": 1435735,
+            "sha256": "f7a7ad049c2e27b0df8fca68e1cb772909d3eed504fbb6ccf07ffdc0f0a0dd7a",
+            "git_blob_sha": "28a87796a798e0b9d91244024c5ef3de29e10fe1"
+          },
+          {
+            "path": "docs/modernization/verification/lsp-router-owner-20261122/README.md",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/docs/modernization/verification/lsp-router-owner-20261122/README.md",
+            "bytes": 4968,
+            "sha256": "c23cc93af50ccacffb4cc61a7772d0c970930eab7e11ee3300aa654de856ec12",
+            "git_blob_sha": "b14efb8843625c2a2749d6352c12e239810d7ac8"
+          },
+          {
+            "path": "docs/modernization/verification/lsp-router-owner-20261122/raw-evidence.zip",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/docs/modernization/verification/lsp-router-owner-20261122/raw-evidence.zip",
+            "bytes": 1070779,
+            "sha256": "3c9d3ca51b131b15fd828c2410faf052d8a8cb684ff3a34f2b51ab584f292534",
+            "git_blob_sha": "1d0aa357ac3bfc83d720e72cd758459bfd7faa29"
+          },
+          {
+            "path": "docs/modernization/verification/lsp-router-owner-20261122/results.json",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/docs/modernization/verification/lsp-router-owner-20261122/results.json",
+            "bytes": 8701,
+            "sha256": "d74f7b9e0ae7d73ec6d36a8f395e653294ffc17c2754cc600b88f1c0d306148f",
+            "git_blob_sha": "d95239c1b05dd267bd37d9cce153cecc30a9da4a"
+          },
+          {
+            "path": "internal/gui/lsp_router_control.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/internal/gui/lsp_router_control.go",
+            "bytes": 5480,
+            "sha256": "c84607442f0523e2dbf8726e6041f24acbe7cbc4b5f008db84e5b0496138228e",
+            "git_blob_sha": "d8095741bca044f4b9af8765fb7cc75389af68bb"
+          },
+          {
+            "path": "internal/gui/lsp_router_control_test.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/internal/gui/lsp_router_control_test.go",
+            "bytes": 8692,
+            "sha256": "973259cd775f3a4dad5d15a58e06c80767e37d09c3eea65efc19c4ee8356529b",
+            "git_blob_sha": "7dc46588814d33c5769f17cac4022361dad2c093"
+          },
+          {
+            "path": "internal/gui/server.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/663/internal/gui/server.go",
+            "bytes": 53673,
+            "sha256": "cd2d06a86ba0393293daa92e52f9f4d0c60a7e7cb5df7bb4be2e3f295f27ad2b",
+            "git_blob_sha": "0dd902b5464d179b665cc8bfdd03b0af1d264439"
+          }
+        ],
+        "exact_changed_path_set": true,
+        "all_published_bytes_match": true,
+        "readback_utc": "2026-11-22T16:07:29.141701+00:00"
+      }
+    },
+    "scheduler": {
+      "pr": 660,
+      "head": "63ba3e771cb5a165e276bf7c481e10a3d3a19837",
+      "parent": "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9",
+      "archive_sha256": "37fa99c64880d4aef5bfa4ff1cf5c19ce0fef6a6c8022b590d1215c18b0db120",
+      "payload_count": 114,
+      "readback": {
+        "pr": 660,
+        "head": "63ba3e771cb5a165e276bf7c481e10a3d3a19837",
+        "parents": [
+          "b575b2c1c44c03bd14da281f8b81f50c6aec4bb9"
+        ],
+        "tree": "222bb426a36e9da06568d1fead82b67c282aca56",
+        "files": [
+          {
+            "path": "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/README.md",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/660/docs/modernization/verification/scheduler-upgrade-snapshot-20261122/README.md",
+            "bytes": 5518,
+            "sha256": "29df76503ebf1546d545de12709f5f302eef1f77d93bde493f834bec20169a23",
+            "git_blob_sha": "0839ab96322ba8616b065825924d707c27c91caa"
+          },
+          {
+            "path": "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/raw-evidence.zip",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/660/docs/modernization/verification/scheduler-upgrade-snapshot-20261122/raw-evidence.zip",
+            "bytes": 721029,
+            "sha256": "37fa99c64880d4aef5bfa4ff1cf5c19ce0fef6a6c8022b590d1215c18b0db120",
+            "git_blob_sha": "64088fac50782f80de4e4cb0c9f3e5b5e9a00efd"
+          },
+          {
+            "path": "docs/modernization/verification/scheduler-upgrade-snapshot-20261122/results.json",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/660/docs/modernization/verification/scheduler-upgrade-snapshot-20261122/results.json",
+            "bytes": 9460,
+            "sha256": "96d43b0b6e1027165756bcf4ca2dc8d8c2ba04b9edd09758d1fe44571b70d86a",
+            "git_blob_sha": "c29db8ee2e869b0f22e38d3874329ee80bca3a3a"
+          },
+          {
+            "path": "internal/api/scheduler_mgmt.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/660/internal/api/scheduler_mgmt.go",
+            "bytes": 15700,
+            "sha256": "d00da25726b61636af69e6c3e53d2c6b4e77bf01f6e84161ea0fa1ee87f9372e",
+            "git_blob_sha": "130ee0a54852c4278cf9848845cb8a6c44bcd7db"
+          },
+          {
+            "path": "internal/api/scheduler_upgrade_snapshot_test.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/660/internal/api/scheduler_upgrade_snapshot_test.go",
+            "bytes": 8453,
+            "sha256": "152e7ff4d122a1a2713d97c3602e52dada856d83259e91a45f1b6034e0ef8a08",
+            "git_blob_sha": "78e1ec9f1169d032d32c34d3b257c1c7030d475c"
+          }
+        ],
+        "exact_changed_path_set": true,
+        "all_published_bytes_match": true,
+        "readback_utc": "2026-11-22T16:07:29.071878+00:00"
+      }
+    },
+    "serena": {
+      "pr": 655,
+      "head": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+      "parent": "2defe618259f7db4144824d19927b032300d160d",
+      "archive_sha256": "90299ea0aff680c148c340213dd802adfb7c8c94996877b8eec702f0bd9a442c",
+      "payload_count": 78,
+      "readback": {
+        "pr": 655,
+        "head": "1a5a7dd04fe732df5c539860dde813c8c703586d",
+        "parents": [
+          "2defe618259f7db4144824d19927b032300d160d"
+        ],
+        "tree": "c3fc3bb69ca4c4023e59a7b0e5cd02d8e0cad314",
+        "files": [
+          {
+            "path": "docs/modernization/verification/serena-wrapper-receipt-20261122/README.md",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/docs/modernization/verification/serena-wrapper-receipt-20261122/README.md",
+            "bytes": 6469,
+            "sha256": "e090dcc85ac400adae99aa39929809f996b3a102be294618808c6e973e6e47ec",
+            "git_blob_sha": "b7174b90bf5b9b5f7e023c0a0524d316e026eabc"
+          },
+          {
+            "path": "docs/modernization/verification/serena-wrapper-receipt-20261122/raw-evidence.zip",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/docs/modernization/verification/serena-wrapper-receipt-20261122/raw-evidence.zip",
+            "bytes": 646315,
+            "sha256": "90299ea0aff680c148c340213dd802adfb7c8c94996877b8eec702f0bd9a442c",
+            "git_blob_sha": "448dc9d0c51ab6951c5e4ccc2d2b8a61401ea8d9"
+          },
+          {
+            "path": "docs/modernization/verification/serena-wrapper-receipt-20261122/results.json",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/docs/modernization/verification/serena-wrapper-receipt-20261122/results.json",
+            "bytes": 12977,
+            "sha256": "d687d07a34c7ef7ad0061dbc19a1bccdd51c5b1999c730dc8f4df56783f0af66",
+            "git_blob_sha": "49b5f0b6eab551c817e54839930952e6534fe28c"
+          },
+          {
+            "path": "internal/cli/serena_prepared_run.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/internal/cli/serena_prepared_run.go",
+            "bytes": 7937,
+            "sha256": "c031a67a86f6d267fe2766f1fbeca9cc9d148115287399892f97bf010e264947",
+            "git_blob_sha": "de9b2b80dbc2e1016e2b9334f1d7306a2a9dafaf"
+          },
+          {
+            "path": "internal/cli/serena_prepared_wrapper_close.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/internal/cli/serena_prepared_wrapper_close.go",
+            "bytes": 4251,
+            "sha256": "3e9dc9086d36a0fd65d61505f0096fc9a298dcb2fe90761668d3b1e6b950d430",
+            "git_blob_sha": "be36c14801f97f60ad89d5104f53436ee1ab1803"
+          },
+          {
+            "path": "internal/cli/serena_prepared_wrapper_close_windows_test.go",
+            "local_path": "/workspace/scratch/e51f442c712e/p0-next-20261122/publication/655/internal/cli/serena_prepared_wrapper_close_windows_test.go",
+            "bytes": 9780,
+            "sha256": "352bcda1080b011301095d6adaa03b1f61227c163cfaab00ba0ba2b0c1b02da3",
+            "git_blob_sha": "50b0e008d370b237fc2eeb4ed3d7ceb93cefb4da"
+          }
+        ],
+        "exact_changed_path_set": true,
+        "all_published_bytes_match": true,
+        "readback_utc": "2026-11-22T16:13:25.901197+00:00"
+      }
+    }
+  },
+  "queue": {
+    "open_count": 30,
+    "draft_count": 30,
+    "numbers": [
+      623,
+      624,
+      625,
+      626,
+      627,
+      628,
+      629,
+      631,
+      632,
+      635,
+      637,
+      643,
+      644,
+      646,
+      647,
+      649,
+      650,
+      653,
+      654,
+      655,
+      657,
+      659,
+      660,
+      661,
+      663,
+      664,
+      665,
+      666,
+      667,
+      668
+    ]
+  },
+  "architecture_gate": {
+    "status": "FAILED",
+    "exit_code": 1,
+    "new": 388,
+    "stale": 128,
+    "grown": 42,
+    "workers_within_new": 72,
+    "expired": 0,
+    "unowned_baseline": 0
+  },
+  "full_default_tagged_go_suites": "NOT_RUN",
+  "native_scheduler_lifecycle": "NOT_RUN in this increment",
+  "installed_product_operations": "NOT_RUN",
+  "external_exact_head_review": "PENDING",
+  "cleanup": {
+    "windows_workspace": {
+      "schema": 1,
+      "started_utc": "2026-11-22T16:23:58.792361+00:00",
+      "source": "D:\\dev\\ChatGPT\\mcp-p0-next-20261122-e51f",
+      "target": "D:\\dev\\ChatGPT\\trash\\mcp-p0-next-20261122-e51f",
+      "moved": true,
+      "preserved_archive_sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3",
+      "local_preservation": {
+        "schema": 1,
+        "verified_utc": "2026-11-22T16:23:46.190534+00:00",
+        "archive_sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3",
+        "archive_bytes": 3882792,
+        "all_payloads_verified": true,
+        "payload_count": 296,
+        "retained_outside_trash": true,
+        "local_path": "/workspace/scratch/e51f442c712e/p0-next-closeout-20261122/windows-preserved-workspace.zip",
+        "qualified_direct_children_waited": 33,
+        "process_scope": "Visible command lines only; no hidden-process or open-handle settlement claim"
+      },
+      "completed": true,
+      "delete_attempted": false,
+      "trash_emptied": false,
+      "termination_requested": false,
+      "history_or_shared_cache_modified": false,
+      "whole_process_tree_settlement_claimed": false,
+      "process_observation": {
+        "label": "before-move",
+        "started_utc": "2026-11-22T16:23:58.112440+00:00",
+        "argv": [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId,ParentProcessId,CommandLine) | ConvertTo-Json -Compress"
+        ],
+        "powershell_sha256": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8",
+        "direct_child_waited": true,
+        "timed_out": false,
+        "termination_requested": false,
+        "pid": 55052,
+        "exit_code": 0,
+        "finished_utc": "2026-11-22T16:23:58.788693+00:00",
+        "stdout_sha256": "37329b6a581cdfb4f4c713d0d438c9804de6a1d96b86c73ae400a75a41180886",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_bytes": 0,
+        "process_rows": 315,
+        "missing_commandline": 21,
+        "matches": [],
+        "scope": "Visible command lines only; no whole-machine, hidden-process or open-handle settlement claim"
+      },
+      "source_absent": true,
+      "target_exists": true,
+      "inventory_equal": true,
+      "inventory_before_sha256": "98b7c6d31d6fdc9900eaade9d5d570606a7a5cfc23f52ad84425a1824da0ff6f",
+      "inventory_after_sha256": "98b7c6d31d6fdc9900eaade9d5d570606a7a5cfc23f52ad84425a1824da0ff6f",
+      "files": 6903,
+      "directories": 570,
+      "bytes": 138166293,
+      "finished_utc": "2026-11-22T16:24:06.769788+00:00"
+    },
+    "windows_transport": {
+      "schema": 1,
+      "started_utc": "2026-11-22T16:25:57.391632+00:00",
+      "source": "D:\\dev\\ChatGPT\\mcp-p0-next-closeout-20261122-e51f",
+      "target": "D:\\dev\\ChatGPT\\trash\\mcp-p0-next-transports-20261122-e51f",
+      "completed": true,
+      "retained_evidence_directory": "D:\\dev\\ChatGPT\\mcp-p0-next-closeout-20261122-e51f",
+      "retained_preservation_sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3",
+      "selection": [
+        "preserved-workspace-part-000.b64",
+        "preserved-workspace-part-001.b64",
+        "preserved-workspace-part-002.b64",
+        "preserved-workspace-part-003.b64",
+        "preserved-workspace-part-004.b64",
+        "preserved-workspace-part-005.b64",
+        "preserved-workspace-part-006.b64",
+        "preserved-workspace-part-007.b64",
+        "preserved-workspace-part-008.b64",
+        "preserved-workspace-part-009.b64",
+        "preserved-workspace-part-010.b64",
+        "preserved-workspace-part-011.b64",
+        "preserved-workspace-part-012.b64",
+        "preserved-workspace-part-013.b64",
+        "preserved-workspace-part-014.b64",
+        "preserved-workspace-part-015.b64",
+        "preserved-workspace-part-016.b64",
+        "preserved-workspace-part-017.b64",
+        "preserved-workspace-part-018.b64",
+        "preserved-workspace-part-019.b64",
+        "preserved-workspace-part-020.b64",
+        "preserved-workspace-part-021.b64",
+        "preserved-workspace-part-022.b64",
+        "preserved-workspace-part-023.b64",
+        "preserved-workspace-part-024.b64",
+        "preserved-workspace-part-025.b64",
+        "preserved-workspace-part-026.b64",
+        "preserved-workspace-part-027.b64",
+        "preserved-workspace-part-028.b64",
+        "runtime-before-inventory",
+        "runtime-before-move"
+      ],
+      "moves": [
+        "preserved-workspace-part-000.b64",
+        "preserved-workspace-part-001.b64",
+        "preserved-workspace-part-002.b64",
+        "preserved-workspace-part-003.b64",
+        "preserved-workspace-part-004.b64",
+        "preserved-workspace-part-005.b64",
+        "preserved-workspace-part-006.b64",
+        "preserved-workspace-part-007.b64",
+        "preserved-workspace-part-008.b64",
+        "preserved-workspace-part-009.b64",
+        "preserved-workspace-part-010.b64",
+        "preserved-workspace-part-011.b64",
+        "preserved-workspace-part-012.b64",
+        "preserved-workspace-part-013.b64",
+        "preserved-workspace-part-014.b64",
+        "preserved-workspace-part-015.b64",
+        "preserved-workspace-part-016.b64",
+        "preserved-workspace-part-017.b64",
+        "preserved-workspace-part-018.b64",
+        "preserved-workspace-part-019.b64",
+        "preserved-workspace-part-020.b64",
+        "preserved-workspace-part-021.b64",
+        "preserved-workspace-part-022.b64",
+        "preserved-workspace-part-023.b64",
+        "preserved-workspace-part-024.b64",
+        "preserved-workspace-part-025.b64",
+        "preserved-workspace-part-026.b64",
+        "preserved-workspace-part-027.b64",
+        "preserved-workspace-part-028.b64",
+        "runtime-before-inventory",
+        "runtime-before-move"
+      ],
+      "delete_attempted": false,
+      "termination_requested": false,
+      "trash_emptied": false,
+      "whole_process_tree_settlement_claimed": false,
+      "inventory_equal": true,
+      "sources_absent": true,
+      "files": 29,
+      "directories": 14,
+      "bytes": 5177056,
+      "finished_utc": "2026-11-22T16:25:57.448677+00:00"
+    },
+    "local_workspace": {
+      "schema": 1,
+      "started_utc": "2026-11-22T16:26:59.030613+00:00",
+      "source": "/workspace/scratch/e51f442c712e/p0-next-20261122",
+      "target": "/workspace/scratch/e51f442c712e/trash/local-p0-next-20261122",
+      "completed": true,
+      "moved": true,
+      "agents_released_by_root": true,
+      "process_observations": [
+        {
+          "label": "before-preservation",
+          "utc": "2026-11-22T16:26:56.838116+00:00",
+          "pids_seen": 1,
+          "unavailable_reads": 0,
+          "matches": [],
+          "excluded_pid": 2,
+          "scope": "Visible /proc cmdline, cwd and fd references; not whole-machine settlement"
+        },
+        {
+          "label": "before-move",
+          "utc": "2026-11-22T16:26:59.030398+00:00",
+          "pids_seen": 1,
+          "unavailable_reads": 0,
+          "matches": [],
+          "excluded_pid": 2,
+          "scope": "Visible /proc cmdline, cwd and fd references; not whole-machine settlement"
+        }
+      ],
+      "recovery": {
+        "path": "/workspace/scratch/e51f442c712e/p0-next-closeout-20261122/local-workspace-recovery.zip",
+        "bytes": 23783136,
+        "sha256": "50c3a207ca9f86719a5a7dcd612ea3facd48450947ab1791bd7f1958cd6c3392",
+        "all_file_payloads_verified": true
+      },
+      "inventory_before_sha256": "2e06a5761f30b9ab8aa94c5b46de4af6765976ddef33f8e9510eea1003f12120",
+      "retained_checkout": "/workspace/scratch/e51f442c712e/mcphub-base",
+      "retained_prior_closeout": "/workspace/scratch/e51f442c712e/continuation-closeout",
+      "delete_attempted": false,
+      "termination_requested": false,
+      "trash_emptied": false,
+      "history_or_shared_cache_modified": false,
+      "whole_process_tree_settlement_claimed": false,
+      "inventory_after_sha256": "2e06a5761f30b9ab8aa94c5b46de4af6765976ddef33f8e9510eea1003f12120",
+      "inventory_equal": true,
+      "source_absent": true,
+      "target_exists": true,
+      "files": 1579,
+      "directories": 159,
+      "bytes": 53912420,
+      "retained_checkout_exists": true,
+      "finished_utc": "2026-11-22T16:26:59.183186+00:00"
+    },
+    "temporary_reference": {
+      "schema": 1,
+      "source": "/workspace/scratch/e51f442c712e/p0-next-closeout-20261122/prior-cleanup",
+      "target": "/workspace/scratch/e51f442c712e/trash/p0-next-closeout-reference-20261122",
+      "reason": "Unmodified temporary copy of prior published cleanup helper; current helpers and prior evidence are retained",
+      "file": "cleanup_scheduler.py",
+      "bytes": 18046,
+      "sha256": "474eba51f77970bfb7fd82e1a632ef348666a4131f3d1cc272efa59ee3113413",
+      "delete_attempted": false,
+      "trash_emptied": false,
+      "completed": true,
+      "inventory_equal": true,
+      "source_absent": true
+    },
+    "windows_retained_results": "D:\\dev\\ChatGPT\\mcp-p0-next-closeout-20261122-e51f"
+  },
+  "evidence": {
+    "path": "p0-next-evidence-20261122.zip",
+    "bytes": 4193069,
+    "sha256": "34544fab2529666fdd59d258834a979bd60bfaadd0ba990951c7e2c77bba4d97",
+    "payloads": 28,
+    "manifest": {
+      "architecture-triage.json": {
+        "bytes": 75162,
+        "sha256": "ac498187bd61de0a4e8f9957ff8dd59ce8185089918fcc34f655d13141b24123"
+      },
+      "cleanup-config.json": {
+        "bytes": 10517,
+        "sha256": "358eb6b5884c4a1526f11842d445a6576fd16111808108124e63c756aa249808"
+      },
+      "cleanup_local_next.py": {
+        "bytes": 5996,
+        "sha256": "59428b2c904a41c7bee1b8104f9b1cd3f23c00b9eee2191e318dc2ec0d940c45"
+      },
+      "cleanup_next.py": {
+        "bytes": 14834,
+        "sha256": "080ba3eb36d8af9278a62552484c65edf548c9d4d6179346c364fde36c962d4f"
+      },
+      "cleanup_transports.py": {
+        "bytes": 4588,
+        "sha256": "c063481bff6dbe0bcea1b7bfa8dd97cae301bdf46e1712c8c27894731915af22"
+      },
+      "github-snapshot.json": {
+        "bytes": 630207,
+        "sha256": "52b40dfc7c69b9935aae45b1da30a205cebbc5d9c58c21e3beb8a40592b09569"
+      },
+      "internal-review-summary.json": {
+        "bytes": 2077,
+        "sha256": "82c8453462828e3cb35f6ad6c7e9d137a8d490a25ef7471b659e4648cceb5472"
+      },
+      "local-cleanup.json": {
+        "bytes": 1915,
+        "sha256": "a8724c38e12ef97bb8100df6349dad863e74b07c0995cd5e26be567e0a8e80f0"
+      },
+      "local-inventory-after.json.gz": {
+        "bytes": 81830,
+        "sha256": "286475bff1719270e5aa7db3d01de4f6cdce93cdfc9ee5eef15afa6c6261ec2f"
+      },
+      "local-inventory-before.json.gz": {
+        "bytes": 81830,
+        "sha256": "286475bff1719270e5aa7db3d01de4f6cdce93cdfc9ee5eef15afa6c6261ec2f"
+      },
+      "preparation-import-failure.json": {
+        "bytes": 558,
+        "sha256": "1bfa44b548ae0ecaa47f8e9410b445527dbc6c5aa098accb2b8d9a93d436a787"
+      },
+      "preservation-ack.json": {
+        "bytes": 530,
+        "sha256": "6a548f45645bfaf44816954ea54daad09d4557863f9560436baf0208d6bb4e16"
+      },
+      "prior_local_inventory_helper.py": {
+        "bytes": 11103,
+        "sha256": "f5da55e6e91b9c062cb4d2cc953e1d18247eff29f424d109ed2eaf64b4b045a8"
+      },
+      "publication/655-manifest.json": {
+        "bytes": 2625,
+        "sha256": "f44686e416bd38ed493bf2c75e947569a50fd9ff062e7c50ba2774cab0c340c6"
+      },
+      "publication/660-manifest.json": {
+        "bytes": 2294,
+        "sha256": "fe7199bffea31c799cc5a8e61ec42b5b7c25db146c64bdb7846aabfdd8e3bc52"
+      },
+      "publication/663-manifest.json": {
+        "bytes": 2905,
+        "sha256": "b1e4876b75f4186bf9bdb21c8aa4b37b9770c8dc527880279ac291a6b609673c"
+      },
+      "publication/readback-655.json": {
+        "bytes": 2810,
+        "sha256": "01f75802fc68f3901d3fc9606dda4138c905556ac0e99682c4985a41c0c06099"
+      },
+      "publication/readback-660.json": {
+        "bytes": 2422,
+        "sha256": "5a26489a8ba28e1365b12764b177d2dbdc3802fae6ccebfff3847e0fe0898d36"
+      },
+      "publication/readback-663.json": {
+        "bytes": 3034,
+        "sha256": "aa55861c570e86edb4a6788121e17daab2ef59a88cf4dd01030a60dfca9c82c7"
+      },
+      "published-results/architecture.json": {
+        "bytes": 8701,
+        "sha256": "d74f7b9e0ae7d73ec6d36a8f395e653294ffc17c2754cc600b88f1c0d306148f"
+      },
+      "published-results/scheduler.json": {
+        "bytes": 9460,
+        "sha256": "96d43b0b6e1027165756bcf4ca2dc8d8c2ba04b9edd09758d1fe44571b70d86a"
+      },
+      "published-results/serena.json": {
+        "bytes": 12977,
+        "sha256": "d687d07a34c7ef7ad0061dbc19a1bccdd51c5b1999c730dc8f4df56783f0af66"
+      },
+      "reference-copy-cleanup.json": {
+        "bytes": 578,
+        "sha256": "2c6f74c286c30047d79e3310dc48d1a2f2d58d6a79d3264934a09d9c5d6b5a8a"
+      },
+      "residual-section-draft.md": {
+        "bytes": 18787,
+        "sha256": "c468a03ff17e2de0065f2543765a52e6f45a7e0d42f602040fd5d9b654e23d2c"
+      },
+      "transport-cleanup.json": {
+        "bytes": 16829,
+        "sha256": "7221ad1a7f1f2ebccc1acb3bdcdf2982ddb9cc89908b0049be36f00a83cf71c2"
+      },
+      "windows-preservation-transport.json": {
+        "bytes": 5059,
+        "sha256": "fe2673659b5402cf4c636b849edcbe5f18cf30fb352604501d33a07356f43bc3"
+      },
+      "windows-preserved-workspace.zip": {
+        "bytes": 3882792,
+        "sha256": "7ab38eb7fa472e10b013df68ba6fe477ccfaa2ec199cf170db96f36cfa3921f3"
+      },
+      "workspace-cleanup.json": {
+        "bytes": 2678,
+        "sha256": "5e17efa3b8bdbc636f205c06339e94007d6a354498764c70f93282a92160156d"
+      }
+    }
+  },
+  "remaining_plan_anchor": "p0-next-residual-20261122",
+  "operations_not_performed": [
+    "new PR",
+    "merge",
+    "force push",
+    "branch deletion",
+    "dependency installation/download",
+    "native Scheduler mutation",
+    "installed Product mutation",
+    "external quota reviewer",
+    "manual CI",
+    "trash emptying"
+  ]
+}

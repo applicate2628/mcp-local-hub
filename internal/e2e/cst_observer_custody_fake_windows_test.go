@@ -293,6 +293,7 @@ func cstRunFakeB0(t *testing.T, mode string, f4 *f4TestHost) (got cstFakeB0Outco
 	var foreignHandle windows.Handle
 	if f4 == nil {
 		foreign = exec.Command(os.Args[0], "-test.run=^TestCSTObserverCustodyFakeFault$")
+		subprocess.NoConsole(foreign)
 		foreign.Env = append(os.Environ(), "MCPHUB_CST_OBSERVER_CHILD=foreign")
 		foreignInput, err := foreign.StdinPipe()
 		if err != nil {

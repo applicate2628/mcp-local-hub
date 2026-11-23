@@ -1,0 +1,100 @@
+{
+  "schema": "residual-closeout-evidence-v1",
+  "archive": {
+    "file": "verification-evidence.zip",
+    "bytes": 34109,
+    "sha256": "51ef6e1423373613cf3904bea18a13528a32956a7b12e82a15d2b995329df52d",
+    "members": 18
+  },
+  "manifest": "PACKAGE_FILES.json",
+  "files": [
+    {
+      "path": "a5/root-source-readback.json",
+      "bytes": 476,
+      "sha256": "11fbe3c301eb406cf71a83533e19e578adb98aac2d9fb84afa49dc01d3bd3b08"
+    },
+    {
+      "path": "cleanup/REVIEW.md",
+      "bytes": 3568,
+      "sha256": "b17103a83cc0faf6515651be8e113f73fdf94691739e91f493aced311159b9d4"
+    },
+    {
+      "path": "cleanup/local-plan.json",
+      "bytes": 1384,
+      "sha256": "7479ac148b40d7eb2cfe49ee4817dc29546baf7fc27d8594d69fd7303f2c8604"
+    },
+    {
+      "path": "cleanup/local-receipt.json",
+      "bytes": 5298,
+      "sha256": "d8f55b8e45a2fffd889e42f8835446bc51ad672a5b072cfc9991cb3a7e694aa3"
+    },
+    {
+      "path": "cleanup/remote-plan.json",
+      "bytes": 1284,
+      "sha256": "a99ae86bd14d03955bfb62ec659da9c72ea1afcfe829e85581a46779c81e73fd"
+    },
+    {
+      "path": "cleanup/remote-read-file-tool.json",
+      "bytes": 7106,
+      "sha256": "1d7656a9d9aeb4d7d637e535173d97d2ef041a67a1f00ef8294de04ba8d264c6"
+    },
+    {
+      "path": "cleanup/remote-receipt-readback.json",
+      "bytes": 6618,
+      "sha256": "c17fd43fedde1be99cdf214549d55912224637f074ccc9eb3459907ccaf0f179"
+    },
+    {
+      "path": "cleanup/trash_transport_duplicates.py",
+      "bytes": 5572,
+      "sha256": "1ef2180424499b738175a7a8a71168dca70849e330e162882206c0b49dfc87ea"
+    },
+    {
+      "path": "publication-660-commit-readback.json",
+      "bytes": 1571,
+      "sha256": "dda45f31975e436617a79b13d5438b9e17b3a5eeca3c57ab2b210c27e3e35129"
+    },
+    {
+      "path": "publication-660-manifest.json",
+      "bytes": 4684,
+      "sha256": "3c04a71d21cf48aabed395c186153ac2cdf40be13c331e159b2a6084e7fcb566"
+    },
+    {
+      "path": "publication-660-pr-readback.json",
+      "bytes": 23100,
+      "sha256": "5a028047d2c36be51aa9c6fd86da1fe45812e78dd277fa5b76bf00efff822deb"
+    },
+    {
+      "path": "publication-660-readback.json",
+      "bytes": 5121,
+      "sha256": "fd57b886fe93e4b5faa07fe019ef2ca2dc53dbc194c87300469ac641ec5eed4d"
+    },
+    {
+      "path": "publication-663-commit-readback.json",
+      "bytes": 1583,
+      "sha256": "4feeb90a7cde98deb20f4acab61a25d0634793d04b8547b24904224f2973f9f4"
+    },
+    {
+      "path": "publication-663-manifest.json",
+      "bytes": 2829,
+      "sha256": "ad770529565a5f8d981a3f182ee9f9b1138295d49b9bdd76926f70d4d66c89bb"
+    },
+    {
+      "path": "publication-663-pr-readback.json",
+      "bytes": 14312,
+      "sha256": "1dabc514bb33bc4759e9b27103ecd6fa58d9a63c93b7166055d03288521e2edf"
+    },
+    {
+      "path": "publication-663-readback.json",
+      "bytes": 2921,
+      "sha256": "423a60daa6bbdf96e154a30ea89b295c2bdf98f9f31d7eda53d06a008e4ef370"
+    },
+    {
+      "path": "readback_publication.py",
+      "bytes": 3297,
+      "sha256": "23420e540ac8b22c74058912eb861a33dacfcb86f09e979b76d30e177a94254d"
+    }
+  ],
+  "all_original_bytes_equal": true,
+  "zip_integrity_checked": true,
+  "scope": "Exact publication 660/663 readbacks, retained cleanup receipts and root Source data check. Does not claim its own future 664 publication readback."
+}

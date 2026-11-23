@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
 type publicContractDecisionRecord struct {
@@ -129,6 +131,7 @@ func publicContractHasExactLine(raw []byte, want string) bool {
 func publicContractRequireIndexedBlob(t *testing.T, root, relative, wantBlob string) {
 	t.Helper()
 	cmd := exec.Command("git", "-C", root, "ls-files", "--stage", "--", filepath.ToSlash(relative))
+	process.HideToolConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git ls-files %s: %v", relative, err)
@@ -138,6 +141,7 @@ func publicContractRequireIndexedBlob(t *testing.T, root, relative, wantBlob str
 		t.Fatalf("%s index entry = %q, want stage-0 blob %s", relative, strings.TrimSpace(string(out)), wantBlob)
 	}
 	cmd = exec.Command("git", "-C", root, "diff", "--quiet", "--", filepath.ToSlash(relative))
+	process.HideToolConsole(cmd)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s differs between worktree and candidate index: %v", relative, err)
 	}

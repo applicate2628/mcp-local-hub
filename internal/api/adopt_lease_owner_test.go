@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 // TestAdoptLeaseLeafRejectsHardlinkBeforeLock catches the unsafe path-owner
@@ -332,6 +334,7 @@ func startAdoptLeaseChild(t *testing.T, stateDir, entry, role string) *adoptLeas
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), adoptLeaseChildTimeout)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdoptLeaseRaceChild$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_A2_ROLE="+role, "MCPHUB_A2_STATE="+stateDir, "MCPHUB_A2_ENTRY="+entry)
 	child := &adoptLeaseChild{cmd: cmd, cancel: cancel, role: role}
 	cmd.Stderr = &child.stderr
@@ -397,6 +400,7 @@ func runAdoptLeaseChild(t *testing.T, stateDir, entry, role string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), adoptLeaseChildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdoptLeaseRaceChild$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), "MCPHUB_A2_ROLE="+role, "MCPHUB_A2_STATE="+stateDir, "MCPHUB_A2_ENTRY="+entry)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

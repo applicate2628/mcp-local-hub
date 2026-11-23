@@ -1,0 +1,107 @@
+{
+  "qualified_overlay": {
+    "claims_limits": [
+      "Helper Cmd.Wait settlement is distinct from complete GUI worker settlement",
+      "Production PID-owner refactoring is not part of these test changes",
+      "GUI rewrite reaches actual loopback GUI server and HKCU QUERY_VALUE read",
+      "No installed Hub/scheduler mutation is claimed or needed",
+      "Negative Go FAIL events remain FAIL even if the control oracle matches"
+    ],
+    "control_manifest_sha256": "8d38e8532d2756b8b9771a7e7b59638dcea3c740d0219a3678e38259da498b97",
+    "control_mutation": "RaceLost owned kill callback returns nil; original Cmd.Process.Kill and one Cmd.Wait cleanup remain",
+    "control_only_changed_candidate": "internal/cli/gui_force_test.go",
+    "formatted_manifest_sha256": "d2bc2e7c65db4b3e66bcd8393e37482b834d10317ce876ace4a5c05152c03eea",
+    "original_formatted_candidate_bytes_identical": true,
+    "original_manifest_sha256": "0a5fedc6260e74407c2297e7b2403fdf75091b6c255ddf3fe9f5c2ed3b003823",
+    "overlay_count": 4,
+    "overlay_roles": {
+      "internal/cli/gui_force_test.go": "GUI retained original Cmd fixture and two assertions",
+      "internal/daemon/main_dispatch_test.go": "canonical daemon dispatch guards",
+      "internal/daemon/main_test.go": "canonical daemon helper entry guard",
+      "internal/gui/test_seams.go": "restore-returning setter for existing killProcessOverride"
+    },
+    "physical_source_head": "858812988833a84368c60fba1540ae601155fa71",
+    "physical_source_relative": "preserved-input/source-preserved",
+    "physical_source_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "producer": "Local source/manifest analysis only; native facts remain in original runner receipts",
+    "schema": 1,
+    "source_files": [
+      {
+        "candidate_git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+        "candidate_sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+        "path": "internal/daemon/main_test.go",
+        "source_git_blob": "2c435207b252d5efb263653d857fd13806704847",
+        "source_sha256": "a125d32f771b7c39bda73d5d2bad3f3be4cf8d12c79a4e49be156bff45509183"
+      },
+      {
+        "candidate_git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+        "candidate_sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+        "path": "internal/daemon/main_dispatch_test.go",
+        "source_git_blob": null,
+        "source_sha256": null
+      },
+      {
+        "candidate_git_blob": "4c549a83239b38fe3db7df36e1c459da10da3997",
+        "candidate_sha256": "6886f2ed7f73752fb09251d886cf2eaafd1e0d3e5758c795d87e08bed67bb969",
+        "path": "internal/cli/gui_force_test.go",
+        "source_git_blob": "06ec8f6d6a624dce040390532bda824b2553b46a",
+        "source_sha256": "db019916c49da6c5be02298559690b368e431e0c01feb95a786add30b875eba8"
+      },
+      {
+        "candidate_git_blob": "63d148b8b8a3657d994e00e83521d5a17a6da2c9",
+        "candidate_sha256": "631e6d9668764f376b95bb12925e8309ff5e32e418ed2d2ac0a30f7fdec25488",
+        "path": "internal/gui/test_seams.go",
+        "source_git_blob": "995a412d124a33248af002f67fc948b673fc3671",
+        "source_sha256": "d718076d118e16475959631cf5d79755bc044bb0f11e0aea7b2f74340570960e"
+      }
+    ]
+  },
+  "canonical_parent": {
+    "schema": 1,
+    "physical_source": "858812988833a84368c60fba1540ae601155fa71",
+    "parent": "1825af471c6516d47b2ee6daabf20e0ecd243b1a",
+    "parent_tree": "4cf346058a66fed8af77e7a7ffc2dd2c936d64ba",
+    "compare_total_commits": 5,
+    "compare_files_count": 10,
+    "go_delta": [
+      {
+        "path": "internal/cli/gui_force_test.go",
+        "status": "modified",
+        "git_blob": "af0103828e23ac3d46ee21af814131c1796b3435"
+      },
+      {
+        "path": "internal/daemon/main_dispatch_test.go",
+        "status": "added",
+        "git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7"
+      },
+      {
+        "path": "internal/daemon/main_test.go",
+        "status": "modified",
+        "git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8"
+      }
+    ],
+    "new_code_commit": "8f6a89b491c3dca11830688b8b158bf973b19363",
+    "new_code_tree": "a354fa2d72b85b851176c073a99a6f97c651276b",
+    "updated_code": [
+      {
+        "path": "internal/cli/gui_force_test.go",
+        "mode": "100644",
+        "type": "blob",
+        "sha": "4c549a83239b38fe3db7df36e1c459da10da3997"
+      },
+      {
+        "path": "internal/gui/test_seams.go",
+        "mode": "100644",
+        "type": "blob",
+        "sha": "63d148b8b8a3657d994e00e83521d5a17a6da2c9"
+      }
+    ],
+    "expected_final_go_delta_paths": [
+      "internal/daemon/main_test.go",
+      "internal/daemon/main_dispatch_test.go",
+      "internal/cli/gui_force_test.go",
+      "internal/gui/test_seams.go"
+    ],
+    "scope": "Parent differs from physical source in exactly three Go files; GUI replacement and new seam yield exactly the four qualified overlays. Non-Go differences are documentation/evidence."
+  }
+}

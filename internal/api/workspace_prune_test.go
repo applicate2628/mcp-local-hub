@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestIsAgentWorktreePath(t *testing.T) {
@@ -702,6 +704,7 @@ func TestIsDeadGitWorktreePath_SeparateGitDirNested_RealGit(t *testing.T) {
 	runGit := func(dir string, args ...string) string {
 		t.Helper()
 		cmd := exec.Command(gitBin, args...)
+		process.HideToolConsole(cmd)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
@@ -795,6 +798,7 @@ func TestIsDeadGitWorktreePath_SeparateGitDirUnderUserModules_RealGit(t *testing
 	runGit := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(gitBin, args...)
+		process.HideToolConsole(cmd)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
@@ -869,6 +873,7 @@ func TestIsDeadGitWorktreePath_SeparateGitDirUnderUserWorktrees_RealGit(t *testi
 	runGit := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command(gitBin, args...)
+		process.HideToolConsole(cmd)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
@@ -1223,6 +1228,7 @@ func TestIsDeadGitWorktreePath_SubmoduleInsideWorktree_RealGit(t *testing.T) {
 	runGit := func(dir string, args ...string) string {
 		t.Helper()
 		cmd := exec.Command(gitBin, args...)
+		process.HideToolConsole(cmd)
 		cmd.Dir = dir
 		// Deterministic identity + allow file:// submodule transport (git ≥2.38
 		// blocks it by default). Keep ambient-input control: no reliance on the
@@ -1626,6 +1632,7 @@ func TestIsDeadGitWorktreePath_SubmoduleInsideRemovedWorktreeNotPruned_RealGit(t
 	runGit := func(dir string, args ...string) string {
 		t.Helper()
 		cmd := exec.Command(gitBin, args...)
+		process.HideToolConsole(cmd)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",

@@ -1,0 +1,67 @@
+{
+  "started_utc": "2026-11-23T13:23:33.872278+00:00",
+  "completed": true,
+  "automatic_purge": false,
+  "moves": [
+    {
+      "source": "publisher-work-20261123-57604a3a/fixture-checkout",
+      "target_leaf": "unused-fixture-checkout",
+      "kind": "exact-source-duplicate",
+      "files": 3323,
+      "bytes": 50823826,
+      "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d",
+      "target": "trash/continuation-20261123-57604a3a/unused-fixture-checkout"
+    },
+    {
+      "source": "exports/b1-release-20261123-57604a3a.b64",
+      "target_leaf": "b1-release-20261123-57604a3a.b64",
+      "kind": "encoded-transport-duplicate",
+      "files": 1,
+      "bytes": 1074488,
+      "sha256": "cf5d3475c0e1480841ff35d339e0ba1cdb9b7fb1bea13f7936c65afdc7dc44a2",
+      "retained_archive_sha256": "616c2e2e4920f32b23744349d2c9178e2adefc4ffa4230d509351090b04a9810",
+      "target": "trash/continuation-20261123-57604a3a/b1-release-20261123-57604a3a.b64"
+    },
+    {
+      "source": "exports/scheduler-error-origins-20261123-57604a3a.b64",
+      "target_leaf": "scheduler-error-origins-20261123-57604a3a.b64",
+      "kind": "encoded-transport-duplicate",
+      "files": 1,
+      "bytes": 1753812,
+      "sha256": "21f00cf7a5f5b79662bc81faf5cf6e932d2796bb4cfe5143901ab312f9870276",
+      "retained_archive_sha256": "26501be50a4ba36c136963fd4e68f42984d1df12af49233b079fdee6540b9102",
+      "target": "trash/continuation-20261123-57604a3a/scheduler-error-origins-20261123-57604a3a.b64"
+    },
+    {
+      "source": "exports/publisher-roles-20261123-57604a3a.b64",
+      "target_leaf": "publisher-roles-20261123-57604a3a.b64",
+      "kind": "encoded-transport-duplicate",
+      "files": 1,
+      "bytes": 1284305,
+      "sha256": "56527677e0bcca664c09d228528ff93719839dc12c5dd094d4345649e8487210",
+      "retained_archive_sha256": "b991e776d834d655e42a25d72da9d98e46d66e85946cee36d2a2b29ec250d150",
+      "target": "trash/continuation-20261123-57604a3a/publisher-roles-20261123-57604a3a.b64"
+    },
+    {
+      "source": "exports/scheduler-standalone-20261123-57604a3a.b64",
+      "target_leaf": "scheduler-standalone-20261123-57604a3a.b64",
+      "kind": "encoded-transport-duplicate",
+      "files": 1,
+      "bytes": 495001,
+      "sha256": "e22883614cc6131d3aaca66af9b6229fc99967a371da235316f37cfe3fc54a6f",
+      "retained_archive_sha256": "52c8ac806a5153927bd7f5c0f583cc7cb91b5ad1942a36097254b6bc398b2de3",
+      "target": "trash/continuation-20261123-57604a3a/scheduler-standalone-20261123-57604a3a.b64"
+    }
+  ],
+  "preserved_source_before": {
+    "files": 3323,
+    "bytes": 50823826,
+    "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"
+  },
+  "preserved_source_after": {
+    "files": 3323,
+    "bytes": 50823826,
+    "inventory_sha256": "cb09bfe6d855e612a66f65bf87126a82050b78a492eacf0762236c06f3b50a7d"
+  },
+  "finished_utc": "2026-11-23T13:23:39.042495+00:00"
+}

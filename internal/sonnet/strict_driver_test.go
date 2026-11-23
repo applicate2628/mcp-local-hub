@@ -291,6 +291,7 @@ func runStrictDriverHelper(t *testing.T, exitCode int) (*exec.Cmd, error) {
 	}
 	projectRoot := writeProject(t)
 	cmd := exec.Command(helper, filepath.Join(projectRoot, "sample.son"))
+	process.NoConsole(cmd)
 	cmd.Dir = projectRoot
 	return cmd, cmd.Run()
 }

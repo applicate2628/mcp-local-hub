@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "pr": 664,
+  "branch": "fix/p0-test-entry-preserve-20261121",
+  "publication_head": "d16d60adeb2726169d00b17b8c13324ded76fc67",
+  "publication_tree": "28d5fae1c12ddd1a68b8fd53459e3476267f6750",
+  "code_head": "8f6a89b491c3dca11830688b8b158bf973b19363",
+  "code_tree": "a354fa2d72b85b851176c073a99a6f97c651276b",
+  "parent": "1825af471c6516d47b2ee6daabf20e0ecd243b1a",
+  "readback_text_files": [
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "sha": "4c549a83239b38fe3db7df36e1c459da10da3997",
+      "content_matched": true
+    },
+    {
+      "path": "internal/gui/test_seams.go",
+      "sha": "63d148b8b8a3657d994e00e83521d5a17a6da2c9",
+      "content_matched": true
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/README.md",
+      "sha": "9c5cb05e4a4b8a5910c41508f4ffde39fee5c501",
+      "content_matched": true
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/qualification.json",
+      "sha": "fefd603a58845b929abaa5ad6469c8ee18e369be",
+      "content_matched": true
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/source-composition-proof.json",
+      "sha": "6b8d493108a3ca7c55e89503266aacd6630e6f1d",
+      "content_matched": true
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/archive.json",
+      "sha": "d7afd63152e70610a90ebb0d364b5cd1ec56aa2f",
+      "content_matched": true
+    },
+    {
+      "path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "sha": "45b13967c50c4c4ab9a43fce1325db171b4f1e3e",
+      "content_matched": true
+    },
+    {
+      "path": "internal/daemon/main_test.go",
+      "sha": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+      "content_matched": true
+    },
+    {
+      "path": "internal/daemon/main_dispatch_test.go",
+      "sha": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+      "content_matched": true
+    }
+  ],
+  "increment_paths": [
+    {
+      "path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "sha": "45b13967c50c4c4ab9a43fce1325db171b4f1e3e"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/README.md",
+      "sha": "9c5cb05e4a4b8a5910c41508f4ffde39fee5c501"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/archive.json",
+      "sha": "d7afd63152e70610a90ebb0d364b5cd1ec56aa2f"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/gui-owner-evidence.zip",
+      "sha": "2e5050d5c856399c90b33875df535807508fa9d6"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/qualification.json",
+      "sha": "fefd603a58845b929abaa5ad6469c8ee18e369be"
+    },
+    {
+      "path": "docs/modernization/verification/gui-original-owner-2026-11-22/source-composition-proof.json",
+      "sha": "6b8d493108a3ca7c55e89503266aacd6630e6f1d"
+    },
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "sha": "4c549a83239b38fe3db7df36e1c459da10da3997"
+    },
+    {
+      "path": "internal/gui/test_seams.go",
+      "sha": "63d148b8b8a3657d994e00e83521d5a17a6da2c9"
+    }
+  ],
+  "full_pr_changed_files": 41,
+  "full_tree_truncated": false,
+  "physical_source": "858812988833a84368c60fba1540ae601155fa71",
+  "qualified_go_delta": [
+    {
+      "path": "internal/cli/gui_force_test.go",
+      "sha": "4c549a83239b38fe3db7df36e1c459da10da3997"
+    },
+    {
+      "path": "internal/daemon/main_dispatch_test.go",
+      "sha": "2146ff844d14b19e65e08520dcea2efabf01b4c7"
+    },
+    {
+      "path": "internal/daemon/main_test.go",
+      "sha": "f9ce99733688bb630efe144f06a18ad5892d76a8"
+    },
+    {
+      "path": "internal/gui/test_seams.go",
+      "sha": "63d148b8b8a3657d994e00e83521d5a17a6da2c9"
+    }
+  ],
+  "all_expected_tree_modes_and_blobs_verified": true,
+  "parent_chain_verified": true,
+  "archive": {
+    "schema": 1,
+    "archive": "gui-owner-evidence.zip",
+    "bytes": 766200,
+    "sha256": "7b5cb19644e66910e4dd69e077c361c79845b8087e2d9771f0545c9c08788010",
+    "git_blob": "2e5050d5c856399c90b33875df535807508fa9d6",
+    "entries": 28,
+    "payload_entries": 27,
+    "all_members_crc_length_sha256_verified": true,
+    "inner_archive": {
+      "bytes": 986320,
+      "sha256": "52879c23549f17d6aeaa622f702bc61c7417131441b1e3c3b7eb3b261101a335",
+      "entries": 1346
+    },
+    "remote_binary_readback": "Upload blob SHA and published Git tree must match; no second binary download is claimed"
+  },
+  "binary_readback_scope": "Exact uploaded Git blob and published tree identity verified; binary re-download not claimed",
+  "draft": true,
+  "merge_performed": false,
+  "force_push": false
+}
+

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestProcessTreeHelper(t *testing.T) {
@@ -28,6 +30,7 @@ func TestProcessTreeHelper(t *testing.T) {
 		os.Exit(91)
 	}
 	grandchild := exec.Command(executable, "-test.run=^TestProcessTreeHelper$", "--", "grandchild")
+	process.NoConsole(grandchild)
 	grandchild.Env = os.Environ()
 	if err := grandchild.Start(); err != nil {
 		os.Exit(92)

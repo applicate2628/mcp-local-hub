@@ -1,0 +1,840 @@
+{
+  "schema": 1,
+  "archive": {
+    "name": "p0-gates-evidence.zip",
+    "bytes": 2883474,
+    "sha256": "8f20dc494b9566c8b3113dabceca6c73f3c8ed06b80ffa27808467d7ecd1a0c0",
+    "entries": 394,
+    "manifest_sha256": "3efb5720e51877a244cb9ff3137ef878af34f56f12561492385c6c5bc7e1a221"
+  },
+  "source_preservation": {
+    "status": "LOCAL_CODE_DELTA_VERIFIED_PUBLICATION_READBACK_REQUIRED",
+    "old_pr": 658,
+    "old_pr_head": "f9966f008aed4d0cfa80d88cc80c12d08e03634f",
+    "preservation_checkpoint_commit": "858812988833a84368c60fba1540ae601155fa71",
+    "preservation_checkpoint_tree": "dba685c090952a93a80a1e82403c4646ad8aaed1",
+    "code_commit": "97ff6da0c428a8c30f1952da470e3ff033a740e4",
+    "code_tree": "3a0973ee5242f5248908bf7a16954de6cea9600f",
+    "all_28_original_payloads_retained_in_checkpoint": true,
+    "unchanged_original_paths_at_code_commit": 26,
+    "reviewed_changes_after_checkpoint": {
+      "internal/daemon/main_test.go": {
+        "ordinary_tail_byte_identical": true,
+        "original_validator_byte_identical": true,
+        "new_scope": "Admit the private master stdio fixture before package-state allocation; fail on an unexpected return."
+      },
+      "internal/cli/gui_force_test.go": {
+        "exactly_two_argument_insertions": true,
+        "new_scope": "Disable profiles and interactivity in the existing two PowerShell fixtures.",
+        "native_cases_executed": false
+      },
+      "internal/daemon/main_dispatch_test.go": {
+        "new_file": true,
+        "pure_table_cases": 39
+      }
+    },
+    "preserved_paths": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "original_blob": "0753bfc3548d4ebb2d5daa7ae399edbb9c6a6d1d",
+        "candidate_blob": "0753bfc3548d4ebb2d5daa7ae399edbb9c6a6d1d",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": ".plans/2026-11/prune-recovery-closeout-20261121.json",
+        "original_blob": "2a0fe92225c8daa4f8f932103d97fb6bc8e39152",
+        "candidate_blob": "2a0fe92225c8daa4f8f932103d97fb6bc8e39152",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "AGENTS.md",
+        "original_blob": "cc889dd7c9679985fab7ae55d82d76597bbebcdc",
+        "candidate_blob": "cc889dd7c9679985fab7ae55d82d76597bbebcdc",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "CLAUDE.md",
+        "original_blob": "43c994c2d3617f947bcb5adf1933e21dabe46bb5",
+        "candidate_blob": "43c994c2d3617f947bcb5adf1933e21dabe46bb5",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "original_blob": "c44704c7d2341e6c0c5be1767bcb0737a88546a4",
+        "candidate_blob": "c44704c7d2341e6c0c5be1767bcb0737a88546a4",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "cmd/mcphub/main_test.go",
+        "original_blob": "64b2e519fc4e6692dfcfe462db728478a2b0c7bc",
+        "candidate_blob": "64b2e519fc4e6692dfcfe462db728478a2b0c7bc",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "docs/agent-runbook.md",
+        "original_blob": "1e7e066e99e021a93af80ddb2401ad0399b3df15",
+        "candidate_blob": "1e7e066e99e021a93af80ddb2401ad0399b3df15",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "docs/frontend-flowbite.md",
+        "original_blob": "1e87230105d1e183dd8f088a4ec39adbaba1cc2d",
+        "candidate_blob": "1e87230105d1e183dd8f088a4ec39adbaba1cc2d",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "docs/skills/mcphub-explained/SKILL.md",
+        "original_blob": "1382aee61c9b6dd3f03d1d70359265712703c2af",
+        "candidate_blob": "1382aee61c9b6dd3f03d1d70359265712703c2af",
+        "same_bytes": true,
+        "responsibility": "canonical_instructions_plan_evidence"
+      },
+      {
+        "path": "internal/api/hub_mcp_state_read_inode_windows.go",
+        "original_blob": "a195ce33e11c5a0090f00a4d6df535094bcac318",
+        "candidate_blob": "a195ce33e11c5a0090f00a4d6df535094bcac318",
+        "same_bytes": true,
+        "responsibility": "effective_read_policy_diagnostic"
+      },
+      {
+        "path": "internal/api/hub_mcp_state_read_policy_windows_test.go",
+        "original_blob": "f981b0a0649002e4f6c1c5f10e0d8b3eb90bc826",
+        "candidate_blob": "f981b0a0649002e4f6c1c5f10e0d8b3eb90bc826",
+        "same_bytes": true,
+        "responsibility": "effective_read_policy_diagnostic"
+      },
+      {
+        "path": "internal/api/lsp_routing/main_test.go",
+        "original_blob": "262f6e75e8e32d94c96020915b949f8c260c2544",
+        "candidate_blob": "262f6e75e8e32d94c96020915b949f8c260c2544",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/api/lsp_routing/resolver_benchmark_test.go",
+        "original_blob": "453c1908a8d4974750259e1b2509c9ee87e430a0",
+        "candidate_blob": "453c1908a8d4974750259e1b2509c9ee87e430a0",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/api/lsp_routing/resolver_test.go",
+        "original_blob": "3bb39e2b2854b2d189f4c4fc1ba7c24d67b31629",
+        "candidate_blob": "3bb39e2b2854b2d189f4c4fc1ba7c24d67b31629",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/api/serena_routing/main_test.go",
+        "original_blob": "ca4b250ceb9f4248389e2c827ce930d792f5efcd",
+        "candidate_blob": "ca4b250ceb9f4248389e2c827ce930d792f5efcd",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/api/serena_routing/resolver_test.go",
+        "original_blob": "6cf4f042ab562157e9eede75be9d27743ec5c577",
+        "candidate_blob": "6cf4f042ab562157e9eede75be9d27743ec5c577",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/api/serena_routing/shared_observer_public_test.go",
+        "original_blob": "d41cb9db5e83fc6d9799b18b2151543f63dd8ce5",
+        "candidate_blob": "d41cb9db5e83fc6d9799b18b2151543f63dd8ce5",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/cli/gui_force_test.go",
+        "original_blob": "06ec8f6d6a624dce040390532bda824b2553b46a",
+        "candidate_blob": "af0103828e23ac3d46ee21af814131c1796b3435",
+        "same_bytes": false,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/cli/supervise_reconcile_ipc_test.go",
+        "original_blob": "4fbe28e28679c5a48b4731057683ac6f19607137",
+        "candidate_blob": "4fbe28e28679c5a48b4731057683ac6f19607137",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/daemon/host_original_windows_test.go",
+        "original_blob": "2e16c3c3340e6f8031cc25083e1ef839677c1520",
+        "candidate_blob": "2e16c3c3340e6f8031cc25083e1ef839677c1520",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/daemon/lazy_proxy_readiness_test.go",
+        "original_blob": "860f38c51af8548a71e0211da3efda9f59de0752",
+        "candidate_blob": "860f38c51af8548a71e0211da3efda9f59de0752",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/daemon/lazy_proxy_test.go",
+        "original_blob": "f02eebcf9090ec3d7f0f43f5ba9f58bd7b2b484e",
+        "candidate_blob": "f02eebcf9090ec3d7f0f43f5ba9f58bd7b2b484e",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/daemon/main_test.go",
+        "original_blob": "2c435207b252d5efb263653d857fd13806704847",
+        "candidate_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+        "same_bytes": false,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/oneapirun/async_owner_test.go",
+        "original_blob": "b3f8c23f860f27ee4e1b3b7b9314005eb479adfe",
+        "candidate_blob": "b3f8c23f860f27ee4e1b3b7b9314005eb479adfe",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/oneapirun/async_test.go",
+        "original_blob": "aa340ab93e65289798ace2b647469e5a9c93923e",
+        "candidate_blob": "aa340ab93e65289798ace2b647469e5a9c93923e",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "internal/oneapirun/main_test.go",
+        "original_blob": "f4161edc5af2ad1d8e0b12016d04e11492f76cef",
+        "candidate_blob": "f4161edc5af2ad1d8e0b12016d04e11492f76cef",
+        "same_bytes": true,
+        "responsibility": "test_isolation_and_fixture_inputs"
+      },
+      {
+        "path": "tools/testshards/main.go",
+        "original_blob": "a0c3b0bc5456ac84c8f6bc01c0f324cf215c9ca9",
+        "candidate_blob": "a0c3b0bc5456ac84c8f6bc01c0f324cf215c9ca9",
+        "same_bytes": true,
+        "responsibility": "test_shard_diagnostics_tool"
+      },
+      {
+        "path": "tools/testshards/main_test.go",
+        "original_blob": "a3f4a789512c33b7ec25bc85e6c0b8f8485d8f9a",
+        "candidate_blob": "a3f4a789512c33b7ec25bc85e6c0b8f8485d8f9a",
+        "same_bytes": true,
+        "responsibility": "test_shard_diagnostics_tool"
+      }
+    ],
+    "limits": [
+      "Later plan and evidence updates must be checked separately.",
+      "This is a source-preservation proof, not full Go or installed-product acceptance.",
+      "PR #658 remains open until the replacement is published and read back; its branch is retained."
+    ]
+  },
+  "recorded_archives": {
+    "completed": true,
+    "archives": [
+      {
+        "family": "canonical",
+        "archive": "canonical-evidence.zip",
+        "bytes": 1023730,
+        "sha256": "049089bb350e4822833002a117edc1e7912d784f45a992344da2cc3c0cb90075",
+        "entries": 1381,
+        "phases": [
+          {
+            "phase": "helper-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt-check",
+                "exit_code": 0,
+                "seconds": 0.02752339991275221,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "daemon-control",
+                "exit_code": 0,
+                "seconds": 14.688279299996793,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "helper-candidate",
+            "completed": false,
+            "declared_failure": "format-refusal-before-tests",
+            "commands": [
+              {
+                "label": "gofmt-check",
+                "exit_code": 0,
+                "seconds": 0.018788599991239607,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "helper-candidate-formatted",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt-check",
+                "exit_code": 0,
+                "seconds": 0.015445500030182302,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "dispatch-cases",
+                "exit_code": 0,
+                "seconds": 26.544791199965402,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "daemon-candidate",
+                "exit_code": 0,
+                "seconds": 3.0426457000430673,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "helper-missing-formatted",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt-check",
+                "exit_code": 0,
+                "seconds": 0.019611600087955594,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "daemon-missing",
+                "exit_code": 0,
+                "seconds": 4.483732799999416,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "p0-build-vet",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "full-build",
+                "exit_code": 0,
+                "seconds": 19.18570939998608,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "full-vet",
+                "exit_code": 0,
+                "seconds": 22.60200359998271,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "private-proof-probe",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [],
+            "cases": []
+          },
+          {
+            "phase": "private-proof-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": 0,
+                "oracle_matched": true,
+                "expected_state_roots": 1,
+                "state_directories_after": [
+                  "mcphub-daemon-test-state-2308510757"
+                ]
+              },
+              {
+                "case": "invalid-mode",
+                "exit_code": 1,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": []
+              },
+              {
+                "case": "extra-argument",
+                "exit_code": 1,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": []
+              }
+            ]
+          },
+          {
+            "phase": "private-proof-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": 0,
+                "oracle_matched": true,
+                "expected_state_roots": 0,
+                "state_directories_after": []
+              },
+              {
+                "case": "invalid-mode",
+                "exit_code": 2,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": []
+              },
+              {
+                "case": "extra-argument",
+                "exit_code": 2,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": []
+              }
+            ]
+          },
+          {
+            "phase": "private-proof-missing-fixture",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [],
+            "cases": [
+              {
+                "case": "missing-fixture",
+                "exit_code": 2,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": []
+              }
+            ]
+          },
+          {
+            "phase": "preserved-build-vet",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "full-build",
+                "exit_code": 0,
+                "seconds": 29.51368099998217,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "full-vet",
+                "exit_code": 0,
+                "seconds": 24.467130499891937,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "composed-build-vet",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "full-build",
+                "exit_code": 0,
+                "seconds": 8.267385000013746,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "full-vet",
+                "exit_code": 0,
+                "seconds": 21.973626699997112,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          }
+        ]
+      },
+      {
+        "family": "api",
+        "archive": "api-evidence.zip",
+        "bytes": 614993,
+        "sha256": "2a156f8af09d6d0db31353540520e3e0f57cce5765c9103073b12fd04ad61fdb",
+        "entries": 829,
+        "phases": [
+          {
+            "phase": "api-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "api-control",
+                "exit_code": 0,
+                "seconds": 34.45958030002657,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "api-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt",
+                "exit_code": 0,
+                "seconds": 0.016455800039693713,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "api-dispatch-race",
+                "exit_code": 0,
+                "seconds": 49.88561950006988,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "api-candidate",
+                "exit_code": 0,
+                "seconds": 25.58095809991937,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "native-proof-api-control",
+            "completed": false,
+            "declared_failure": "telemetry-encoding-refusal-before-helper",
+            "commands": [],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": null,
+                "oracle_matched": false,
+                "expected_state_roots": null,
+                "state_directories_after": null
+              }
+            ]
+          },
+          {
+            "phase": "native-proof-v2-api-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "cooperative",
+                "exit_code": 0,
+                "seconds": 0.024573700036853552,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": 1,
+                "state_directories_after": null
+              }
+            ]
+          },
+          {
+            "phase": "native-proof-v2-api-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "cooperative",
+                "exit_code": 0,
+                "seconds": 0.020571000059135258,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "invalid-marker",
+                "exit_code": 3,
+                "seconds": 0.011923099984414876,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "extra-argument",
+                "exit_code": 3,
+                "seconds": 0.014535400085151196,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": 0,
+                "state_directories_after": null
+              },
+              {
+                "case": "invalid-marker",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": null
+              },
+              {
+                "case": "extra-argument",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "family": "cli",
+        "archive": "cli-evidence.zip",
+        "bytes": 861392,
+        "sha256": "1066444ea05979beef6ab3eeb268a56b1c4fa9c1cb0cafa6f71dd4a5c1287b45",
+        "entries": 1181,
+        "phases": [
+          {
+            "phase": "cli-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "cli-control",
+                "exit_code": 0,
+                "seconds": 22.100318200071342,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "cli-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt",
+                "exit_code": 0,
+                "seconds": 0.1474349000491202,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "cli-dispatch-race",
+                "exit_code": 0,
+                "seconds": 52.373052500071935,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "cli-candidate",
+                "exit_code": 0,
+                "seconds": 14.425561900017783,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "cli-control-oracle",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "caller-root-control",
+                "exit_code": 1,
+                "seconds": 32.43258039990906,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "cli-owned-helpers",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "caller-root-and-codegraph",
+                "exit_code": 0,
+                "seconds": 9.782437700079754,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "cli-path-checks",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "native-leaf-checks",
+                "exit_code": 0,
+                "seconds": 7.433090499951504,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          },
+          {
+            "phase": "native-proof-v2-cli-control",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "cooperative",
+                "exit_code": 0,
+                "seconds": 0.0301758999703452,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": 1,
+                "state_directories_after": null
+              }
+            ]
+          },
+          {
+            "phase": "native-proof-v2-cli-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "cooperative",
+                "exit_code": 0,
+                "seconds": 0.02301520004402846,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "invalid-marker",
+                "exit_code": 3,
+                "seconds": 0.01477879995945841,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "extra-argument",
+                "exit_code": 3,
+                "seconds": 0.01704419997986406,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": [
+              {
+                "case": "cooperative",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": 0,
+                "state_directories_after": null
+              },
+              {
+                "case": "invalid-marker",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": null
+              },
+              {
+                "case": "extra-argument",
+                "exit_code": null,
+                "oracle_matched": true,
+                "expected_state_roots": null,
+                "state_directories_after": null
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "family": "shell",
+        "archive": "shell-evidence.zip",
+        "bytes": 143358,
+        "sha256": "e11cfb6d56941b3f5628bda6f1a2a39062499c97edcecf2bcf00585c3a8bf74d",
+        "entries": 196,
+        "phases": [
+          {
+            "phase": "shell-candidate",
+            "completed": true,
+            "declared_failure": null,
+            "commands": [
+              {
+                "label": "gofmt",
+                "exit_code": 0,
+                "seconds": 0.011912500020116568,
+                "timed_out": false,
+                "settled": true
+              },
+              {
+                "label": "stdout-limit-race",
+                "exit_code": 0,
+                "seconds": 4.40723499993328,
+                "timed_out": false,
+                "settled": true
+              }
+            ],
+            "cases": []
+          }
+        ]
+      }
+    ]
+  },
+  "full_go_default": "NOT_RUN",
+  "full_go_tagged_api_cli": "NOT_RUN",
+  "published_head_qualification": "NOT_CLAIMED; exact physical commits plus overlays are recorded inside",
+  "external_review_on_publication_head": "REVIEW_PENDING",
+  "serena_and_architecture_code_in_composed_build": false
+}

@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "date_moscow": "2026-11-22",
+  "pr": 624,
+  "branch": "perf/rx01-cmaketrace-benchmark-20261112",
+  "head": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+  "tree": "37541f5374b15dce704ade44d69174f95001cded",
+  "draft": true,
+  "full_pr_path_count": 16,
+  "code_commit": "074f8232731cffa7fb39e7defbaf7e20ee5e5be6",
+  "code_tree": "e4ef93c843ec3342c4a6d564e7f5ad88e9b3b021",
+  "evidence_commit": "5a948076bad4b9b7aa409f2aa46562b9cbe323fd",
+  "evidence_tree": "70c10faecc30f0869214af5ca12fe2ce49844bd3",
+  "publication_readback_blob": "bd2ea88e7c1784f16ffadde87dcef8a71bca43a0",
+  "parent": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+  "report_url": "https://github.com/applicate2628/mcp-local-hub/blob/5ee707f388dbcdd448d910ab7c2c65b4cdad0424/docs/modernization/verification/cmaketrace-terminal-cancellation-2026-11-22/README.md",
+  "positive": {
+    "test_and_subtest_pass": 19,
+    "package_pass": 1,
+    "fail": 0,
+    "skip": 0
+  },
+  "negative": {
+    "go_exit": 1,
+    "pass": 4,
+    "fail": 6,
+    "skip": 0
+  },
+  "format_compile_build_vet": "PASS on exact physical master75 plus five overlays; build/vet affected package only",
+  "published_package_go_paths": 21,
+  "all_package_go_blobs_match_qualified_composition": true,
+  "outer_archive": {
+    "bytes": 647455,
+    "sha256": "5444b8c4825034fa8a0fa2936a20a1f9a98d12a75698b89772a8c03238021e67",
+    "git_blob": "e7e2e6e5f736259e89b0c966ebac1319f7f50768",
+    "entries": 21
+  },
+  "inner_archive": {
+    "archive": "cmake-evidence.zip",
+    "bytes": 825432,
+    "chunk_characters": 24000,
+    "chunks": 46,
+    "encoding": "zip+base64",
+    "entries": 1148,
+    "family": "cmake",
+    "manifest_bytes": 236087,
+    "manifest_sha256": "1b75da1ff556914f4e2216b6e9f4f125c320b4c55540bccf54c8c9d85242d19c",
+    "python_version": "3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]",
+    "schema": 1,
+    "sha256": "b224a0ab9423d47e91c3fe3f39660c6ad6c15b2ad361b67cff4c6ff4c7c02bc4",
+    "zlib_version": "1.3.1.zlib-ng"
+  },
+  "full_go_suite": "NOT_RUN",
+  "real_consumer_measurements": "NOT_RUN",
+  "external_review": "REVIEW_PENDING",
+  "branches_deleted": false,
+  "pr_merged": false,
+  "local_serialization_failure_preserved": true
+}

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "manifest_sha256": "44df5301051dae725f3c32ebb62c186c5dfc8205b8c93863f4229a49766e4c32",
+  "candidate_output_files_verified": 111,
+  "archive": {
+    "file": "candidate-inputs.zip",
+    "members": 111,
+    "bytes": 367262,
+    "sha256": "9da4b677c1ed02af71bb949005c4c06411400530079ede5938d6b6a3c67c35fe",
+    "read_back": true
+  },
+  "base": {
+    "ref": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "tree": "cb3eec77c23f9400be962d91c9f23834b84f7643",
+    "files": 3270
+  },
+  "prospective_source": {
+    "files": 3309,
+    "added": 39,
+    "modified": 35,
+    "removed": 0,
+    "tree": "d7932bf914b736526d76f97559d17499b88fbfb2",
+    "computed_in_memory_only": true,
+    "git_tree_object_created": false,
+    "commit_created": false,
+    "source_epoch_issued": false
+  },
+  "own_review": "All111 outputs and complete path sets verified; base and prospective Git trees independently recalculated; five overlap resolutions and clean publisher/Product distinction read.",
+  "independent_review": "Second agent compared all five overlaps to exact owners and reviewed excluded paths, source admission and role boundaries; no new actionable finding.",
+  "execution": {
+    "project_code": false,
+    "tests": "NOT_RUN",
+    "builds": "NOT_RUN",
+    "publisher": "NOT_RUN",
+    "product": "NOT_RUN"
+  },
+  "external_review": "PENDING"
+}

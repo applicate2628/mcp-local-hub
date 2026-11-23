@@ -1,0 +1,735 @@
+{
+  "schema": 1,
+  "scope": "Second reader/relay increment on 2026-11-22; exact code publication, canonical readback and completed owned Windows/local cleanup",
+  "canonical_parent": "fcca94575b94cebcc0b9bc99b9e8250d28858d0b",
+  "code_publication_readback": {
+    "schema": 1,
+    "observed_utc": "2026-11-22T11:17:16.312730+00:00",
+    "published_commits": [
+      "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+      "4b6ec39930cb5a0498dba068b99dbf29ba7129b7"
+    ],
+    "all_published_bytes_equal": true,
+    "publications": [
+      {
+        "schema": 1,
+        "component": "reader",
+        "observed_utc": "2026-11-22T11:11:09.100056+00:00",
+        "remote_fetch": "explicit newly published SHA fetched with --refetch --depth=1",
+        "commit": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+        "parents": [
+          "75dbc6406123e22468f168b861d5e0622c9d5769"
+        ],
+        "tree": "d4fa28257ecd088b4c7cf49c974633cd93b796a4",
+        "base": "75dbc6406123e22468f168b861d5e0622c9d5769",
+        "exact_delta_paths": [
+          "docs/modernization/verification/go-reader-close-errors-20261122/README.md",
+          "docs/modernization/verification/go-reader-close-errors-20261122/raw-evidence.tar.gz",
+          "docs/modernization/verification/go-reader-close-errors-20261122/runtime-review.json",
+          "docs/modernization/verification/go-reader-close-errors-20261122/runtime-summary.json",
+          "docs/modernization/verification/go-reader-close-errors-20261122/source-review.json",
+          "internal/api/managed_backend_install.go",
+          "internal/api/managed_backend_reader_failures_test.go",
+          "internal/api/state_read_beneath_root_common.go",
+          "internal/api/state_read_beneath_root_failures_posix_test.go",
+          "internal/api/state_read_beneath_root_failures_test.go",
+          "internal/api/state_read_beneath_root_failures_windows_test.go",
+          "internal/api/state_read_beneath_root_posix.go",
+          "internal/api/state_read_beneath_root_windows.go"
+        ],
+        "all_published_bytes_equal": true,
+        "files": [
+          {
+            "path": "docs/modernization/verification/go-reader-close-errors-20261122/README.md",
+            "bytes": 28505,
+            "sha256": "0980532b013617a10e280176075b8a58d9a71ac5ad7444a05d5f36ee6288dd8e",
+            "git_blob": "306f7fd87c18eedd6e9c9958b2a12fb7e0c4dc06"
+          },
+          {
+            "path": "docs/modernization/verification/go-reader-close-errors-20261122/raw-evidence.tar.gz",
+            "bytes": 2089967,
+            "sha256": "36667a5b1f1ebe90d274779a285f31114412f2af75a3f852d16c6e9cec4dbabf",
+            "git_blob": "8a8f2c264824288aed3a7970bb55bcd6b1a0bd5a"
+          },
+          {
+            "path": "docs/modernization/verification/go-reader-close-errors-20261122/runtime-review.json",
+            "bytes": 19049,
+            "sha256": "1f5f8c77a2c9bc750b0302a9ba027bc89240e290eece2e08a3a69c3ae2f978bc",
+            "git_blob": "cde416452c67b662423c78cb2a6c97bf2033b265"
+          },
+          {
+            "path": "docs/modernization/verification/go-reader-close-errors-20261122/runtime-summary.json",
+            "bytes": 24471,
+            "sha256": "cbea4eb8e734d3799dce62b81b88c7ffdeeb6959b7dd06a1f03df8b04d2bb599",
+            "git_blob": "1fd9342c1dab212b74b05fad2f2a1dd9e649b50a"
+          },
+          {
+            "path": "docs/modernization/verification/go-reader-close-errors-20261122/source-review.json",
+            "bytes": 4059,
+            "sha256": "8738baf5a0d92309235041e224c8abe5ac79ae9a1eb65b37eb90147c951428f4",
+            "git_blob": "2fa469626cdb3a554c1d90ac65eed0311d814778"
+          },
+          {
+            "path": "internal/api/managed_backend_install.go",
+            "bytes": 39202,
+            "sha256": "268cd05acb5024bebec033bbb7520293e3825cf83698e26d8c9196f074d175cd",
+            "git_blob": "f4723f32cf67904bab4f57cf7f996c5ca9d6b81c"
+          },
+          {
+            "path": "internal/api/managed_backend_reader_failures_test.go",
+            "bytes": 5425,
+            "sha256": "2e9af3a89dfcd2060eba3102e34b5b9ff56ab4cfd19f8eab2d973973e9d39554",
+            "git_blob": "367f80c3aad68cefb7265cf64323cef4856ac166"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_common.go",
+            "bytes": 6923,
+            "sha256": "078aee76560aa87440bb130b787dec5f4879d888875a561639d2e8215dabf6c8",
+            "git_blob": "6631f7bffc0a425318c8ed3fabfc103953c7e5fb"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_failures_posix_test.go",
+            "bytes": 705,
+            "sha256": "807066c79c0cbf1afeda6fcb7048cbf5c7837f42bf43425a53c53cc34b0734c7",
+            "git_blob": "de86c8157b964c40d435e65053d80c199599bda3"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_failures_test.go",
+            "bytes": 8835,
+            "sha256": "0e4d6bb0420fc05983600f40c1f9d8832bb8e904cc4042305be894a9c6656f8b",
+            "git_blob": "a0805fb18d661742b6d73cf3d879a41cdb9c3542"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_failures_windows_test.go",
+            "bytes": 802,
+            "sha256": "76fc455c726c1db2d77f0aa79f4c024f886ea58f794466728ead4ecfd59dfce2",
+            "git_blob": "71b83e9c8668bbbf31f5709e19485b9a59377002"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_posix.go",
+            "bytes": 7322,
+            "sha256": "40fd197685cb5a1679713eb86af3895f1756f943d8b88e577e4375c349fd27c5",
+            "git_blob": "2737da88f254c56efd5e3d4a92b6cc0b7449380e"
+          },
+          {
+            "path": "internal/api/state_read_beneath_root_windows.go",
+            "bytes": 10784,
+            "sha256": "9edb5acfa99e24482081421f29ed55bbb5b4471f64b57b6449e23ffe011ba05d",
+            "git_blob": "d38443d990c5c23030edf5d219167f405b7aa8d9"
+          }
+        ],
+        "source_worktree_status": ""
+      },
+      {
+        "schema": 1,
+        "component": "relay",
+        "observed_utc": "2026-11-22T11:15:14.463161+00:00",
+        "remote_fetch": "explicit newly published SHA fetched with --refetch --depth=1",
+        "commit": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7",
+        "parents": [
+          "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da"
+        ],
+        "tree": "7aae6dbc0c29ad51499da4eb456f3dd08f55d4a3",
+        "base": "f11cd6cf1f4031f3a2d7db60fb5d4edf19d0a4da",
+        "exact_delta_paths": [
+          "docs/modernization/verification/relay-session-retry-20261122/README.md",
+          "docs/modernization/verification/relay-session-retry-20261122/raw-evidence.tar.gz",
+          "docs/modernization/verification/relay-session-retry-20261122/runtime-review.json",
+          "docs/modernization/verification/relay-session-retry-20261122/runtime-summary.json",
+          "docs/modernization/verification/relay-session-retry-20261122/source-review.json",
+          "internal/daemon/relay.go",
+          "internal/daemon/relay_consumer_profile_test.go",
+          "internal/daemon/relay_protocol_contract_test.go",
+          "internal/daemon/relay_qualification.go",
+          "internal/daemon/relay_response_contract_test.go",
+          "internal/daemon/relay_test.go"
+        ],
+        "all_published_bytes_equal": true,
+        "files": [
+          {
+            "path": "docs/modernization/verification/relay-session-retry-20261122/README.md",
+            "bytes": 27313,
+            "sha256": "95b17d7414577e78ee5ddafc26452cc0834056a62789c0880642b31a99acf7be",
+            "git_blob": "d4094bde9f138269ce89160b2dbeb2679ce69278"
+          },
+          {
+            "path": "docs/modernization/verification/relay-session-retry-20261122/raw-evidence.tar.gz",
+            "bytes": 3872612,
+            "sha256": "beb16c79c122f7dd0e9e3f754dda80048bfc0ff7ce8e56b617cc55b639367e55",
+            "git_blob": "7e61d7f5c30ae975ff7438872e433bcc0d588a06"
+          },
+          {
+            "path": "docs/modernization/verification/relay-session-retry-20261122/runtime-review.json",
+            "bytes": 34568,
+            "sha256": "3b0fe602e8947fc17600afce6958e1e909a92414e4c196ce8dc32e3635ad0025",
+            "git_blob": "2203648a3c4a23d37394622c2d5730fa5a27a0bd"
+          },
+          {
+            "path": "docs/modernization/verification/relay-session-retry-20261122/runtime-summary.json",
+            "bytes": 65381,
+            "sha256": "f677ec9f07f28f7ae22d3262deb2b06f494f4d55e419df466f3fb6c168cfa81d",
+            "git_blob": "acc15c5eabcb3377efaca9362dcdc20ec8096b7b"
+          },
+          {
+            "path": "docs/modernization/verification/relay-session-retry-20261122/source-review.json",
+            "bytes": 17710,
+            "sha256": "8e4b61537010c87d5d88301e76b0d57f639930697dd844655c87192c0343a57d",
+            "git_blob": "b6b08f737a65719f85dd0dec549f7c24c5bc418f"
+          },
+          {
+            "path": "internal/daemon/relay.go",
+            "bytes": 32405,
+            "sha256": "f02549680ee78323150205a843c56e83a51193f481a18db6277d268557de06a3",
+            "git_blob": "d0cf1ba96d9b6d42c562255bad68b3091ee0dda5"
+          },
+          {
+            "path": "internal/daemon/relay_consumer_profile_test.go",
+            "bytes": 11789,
+            "sha256": "f1a87a9746c805bdaafa2423c0fe66a49d1164234efdb240ce7f235b71b87ef2",
+            "git_blob": "bfacc5068b66a2b3389b724f0ab4da0965dd59b0"
+          },
+          {
+            "path": "internal/daemon/relay_protocol_contract_test.go",
+            "bytes": 22032,
+            "sha256": "d62759a589d2f2db6686e6f5bec1ff8cbab2c2ddbf4a92e1ae6e6c519da619cb",
+            "git_blob": "959ca512162c57d1d5519c758f147fb490186e16"
+          },
+          {
+            "path": "internal/daemon/relay_qualification.go",
+            "bytes": 21423,
+            "sha256": "be155873eb35e11eb337107a43c7f4c99c0e426f403b2a9b5cc60a35ef2ff082",
+            "git_blob": "5ece5adf409d4dc7d287048281fe8fe0a05f936b"
+          },
+          {
+            "path": "internal/daemon/relay_response_contract_test.go",
+            "bytes": 39400,
+            "sha256": "6d8b1f524503432fc7587f363a2e3679f0cb6834e2b2a9dc9664a7f6b2f6525c",
+            "git_blob": "ea5a229f0359c7fbfad49144da8e857360c3d5aa"
+          },
+          {
+            "path": "internal/daemon/relay_test.go",
+            "bytes": 13654,
+            "sha256": "4ea59e9f3def0ec45f986bfcc9ee87f4dbd2124d775464993d1e079515cd05de",
+            "git_blob": "3e7e2d403e78edbf3c1a3097936c92c8f6f00430"
+          }
+        ],
+        "source_worktree_status": ""
+      }
+    ],
+    "queue": {
+      "schema": 1,
+      "scope": "Observed after reader and relay publication, before canonical-plan update",
+      "count": 30,
+      "all_draft": true,
+      "prs": [
+        {
+          "number": 668,
+          "title": "fix(api): retain reader close failures and consume handles once",
+          "draft": true,
+          "state": "open",
+          "head": "1b7655ae9a0dec7d6821d8419087fd92ccadbb62",
+          "head_ref": "fix/go-reader-close-errors-20261122"
+        },
+        {
+          "number": 667,
+          "title": "fix(perftools): bound discovery probes and isolate stdout fixture",
+          "draft": true,
+          "state": "open",
+          "head": "1eb934595d3c21954d0bddb934be57a3fe3138cf",
+          "head_ref": "test/perftools-stdout-explicit-env-20261121"
+        },
+        {
+          "number": 666,
+          "title": "test(cli): bind helper admission and caller state before package setup",
+          "draft": true,
+          "state": "open",
+          "head": "09de8e98d1aa6f122215dbe869bc6f7d0ce083f5",
+          "head_ref": "fix/cli-test-helper-dispatch-20261121"
+        },
+        {
+          "number": 665,
+          "title": "test(api): validate helper roles before creating package fixtures",
+          "draft": true,
+          "state": "open",
+          "head": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+          "head_ref": "fix/api-test-helper-dispatch-20261121"
+        },
+        {
+          "number": 664,
+          "title": "test: preserve package isolation and qualify GUI helper ownership",
+          "draft": true,
+          "state": "open",
+          "head": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+          "head_ref": "fix/p0-test-entry-preserve-20261121"
+        },
+        {
+          "number": 663,
+          "title": "fix(archguard): preserve baseline ownership after route extraction",
+          "draft": true,
+          "state": "open",
+          "head": "1cabce12655f810b742e6c31369441cacd72573c",
+          "head_ref": "fix/archguard-mcproute-baseline-20261121"
+        },
+        {
+          "number": 661,
+          "title": "test(cli): require semantic Serena conflict validation failures",
+          "draft": true,
+          "state": "open",
+          "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+          "head_ref": "test/serena-conflict-validation-oracle-20261121"
+        },
+        {
+          "number": 660,
+          "title": "fix(scheduler): preserve task query results and hidden lookups",
+          "draft": true,
+          "state": "open",
+          "head": "0bdb725ed261c532eba07d645c2a14880d12b9fd",
+          "head_ref": "fix/scheduler-hidden-task-lookup-20261119"
+        },
+        {
+          "number": 659,
+          "title": "fix(api): preserve unknown port observations in stop decisions",
+          "draft": true,
+          "state": "open",
+          "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+          "head_ref": "fix/api-port-pid-observation-20261118"
+        },
+        {
+          "number": 657,
+          "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+          "draft": true,
+          "state": "open",
+          "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+          "head_ref": "fix/canonical-command-test-product-20261116"
+        },
+        {
+          "number": 655,
+          "title": "fix(serena): settle preparation before canceling work context",
+          "draft": true,
+          "state": "open",
+          "head": "2defe618259f7db4144824d19927b032300d160d",
+          "head_ref": "fix/serena-finalize-context-20261115"
+        },
+        {
+          "number": 654,
+          "title": "fix(serena): receive Ready readback with its original byte bound",
+          "draft": true,
+          "state": "open",
+          "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+          "head_ref": "fix/serena-ready-readback-20261115"
+        },
+        {
+          "number": 653,
+          "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+          "draft": true,
+          "state": "open",
+          "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+          "head_ref": "fix/serena-tcp-query-budget-20261115"
+        },
+        {
+          "number": 650,
+          "title": "fix(serena): preserve qualification bindings and request budgets",
+          "draft": true,
+          "state": "open",
+          "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+          "head_ref": "fix/serena-protocol-binding-20261114"
+        },
+        {
+          "number": 649,
+          "title": "fix(serena): bind qualification home to the owned directory",
+          "draft": true,
+          "state": "open",
+          "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+          "head_ref": "fix/serena-qualification-home-20261114"
+        },
+        {
+          "number": 647,
+          "title": "fix(serena): own Windows Git subprocess environment",
+          "draft": true,
+          "state": "open",
+          "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+          "head_ref": "fix/serena-executable-discovery-20261114"
+        },
+        {
+          "number": 646,
+          "title": "fix(serena): prefer qualified system Python discovery",
+          "draft": true,
+          "state": "open",
+          "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+          "head_ref": "fix/serena-python-discovery-preference-20261114"
+        },
+        {
+          "number": 644,
+          "title": "spike(rust): observe original process identity while retaining ownership",
+          "draft": true,
+          "state": "open",
+          "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+          "head_ref": "spike/rx02-native-identity-20261114"
+        },
+        {
+          "number": 643,
+          "title": "fix(serena): retain original owners through install and cleanup",
+          "draft": true,
+          "state": "open",
+          "head": "daaa04c14bc3944babd4efbc3a125eaf495e6534",
+          "head_ref": "fix/serena-cleanup-parent-observation-20261114"
+        },
+        {
+          "number": 637,
+          "title": "test(serena): run positive migration fixtures through real preparation",
+          "draft": true,
+          "state": "open",
+          "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+          "head_ref": "fix/serena-integration-qualification-20261114"
+        },
+        {
+          "number": 635,
+          "title": "test(serena): build a source-issued native qualification publisher",
+          "draft": true,
+          "state": "open",
+          "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+          "head_ref": "fix/serena-qualification-publisher-20261114"
+        },
+        {
+          "number": 632,
+          "title": "fix(serena): discover UV from the qualified execution PATH",
+          "draft": true,
+          "state": "open",
+          "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+          "head_ref": "fix/serena-qualified-uv-path-20261114"
+        },
+        {
+          "number": 631,
+          "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+          "draft": true,
+          "state": "open",
+          "head": "701535e3439d74495080463976d610a42303e5cf",
+          "head_ref": "spike/rx02-go-rust-boundary-20261113"
+        },
+        {
+          "number": 629,
+          "title": "fix(relay): bound responses and preserve negotiated session ownership",
+          "draft": true,
+          "state": "open",
+          "head": "4b6ec39930cb5a0498dba068b99dbf29ba7129b7",
+          "head_ref": "fix/relay-output-failure-contract-20261113"
+        },
+        {
+          "number": 628,
+          "title": "fix(status): observe Windows process identity and RSS through one handle",
+          "draft": true,
+          "state": "open",
+          "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+          "head_ref": "perf/rx16-native-observation-20261112"
+        },
+        {
+          "number": 627,
+          "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+          "draft": true,
+          "state": "open",
+          "head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+          "head_ref": "spike/rx04-anchored-read-20261112"
+        },
+        {
+          "number": 626,
+          "title": "test(perf): relay workload and executable-size control before Rust migration",
+          "draft": true,
+          "state": "open",
+          "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+          "head_ref": "perf/rx01-relay-baseline-20261112"
+        },
+        {
+          "number": 625,
+          "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+          "draft": true,
+          "state": "open",
+          "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+          "head_ref": "spike/rx02-native-process-owner-20261112"
+        },
+        {
+          "number": 624,
+          "title": "perf(cmaketrace): retain bounded records and qualify terminal cancellation",
+          "draft": true,
+          "state": "open",
+          "head": "5ee707f388dbcdd448d910ab7c2c65b4cdad0424",
+          "head_ref": "perf/rx01-cmaketrace-benchmark-20261112"
+        },
+        {
+          "number": 623,
+          "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+          "draft": true,
+          "state": "open",
+          "head": "7a7263e7ff341496aeeb5431d53f6fed388a8ed0",
+          "head_ref": "docs/rust-cross-platform-no-com-20261112"
+        }
+      ]
+    },
+    "merge_performed": false,
+    "force_push": false,
+    "branch_deleted": false,
+    "external_review": "PENDING",
+    "full_default_and_tagged_suites": "NOT_RUN"
+  },
+  "raw_archive": {
+    "path": "reader-relay-closeout-evidence-20261122.tar.gz",
+    "bytes": 1232237,
+    "sha256": "02f86bd092328434aa26d1753027d23cbc991efb9b61ca869097296388ac7e07",
+    "git_blob": "b115394d95fa3baf8f16efe5df7d8ec8c7190712",
+    "indexed_files": 99,
+    "total_regular_members": 100
+  },
+  "windows_cleanup": {
+    "schema": "iteration-trash-closeout-v1",
+    "source": "D:\\dev\\ChatGPT\\mcp-next-20261122-e21a1792",
+    "destination": "D:\\dev\\ChatGPT\\trash\\mcp-next-20261122-e21a1792",
+    "retained_directory": "D:\\dev\\ChatGPT\\mcp-next-closeout-20261122-e21a1792",
+    "state": "complete",
+    "queries": [
+      {
+        "utc": "2026-11-22T11:21:41.476922+00:00",
+        "rows": 305,
+        "available_command_lines": 125,
+        "unavailable_command_lines": 180,
+        "stdout_sha256": "276d4f5af70126a26a95bfa712bee210736c446e7766e8c2179df93b807a45a3",
+        "exact_path_matches": []
+      },
+      {
+        "utc": "2026-11-22T11:21:52.197348+00:00",
+        "rows": 307,
+        "available_command_lines": 127,
+        "unavailable_command_lines": 180,
+        "stdout_sha256": "b974176fb8216f9638637448371489ed46581619cc2d2258fe6ff7c18384b52f",
+        "exact_path_matches": []
+      }
+    ],
+    "move_attempted": true,
+    "deletion_attempted": false,
+    "trash_emptied": false,
+    "limits": [
+      "Available command lines and executable paths only; inaccessible commands and process working directories are not proven idle.",
+      "No general process-tree settlement or atomic namespace-lock guarantee.",
+      "Explicit output/profile/temp/cache paths use D; this is not system-wide filesystem-write tracing."
+    ],
+    "inventory_definition": "SHA256 of UTF-8 compact JSON, ensure_ascii=False, sort_keys=True; sorted files [relative POSIX path,bytes,SHA256] and sorted directories including dot root.",
+    "input_sha256": "3c44b21925a1cce46102ddfc71232ad46dbb644c5cc74933f562aa3672c3b7ad",
+    "helper_sha256": "1a777593c90405315c31bc1300e1a4ca373802436a4150496b047edabb8b36f4",
+    "before": {
+      "files": 7042,
+      "directories_including_root": 483,
+      "bytes": 136416620,
+      "inventory_sha256": "b1aa86d07921e9589f2c9815c95702f54b2da05bee88392babe62154e914ee17"
+    },
+    "after": {
+      "files": 7042,
+      "directories_including_root": 483,
+      "bytes": 136416620,
+      "inventory_sha256": "b1aa86d07921e9589f2c9815c95702f54b2da05bee88392babe62154e914ee17"
+    },
+    "inventory_equal": true,
+    "source_absent": true
+  },
+  "windows_cleanup_raw_receipt": {
+    "path_in_archive": "cleanup/observed/cleanup-receipt.json",
+    "sha256": "9b9f165fe38381d7201342e66036b6d87d358646954f666f7e936faf00562873",
+    "settled_children": 706
+  },
+  "local_cleanup": {
+    "state": "complete",
+    "sources": [
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/source",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/reader",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/relay",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/qualification",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/p0",
+      "/workspace/scratch/e21a17927f63/iteration-20261122b/cleanup"
+    ],
+    "destination": "/workspace/scratch/e21a17927f63/trash/iteration-20261122b-work-20261122",
+    "retained_directory": "/workspace/scratch/e21a17927f63/iteration-20261122b/publication",
+    "moves": 6,
+    "before": {
+      "files": 7224,
+      "directories_including_six_roots": 288,
+      "bytes": 234260451,
+      "inventory_sha256": "d4faea10999d16511709c0e891af9561342137b6be5043815eb0edef8ff88ea5",
+      "inventory_json_bytes": 906417
+    },
+    "after": {
+      "files": 7224,
+      "directories_including_six_roots": 288,
+      "bytes": 234260451,
+      "inventory_sha256": "d4faea10999d16511709c0e891af9561342137b6be5043815eb0edef8ff88ea5",
+      "inventory_json_bytes": 906417
+    },
+    "inventory_equal": true,
+    "source_absent": true,
+    "process_checks": [
+      {
+        "utc": "2026-11-22T11:44:48.440990+00:00",
+        "pids": 2,
+        "argv": 2,
+        "cwd": 2,
+        "exe": 2,
+        "fd": 7,
+        "disappeared": 1,
+        "unavailable": [],
+        "hits": [],
+        "seconds": 0.000593241000387934
+      },
+      {
+        "utc": "2026-11-22T11:44:51.027174+00:00",
+        "pids": 2,
+        "argv": 2,
+        "cwd": 2,
+        "exe": 2,
+        "fd": 7,
+        "disappeared": 1,
+        "unavailable": [],
+        "hits": [],
+        "seconds": 0.00043158100015716627
+      }
+    ],
+    "required_pins_rechecked_after_cleanup": 77,
+    "admission_sha256": "e01db6f81b3f8b96358cc20bf519d44894a74d9d5b6b03674c4cde5c40b26388",
+    "helper_sha256": "5646f5bf8bdddf449651699b47f96bf75783d5196c4a525d792407d8519bb1dc",
+    "raw_receipt_sha256": "0735235a10385c854bc50c1024ea3cd33053afa044e1da635de2185de26721b8",
+    "deletion_attempted": false,
+    "trash_emptied": false,
+    "limits": [
+      "Only the visible /proc namespace is inspected. No atomic process/filesystem freeze.",
+      "Literal argv and simple path arguments are checked; shell expansion, scripts, aliases, encoded references and other namespaces are not fully interpreted.",
+      "Disappearing processes/fds are counted; other access errors refuse the move. The 30-second query budget is checked between reads, not a syscall interruption.",
+      "Inventories cover ordinary file byte streams and directory paths, not ACLs/xattrs or every filesystem property. Six renames are not one atomic transaction.",
+      "The pinned admission is root's publication/preservation decision; this helper does not contact GitHub or independently approve those documents."
+    ]
+  },
+  "recovery": "publication/recovery/source858-delta.json and all 28 exact delta files preserve source858 content on master75 outside trash; Git commit bytes are retained.",
+  "p0": {
+    "schema": 1,
+    "scope": "Read-only binding of the current master input to the published #663 architecture qualification; no Go, native, installed-product or external-review execution",
+    "canonical_instructions_commit": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+    "observed_master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "physical_source": "../source",
+    "source_files": [
+      {
+        "path": "architecture/baseline.yaml",
+        "sha256": "7b9a60e93c34b43b6664afcf708de1ac8b8871024adf97f5d0ec5fc2ca172312",
+        "git_blob": "3b0ab8a006ed4e2b211e3e9202c74cca925bb064",
+        "physical_bytes_match": true
+      },
+      {
+        "path": "architecture/owners.yaml",
+        "sha256": "59ac427dd7ef9b8fe02cc613d480d7a45c1ed80158c73ab542adbc4217b2d424",
+        "git_blob": "e83618d45e0a16b081a510cb5b350903d7df807f",
+        "physical_bytes_match": true
+      },
+      {
+        "path": "architecture/policy.yaml",
+        "sha256": "0bbddfab2a92dd9f795cb5518be6b1e435ef4055bda95786d417eb99f9e0d961",
+        "git_blob": "ac7f174afe40e0097d7bc0771acd72547f175d7e",
+        "physical_bytes_match": true
+      },
+      {
+        "path": "internal/mcproute/serena_router_lifecycle.go",
+        "sha256": "a6927853b36b2f8062e2ae9062c34b5740637c1f1d67bf0024c88078a7ebc7cc",
+        "git_blob": "7617d1a5044f94eed6159de350d5a5f7df4612eb",
+        "physical_bytes_match": true
+      }
+    ],
+    "published_qualification": {
+      "commit": "1cabce12655f810b742e6c31369441cacd72573c",
+      "path": "docs/modernization/verification/archguard-migration-2026-11-21/qualification.json",
+      "git_blob": "b02865d0393cfa83875f7b4feb5e283febb9dd21",
+      "executed_source": "8a13085cbae24e18c2d7c2918b0241ab743dc729",
+      "executed_tree": "37c5071d505d38f15cbf8d9c227ad10014c08395",
+      "source_delta_paths": [
+        "architecture/baseline.yaml",
+        "architecture/owners.yaml",
+        "architecture/policy.yaml",
+        "internal/mcproute/serena_router_lifecycle.go"
+      ],
+      "verify_exit_code": 1,
+      "residual": {
+        "New": 389,
+        "Stale": 128,
+        "Grown": 42,
+        "workers": 72,
+        "expired": 0,
+        "unowned": 0
+      },
+      "worker_count_is_subset_of_new": true,
+      "wrapper_status": "FAILED",
+      "skipped_test": "TestUnixBackslashPathRemainsDistinct"
+    },
+    "conclusions": [
+      "The current immutable physical input is master, not the four-file candidate executed by the recorded #663 qualification.",
+      "No justified minimal analyzer correction was established in this bounded review; no gate weakening or bulk rebaseline is recommended.",
+      "Unowned=0 establishes metadata completeness only; legacy worker baseline and an empty registry do not establish cancellation, join or lifetime contracts.",
+      "The Windows skip tests real Unix filename semantics and remains unexecuted in that qualification.",
+      "No primary published source for the parallel Serena checkpoint was obtained by this reviewer; preliminary messages were not treated as PASS."
+    ],
+    "modified_project_sources": false,
+    "runtime_checks_executed": false
+  },
+  "own_review": "Requirements, correctness, safety, compatibility, complexity, qualification scope, archive members and published byte/ref binding reviewed by root. Final local helper/input binding, actual receipt, equal decoded inventories, six source absences and all 77 retained pins were independently checked by root after execution.",
+  "independent_review": "Separate source, formatter, runner, runtime, packaging, canonical-plan and cleanup-source reviews retained. Cleanup input hash substitution and final observations checked by root. Final canonical bytes/archive, local helper source and complete preservation coverage received separate internal reviews without mandatory findings.",
+  "full_default_tests": "NOT_RUN",
+  "full_tagged_tests": "NOT_RUN",
+  "external_exact_head_review": "PENDING",
+  "merge_performed": false,
+  "force_push": false,
+  "donor_closed": false,
+  "branch_deleted": false,
+  "previous_R24_R25_scope": "Unchanged; this increment does not enlarge earlier acceptance claims.",
+  "initial_canonical_publication_readback": {
+    "schema": 1,
+    "component": "canonical-plan-and-closeout",
+    "observed_utc": "2026-11-22T11:34:13.757449+00:00",
+    "remote_fetch": "explicit newly published SHA fetched with --refetch --depth=1",
+    "commit": "fcca94575b94cebcc0b9bc99b9e8250d28858d0b",
+    "parents": [
+      "b4bb85c2a099916974c55a69490c6644702b6fe0"
+    ],
+    "tree": "add7e7bcfafe246d8ca6a23491bc0e9605713cb0",
+    "base": "b4bb85c2a099916974c55a69490c6644702b6fe0",
+    "exact_delta_paths": [
+      ".plans/2026-11/archguard-source-binding-20261122.json",
+      ".plans/2026-11/open-pr-integration-20261117.md",
+      ".plans/2026-11/reader-relay-closeout-20261122.json",
+      ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz"
+    ],
+    "all_published_bytes_equal": true,
+    "files": [
+      {
+        "path": ".plans/2026-11/archguard-source-binding-20261122.json",
+        "bytes": 3015,
+        "sha256": "844dbd65240a677dd50864d33b36c402abd593c61ef4642042acacaddf2738aa",
+        "git_blob": "e37b24d9804de327b0ed64b6ca7b0dccc0bda9d9"
+      },
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 105036,
+        "sha256": "1ac244594b256ddea67026f223a345237818803479ee8779c067f3b285836da5",
+        "git_blob": "13aa8ba491e43e26cd61a08be0377ae3a4135357"
+      },
+      {
+        "path": ".plans/2026-11/reader-relay-closeout-20261122.json",
+        "bytes": 27266,
+        "sha256": "450ff679bc05c5c0679b845649b231a3ac5a8f69788d9759a6ae7fb60073a37f",
+        "git_blob": "0eedcae94897a109fdc615faf9bcd768ebe92ad2"
+      },
+      {
+        "path": ".plans/2026-11/reader-relay-closeout-evidence-20261122.tar.gz",
+        "bytes": 1232237,
+        "sha256": "02f86bd092328434aa26d1753027d23cbc991efb9b61ca869097296388ac7e07",
+        "git_blob": "b115394d95fa3baf8f16efe5df7d8ec8c7190712"
+      }
+    ],
+    "source_worktree_status": ""
+  },
+  "local_evidence": {
+    "path": "reader-relay-local-cleanup-20261122.json",
+    "bytes": 849757,
+    "sha256": "2be0f3e5cb6a099bda0f916ac16409ebcfc85ab47ea35bb91d6ab9e8779ae4d8",
+    "contents": "Exact helper text, admission values, full before/after inventories within the receipt, own/independent source and preservation reviews, root observation and initial canonical readback."
+  }
+}

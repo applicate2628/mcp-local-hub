@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestSupervisorControlReadinessProducerShape(t *testing.T) {
@@ -209,6 +210,7 @@ func TestSupervisorControlReadinessWrongNativePeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(exe, "-test.run=^TestSupervisorReadinessOriginalChild$")
+	process.NoConsole(cmd)
 	cmd.Env = append(os.Environ(), readinessOriginalChildEnv+"=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	input, err := cmd.StdinPipe()

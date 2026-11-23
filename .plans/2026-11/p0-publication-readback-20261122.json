@@ -1,0 +1,443 @@
+{
+  "schema": 1,
+  "observed_moscow": "2026-11-22T00:20:20.839478+03:00",
+  "status": "ALL_FOUR_PUBLISHED_TREES_READ_BACK",
+  "canonical": {
+    "status": "PUBLISHED_TREE_AND_ALL_TEXT_BYTES_VERIFIED",
+    "pr": 664,
+    "head": "f21728d6f3937187fea517c8ca5916b6f69ac7c5",
+    "tree": "bc24ce5c40648c5ea1f149bd897c08391d1613a7",
+    "old_pr": 658,
+    "old_head": "f9966f008aed4d0cfa80d88cc80c12d08e03634f",
+    "source_checkpoint": "858812988833a84368c60fba1540ae601155fa71",
+    "verified_text_files": 31,
+    "verified_changed_tree_entries": 32,
+    "unchanged_original_files_in_publication": 25,
+    "reviewed_original_changes": [
+      ".plans/2026-11/open-pr-integration-20261117.md",
+      "internal/daemon/main_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "all_original28_payloads_retained_at_checkpoint_and_inside_published_archive": true,
+    "archive_sha256": "8f20dc494b9566c8b3113dabceca6c73f3c8ed06b80ffa27808467d7ecd1a0c0",
+    "archive_git_blob": "c5e443ec0d550c15dad7f6d5fd202d045111691f",
+    "archive_readback_scope": "Published tree blob equals the server-created blob and locally verified bytes; full remote ZIP was not downloaded again",
+    "files": [
+      {
+        "path": ".plans/2026-11/open-pr-integration-20261117.md",
+        "bytes": 68387,
+        "sha256": "5d4926dcbbd351897b0cdec3c765f15b9677eed8c5b66b75d55f4d782e0f3f05",
+        "git_blob": "9e836e2054e41b807896292296f6103d01f89e3c",
+        "same_as_original658": false
+      },
+      {
+        "path": ".plans/2026-11/prune-recovery-closeout-20261121.json",
+        "bytes": 6622,
+        "sha256": "beb14c9113f0aafb87e660f646b3430fc6811241b8a40a7d44d9002d2aaf4498",
+        "git_blob": "2a0fe92225c8daa4f8f932103d97fb6bc8e39152",
+        "same_as_original658": true
+      },
+      {
+        "path": "AGENTS.md",
+        "bytes": 8220,
+        "sha256": "94a3124e31c8b51e884a02bbdcffb010ec0c5ba19f29009da2c761a1d0bad135",
+        "git_blob": "cc889dd7c9679985fab7ae55d82d76597bbebcdc",
+        "same_as_original658": true
+      },
+      {
+        "path": "CLAUDE.md",
+        "bytes": 11,
+        "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+        "git_blob": "43c994c2d3617f947bcb5adf1933e21dabe46bb5",
+        "same_as_original658": true
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "bytes": 6188,
+        "sha256": "0574576643baca6f7e72f5225b2c7c34f46ca183919767a52c953198f589e850",
+        "git_blob": "c44704c7d2341e6c0c5be1767bcb0737a88546a4",
+        "same_as_original658": true
+      },
+      {
+        "path": "cmd/mcphub/main_test.go",
+        "bytes": 12835,
+        "sha256": "2c10343ad035722c3e03af41546d2a2f95118daae5bbf25eddb68f0ac6b3ae42",
+        "git_blob": "64b2e519fc4e6692dfcfe462db728478a2b0c7bc",
+        "same_as_original658": true
+      },
+      {
+        "path": "docs/agent-runbook.md",
+        "bytes": 121009,
+        "sha256": "5d6be718c54bd3436ca8b37ae8a6e42d071f24f2c7961a4adcfe25843491a518",
+        "git_blob": "1e7e066e99e021a93af80ddb2401ad0399b3df15",
+        "same_as_original658": true
+      },
+      {
+        "path": "docs/frontend-flowbite.md",
+        "bytes": 6150,
+        "sha256": "f7325180c940429a72b01ab14123ab59b52df7bd33efe3af107ee23c619838f5",
+        "git_blob": "1e87230105d1e183dd8f088a4ec39adbaba1cc2d",
+        "same_as_original658": true
+      },
+      {
+        "path": "docs/skills/mcphub-explained/SKILL.md",
+        "bytes": 18405,
+        "sha256": "914094e26ccf9944ab2ec6192be30c472025f1518bbe31733ec8795b3195341f",
+        "git_blob": "1382aee61c9b6dd3f03d1d70359265712703c2af",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/hub_mcp_state_read_inode_windows.go",
+        "bytes": 16896,
+        "sha256": "bd2a4063b72fee4f2bbbf5216003d78dc16fa93e9016628d02bd3ee02290bf18",
+        "git_blob": "a195ce33e11c5a0090f00a4d6df535094bcac318",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/hub_mcp_state_read_policy_windows_test.go",
+        "bytes": 2290,
+        "sha256": "f810c1d662103850c2f18fd967724d9898c55fb4cc9407b36c55ed93c2a7f541",
+        "git_blob": "f981b0a0649002e4f6c1c5f10e0d8b3eb90bc826",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/lsp_routing/main_test.go",
+        "bytes": 1123,
+        "sha256": "fa9f1781be314ac77080dfe1707f39ccd5fcbe26bcc21adf0f7bd20b16b66201",
+        "git_blob": "262f6e75e8e32d94c96020915b949f8c260c2544",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/lsp_routing/resolver_benchmark_test.go",
+        "bytes": 2676,
+        "sha256": "d315f4f5390624903a99ad3b7e8652844c433e80bd43b2affd39f3cd3d732960",
+        "git_blob": "453c1908a8d4974750259e1b2509c9ee87e430a0",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/lsp_routing/resolver_test.go",
+        "bytes": 18433,
+        "sha256": "b347099b508dc68a7ee11cb8c83ce627fb66c39f38e8a0eb8c6800145ea61bd3",
+        "git_blob": "3bb39e2b2854b2d189f4c4fc1ba7c24d67b31629",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/serena_routing/main_test.go",
+        "bytes": 1138,
+        "sha256": "f65cfa07f4ab7142d635631668288bbcaea7e810df4052c8d1fb40a964ddda6b",
+        "git_blob": "ca4b250ceb9f4248389e2c827ce930d792f5efcd",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/serena_routing/resolver_test.go",
+        "bytes": 30515,
+        "sha256": "2a449f76293b73f17c0808708fef10542fd16a60c16d81810f028d84510e57a8",
+        "git_blob": "6cf4f042ab562157e9eede75be9d27743ec5c577",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/api/serena_routing/shared_observer_public_test.go",
+        "bytes": 7678,
+        "sha256": "050fd6c0f482c15a20562b09bae2bdac3e1e153228f518c15949b9f053d1405a",
+        "git_blob": "d41cb9db5e83fc6d9799b18b2151543f63dd8ce5",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/cli/gui_force_test.go",
+        "bytes": 51538,
+        "sha256": "df9944ad7435aa1613bb6353bc45a219d34ab8a683cee2e04edb9d458c51fdc1",
+        "git_blob": "af0103828e23ac3d46ee21af814131c1796b3435",
+        "same_as_original658": false
+      },
+      {
+        "path": "internal/cli/supervise_reconcile_ipc_test.go",
+        "bytes": 82329,
+        "sha256": "e41e7500eb6e60b2abef2f590ad676810f46b90983bf7811cb4a248234e008d4",
+        "git_blob": "4fbe28e28679c5a48b4731057683ac6f19607137",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/daemon/host_original_windows_test.go",
+        "bytes": 15704,
+        "sha256": "29c02fa3c97233d52c9f91c7386d5e599a12297e2d8d100762b51f81cfe63ce8",
+        "git_blob": "2e16c3c3340e6f8031cc25083e1ef839677c1520",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/daemon/lazy_proxy_readiness_test.go",
+        "bytes": 23910,
+        "sha256": "20c2fef9d8abdebe78fbd2288093ed9c6c1d9f5eb150ce1d774d8cc63f57e783",
+        "git_blob": "860f38c51af8548a71e0211da3efda9f59de0752",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/daemon/lazy_proxy_test.go",
+        "bytes": 173471,
+        "sha256": "eb6c940ed87e156a2ed247966480a141e2a46595c8855839e97cea2bcf9401d3",
+        "git_blob": "f02eebcf9090ec3d7f0f43f5ba9f58bd7b2b484e",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/daemon/main_test.go",
+        "bytes": 4764,
+        "sha256": "85b12d32ab13bac46284586908b0d59eabf6d87bd50bac5123ca1ab61c447cc8",
+        "git_blob": "f9ce99733688bb630efe144f06a18ad5892d76a8",
+        "same_as_original658": false
+      },
+      {
+        "path": "internal/oneapirun/async_owner_test.go",
+        "bytes": 35797,
+        "sha256": "9d61edc2ebc886a92950323238e624ece386b93a30077adf6e81f88a5588a863",
+        "git_blob": "b3f8c23f860f27ee4e1b3b7b9314005eb479adfe",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/oneapirun/async_test.go",
+        "bytes": 3279,
+        "sha256": "c7ccafe80d3eecf8b5f46d37796379b61b794935ac3d4ae014e7786e48001ffa",
+        "git_blob": "aa340ab93e65289798ace2b647469e5a9c93923e",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/oneapirun/main_test.go",
+        "bytes": 1144,
+        "sha256": "3e874dc6ef04d380f36319341089983ff5c466b99903ffe6e2bb08b68065cc15",
+        "git_blob": "f4161edc5af2ad1d8e0b12016d04e11492f76cef",
+        "same_as_original658": true
+      },
+      {
+        "path": "tools/testshards/main.go",
+        "bytes": 14020,
+        "sha256": "7d74038c23ec4974ed8cfaa3f14a1155514e37d5ce08d7ef519d285b17a95c22",
+        "git_blob": "a0c3b0bc5456ac84c8f6bc01c0f324cf215c9ca9",
+        "same_as_original658": true
+      },
+      {
+        "path": "tools/testshards/main_test.go",
+        "bytes": 4965,
+        "sha256": "eb5ba3fa08c174ec4239ebba55d3b35aa23c6d0eb032ff70746d0293306712c6",
+        "git_blob": "a3f4a789512c33b7ec25bc85e6c0b8f8485d8f9a",
+        "same_as_original658": true
+      },
+      {
+        "path": "internal/daemon/main_dispatch_test.go",
+        "bytes": 8345,
+        "sha256": "f70b81e92396d2d72b342c9ec8d76e29830c7359b2e54c7733c34871683a1dd1",
+        "git_blob": "2146ff844d14b19e65e08520dcea2efabf01b4c7",
+        "same_as_original658": false
+      },
+      {
+        "path": "docs/modernization/verification/p0-safe-test-gates-2026-11-21/README.md",
+        "bytes": 22383,
+        "sha256": "34a4f143f32c5853042e416e4a1ced96dfb4d816b99b79c76470b21230b59d8b",
+        "git_blob": "a1658478b88c4aedc5dda62a0696d79b540a5035",
+        "same_as_original658": false
+      },
+      {
+        "path": "docs/modernization/verification/p0-safe-test-gates-2026-11-21/qualification.json",
+        "bytes": 28304,
+        "sha256": "04799ac76f4687c165fff039b96149b3f515f0b95ce100ca048b051a34e72631",
+        "git_blob": "74f5e4a4ec444969ff13eecdfa0fa2575a1efa66",
+        "same_as_original658": false
+      }
+    ],
+    "full_go_or_product_acceptance": false,
+    "old_branch_must_be_retained": true
+  },
+  "dependent_prs": [
+    {
+      "group": "api",
+      "pr": 665,
+      "head": "b5cd530969b7089e7d7cbaf5308543be8c443f8c",
+      "tree": "068384ae0993da7a0986382f07a23748f640bd60",
+      "parent": "4177993228bd70c95d61f0e35fe1d8f5b5f2f1ee",
+      "base": "fix/p0-test-entry-preserve-20261121",
+      "merge_base": "858812988833a84368c60fba1540ae601155fa71",
+      "changed_files": 8,
+      "text_files_read_back": 7,
+      "metadata_and_changed_tree_verified": true,
+      "source_and_document_bytes_verified": [
+        {
+          "path": "internal/api/intent_audit_caller_oracle_test.go",
+          "bytes": 5807,
+          "sha256": "266da232a605029cb2eb65cf57dcf80ca0d629a4259d6a021b48958d786fe365",
+          "git_blob": "f28b37e15208970e4f1ab1339b30446eae72bc0f",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/api/main_helper_dispatch_test.go",
+          "bytes": 4137,
+          "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95",
+          "git_blob": "05c3c8d831013ebd4114dcb372d55137132ce606",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/api/main_helper_dispatch_validation_test.go",
+          "bytes": 6651,
+          "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd",
+          "git_blob": "86b8a81a3bd8cb0219bd99f8a4aba5899f792bb0",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/api/main_test.go",
+          "bytes": 16576,
+          "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1",
+          "git_blob": "665f48f9d658fed3708700a30c3d60df3a979bcd",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/api/secrets_test.go",
+          "bytes": 48066,
+          "sha256": "ad1f93d38e8c4ff3d369779223a7bf4f7686947135a76706bf45494bbc771e79",
+          "git_blob": "ce45e86c6df0cda46e38240dadb03b64b9830b05",
+          "readback_matches": true
+        },
+        {
+          "path": "docs/modernization/verification/api-helper-dispatch-2026-11-21/README.md",
+          "bytes": 22065,
+          "sha256": "e0a7497957147d75eec99647aed7d01742068f755e7ef553d4f4f4cbbd9cb24b",
+          "git_blob": "433991ec7a06841c5036ea36ec7ecf42bf750ac7",
+          "readback_matches": true
+        },
+        {
+          "path": "docs/modernization/verification/api-helper-dispatch-2026-11-21/source-inputs.json",
+          "bytes": 1679,
+          "sha256": "11933196d9408072a978de022b8460a71562b58490c58aa7cc9a06d58edc0ca8",
+          "git_blob": "a6a5a14baf4040b6eb6af58ca3afb4435ce3da7c",
+          "readback_matches": true
+        }
+      ],
+      "archive_tree_blob_verified": true,
+      "archive_readback_scope": "Server-created Git blob equals locally verified archive; remote ZIP was not downloaded again",
+      "full_go_or_product_acceptance": false
+    },
+    {
+      "group": "cli",
+      "pr": 666,
+      "head": "09de8e98d1aa6f122215dbe869bc6f7d0ce083f5",
+      "tree": "ee3d8cfe7eeecab9f30598c3d3e03db9e8135af0",
+      "parent": "9ece512541ef7963660f82a8b5fa54cac8fc97e0",
+      "base": "fix/p0-test-entry-preserve-20261121",
+      "merge_base": "858812988833a84368c60fba1540ae601155fa71",
+      "changed_files": 11,
+      "text_files_read_back": 10,
+      "metadata_and_changed_tree_verified": true,
+      "source_and_document_bytes_verified": [
+        {
+          "path": "internal/cli/daemon_mcpcompat_test.go",
+          "bytes": 4989,
+          "sha256": "863c35b2e567763d855116e0acbea54d8fbafa06f0fa7b9aef3da46b9197f377",
+          "git_blob": "1ae992b21f00bf56b5abef18e45a21c1e207265c",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/secrets_audit_test.go",
+          "bytes": 21702,
+          "sha256": "c423cccb8fb89ab850c0126fc9aa03a04ec9eaaab1d1314077029827ccfffbdc",
+          "git_blob": "7a5ed33e35b440a6f999d8f3c3a3e8c1dfe428cd",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/secrets_helper_dispatch_test.go",
+          "bytes": 2170,
+          "sha256": "19445ecbf8eda456dab02a89e464fe2e26f6a83c0ae1c351f4cd890cbcf59bb5",
+          "git_blob": "de5d5db25e4250cf6124907c7d417f24ad032d91",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/settings_registry_test.go",
+          "bytes": 31661,
+          "sha256": "4b2d439005aab3ca44e7a849d1279d8ef2432f9bd8b44b28bf7afd048c828c35",
+          "git_blob": "c5e33df12c58968756efc7305a01568afbaf5cd4",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/testmain_dispatch_test.go",
+          "bytes": 16814,
+          "sha256": "a6dea359e9e2549bb0361b4f22f3be7c37a992110fc2e0edfcaa55ec9d43e680",
+          "git_blob": "57faa4775e40360830a8b5ee0cf5bcfb34c782bc",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/testmain_helpers_test.go",
+          "bytes": 4750,
+          "sha256": "f65df497dbfb923c4db53615e3e56b84c58c2ab13cb643c899374d9e664e9213",
+          "git_blob": "9ed964e645f4ce022a5afde86bfe86df0991adf5",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/testmain_paths_other_test.go",
+          "bytes": 764,
+          "sha256": "900ebd5091fbe0fc5a8d3a7778645b0af15eafa020740025f1fdfafc300e1772",
+          "git_blob": "9bd5cf27131490c9c96b9a74f1bbfb95a7803f5a",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/cli/testmain_paths_windows_test.go",
+          "bytes": 1117,
+          "sha256": "ac2cd47de0d212ec5bb05844a6066645fc9277bf2192f88f208f0ffd0d1dbc0b",
+          "git_blob": "e248ed590868ac4a9b08f3763de9e06028de4761",
+          "readback_matches": true
+        },
+        {
+          "path": "docs/modernization/verification/cli-helper-dispatch-2026-11-21/README.md",
+          "bytes": 27247,
+          "sha256": "8faad520992064cfedb69d100f8d075789523c9e02c6670079f0e2e8ecfcfb04",
+          "git_blob": "ed4273700b5caba30efcbf38cab239296479fc6f",
+          "readback_matches": true
+        },
+        {
+          "path": "docs/modernization/verification/cli-helper-dispatch-2026-11-21/source-inputs.json",
+          "bytes": 2677,
+          "sha256": "d7d03eb114e1e456a11b728a6dc07b4c389e1a9071e8f3b2942dce86c21694d4",
+          "git_blob": "3e49aa916fd7055f72804db90aade3da050f19b7",
+          "readback_matches": true
+        }
+      ],
+      "archive_tree_blob_verified": true,
+      "archive_readback_scope": "Server-created Git blob equals locally verified archive; remote ZIP was not downloaded again",
+      "full_go_or_product_acceptance": false
+    },
+    {
+      "group": "shell",
+      "pr": 667,
+      "head": "99dd76ccd453ccd56d9adbcd6f4d4d06ce5cb57c",
+      "tree": "c1366014f49465da47e8244bbfd262ec86259094",
+      "parent": "43a43d4db9ce4100657705e4e98fa33cd6e9f565",
+      "base": "fix/p0-test-entry-preserve-20261121",
+      "merge_base": "858812988833a84368c60fba1540ae601155fa71",
+      "changed_files": 4,
+      "text_files_read_back": 3,
+      "metadata_and_changed_tree_verified": true,
+      "source_and_document_bytes_verified": [
+        {
+          "path": "internal/perftools/exec.go",
+          "bytes": 4063,
+          "sha256": "ea50b3b8dcc515be7dbdcd2c57e161920b50ca569ff0fd107a1b906eb0225ca8",
+          "git_blob": "54d9a0c993e64cc8ff7180f170d7ec6316311b7f",
+          "readback_matches": true
+        },
+        {
+          "path": "internal/perftools/exec_test.go",
+          "bytes": 795,
+          "sha256": "04de5427c860d03672e4f69dc49a8f4159439e5fcf4415944a6d0b6008eefaf1",
+          "git_blob": "7a31654aadcda3447928d5561e3b6534c61132e6",
+          "readback_matches": true
+        },
+        {
+          "path": "docs/modernization/verification/perftools-stdout-fixture-2026-11-21/README.md",
+          "bytes": 8651,
+          "sha256": "6c8d66b47f32bd3ef5aa01e199f600ded7cb954cbbe0522eb8460bc4aae5f801",
+          "git_blob": "50b83e9c49e790a3490a41f5df02a3f782aebce6",
+          "readback_matches": true
+        }
+      ],
+      "archive_tree_blob_verified": true,
+      "archive_readback_scope": "Server-created Git blob equals locally verified archive; remote ZIP was not downloaded again",
+      "full_go_or_product_acceptance": false
+    }
+  ],
+  "old658_close_condition": "Source preservation and published readback complete; close only if live old head still f9966f008aed4d0cfa80d88cc80c12d08e03634f",
+  "old658_branch_retained": true,
+  "no_merge_force_push_branch_delete_manual_ci_or_external_review_dispatch": true
+}

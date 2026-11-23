@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
 func TestClassifyGUITestHelperDispatchTruthTable(t *testing.T) {
@@ -111,6 +113,7 @@ func TestGUITestBinaryRejectsMalformedHelperDispatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], tc.args...)
+			process.NoConsole(cmd)
 			cmd.Env = append(withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS), tc.env...)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
@@ -125,6 +128,7 @@ func TestGUITestBinaryRejectsMalformedHelperDispatch(t *testing.T) {
 
 func TestGUITestBinaryAllowsUnmarkedOuterR6Selector(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$")
+	process.NoConsole(cmd)
 	cmd.Env = withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("unmarked outer R6 selector: %v\n%s", err, output)
