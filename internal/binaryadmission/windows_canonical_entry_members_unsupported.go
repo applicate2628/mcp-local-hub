@@ -109,6 +109,10 @@ func (*StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProduct(context.Context
 	return nil, errWindowsCanonicalEntryUnsupported
 }
 
+func (*StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProductWithStagedLauncher(context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
+	return nil, errWindowsCanonicalEntryUnsupported
+}
+
 func (*WindowsCanonicalEntryPriorSetV2) ReadOriginal(context.Context, string) (bool, []byte, string, error) {
 	return false, nil, "", errWindowsCanonicalEntryUnsupported
 }

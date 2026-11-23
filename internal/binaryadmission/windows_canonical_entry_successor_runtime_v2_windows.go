@@ -16,12 +16,24 @@ import (
 // A successor borrows the actual composed current cohort from its original
 // stage and prior. This parent owns no handle and cannot be decoded from DATA.
 type canonicalEntrySuccessorRuntimeV2 struct {
-	stage   *StagedWindowsCanonicalEntrySetV2
-	prior   *WindowsCanonicalEntryPriorSetV2
-	members map[string]*canonicalEntryNativeFile
+	stage          *StagedWindowsCanonicalEntrySetV2
+	prior          *WindowsCanonicalEntryPriorSetV2
+	members        map[string]*canonicalEntryNativeFile
+	stagedLauncher bool
 }
 
 func (s *StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProduct(ctx context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
+	return s.successorRuntimeProduct(ctx, false)
+}
+
+// SuccessorRuntimeProductWithStagedLauncher borrows the already-published
+// Product while its original candidate Launcher stays at the issued stage
+// name and the canonical Launcher slot is absent.
+func (s *StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProductWithStagedLauncher(ctx context.Context) (*WindowsCanonicalEntryRuntimeV1, error) {
+	return s.successorRuntimeProduct(ctx, true)
+}
+
+func (s *StagedWindowsCanonicalEntrySetV2) successorRuntimeProduct(ctx context.Context, stagedLauncher bool) (*WindowsCanonicalEntryRuntimeV1, error) {
 	if s == nil {
 		return nil, errors.New("missing original current successor stage")
 	}
@@ -35,7 +47,7 @@ func (s *StagedWindowsCanonicalEntrySetV2) SuccessorRuntimeProduct(ctx context.C
 	}
 	s.prior.original.mu.Lock()
 	defer s.prior.original.mu.Unlock()
-	owner := &canonicalEntrySuccessorRuntimeV2{stage: s, prior: s.prior}
+	owner := &canonicalEntrySuccessorRuntimeV2{stage: s, prior: s.prior, stagedLauncher: stagedLauncher}
 	members, actual, err := owner.receiveMembersLocked(ctx)
 	if err != nil {
 		return nil, err
@@ -102,7 +114,18 @@ func (r *canonicalEntrySuccessorRuntimeV2) receiveMembersLocked(ctx context.Cont
 		}
 		target := filepath.Join(c.parent.path, filepath.FromSlash(key))
 		selected, owner := c.members[key], c
-		if selected == nil || selected.original == nil || !strings.EqualFold(selected.original.path, target) {
+		launcher := r.stagedLauncher && key == c.snapshot.CanonicalEntryRelativePath
+		if launcher {
+			relative := s.launcherStageRelative
+			if !publisherSourcePathValid(relative) || path.Base(relative) != relative ||
+				strings.EqualFold(relative, key) || selected == nil || selected.evidence.File.Path != relative {
+				return nil, WindowsCanonicalEntrySetSnapshotV2{}, errors.New("original Launcher is not at its issued stage name")
+			}
+			target = filepath.Join(c.parent.path, relative)
+		} else if selected == nil || selected.original == nil || !strings.EqualFold(selected.original.path, target) {
+			if r.stagedLauncher && key == c.snapshot.ProductRelativePath {
+				return nil, WindowsCanonicalEntrySetSnapshotV2{}, errors.New("original staged Product is not at its canonical target")
+			}
 			selected, owner = pc.members[key], pc
 		}
 		if selected == nil || selected.original == nil || selected.original.file == nil || !strings.EqualFold(selected.original.path, target) || selected.evidence.File.SHA256 != plan[key].SHA256 {
@@ -122,6 +145,11 @@ func (r *canonicalEntrySuccessorRuntimeV2) receiveMembersLocked(ctx context.Cont
 			return nil, WindowsCanonicalEntrySetSnapshotV2{}, err
 		}
 		fact := selected.evidence
+		if launcher {
+			// The original name was received above. Compare this detached
+			// fact against the logical member key in the authenticated plan.
+			fact.File.Path = key
+		}
 		if !canonicalMemberMatchesPlanV2(fact, plan[key]) {
 			return nil, WindowsCanonicalEntrySetSnapshotV2{}, errors.New("original current successor member differs from authenticated source extent/attributes")
 		}
@@ -183,6 +211,11 @@ func (r *canonicalEntrySuccessorRuntimeV2) receiveMembersLocked(ctx context.Cont
 	}
 	for _, component := range payload.Components {
 		if err := canonicalEntryVerifyDirectoryMembers(ctx, c.root, objects, objects[component.Root], component.Root); err != nil {
+			return nil, WindowsCanonicalEntrySetSnapshotV2{}, err
+		}
+	}
+	if r.stagedLauncher {
+		if err := canonicalEntryRequireAbsent(c.parent, c.snapshot.CanonicalEntryRelativePath); err != nil {
 			return nil, WindowsCanonicalEntrySetSnapshotV2{}, err
 		}
 	}

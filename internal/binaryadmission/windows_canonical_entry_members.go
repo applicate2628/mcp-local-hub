@@ -182,10 +182,11 @@ type canonicalEntryMembersV2 struct {
 }
 
 type StagedWindowsCanonicalEntrySetV2 struct {
-	original       canonicalEntryMembersV2
-	prior          *WindowsCanonicalEntryPriorSetV2
-	priorAttempted bool
-	priorError     error
+	original              canonicalEntryMembersV2
+	prior                 *WindowsCanonicalEntryPriorSetV2
+	priorAttempted        bool
+	priorError            error
+	launcherStageRelative string
 }
 
 type WindowsCanonicalEntryPriorSetV2 struct {

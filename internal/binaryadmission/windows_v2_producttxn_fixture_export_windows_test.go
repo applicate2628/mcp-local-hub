@@ -266,3 +266,158 @@ func TestExportWindowsV2ProductTxnFixture(t *testing.T) {
 	}
 	t.Logf("retained synthetic V4 input snapshot SHA-256 %s", RuntimeDigest(raw))
 }
+
+func TestCanonicalV2SuccessorReceivesIssuedStagedLauncher(t *testing.T) {
+	ctx := t.Context()
+	entry, binding, _ := v2TxnDonorEntryFixture(t)
+	launcherBytes, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := AdmitWindowsCanonicalEntrySetV2(ctx, entry, binding)
+	if source != nil {
+		t.Cleanup(func() {
+			if err := source.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), WindowsCanonicalEntryRelativePathV1)
+	stage, err := source.Stage(ctx, target)
+	var prior *WindowsCanonicalEntryPriorSetV2
+	if stage != nil {
+		t.Cleanup(func() {
+			if prior != nil {
+				if err := prior.Close(); err != nil {
+					t.Error(err)
+				}
+			}
+			if err := stage.Close(); err != nil {
+				t.Error(err)
+			}
+			for _, d := range stage.Directories() {
+				if err := d.Close(); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err = stage.AcquireOriginalPriorSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stage.EnsureOriginalMemberDirectories(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := stage.TakeForTransaction(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members, err := stage.Members()
+	if err != nil {
+		t.Fatal(err)
+	}
+	move := func(t *testing.T, key, to string) {
+		t.Helper()
+		result, err := stage.MoveOriginal(ctx, key, to)
+		if err != nil || !result.Applied || !result.Readback {
+			t.Fatal("fixture original move did not settle", err)
+		}
+	}
+	launcher, product := snapshot.CanonicalEntryRelativePath, snapshot.ProductRelativePath
+	for _, member := range members {
+		if member.Member != launcher {
+			move(t, member.Member, member.Member)
+		}
+	}
+	if _, err := stage.PublishedSnapshot(ctx); err == nil {
+		t.Fatal("published snapshot accepted an absent canonical Launcher")
+	}
+	if view, err := stage.SuccessorRuntimeProduct(ctx); err == nil || view != nil {
+		t.Fatal("ordinary runtime receiver accepted an absent canonical Launcher")
+	}
+	view, err := stage.SuccessorRuntimeProductWithStagedLauncher(ctx)
+	if err != nil || view == nil || view.Artifact() != snapshot.ProductArtifact {
+		t.Fatalf("exact staged Launcher did not qualify the canonical Product: %v", err)
+	}
+	requireRefusal := func(t *testing.T) {
+		t.Helper()
+		if fresh, err := stage.SuccessorRuntimeProductWithStagedLauncher(ctx); err == nil || fresh != nil {
+			t.Fatal("fresh runtime view accepted changed original evidence")
+		}
+		if err := view.ValidateOriginal(ctx); err == nil {
+			t.Fatal("borrowed runtime view accepted changed original evidence")
+		}
+	}
+	t.Run("occupied canonical launcher", func(t *testing.T) {
+		if err := os.WriteFile(target, launcherBytes, 0600); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Remove(target); err != nil {
+				t.Error(err)
+			}
+		}()
+		requireRefusal(t)
+	})
+	c := &stage.original
+	original := c.members[launcher].original
+	t.Run("missing and wrong stage seal", func(t *testing.T) {
+		seal := original.readOnlyGuard
+		defer func() { original.readOnlyGuard = seal }()
+		original.readOnlyGuard = nil
+		requireRefusal(t)
+		original.readOnlyGuard = c.members[product].original.readOnlyGuard
+		requireRefusal(t)
+	})
+	t.Run("same bytes wrong stage identity", func(t *testing.T) {
+		// Move the actual fixture handle using a detached location record,
+		// leaving the staged bank's issued evidence stale on purpose.
+		displaced := *original
+		moveFixture := func(to string) {
+			t.Helper()
+			result, err := canonicalEntryMoveOriginal(ctx, c.root, c.parent, &displaced, launcher, to, c.members[launcher].evidence.File.SHA256)
+			if err != nil || !result.Applied || !result.Readback {
+				t.Fatal("fixture Launcher identity move did not settle", err)
+			}
+		}
+		moveFixture("fixture-displaced-launcher.stage")
+		defer func() { moveFixture(stage.launcherStageRelative) }()
+		if err := os.WriteFile(original.path, launcherBytes, 0600); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.Remove(original.path); err != nil {
+				t.Error(err)
+			}
+		}()
+		requireRefusal(t)
+	})
+	t.Run("changed issued stage placement", func(t *testing.T) {
+		move(t, launcher, "fixture-moved-launcher.stage")
+		defer move(t, launcher, stage.launcherStageRelative)
+		requireRefusal(t)
+	})
+	t.Run("changed canonical product", func(t *testing.T) {
+		move(t, product, "fixture-displaced-product.stage")
+		defer move(t, product, product)
+		requireRefusal(t)
+	})
+	if err := view.ValidateOriginal(ctx); err != nil {
+		t.Fatal("restored exact staged Launcher lost runtime authority", err)
+	}
+	move(t, launcher, launcher)
+	requireRefusal(t)
+	if actual, err := stage.PublishedSnapshot(ctx); err != nil || !compareSnapshotV2(actual, snapshot) {
+		t.Fatal("final complete published snapshot did not verify", err)
+	}
+	if final, err := stage.SuccessorRuntimeProduct(ctx); err != nil || final == nil {
+		t.Fatal("ordinary successor runtime did not verify after final Launcher publication", err)
+	}
+}

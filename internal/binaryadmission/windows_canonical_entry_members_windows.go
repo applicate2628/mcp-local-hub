@@ -538,7 +538,9 @@ func (o *WindowsCanonicalEntrySetV2) Stage(ctx context.Context, canonicalEntryPa
 			return s, errors.New("actual member stage differs from authenticated source")
 		}
 		// Preserve the portable attributes described by the authenticated plan.
-		if key != o.snapshot.CanonicalEntryRelativePath && actual.Attributes != object.Attributes {
+		if key == o.snapshot.CanonicalEntryRelativePath {
+			s.launcherStageRelative = leaf
+		} else if actual.Attributes != object.Attributes {
 			return s, errors.New("created member attributes differ from authenticated source")
 		}
 	}
