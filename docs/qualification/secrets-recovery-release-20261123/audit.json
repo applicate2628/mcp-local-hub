@@ -1,0 +1,526 @@
+{
+  "schema": "recovery-lock-publication-audit-v1",
+  "source_base_commit": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "archive": {
+    "path": "b1-release-20261123-57604a3a.zip",
+    "bytes": 805866,
+    "sha256": "616c2e2e4920f32b23744349d2c9178e2adefc4ffa4230d509351090b04a9810"
+  },
+  "members": [
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/receipt-initial.json",
+      "bytes": 497,
+      "sha256": "0b74a0c4e3a48be61fd2003d4cb28f3b11452f430c544370746fc3d296fd06a3"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/receipt.json",
+      "bytes": 9652,
+      "sha256": "d00a957d3ec9a82da69c105c9b805bafd676ec3631d0fe88d7f53d710e6de830"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.launched.json",
+      "bytes": 698,
+      "sha256": "d4b99bd01fe9aec75fe9a521d76fd260f00b1002e4abed8b835979650aaa9645"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.receipt.json",
+      "bytes": 5513,
+      "sha256": "39f19d7ce3a4160c66062b32fb29a96435032f6cd4fc069dcd824a7d0a41e36e"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.started.json",
+      "bytes": 682,
+      "sha256": "1c6aabee4ffa1b96e6cb8a0eb6baa0931db6a9fc63911e5ef9ecdf19b2862aff"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.stdout.log",
+      "bytes": 60172,
+      "sha256": "0383c95e7fd586caecf83351b19aaaa45b7d7e720aae1054b4bfd4fc6685b2f5"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/receipt-initial.json",
+      "bytes": 493,
+      "sha256": "3df2b739da9730f13f70cb3b8eb686a24b32fb9ba75ebe8d42104f0a3c5ebaa9"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/receipt.json",
+      "bytes": 9065,
+      "sha256": "f46ba36dca3ea4b6e409de39b125d99f1467716dea6874198f6b26fb6186e3a4"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.launched.json",
+      "bytes": 872,
+      "sha256": "fd63cf12ca5622fe7c8cfb62f3a82fe6d2ea705496eed6e2b06d10e8e6a2040e"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.receipt.json",
+      "bytes": 5131,
+      "sha256": "448331112c048bda356560dcb8ba83e12812a88ba2ec85e343fd874e60686b75"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.started.json",
+      "bytes": 856,
+      "sha256": "3ffae2ad270f292842608ca333f54a37f80ff2df1fb91ecb3ba5a9c1c1e398c5"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.stdout.log",
+      "bytes": 49885,
+      "sha256": "4c08b1f4e32d1f408f755f63b2ac6b005ec9ab41fe2301a6c80b20eef0a12ff6"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-envelope.launched.json",
+      "bytes": 778,
+      "sha256": "0c15d4211acb52137a9c403fc389179b6ff6f1844643b956301636ca721ae944"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-envelope.receipt.json",
+      "bytes": 1525,
+      "sha256": "708407605c4fa6f4aca74f01e2155b80761d1caf0fd7ef4c7c2e94d005da70ec"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-envelope.started.json",
+      "bytes": 762,
+      "sha256": "d22de19a0a113189681ccfb40770d4594d926e498d8253fb7050755a4e445112"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-envelope.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-envelope.stdout.log",
+      "bytes": 5206,
+      "sha256": "d823c7033dde7e1855becc3e7423649bb15b6c7b8c5389cfeb9926f6d4b60086"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-owner.launched.json",
+      "bytes": 772,
+      "sha256": "a7c7798325b0989e8d95e27107f02d971b2d8e7f470b453d4b662dff2551772a"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-owner.receipt.json",
+      "bytes": 1519,
+      "sha256": "145c5e0032c2feba9012cc9372383b61c518b06652dd93d66b93eea4e00312ba"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-owner.started.json",
+      "bytes": 756,
+      "sha256": "30edbe0b001efdd1b133e6a222b4e8446772cde14fb0447c23dec9a68cff8b21"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-owner.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/old-owner.stdout.log",
+      "bytes": 5331,
+      "sha256": "4beff6024148c05ac3202b44dd28edf218cdc3a656d002604f637521c35bbabd"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/receipt-initial.json",
+      "bytes": 493,
+      "sha256": "25254c443c154c5b251e67c9d82ff1d4217c285935959e013ab5ed796319932b"
+    },
+    {
+      "path": "evidence/b1-controls-20261123-57604a3a/receipt.json",
+      "bytes": 6967,
+      "sha256": "320e017388b1e113581e05cb889d45b1684079ce0b647a519c158eda59c61f94"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-build.launched.json",
+      "bytes": 419,
+      "sha256": "07cb5754181e0a42818dbf9598eb0fa483e31912946eb10bce6aa79b40afc0f5"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-build.receipt.json",
+      "bytes": 776,
+      "sha256": "e413acda5d13160ffa76454ed4180b3374dd92bcc480a4657e408be6cffb4f07"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-build.started.json",
+      "bytes": 403,
+      "sha256": "6239d24691fb282c805992b99770db44266314215c39a036a18608f609c9e736"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-build.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-build.stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-vet.launched.json",
+      "bytes": 415,
+      "sha256": "31065fbf8320290063bacca468909261267e083649a5c20f9e5ee47f69ab11fd"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-vet.receipt.json",
+      "bytes": 772,
+      "sha256": "440d43b5e30f31f6d76e0bd0fd382b95417b94a58f315634a05cceeb7f1b0c5c"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-vet.started.json",
+      "bytes": 399,
+      "sha256": "5c9cc1baa6e634d006ffacae97f8b7eaa62c2c5bc232ac20e8d3ea625477e703"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-vet.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/api-vet.stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/receipt-initial.json",
+      "bytes": 457,
+      "sha256": "d9cbda93c66ca10c790d0a853371838249e8fbfa8d594a59eb831f656f3d672e"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/receipt.json",
+      "bytes": 13242,
+      "sha256": "d74042e9d2a36e6a7990a1d88d64baa6b08ebeb93a82583f22b0d8d392d612c5"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.launched.json",
+      "bytes": 803,
+      "sha256": "5573bd6ce3bd39c25f2d73c734e0f629ad1b94ee81c96426f89e4d240483747d"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.receipt.json",
+      "bytes": 3638,
+      "sha256": "3d6ee1c4711a625e418193706674f84291f60245917a59ffd312026af9b3135b"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.started.json",
+      "bytes": 787,
+      "sha256": "10ebd3b3d180ab6cffa624344cf258802f3c335b6a519ee535e4745a212bad93"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.stdout.log",
+      "bytes": 33465,
+      "sha256": "8df35bee3218a7accb073faaa3dce665157c646420df826a75dcb3800a206658"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.launched.json",
+      "bytes": 834,
+      "sha256": "fe9a3a0793957f98a723b7ca94abdc1160b03a397984539d65a2951817950c92"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.receipt.json",
+      "bytes": 3669,
+      "sha256": "74ca45ebf61f9dd63ef3c0f1fe6e8ae90cb62b70e496115a5d1a4bebe3030f48"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.started.json",
+      "bytes": 818,
+      "sha256": "a1d3afb8447b9541e32ce69fdf0d378cbe15e8b9f6dc7a5d0f2cc268709aa165"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.stderr.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.stdout.log",
+      "bytes": 33475,
+      "sha256": "ada6db4d5866adac40583b7186b14b118a66b92d5da548a55ee670baceaffd60"
+    },
+    {
+      "path": "evidence/materialize-b1-standalone-20261123-57604a3a/receipt.json",
+      "bytes": 1069,
+      "sha256": "976258e0dca518e7c6bbae4fcfece8b490f1ec93a9151e9bb664b908313d0291"
+    },
+    {
+      "path": "evidence/materialize-continuation-20261123-57604a3a/receipt.json",
+      "bytes": 3916,
+      "sha256": "485e19641c539ebfd0f7ee033267e71e13b87659ea4b1b782f6d974949359606"
+    },
+    {
+      "path": "inputs/b1-controls-20261123-57604a3a/old-envelope.go",
+      "bytes": 22054,
+      "sha256": "d9a3d00ca1f7f7ce0e266f5834238d3f1efe06f44f5be174eaf33b55ffc57926"
+    },
+    {
+      "path": "inputs/b1-controls-20261123-57604a3a/old-envelope.go.overlay.json",
+      "bytes": 284,
+      "sha256": "05342b8044bd3b69e2d836b1673f19168922499604017eacc0e4bce7c9159c71"
+    },
+    {
+      "path": "inputs/b1-controls-20261123-57604a3a/old-owner.go",
+      "bytes": 22027,
+      "sha256": "e585d5fc9c3b6a82f66b557b7fa50937fddfa2b94d7d473870d2cd1ae8971544"
+    },
+    {
+      "path": "inputs/b1-controls-20261123-57604a3a/old-owner.go.overlay.json",
+      "bytes": 281,
+      "sha256": "f71122b435863f61e6d0d21e7da6e4340a77b23b7fed5097a780fe3ff996a1f6"
+    },
+    {
+      "path": "inputs/continuation-20261123-57604a3a/internal/api/secrets_init_recovery.go",
+      "bytes": 22087,
+      "sha256": "f40c60a79affd1e9c1cb9b61a93c870eea2edec0899cf4c7766169aa1dfe3caf"
+    },
+    {
+      "path": "inputs/continuation-20261123-57604a3a/internal/api/secrets_init_recovery_lock_test.go",
+      "bytes": 4426,
+      "sha256": "db8569cfede6f1a265d1bd5935f62d2d6c010885780be5bc27b57b3d3ce1f4b1"
+    },
+    {
+      "path": "inputs/continuation-20261123-57604a3a/internal/api/supervisor_intent_lock_ownership_test.go",
+      "bytes": 18583,
+      "sha256": "968c875951ed3a1a8f2d4e1a3207dad504d18129cd027c1df8feb529e28f751e"
+    },
+    {
+      "path": "plans/b1-continuation-20261123-57604a3a.json",
+      "bytes": 594989,
+      "sha256": "94850d9b5b25e5d326702990b4bdb8428b8cd4e5eb9875c544139e87335c5508"
+    },
+    {
+      "path": "plans/b1-contract-20261123-57604a3a.json",
+      "bytes": 595044,
+      "sha256": "e6f6697e8b9aca7e7736711f1a4f52163e32f1909dcc41aee94b131f31755e66"
+    },
+    {
+      "path": "plans/b1-controls-20261123-57604a3a.json",
+      "bytes": 596062,
+      "sha256": "c5c2b06ae1f2e8413a206de36f69262e716ba72ad30984ee3781391aaa180e92"
+    },
+    {
+      "path": "plans/b1-standalone-20261123-57604a3a.json",
+      "bytes": 588595,
+      "sha256": "098215baa55eaae3cdde2e782fcdfcbb5b891f19d4dc4be41420cdec0eab85db"
+    },
+    {
+      "path": "prepare_b1_standalone_20261123_57604a3a.py",
+      "bytes": 5865,
+      "sha256": "4c9b424504364693eb5e4e1bba9bd2a5b8497d4d842fe2375bdd6e60bed56410"
+    },
+    {
+      "path": "prepare_continuation_20261123_57604a3a.py",
+      "bytes": 9021,
+      "sha256": "926e2b670db115cec49ad1405af49333c919a7dcea554b5c4e57ce0fbf86142f"
+    },
+    {
+      "path": "prepare_followup_20261123_57604a3a.py",
+      "bytes": 5282,
+      "sha256": "5d0af45440001a2724c17c8418885bebf7bf3f03fd07d9b5634fa9d47bf84b6a"
+    },
+    {
+      "path": "qualify_go.py",
+      "bytes": 13912,
+      "sha256": "a483536d689df8c5713fddbdfd221b85953cf0ce4f9d578a31c4cdbfc6b9a26e"
+    }
+  ],
+  "event_audit": [
+    {
+      "receipt": "evidence/b1-continuation-20261123-57604a3a/recovery-release-and-regression.receipt.json",
+      "exit_code": 1,
+      "oracle_pass": false,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 54,
+        "fail": 10
+      },
+      "nonpass": [
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/protected_empty",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/missing",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/not_directory",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/broadened_empty",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/broadened_ignored",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary/reparse",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceBoundary",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInit_RecoveryNamespaceFailurePaths",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": null,
+          "package": "mcp-local-hub/internal/api"
+        }
+      ]
+    },
+    {
+      "receipt": "evidence/b1-contract-20261123-57604a3a/recovery-lock-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 55
+      },
+      "nonpass": []
+    },
+    {
+      "receipt": "evidence/b1-controls-20261123-57604a3a/old-envelope.receipt.json",
+      "exit_code": 1,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "fail": 5
+      },
+      "nonpass": [
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/success/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/primary/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/primary-and-recovery/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": null,
+          "package": "mcp-local-hub/internal/api"
+        }
+      ]
+    },
+    {
+      "receipt": "evidence/b1-controls-20261123-57604a3a/old-owner.receipt.json",
+      "exit_code": 1,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "fail": 5
+      },
+      "nonpass": [
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/success/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/primary/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement/primary-and-recovery/release-failure",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": "TestSecretsInitRecoveryLockSettlement",
+          "package": "mcp-local-hub/internal/api"
+        },
+        {
+          "action": "fail",
+          "test": null,
+          "package": "mcp-local-hub/internal/api"
+        }
+      ]
+    },
+    {
+      "receipt": "evidence/b1-standalone-20261123-57604a3a/api-build.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "receipt": "evidence/b1-standalone-20261123-57604a3a/api-vet.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {},
+      "nonpass": []
+    },
+    {
+      "receipt": "evidence/b1-standalone-20261123-57604a3a/standard-recovery-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 39
+      },
+      "nonpass": []
+    },
+    {
+      "receipt": "evidence/b1-standalone-20261123-57604a3a/tagged-recovery-contract.receipt.json",
+      "exit_code": 0,
+      "oracle_pass": true,
+      "settled": true,
+      "timed_out": false,
+      "counts": {
+        "pass": 39
+      },
+      "nonpass": []
+    }
+  ]
+}
