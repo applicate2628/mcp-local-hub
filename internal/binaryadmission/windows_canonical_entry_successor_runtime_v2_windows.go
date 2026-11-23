@@ -223,6 +223,10 @@ func (r *canonicalEntrySuccessorRuntimeV2) receiveMembersLocked(ctx context.Cont
 }
 
 func receiveCanonicalSuccessorDirectoryV2(ctx context.Context, c *canonicalEntryMembersV2, key string) (*canonicalEntryNativeFile, uint32, error) {
+	return receiveCanonicalSuccessorDirectoryReadV2(ctx, c, key, nil)
+}
+
+func receiveCanonicalSuccessorDirectoryReadV2(ctx context.Context, c *canonicalEntryMembersV2, key string, scope *canonicalEntryRecoveryReadScopeV2) (*canonicalEntryNativeFile, uint32, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -232,10 +236,10 @@ func receiveCanonicalSuccessorDirectoryV2(ctx context.Context, c *canonicalEntry
 	if d == nil {
 		return nil, 0, errors.New("original current successor directory lender unavailable")
 	}
-	if err := c.borrowDirectoryRead(ctx, key, d, nil); err != nil {
+	if err := c.borrowDirectoryRead(ctx, key, d, scope); err != nil {
 		return nil, 0, err
 	}
-	snapshot, err := d.SnapshotForEntryMembersV2()
+	snapshot, err := d.snapshotForEntryMembersRead(ctx, scope)
 	if err != nil {
 		return nil, 0, err
 	}

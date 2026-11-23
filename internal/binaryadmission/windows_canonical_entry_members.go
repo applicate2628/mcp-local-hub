@@ -140,6 +140,7 @@ type WindowsCanonicalEntryMembersRecoveryInputV2 struct {
 	Expected      WindowsCanonicalEntrySetSnapshotV2
 	TransactionID string
 	Purpose       WindowsCanonicalEntryRecoveryPurposeV2
+	Retained      *WindowsCanonicalEntryRetainedMembersV2
 	Members       []WindowsCanonicalEntryMemberRecoveryPlanV2
 	Directories   []WindowsCanonicalEntryMemberDirectoryRecordV2
 	Moves         []WindowsCanonicalEntryMemberMoveRecordV2
@@ -183,6 +184,7 @@ type canonicalEntryMembersV2 struct {
 	probeCloseError            error
 	recoveryInput              *WindowsCanonicalEntryMembersRecoveryInputV2
 	recoveryAbsences           map[string]WindowsCanonicalEntryMemberCleanupRecordV2
+	recoveryRetained           map[string]RuntimeObjectV1
 	recoverySide               WindowsCanonicalRecoverySideV1
 	captures                   []WindowsCanonicalEntryMemberEvidenceV2
 	moves, cleanup             []WindowsCanonicalEntryMoveResultV1
@@ -222,6 +224,11 @@ func cloneCanonicalEntryRecoveryTextV2(p *string) *string {
 
 func cloneCanonicalEntryMembersRecoveryInputV2(v WindowsCanonicalEntryMembersRecoveryInputV2) WindowsCanonicalEntryMembersRecoveryInputV2 {
 	v.Expected = cloneCanonicalEntrySnapshotV2(v.Expected)
+	if v.Retained != nil {
+		copy := *v.Retained
+		copy.Singletons = slices.Clone(copy.Singletons)
+		v.Retained = &copy
+	}
 	v.Members = slices.Clone(v.Members)
 	for i := range v.Members {
 		p := &v.Members[i]
