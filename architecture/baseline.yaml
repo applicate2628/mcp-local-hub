@@ -17797,20 +17797,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
       max_metric: 1
-    - fingerprint: 94c67958d68ac8aa3eb628d7d51b6351dbb006d023d302b6ba8a39d6454ca4e5
-      kind: api_construction
-      location:
-        path: internal/gui/settings.go
-        symbol: realSettingsAPI.List
-        line: 24
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: 94ce50c8b2da55864178e452452b3e16ddb2079a138e78c517acd589983180a4
       kind: mutable_global
       location:
@@ -18396,20 +18382,6 @@ entries:
       evidence: 'PR #183'
       metric: 1
       message: 'production comment contains review history marker "PR #183"; move history to an ADR or archive'
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
-    - fingerprint: 98e8c2d7078d9d2879eaafea91ee2edf1e35f1ccf20fdff1382e3cb5e39d2522
-      kind: api_construction
-      location:
-        path: internal/gui/settings.go
-        symbol: realSettingsAPI.Set
-        line: 25
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
       owner: gui-adapter
       work_package: WP-11B
       remove_by: "2027-03-31"

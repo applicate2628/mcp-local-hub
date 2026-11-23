@@ -69,7 +69,7 @@ func newTestServer(t *testing.T) (*Server, *fakeSettings) {
 	// Seed the live port atomic so s.Port() returns a non-zero value in
 	// tests that don't call Start (which is where the atomic is normally set).
 	s.port.Store(9125)
-	fake := &fakeSettings{}
+	fake := &fakeSettings{path: filepath.Join(t.TempDir(), "gui-preferences.yaml")}
 	s.settings = fake
 	return s, fake
 }

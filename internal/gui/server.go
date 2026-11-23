@@ -840,7 +840,7 @@ func NewServer(cfg Config) *Server {
 		}
 	})
 	s.secrets = realSecretsAPI{}
-	s.settings = realSettingsAPI{}
+	s.settings = realSettingsAPI{api: s.api}
 	s.clientInstallPrefs = s.api
 	s.backups = realBackupsAPI{}
 	s.backupActions = realBackupActionsAPI{}
