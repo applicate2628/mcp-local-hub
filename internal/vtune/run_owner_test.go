@@ -29,13 +29,19 @@ type scriptedVTuneDriver struct {
 	releaseOnce    sync.Once
 }
 
-// closeDeadlineDriver holds collect workers live until the test explicitly
-// releases them, while native stop/force calls consume only their passed
-// context. It makes shutdown-deadline accounting deterministic without a
-// real VTune process.
+// closeDeadlineDriver keeps collect workers live until the test releases
+// them and records cancellation at each shutdown phase's entry.
 type closeDeadlineDriver struct {
 	collectStarted chan struct{}
 	releaseCollect chan struct{}
+	mu             sync.Mutex
+	phaseContexts  []closePhaseContext
+}
+
+type closePhaseContext struct {
+	runID string
+	phase string
+	err   error
 }
 
 func (d *closeDeadlineDriver) collect(context.Context, vtuneRunRequest) (*runOutput, error) {
@@ -43,17 +49,25 @@ func (d *closeDeadlineDriver) collect(context.Context, vtuneRunRequest) (*runOut
 	<-d.releaseCollect
 	return &runOutput{ExitCode: 0, ResultDir: "result", CommandLine: "collect"}, nil
 }
-func (d *closeDeadlineDriver) stop(ctx context.Context, _ vtuneRunRequest) error {
-	<-ctx.Done()
-	return ctx.Err()
+func (d *closeDeadlineDriver) stop(ctx context.Context, req vtuneRunRequest) error {
+	return d.recordShutdownContext(ctx, "stop", req.RunID)
 }
 func (d *closeDeadlineDriver) finalize(context.Context, vtuneRunRequest) error { return nil }
 func (d *closeDeadlineDriver) report(context.Context, vtuneRunRequest) (*runOutput, error) {
 	return &runOutput{ExitCode: 0, ResultDir: "result", ReportCSV: "Function\tCPU Time\nmain\t1.0\n", Summary: "summary", ReportPath: "report.csv"}, nil
 }
-func (d *closeDeadlineDriver) forceStop(ctx context.Context, _ vtuneRunRequest) error {
-	<-ctx.Done()
-	return ctx.Err()
+func (d *closeDeadlineDriver) forceStop(ctx context.Context, req vtuneRunRequest) error {
+	return d.recordShutdownContext(ctx, "forceStop", req.RunID)
+}
+
+func (d *closeDeadlineDriver) recordShutdownContext(ctx context.Context, phase, runID string) error {
+	// Capture the state now; Close cancels derived contexts after the calls,
+	// so inspecting a retained context later would accept a fresh budget.
+	err := ctx.Err()
+	d.mu.Lock()
+	d.phaseContexts = append(d.phaseContexts, closePhaseContext{runID: runID, phase: phase, err: err})
+	d.mu.Unlock()
+	return err
 }
 
 func (d *scriptedVTuneDriver) collect(context.Context, vtuneRunRequest) (*runOutput, error) {
@@ -343,34 +357,77 @@ func TestVTuneRunOwner_CloseSharesCancelledBudgetAcrossRunsAndRetainsLease(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	owners := []*vtuneRunOwnerV1{o}
+	var runIDs []string
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(d.releaseCollect) }) }
+	t.Cleanup(func() {
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		deadline, _ := ctx.Deadline()
+		for _, runID := range runIDs {
+			if !o.waitSettled(runID, time.Until(deadline)) {
+				t.Errorf("cleanup: run %q did not settle after release", runID)
+			}
+		}
+		for _, owner := range owners {
+			if err := owner.Close(ctx); err != nil {
+				t.Errorf("cleanup: Close: %v", err)
+			}
+		}
+	})
 	for i := 0; i < 2; i++ {
-		if _, _, err := o.Start(vtuneRunRequest{Target: "target.exe", AnalysisType: "hotspots", TimeoutSec: 60}); err != nil {
+		run, _, err := o.Start(vtuneRunRequest{Target: "target.exe", AnalysisType: "hotspots", TimeoutSec: 60})
+		if err != nil {
 			t.Fatal(err)
 		}
+		runIDs = append(runIDs, run.RunID)
 		<-d.collectStarted
+	}
+	if runIDs[0] == runIDs[1] {
+		t.Fatal("two runs received the same run ID")
 	}
 	shutdownCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	started := time.Now()
 	if err := o.Close(shutdownCtx); err == nil {
 		t.Fatal("Close unexpectedly succeeded with an already-cancelled deadline")
 	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("Close consumed fresh per-run phase budgets: %s", elapsed)
+	d.mu.Lock()
+	calls := append([]closePhaseContext(nil), d.phaseContexts...)
+	d.mu.Unlock()
+	if len(calls) != 2*len(runIDs) {
+		t.Fatalf("shutdown phase calls = %d, want stop and forceStop for both runs", len(calls))
 	}
-	if _, err := newVTuneRunOwnerV1(root, &scriptedVTuneDriver{collectStarted: make(chan struct{}), releaseCollect: make(chan struct{})}); err == nil {
+	counts := make(map[[2]string]int)
+	for _, call := range calls {
+		if !errors.Is(call.err, context.Canceled) {
+			t.Errorf("run %q %s context at entry = %v, want already cancelled", call.runID, call.phase, call.err)
+		}
+		counts[[2]string{call.runID, call.phase}]++
+	}
+	for _, runID := range runIDs {
+		for _, phase := range []string{"stop", "forceStop"} {
+			if got := counts[[2]string{runID, phase}]; got != 1 {
+				t.Errorf("run %q %s calls = %d, want 1", runID, phase, got)
+			}
+		}
+	}
+	if next, err := newVTuneRunOwnerV1(root, &scriptedVTuneDriver{collectStarted: make(chan struct{}), releaseCollect: make(chan struct{})}); err == nil {
+		owners = append(owners, next)
 		t.Fatal("successor acquired the store before the cancelled runs settled")
 	}
-	close(d.releaseCollect)
-	for _, r := range o.runs {
-		if !o.waitSettled(r.RunID, time.Second) {
-			t.Fatalf("run %q did not complete the lease-proven handoff", r.RunID)
+	release()
+	for _, runID := range runIDs {
+		if !o.waitSettled(runID, time.Second) {
+			t.Fatalf("run %q did not complete the lease-proven handoff", runID)
 		}
 	}
 	next, err := newVTuneRunOwnerV1(root, &scriptedVTuneDriver{collectStarted: make(chan struct{}), releaseCollect: make(chan struct{})})
 	if err != nil {
 		t.Fatalf("successor remained blocked after every worker settled: %v", err)
 	}
+	owners = append(owners, next)
 	if err := next.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

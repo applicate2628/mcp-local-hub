@@ -400,6 +400,176 @@ func TestLookupPIDHandleIdentityClosesOnSuccessAndIdentityError(t *testing.T) {
 	}
 }
 
+func TestObservePIDHandleIdentityUsesExactHeldObject(t *testing.T) {
+	const pid = 4321
+	const handle windows.Handle = 0x1234
+	imageErr := &pidImagePathQueryError{pid: pid, err: windows.ERROR_ACCESS_DENIED}
+	waitErr := errors.New("fixture wait failed")
+	closeErr := errors.New("fixture close failed")
+	otherErr := errors.New("fixture independent identity failure")
+	for _, tc := range []struct {
+		name        string
+		identityErr error
+		waitResult  uint32
+		waitErr     error
+		closeErr    error
+		cancel      bool
+		wantWait    bool
+		wantAbsent  bool
+		wantErrs    []error
+	}{
+		{name: "identity"},
+		{name: "image denied and signaled", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, wantWait: true, wantAbsent: true},
+		{name: "image denied and live", identityErr: imageErr, waitResult: uint32(windows.WAIT_TIMEOUT), wantWait: true, wantErrs: []error{imageErr}},
+		{name: "unsupported wait", identityErr: imageErr, waitResult: windows.WAIT_ABANDONED, wantWait: true, wantErrs: []error{imageErr}},
+		{name: "failed wait", identityErr: imageErr, waitResult: windows.WAIT_FAILED, waitErr: waitErr, wantWait: true, wantErrs: []error{imageErr, waitErr}},
+		{name: "failed close", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantWait: true, wantErrs: []error{imageErr, closeErr}},
+		{name: "canceled during close", identityErr: imageErr, waitResult: windows.WAIT_OBJECT_0, cancel: true, wantWait: true, wantErrs: []error{imageErr, context.Canceled}},
+		{name: "denied at another stage", identityErr: windows.ERROR_ACCESS_DENIED, wantErrs: []error{windows.ERROR_ACCESS_DENIED}},
+		{name: "aggregate identity failure", identityErr: errors.Join(imageErr, otherErr), wantErrs: []error{imageErr, otherErr}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var calls []string
+			got, err := readPIDHandleObservation(ctx, pid, pidHandleObservationOps{
+				open: func(access uint32, inherit bool, gotPID uint32) (windows.Handle, error) {
+					calls = append(calls, "open")
+					if access != windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE || inherit || gotPID != pid {
+						t.Fatalf("open=(%#x,%v,%d)", access, inherit, gotPID)
+					}
+					return handle, nil
+				},
+				identity: func(gotPID int, gotHandle windows.Handle) (processHandleIdentity, error) {
+					calls = append(calls, "identity")
+					if gotPID != pid || gotHandle != handle {
+						t.Fatalf("identity=(%d,%#x)", gotPID, gotHandle)
+					}
+					return processHandleIdentity{ExecutablePath: "fixture.exe", CreationTime: time.Unix(1700000000, 0)}, tc.identityErr
+				},
+				wait: func(gotHandle windows.Handle, timeout uint32) (uint32, error) {
+					calls = append(calls, "wait")
+					if gotHandle != handle || timeout != 0 {
+						t.Fatalf("wait=(%#x,%d)", gotHandle, timeout)
+					}
+					return tc.waitResult, tc.waitErr
+				},
+				close: func(gotHandle windows.Handle) error {
+					calls = append(calls, "close")
+					if gotHandle != handle {
+						t.Fatalf("close=(%#x)", gotHandle)
+					}
+					if tc.cancel {
+						cancel()
+					}
+					return tc.closeErr
+				},
+			})
+			wantCalls := "open,identity,close"
+			if tc.wantWait {
+				wantCalls = "open,identity,wait,close"
+			}
+			if strings.Join(calls, ",") != wantCalls {
+				t.Fatalf("calls=%v, want %s", calls, wantCalls)
+			}
+			if (err != nil) != (len(tc.wantErrs) != 0) || got.ConfirmedAbsent != tc.wantAbsent {
+				t.Fatalf("observation=%+v error=%v", got, err)
+			}
+			for _, cause := range tc.wantErrs {
+				if !errors.Is(err, cause) {
+					t.Fatalf("error=%v, missing %v", err, cause)
+				}
+			}
+			wantIdentity := PIDHandleIdentity{}
+			if tc.identityErr == nil {
+				wantIdentity = PIDHandleIdentity{PID: pid, ExecutablePath: "fixture.exe", StartedAt: time.Unix(1700000000, 0).UTC()}
+			}
+			if got.Identity != wantIdentity {
+				t.Fatalf("identity=%+v, want %+v", got.Identity, wantIdentity)
+			}
+		})
+	}
+}
+
+func TestObservePIDHandleIdentityRechecksOnlyMissingOpen(t *testing.T) {
+	const pid = 4321
+	const handle windows.Handle = 0x1234
+	closeErr := errors.New("fixture close failed")
+	for _, tc := range []struct {
+		name       string
+		openErr    error
+		reopenErr  error
+		waitResult uint32
+		closeErr   error
+		wantCalls  string
+		wantAbsent bool
+		wantErrs   []error
+	}{
+		{name: "missing again", openErr: windows.ERROR_INVALID_PARAMETER, reopenErr: windows.ERROR_INVALID_PARAMETER, wantCalls: "open,reopen", wantAbsent: true},
+		{name: "reopened signaled", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: windows.WAIT_OBJECT_0, wantCalls: "open,reopen,wait,close", wantAbsent: true},
+		{name: "reopened live", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: uint32(windows.WAIT_TIMEOUT), wantCalls: "open,reopen,wait,close", wantErrs: []error{windows.ERROR_INVALID_PARAMETER}},
+		{name: "reopened close failed", openErr: windows.ERROR_INVALID_PARAMETER, waitResult: windows.WAIT_OBJECT_0, closeErr: closeErr, wantCalls: "open,reopen,wait,close", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, closeErr}},
+		{name: "reopen denied", openErr: windows.ERROR_INVALID_PARAMETER, reopenErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open,reopen", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_ACCESS_DENIED}},
+		{name: "initial open denied", openErr: windows.ERROR_ACCESS_DENIED, wantCalls: "open", wantErrs: []error{windows.ERROR_ACCESS_DENIED}},
+		{name: "aggregate open error", openErr: errors.Join(windows.ERROR_INVALID_PARAMETER, closeErr), wantCalls: "open", wantErrs: []error{windows.ERROR_INVALID_PARAMETER, closeErr}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			got, err := readPIDHandleObservation(context.Background(), pid, pidHandleObservationOps{
+				open: func(access uint32, inherit bool, gotPID uint32) (windows.Handle, error) {
+					if inherit || gotPID != pid {
+						t.Fatalf("open=(%#x,%v,%d)", access, inherit, gotPID)
+					}
+					if len(calls) == 0 {
+						calls = append(calls, "open")
+						if access != windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE {
+							t.Fatalf("initial open access=%#x", access)
+						}
+						return 0, tc.openErr
+					}
+					calls = append(calls, "reopen")
+					if access != windows.SYNCHRONIZE {
+						t.Fatalf("reopen access=%#x", access)
+					}
+					if tc.reopenErr != nil {
+						return 0, tc.reopenErr
+					}
+					return handle, nil
+				},
+				identity: func(int, windows.Handle) (processHandleIdentity, error) {
+					t.Fatal("synchronize-only handle cannot read identity")
+					return processHandleIdentity{}, nil
+				},
+				wait: func(gotHandle windows.Handle, timeout uint32) (uint32, error) {
+					calls = append(calls, "wait")
+					if gotHandle != handle || timeout != 0 {
+						t.Fatalf("wait=(%#x,%d)", gotHandle, timeout)
+					}
+					return tc.waitResult, nil
+				},
+				close: func(gotHandle windows.Handle) error {
+					calls = append(calls, "close")
+					if gotHandle != handle {
+						t.Fatalf("close=(%#x)", gotHandle)
+					}
+					return tc.closeErr
+				},
+			})
+			if strings.Join(calls, ",") != tc.wantCalls {
+				t.Fatalf("calls=%v, want %s", calls, tc.wantCalls)
+			}
+			if (err != nil) != (len(tc.wantErrs) != 0) || got != (PIDHandleObservation{ConfirmedAbsent: tc.wantAbsent}) {
+				t.Fatalf("observation=%+v error=%v", got, err)
+			}
+			for _, cause := range tc.wantErrs {
+				if !errors.Is(err, cause) {
+					t.Fatalf("error=%v, missing %v", err, cause)
+				}
+			}
+		})
+	}
+}
+
 func TestHeldPIDJobObservationIsQueryOnlyAndFailClosed(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

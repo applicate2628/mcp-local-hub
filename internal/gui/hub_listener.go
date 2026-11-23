@@ -1,104 +1,35 @@
-// hub_listener.go — Phase 4 Task 4.4 (G4 unified hub MCP).
-//
-// Owns the hub-mcp listener lifecycle, separate from the gui-server
-// listener. Called by Server.Start after the gui-server listener
-// binds and after the gui_server.hub_endpoint_enabled gate evaluates
-// to true. The hub listener is a SEPARATE socket at the operator-
-// chosen port (persisted in hub-mcp.endpoint.json across restarts);
-// the existing per-daemon URLs are unaffected by Phase 4.
-//
-// Bind ordering (spec §"Bind ordering"):
-//
-//   1. Validate <state-dir> sanity (handled by DaemonStateDir).
-//   2. flock(hub-mcp.lock) — implicit in the EnsureHubTokens +
-//      EnsureHubEndpoint helpers.
-//   3. Load OR generate hub-mcp-tokens.json (EnsureHubTokens).
-//   4. Load existing hub-mcp.endpoint.json (LoadHubEndpoint).
-//   5. Validate participating manifests in strict mode
-//      (ManifestValidateForHubBind).
-//   6. listener := NewListenerWithSOExclusive("127.0.0.1:<port>").
-//   7. Write hub-mcp.endpoint.json with the OS-assigned port if
-//      step 4 returned port=0 (EnsureHubEndpoint).
-//   8. funlock — implicit.
-//   9. Serve.
-//
-// Step 7 is the load-bearing crash-safety hop: if it fails AFTER the
-// listener exists, we Close the listener so no traffic is accepted
-// without a published endpoint file.
-//
-// Bind-failure handling: a port-in-use error during step 6 triggers
-// the credential-rotation warning per spec §"Pre-bind handling" —
-// a same-user local process may have pre-bound the port to harvest
-// the token bytes a future client would have sent.
-//
-// Spec: docs/superpowers/specs/2026-05-12-g4-unified-hub-mcp-design-v3.md
-// §"Bind ordering".
-// Plan: docs/superpowers/plans/2026-05-12-g4-unified-hub-mcp.md Task 4.4.
-
 package gui
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/clients"
-	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/mcproute"
 )
 
-const (
-	hubMcpReadHeaderTimeout = 10 * time.Second
-	hubMcpReadTimeout       = 15 * time.Second
-	hubMcpIdleTimeout       = 120 * time.Second
-)
-
-// HubListenerComponents bundles the resources the hub listener owns
-// across its lifetime. Bound to Server in Server.Start so Shutdown
-// can tear them down on context cancellation.
+// HubListenerComponents is the GUI registration and health projection for a
+// listener whose transport is owned by mcproute.
 type HubListenerComponents struct {
-	srv     *http.Server
-	store   *api.HubSessionStore
-	handler *api.HubMcpHandler
-	reload  *api.InternalReloadHandler
-	port    int
-	// reconcilePending is copied from the endpoint returned by the serialized
-	// bind transaction and hydrates the Server-owned health tracker.
+	listener         *mcproute.HubListener
+	port             int
 	reconcilePending bool
-
-	// listenerCancel stops per-listener background watchers. It is
-	// derived from the long-lived hub init context so shutdown/restart can
-	// cancel the old listener's watchers without stopping the restart driver.
-	listenerCancel context.CancelFunc
-
-	// alive is true between the serve goroutine's start and exit.
-	// Server.HubMcpEndpointActive consults this AND the
-	// hubMcpComp.Load() result so the `actual_hub_endpoint_enabled`
-	// settings DTO field reflects CURRENT liveness, not "ever-
-	// published". codex bot r2 P2 closure on PR #168: pre-fix, a
-	// post-startup listener death (accept-loop fatal, etc.) was
-	// only logged via LogHubMcpEvent; hubMcpComp stayed non-nil so
-	// the badge stayed hidden even though the runtime endpoint
-	// was actually down.
-	alive atomic.Bool
+	listenerCancel   context.CancelFunc
+	alive            atomic.Bool
 }
 
-// Alive reports whether the serve goroutine is currently running.
-// Set to true at construction; cleared by a defer in the serve
-// goroutine when Serve returns (any path: clean shutdown or
-// fatal accept-loop error). Exported for cross-package access by
-// Server.HubMcpEndpointActive.
+// Alive reports current transport liveness.
 func (c *HubListenerComponents) Alive() bool {
 	if c == nil {
 		return false
+	}
+	if c.listener != nil {
+		return c.listener.Alive()
 	}
 	return c.alive.Load()
 }
@@ -542,7 +473,7 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 			}
 			return hubListenerRestartStopDriver
 		}
-		if !newComp.alive.Load() {
+		if !newComp.Alive() {
 			if s.hubMcpComp.CompareAndSwap(newComp, nil) {
 				opts.shutdownFn(context.Background(), newComp)
 			}
@@ -727,249 +658,27 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	if !enabled {
 		return nil, nil
 	}
-	if opts.reloadHandlerFn == nil {
-		opts.reloadHandlerFn = api.NewInternalReloadHandler
-	}
-
-	// codex bot phase4 r10 P1 closure on PR #158: short-circuit if
-	// ctx is already canceled BEFORE we touch hub-mcp.lock. The pre-r10
-	// code would still try to acquire the lock (blocking flock) even
-	// though the caller (Server.Start) already gave up — the goroutine
-	// could come back later, bind a listener, and store it in
-	// hubMcpComp AFTER Server.Start returned. Fail fast instead.
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("hub-mcp: %w", err)
-	}
-
-	// Steps 3-7 — lock-atomic bind transaction. codex deep-sec P1
-	// closure on PR #158: the pre-r2 implementation called
-	// EnsureHubTokens (locked), LoadHubEndpoint (no lock),
-	// validateManifests (no lock), bind (no lock), EnsureHubEndpoint
-	// (locked) — leaving four lock-free windows in between. Two
-	// concurrent gui-server starts could both clear the same
-	// persisted port=0 record, both bind distinct OS-assigned
-	// ports, and race the endpoint persist. BindHubMcpListener
-	// holds hub-mcp.lock across the entire sequence so concurrent
-	// starts serialize. SO_EXCLUSIVEADDRUSE (Windows) + ordinary
-	// loopback semantics (POSIX) make the second caller's bind fail
-	// fast against the first caller's already-persisted port.
-	//
-	// codex bot phase4 r10 P1 closure on PR #158: ctx is threaded
-	// into BindHubMcpListener so the lock acquisition itself is
-	// bounded — under contention with a sibling CLI holding
-	// hub-mcp.lock, ctx.Done() unwinds the bind transaction within
-	// ~10 ms (acquireHubMcpLockContext retry cadence). Without this,
-	// the goroutine would block on flock indefinitely past Start's
-	// shutdown budget.
-	res, berr := api.BindHubMcpListener(
-		ctx,
-		clients.SupportedClientNames(),
-		func() error { return validateParticipatingManifestsForHubBind(a) },
-	)
-	if berr != nil {
-		return nil, fmt.Errorf("hub-mcp: %w", berr)
-	}
-	ln := res.Listener
-	ep := res.Endpoint
-	port := ep.Port
-
-	// Groups/namespaces Phase 3 (decision §"Phase 3 diagnostic finding",
-	// Defect A): publish the ResolverSnapshot from the participating
-	// manifests NOW that the gate-ON listener has bound. Before this
-	// wiring NOTHING in production published a snapshot, so the live hub
-	// LoadResolverSnapshot()'d nil at every session initialize → empty
-	// IntendedParticipants → AggregateInitialize fanned out to nothing →
-	// the aggregate exposed no tools (dormant). This is the choke point
-	// the design names: build from the SAME manifest source the bind
-	// pre-gate (validateParticipatingManifestsForHubBind) just validated.
-	//
-	// Gate-ON only by construction: this code is past the `enabled` short-
-	// circuit, so a gate-OFF process never reaches it (no publish at
-	// gate-OFF — the listener never runs, so a published snapshot would be
-	// read by no one anyway).
-	//
-	// A publish failure is NON-fatal to the bind: the listener is already
-	// up and a published-nil snapshot degrades to the same dormant
-	// behavior that existed before this wiring (empty participants), not a
-	// crash. Surface it as a structured warn so the dormant-aggregate
-	// condition is observable rather than silent.
-	if perr := publishResolverSnapshotForHubBind(ctx, a); perr != nil {
-		_ = api.LogHubMcpEvent("warn", "resolver-snapshot-publish-failed", map[string]any{
-			"port": port,
-			"err":  perr.Error(),
-		})
-	}
-
-	// Step 9 — set up mux + serve. Session store is per-listener so
-	// a future "stop hub mode" path can tear down sessions cleanly.
-	store := api.NewHubSessionStore(api.SessionStoreOpts{})
-	handler := api.NewHubMcpHandler(store)
-	handler.SetEndpoint(ep)
-	// codex bot phase4 r5 P2 closure on PR #158: control-token
-	// persistence failure surfaces as a returned error so the hub
-	// listener refuses to come up with a silently-broken
-	// /internal/reload-tokens. Rollback the bound listener so we
-	// don't leave a half-initialized hub server running.
-	reload, reloadErr := opts.reloadHandlerFn(ctx)
-	if reloadErr != nil {
-		_ = ln.Close()
-		store.Close()
-		// codex bot phase4 r8 P2 closure on PR #158: roll back the
-		// persisted endpoint port so status / consumers of
-		// hub-mcp.endpoint.json don't discover a dead port + PID
-		// pair until the next successful startup. ResetHubPort sets
-		// Port=0 and preserves StartedAt + InstanceID (port-only
-		// mutation per its own r2 P2 closure). If the rollback
-		// itself fails (e.g. flock contention with a sibling CLI),
-		// surface that as an additional log line — the operator
-		// must then manually `mcphub gui --reset-port` to clear the
-		// stale endpoint.
-		//
-		// codex bot phase4 r12 P1 closure on PR #158: use the
-		// ctx-aware variant so a sibling holder of hub-mcp.lock can
-		// not freeze the rollback past Server.Start's shutdown
-		// budget. If ctx is already canceled (the typical r10 race
-		// — gui-server gave up on hub init), the rollback fails
-		// fast with context.Canceled; the dead port + PID pair stays
-		// on disk and the operator runs `mcphub gui --reset-port`
-		// manually. That's strictly better than the goroutine
-		// blocking past Start's return and mutating state after.
-		//
-		// Auto-restart opts out of this rollback. Installed client
-		// configs already hold /clients/ and /g/ URLs with the
-		// persisted port; clearing it would make the retry choose a
-		// fresh OS port and orphan those gated URLs. The restart
-		// driver emits hub-listener-restart-failed and retries against
-		// the same persisted port instead.
-		//
-		// Initial startup does not carry a pre-start dependency snapshot into
-		// this later failure boundary. ResetHubPortContext re-probes while its
-		// hub-mcp.lock is held and returns ErrHubPortResetBlocked when a client,
-		// group, or unreadable source now depends on the persisted port.
-		if !opts.preservePortOnReloadHandlerFailure {
-			if rerr := api.ResetHubPortContext(ctx); rerr != nil {
-				if !errors.Is(rerr, api.ErrHubPortResetBlocked) {
-					_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
-						"err": rerr.Error(),
-					})
-				}
-			}
-		}
-		return nil, fmt.Errorf("hub-mcp: %w", reloadErr)
-	}
-
-	mux := http.NewServeMux()
-	// /clients/ catches everything under /clients/<id>/mcp; the
-	// handler's path parser validates the trailing /mcp + the client
-	// id (gate 2). Sourced from api.HubClientPrefix — the single owner
-	// of this literal shared with the parser + URL-builder (deep-review
-	// r2 P4-4: this mount previously re-hardcoded "/clients/").
-	mux.Handle(api.HubClientPrefix, handler)
-	// Groups/namespaces Phase 4b: the SAME handler serves /g/<group>/mcp
-	// (the design's structurally-separate-prefix decision). The handler's
-	// parseHubPathFromURL recognizes BOTH prefixes and maps a group to the
-	// kind-namespaced "g:<group>" scope key; gate 2 rejects an unknown
-	// group with the same empty-body 404 the unknown-client path uses. No
-	// /clients/ behavior changes — the client branch is byte-identical.
-	// Sourced from api.HubGroupPrefix (deep-review r2 P4-4).
-	mux.Handle(api.HubGroupPrefix, handler)
-	// codex bot phase4 r12 P2 closure on PR #158: also register the
-	// bare /clients pattern (no trailing slash) so ServeMux does NOT
-	// auto-301 /clients → /clients/ before the auth/path gates run.
-	// The 301 would (a) emit a redirect response outside the
-	// handler's 404-empty contract and (b) some redirect-following
-	// clients may rewrite POST as GET on the redirect step,
-	// silently dropping the JSON-RPC body. Returning 404 directly
-	// matches the handler's gate-2 path-shape contract.
-	//
-	// codex bot phase4 r13 P2 closure on PR #158: use plain
-	// WriteHeader(404) with no body. http.NotFound writes
-	// "404 page not found\n" which breaks the handler's empty-body
-	// 404 contract for all other gate-2 path-shape failures. Now
-	// every gate-2 path-shape rejection returns the SAME shape:
-	// empty body, status 404. Eliminates route-fingerprinting and
-	// keeps callers from differentiating /clients vs /clients/foo.
-	mux.HandleFunc(strings.TrimSuffix(api.HubClientPrefix, "/"), func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	comp := &HubListenerComponents{}
+	listener, err := mcproute.StartHubListener(ctx, a, mcproute.HubListenerOptions{
+		PreservePortOnReloadHandlerFailure: opts.preservePortOnReloadHandlerFailure,
+		ReloadHandler:                      opts.reloadHandlerFn,
+		HealthProbeInterval:                opts.healthProbeInterval,
+		OnUnresponsive:                     hubListenerComponentCallback(opts.server, comp, opts.onUnresponsive),
+		OnRecovered:                        hubListenerComponentCallback(opts.server, comp, opts.onRecovered),
+		OnServeFailure:                     func(error) { hubListenerServeFailed(opts.server, comp) },
 	})
-	// Mirror the bare-prefix 404 guard for /g (same anti-301 +
-	// empty-body-404 contract as /clients above).
-	mux.HandleFunc(strings.TrimSuffix(api.HubGroupPrefix, "/"), func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	})
-	mux.Handle("/internal/reload-tokens", reload)
-
-	// codex bot phase4 r23 P2 closure on PR #158: pre-filter the
-	// request path BEFORE http.ServeMux gets a chance to apply its
-	// built-in URL normalization (cleanPath collapsing `//`, `/./`,
-	// `/../`). ServeMux would otherwise issue a 301 redirect for
-	// any path that differs from path.Clean(path) — emitting a
-	// Location header for malformed POSTs that the handler contract
-	// says should return a quiet 404. Redirect-following POSTs may
-	// also rewrite to GET on the second hop, silently dropping the
-	// JSON-RPC body. Reject path-traversal / collapsed-slash inputs
-	// directly with empty-body 404, matching every other gate-2
-	// path-shape failure surface.
-	muxedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
-
-	srv := newHubMcpHTTPServer(muxedHandler)
-
-	// Allocate the components bundle BEFORE starting the serve
-	// goroutine so the goroutine can mark `alive=false` on exit
-	// (codex bot r2 P2 closure on PR #168 — accurate live-state
-	// for the persisted-vs-runtime hub-endpoint badge).
-	listenerCtx, listenerCancel := context.WithCancel(ctx)
-	comp := &HubListenerComponents{
-		srv:              srv,
-		store:            store,
-		handler:          handler,
-		reload:           reload,
-		port:             port,
-		reconcilePending: ep.ReconcilePending,
-		listenerCancel:   listenerCancel,
+	if err != nil {
+		return nil, err
 	}
-	comp.alive.Store(true)
-
-	// Hot-swap (b) event-driven proactive re-init: watch the supervisor's daemon
-	// state and mark a cached hub session stale the moment a daemon restart (a
-	// per-port current_pid change) is observed, so the NEXT tools/call re-inits
-	// BEFORE dispatching instead of failing first. Sourced off a.DaemonStatusSnapshot
-	// — the SAME cached + singleflight-collapsed status /api/status already polls
-	// (one fetch, two consumers; no redundant supervisor-IPC dial). Fire-and-forget
-	// on the listener ctx: it unwinds solely on ctx cancellation (hub stop /
-	// shutdown), so it needs no explicit join. (a)'s failure-driven self-heal
-	// remains the backstop for the window between a restart and the next
-	// observation (and for the astronomically-unlikely same-PID-recycle case).
-	go api.NewDaemonRestartWatcher(a.DaemonStatusSnapshot, store.MarkPortStale, 0).Run(listenerCtx)
-
-	// B1 footgun observability + v1 auto-restart trigger:
-	// a HUNG (not crashed) hub listener with the GUI process still alive
-	// is otherwise SILENT — the serve goroutine's `hub-listener-down`
-	// only fires on a serve-loop DEATH, and `\mcp-local-hub-liveness`
-	// probes the supervisor lock, not this listener. This watcher TCP-
-	// dials the bound port on a cadence and emits a structured
-	// `hub-listener-unresponsive` warn (once, on transition). The
-	// optional callback only signals the Server-owned restart driver; the
-	// watcher remains detect-only. v1 is intentionally TCP-dial only.
-	// A handler-deadlock-specific authed round-trip probe is the named v2
-	// follow-up because that probe can itself wedge or consume session cap.
-	// Fire-and-forget on the listener ctx: unwinds solely on ctx
-	// cancellation (hub stop / shutdown), same as the watcher above.
-	healthWatcher := api.NewHubListenerHealthWatcher(port, opts.healthProbeInterval)
-	healthWatcher.SetOnUnresponsive(hubListenerComponentCallback(opts.server, comp, opts.onUnresponsive))
-	healthWatcher.SetOnRecovered(hubListenerComponentCallback(opts.server, comp, opts.onRecovered))
-	go healthWatcher.Run(listenerCtx)
+	ep := listener.Endpoint()
+	comp.listener, comp.port, comp.reconcilePending = listener, ep.Port, ep.ReconcilePending
 
 	// Keep the process-local reconcile latch aligned with a successful CLI
 	// reconcile. This watcher is detect-only: read failures are ignored for the
 	// current tick, and listener cancellation is its sole lifetime boundary.
 	if server := opts.server; server != nil {
+		listenerCtx, cancel := context.WithCancel(ctx)
+		comp.listenerCancel = cancel
 		interval := opts.healthProbeInterval
 		if interval <= 0 {
 			interval = api.DefaultHubHealthProbeInterval
@@ -1001,49 +710,20 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 		}()
 	}
 
-	go func() {
-		// Mark the listener dead on any exit path (clean shutdown via
-		// ErrServerClosed AND fatal accept-loop errors). The badge
-		// consumer (Server.HubMcpEndpointActive) re-reads this on
-		// each /api/settings request, so a post-startup death is
-		// reflected within one snapshot tick.
-		defer comp.alive.Store(false)
-
-		// codex bot phase4 r2 P2 closure on PR #158: surface non-
-		// shutdown serve errors so operators can diagnose a hub
-		// listener that died after startup reported `hub-listener-up`.
-		// http.ErrServerClosed is the normal shutdown signal (returned
-		// by Serve after Shutdown / Close) and not load-bearing here.
-		// Anything else (accept loop fatal, unexpected close, etc.)
-		// is structured-logged via LogHubMcpEvent so it appears in
-		// the same hub-mcp.log stream as bind / lifecycle events.
-		serveHubMcpListener(opts.server, comp, srv, ln, port)
-	}()
-
-	_ = api.LogHubMcpEvent("info", "hub-listener-up", map[string]any{
-		"port": port,
-	})
-
 	return comp, nil
 }
 
-func serveHubMcpListener(s *Server, comp *HubListenerComponents, srv *http.Server, ln net.Listener, port int) {
-	if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-		comp.alive.Store(false)
-		if s != nil {
-			registered := s.hubMcpComp.Load()
-			if registered == nil || registered == comp {
-				if s.hubRestartDriverAlive.Load() {
-					s.hubHealth.set(HubHealthRecovering, "")
-				} else {
-					s.hubHealth.set(HubHealthDown, "")
-				}
+func hubListenerServeFailed(s *Server, comp *HubListenerComponents) {
+	comp.alive.Store(false)
+	if s != nil {
+		registered := s.hubMcpComp.Load()
+		if registered == nil || registered == comp {
+			if s.hubRestartDriverAlive.Load() {
+				s.hubHealth.set(HubHealthRecovering, "")
+			} else {
+				s.hubHealth.set(HubHealthDown, "")
 			}
 		}
-		_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
-			"port": port,
-			"err":  serveErr.Error(),
-		})
 	}
 }
 
@@ -1058,22 +738,7 @@ func hubListenerComponentCallback(s *Server, comp *HubListenerComponents, callba
 	}
 }
 
-func newHubMcpHTTPServer(handler http.Handler) *http.Server {
-	return &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: hubMcpReadHeaderTimeout,
-		ReadTimeout:       hubMcpReadTimeout,
-		IdleTimeout:       hubMcpIdleTimeout,
-	}
-}
-
-// ShutdownHubListener drains the hub listener under a 5s timeout +
-// closes the session store's sweep goroutine + removes the control
-// token file. Idempotent: calling with a nil components is a no-op.
-//
-// Step-7 write failure means components may be nil; the caller's
-// gui-server shutdown still runs but the hub side has nothing to
-// drain.
+// ShutdownHubListener settles the GUI health watcher and the common transport.
 func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 	if c == nil {
 		return
@@ -1081,188 +746,12 @@ func ShutdownHubListener(parentCtx context.Context, c *HubListenerComponents) {
 	if c.listenerCancel != nil {
 		c.listenerCancel()
 	}
-	shutCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
-	defer cancel()
-	if c.srv != nil {
-		// codex bot phase4 r6 P2 closure on PR #158: surface a
-		// graceful-shutdown failure (typically context.DeadlineExceeded
-		// when an in-flight /clients/.../mcp request did not finish
-		// within the budget). We still proceed to tear down the
-		// session store and reload handler — keeping them alive
-		// indefinitely would leak goroutines and the control-token
-		// file. But the operator now sees a structured log line
-		// indicating graceful shutdown did not complete cleanly,
-		// which can correlate with later "request timed out mid-
-		// flight" diagnostics on the client side.
-		if err := c.srv.Shutdown(shutCtx); err != nil {
-			_ = api.LogHubMcpEvent("warn", "hub-shutdown-incomplete", map[string]any{
-				"port": c.port,
-				"err":  err.Error(),
-			})
-			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
-			// Shutdown returned an error (typically context deadline
-			// exceeded) — graceful drain failed. The pre-r24 code
-			// continued to close store/reload, leaving active hub
-			// request goroutines alive (a long tools/call inside
-			// the 60s daemon POST keeps the request handler alive
-			// past the 5s graceful budget). Call srv.Close() to
-			// force-close active connections so request goroutines
-			// can unwind before the process exits.
-			_ = c.srv.Close()
-		}
-	}
-	if c.store != nil {
-		c.store.Close()
-	}
-	if c.reload != nil {
-		// codex bot phase4 r10 P1 closure on PR #158: pass shutCtx
-		// (the 5s shutdown budget) so the reload-token flock
-		// acquisition cannot block past that budget. A sibling
-		// process holding hub-mcp.lock surfaces as
-		// context.DeadlineExceeded here; the in-memory control token
-		// is already cleared, so leaving the on-disk file behind is
-		// harmless — the next hub start regenerates it under flock.
-		if err := c.reload.Shutdown(shutCtx); err != nil {
-			_ = api.LogHubMcpEvent("warn", "hub-control-token-cleanup-incomplete", map[string]any{
-				"port": c.port,
-				"err":  err.Error(),
-			})
-		}
-	}
+	c.listener.Shutdown(parentCtx)
 }
 
-// validateParticipatingManifestsForHubBind iterates every server
-// manifest known to this API instance + checks strict-mode validity.
-// Returns the first failing manifest's error (one violation is
-// enough to refuse the bind per spec §"Pre-gate"). An empty manifest
-// set is acceptable (operator may be running gui without manifests).
-//
-// Wraps api.API.ManifestValidateForHubBind so callers in this file
-// share the same gate.
-func validateParticipatingManifestsForHubBind(a *api.API) error {
-	if a == nil {
-		return nil
-	}
-	scan, err := a.Scan()
-	if err != nil {
-		return fmt.Errorf("scan manifests: %w", err)
-	}
-	for _, entry := range scan.Entries {
-		if !entry.ManifestExists {
-			continue
-		}
-		// codex deep-sec P2 closure on PR #158: read with ManifestGet
-		// (embedded-first) so manifests baked into the binary AND
-		// disk overrides are validated against the same strict gate.
-		// ManifestGetWithHash was disk-only — an embedded-only
-		// manifest hit os.ErrNotExist and got silently skipped,
-		// bypassing the bind pre-gate for the shipped manifest set.
-		yaml, gerr := a.ManifestGet(entry.Name)
-		if gerr != nil {
-			// codex bot phase4 r1 P1 closure on PR #158: only the
-			// scan-window race (manifest deleted between scan and read)
-			// is benign. Permission errors, schema errors, or any
-			// other read failure MUST fail the bind so the strict
-			// pre-gate isn't silently bypassed.
-			if errors.Is(gerr, os.ErrNotExist) {
-				continue
-			}
-			return fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
-		}
-		if verr := a.ManifestValidateForHubBind(yaml); verr != nil {
-			return fmt.Errorf("manifest %q: %w", entry.Name, verr)
-		}
-	}
-	return nil
-}
-
-// publishResolverSnapshotForHubBind builds + publishes the hub's
-// ResolverSnapshot from the participating manifests. This is the
-// production publish choke point the groups/namespaces design names
-// (decision §"Phase 3 diagnostic finding", Defect A): pre-this-wiring
-// the snapshot publish path (PublishResolverSnapshot /
-// BumpResolverOnManifestChange) had ZERO production callers, so the
-// gate-ON hub aggregate read a nil snapshot and exposed no tools.
-//
-// Manifest source: the SAME set validateParticipatingManifestsForHubBind
-// validates — a.Scan() entries with ManifestExists, loaded via
-// a.ManifestGet (embed-first). Building from the validated set keeps the
-// published topology consistent with what passed the bind pre-gate.
-//
-// Each manifest's client_bindings rows become Bindings[client] entries
-// (keyed by the same client id parseClientPathFromURL yields), via the
-// existing BumpResolverOnManifestChange atomic-swap publish. A manifest
-// whose client_bindings is empty contributes nothing — additive by
-// omission, identical to today when the file carries no bindings.
-//
-// A per-manifest parse failure is a hard error here (not a silent skip):
-// the bind pre-gate already validated every manifest, so a parse failure
-// at this point is a genuine inconsistency the operator should see, not a
-// routine missing-server case. The caller treats the returned error as
-// non-fatal to the bind (logs a warn) so a single bad manifest degrades
-// to the dormant-aggregate behavior, never a failed gui startup.
+// Group and manifest changes share the resolver publisher used at listener startup.
 func publishResolverSnapshotForHubBind(ctx context.Context, a *api.API) error {
-	if a == nil {
-		return nil
-	}
-	// R4-3 (bot R4): the manifest scan is now run UNDER hub-mcp.lock, inside
-	// PublishGroupsSnapshotLocked, via this closure — so scan+publish is one
-	// atomic critical section and concurrent manifest mutations serialize on
-	// the flock, each publishing the LATEST on-disk manifest set (no stale
-	// scan can clobber a newer publish). The closure reads client config, the
-	// workspace registry, process snapshots, and embed-first manifests — NONE
-	// of which acquire hub-mcp.lock — so running it under the held lock is
-	// deadlock-free (verified: a.Scan / a.ManifestGet / config.ParseManifest
-	// have no path to acquireHubMcpLock).
-	scanManifests := func() ([]config.ServerManifest, error) {
-		scan, err := a.Scan()
-		if err != nil {
-			return nil, fmt.Errorf("scan manifests: %w", err)
-		}
-		manifests := make([]config.ServerManifest, 0, len(scan.Entries))
-		for _, entry := range scan.Entries {
-			if !entry.ManifestExists {
-				continue
-			}
-			// Embed-first read, matching validateParticipatingManifestsForHubBind.
-			yamlStr, gerr := a.ManifestGet(entry.Name)
-			if gerr != nil {
-				// Scan-window race (manifest deleted between scan and read) is
-				// benign — skip it. Any other read error is surfaced.
-				if errors.Is(gerr, os.ErrNotExist) {
-					continue
-				}
-				return nil, fmt.Errorf("manifest %q: read: %w", entry.Name, gerr)
-			}
-			m, perr := config.ParseManifest(strings.NewReader(yamlStr))
-			if perr != nil {
-				return nil, fmt.Errorf("manifest %q: parse: %w", entry.Name, perr)
-			}
-			manifests = append(manifests, *m)
-		}
-		return manifests, nil
-	}
-	// Groups/namespaces Phase 4a (DATA layer): fold groups.yaml into the
-	// SAME published snapshot under kind-namespaced "g:<group>" keys, and
-	// ensure a per-group hub-token row (loopback-only — the §D auth seam).
-	//
-	// P3-2 (opus-arch) + R4-3/R4-4 (bot R4): the scan → groups read →
-	// token-ensure → publish span is serialized under ONE held hub-mcp.lock
-	// inside PublishGroupsSnapshotLocked so a concurrent GUI groups OR manifest
-	// mutation can never make this read an intermediate config and publish a
-	// torn / out-of-order topology. The flock is acquired ctx-bounded (R4-4) so
-	// a stuck sibling holder cannot freeze GUI startup/shutdown past its budget.
-	// No deadlock: this runs AFTER any RMW / bind lock was released, the scan
-	// closure does not acquire hub-mcp.lock, and the helper only calls in-flock
-	// ("…Locked") halves that do not re-acquire.
-	//
-	// A bad / unreadable groups.yaml must NEVER fault the client snapshot
-	// publish (additive-by-omission, decision claim 5): the helper degrades a
-	// load error to "no groups" with a structured warn, so the bare-<client>
-	// bindings still publish exactly as before. A token-ensure failure is
-	// surfaced (deferred — the snapshot publishes first) so the GUI mutation
-	// tail reports restart_required rather than a false full success.
-	return api.PublishGroupsSnapshotLocked(ctx, scanManifests)
+	return mcproute.PublishHubResolverSnapshot(ctx, a)
 }
 
 // isMissingHubEndpoint is true if err describes a "hub-mcp.endpoint.json

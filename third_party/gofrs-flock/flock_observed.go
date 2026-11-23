@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type AcquisitionObservation struct {
 	FileCloseAttempts    uint64
 	FilesClosed          uint64
 	AllocatedFilesClosed bool
+	AcquireError         error
+	Pending              bool
 	Error                error
 }
 
@@ -45,6 +48,8 @@ type ReleaseObservation struct {
 type observedAcquisition struct {
 	generation                              uint64
 	attempted, returned                     bool
+	singleAttempt                           bool
+	nativeAcquireErr                        error
 	held                                    bool
 	filesOpened, closeAttempts, filesClosed uint64
 	closeErr                                error
@@ -59,6 +64,30 @@ type observedAcquisition struct {
 // allocated descriptor is counted by setFh/resetFh, including busy/error and
 // POSIX reopen branches. Legacy returns keep their original error semantics.
 func (f *Flock) TryLockContextObserved(ctx context.Context, retryDelay time.Duration) (AcquisitionObservation, error) {
+	return f.acquireObserved(ctx, false, func() (bool, error) {
+		return tryCtx(ctx, f.tryLockObserved, retryDelay)
+	})
+}
+
+// TryLockObserved performs exactly one nonblocking original Windows attempt.
+// Cancellation after the attempt retains the actual held or partial owner.
+func (f *Flock) TryLockObserved(ctx context.Context) (AcquisitionObservation, error) {
+	if runtime.GOOS != "windows" {
+		return AcquisitionObservation{}, errors.ErrUnsupported
+	}
+	return f.acquireObserved(ctx, true, func() (bool, error) {
+		return f.tryLockObserved()
+	})
+}
+
+// Record the original Windows status before the platform maps busy to false.
+func (f *Flock) recordSingleNativeAcquire(original bool, cause error) {
+	if original && f.observed != nil && f.observed.singleAttempt && !f.observed.returned {
+		f.observed.nativeAcquireErr = cause
+	}
+}
+
+func (f *Flock) acquireObserved(ctx context.Context, single bool, attempt func() (bool, error)) (AcquisitionObservation, error) {
 	if f == nil || ctx == nil {
 		return AcquisitionObservation{}, errors.New("observed flock/context required")
 	}
@@ -66,7 +95,7 @@ func (f *Flock) TryLockContextObserved(ctx context.Context, retryDelay time.Dura
 		return AcquisitionObservation{}, err
 	}
 	f.m.Lock()
-	if f.observed != nil && !f.observed.returned {
+	if f.observed != nil && (!f.observed.returned || f.observed.release == nil && (single || f.observed.singleAttempt)) {
 		f.m.Unlock()
 		return AcquisitionObservation{}, errors.New("observed acquisition already entered")
 	}
@@ -80,9 +109,9 @@ func (f *Flock) TryLockContextObserved(ctx context.Context, retryDelay time.Dura
 		return AcquisitionObservation{}, errors.New("preexisting or unresolved flock ownership cannot become observed acquisition")
 	}
 	f.observedGeneration++
-	f.observed = &observedAcquisition{generation: f.observedGeneration, attempted: true}
+	f.observed = &observedAcquisition{generation: f.observedGeneration, attempted: true, singleAttempt: single}
 	f.m.Unlock()
-	held, acquireErr := tryCtx(ctx, f.tryLockObserved, retryDelay)
+	held, acquireErr := attempt()
 	f.m.Lock()
 	defer f.m.Unlock()
 	state := f.observed
@@ -94,6 +123,13 @@ func (f *Flock) TryLockContextObserved(ctx context.Context, retryDelay time.Dura
 		f.observedPending = errors.Join(f.observedPending, errors.New("observed acquisition resource closure incomplete"))
 		err = errors.Join(err, f.observedPending)
 		view.Error = err
+	}
+	if single {
+		view.AcquireError = state.nativeAcquireErr
+		if view.AcquireError == nil {
+			view.AcquireError = acquireErr
+		}
+		view.Pending = f.observedPending != nil
 	}
 	return view, err
 }

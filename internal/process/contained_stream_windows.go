@@ -398,6 +398,21 @@ func (c *windowsContainedChild) containedRootIdentity() (ContainedRootIdentity, 
 	return v, nil
 }
 func (c *windowsContainedChild) settleContained(ctx context.Context, natural bool) (ContainedNativeSnapshot, error) {
+	return c.settleContainedWithEOFGrace(ctx, natural, time.Time{})
+}
+
+func (c *windowsContainedChild) settleContainedAfterEOF(ctx context.Context, grace time.Time) (ContainedNativeSnapshot, error) {
+	if err := creatorClosureContext(ctx); err != nil {
+		return ContainedNativeSnapshot{}, err
+	}
+	deadline, _ := ctx.Deadline()
+	if grace.IsZero() || !grace.Before(deadline) {
+		return ContainedNativeSnapshot{}, errors.New("original EOF grace must precede terminal deadline")
+	}
+	return c.settleContainedWithEOFGrace(ctx, true, grace)
+}
+
+func (c *windowsContainedChild) settleContainedWithEOFGrace(ctx context.Context, natural bool, grace time.Time) (ContainedNativeSnapshot, error) {
 	if c != nil && c.memberSource != nil {
 		permit, owned, err := c.job.enterMemberTerminal(ctx)
 		if err != nil {
@@ -443,7 +458,19 @@ func (c *windowsContainedChild) settleContained(ctx context.Context, natural boo
 	original.required = true
 	var observation jobTerminationObservation
 	var err error
-	if natural {
+	jobEmpty := false
+	if !grace.IsZero() {
+		jobEmpty, err = c.job.waitOriginalEOFGrace(ctx, grace)
+		if err != nil {
+			return v, err
+		}
+	}
+	if jobEmpty {
+		// Before the grace expires, only the non-terminating proof is
+		// permitted. Accounting is the gate, not the terminal receipt.
+		observation, err = c.job.observeCreatorClosure(ctx, original)
+		observation.terminalAction = creatorTerminalNotRequested
+	} else if natural {
 		observation, err = c.job.completeCreatorAfterExit(ctx, original)
 	} else {
 		deadline, _ := ctx.Deadline()
@@ -464,4 +491,33 @@ func (c *windowsContainedChild) settleContained(ctx context.Context, natural boo
 	v.CapturedMemberPIDs = append([]uint32(nil), observation.native.CapturedMemberPIDs...)
 	v.Error = errors.Join(err, observation.terminalActionErr, c.creationError, c.attributeClose.Error)
 	return v, v.Error
+}
+
+// Called under the existing original-Job terminal permit. Accounting follows
+// the whole retained Job as helpers exit or start, including after root exit.
+func (j *Job) waitOriginalEOFGrace(ctx context.Context, grace time.Time) (bool, error) {
+	ops := j.terminationOperations()
+	for {
+		if err := creatorClosureContext(ctx); err != nil {
+			return false, err
+		}
+		remaining := time.Until(grace)
+		if remaining <= 0 {
+			return false, nil
+		}
+		info, err := ops.accounting(j)
+		if err != nil {
+			return false, fmt.Errorf("observe original Job during EOF grace: %w", err)
+		}
+		if info.ActiveProcesses == 0 {
+			return true, nil
+		}
+		timer := time.NewTimer(min(time.Until(grace), terminateAllPollInterval))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
