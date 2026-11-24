@@ -1276,14 +1276,16 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 	// no-injection — never block startup.
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
+	var daemonCreators *daemonCreatorRecords
 	if spawnFn == nil {
-		daemonCreators := &daemonCreatorRecords{}
+		daemonCreators = &daemonCreatorRecords{}
 		spawnFn = makeProductionSpawnFnWithCreatorRecords(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx, oneAPIInj, strictJobProtection, nil, daemonCreators)
 	}
 	terminateFn := reconcileTerminateFn
 	var terminateOutcomeFn terminationOutcomeFunc
 	if terminateFn == nil {
 		terminateOutcomeFn = makeProductionTerminationOutcomeFn(events, runningPIDs, runtimeTracker, statePath)
+		terminateOutcomeFn = guardForceStopTermination(daemonCreators, terminateOutcomeFn)
 		terminateFn = func(d api.SupervisorDaemon) error {
 			return terminateOutcomeFn(d, terminationExpectedTupleForTask(runtimeTracker, d.TaskName)).legacyError()
 		}
@@ -1312,6 +1314,7 @@ func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool
 		spawn:               spawnFn,
 		terminate:           terminateFn,
 		terminateOutcome:    terminateOutcomeFn,
+		daemonCreators:      daemonCreators,
 		statePath:           statePath,
 		ctx:                 loopCtx,
 		targetRegistryPath:  api.DefaultRegistryPath,
@@ -2311,6 +2314,8 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		return handleExit(conn, req, deps)
 	case "respawn":
 		return handleRespawn(conn, req, deps)
+	case "force_stop":
+		return handleForceStop(conn, req, deps)
 	case "reconcile":
 		// Phase A.3 (plan v10 §A.3, 2026-05-20): operator-triggered
 		// in-place drift cleanup. Reads supervisor-intent.json + the
@@ -3655,6 +3660,23 @@ type crashEvent struct {
 	WaitErr   error
 }
 
+// daemonWaitExitCode gives the original creator snapshot precedence over an
+// optional ExitError. Unknown keeps the existing diagnostic default; the caller
+// retains its wait error and refuses terminal publication.
+func daemonWaitExitCode(root *process.CreatorRootExitSnapshot, waitErr error) int {
+	if root != nil {
+		if root.Known {
+			return root.ExitCode
+		}
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 0
+}
+
 // spawnWorkerObserver is an optional, per-factory fixture boundary. Production
 // callers pass nil; the returned SpawnFunc and its child policy are unchanged.
 type spawnWorkerObserver interface {
@@ -3678,6 +3700,8 @@ type daemonCreatorOperation struct {
 	id                 uint64
 	task               string
 	generation         int
+	pid                int
+	startedAt          time.Time
 	role               string
 	owner              *process.ProvisionalProcess
 	starting           bool
@@ -3690,11 +3714,17 @@ type daemonCreatorOperation struct {
 	rootErr            error
 	terminal           *process.CreatorTerminalResult
 	terminalErr        error
-	readinessDone      bool
-	readinessErr       error
-	waiterDone         bool
-	waiterErr          error
-	complete           bool
+	// Natural exit and force-stop join this one original terminal operation.
+	// The native owner itself rejects concurrent terminal calls; it does not
+	// join them. This completion cell preserves the sole waiter's exit publish.
+	terminalDone             chan struct{}
+	forceStopRequested       bool
+	otherTerminationSelected bool
+	readinessDone            bool
+	readinessErr             error
+	waiterDone               bool
+	waiterErr                error
+	complete                 bool
 }
 
 func (r *daemonCreatorRecords) begin(task string) (*daemonCreatorOperation, error) {
@@ -4408,6 +4438,7 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 		if creators != nil {
 			creators.mu.Lock()
 			operation.generation = spawnGen
+			operation.pid, operation.startedAt = pid, startedAt
 			creators.mu.Unlock()
 		}
 		if workers != nil {
@@ -4478,20 +4509,21 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 			}
 			<-spawnLogged
 			var waitErr error
+			var creatorRoot *process.CreatorRootExitSnapshot
 			if creator != nil {
 				root, rootErr := creator.WaitCreatorRoot()
+				creatorRoot = &root
 				waitErr = rootErr
-				var terminal *process.CreatorTerminalResult
-				var terminalErr error
-				if root.Known {
-					terminalCtx, cancel := context.WithTimeout(context.Background(), daemonCreatorTerminalObservationBudget)
-					terminal, terminalErr = creator.CompleteCreatorAfterExit(terminalCtx, true)
-					cancel()
-				} else {
-					terminalErr = errors.New("daemon original root exit is unavailable for terminal policy")
-				}
+				terminalCtx, cancel := context.WithTimeout(context.Background(), daemonCreatorTerminalObservationBudget)
+				_, terminalErr := creators.completeTerminal(terminalCtx, operation, func(ctx context.Context) (*process.CreatorTerminalResult, error) {
+					if !root.Known {
+						return nil, errors.New("daemon original root exit is unavailable for terminal policy")
+					}
+					return creator.CompleteCreatorAfterExit(ctx, true)
+				})
+				cancel()
 				creators.mu.Lock()
-				operation.root, operation.rootErr, operation.terminal, operation.terminalErr = root, rootErr, terminal, terminalErr
+				operation.root, operation.rootErr = root, rootErr
 				creators.mu.Unlock()
 				workerErr = terminalErr
 			} else {
@@ -4511,11 +4543,7 @@ func makeProductionSpawnFnWithCreatorRecords(events *api.SupervisorEventLog, tra
 			// pid_generation and the operator has zero data on why.
 			// Emitting daemon-exited with pid + exit_code + wait_err
 			// closes that diagnostic gap.
-			exitCode := 0
-			var ee *exec.ExitError
-			if errors.As(waitErr, &ee) {
-				exitCode = ee.ExitCode()
-			}
+			exitCode := daemonWaitExitCode(creatorRoot, waitErr)
 			severity := "info"
 			if waitErr != nil || exitCode != 0 {
 				severity = "warn"

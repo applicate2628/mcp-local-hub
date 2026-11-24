@@ -1,20 +1,9 @@
 package api
 
-// Phase F follow-up (bot PR #288 F3) — make `mcphub stop --force` terminate
-// SUPERVISOR-OWNED daemons.
-//
-// The --force branch records NO Desired=stopped intent (its documented
-// contract: the daemon auto-revives), so it deliberately skips the
-// reconcile-driven stop path the no-force branch uses
-// (stopSupervisorOwnedDaemons). It then calls stopKillCore, whose kill
-// targets come ONLY from the scheduler List / listTasksForServer. Under
-// the v0.6 Phase F model a global daemon has NO scheduler task — it lives
-// in supervisor-intent.json — so for such a daemon stopKillCore iterates an
-// empty set and kills NOTHING: `mcphub stop --force <global>` recorded the
-// forced-stop audit + intent but left the daemon running until the next
-// reconcile. This file closes that gap: the force branch also resolves the
-// supervisor-owned descriptors in scope and kills them directly, preserving
-// the force semantic (a non-clean kill the reaper observes → auto-revive).
+// Explicit force-stop delegates to the Supervisor's retained creator. It does
+// not write Desired=stopped or infer termination authority from PID/port data.
+// The older observation-based helpers below remain used by legacy removal and
+// unavailable-Supervisor cleanup; they are not a force-stop fallback.
 
 import (
 	"context"
@@ -26,52 +15,20 @@ import (
 	"mcp-local-hub/internal/process"
 )
 
-// stopForceKillPIDFn is the test seam for the PID-kill fallback used when a
-// supervisor-owned descriptor carries no port (e.g. a degenerate or
-// not-yet-bound row) but the IPC status reports a live PID. Production uses the
-// strongest tree primitive per platform: Windows goes through the Lane A
-// taskkill /T primitive; POSIX goes through process.TreeKillByPID, which kills
-// the process group and falls back to a single PID only when the target is not a
-// group leader. Mirrors killByPortFn's seam discipline so the force-kill path is
-// exercisable without touching real processes.
+// The legacy PID adapter now refuses in production on every platform. Old
+// classifier tests may inject outcomes; those injections are not native proof.
+// Successful force-stop is delegated through supervisorForceStopFn below.
 var stopForceKillPIDFn = stopForceKillSupervisorPIDTree
 
-// supervisorIPCStatusFn is the test seam for supervisor IPC status reads that
-// need the supervisor-owned live PID map. The force path uses it to recover a
-// live PID when a descriptor has no port; the serena idle-wake readiness proof
-// uses it to bind the woken task to the supervisor-reported child PID before
-// trusting the daemon port. Production: DialSupervisorIPCStatus. In the force
-// path, an unreachable supervisor (ErrSupervisorIPCUnavailable) is non-fatal
-// only after the liveness probe confirms no live supervisor owner remains; a
-// live owner with broken IPC would respawn a non-clean descriptor kill.
+// supervisorIPCStatusFn supplies observations to legacy removal and Serena
+// idle-wake readiness. Explicit force-stop uses supervisorForceStopFn instead.
 var supervisorIPCStatusFn = DialSupervisorIPCStatus
 
-// stopForceKillSupervisorOwned terminates the supervisor-owned daemons in
-// scope for `mcphub stop --force`. It is the force-branch counterpart to the
-// no-force stopSupervisorOwnedDaemons (which drives reconcile-apply): force
-// records no stop intent, so a reconcile would read Desired=running and post
-// nothing — the only correct force action is a direct kill the reaper sees as
-// a non-clean exit, leaving the daemon to auto-revive.
-//
-// Returns (results, handled, err):
-//
-//   - No supervisor intent file or no targets in scope → (nil, false, nil):
-//     nothing is supervisor-owned here; the legacy stopKillCore owns the
-//     stop (it still iterates the scheduler tasks for legacy rows).
-//   - Otherwise → one RestartResult row per target with handled=true. Each
-//     target is killed by its descriptor Port via the shared port-kill
-//     primitive, unless IPC is unavailable while the supervisor owner is still
-//     live/undeterminable. A live owner receives retryable error rows instead
-//     of a force kill because the supervisor reaper can respawn the child. A
-//     target with no descriptor port, no port-owner lookup, or no current port
-//     listener falls back to a PID kill resolved from the supervisor IPC status.
-//     A portless target with no live PID is an error row: force-stop has no kill
-//     surface and cannot prove the daemon is gone.
-//
-// The returned handled set's task names let the caller skip these rows in
-// stopKillCore so a daemon is never double-killed (and a legacy row that
-// ALSO has a scheduler task is still reached by stopKillCore for the names
-// NOT in this set).
+var supervisorForceStopFn = DialSupervisorIPCForceStop
+
+// Every selected target receives one receipt or an explicit refusal. Missing
+// custody, old protocol, unsupported platforms and transport failures never
+// fall through to numerical PID or listener-based termination.
 func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {
 	targets, err := loadSupervisorOwnedTargets(server, daemonFilter)
 	if err != nil {
@@ -81,19 +38,39 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 		return nil, false, nil
 	}
 
-	// Best-effort IPC status, used only to recover a live PID for a target
-	// whose descriptor carries no port. If IPC is unavailable, prove there is no
-	// live supervisor owner before falling back to descriptor force-kill.
-	pidByTask, reachable, statusErr := supervisorOwnedLivePIDsWithReachabilityErr(ctx)
-	if !reachable && errors.Is(statusErr, ErrSupervisorIPCUnavailable) {
-		if rows, blocked := supervisorIPCUnavailableRetryRowsForLiveOwner(targets, statusErr); blocked {
-			return rows, true, nil
-		}
-	}
-
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {
-		results = append(results, forceKillOneSupervisorTarget(d, pidByTask))
+		port, _ := EffectiveDaemonPort(d)
+		receipt, err := supervisorForceStopFn(ctx, d.TaskName, port)
+		row := RestartResult{TaskName: d.TaskName}
+		if err != nil {
+			row.Code = ForceStopClosureIncomplete
+			var ipcErr *IPCErr
+			if errors.As(err, &ipcErr) {
+				row.Code = ipcErr.Code
+			} else if errors.Is(err, ErrSupervisorIPCUnavailable) {
+				row.Code = ForceStopOwnerUnavailable
+			}
+			row.Err = "supervisor force_stop: " + err.Error()
+			if receipt.State != "" {
+				row.Err += fmt.Sprintf(" (receipt state=%s, root_exited=%t, tree_closed=%t, handles_closed=%t)", receipt.State, receipt.RootExited, receipt.TreeClosed, receipt.HandlesClosed)
+			}
+		} else if receipt.State != ForceStopClosed || !receipt.RootExited || !receipt.TreeClosed || !receipt.HandlesClosed || receipt.Error != "" {
+			row.Code, row.Err = receipt.Reason, receipt.Error
+			if row.Code == "" {
+				row.Code = ForceStopClosureIncomplete
+			}
+			if row.Err == "" {
+				row.Err = "supervisor force_stop did not prove original tree closure"
+			}
+			row.Err += fmt.Sprintf(" (root_exited=%t, tree_closed=%t, handles_closed=%t, action=%s)", receipt.RootExited, receipt.TreeClosed, receipt.HandlesClosed, receipt.Action)
+		} else if receipt.PortState != "free" {
+			row.Warning = fmt.Sprintf("original process tree closed; port state is %s (owner pid %d); automatic restart remains governed by running intent", receipt.PortState, receipt.PortOwnerPID)
+			if receipt.PortError != "" {
+				row.Warning += "; " + receipt.PortError
+			}
+		}
+		results = append(results, row)
 	}
 	return results, true, nil
 }
@@ -141,6 +118,9 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 			pidKillContext = pidKillErr.Error()
 		} else if err := stopForceKillPIDFn(pid); err != nil {
 			pidKillErr = fmt.Errorf("force kill daemon by pid %d: %w", pid, err)
+			if errors.Is(err, ErrOriginalProcessOwnerRequired) {
+				return RestartResult{TaskName: d.TaskName, Code: ForceStopOwnerUnavailable, Err: pidKillErr.Error()}
+			}
 			// (no pidKillContext set here: both exits below return pidKillErr
 			// directly and never reach the port-path appendPIDKillContext, so an
 			// assignment would be dead — SA4006.)
@@ -176,6 +156,9 @@ func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) 
 	if d.Port != 0 {
 		outcome, err := forceKillByPortFn(d.Port, 5*time.Second)
 		if err != nil {
+			if errors.Is(err, ErrOriginalProcessOwnerRequired) {
+				return RestartResult{TaskName: d.TaskName, Code: ForceStopOwnerUnavailable, Err: appendPIDKillContext(err.Error(), pidKillContext)}
+			}
 			return RestartResult{TaskName: d.TaskName, Err: appendPIDKillContext("force kill daemon by port: "+err.Error(), pidKillContext)}
 		}
 		if outcome == portKillKilled {

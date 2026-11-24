@@ -11,12 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -3236,14 +3234,10 @@ func isMcphubProcessImage(image string) bool {
 	return strings.EqualFold(strings.TrimSpace(image), mcphubProcessImageName)
 }
 
-// mcphubPIDImageVerified probes the identity of pid. The identity gate is
-// BEST-EFFORT hardening only when the lookup surface is structurally
-// unavailable (nil seam, e.g. non-Windows hosts where no PID-image probe is
-// wired): the caller may proceed in that case to preserve stop --force on
-// hosts without the lookup. Once a probe is wired, however, an ok=false result
-// means verification was attempted and failed (lookup/parsing failure, exited
-// process, PID reuse race, etc.) and must fail closed rather than authorize a
-// kill without a positive mcphub image verdict.
+// mcphubPIDImageVerified classifies a PID observation. A wired probe failure
+// remains unknown; an absent probe is reported separately for compatibility.
+// Neither a positive image/SID result nor a missing lookup grants termination
+// authority: the numerical termination leaves require the original creator.
 func mcphubPIDImageVerified(pid int) (image, parentImage string, verified, lookupAvailable, lookupOK bool) {
 	if processIdentityByPID == nil {
 		return "", "", false, false, false
@@ -4906,23 +4900,13 @@ var forceKillByPortFn = killDaemonByPortOutcome
 var taskkillProcessTreeByPIDFn = taskkillProcessTreeByPID
 
 func taskkillProcessTreeByPID(pid int) error {
-	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F", "/T")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("taskkill %d: %w: %s", pid, err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return &OriginalProcessOwnerRequiredError{PID: pid}
 }
 
-// killDaemonByPort finds the process listening on 127.0.0.1:port, kills
-// its whole tree with taskkill /F /T, and polls until the port is free.
-// Returns nil when nothing is listening (nothing to kill), or when the host has
-// no process-lookup hook for port-owner discovery.
-//
-// /T is critical: our hub.exe spawns npx/uvx which spawn node/python.
-// Killing only hub.exe leaves the grandchildren running and occupying
-// the child-stdin side of the pipe.
+// killDaemonByPort retains the legacy observation/error adapter. A listener
+// found by port cannot be terminated by its numeric PID: the production leaf
+// returns ErrOriginalProcessOwnerRequired. Historical absent/unsupported
+// observations remain distinct outcomes, not native tree-closure receipts.
 func killDaemonByPort(port int, timeout time.Duration) error {
 	_, err := killDaemonByPortOutcome(port, timeout)
 	return err
@@ -4958,7 +4942,9 @@ func killDaemonByPortOutcome(port int, timeout time.Duration) (portKillOutcome, 
 		return portKillIdentityMismatch, err
 	}
 	if err := taskkillProcessTreeByPIDFn(pid); err != nil {
-		return portKillNoListener, err
+		// A refused operation is not a no-listener observation. The original
+		// creator must perform termination; this API holds only a numeric PID.
+		return portKillProbeUnknown, err
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

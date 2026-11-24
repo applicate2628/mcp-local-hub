@@ -191,6 +191,7 @@ func TestMain(m *testing.M) {
 	prevAutoRegisterReadiness := autoRegisterReadinessFn
 	prevTaskkillTree := taskkillProcessTreeByPIDFn
 	prevStopForceKillPID := stopForceKillPIDFn
+	prevSupervisorForceStop := supervisorForceStopFn
 	prevSnapshotProcesses := snapshotProcessesFn
 	prevFrozenStdioBridgeAdmission := frozenStdioBridgeAdmissionFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
@@ -228,6 +229,9 @@ func TestMain(m *testing.M) {
 	// force-stop test can never SIGKILL a real process group.
 	stopForceKillPIDFn = func(int) error {
 		return errors.New("force-kill PID sealed by TestMain default-stub")
+	}
+	supervisorForceStopFn = func(context.Context, string, int) (ForceStopResultV1, error) {
+		return ForceStopResultV1{}, ErrSupervisorIPCUnavailable
 	}
 	// CleanupLogWatchers shells out to wmic/ps through snapshotProcessesFn, then
 	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
@@ -282,6 +286,7 @@ func TestMain(m *testing.M) {
 	autoRegisterReadinessFn = prevAutoRegisterReadiness
 	taskkillProcessTreeByPIDFn = prevTaskkillTree
 	stopForceKillPIDFn = prevStopForceKillPID
+	supervisorForceStopFn = prevSupervisorForceStop
 	snapshotProcessesFn = prevSnapshotProcesses
 	frozenStdioBridgeAdmissionFn = prevFrozenStdioBridgeAdmission
 	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {

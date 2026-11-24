@@ -50,6 +50,7 @@ func TestTestMainSealsLiveFleetAndSlowSeams(t *testing.T) {
 	sealed("loopbackPortOwnerFn", loopbackPortOwnerFn, loopbackPortOwnerPID)
 	sealed("taskkillProcessTreeByPIDFn", taskkillProcessTreeByPIDFn, taskkillProcessTreeByPID)
 	sealed("stopForceKillPIDFn", stopForceKillPIDFn, stopForceKillSupervisorPIDTree)
+	sealed("supervisorForceStopFn", supervisorForceStopFn, DialSupervisorIPCForceStop)
 }
 
 // liveSeamSinkNames are the production functions whose presence in a package-var

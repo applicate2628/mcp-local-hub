@@ -1,0 +1,389 @@
+{
+  "schema": "audit-force-stop-evidence-v1",
+  "pr": 659,
+  "base": "a3568dfe3426afaca4176d57a2310097e5214e77",
+  "status": "FOCUSED_PASS_NOT_PRODUCT_ACCEPTANCE",
+  "source_sha256": {
+    "internal/api/install.go": "dd44698c603109ec0d483fb51d1141ac4e6a3e18197d5f3973c6ab1106933539",
+    "internal/api/install_intent.go": "5bb7ad503b54c729bc7749a6d8f2e12a39771eb6a734d1c1be9472af92c5ced5",
+    "internal/api/install_parsed_manifest.go": "8c3d106388c7db01deb312a86292407b068527160a4201f814833900b5ff3102",
+    "internal/api/install_parsed_manifest_lane_b_test.go": "335593b0503bfec793cca5592c3ad369fab4aa0b78282e619db87681706339bc",
+    "internal/api/main_test.go": "dd3f392c84b1db87a48a29d59ed2528ccb239a5af25d353b753f883b8f3a3ff6",
+    "internal/api/original_process_owner_required_test.go": "bd4fb805baee10374803667167e2aabd4ccdb768df2326b147abb05586a395d5",
+    "internal/api/phase_f_lifecycle_test.go": "518db73eeff4dddef2f7cb07286dda2e821fac7d734b6f7769d2f16cd2181597",
+    "internal/api/stop_force_supervisor.go": "9dcc918db886d384aeb87a2790b0ceb78003d05bf25629f82a9a64abdfe83e17",
+    "internal/api/stop_force_supervisor_other.go": "a75bb2e8aeef4826f32ab897fd3aa39ac31e36322f5d27bd61997beace66c032",
+    "internal/api/stop_supervisor_lane_b_test.go": "2937d0c5a0e78af892263abcd8f39a124447ae9ba0748af79d1713b92daf5fcb",
+    "internal/api/supervisor_force_stop.go": "4c10a94f1dd2fc4d09207951dad34b232c3a1b3b4953db52175f277e55172291",
+    "internal/api/supervisor_force_stop_test.go": "1dbc0f9f762700ab7d6168f28fd9f48777ea5cfc6c546e2b9866fd82375a321d",
+    "internal/api/supervisor_ipc_force_stop_client.go": "68c3c7f8086c051823d7bd6a65f004fdd33e8b9df1ffa6c90110a2ad10a5af9e",
+    "internal/api/supervisor_ipc_status_client.go": "58a1c4eda2abf785ab096b722a2d044f8a2d03766f3a9b9714e5690e486bb819",
+    "internal/api/supervisor_seal_guard_test.go": "0ba9737f71cafaa7a40b641a12056d9a2926adc42359870a18de15920d93d914",
+    "internal/cli/supervise.go": "c3019870d1b0161ea08a0ababbf7f841c37c1d17bdafc6c95f15f7c9f8e93aaa",
+    "internal/cli/supervise_force_stop.go": "970c226446e206d95c168f831b74bc3b626d0aa13db9159ca4f02e9a0904cfa3",
+    "internal/cli/supervise_force_stop_test.go": "39a151f56ae4094995c016e0a8c31772a6e2c9514c2a1a88244f8efa4e2c6d62",
+    "internal/cli/supervise_force_stop_windows_test.go": "eb7da02d67fa201881f0d4ff9816344ccfcda61962839b663914372c5e0522fa",
+    "internal/cli/supervise_status.go": "97d206b9c77944f04ea156af46d7fbc44d2c803a9d361cbc50ae4b422c762662",
+    "internal/cli/supervisor_controller.go": "8bf0eb49338f0a8b41d4d11be612cf3530b82f6ec3f27736e4f2c56601c3b792",
+    "internal/cli/supervise_root_exit_test.go": "8193f363f7a31492593f0c85acb00b7cdd97c68e5a052e4d45dda52542c2fc1e"
+  },
+  "toolchain": "go1.27.4 windows/amd64",
+  "native_guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+  "runs": [
+    {
+      "id": "initial-focused",
+      "status": "PASS",
+      "checks": [
+        {
+          "argv": [
+            "git.exe",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.14167180005460978,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "6d83d70ca037a45e20bf3ebc52e27eebe9fa97c2b5960a9d13696b8d9f2f112b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "gofmt.exe",
+            "-w",
+            "internal/api/install.go",
+            "internal/api/install_intent.go",
+            "internal/api/install_parsed_manifest.go",
+            "internal/api/install_parsed_manifest_lane_b_test.go",
+            "internal/api/main_test.go",
+            "internal/api/original_process_owner_required_test.go",
+            "internal/api/phase_f_lifecycle_test.go",
+            "internal/api/stop_force_supervisor.go",
+            "internal/api/stop_force_supervisor_other.go",
+            "internal/api/stop_supervisor_lane_b_test.go",
+            "internal/api/supervisor_force_stop.go",
+            "internal/api/supervisor_force_stop_test.go",
+            "internal/api/supervisor_ipc_force_stop_client.go",
+            "internal/api/supervisor_ipc_status_client.go",
+            "internal/api/supervisor_seal_guard_test.go",
+            "internal/cli/supervise.go",
+            "internal/cli/supervise_force_stop.go",
+            "internal/cli/supervise_force_stop_test.go",
+            "internal/cli/supervise_force_stop_windows_test.go",
+            "internal/cli/supervise_status.go",
+            "internal/cli/supervisor_controller.go"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.12302509997971356,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "git.exe",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.15572730003623292,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "go.exe",
+            "test",
+            "-v",
+            "-count=1",
+            "-timeout",
+            "3m",
+            "./internal/api",
+            "-run",
+            "^Test(StopForce|StopWithOptsForce|ForceStop|NumericalTermination|RemovedTargetCannotPromote|PortOnlyTermination|TestMainSeals|NoUnsealedLiveSeam)"
+          ],
+          "exit_code": 0,
+          "command_seconds": 38.1667499000323,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e7eacf714b04847177dfb3d4ccff6b0c3ab80406d583dc0bcacf26c6b4c866d0",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "go.exe",
+            "test",
+            "-v",
+            "-count=1",
+            "-timeout",
+            "3m",
+            "./internal/cli",
+            "-run",
+            "^Test(DaemonCreatorForce|ForceStop|ProductionForceStop|DaemonCreatorIncompleteClosure|ProductionSpawnFn_RetainedCreatorCloses)"
+          ],
+          "exit_code": 0,
+          "command_seconds": 36.61666070000501,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "f0d1c0503b69a18d6d010462710d532ab19a1faae2731adb325eee97ed643613",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "controller": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 75.50920179998502,
+        "receipt_sha256": "168b552620e1023fe57625007fc52368e34040d91add4a18a143a68ff7308bac"
+      }
+    },
+    {
+      "id": "existing-helper",
+      "status": "PASS",
+      "checks": [
+        {
+          "argv": [
+            "git.exe",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.15408059995388612,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "6d83d70ca037a45e20bf3ebc52e27eebe9fa97c2b5960a9d13696b8d9f2f112b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "gofmt.exe",
+            "-w",
+            "internal/cli/supervise_force_stop_windows_test.go"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.08774160000029951,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "git.exe",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.10869570000795648,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "go.exe",
+            "test",
+            "-v",
+            "-count=1",
+            "-timeout",
+            "2m",
+            "./internal/cli",
+            "-run",
+            "^TestProductionForceStopOriginalCreatorClosesBeforeSingleExit$"
+          ],
+          "exit_code": 0,
+          "command_seconds": 26.857343700015917,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "2b422d311013b6fc82120a3a2e02a805fb1779bf20e7b41c6003073941c9b4bb",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "controller": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 27.421963300032075,
+        "receipt_sha256": "2a530184037e44cd3d296cbddf630b1556e244be4a6cab3d144d431643662c4d"
+      }
+    },
+    {
+      "id": "root-exit-and-final-cli",
+      "status": "PASS",
+      "checks": [
+        {
+          "argv": [
+            "git.exe",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.09390850004274398,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "6d83d70ca037a45e20bf3ebc52e27eebe9fa97c2b5960a9d13696b8d9f2f112b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "gofmt.exe",
+            "-w",
+            "internal/cli/supervise.go",
+            "internal/cli/supervise_root_exit_test.go"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.09500329999718815,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "go.exe",
+            "test",
+            "-v",
+            "-count=1",
+            "-timeout",
+            "2m",
+            "./internal/cli",
+            "-run",
+            "^TestDaemonWaitExitCodeUsesKnownCreatorResult$"
+          ],
+          "exit_code": 1,
+          "command_seconds": 12.614341599983163,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "3a2a285d6268aa46e43f9640638905948af5155b77a5143d079bffbee559f22b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "gofmt.exe",
+            "-w",
+            "internal/cli/supervise.go"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.13666770001873374,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "git.exe",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "command_seconds": 0.1010035999934189,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "argv": [
+            "go.exe",
+            "test",
+            "-v",
+            "-count=1",
+            "-timeout",
+            "3m",
+            "./internal/cli",
+            "-run",
+            "^Test(DaemonWaitExitCode|DaemonCreatorForce|ForceStop|ProductionForceStop|DaemonCreatorIncompleteClosure|ProductionSpawnFn_RetainedCreatorCloses)"
+          ],
+          "exit_code": 0,
+          "command_seconds": 14.018663300026674,
+          "root_reaped": true,
+          "job_active_zero": true,
+          "handles_closed": true,
+          "native_issues": [],
+          "readers_joined": true,
+          "quiescence": "complete",
+          "stdout_sha256": "30caaba85a1e7de113bae6c0c9cdf336b8920b79fb3fc891a4475a918cee28e0",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "controller": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 27.286141199991107,
+        "receipt_sha256": "46528442c55c6d6a8aa0eb023bd5daa0b40474e832ca582fdfe85827d9f3fb82"
+      }
+    }
+  ],
+  "negative_control": "Old exec.ExitError-only classification failed known creator codes7/259/2147483649/4294967295 and observer-error case; restored code passed. Negative command exit1 is expected.",
+  "history": "Initial native force fixture had an unregistered test helper. Final source reuses the existing admitted sleeping helper; no second role/dispatcher. Initial focused result retained as historical.",
+  "wave_source": "Original creator exit-code consumer logic and regression adapted from c3b8c802be190c335b84ff7323a14d9eb63518b6 tree. Foreign worktree read-only. Existing admitted exit-code child reused.",
+  "limits": [
+    "Authenticated force_stop success over a real named pipe not qualified by the net.Pipe wire fixture or direct native controller fixture.",
+    "No new CLI stop --force flag. API StopWithOpts Force and separate IPC verb only.",
+    "Removed descriptor/PID-only cleanup returns explicit incomplete refusal; automatic cleanup requires original generation captured before removal.",
+    "Non-Windows original-tree force-stop unsupported.",
+    "Full default/tagged gates and installed Product acceptance not established by these focused runs."
+  ]
+}

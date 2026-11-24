@@ -690,7 +690,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 				removedSupervisorTargetsAfterInstall,
 				removedSupervisorPIDByTask,
 				nudgeResult,
-				fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
+				fmt.Sprintf("original creator custody required to complete cleanup for %s", m.Name),
 				w,
 			)
 		}
@@ -1164,7 +1164,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 		removedSupervisorTargetsAfterInstall,
 		removedSupervisorPIDByTask,
 		nudgeResult,
-		fmt.Sprintf("re-run install or `mcphub stop --force %s`", m.Name),
+		fmt.Sprintf("original creator custody required to complete cleanup for %s", m.Name),
 		w,
 	)
 	return nil
@@ -1394,6 +1394,8 @@ type supervisorReconcileNudgeResult struct {
 }
 
 func (r supervisorReconcileNudgeResult) allowsRemovedTargetKill() bool {
+	// Historical nudge admission only. This is not creator authority; the
+	// production numerical leaves still refuse PID-only termination.
 	return r.status == supervisorReconcileNudgeSucceeded || r.status == supervisorReconcileNudgeIPCUnavailable
 }
 
@@ -1663,14 +1665,14 @@ func killRemovedSupervisorTargetsAfterNudge(targets []SupervisorDaemon, pidByTas
 			if nudgeResult.err != nil {
 				errText = nudgeResult.err.Error()
 			}
-			warnf("force kill removed supervisor targets skipped because supervisor reconcile nudge failed: %s (retry: %s)", errText, retryPath)
+			warnf("force kill removed supervisor targets skipped because supervisor reconcile nudge failed: %s; cleanup incomplete (%s)", errText, retryPath)
 		}
 		return
 	}
 	for _, d := range targets {
 		result := forceKillOneSupervisorTarget(d, pidByTask)
 		if result.Err != "" && warnf != nil {
-			warnf("force kill removed supervisor target %s: %s", d.TaskName, result.Err)
+			warnf("cleanup incomplete for removed supervisor target %s: %s; original creator custody is required", d.TaskName, result.Err)
 		}
 	}
 }
@@ -2577,7 +2579,7 @@ func killRemovedSupervisorTargetsAfterUninstall(server string, targets []Supervi
 		targets,
 		pidByTask,
 		nudgeResult,
-		fmt.Sprintf("re-run uninstall or `mcphub stop --force %s`", server),
+		fmt.Sprintf("original creator custody required to complete cleanup for %s", server),
 		func(format string, args ...any) {
 			if report != nil {
 				report.TaskDeleteWarns = append(report.TaskDeleteWarns, fmt.Sprintf(format, args...))

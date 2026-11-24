@@ -277,8 +277,11 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 			out := buf.String()
 			hasWarn := strings.Contains(out, "warning:") &&
 				strings.Contains(out, "reconcile") &&
-				strings.Contains(out, "re-run install") &&
-				strings.Contains(out, "mcphub stop --force demo")
+				strings.Contains(out, "original creator custody required") &&
+				strings.Contains(out, "cleanup incomplete")
+			if strings.Contains(out, "mcphub stop --force") {
+				t.Fatalf("cleanup warning recommends an unavailable CLI fallback: %s", out)
+			}
 			if hasWarn != tc.wantWarn {
 				t.Fatalf("warning presence = %v, want %v; output:\n%s", hasWarn, tc.wantWarn, out)
 			}

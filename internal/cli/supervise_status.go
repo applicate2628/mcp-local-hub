@@ -362,6 +362,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			"state":             stateText,
 			"current_pid":       runtimeState.CurrentPID,
 			"started_at":        daemonRuntimeStartedAt(runtimeState.StartedAt),
+			"pid_generation":    runtimeState.PIDGeneration,
 			"is_maintenance":    isSupervisorMaintenanceTask(taskName),
 			"crashes_in_window": tracker.CrashCountInWindow(taskName, statusNow, respawnFailureWindow),
 		}
