@@ -55,6 +55,7 @@ type HTTPToStdioRelay struct {
 	sessionMu       sync.Mutex
 	sessionID       string // "" until minted
 	protocolVersion string // "" until a matching InitializeResult is forwarded
+	initialized     bool   // negotiation completed, even when Session-Id is absent
 	qualificationMu sync.Mutex
 	qualification   *mcpHTTPQualificationOwner
 
@@ -97,9 +98,9 @@ const (
 	// without rejecting any real MCP payload.
 	maxStdinLineBytes = 1 << 20 // 1 MiB
 
-	// Upper bound on concurrent POST workers spawned from stdinPump after
-	// session establishment. Provides backpressure against untrusted or
-	// buggy stdio clients that can otherwise enqueue unbounded work.
+	// Upper bound on concurrent request POST workers after initialization.
+	// Responses and notifications use the input owner's single synchronous
+	// POST, so a nested reply/cancellation never needs one of these slots.
 	maxConcurrentPOSTs = 64
 
 	// Match the existing HTTP host's finite body envelope. SSE streams may
@@ -108,6 +109,7 @@ const (
 )
 
 var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
+var errRelaySessionLost = errors.New("HTTP session expired; restart the transport and initialize a new session; earlier calls may have executed and were not replayed")
 
 // Run starts one relay lifetime and joins its POST/SSE workers before returning.
 // Normal stdin EOF drains accepted responses before best-effort DELETE /mcp.
@@ -128,8 +130,8 @@ var errStdinLineTooLong = errors.New("stdin line exceeds maxStdinLineBytes")
 // are refused. Clean EOF/cancellation alone retains the nil result.
 //
 // Lifecycle rules:
-//   - stdin pump reads lines and dispatches POSTs in parallel goroutines
-//     tracked by postWG.
+//   - stdin pump reads lines, sends control messages synchronously, and
+//     dispatches request POSTs in parallel goroutines tracked by postWG.
 //   - When stdin returns (EOF or read error), Run first waits for all
 //     in-flight POSTs to drain so the last response reaches stdout before
 //     the SSE listener is canceled and DELETE /mcp is sent.
@@ -272,14 +274,16 @@ func (r *HTTPToStdioRelay) pumpInput(ctx context.Context, wg *sync.WaitGroup) (e
 
 // stdinPump reads JSON-RPC lines from stdin and POSTs each to /mcp.
 //
-// Messages sent before the session is established (before the server
-// responds to `initialize` with a `MCP-Session-Id` header) are
+// Messages sent before initialization completes (before a matching
+// InitializeResult reaches stdout, with or without a Session-Id) are
 // processed SYNCHRONOUSLY — one at a time, in stdin order. This
-// prevents the race where a goroutine carrying `notifications/initialized`
-// wins the CAS slot and arrives at the server before `initialize`.
+// preserves initialize ordering and publication of negotiated headers.
 //
-// After the session is established, messages are dispatched in parallel
-// goroutines tracked by wg so Run can wait for them to drain.
+// Afterwards requests use bounded workers tracked by wg. Responses and
+// notifications only need an HTTP acknowledgement; the input owner sends
+// them directly, independently of those workers. A full request limit rejects
+// a new request before delivery instead of blocking input behind a request
+// that may itself be waiting for a response or cancellation from that input.
 func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) error {
 	reader := bufio.NewReaderSize(r.Stdin, maxStdinLineBytes)
 	postSem := make(chan struct{}, maxConcurrentPOSTs)
@@ -302,19 +306,27 @@ func (r *HTTPToStdioRelay) stdinPump(ctx context.Context, wg *sync.WaitGroup) er
 			continue
 		}
 
-		// Synchronous path until session established — guarantees
-		// message ordering (initialize first) and session-id capture
-		// before any parallel dispatch.
-		if r.getSessionID() == "" {
+		meta, metaErr := decodeJSONRPCMeta(line)
+		if !r.isInitialized() || (metaErr == nil && (meta.Method == "" || len(meta.ID) == 0)) {
 			r.handlePOST(ctx, line)
 			continue
 		}
 
-		// Session known — safe to parallelize.
+		// Admission must not stop input: later messages can release the
+		// outstanding requests. No queued goroutine or remote effect exists
+		// for the rejected request.
 		select {
 		case postSem <- struct{}{}:
 		case <-ctx.Done():
 			return ctx.Err()
+		default:
+			capacityErr := errors.New("request capacity exhausted; message was not forwarded")
+			if metaErr != nil {
+				r.recordPOSTFailure(ctx, capacityErr)
+				return capacityErr // no valid request ID to receive a refusal
+			}
+			r.sendSyntheticError(meta, metaErr, capacityErr)
+			continue
 		}
 
 		wg.Add(1)
@@ -343,7 +355,7 @@ func (r *HTTPToStdioRelay) recordPOSTFailure(ctx context.Context, err error) {
 
 // handlePOST sends one JSON-RPC message over HTTP POST and forwards the
 // server's response(s) back to stdout. On HTTP failure with a request
-// (has id), synthesizes a JSON-RPC error response so the client does
+// (has method and id), synthesizes a JSON-RPC error response so the client does
 // not hang awaiting a reply.
 func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 	meta, metaErr := decodeJSONRPCMeta(body)
@@ -426,6 +438,7 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 			r.sessionMu.Lock()
 			if r.protocolVersion == "" {
 				r.protocolVersion = version
+				r.initialized = true
 				if r.sessionID == "" {
 					r.sessionID = sid
 				}
@@ -461,14 +474,24 @@ func (r *HTTPToStdioRelay) handlePOST(ctx context.Context, body []byte) {
 		}
 		_, _ = forward(msg) // writeLine retains any stdout failure for Run
 	case http.StatusNotFound:
-		// Session dropped by server; relay could re-initialize automatically,
-		// but for v1 we surface the error to the client. Antigravity will
-		// spawn a fresh relay if it retries.
-		r.logErr("session lost (server returned 404)")
-		r.sendSyntheticError(meta, metaErr, fmt.Errorf("session lost"))
+		// An RPC error alone leaves an existing stdio client on the expired
+		// transport. End this lifetime so its owner observes the loss, then
+		// requires fresh initialization. Never resend a delivered request.
+		failure := errRelaySessionLost
+		if req.Header.Get(mcpSessionIDHeader) == "" {
+			failure = errors.New("POST endpoint returned HTTP 404")
+		}
+		r.recordPOSTFailure(ctx, failure)
+		r.logErr("POST: %v", failure)
+		r.sendSyntheticError(meta, metaErr, failure)
 	default:
 		msg, readErr := readAllWithLimit(resp.Body, maxRelayResponseBytes)
 		statusErr := fmt.Errorf("HTTP %d", resp.StatusCode)
+		if metaErr == nil && (meta.Method == "" || len(meta.ID) == 0) {
+			// A rejected response/cancellation has no JSON-RPC response of
+			// its own. Keep its failure observable and stop dependent work.
+			r.recordPOSTFailure(ctx, statusErr)
+		}
 		if readErr != nil {
 			r.recordPOSTFailure(ctx, fmt.Errorf("read POST HTTP %d body: %w", resp.StatusCode, readErr))
 			r.logErr("POST non-2xx: status=%d body read: %v", resp.StatusCode, readErr)
@@ -544,6 +567,9 @@ func (r *HTTPToStdioRelay) sseListener(ctx context.Context) error {
 			// Server doesn't support server-initiated SSE (spec §allows).
 			resp.Body.Close()
 			return nil
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return errors.Join(errRelaySessionLost, resp.Body.Close())
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
@@ -743,10 +769,10 @@ func (r *HTTPToStdioRelay) deleteSession(sid, version string) {
 
 // sendSyntheticError emits a JSON-RPC error response to stdout so a
 // client awaiting a response does not hang indefinitely. Called when
-// the underlying HTTP POST fails. If the original request had no id
-// (notification), no synthetic response is emitted (none is expected).
+// the underlying HTTP POST fails. Notifications and client responses never
+// receive a synthetic response of their own.
 func (r *HTTPToStdioRelay) sendSyntheticError(meta *jsonrpcMeta, metaErr error, cause error) {
-	if metaErr != nil || meta == nil || len(meta.ID) == 0 || string(meta.ID) == "null" {
+	if metaErr != nil || meta == nil || meta.Method == "" || len(meta.ID) == 0 || string(meta.ID) == "null" {
 		return
 	}
 	// Error code -32603 = JSON-RPC "Internal error" per spec.
@@ -830,13 +856,22 @@ func (r *HTTPToStdioRelay) getProtocolVersion() string {
 	return r.protocolVersion
 }
 
+func (r *HTTPToStdioRelay) isInitialized() bool {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	return r.initialized
+}
+
 func (r *HTTPToStdioRelay) setSessionID(sid string) {
 	// Only store the first session id; rotation would happen via
 	// explicit re-initialize which is out of v1 scope.
+	// The finite qualification owner calls this only after validating its
+	// InitializeResult; it does not run the stdio negotiation path.
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 	if r.sessionID == "" {
 		r.sessionID = sid
+		r.initialized = sid != ""
 	}
 }
 
@@ -846,6 +881,7 @@ func (r *HTTPToStdioRelay) takeSessionID() string {
 	sid := r.sessionID
 	r.sessionID = ""
 	r.protocolVersion = ""
+	r.initialized = false
 	return sid
 }
 
