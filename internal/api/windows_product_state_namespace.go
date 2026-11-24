@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -67,6 +68,18 @@ func (s *WindowsProductStateNamespace) ReadBoundFile(ctx context.Context, path, 
 		return nil, err
 	}
 	return s.native.read(ctx, leaf)
+}
+
+// WithBoundFileReader lends the private regular file at an exact basename
+// under this held namespace. The synchronous callback must consume the whole
+// file. It receives neither a path nor a handle, and its reader is revoked
+// when it returns. A successful return includes original-file and resource
+// readback, so results produced by the callback remain provisional until then.
+func (s *WindowsProductStateNamespace) WithBoundFileReader(ctx context.Context, leaf string, read func(io.Reader) error) error {
+	if s == nil || s.native == nil || ctx == nil || read == nil {
+		return errHubRouteStateUnavailable
+	}
+	return s.native.withBoundFileReader(ctx, leaf, read)
 }
 
 func (s *WindowsProductStateNamespace) validatePath(ctx context.Context, path, leaf string) error {

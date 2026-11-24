@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +33,7 @@ import (
 
 type v2TxnFixtureTasks struct {
 	root                        string
+	backups                     []WindowsProductPairTaskBackup
 	currentXML, priorXML        string
 	exports, rewrites, restores int
 	closes, discards            int
@@ -43,7 +46,7 @@ func (f *v2TxnFixtureTasks) InventoryExport() error {
 }
 
 func (f *v2TxnFixtureTasks) RecoveryDescriptor() (WindowsProductPairTaskRecovery, error) {
-	return WindowsProductPairTaskRecovery{StoreRoot: f.root, Backups: []WindowsProductPairTaskBackup{}}, nil
+	return WindowsProductPairTaskRecovery{StoreRoot: f.root, Backups: append([]WindowsProductPairTaskBackup{}, f.backups...)}, nil
 }
 
 func (f *v2TxnFixtureTasks) RewriteCommand() error {
@@ -544,6 +547,9 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 		"upgrade_full_selector_first_write_absent",
 		"launcher_last_predecision_inverse",
 		"current_inverse_after_intent_failure",
+		"clean_install_rolled_back_preflight",
+		"clean_install_archive_batch",
+		"clean_install_archive_batch_interrupted",
 		"retained_runtime_requires_native_witness",
 		"commit_decided_cold_forward_and_repeat",
 		"commit_decided_cold_cleanup_exact_slots",
@@ -636,8 +642,9 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			pretransferClose := phase == "pretransfer_prior_closes_before_stage"
 			exactCleanupSlots := phase == "commit_decided_cold_cleanup_exact_slots"
 			retainedRuntime := phase == "retained_runtime_requires_native_witness"
+			cleanInstall := strings.HasPrefix(phase, "clean_install_")
 			var prior map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2
-			if inverse || pretransferClose || exactCleanupSlots || retainedRuntime || phase == "current_inverse_after_intent_failure" {
+			if inverse || pretransferClose || exactCleanupSlots || retainedRuntime || cleanInstall || phase == "current_inverse_after_intent_failure" {
 				prior = v2TxnSeedPrior(t, input, dst, seed)
 			}
 			if inverse {
@@ -782,6 +789,10 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 
 			if phase == "current_inverse_after_intent_failure" {
 				v2TxnAssertInverseDiagnosticAfterPrefix(t, ctx, txn, stagedFiles)
+				return
+			}
+			if cleanInstall {
+				v2TxnAssertRolledBackCleanInstallPreflight(t, txn, tasks, journalPath, stagedFiles, prior, phase)
 				return
 			}
 
@@ -1098,6 +1109,414 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 	}
 }
 
+func v2TxnAssertRolledBackCleanInstallPreflight(t *testing.T, txn *WindowsProductTxn, tasks *v2TxnFixtureTasks, journalPath string, staged map[string]binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, prior map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2, phase string) {
+	t.Helper()
+	o := &txn.Opts
+	ctx := o.Context
+	store, err := newWindowsProductPairTaskStore(o.StateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	tasks.root = store.RootPath()
+	backup := []byte(tasks.currentXML)
+	ref, err := store.Retain(ctx, backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks.backups = []WindowsProductPairTaskBackup{{TaskName: "\\mcp-local-hub-fixture", Ref: ref, SHA256: v2TxnFixtureDigest(backup)}}
+	o.Mode = WindowsProductPairModeUpgrade
+	o.FrozenPorts = []windowsProductIntentPortV1{}
+	o.PreSettlement = &windowsProductQuiescenceObservationV1{
+		GUIOwner: windowsProductGUIOwnerConfirmedAbsent, Supervisor: windowsProductSupervisorSettlementV1{State: windowsProductSupervisorKnownAbsent},
+		Ports: []windowsProductPortSettlementV1{}, SupervisorLockReleased: true,
+	}
+	preflight, err := inspectCurrentEntryPreflight(*o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.ReplacementAuthority.Disposition = preflight.Disposition
+	cut := errors.New("stop after durable rollback, before any successor cleanup")
+	o.Deps.Fault = func(at WindowsProductStage) error {
+		if at == WindowsProductStageTasksReadBack {
+			return cut
+		}
+		return nil
+	}
+	o.Deps.WriteRecoveryJournal = func(name string, raw []byte) error {
+		j, err := decodeWindowsProductRecoveryJournalV3(raw)
+		if err != nil {
+			return err
+		}
+		if err := api.WriteStateFileBytesAtomic(name, raw); err != nil {
+			return err
+		}
+		if j.EntryBundle.Bundle.Disposition.State == "rolled-back" {
+			return cut
+		}
+		return nil
+	}
+	if err := txn.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := windowsCanonicalEntryRecoveryRequestForDomain(ctx, o.StateDir, o.CanonicalEntryPath, o.LegacyWindowlessPath, true, o.JournalAllowance, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, acquired, err := api.TryAcquireUpgradeFence(ctx, o.StateDir)
+	if err != nil || !acquired || fence == nil {
+		t.Fatal("test-owned Product fence unavailable", err)
+	}
+	t.Cleanup(func() {
+		if err := fence.Release(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := inspectRolledBackCurrentEntry(req); !errors.Is(err, ErrWindowsProductRecoveryPending) {
+		t.Fatal("preflight accepted a prepared transaction", err)
+	}
+	o.ReplacementAuthority.Quiescence = &windowsProductQuiescenceReceiptV1{
+		ReceiptID: "private-clean-preflight", Scope: windowsProductQuiescenceScopeV1, ObservationSHA256: v2TxnFixtureDigest([]byte("fixture observation")),
+		CanonicalCLIPath: o.ProductPath, CanonicalWindowlessPath: o.LegacyWindowlessPath, PriorCLI: preflight.PriorCLI, PriorWindowless: preflight.PriorWindowless,
+		GUIOwner: o.PreSettlement.GUIOwner, Supervisor: o.PreSettlement.Supervisor, Ports: o.PreSettlement.Ports,
+		SupervisorLockReleased: true, SettledAtUTC: time.Unix(1, 0).UTC(),
+	}
+	if _, err := txn.Run(ctx); !errors.Is(err, cut) {
+		t.Fatal("fixture did not reach the intended rollback boundary", err)
+	}
+	raw := mustReadFile(t, journalPath)
+	j, err := decodeWindowsProductRecoveryJournalV3(raw)
+	if err != nil || j.EntryBundle.Bundle.Disposition.State != "rolled-back" || len(j.EntryBundle.Cleanup) != 0 ||
+		tasks.restores != 1 || tasks.discards != 0 || tasks.currentXML != string(backup) {
+		t.Fatal("fixture did not persist a restored rolled-back checkpoint", err)
+	}
+	unbound, err := encodeReceivedWindowsProductRecoveryJournalV3(j)
+	if err != nil || !bytes.Equal(unbound, raw) || bytes.Contains(raw, []byte("clean_archive_sha256")) {
+		t.Fatal("clean archive support changed the existing unbound V3 wire", err)
+	}
+	plan, err := inspectRolledBackCurrentEntry(req)
+	if err != nil || plan.TransactionID != j.TransactionID || plan.JournalSHA256 != v2TxnFixtureDigest(raw) || len(plan.Successors) != len(staged) {
+		t.Fatal("preflight did not receive exact rolled-back originals", err)
+	}
+	root := filepath.Dir(o.CanonicalEntryPath)
+	for _, member := range plan.Successors {
+		if original, ok := staged[member.Member]; !ok || member.NativeIdentity != original.NativeIdentity || member.File.Path == member.Member ||
+			v2TxnFixtureIdentity(t, filepath.Join(root, filepath.FromSlash(member.File.Path))) != original.NativeIdentity {
+			t.Fatal("preflight did not retain an exact non-final original", member.Member)
+		}
+	}
+	for final, identity := range prior {
+		if v2TxnFixtureIdentity(t, final) != identity {
+			t.Fatal("preflight changed a restored original", filepath.Base(final))
+		}
+	}
+	if !bytes.Equal(raw, mustReadFile(t, journalPath)) || !bytes.Equal(backup, mustReadFile(t, filepath.Join(tasks.root, ref))) {
+		t.Fatal("preflight changed the old journal or retained Task backup")
+	}
+	if phase == "clean_install_rolled_back_preflight" {
+		return
+	}
+	batchInterrupted := phase == "clean_install_archive_batch_interrupted"
+	writeCount := 0
+	req.Deps.WriteJournal = func(path string, body []byte) error {
+		writeCount++
+		if err := api.WriteStateFileBytesAtomic(path, body); err != nil {
+			return err
+		}
+		if batchInterrupted {
+			return cut
+		}
+		return nil
+	}
+	var archivePath string
+	err = withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, heldPrior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, oldStore *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+		archive, err := s.writeRolledBackCurrentArchive(ctx, successor, oldStore, members)
+		if err != nil {
+			return err
+		}
+		archivePath = archive.path
+		image := mustReadFile(t, archivePath) // The retained synthetic donor has bounded file contents.
+		if !bytes.Equal(raw, mustReadFile(t, journalPath)) || writeCount != 0 {
+			t.Fatal("archive publication changed the exact old transaction")
+		}
+		expected := map[string]string{WindowsProductRecoveryFileLeafV3: v2TxnFixtureDigest(raw), "tasks/" + ref: v2TxnFixtureDigest(backup)}
+		for _, member := range members {
+			expected["successors/"+member.Member] = member.File.SHA256
+		}
+		reader := tar.NewReader(bytes.NewReader(image))
+		for {
+			header, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			body, err := io.ReadAll(reader)
+			if err != nil || expected[header.Name] != v2TxnFixtureDigest(body) {
+				t.Fatal("archive entry is foreign or differs from the observed original", header.Name, err)
+			}
+			delete(expected, header.Name)
+		}
+		if len(expected) != 0 {
+			t.Fatal("archive omitted exact original material")
+		}
+		if _, err := s.writeRolledBackCurrentArchive(ctx, successor, oldStore, members); err == nil || !bytes.Equal(image, mustReadFile(t, archivePath)) {
+			t.Fatal("archive create overwrote the same transaction's archive", err)
+		}
+		namespace, err := api.OpenWindowsProductStateNamespace(ctx, o.StateDir)
+		if err != nil || namespace == nil {
+			return errors.Join(err, errors.New("private archive namespace was not received"))
+		}
+		defer func() {
+			if err := namespace.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		received, err := receiveRolledBackCurrentArchive(ctx, namespace, archive)
+		if err != nil || received.archive.archiveSHA256 != sha256.Sum256(image) {
+			t.Fatal("protected archive readback differs from the independently inspected fixture archive", err)
+		}
+		retry, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+		if err != nil || retry.archive.archiveSHA256 != received.archive.archiveSHA256 {
+			t.Fatal("unchanged unbound archive could not be received after a retry", err)
+		}
+		return s.discardArchivedCurrentOriginals(ctx, heldPrior, successor, retry)
+	})
+	if batchInterrupted {
+		if !errors.Is(err, cut) || writeCount != 1 {
+			t.Fatal("interruption did not stop after exact grouped durable intent", err, writeCount)
+		}
+	} else if err != nil || writeCount != 2 {
+		t.Fatal("selected archive cleanup did not finish in two existing journal writes", err, writeCount)
+	}
+	newJournal, err := v2TxnReadFixtureJournal(journalPath)
+	if err != nil || newJournal.TransactionID != j.TransactionID || len(newJournal.EntryBundle.Cleanup) != len(staged) ||
+		newJournal.EntryBundle.CleanArchiveSHA256 != v2TxnFixtureDigest(mustReadFile(t, archivePath)) {
+		t.Fatal("archive cleanup did not retain the old rollback owner", err)
+	}
+	for _, row := range newJournal.EntryBundle.Cleanup {
+		name := filepath.Join(root, filepath.FromSlash(row.SourceRelative))
+		if batchInterrupted {
+			if row.State != "discard_intent" || v2TxnFixtureIdentity(t, name) != staged[row.Member].NativeIdentity {
+				t.Fatal("interrupted batch changed an original or lost its durable intent")
+			}
+		} else if row.State != "absence_received" || v2TxnFixtureAbsent(name) != nil {
+			t.Fatal("batch did not prove exact absence for its selected original")
+		}
+	}
+	if batchInterrupted {
+		namespace, err := api.OpenWindowsProductStateNamespace(ctx, o.StateDir)
+		if err != nil || namespace == nil {
+			t.Fatal("private archive retry namespace unavailable", err)
+		}
+		t.Cleanup(func() {
+			if err := namespace.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		originalArchive := mustReadFile(t, archivePath)
+		corrupted := bytes.Clone(originalArchive)
+		corrupted[512] ^= 1 // Change the first byte of the embedded raw V3.
+		var escaped bytes.Buffer
+		tarWriter := tar.NewWriter(&escaped)
+		for _, entry := range []struct {
+			name string
+			body []byte
+		}{{WindowsProductRecoveryFileLeafV3, raw}, {"../escaped", []byte("fixture")}} {
+			if err := tarWriter.WriteHeader(&tar.Header{Name: entry.name, Mode: 0600, Size: int64(len(entry.body))}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tarWriter.Write(entry.body); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tarWriter.Close(); err != nil {
+			t.Fatal(err)
+		}
+		pendingBytes := mustReadFile(t, journalPath)
+		for _, invalid := range [][]byte{corrupted, escaped.Bytes()} {
+			if err := os.WriteFile(archivePath, invalid, 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, _, _ *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+				_, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+				return err
+			})
+			if !errors.Is(err, ErrWindowsProductRecoveryIdentity) || !bytes.Equal(pendingBytes, mustReadFile(t, journalPath)) {
+				t.Fatal("corrupt or escaping archive advanced the original recovery", err)
+			}
+		}
+		if err := os.WriteFile(archivePath, originalArchive, 0600); err != nil {
+			t.Fatal(err)
+		}
+		v2TxnAssertBoundArchiveRefusesPartialReplacement(t, req, namespace, newJournal, originalArchive, archivePath, journalPath, root)
+		req.Deps.WriteJournal = nil
+		req.Deps.DiscardTaskStore = func(WindowsProductPairTaskRecovery) error { return store.Close() }
+		req.Deps.RemoveJournal = func(string) error { return cut }
+		err = withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, heldPrior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+			received, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+			if err != nil {
+				return err
+			}
+			if err := s.discardArchivedCurrentOriginals(ctx, heldPrior, successor, received); err != nil {
+				return err
+			}
+			_, err = s.finishCurrentRollback(ctx, heldPrior, successor, nil)
+			return err
+		})
+		if !errors.Is(err, cut) {
+			t.Fatal("valid retained archive could not continue exact old cleanup", err)
+		}
+		terminal, err := v2TxnReadFixtureJournal(journalPath)
+		if err != nil || terminal.Phase != WindowsProductRecoverySettledRollback || v2TxnFixtureAbsent(tasks.root) != nil ||
+			terminal.EntryBundle.CleanArchiveSHA256 != newJournal.EntryBundle.CleanArchiveSHA256 {
+			t.Fatal("test did not reach settled checkpoint after retained Task retirement", err)
+		}
+		req.Deps.RemoveJournal = nil
+		err = withRolledBackCurrentEntry(req, true, func(s *windowsCanonicalJournalRecoverySource, heldPrior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+			if _, err := s.receiveExistingRolledBackArchive(ctx, namespace, members); err != nil {
+				return err
+			}
+			if err := successor.VerifyCleanupAbsences(ctx, binaryadmission.WindowsCanonicalRecoverySuccessorV1, binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2); err != nil {
+				return err
+			}
+			if err := s.closeCurrentMembers(heldPrior, successor); err != nil {
+				return err
+			}
+			if err := s.settleCurrentDirectories(ctx, false); err != nil {
+				return err
+			}
+			_, err := s.retireCurrentRollback(nil)
+			return err
+		})
+		if err != nil || v2TxnFixtureAbsent(journalPath) != nil || !bytes.Equal(originalArchive, mustReadFile(t, archivePath)) {
+			t.Fatal("terminal clean-install retry did not retire only the old journal", err)
+		}
+		req.AcquireSuccessorQuiescence = func(context.Context, windowsProductRecoveryJournalV3, binaryadmission.WindowsCanonicalRecoverySourceV2, *binaryadmission.WindowsCanonicalEntryRecoverySetV2) (*windowsProductSuccessorQuiescence, error) {
+			t.Fatal("already-retired journal attempted the old quiescence operation")
+			return nil, cut
+		}
+		if err := retireRolledBackForCleanInstall(req, namespace); err != nil {
+			t.Fatal("confirmed absence blocked new clean installation after retirement", err)
+		}
+	}
+	if len(mustReadFile(t, archivePath)) == 0 {
+		t.Fatal("archive lost after old transaction settlement")
+	}
+	for final, identity := range prior {
+		if v2TxnFixtureIdentity(t, final) != identity {
+			t.Fatal("archive cleanup changed the restored preimage", filepath.Base(final))
+		}
+	}
+}
+
+func v2TxnAssertBoundArchiveRefusesPartialReplacement(t *testing.T, req windowsProductRecoveryRequest, namespace *api.WindowsProductStateNamespace, advanced windowsProductRecoveryJournalV3, archive []byte, archivePath, journalPath, root string) {
+	t.Helper()
+	ctx := req.Context
+	row := advanced.EntryBundle.Cleanup[0]
+	raw := mustReadFile(t, journalPath)
+	err := withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, _ *binaryadmission.WindowsCanonicalEntryRecoverySetV2, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+		if _, err := s.receiveExistingRolledBackArchive(ctx, namespace, members); err != nil {
+			return err
+		}
+		changed, err := cloneCurrentRecoveryJournal(s.journal)
+		if err != nil {
+			return err
+		}
+		changed.EntryBundle.CleanArchiveSHA256 = strings.Repeat("a", 64)
+		if err := s.persistCurrent(changed); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+			t.Fatal("persist allowed exchanging the bound archive digest", err)
+		}
+		changed.EntryBundle.CleanArchiveSHA256 = ""
+		if err := s.persistCurrent(changed); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+			t.Fatal("persist allowed dropping the bound archive digest", err)
+		}
+		_, err = s.writeRolledBackCurrentArchive(ctx, successor, nil, members)
+		if !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+			t.Fatal("advanced bound V3 allowed new archive creation", err)
+		}
+		result, err := successor.DiscardOriginal(ctx, row.Member, row.SourceRelative)
+		return canonicalEntryDiscardResultError(result, err, row.Member, row.SourceRelative)
+	})
+	if err != nil || !bytes.Equal(raw, mustReadFile(t, journalPath)) ||
+		v2TxnFixtureAbsent(filepath.Join(root, filepath.FromSlash(row.SourceRelative))) != nil {
+		t.Fatal("fixture did not leave a physically absent successor after durable prepared intents", err)
+	}
+	if _, err := rollbackCurrentCanonicalEntryRecovery(req, boundWindowsProductRecoveryDefaults(req), journalPath, advanced, nil); !errors.Is(err, ErrWindowsProductRecoveryPending) || !bytes.Equal(raw, mustReadFile(t, journalPath)) {
+		t.Fatal("ordinary recovery bypassed the bound archive receiver", err)
+	}
+
+	// Keep the current cleanup history but omit its clean archive binding.
+	// The resulting replacement is a well-formed archive that claims the
+	// physically removed original was already absent at archival.
+	forged, err := cloneCurrentRecoveryJournal(advanced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged.EntryBundle.CleanArchiveSHA256 = ""
+	advancedRaw, err := encodeReceivedWindowsProductRecoveryJournalV3(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replacement bytes.Buffer
+	writer := tar.NewWriter(&replacement)
+	reader := tar.NewReader(bytes.NewReader(archive))
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Name == "successors/"+row.Member {
+			continue
+		}
+		if header.Name == WindowsProductRecoveryFileLeafV3 {
+			header.Size = int64(len(advancedRaw))
+			if err := writer.WriteHeader(header); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.Write(advancedRaw); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := writer.WriteHeader(header); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.Copy(writer, reader); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, replacement.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err = withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, _, _ *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+		_, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+		return err
+	})
+	if !errors.Is(err, ErrWindowsProductRecoveryIdentity) || !strings.Contains(err.Error(), "bound clean install archive digest differs") ||
+		!bytes.Equal(raw, mustReadFile(t, journalPath)) {
+		t.Fatal("a partial archive substituted for the archive recorded before cleanup", err)
+	}
+	for _, other := range advanced.EntryBundle.Cleanup[1:] {
+		if err := v2TxnFixtureAbsent(filepath.Join(root, filepath.FromSlash(other.SourceRelative))); err == nil {
+			t.Fatal("refused partial archive removed another issued original", other.Member)
+		}
+	}
+	if err := os.WriteFile(archivePath, archive, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	input, seed, _ := v2TxnFixtureInput(t)
 	for _, tc := range []struct {

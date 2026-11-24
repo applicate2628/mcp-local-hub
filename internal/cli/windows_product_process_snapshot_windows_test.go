@@ -3,12 +3,16 @@ package cli
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"mcp-local-hub/internal/process"
 )
 
 func productSnapshotEntry(pid uint32, name string) windows.ProcessEntry32 {
@@ -78,6 +82,79 @@ func TestProductImageSnapshotCancellationDiscardsCandidates(t *testing.T) {
 	got, err := productImageSnapshotPIDs(ctx, []string{"mcphub.exe"}, ops)
 	if got != nil || !errors.Is(err, context.Canceled) || *closed != 1 {
 		t.Fatalf("canceled snapshot returned %v, %v; closes = %d", got, err, *closed)
+	}
+}
+
+func TestProductImageAbsenceReceivesHeldIdentity(t *testing.T) {
+	root := t.TempDir()
+	launcher := filepath.Join(root, "mcphub.exe")
+	product := filepath.Join(root, "mcphub-product", "mcphub.exe")
+	legacy := filepath.Join(root, "mcphub-windowless.exe")
+	images := []string{product, launcher, legacy}
+	birth := time.Unix(1700000000, 0)
+	unknown := windows.ERROR_ACCESS_DENIED
+	for _, tc := range []struct {
+		name      string
+		path      string
+		base      string
+		absent    bool
+		err       error
+		wantCheck windowsProductAbsenceCheck
+	}{
+		{name: "foreign same basename", path: filepath.Join(root, "different", "mcphub.exe"), base: "mcphub.exe"},
+		{name: "live exact Product with only image name", path: strings.ToUpper(product), base: "mcphub.exe", wantCheck: windowsProductAbsenceProcessPresent},
+		{name: "live exact Launcher", path: launcher, base: "mcphub.exe", wantCheck: windowsProductAbsenceProcessPresent},
+		{name: "live exact legacy image", path: legacy, base: "mcphub-windowless.exe", wantCheck: windowsProductAbsenceProcessPresent},
+		{name: "same held object ended", base: "mcphub.exe", absent: true},
+		{name: "unknown identity", base: "mcphub.exe", err: unknown, wantCheck: windowsProductAbsenceProcessIdentity},
+		{name: "incomplete identity", base: "mcphub.exe", wantCheck: windowsProductAbsenceProcessIdentity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A native row has an executable basename and PID. No command
+			// line is available to admit or exclude either row.
+			ops, closed := productSnapshotFixture(t, []windows.ProcessEntry32{
+				productSnapshotEntry(77, "python.exe"),
+				productSnapshotEntry(78, tc.base),
+			}, nil, nil)
+			calls := 0
+			err := observeWindowsProductImageAbsence(t.Context(), images, nil, ops, func(_ context.Context, pid int) (process.PIDHandleObservation, error) {
+				calls++
+				if pid != 78 || *closed != 1 {
+					t.Fatalf("received foreign PID or unsettled snapshot: %d, %d", pid, *closed)
+				}
+				if tc.absent || tc.err != nil {
+					return process.PIDHandleObservation{ConfirmedAbsent: tc.absent}, tc.err
+				}
+				return process.PIDHandleObservation{Identity: process.PIDHandleIdentity{PID: pid, ExecutablePath: tc.path, StartedAt: birth}}, nil
+			})
+			if calls != 1 {
+				t.Fatalf("selected image identity received %d times", calls)
+			}
+			if tc.wantCheck == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var observed *windowsProductAbsenceError
+			if !errors.As(err, &observed) || observed.check != tc.wantCheck {
+				t.Fatalf("wrong absence result: %v", err)
+			}
+			if tc.err != nil && !errors.Is(err, tc.err) {
+				t.Fatalf("original native failure lost: %v", err)
+			}
+		})
+	}
+}
+
+func TestCleanInstallProcessAbsenceRequiresAllImagePaths(t *testing.T) {
+	root := t.TempDir()
+	product := filepath.Join(root, "mcphub-product", "mcphub.exe")
+	launcher := filepath.Join(root, "mcphub.exe")
+	err := validateCleanInstallProcessAbsence(t.Context(), product, launcher, "")
+	var refusal *windowsProductAbsenceError
+	if !errors.As(err, &refusal) || refusal.check != windowsProductAbsenceIssuedImages {
+		t.Fatalf("missing legacy path was credited: %v", err)
 	}
 }
 

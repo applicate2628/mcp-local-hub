@@ -541,6 +541,7 @@ func (o *windowsProductPairTaskOwner) VerifyRuntimeSHA256() (string, error) {
 	return o.txn.VerifyRuntimeSHA256()
 }
 func (o *windowsProductPairTaskOwner) RestoreImport() error        { return o.txn.RestoreImport() }
+func (o *windowsProductPairTaskOwner) VerifyRestored() error       { return o.txn.VerifyRestored() }
 func (o *windowsProductPairTaskOwner) DiscardRecoveryStore() error { return o.store.Close() }
 func (o *windowsProductPairTaskOwner) Close() error                { return o.txn.Close() }
 

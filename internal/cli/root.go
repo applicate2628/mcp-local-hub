@@ -65,8 +65,9 @@ func NewRootCmdWithWindowsCanonicalEntryBinding(binding binaryadmission.WindowsC
 }
 
 type windowsCanonicalEntryCommandInput struct {
-	binding    binaryadmission.WindowsCanonicalEntryBuildBindingV1
-	bindingErr error
+	binding      binaryadmission.WindowsCanonicalEntryBuildBindingV1
+	bindingErr   error
+	cleanInstall bool
 }
 
 func newRootCmdWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCommandInput) *cobra.Command {

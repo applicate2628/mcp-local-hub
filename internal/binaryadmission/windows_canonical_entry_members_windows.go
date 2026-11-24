@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -3110,8 +3112,25 @@ func (c *canonicalEntryMembersV2) verifyCleanupAbsence(input WindowsCanonicalEnt
 // A successful absence requires that original's acquired witness or applied
 // native readback and its current durable cleanup row.
 func (r *WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, expected WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	return r.receiveCleanupMember(ctx, side, purpose, expected, nil)
+}
+
+// CopyRollbackCleanupOriginal streams one issued, non-final successor original
+// from the held bank. Proven absences do not write. The destination may contain
+// partial bytes on error and may be accepted only after successful readback.
+func (r *WindowsCanonicalEntryRecoverySetV2) CopyRollbackCleanupOriginal(ctx context.Context, expected WindowsCanonicalEntryMemberEvidenceV2, destination io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	if destination == nil {
+		return WindowsCanonicalEntryMemberEvidenceV2{}, false, errors.New("rollback cleanup archive destination required")
+	}
+	return r.receiveCleanupMember(ctx, WindowsCanonicalRecoverySuccessorV1, WindowsCanonicalRecoveryRollbackCleanupV2, expected, destination)
+}
+
+func (r *WindowsCanonicalEntryRecoverySetV2) receiveCleanupMember(ctx context.Context, side WindowsCanonicalRecoverySideV1, purpose WindowsCanonicalEntryRecoveryPurposeV2, expected WindowsCanonicalEntryMemberEvidenceV2, destination io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
 	var observation WindowsCanonicalEntryMemberEvidenceV2
 	err := r.withCleanupRead(ctx, side, purpose, func(c *canonicalEntryMembersV2, input WindowsCanonicalEntryMembersRecoveryInputV2, scope *canonicalEntryRecoveryReadScopeV2) error {
+		if destination != nil && c.recoveryInput.Purpose != WindowsCanonicalRecoveryRollbackCleanupV2 {
+			return errors.New("rollback cleanup archive requires a bank acquired for cleanup")
+		}
 		i := sort.Search(len(input.Members), func(i int) bool { return input.Members[i].Member >= expected.Member })
 		if i == len(input.Members) || input.Members[i].Member != expected.Member {
 			return errors.New("unissued cleanup member key")
@@ -3148,6 +3167,29 @@ func (r *WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(ctx context.Co
 		}
 		if actual != m.evidence || actual.NativeIdentity != expected.NativeIdentity || actual.Size != expected.Size || actual.Attributes != expected.Attributes {
 			return errors.New("original cleanup member identity, parent, extent, attributes or bytes changed")
+		}
+		if destination != nil {
+			if canonicalEntryIsFinalRelative(actual.File.Path) || slices.ContainsFunc(c.root.memberFinalPaths, func(final string) bool {
+				return strings.EqualFold(final, actual.File.Path)
+			}) {
+				return errors.New("rollback cleanup archive cannot read a protected final")
+			}
+			hash := sha256.New()
+			reader := &canonicalEntryContextReader{ctx: ctx, reader: io.NewSectionReader(m.original.file, 0, actual.Size)}
+			n, err := io.Copy(io.MultiWriter(destination, hash), reader)
+			if err != nil {
+				return err
+			}
+			if n != actual.Size || hex.EncodeToString(hash.Sum(nil)) != expected.File.SHA256 {
+				return errors.New("rollback cleanup original bytes changed during archive copy")
+			}
+			after, err := c.receiveMemberRead(ctx, expected.Member, m.original, expected.File.SHA256, scope)
+			if err != nil {
+				return err
+			}
+			if after != actual {
+				return errors.New("rollback cleanup original changed after archive copy")
+			}
 		}
 		observation = actual
 		return nil

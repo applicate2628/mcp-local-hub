@@ -862,15 +862,23 @@ func (t *OwnedEntrypointTaskTxn) RestoreImport() error {
 			errs = append(errs, fmt.Errorf("entrypoint task restore import %q: %w", key, err))
 		}
 	}
+	return errors.Join(errors.Join(errs...), t.VerifyRestored())
+}
+
+// VerifyRestored receives the exact live Task set against its retained originals.
+func (t *OwnedEntrypointTaskTxn) VerifyRestored() error {
+	if err := t.requireInventory(); err != nil {
+		return err
+	}
 	if _, err := t.verify(func(_ ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
 		if !bytes.Equal(raw, snapshot.xml) {
 			return errors.New("restored XML is not byte-exact")
 		}
 		return nil
 	}); err != nil {
-		errs = append(errs, fmt.Errorf("entrypoint task restore verification: %w", err))
+		return fmt.Errorf("entrypoint task restore verification: %w", err)
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 // Close releases the cross-process lock. It is idempotent and must be called

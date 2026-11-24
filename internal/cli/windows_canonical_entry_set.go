@@ -29,15 +29,16 @@ const UpgradeAdmissionCanonicalEntryProductV2 = "canonical-entry-product-v2"
 // The current arm shares the existing outer record and entry_set key, while
 // historical V1 values retain their original serializer and meaning.
 type windowsCanonicalEntrySetJournalV2 struct {
-	Schema         string                                             `json:"schema"`
-	TransactionID  string                                             `json:"transaction_id"`
-	CanonicalEntry windowsProductRecoveryArtifactV3                   `json:"canonical_entry"`
-	StagedEntry    windowsProductRecoveryStagedV3                     `json:"staged_entry"`
-	Bundle         windowsCanonicalEntryBundleJournalV2               `json:"bundle"`
-	Expected       binaryadmission.WindowsCanonicalEntrySetSnapshotV2 `json:"expected"`
-	Moves          []windowsCanonicalEntryMoveRecordV2                `json:"moves"`
-	Cleanup        []windowsCanonicalEntryCleanupV2                   `json:"cleanup"`
-	PriorRuntime   *windowsCanonicalEntryRuntimePreimageV1            `json:"prior_runtime"`
+	Schema             string                                             `json:"schema"`
+	TransactionID      string                                             `json:"transaction_id"`
+	CanonicalEntry     windowsProductRecoveryArtifactV3                   `json:"canonical_entry"`
+	StagedEntry        windowsProductRecoveryStagedV3                     `json:"staged_entry"`
+	Bundle             windowsCanonicalEntryBundleJournalV2               `json:"bundle"`
+	Expected           binaryadmission.WindowsCanonicalEntrySetSnapshotV2 `json:"expected"`
+	Moves              []windowsCanonicalEntryMoveRecordV2                `json:"moves"`
+	Cleanup            []windowsCanonicalEntryCleanupV2                   `json:"cleanup"`
+	PriorRuntime       *windowsCanonicalEntryRuntimePreimageV1            `json:"prior_runtime"`
+	CleanArchiveSHA256 string                                             `json:"clean_archive_sha256,omitempty"`
 }
 
 type windowsCanonicalEntryBundleJournalV2 struct {
@@ -293,9 +294,15 @@ func canonicalCurrentObjectWithOptional(raw []byte, optional string, names ...st
 }
 
 func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
-	f, err := canonicalCurrentObject(raw, "schema", "transaction_id", "canonical_entry", "staged_entry", "bundle", "expected", "moves", "cleanup", "prior_runtime")
+	f, err := canonicalCurrentObjectWithOptional(raw, "clean_archive_sha256", "schema", "transaction_id", "canonical_entry", "staged_entry", "bundle", "expected", "moves", "cleanup", "prior_runtime")
 	if err != nil {
 		return err
+	}
+	if raw := f["clean_archive_sha256"]; raw != nil {
+		var digest string
+		if err := json.Unmarshal(raw, &digest); err != nil || !validLowerHexSHA256(digest) {
+			return errors.Join(err, errors.New("invalid clean archive digest"))
+		}
 	}
 	object := func(raw json.RawMessage, nullable bool, names ...string) (map[string]json.RawMessage, error) {
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
@@ -2893,6 +2900,24 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 	}
 	if !e.Bundle.Disposition.Transferred || e.Bundle.Disposition.State == "staged" {
 		return errors.New("current published journal has no transferred disposition")
+	}
+	if e.CleanArchiveSHA256 != "" {
+		if !validLowerHexSHA256(e.CleanArchiveSHA256) || j.Mode != WindowsProductPairModeUpgrade ||
+			j.PreSettlement == nil || e.PriorRuntime == nil || !e.PriorRuntime.Present {
+			return errors.New("clean archive binding lacks exact restored Product evidence")
+		}
+		switch j.Phase {
+		case WindowsProductRecoveryPrepared, WindowsProductRecoveryGUIOwnedStopPending, WindowsProductRecoverySuccessorStarting:
+			if e.Bundle.Disposition.State != "rolled-back" {
+				return errors.New("clean archive binding requires the rolled-back disposition")
+			}
+		case WindowsProductRecoverySettledRollback:
+			if e.Bundle.Disposition.State != "settled" {
+				return errors.New("clean archive binding requires the settled rollback disposition")
+			}
+		default:
+			return errors.New("clean archive binding is outside rollback cleanup")
+		}
 	}
 	targets, err := binaryadmission.CanonicalEntryTargetsV2(e.CanonicalEntry.Target)
 	if err != nil {

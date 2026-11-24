@@ -219,7 +219,8 @@ type UpgradeReceiptV1 struct {
 //     docstring binding table).
 type UpgradeOpts struct {
 	// Borrowed from the same original prior-set owner; never independently closed.
-	priorRuntime *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	priorRuntime       *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1
+	requirePriorAbsent bool
 	// WindowsProduct is the sole one-artifact Product/V3 transaction.
 	WindowsProduct *WindowsProductTxn
 	// GUIOwnedPending means Prepare already wrote the live GUI-owned V3 preimage
@@ -431,7 +432,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 		if err := validateWindowsProductFrozenPorts(lifecycle.FrozenPorts, opts.ExpectedPorts); err != nil {
 			return fmt.Errorf("%w: %v", ErrWindowsProductPairSupervisorUnsettled, err)
 		}
-		if !opts.GUIOwnedPending && lifecycle.Retained != nil && lifecycle.Retained.Observe != nil {
+		if !opts.requirePriorAbsent && !opts.GUIOwnedPending && lifecycle.Retained != nil && lifecycle.Retained.Observe != nil {
 			paths := opts.WindowsProduct.Opts
 			retainedInitial, err = lifecycle.Retained.Observe(ctx, opts.BinaryPath, paths.LegacyWindowlessPath, append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...))
 			if err != nil {
@@ -457,6 +458,9 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 			}
 			pairObservation = &observation
 			pairKnownAbsent = observation.Supervisor.State == windowsProductSupervisorKnownAbsent
+		}
+		if opts.requirePriorAbsent && !pairKnownAbsent {
+			return errors.Join(ErrWindowsProductPairSupervisorUnsettled, errors.New("clean install requires the prior supervisor to remain absent"))
 		}
 		opts.WindowsProduct.Opts.FrozenPorts = append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...)
 		if opts.GUIOwnedPending {
@@ -1198,6 +1202,9 @@ func retainedGenerationPreSettlement(observation retainedGenerationObservationV1
 }
 
 func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {
+	if opts.requirePriorAbsent {
+		return trigger
+	}
 	launch, err := opts.Deps.StartSupervisor(opts.BinaryPath)
 	if err != nil {
 		return errors.Join(trigger, fmt.Errorf("canonical prior binary was not promoted but prior supervisor recovery start failed: %w", err), abortStartedSupervisor(launch))

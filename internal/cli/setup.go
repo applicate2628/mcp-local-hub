@@ -282,6 +282,7 @@ func newSetupCmdRealWithWindowsCanonicalEntryInput(input windowsCanonicalEntryCo
 	var trustedRoots []string
 	var installServer string
 	var fixEphemeralRange bool
+	var cleanInstall bool
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install the mcphub product to ~/.local/bin, register PATH, install the supervisor-liveness task",
@@ -388,6 +389,14 @@ Exit codes:
 
 See also: install, uninstall, autostart, supervise.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cleanInstall {
+				if rollbackLSPRouter || allowElevated || len(trustedRoots) != 0 || installServer != "" || fixEphemeralRange {
+					return errors.New("--clean cannot be combined with other setup operations")
+				}
+				selected := input
+				selected.cleanInstall = true
+				return dispatchUpgradeWithWindowsCanonicalEntryInput(cmd, selected)
+			}
 			if rollbackLSPRouter {
 				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)
 			}
@@ -450,6 +459,10 @@ See also: install, uninstall, autostart, supervise.`,
 			// no-op when --server is empty.
 			return runSetupInstallServer(cmd.OutOrStdout(), installServer)
 		},
+	}
+	if runtime.GOOS == "windows" {
+		c.Flags().BoolVar(&cleanInstall, "clean", false,
+			"install the current Product with its previous fleet stopped, preserving settings and client data and archiving an exact pending rollback; use plain setup for a fresh profile")
 	}
 	c.Flags().BoolVar(&allowElevated, "allow-elevated", false,
 		"override plan §42 elevation refusal (records a high-priority audit entry; fail-closed if audit fails per §61)")

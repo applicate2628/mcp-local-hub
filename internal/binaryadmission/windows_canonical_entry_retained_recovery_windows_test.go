@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,12 +15,13 @@ import (
 )
 
 type retainedRecoveryFixture struct {
-	input   WindowsCanonicalEntryMembersRecoveryInputV2
-	lenders []*WindowsCanonicalEntryPayloadDirectoryV1
+	input         WindowsCanonicalEntryMembersRecoveryInputV2
+	lenders       []*WindowsCanonicalEntryPayloadDirectoryV1
+	validationErr error
 }
 
 func (f *retainedRecoveryFixture) ValidateOriginalRecovery(ctx context.Context) error {
-	return ctx.Err()
+	return errors.Join(ctx.Err(), f.validationErr)
 }
 
 func (f *retainedRecoveryFixture) WithOriginalMemberRecoveryInput(ctx context.Context, _ WindowsCanonicalRecoverySideV1, receive func(WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
@@ -131,6 +133,10 @@ func TestColdRecoveryReceivesRetainedOriginalsReadOnly(t *testing.T) {
 	}
 	prior, successor, f.lenders = nil, nil, nil
 
+	t.Run("archive_rollback_cleanup_original", func(t *testing.T) {
+		verifyRollbackCleanupArchiveCopy(t, input)
+	})
+
 	// Leave the original parked in the private fixture and insert an
 	// ordinary, same-byte replacement with a different native identity.
 	body := readRetainedFixtureFile(t, targets.ProductPath)
@@ -155,6 +161,108 @@ func TestColdRecoveryReceivesRetainedOriginalsReadOnly(t *testing.T) {
 	if !bytes.Equal(readRetainedFixtureFile(t, targets.ProductPath), body) ||
 		!bytes.Equal(readRetainedFixtureFile(t, old), body) {
 		t.Fatal("failed retained receiving changed fixture bytes")
+	}
+}
+
+type rollbackArchiveTestWriter func([]byte) (int, error)
+
+func (w rollbackArchiveTestWriter) Write(p []byte) (int, error) { return w(p) }
+
+func verifyRollbackCleanupArchiveCopy(t *testing.T, input WindowsCanonicalEntryMembersRecoveryInputV2) {
+	t.Helper()
+	ctx := t.Context()
+	input.Purpose = WindowsCanonicalRecoveryRollbackCleanupV2
+	f := &retainedRecoveryFixture{input: input}
+	plan := input.Members[0]
+	expected := *plan.Staged
+	originalPath := filepath.Join(filepath.Dir(input.Targets.CanonicalEntryPath), expected.File.Path)
+	originalBytes := readRetainedFixtureFile(t, originalPath)
+	run := func(side WindowsCanonicalRecoverySideV1, wantAcquire bool, check func(*WindowsCanonicalEntryRecoverySetV2)) {
+		t.Helper()
+		owner, err := AcquireWindowsCanonicalEntryForRecoveryV2(ctx, f, side)
+		defer func() {
+			if err := closeRetainedRecoveryFixture(owner); err != nil {
+				t.Error(err)
+			}
+		}()
+		if (err == nil) != wantAcquire {
+			t.Fatalf("unexpected acquisition outcome: %v", err)
+		}
+		check(owner)
+	}
+	var buffer bytes.Buffer
+	refused := func(owner *WindowsCanonicalEntryRecoverySetV2, want WindowsCanonicalEntryMemberEvidenceV2) {
+		t.Helper()
+		got, present, err := owner.CopyRollbackCleanupOriginal(ctx, want, &buffer)
+		if err == nil || present || got != (WindowsCanonicalEntryMemberEvidenceV2{}) || buffer.Len() != 0 {
+			t.Fatalf("archive refusal wrote or credited data: present=%v bytes=%d error=%v", present, buffer.Len(), err)
+		}
+	}
+	run(WindowsCanonicalRecoveryPriorV1, true, func(owner *WindowsCanonicalEntryRecoverySetV2) {
+		refused(owner, expected)
+	})
+	run(WindowsCanonicalRecoverySuccessorV1, true, func(owner *WindowsCanonicalEntryRecoverySetV2) {
+		wrong := expected
+		wrong.NativeIdentity = plan.Prior.NativeIdentity
+		refused(owner, wrong)
+		root := owner.original.original.root
+		finals := root.memberFinalPaths
+		root.memberFinalPaths = append(slices.Clone(finals), strings.ToUpper(expected.File.Path))
+		refused(owner, expected)
+		root.memberFinalPaths = finals
+		got, present, err := owner.CopyRollbackCleanupOriginal(ctx, expected, &buffer)
+		if err != nil || !present || got != expected || !bytes.Equal(buffer.Bytes(), originalBytes) {
+			t.Fatalf("exact held original was not copied: present=%v bytes=%d error=%v", present, buffer.Len(), err)
+		}
+		buffer.Reset()
+		got, present, err = owner.CopyRollbackCleanupOriginal(ctx, expected, rollbackArchiveTestWriter(func(p []byte) (int, error) {
+			return len(p) - 1, nil
+		}))
+		if !errors.Is(err, io.ErrShortWrite) || present || got != (WindowsCanonicalEntryMemberEvidenceV2{}) {
+			t.Fatalf("partial archive write was credited: present=%v error=%v", present, err)
+		}
+		marker := errors.New("fixture closing journal validation")
+		got, present, err = owner.CopyRollbackCleanupOriginal(ctx, expected, rollbackArchiveTestWriter(func(p []byte) (int, error) {
+			f.validationErr = marker
+			return buffer.Write(p)
+		}))
+		f.validationErr = nil
+		if !errors.Is(err, marker) || present || got != (WindowsCanonicalEntryMemberEvidenceV2{}) || !bytes.Equal(buffer.Bytes(), originalBytes) {
+			t.Fatalf("archive copy with unconfirmed final validation was credited: present=%v error=%v", present, err)
+		}
+		buffer.Reset()
+	})
+	if !bytes.Equal(readRetainedFixtureFile(t, originalPath), originalBytes) {
+		t.Fatal("archive transfer changed the original")
+	}
+
+	// An exact recorded native absence is received without writing any bytes.
+	f.input.Cleanup = []WindowsCanonicalEntryMemberCleanupRecordV2{{
+		TransactionID: input.TransactionID, Side: "unused-successor", Member: expected.Member,
+		SourceRelative: expected.File.Path, ExpectedSHA256: expected.File.SHA256,
+		State: "discard_intent", Purpose: input.Purpose,
+	}}
+	parked := filepath.Join(t.TempDir(), "archive-fixture-original")
+	if err := os.Rename(originalPath, parked); err != nil {
+		t.Fatal(err)
+	}
+	run(WindowsCanonicalRecoverySuccessorV1, true, func(owner *WindowsCanonicalEntryRecoverySetV2) {
+		got, present, err := owner.CopyRollbackCleanupOriginal(ctx, expected, &buffer)
+		if err != nil || present || got != (WindowsCanonicalEntryMemberEvidenceV2{}) || buffer.Len() != 0 {
+			t.Fatalf("confirmed absence wrote or credited data: present=%v bytes=%d error=%v", present, buffer.Len(), err)
+		}
+	})
+	if err := os.WriteFile(originalPath, originalBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run(WindowsCanonicalRecoverySuccessorV1, false, func(owner *WindowsCanonicalEntryRecoverySetV2) {
+		refused(owner, expected)
+	})
+	if err := os.Remove(originalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(parked, originalPath); err != nil {
+		t.Fatal(err)
 	}
 }
 

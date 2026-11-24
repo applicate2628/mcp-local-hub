@@ -278,31 +278,8 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	if _, err := observeWindowsProductIntentPorts(ctx, q.journal.Product.Target, frozen, true); err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceFrozenPorts, cause: err}
 	}
-	names := []string{"mcphub.exe", "mcphub-windowless.exe"}
-	for _, image := range images {
-		names = append(names, filepath.Base(image))
-	}
-	pids, err := productImageSnapshotPIDs(ctx, names, nativeProductProcessSnapshotOps())
-	if err != nil {
-		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
-	}
-	for _, pid := range pids {
-		if err := ctx.Err(); err != nil {
-			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
-		}
-		observation, err := process.ObservePIDHandleIdentity(ctx, pid)
-		if err != nil {
-			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
-		}
-		if observation.ConfirmedAbsent {
-			continue
-		}
-		identity := observation.Identity
-		for _, image := range images {
-			if samePath(identity.ExecutablePath, image) {
-				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
-			}
-		}
+	if err := observeWindowsProductImageAbsence(ctx, images, []string{"mcphub.exe", "mcphub-windowless.exe"}, nativeProductProcessSnapshotOps(), process.ObservePIDHandleIdentity); err != nil {
+		return err
 	}
 	record, err := gui.ReadGUIOwnerRecord(q.guiOwnerPath)
 	if err != nil {
@@ -310,6 +287,59 @@ func (q *windowsProductSuccessorQuiescence) absent(ctx context.Context) error {
 	}
 	if err := proveUpgradeGUIOwnerEndpointAbsent(ctx, record, api.LoopbackPortOwnerPIDContext); err != nil {
 		return &windowsProductAbsenceError{check: windowsProductAbsenceGUIEndpoint, cause: err}
+	}
+	return nil
+}
+
+// The clean-install owner supplies all three installed image paths. This
+// observation alone does not reserve GUI startup, the Supervisor or ports.
+func validateCleanInstallProcessAbsence(ctx context.Context, productPath, launcherPath, legacyWindowlessPath string) error {
+	images := []string{productPath, launcherPath, legacyWindowlessPath}
+	for _, image := range images {
+		if !cleanAbsolutePath(image) {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceIssuedImages, cause: errors.New("clean installation requires exact installed image paths")}
+		}
+	}
+	return observeWindowsProductImageAbsence(ctx, images, nil, nativeProductProcessSnapshotOps(), process.ObservePIDHandleIdentity)
+}
+
+func observeWindowsProductImageAbsence(ctx context.Context, images, names []string, ops productProcessSnapshotOps, observe func(context.Context, int) (process.PIDHandleObservation, error)) error {
+	if ctx == nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: errors.New("process absence context required")}
+	}
+	if err := ctx.Err(); err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
+	}
+	for _, image := range images {
+		names = append(names, filepath.Base(image))
+	}
+	pids, err := productImageSnapshotPIDs(ctx, names, ops)
+	if err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceProcessInventory, cause: err}
+	}
+	for _, pid := range pids {
+		if err := ctx.Err(); err != nil {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
+		}
+		observation, err := observe(ctx, pid)
+		if err != nil {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: err}
+		}
+		if observation.ConfirmedAbsent {
+			continue
+		}
+		identity := observation.Identity
+		if identity.PID != pid || !filepath.IsAbs(identity.ExecutablePath) || identity.StartedAt.IsZero() {
+			return &windowsProductAbsenceError{check: windowsProductAbsenceProcessIdentity, cause: errors.New("incomplete selected process identity")}
+		}
+		for _, image := range images {
+			if samePath(identity.ExecutablePath, image) {
+				return &windowsProductAbsenceError{check: windowsProductAbsenceProcessPresent, cause: fmt.Errorf("%w: current selected image still has a process user", ErrWindowsProductRecoveryPending)}
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return &windowsProductAbsenceError{check: windowsProductAbsenceContext, cause: err}
 	}
 	return nil
 }

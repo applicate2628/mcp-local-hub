@@ -2,7 +2,10 @@
 
 package binaryadmission
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 func (*WindowsCanonicalEntrySetV2) Stage(context.Context, string) (*StagedWindowsCanonicalEntrySetV2, error) {
 	return nil, errWindowsCanonicalEntryUnsupported
@@ -86,6 +89,9 @@ func (*WindowsCanonicalEntryRecoverySetV2) Members(context.Context) ([]WindowsCa
 	return nil, errWindowsCanonicalEntryUnsupported
 }
 func (*WindowsCanonicalEntryRecoverySetV2) ObserveCleanupMember(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, WindowsCanonicalEntryMemberEvidenceV2) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
+	return WindowsCanonicalEntryMemberEvidenceV2{}, false, errWindowsCanonicalEntryUnsupported
+}
+func (*WindowsCanonicalEntryRecoverySetV2) CopyRollbackCleanupOriginal(context.Context, WindowsCanonicalEntryMemberEvidenceV2, io.Writer) (WindowsCanonicalEntryMemberEvidenceV2, bool, error) {
 	return WindowsCanonicalEntryMemberEvidenceV2{}, false, errWindowsCanonicalEntryUnsupported
 }
 func (*WindowsCanonicalEntryRecoverySetV2) VerifyCleanupAbsences(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2) error {
