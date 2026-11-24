@@ -1319,6 +1319,7 @@ func v2TxnAssertRolledBackCleanInstallPreflight(t *testing.T, txn *WindowsProduc
 				t.Error(err)
 			}
 		})
+		v2TxnAssertCleanEffectGuard(t, req, namespace, journalPath, archivePath)
 		originalArchive := mustReadFile(t, archivePath)
 		corrupted := bytes.Clone(originalArchive)
 		corrupted[512] ^= 1 // Change the first byte of the embedded raw V3.
@@ -1415,13 +1416,82 @@ func v2TxnAssertRolledBackCleanInstallPreflight(t *testing.T, txn *WindowsProduc
 	}
 }
 
+func v2TxnAssertCleanEffectGuard(t *testing.T, req windowsProductRecoveryRequest, namespace *api.WindowsProductStateNamespace, journalPath, archivePath string) {
+	t.Helper()
+	ctx := req.Context
+	original := mustReadFile(t, journalPath)
+	err := withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, _, _ *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
+		received, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+		if err != nil {
+			return err
+		}
+		archive := received.archive
+		unexpected := func(func(context.Context) error, binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error {
+			t.Error("an unqualified effect provider callback was invoked")
+			return nil
+		}
+		if err := s.WithCanonicalRecoveryCleanEffectScope(ctx, archive.digest(), unexpected); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+			t.Fatal("native authority escaped its file holds", err)
+		}
+		var late func(context.Context) error
+		var effectErr error
+		if err := s.withArchivedRollbackCleanupGuard(ctx, namespace, archive, func() {
+			for _, name := range []string{journalPath, archivePath} {
+				path, err := windows.UTF16PtrFromString(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, access := range []uint32{windows.GENERIC_WRITE, windows.DELETE} {
+					h, err := windows.CreateFile(path, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+						nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+					if err == nil {
+						t.Error("archive effect window permitted replacing or editing an original", windows.CloseHandle(h))
+					} else if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+						t.Error("expected native original sharing refusal", err)
+					}
+				}
+			}
+			if err := s.WithCanonicalRecoveryCleanEffectScope(ctx, strings.Repeat("0", 64), unexpected); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+				t.Error("effect source admitted a different archive digest", err)
+			}
+			effectErr = s.WithCanonicalRecoveryCleanEffectScope(ctx, archive.digest(), func(check func(context.Context) error, input binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error {
+				late = check
+				if input.Purpose != binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 || input.TransactionID != s.journal.TransactionID ||
+					len(input.Cleanup) != len(members) || !reflect.DeepEqual(input.Cleanup, s.journal.EntryBundle.Cleanup) {
+					t.Error("effect scope did not receive the exact grouped original intents")
+				}
+				if err := s.WithCanonicalRecoveryCleanEffectScope(ctx, archive.digest(), unexpected); !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
+					t.Error("effect source delivered the same scope twice", err)
+				}
+				return check(ctx)
+			})
+		}); err != nil || effectErr != nil || late == nil || !errors.Is(late(ctx), ErrWindowsProductRecoveryIdentity) {
+			t.Fatal("live cleanup file guards or one-use revocation did not settle", err, effectErr)
+		}
+		drifted := append(bytes.Clone(original), '\n')
+		if err := api.WriteStateFileBytesAtomic(journalPath, drifted); err != nil {
+			return err
+		}
+		guardErr := s.withArchivedRollbackCleanupGuard(ctx, namespace, archive, func() {
+			t.Error("changed durable V3 reached native effects")
+		})
+		if !errors.Is(guardErr, ErrWindowsProductRecoveryIdentity) || !bytes.Equal(drifted, mustReadFile(t, journalPath)) {
+			t.Fatal("changed durable V3 was not preserved on refusal", guardErr)
+		}
+		return api.WriteStateFileBytesAtomic(journalPath, original)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 func v2TxnAssertBoundArchiveRefusesPartialReplacement(t *testing.T, req windowsProductRecoveryRequest, namespace *api.WindowsProductStateNamespace, advanced windowsProductRecoveryJournalV3, archive []byte, archivePath, journalPath, root string) {
 	t.Helper()
 	ctx := req.Context
 	row := advanced.EntryBundle.Cleanup[0]
 	raw := mustReadFile(t, journalPath)
 	err := withRolledBackCurrentEntry(req, false, func(s *windowsCanonicalJournalRecoverySource, _ *binaryadmission.WindowsCanonicalEntryRecoverySetV2, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, _ *windowsProductPairTaskStore, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) error {
-		if _, err := s.receiveExistingRolledBackArchive(ctx, namespace, members); err != nil {
+		archive, err := s.receiveExistingRolledBackArchive(ctx, namespace, members)
+		if err != nil {
 			return err
 		}
 		changed, err := cloneCurrentRecoveryJournal(s.journal)
@@ -1440,8 +1510,25 @@ func v2TxnAssertBoundArchiveRefusesPartialReplacement(t *testing.T, req windowsP
 		if !errors.Is(err, ErrWindowsProductRecoveryIdentity) {
 			t.Fatal("advanced bound V3 allowed new archive creation", err)
 		}
-		result, err := successor.DiscardOriginal(ctx, row.Member, row.SourceRelative)
-		return canonicalEntryDiscardResultError(result, err, row.Member, row.SourceRelative)
+		var selected []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2
+		for _, member := range members {
+			if member.Member == row.Member {
+				selected = append(selected, member)
+			}
+		}
+		if len(selected) != 1 {
+			t.Fatal("issued selected archive original unavailable")
+		}
+		beforeReads := len(s.req.journalReadEvidence.observations())
+		var results []binaryadmission.WindowsCanonicalEntryMoveResultV1
+		var batchErr error
+		guardErr := s.withArchivedRollbackCleanupGuard(ctx, namespace, archive.archive, func() {
+			results, batchErr = successor.DiscardArchivedRollbackCleanup(ctx, archive.archive.digest(), selected)
+		})
+		if len(results) != 1 || len(s.req.journalReadEvidence.observations()) != beforeReads {
+			t.Fatal("held native selected discard did not receive exactly one result without legacy V3 reads", guardErr, batchErr)
+		}
+		return errors.Join(guardErr, canonicalEntryDiscardResultError(results[0], batchErr, row.Member, row.SourceRelative))
 	})
 	if err != nil || !bytes.Equal(raw, mustReadFile(t, journalPath)) ||
 		v2TxnFixtureAbsent(filepath.Join(root, filepath.FromSlash(row.SourceRelative))) != nil {

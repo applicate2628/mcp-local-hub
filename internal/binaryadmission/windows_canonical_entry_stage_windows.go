@@ -413,6 +413,9 @@ func canonicalEntryRelativeParentRead(ctx context.Context, root *WindowsCanonica
 	for _, part := range parts[:len(parts)-1] {
 		borrowed, matched, borrowErr := canonicalEntryBorrowPayloadDirectoryRead(ctx, root, current, part, scope)
 		if borrowErr != nil {
+			if scope != nil && scope.requireIssuedParents {
+				return nil, "", fmt.Errorf("recheck original clean discard parent: %w", borrowErr)
+			}
 			return nil, "", borrowErr
 		}
 		if matched {
@@ -421,7 +424,13 @@ func canonicalEntryRelativeParentRead(ctx context.Context, root *WindowsCanonica
 		}
 		h, err := canonicalEntryOpenRelativeDirectory(current, part)
 		if err != nil {
+			if scope != nil && scope.requireIssuedParents && h != 0 {
+				return nil, "", errors.Join(err, windows.CloseHandle(h))
+			}
 			return nil, "", err
+		}
+		if scope != nil && scope.requireIssuedParents {
+			return nil, "", errors.Join(errors.New("clean discard parent is outside the held original directory set"), windows.CloseHandle(h))
 		}
 		next, err := root.retain(h, filepath.Join(current.path, part), true)
 		if err != nil {
@@ -858,16 +867,29 @@ func canonicalEntryIsFinalRelative(relative string) bool {
 // discard must additionally refuse the original native object selected by ANY
 // final canonical target, with original parent/file guards held continuously.
 func canonicalEntryRefuseFinalObject(root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile) (error, error) {
+	return canonicalEntryRefuseFinalObjectRead(context.Background(), root, parent, member, nil)
+}
+
+func canonicalEntryRefuseFinalObjectRead(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, scope *canonicalEntryRecoveryReadScopeV2) (error, error) {
 	finals := []string{WindowsCanonicalEntryRelativePathV1, WindowsCanonicalProductRelativePathV1, WindowsCanonicalIdentityRelativePathV1}
 	if root.memberFinalPaths != nil {
 		finals = root.memberFinalPaths
 	}
-	return canonicalEntryRefuseFinalPaths(root, parent, member, finals, nil)
+	return canonicalEntryRefuseFinalPathsRead(ctx, root, parent, member, finals, nil, scope)
 }
 
 func canonicalEntryRefuseFinalPaths(root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, finals []string, prior *canonicalEntryClosePriorParentsV2) (error, error) {
+	return canonicalEntryRefuseFinalPathsRead(context.Background(), root, parent, member, finals, prior, nil)
+}
+
+func canonicalEntryRefuseFinalPathsRead(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, finals []string, prior *canonicalEntryClosePriorParentsV2, scope *canonicalEntryRecoveryReadScopeV2) (error, error) {
 	var closeErrors error
 	for _, relative := range finals {
+		if scope != nil {
+			if err := scope.validateBank(ctx, scope.bank); err != nil {
+				return closeErrors, err
+			}
+		}
 		var directory *canonicalEntryNativeFile
 		var leaf string
 		var err error
@@ -875,15 +897,18 @@ func canonicalEntryRefuseFinalPaths(root *WindowsCanonicalEntrySetV1, parent, me
 			directory, leaf, err = prior.finalParent(relative)
 		}
 		if directory == nil && err == nil {
-			directory, leaf, err = canonicalEntryRelativeParent(root, parent, relative)
+			directory, leaf, err = canonicalEntryRelativeParentRead(ctx, root, parent, relative, scope)
 		}
-		if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
+		if err == windows.STATUS_OBJECT_NAME_NOT_FOUND || scope == nil && errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
 			continue
 		}
 		if err != nil {
 			return closeErrors, err
 		}
 		h, err := canonicalEntryOpenNative(windows.Handle(directory.file.Fd()), leaf, false, windows.FILE_READ_DATA, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN)
+		if scope != nil && err != nil && h != 0 {
+			return errors.Join(closeErrors, windows.CloseHandle(h)), err
+		}
 		if errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) {
 			continue
 		}
@@ -913,6 +938,12 @@ func canonicalEntryDiscardOriginal(ctx context.Context, root *WindowsCanonicalEn
 }
 
 func canonicalEntryDiscardOriginalWithClosePrefix(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, memberName, expectedRelative, expectedHash string, prefix *canonicalEntryStageClosePrefixV2) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
+	return canonicalEntryDiscardOriginalWithChecks(ctx, root, parent, member, memberName, expectedRelative, expectedHash, prefix, nil)
+}
+
+// The optional scope supplies original namespace currentness for read probes.
+// Effect authorization remains the caller's separately qualified intent.
+func canonicalEntryDiscardOriginalWithChecks(ctx context.Context, root *WindowsCanonicalEntrySetV1, parent, member *canonicalEntryNativeFile, memberName, expectedRelative, expectedHash string, prefix *canonicalEntryStageClosePrefixV2, scope *canonicalEntryRecoveryReadScopeV2) (result WindowsCanonicalEntryMoveResultV1, retErr error) {
 	result.Member = memberName
 	result.SourceRelative = expectedRelative
 	result.OriginalOwnerPending = root != nil && !root.closed
@@ -939,7 +970,11 @@ func canonicalEntryDiscardOriginalWithClosePrefix(ctx context.Context, root *Win
 	var finalCloseErr, finalErr error
 	deferred := false
 	if prefix == nil {
-		finalCloseErr, finalErr = canonicalEntryRefuseFinalObject(root, parent, member)
+		if scope == nil {
+			finalCloseErr, finalErr = canonicalEntryRefuseFinalObject(root, parent, member)
+		} else {
+			finalCloseErr, finalErr = canonicalEntryRefuseFinalObjectRead(ctx, root, parent, member, scope)
+		}
 	} else {
 		if prefix.root != root || prefix.parent != parent {
 			return result, errors.New("original stage close prefix belongs to a different owner")
@@ -955,6 +990,8 @@ func canonicalEntryDiscardOriginalWithClosePrefix(ctx context.Context, root *Win
 	var closeErr error
 	if deferred {
 		directory, leaf, closeErr, err = prefix.confirmCurrentMember(ctx, member)
+	} else if scope != nil {
+		directory, leaf, closeErr, err = canonicalEntryCurrentMemberRead(ctx, root, parent, member, scope)
 	} else {
 		directory, leaf, closeErr, err = canonicalEntryCurrentMember(root, parent, member)
 	}
@@ -964,6 +1001,11 @@ func canonicalEntryDiscardOriginalWithClosePrefix(ctx context.Context, root *Win
 	}
 	if err = ctx.Err(); err != nil {
 		return result, err
+	}
+	if scope != nil {
+		if err := scope.validateBank(ctx, scope.bank); err != nil {
+			return result, err
+		}
 	}
 	remove := byte(1)
 	var iosb windows.IO_STATUS_BLOCK

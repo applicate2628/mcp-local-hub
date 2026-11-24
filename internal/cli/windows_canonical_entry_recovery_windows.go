@@ -41,6 +41,7 @@ const (
 
 type windowsCanonicalJournalRecoverySource struct {
 	beforeCurrentInverse     func(context.Context) error
+	cleanEffect              currentCleanEffectState
 	inverseMovesReceived     int
 	memberDirectories        []*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1
 	memberDirectorySnapshots map[*binaryadmission.WindowsCanonicalEntryPayloadDirectoryV1]binaryadmission.WindowsCanonicalEntryMemberDirectorySnapshotV2

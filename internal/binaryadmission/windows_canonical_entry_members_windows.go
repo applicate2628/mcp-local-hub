@@ -152,12 +152,20 @@ type canonicalEntryRecoveryCleanupReadSourceV2 interface {
 	WithCanonicalRecoveryCleanupReadScope(context.Context, WindowsCanonicalRecoverySideV1, WindowsCanonicalEntryRecoveryPurposeV2, func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error
 }
 
+// The exact same source may additionally qualify a clean-only effect scope.
+// Its callback is synchronous and bounded by the source's held archive proof
+// and immutable, persisted discard intents. A read scope never grants effects.
+type canonicalEntryRecoveryCleanEffectSourceV2 interface {
+	WithCanonicalRecoveryCleanEffectScope(context.Context, string, func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error
+}
+
 type canonicalEntryRecoveryReadAcceptanceV2 func(func(context.Context) error, *WindowsCanonicalEntryMembersRecoveryInputV2) error
 
 type canonicalEntryRecoveryReadScopeV2 struct {
-	bank   *canonicalEntryMembersV2
-	source WindowsCanonicalRecoverySourceV2
-	check  func(context.Context) error
+	bank                 *canonicalEntryMembersV2
+	source               WindowsCanonicalRecoverySourceV2
+	check                func(context.Context) error
+	requireIssuedParents bool
 }
 
 func sameCanonicalRecoverySourceV2(a, b WindowsCanonicalRecoverySourceV2) bool {
@@ -982,7 +990,11 @@ func (c *canonicalEntryMembersV2) discard(ctx context.Context, key, relative str
 	if err := c.authorizeRecoveryEffect(ctx, key, relative, true); err != nil {
 		return WindowsCanonicalEntryMoveResultV1{Member: key, SourceRelative: relative, Error: err, OriginalOwnerPending: !c.closed}, err
 	}
-	r, err := canonicalEntryDiscardOriginal(ctx, c.root, c.parent, m.original, key, relative, m.evidence.File.SHA256)
+	return c.discardIssuedOriginal(ctx, key, relative, m, nil)
+}
+
+func (c *canonicalEntryMembersV2) discardIssuedOriginal(ctx context.Context, key, relative string, m *canonicalEntryOwnedMemberV2, scope *canonicalEntryRecoveryReadScopeV2) (WindowsCanonicalEntryMoveResultV1, error) {
+	r, err := canonicalEntryDiscardOriginalWithChecks(ctx, c.root, c.parent, m.original, key, relative, m.evidence.File.SHA256, nil, scope)
 	c.cleanup = append(c.cleanup, r)
 	if r.Applied {
 		copy := r
@@ -3616,6 +3628,83 @@ func (r *WindowsCanonicalEntryRecoverySetV2) DiscardOriginal(ctx context.Context
 		return WindowsCanonicalEntryMoveResultV1{}, errors.New("current recovery owner required")
 	}
 	return r.original.DiscardOriginal(ctx, key, relative)
+}
+
+// DiscardArchivedRollbackCleanup receives a clean-only archive-bound intent
+// batch from the exact original source and applies it using the same native
+// discard owner. It returns the actual result prefix even on closing failure.
+func (r *WindowsCanonicalEntryRecoverySetV2) DiscardArchivedRollbackCleanup(ctx context.Context, archiveSHA256 string, members []WindowsCanonicalEntryMemberEvidenceV2) ([]WindowsCanonicalEntryMoveResultV1, error) {
+	if r == nil || r.original == nil || ctx == nil || !validLowerHex(archiveSHA256, 64, 64) {
+		return nil, errors.New("clean rollback cleanup requires the original owner, context and archive digest")
+	}
+	c := &r.original.original
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	const purpose = WindowsCanonicalRecoveryRollbackCleanupV2
+	if !c.ready || c.closed || c.root == nil || c.root.closed || c.parent == nil || c.parent.file == nil ||
+		c.recoverySide != WindowsCanonicalRecoverySuccessorV1 || c.recoveryInput == nil || c.recoveryInput.Purpose != purpose {
+		return nil, errors.Join(c.acquisitionError, errors.New("clean batch requires an opened successor rollback-cleanup bank"))
+	}
+	provider, ok := c.source.(canonicalEntryRecoveryCleanEffectSourceV2)
+	if !ok {
+		return nil, errors.New("original clean rollback cleanup effect scope unavailable")
+	}
+	members = slices.Clone(members)
+	var results []WindowsCanonicalEntryMoveResultV1
+	err := c.receiveRecoveryReadScope(ctx, func(accept canonicalEntryRecoveryReadAcceptanceV2) error {
+		return provider.WithCanonicalRecoveryCleanEffectScope(ctx, archiveSHA256, func(check func(context.Context) error, input WindowsCanonicalEntryMembersRecoveryInputV2) error {
+			return accept(check, &input)
+		})
+	}, func(scope *canonicalEntryRecoveryReadScopeV2, input *WindowsCanonicalEntryMembersRecoveryInputV2) error {
+		if err := scope.validateBank(ctx, c); err != nil {
+			return err
+		}
+		fresh := cloneCanonicalEntryMembersRecoveryInputV2(*input)
+		if fresh.Purpose != purpose || !canonicalRecoveryOriginalBindingStableV2(*c.recoveryInput, fresh) {
+			return errors.New("clean batch no longer binds its original recovery lineage")
+		}
+		if _, err := buildCanonicalRecoveryLineageV2(fresh); err != nil {
+			return err
+		}
+		intents := make(map[string]WindowsCanonicalEntryMemberCleanupRecordV2, len(fresh.Cleanup))
+		for _, row := range fresh.Cleanup {
+			if row.Side == "unused-successor" && row.State == "discard_intent" {
+				intents[row.Member] = row
+			}
+		}
+		for _, evidence := range members {
+			held := c.members[evidence.Member]
+			row, found := intents[evidence.Member]
+			if held == nil || held.original == nil || held.cleanup != nil || held.evidence != evidence || !found ||
+				row.SourceRelative != evidence.File.Path || row.ExpectedSHA256 != evidence.File.SHA256 {
+				return errors.New("clean archive member lacks an exact held original and unique discard intent")
+			}
+			delete(intents, evidence.Member)
+		}
+
+		scope.requireIssuedParents = true
+		results = make([]WindowsCanonicalEntryMoveResultV1, 0, len(members))
+		for _, evidence := range members {
+			held := c.members[evidence.Member]
+			actual, err := c.receiveMemberRead(ctx, evidence.Member, held.original, evidence.File.SHA256, scope)
+			if err == nil && actual != evidence {
+				err = errors.New("clean archive original identity, path, parent, extent, attributes or bytes changed")
+			}
+			if err != nil {
+				results = append(results, WindowsCanonicalEntryMoveResultV1{
+					Member: evidence.Member, SourceRelative: evidence.File.Path, Error: err, OriginalOwnerPending: !c.closed,
+				})
+				return err
+			}
+			result, err := c.discardIssuedOriginal(ctx, evidence.Member, evidence.File.Path, held, scope)
+			results = append(results, result)
+			if err != nil {
+				return err
+			}
+		}
+		return scope.validateBank(ctx, c)
+	})
+	return results, err
 }
 func (r *WindowsCanonicalEntryRecoverySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	if r == nil || r.original == nil {

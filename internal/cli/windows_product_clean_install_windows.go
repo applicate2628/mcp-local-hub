@@ -12,6 +12,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"sync"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
@@ -92,7 +93,10 @@ func (s *windowsCanonicalJournalRecoverySource) writeRolledBackCurrentArchive(ct
 	return a, nil
 }
 
-type receivedRolledBackCurrentArchive struct{ archive rolledBackCurrentArchive }
+type receivedRolledBackCurrentArchive struct {
+	archive   rolledBackCurrentArchive
+	namespace *api.WindowsProductStateNamespace
+}
 
 func (a rolledBackCurrentArchive) matchesSource(source *windowsCanonicalJournalRecoverySource) bool {
 	return a.source == source && a.path != "" && a.journalSHA256 == sha256.Sum256(source.raw)
@@ -113,7 +117,7 @@ func receiveRolledBackCurrentArchive(ctx context.Context, namespace *api.Windows
 	if received != archive.archiveSHA256 {
 		return receivedRolledBackCurrentArchive{}, errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("clean install archive readback differs"))
 	}
-	return receivedRolledBackCurrentArchive{archive}, nil
+	return receivedRolledBackCurrentArchive{archive: archive, namespace: namespace}, nil
 }
 
 func (s *windowsCanonicalJournalRecoverySource) receiveExistingRolledBackArchive(ctx context.Context, namespace *api.WindowsProductStateNamespace, members []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2) (receivedRolledBackCurrentArchive, error) {
@@ -208,7 +212,7 @@ func (s *windowsCanonicalJournalRecoverySource) receiveExistingRolledBackArchive
 	if bound := s.journal.EntryBundle.CleanArchiveSHA256; bound != "" && bound != archive.digest() {
 		return receivedRolledBackCurrentArchive{}, errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("bound clean install archive digest differs"))
 	}
-	return receivedRolledBackCurrentArchive{archive}, nil
+	return receivedRolledBackCurrentArchive{archive: archive, namespace: namespace}, nil
 }
 
 func cleanArchiveFile(h *tar.Header) bool {
@@ -282,6 +286,134 @@ func cleanArchiveDirectoryAdvances(old, now string) bool {
 		old == "dispose_intent" && now == "absence_received"
 }
 
+type currentCleanEffectState struct {
+	mu   sync.Mutex
+	held *currentCleanEffectHold
+}
+
+type currentCleanEffectHold struct {
+	ctx     context.Context
+	path    string
+	raw     []byte
+	journal windowsProductRecoveryJournalV3
+	used    bool
+}
+
+func (s *windowsCanonicalJournalRecoverySource) checkCleanEffectHold(ctx context.Context, held *currentCleanEffectHold, archiveSHA256 string) error {
+	if err := s.validateOriginalRecoveryState(ctx); err != nil {
+		return err
+	}
+	if s.cleanEffect.held != held || held == nil || s.path != held.path ||
+		len(held.raw) == 0 || len(s.raw) != len(held.raw) || &s.raw[0] != &held.raw[0] ||
+		s.journal.EntryBundle != held.journal.EntryBundle || s.journal.Phase != held.journal.Phase ||
+		s.journal.TransactionID != held.journal.TransactionID || s.purpose != canonicalRecoveryRollbackCleanup ||
+		s.journal.EntryBundle.Bundle.Disposition.State != "rolled-back" ||
+		s.journal.EntryBundle.CleanArchiveSHA256 != archiveSHA256 || !validLowerHexSHA256(archiveSHA256) {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	return errors.Join(held.ctx.Err(), s.req.Context.Err())
+}
+
+// WithCanonicalRecoveryCleanEffectScope lends one immutable projection only
+// during the clean owner's nested, protected archive and journal file holds.
+func (s *windowsCanonicalJournalRecoverySource) WithCanonicalRecoveryCleanEffectScope(ctx context.Context, archiveSHA256 string, use func(func(context.Context) error, binaryadmission.WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
+	if s == nil || use == nil {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	state := &s.cleanEffect
+	state.mu.Lock()
+	held := state.held
+	err := s.checkCleanEffectHold(ctx, held, archiveSHA256)
+	if err == nil {
+		if held.used {
+			err = ErrWindowsProductRecoveryIdentity
+		} else {
+			held.used = true
+		}
+	}
+	state.mu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	open := true
+	var checkErr error
+	check := func(ctx context.Context) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if !open {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		if checkErr == nil {
+			checkErr = s.checkCleanEffectHold(ctx, held, archiveSHA256)
+		}
+		return checkErr
+	}
+	defer func() {
+		state.mu.Lock()
+		open = false
+		state.mu.Unlock()
+	}()
+	input, err := projectCurrentRecoveryJournal(held.journal, binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2)
+	if err != nil {
+		return err
+	}
+	if err := check(ctx); err != nil {
+		return err
+	}
+	err = use(check, input)
+	return errors.Join(err, check(ctx))
+}
+
+func (s *windowsCanonicalJournalRecoverySource) withArchivedRollbackCleanupGuard(ctx context.Context, namespace *api.WindowsProductStateNamespace, archive rolledBackCurrentArchive, use func()) error {
+	if namespace == nil || use == nil || s.req.Context == nil || archive.source != s ||
+		s.path != filepath.Join(s.req.StateDir, WindowsProductRecoveryFileLeafV3) ||
+		archive.path != filepath.Join(s.req.StateDir, "windows-product-clean-"+s.journal.TransactionID+".tar") {
+		return ErrWindowsProductRecoveryIdentity
+	}
+	held := &currentCleanEffectHold{ctx: ctx, path: s.path, raw: s.raw, journal: s.journal}
+	archiveSHA256 := archive.digest()
+	var journalErr error
+	archiveErr := namespace.WithBoundFileReader(ctx, filepath.Base(archive.path), func(r io.Reader) error {
+		hash := sha256.New()
+		if _, err := io.Copy(hash, r); err != nil {
+			return err
+		}
+		if fmt.Sprintf("%x", hash.Sum(nil)) != archiveSHA256 {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("bound clean install archive digest differs"))
+		}
+		journalErr = namespace.WithBoundFileReader(ctx, filepath.Base(held.path), func(r io.Reader) error {
+			raw, err := io.ReadAll(io.LimitReader(r, int64(len(held.raw))+1))
+			if err != nil || !bytes.Equal(raw, held.raw) {
+				return errors.Join(ErrWindowsProductRecoveryIdentity, err, errors.New("bound clean install journal bytes differ"))
+			}
+			state := &s.cleanEffect
+			state.mu.Lock()
+			if state.held != nil {
+				state.mu.Unlock()
+				return ErrWindowsProductRecoveryIdentity
+			}
+			state.held = held
+			err = s.checkCleanEffectHold(ctx, held, archiveSHA256)
+			state.mu.Unlock()
+			defer func() {
+				state.mu.Lock()
+				state.held = nil
+				state.mu.Unlock()
+			}()
+			if err != nil {
+				return err
+			}
+			use()
+			// Native outcomes are collected outside this callback. These two
+			// owner callbacks must still receive leaf identity and native close.
+			return nil
+		})
+		return nil
+	})
+	return errors.Join(journalErr, archiveErr)
+}
+
 // discardArchivedCurrentOriginals uses the still-live old V3 owner. It enters
 // no native discard before one durable write admits every covered original.
 func (s *windowsCanonicalJournalRecoverySource) discardArchivedCurrentOriginals(ctx context.Context, prior, successor *binaryadmission.WindowsCanonicalEntryRecoverySetV2, verified receivedRolledBackCurrentArchive) error {
@@ -336,20 +468,39 @@ func (s *windowsCanonicalJournalRecoverySource) discardArchivedCurrentOriginals(
 	if err := s.persistCurrentWithArchive(next, verified); err != nil {
 		return err
 	}
-	for _, member := range archive.members {
-		result, callErr := successor.DiscardOriginal(ctx, member.Member, member.File.Path)
-		s.memberResults = append(s.memberResults, result)
-		s.memberErrors = append(s.memberErrors, callErr)
+	var results []binaryadmission.WindowsCanonicalEntryMoveResultV1
+	var batchErr error
+	guardErr := s.withArchivedRollbackCleanupGuard(ctx, verified.namespace, archive, func() {
+		if len(archive.members) != 0 {
+			results, batchErr = successor.DiscardArchivedRollbackCleanup(ctx, archive.digest(), archive.members)
+		}
+	})
+	s.memberResults = append(s.memberResults, results...)
+	s.memberErrors = append(s.memberErrors, batchErr, guardErr)
+	if len(results) > len(archive.members) {
+		return errors.Join(ErrWindowsProductRecoveryIdentity, guardErr, batchErr)
+	}
+	var outcomeErrs []error
+	for i, result := range results {
+		member := archive.members[i]
+		if result.Member != member.Member || result.SourceRelative != member.File.Path {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, guardErr, batchErr, result.Error, result.CloseError)
+		}
+		if err := canonicalEntryDiscardResultError(result, nil, member.Member, member.File.Path); err != nil {
+			outcomeErrs = append(outcomeErrs, err)
+		}
 		if result.Applied && result.Readback {
 			index := currentCleanupIndex(next.EntryBundle, side, member.Member)
 			next.EntryBundle.Cleanup[index].State = "absence_received"
 		}
-		if err := canonicalEntryDiscardResultError(result, callErr, member.Member, member.File.Path); err != nil {
-			// The old V3 still carries exact intents for retry if readback fails.
-			return errors.Join(err, s.persistCurrent(next))
-		}
 	}
-	if err := s.persistCurrent(next); err != nil {
+	batchErr = errors.Join(batchErr, errors.Join(outcomeErrs...))
+	if guardErr != nil || batchErr == nil && len(results) != len(archive.members) {
+		// Leave the verified old intent intact for any effect whose scope did
+		// not settle, including a native prefix delivered with a close error.
+		return errors.Join(ErrWindowsProductRecoveryPending, guardErr, batchErr)
+	}
+	if err := errors.Join(batchErr, s.persistCurrent(next)); err != nil {
 		return err
 	}
 	if err := errors.Join(prior.VerifyUnchanged(ctx), successor.VerifyUnchanged(ctx)); err != nil {

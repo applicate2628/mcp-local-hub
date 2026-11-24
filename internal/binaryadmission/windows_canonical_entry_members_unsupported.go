@@ -112,6 +112,9 @@ func (*WindowsCanonicalEntryRecoverySetV2) MoveOriginal(context.Context, string,
 func (*WindowsCanonicalEntryRecoverySetV2) DiscardOriginal(context.Context, string, string) (WindowsCanonicalEntryMoveResultV1, error) {
 	return WindowsCanonicalEntryMoveResultV1{}, errWindowsCanonicalEntryUnsupported
 }
+func (*WindowsCanonicalEntryRecoverySetV2) DiscardArchivedRollbackCleanup(context.Context, string, []WindowsCanonicalEntryMemberEvidenceV2) ([]WindowsCanonicalEntryMoveResultV1, error) {
+	return nil, errWindowsCanonicalEntryUnsupported
+}
 func (*WindowsCanonicalEntryRecoverySetV2) Disposition() WindowsCanonicalEntryMemberDispositionV2 {
 	return WindowsCanonicalEntryMemberDispositionV2{}
 }

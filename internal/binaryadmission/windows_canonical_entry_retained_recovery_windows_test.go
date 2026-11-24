@@ -35,6 +35,154 @@ func (f *retainedRecoveryFixture) OriginalMemberDirectories(ctx context.Context)
 	return f.lenders, ctx.Err()
 }
 
+type retainedCleanEffectFixture struct {
+	retainedRecoveryFixture
+	digest       string
+	scopes       int
+	plainReads   int
+	inScope      bool
+	beforeEffect func()
+	closingError error
+}
+
+func (f *retainedCleanEffectFixture) ValidateOriginalRecovery(ctx context.Context) error {
+	if f.inScope {
+		f.plainReads++
+		return errors.New("nested original journal read inside clean effect fixture")
+	}
+	return f.retainedRecoveryFixture.ValidateOriginalRecovery(ctx)
+}
+
+func (f *retainedCleanEffectFixture) WithCanonicalRecoveryCleanEffectScope(ctx context.Context, digest string, use func(func(context.Context) error, WindowsCanonicalEntryMembersRecoveryInputV2) error) error {
+	if f.digest != digest || f.inScope {
+		return errors.New("fixture archive proof differs")
+	}
+	f.scopes++
+	f.inScope = true
+	defer func() { f.inScope = false }()
+	if f.beforeEffect != nil {
+		f.beforeEffect()
+	}
+	return errors.Join(use(func(ctx context.Context) error { return ctx.Err() }, f.input), f.closingError)
+}
+
+func TestColdCleanArchiveBatchReusesOriginalDiscard(t *testing.T) {
+	closingError := errors.New("fixture closing journal proof failed")
+	for _, tc := range []struct {
+		name        string
+		wantApplied bool
+		wantRows    int
+		wantError   error
+	}{
+		{name: "exact archived original", wantApplied: true, wantRows: 1},
+		{name: "foreign requested path", wantRows: 0},
+		{name: "protected final selects the same object", wantRows: 1},
+		{name: "ordinary unrelated final parent", wantRows: 1},
+		{name: "cancel before effect", wantRows: 0, wantError: context.Canceled},
+		{name: "closing proof preserves actual result", wantApplied: true, wantRows: 1, wantError: closingError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			input := seedCleanEffectFixture(t, ctx)
+			expected := *input.Members[0].Staged
+			input.Purpose = WindowsCanonicalRecoveryRollbackCleanupV2
+			f := &retainedCleanEffectFixture{retainedRecoveryFixture: retainedRecoveryFixture{input: input}, digest: strings.Repeat("b", 64)}
+			bank, err := AcquireWindowsCanonicalEntryForRecoveryV2(ctx, f, WindowsCanonicalRecoverySuccessorV1)
+			defer func() {
+				if err := closeRetainedRecoveryFixture(bank); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.input.Cleanup = []WindowsCanonicalEntryMemberCleanupRecordV2{{
+				TransactionID: input.TransactionID, Side: "unused-successor", Member: expected.Member,
+				SourceRelative: expected.File.Path, ExpectedSHA256: expected.File.SHA256,
+				State: "discard_intent", Purpose: input.Purpose,
+			}}
+			root := filepath.Dir(input.Targets.CanonicalEntryPath)
+			original := filepath.Join(root, expected.File.Path)
+			before := readRetainedFixtureFile(t, input.Targets.IdentityPath)
+			switch tc.name {
+			case "foreign requested path":
+				expected.File.Path = "foreign.stage"
+			case "protected final selects the same object":
+				bank.original.original.root.memberFinalPaths = append(bank.original.original.root.memberFinalPaths, expected.File.Path)
+			case "ordinary unrelated final parent":
+				if err := os.Mkdir(filepath.Join(root, "unrelated"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				bank.original.original.root.memberFinalPaths = append(bank.original.original.root.memberFinalPaths, "unrelated/final.exe")
+			case "cancel before effect":
+				f.beforeEffect = cancel
+			}
+			if tc.wantError == closingError {
+				f.closingError = closingError
+			}
+			results, err := bank.DiscardArchivedRollbackCleanup(ctx, f.digest, []WindowsCanonicalEntryMemberEvidenceV2{expected})
+			if len(results) != tc.wantRows || f.scopes != 1 || f.plainReads != 0 {
+				t.Fatalf("clean scope result count/readback: %d, %d, %d, %v", len(results), f.scopes, f.plainReads, err)
+			}
+			if (err == nil) != (tc.name == "exact archived original") || tc.wantError != nil && !errors.Is(err, tc.wantError) {
+				t.Fatalf("unexpected clean batch outcome: %v", err)
+			}
+			if len(results) != 0 {
+				r := results[0]
+				if r.Attempted != tc.wantApplied || r.Applied != tc.wantApplied || r.Readback != tc.wantApplied || tc.wantApplied && (!r.NativeStatusKnown || r.NativeStatus != 0) {
+					t.Fatalf("original native result does not match the actual effect: %+v", r)
+				}
+			}
+			_, err = os.Stat(original)
+			if tc.wantApplied && !errors.Is(err, os.ErrNotExist) || !tc.wantApplied && err != nil {
+				t.Fatalf("source disposition differs: %v", err)
+			}
+			if !bytes.Equal(readRetainedFixtureFile(t, input.Targets.IdentityPath), before) {
+				t.Fatal("clean effect modified the canonical predecessor")
+			}
+		})
+	}
+}
+
+func seedCleanEffectFixture(t *testing.T, ctx context.Context) WindowsCanonicalEntryMembersRecoveryInputV2 {
+	t.Helper()
+	entry, binding, _ := v2TxnDonorEntryFixture(t)
+	target, err := CanonicalEntryTargetsV2(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readRetainedFixtureFile(t, target.IdentityPath)
+	if err := os.WriteFile(target.IdentityPath, append(body, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	destination, _, _ := v2TxnDonorEntryFixture(t)
+	targets, err := CanonicalEntryTargetsV2(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	donor, err := AdmitWindowsCanonicalEntrySetV2(ctx, entry, binding)
+	if donor != nil {
+		defer func() {
+			if err := donor.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	selective, _, err := donor.StageRetainingEqualRuntime(ctx, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witness, err := selective.RetainedMembersWitness(ctx)
+	if err := errors.Join(err, selective.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return seedRetainedRecoveryFixture(t, ctx, donor, targets, witness)
+}
+
 func TestColdRecoveryReceivesRetainedOriginalsReadOnly(t *testing.T) {
 	ctx := t.Context()
 	entry, binding, _ := v2TxnDonorEntryFixture(t)
