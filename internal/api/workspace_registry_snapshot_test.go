@@ -231,14 +231,33 @@ func TestRegistrySnapshotObserver_GUIUnlockFailureKeepsParsedSnapshotAndReportsF
 	}
 }
 
-func TestRegistrySnapshotObserver_PathSwapDuringReadRetries(t *testing.T) {
+func TestRegistrySnapshotObserver_SameMetadataPathSwapDuringReadRetries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	saveSnapshotRow(t, path, 9301)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, before) {
+		t.Fatal("cannot resolve fixture's original file identity")
+	}
 	o := NewRegistrySnapshotObserver(NewRegistry(path), path, true)
 	var once sync.Once
 	o.readFnForTest = func(path string, sink func(string, string, map[string]any) error) ([]byte, error) {
 		data, err := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
-		once.Do(func() { saveSnapshotRow(t, path, 9302) })
+		once.Do(func() {
+			saveSnapshotRow(t, path, 9302)
+			if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) || os.SameFile(before, after) {
+				t.Fatal("fixture must replace file identity while preserving size and modification time")
+			}
+		})
 		return data, err
 	}
 	rows, state, err := observeRowsForTest(o)

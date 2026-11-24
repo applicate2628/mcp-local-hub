@@ -25,6 +25,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -182,39 +183,42 @@ func runSerenaWakeReadiness(ctx context.Context, taskName string, port int, read
 // classifies the daemon's stop via readSerenaUnifiedStopForTask, which used to
 // read+parse the full supervisor-intent.json (and walk the secure-read DACL
 // posture) UNCONDITIONALLY — even in steady state when no stop exists. This
-// cache memoizes the parsed stops sub-block keyed by the file's (mtime, size):
-// each request does only a cheap os.Stat, and re-reads+parses ONLY when the
-// stat key changed (any writer commits via atomic temp+rename, so any stop
-// write/clear bumps mtime and/or size and busts the cache).
+// cache memoizes the parsed stops sub-block using the same file-identity and
+// content-check policy as RegistrySnapshotObserver. Atomic replacement is
+// detected even when mtime and size are preserved. Every 32nd unchanged lookup
+// compares the anchored bytes, bounding staleness after an in-place rewrite
+// that also preserves the metadata. Unchanged bytes need no new decode.
 //
 // Correctness under concurrent writes: this cache backs ONLY the read-only stop
 // CLASSIFICATION (the lock-free read in WakeIdleSerenaDaemon). Every MUTATION
 // (WriteStopIntentIdleGuarded SET, ClearStopIntentIfReason compare-and-clear)
 // re-reads the file FRESH under the supervisor-intent flock and stays
-// authoritative — the cache never participates in a write decision. The only
-// effect of a one-request-stale cache is a benign retry: a just-written stop the
-// cache hasn't picked up yet means one extra forward attempt against a
-// down/up daemon (the next request restats and sees the new mtime). The cache is
-// therefore an optimization with no impact on the FIX-2 arbitration invariants.
+// authoritative — the cache never participates in a write decision. A write
+// concurrent with a cache hit can still be observed on the next lookup. An
+// in-place rewrite preserving all metadata may remain stale for at most the
+// next registrySnapshotCompareEvery lookups; it is not an immediate revocation
+// mechanism. Read/decode failures refuse the wake and leave the cache invalid.
 var serenaStopReadCache struct {
-	mu    sync.Mutex
-	path  string
-	mtime time.Time
-	size  int64
-	stops map[string]DaemonIntent // the parsed UnifiedStopsFile().Tasks; nil when the file is absent
-	valid bool
+	mu      sync.Mutex
+	path    string
+	info    os.FileInfo
+	bytes   []byte
+	stops   map[string]DaemonIntent // the parsed UnifiedStopsFile().Tasks; nil when the file is absent
+	valid   bool
+	lookups uint8
+	// Deterministic package-test seam; production uses the anchored reader.
+	readFnForTest func(string, func(string, string, map[string]any) error) ([]byte, error)
 }
 
 // ReadSerenaUnifiedStopForTask returns the current stop directive for taskName
 // from the UNIFIED supervisor-intent.json stops sub-block via the same
-// mtime/size-keyed cache WakeIdleSerenaDaemon uses. A missing intent file or
+// identity/content-checked cache WakeIdleSerenaDaemon uses. A missing intent file or
 // absent entry returns the zero DaemonIntent (Desired==""), which IsActiveStop
 // treats as "not a stop" (default-running). Read-only.
 //
-// FIX-5: it consults serenaStopReadCache. On a cache hit (file (mtime,size)
-// unchanged since the last read) it returns the cached entry WITHOUT a parse; on
-// a miss (or first call, or a changed stat) it re-reads+parses and refreshes the
-// cache under serenaStopReadCache.mu.
+// A cache hit avoids reading and parsing. A replacement, changed metadata or
+// periodic content check re-reads under serenaStopReadCache.mu, then decodes only
+// changed bytes. Mutation decisions continue to use fresh flock-protected reads.
 func ReadSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
 	return readSerenaUnifiedStopForTask(canonicalIntentTaskKey(taskName))
 }
@@ -237,53 +241,73 @@ func readSerenaUnifiedStopForTaskWithAuditSink(taskName string, sink func(level,
 		return DaemonIntent{}, fmt.Errorf("serena idle wake: resolve supervisor-intent path: %w", err)
 	}
 
-	// Cheap stat for the cache key. A missing file is a valid state (no stops
-	// recorded yet) — cache it as an empty map keyed on a zero stat so repeated
-	// no-file requests do not re-stat-miss every time.
-	var statMtime time.Time
-	var statSize int64
-	fileExists := true
-	if fi, statErr := os.Stat(path); statErr != nil {
-		if !os.IsNotExist(statErr) {
-			return DaemonIntent{}, fmt.Errorf("serena idle wake: stat supervisor-intent.json: %w", statErr)
-		}
-		fileExists = false
-	} else {
-		statMtime = fi.ModTime()
-		statSize = fi.Size()
-	}
-
 	serenaStopReadCache.mu.Lock()
 	defer serenaStopReadCache.mu.Unlock()
 
+	info, err := os.Stat(path)
+	if err != nil {
+		serenaStopReadCache.valid = false
+		if !os.IsNotExist(err) {
+			return DaemonIntent{}, fmt.Errorf("serena idle wake: stat supervisor-intent.json: %w", err)
+		}
+		// Absence is a fresh observation, not a reusable file-identity key.
+		serenaStopReadCache.path = path
+		serenaStopReadCache.info = nil
+		serenaStopReadCache.bytes = nil
+		serenaStopReadCache.stops = nil
+		serenaStopReadCache.lookups = 0
+		serenaStopReadCache.valid = true
+		return DaemonIntent{}, nil
+	}
+
 	if serenaStopReadCache.valid &&
 		serenaStopReadCache.path == path &&
-		serenaStopReadCache.size == statSize &&
-		serenaStopReadCache.mtime.Equal(statMtime) {
-		// Hit: the file is unchanged since the last parse. Return the cached
-		// entry (absent task → zero DaemonIntent → "not a stop").
+		sameRegistryFileInfo(serenaStopReadCache.info, info) &&
+		serenaStopReadCache.lookups < registrySnapshotCompareEvery-1 {
+		serenaStopReadCache.lookups++
 		return serenaStopReadCache.stops[taskName], nil
 	}
 
-	// Miss: (re)read + parse and refresh the cache.
-	var stops map[string]DaemonIntent
-	if fileExists {
-		raw, rerr := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
-		if rerr != nil {
-			return DaemonIntent{}, fmt.Errorf("serena idle wake: read supervisor-intent.json: %w", rerr)
-		}
+	reuseStops := serenaStopReadCache.valid && serenaStopReadCache.path == path && serenaStopReadCache.info != nil
+	serenaStopReadCache.valid = false
+	// Windows Stat may defer loading the file ID until SameFile. Resolve it
+	// before reading, so a replacement cannot supply the "before" identity.
+	if !os.SameFile(info, info) {
+		return DaemonIntent{}, fmt.Errorf("serena idle wake: cannot resolve supervisor-intent.json file identity")
+	}
+	read := ReadStateFileInodeAnchoredWithAuditSink
+	if serenaStopReadCache.readFnForTest != nil {
+		read = serenaStopReadCache.readFnForTest
+	}
+	raw, rerr := read(path, sink)
+	if rerr != nil {
+		return DaemonIntent{}, fmt.Errorf("serena idle wake: read supervisor-intent.json: %w", rerr)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		return DaemonIntent{}, fmt.Errorf("serena idle wake: stat supervisor-intent.json after read: %w", err)
+	}
+	if !sameRegistryFileInfo(info, after) {
+		// Do not publish old bytes under a replacement's identity. The caller's
+		// next attempt takes a fresh observation through this same owner.
+		return DaemonIntent{}, fmt.Errorf("serena idle wake: supervisor-intent.json changed during anchored read")
+	}
+	stops := serenaStopReadCache.stops
+	if !reuseStops || !bytes.Equal(serenaStopReadCache.bytes, raw) {
 		intent, _, rerr := decodeSupervisorIntentFile(path, raw)
 		if rerr != nil {
 			return DaemonIntent{}, fmt.Errorf("serena idle wake: decode supervisor-intent.json: %w", rerr)
 		}
+		stops = nil
 		if intent != nil {
 			stops = UnifiedStopsFile(intent, nil).Tasks
 		}
 	}
 	serenaStopReadCache.path = path
-	serenaStopReadCache.mtime = statMtime
-	serenaStopReadCache.size = statSize
+	serenaStopReadCache.info = after
+	serenaStopReadCache.bytes = raw
 	serenaStopReadCache.stops = stops
+	serenaStopReadCache.lookups = 0
 	serenaStopReadCache.valid = true
 	return stops[taskName], nil
 }

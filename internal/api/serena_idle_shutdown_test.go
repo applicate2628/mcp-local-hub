@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -343,7 +344,7 @@ func TestClearStopIntentIfReason_CompareAndClear(t *testing.T) {
 }
 
 // FIX-5 (hot-path cache correctness): readSerenaUnifiedStopForTask must reflect
-// writes (the mtime/size-keyed cache busts on any change) AND serve repeated
+// writes (the identity/metadata cache detects atomic replacement) AND serve repeated
 // reads of an unchanged file from cache. The optimization must never serve a
 // stale classification across a write.
 func TestReadSerenaUnifiedStopForTask_CacheReflectsWrites(t *testing.T) {
@@ -362,8 +363,7 @@ func TestReadSerenaUnifiedStopForTask_CacheReflectsWrites(t *testing.T) {
 		t.Fatalf("no-stop read must return zero DaemonIntent; got %+v", di)
 	}
 
-	// Two consecutive reads with no write: the second is a cache HIT (valid flag
-	// stays set, same stat key). Both return the same value.
+	// Absence is restated on every lookup; both reads return the same value.
 	if !serenaStopReadCache.valid {
 		t.Fatalf("first read must populate the cache (valid=true)")
 	}
@@ -398,6 +398,153 @@ func TestReadSerenaUnifiedStopForTask_CacheReflectsWrites(t *testing.T) {
 	}
 	if di4.Desired != "" {
 		t.Fatalf("cache must reflect the clear; got %+v (stale stop served after clear?)", di4)
+	}
+}
+
+func TestReadSerenaUnifiedStopForTask_AbsentThenEmptyFileRefusesWake(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	task := canonicalIntentTaskKey(`\mcp-local-hub-serena-empty-intent`)
+	if _, err := ReadSerenaUnifiedStopForTask(task); err != nil {
+		t.Fatalf("initial absence: %v", err)
+	}
+	path := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteStateFileBytesAtomic(path, []byte{}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := ReadSerenaUnifiedStopForTask(task); err == nil || !strings.Contains(err.Error(), "decode supervisor-intent.json") {
+			t.Fatalf("read %d accepted empty existing intent: %v", attempt, err)
+		}
+		if serenaStopReadCache.valid {
+			t.Fatal("invalid intent was published in the stop cache")
+		}
+	}
+	if err := NewAPI().WakeIdleSerenaDaemon(t.Context(), task, 0, "tester"); err == nil {
+		t.Fatal("wake accepted empty existing intent")
+	}
+}
+
+func seedSerenaStopCacheRunningForTest(t *testing.T) (path, task string, before os.FileInfo, stopped []byte) {
+	t.Helper()
+	stateDir := apitest.HardenedTempDir(t)
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	task = canonicalIntentTaskKey(`\mcp-local-hub-serena-cache-identity`)
+	path = filepath.Join(stateDir, supervisorIntentFileLeaf)
+	now := time.Now().UTC()
+	if err := WriteSupervisorIntent(path, &SupervisorIntentFile{
+		Version: 1, UpdatedAt: now.Format(time.RFC3339),
+		Stops: map[string]DaemonIntent{
+			task: {Desired: IntentDesiredRunning, Reason: IntentReasonUserDisabled, UpdatedAt: now},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped = bytes.Replace(raw, []byte(`"desired": "running"`), []byte(`"desired": "stopped"`), 1)
+	if len(stopped) != len(raw) || bytes.Equal(stopped, raw) {
+		t.Fatal("fixture must change running to stopped without changing byte length")
+	}
+	before, err = os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, before) {
+		t.Fatal("cannot resolve fixture's original file identity")
+	}
+	if di, err := ReadSerenaUnifiedStopForTask(task); err != nil || di.Desired != IntentDesiredRunning {
+		t.Fatalf("seed cache: stop=%+v err=%v", di, err)
+	}
+	return path, task, before, stopped
+}
+
+func preserveSerenaStopCacheMetadataForTest(t *testing.T, path string, before os.FileInfo, sameFile bool) {
+	t.Helper()
+	if err := os.Chtimes(path, before.ModTime(), before.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("fixture did not preserve file size and modification time")
+	}
+	if os.SameFile(before, after) != sameFile {
+		t.Fatalf("fixture same file = %v, want %v", !sameFile, sameFile)
+	}
+}
+
+func TestReadSerenaUnifiedStopForTask_SameMetadataReplacementRefusesWake(t *testing.T) {
+	path, task, before, stopped := seedSerenaStopCacheRunningForTest(t)
+	if err := WriteStateFileBytesAtomic(path, stopped); err != nil {
+		t.Fatal(err)
+	}
+	preserveSerenaStopCacheMetadataForTest(t, path, before, false)
+	if err := NewAPI().WakeIdleSerenaDaemon(context.Background(), task, 9202, "tester"); !errors.Is(err, ErrWakeRefusedOperatorStop) {
+		t.Fatalf("replacement must refuse the first wake: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, stopped) {
+		t.Fatalf("operator stop changed during refused wake: err=%v", err)
+	}
+}
+
+func TestReadSerenaUnifiedStopForTask_SameMetadataRewriteDetectedWithinBound(t *testing.T) {
+	path, task, before, stopped := seedSerenaStopCacheRunningForTest(t)
+	if err := os.WriteFile(path, stopped, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	preserveSerenaStopCacheMetadataForTest(t, path, before, true)
+	for lookup := 1; lookup <= registrySnapshotCompareEvery; lookup++ {
+		di, err := ReadSerenaUnifiedStopForTask(task)
+		if err != nil {
+			t.Fatalf("lookup %d: %v", lookup, err)
+		}
+		if di.Desired == IntentDesiredStopped && di.Reason == IntentReasonUserDisabled {
+			return
+		}
+	}
+	t.Fatal("same-file, same-metadata rewrite remained invisible past the content-check bound")
+}
+
+func TestReadSerenaUnifiedStopForTask_ReplacementDuringReadIsNotPublished(t *testing.T) {
+	_, task, before, stopped := seedSerenaStopCacheRunningForTest(t)
+	serenaStopReadCache.valid = false
+	serenaStopReadCache.readFnForTest = func(path string, sink func(string, string, map[string]any) error) ([]byte, error) {
+		raw, err := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
+		if err != nil {
+			return nil, err
+		}
+		if err := WriteStateFileBytesAtomic(path, stopped); err != nil {
+			return nil, err
+		}
+		preserveSerenaStopCacheMetadataForTest(t, path, before, false)
+		return raw, nil
+	}
+	if di, err := ReadSerenaUnifiedStopForTask(task); err == nil || di.Desired != "" || serenaStopReadCache.valid {
+		t.Fatalf("raced read must refuse and invalidate: stop=%+v err=%v valid=%v", di, err, serenaStopReadCache.valid)
+	}
+	serenaStopReadCache.readFnForTest = nil
+	if di, err := ReadSerenaUnifiedStopForTask(task); err != nil || di.Desired != IntentDesiredStopped || di.Reason != IntentReasonUserDisabled {
+		t.Fatalf("fresh read must see replacement: stop=%+v err=%v", di, err)
+	}
+}
+
+func TestReadSerenaUnifiedStopForTask_PeriodicReadFailureCannotReuseCache(t *testing.T) {
+	_, task, _, _ := seedSerenaStopCacheRunningForTest(t)
+	wantErr := errors.New("synthetic anchored read failure")
+	serenaStopReadCache.readFnForTest = func(string, func(string, string, map[string]any) error) ([]byte, error) {
+		return nil, wantErr
+	}
+	serenaStopReadCache.lookups = registrySnapshotCompareEvery - 1
+	for attempt := 0; attempt < 2; attempt++ {
+		if di, err := ReadSerenaUnifiedStopForTask(task); !errors.Is(err, wantErr) || di.Desired != "" || serenaStopReadCache.valid {
+			t.Fatalf("attempt %d reused a failed observation: stop=%+v err=%v valid=%v", attempt, di, err, serenaStopReadCache.valid)
+		}
 	}
 }
 
