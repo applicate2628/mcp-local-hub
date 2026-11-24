@@ -5,12 +5,11 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
-
-	"mcp-local-hub/internal/process"
 )
 
 const schedulerCOMDeadline = 15 * time.Second
@@ -28,11 +27,12 @@ type schedulerCOMRequest struct {
 }
 
 type schedulerCOMTask struct {
-	Name       string `json:"name"`
-	State      int    `json:"state"`
-	XML        string `json:"xml,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	LastResult *int32 `json:"last_result"`
+	Name       string  `json:"name"`
+	State      int     `json:"state"`
+	XML        string  `json:"xml,omitempty"`
+	Owner      string  `json:"owner,omitempty"`
+	LastResult *int32  `json:"last_result"`
+	NextRun    *string `json:"next_run"` // nil is unavailable; empty is observed DATE zero
 }
 
 type schedulerCOMResponse struct {
@@ -52,6 +52,15 @@ function Get-TaskLastResult($task){
  $result=$task.LastTaskResult
  if($null -eq $result){throw 'task result unavailable'}
  return [int]$result
+}
+function Get-TaskNextRun($task){
+ $next=$task.NextRunTime
+ if($null -eq $next -or $next -isnot [DateTime]){throw 'task next run unavailable'}
+ # Native DATE zero is observed no-calendar-time, not a failed property read.
+ if($next.ToOADate() -eq 0){return ''}
+ # Task Scheduler supplies local wall-clock time (Kind Unspecified). Do not
+ # attach a UTC marker or infer a time-zone offset from this observation.
+ return $next.ToString('yyyy-MM-ddTHH:mm:ss.fffffff',[Globalization.CultureInfo]::InvariantCulture)
 }
 function Get-NativeHRESULT($exception){
  $native=$null;$last=$exception
@@ -124,7 +133,7 @@ if($r.operation -eq 'create_xml_if_absent'){
 # Include hidden tasks in named lookups so hidden does not mean absent; preserve List's visible-only scope.
 $flags=1;if($r.operation -eq 'list'){$flags=0};$all=@($f.GetTasks($flags));$n=([string]$r.name).TrimStart('\');$matches=@($all|Where-Object {$_.Name -ceq $n});$t=$matches[0];
 # Owner filtering and status consumers receive a resolved SID, never a short account name.
-if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=(Get-OwnerSID ([string]$_.Definition.Principal.UserId));last_result=(Get-TaskLastResult $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
+if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=(Get-OwnerSID ([string]$_.Definition.Principal.UserId));last_result=(Get-TaskLastResult $_);next_run=(Get-TaskNextRun $_)}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};
 if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};
 if($r.operation -eq 'run_owned'){
  $snapshot=[string]$t.Xml
@@ -143,7 +152,7 @@ if($r.operation -eq 'delete'){$f.DeleteTask($t.Name,0);[pscustomobject]@{ok=$tru
 if($r.operation -eq 'stop'){if([int]$t.State -ne 4){[pscustomobject]@{ok=$false;kind='task_not_running'}|ConvertTo-Json -Compress;exit};$t.Stop(0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};
 if($r.operation -notin @('status','export')){[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='operation'}|ConvertTo-Json -Compress;exit};
 $row=[ordered]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}
-if($r.operation -eq 'status'){$row['owner']=Get-OwnerSID ([string]$row['owner']);$row['last_result']=Get-TaskLastResult $t}
+if($r.operation -eq 'status'){$row['owner']=Get-OwnerSID ([string]$row['owner']);$row['last_result']=Get-TaskLastResult $t;$row['next_run']=Get-TaskNextRun $t}
 [pscustomobject]@{ok=$true;task=[pscustomobject]$row}|ConvertTo-Json -Compress -Depth 4
 }catch{
  if($r.operation -eq 'create_xml_if_absent'){
@@ -168,18 +177,15 @@ var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (sc
 	if err != nil {
 		return schedulerCOMResponse{}, err
 	}
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", schedulerCOMUTF8Preamble+schedulerCOMScript)
-	process.NoConsole(cmd)
-	cmd.Stdin = strings.NewReader(string(raw))
-	out, err := cmd.Output()
-	if err := ctx.Err(); err != nil {
-		return schedulerCOMResponse{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
-	}
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", schedulerCOMUTF8Preamble+schedulerCOMScript)
+	result, err := runSchedulerCommand(ctx, cmd, raw)
 	if err != nil {
-		return schedulerCOMResponse{}, fmt.Errorf("%w: bridge", ErrUnavailable)
+		// Preserve the command boundary's outer dispatch evidence. The public
+		// COM boundary adds operation context after classifying that evidence.
+		return schedulerCOMResponse{}, err
 	}
 	var response schedulerCOMResponse
-	if err := json.Unmarshal(out, &response); err != nil {
+	if err := json.Unmarshal(result.Stdout.Prefix, &response); err != nil {
 		return schedulerCOMResponse{}, fmt.Errorf("%w: protocol", ErrUnavailable)
 	}
 	return response, nil
@@ -191,8 +197,14 @@ func schedulerCOM(ctx context.Context, request schedulerCOMRequest) (schedulerCO
 	}
 	ctx, cancel := context.WithTimeout(ctx, schedulerCOMDeadline)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return schedulerCOMResponse{}, fmt.Errorf("%w: %w", ErrUnavailable, errors.Join(err, context.Cause(ctx)))
+	}
 	response, err := schedulerCOMRun(ctx, request)
 	if err != nil {
+		if schedulerCOMMutates(request.Operation) && !schedulerCommandWasNotDispatched(err) {
+			err = errors.Join(ErrMutationOutcomeUnknown, err)
+		}
 		return schedulerCOMResponse{}, fmt.Errorf("%w: bridge execution: %w", ErrUnavailable, err)
 	}
 	if response.OK {
@@ -212,8 +224,16 @@ func schedulerCOM(ctx context.Context, request schedulerCOMRequest) (schedulerCO
 	case "task_definition_mismatch":
 		return response, fmt.Errorf("%w: guarded task definition mismatch", ErrTaskCorrupt)
 	default:
-		return response, fmt.Errorf("%w: %s", ErrUnavailable, response.Phase)
+		err := fmt.Errorf("%w: %s", ErrUnavailable, response.Phase)
+		if schedulerCOMMutates(request.Operation) {
+			err = errors.Join(ErrMutationOutcomeUnknown, err)
+		}
+		return response, err
 	}
+}
+
+func schedulerCOMMutates(operation string) bool {
+	return operation == "create_xml_if_absent" || operation == "run_owned" || operation == "delete" || operation == "stop"
 }
 
 func taskStatusFromCOM(task schedulerCOMTask) (TaskStatus, error) {
@@ -233,10 +253,19 @@ func taskStatusFromCOM(task schedulerCOMTask) (TaskStatus, error) {
 	if task.LastResult == nil {
 		return TaskStatus{}, fmt.Errorf("%w: missing task result", ErrUnavailable)
 	}
+	if task.NextRun == nil {
+		return TaskStatus{}, fmt.Errorf("%w: missing task next run", ErrUnavailable)
+	}
+	if *task.NextRun != "" {
+		if _, err := time.Parse("2006-01-02T15:04:05.9999999", *task.NextRun); err != nil {
+			return TaskStatus{}, fmt.Errorf("%w: malformed task next run: %w", ErrUnavailable, err)
+		}
+	}
 	return TaskStatus{
 		Name:         `\` + strings.TrimPrefix(task.Name, `\`),
 		RuntimeState: state,
 		LastResult:   int(*task.LastResult),
+		NextRun:      *task.NextRun,
 		Owner:        task.Owner,
 		State:        map[TaskRuntimeState]string{TaskRuntimeDisabled: "Disabled", TaskRuntimeQueued: "Queued", TaskRuntimeReady: "Ready", TaskRuntimeRunning: "Running"}[state],
 	}, nil

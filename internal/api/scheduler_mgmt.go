@@ -318,7 +318,9 @@ func (a *API) WeeklyRefreshSet(schedule string) error {
 		return err
 	}
 	const taskName = "mcp-local-hub-weekly-refresh"
-	_ = sch.Delete(taskName) // idempotent
+	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
+		return fmt.Errorf("delete prior weekly refresh task: %w", err)
+	}
 	return sch.Create(scheduler.TaskSpec{
 		Name:             taskName,
 		Description:      "mcp-local-hub: weekly refresh (restart --all)",

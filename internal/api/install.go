@@ -3556,11 +3556,15 @@ func (s *selectedInstallExecutionPhase) admitPrepared(m *config.ServerManifest, 
 // for the parsed-manifest path), or any rollback ownership — those stay
 // caller-specific because they diverge between the two entrypoints.
 //
-// ctx is accepted for symmetry with the exported InstallParsedManifest
-// seam (and to give future cancellation a home); the underlying audit +
-// scheduler steps are synchronous and do not yet observe it.
+// ctx binds scheduler admission and execution to the same install lifetime.
+// It does not turn already committed client or task effects into non-effects.
 func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *Plan, opts installPlanOpts) error {
-	_ = ctx
+	if ctx == nil {
+		return errors.New("install operation requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if plan.serenaPreparedInvocation != nil {
 		if err := plan.selectedExecutionPhase.admitPrepared(m, plan, opts, true); err != nil {
 			return err
@@ -3584,7 +3588,7 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	if err := a.recordInstallAuditForTasks(installAuditTaskNamesOrOverride(m, opts.DaemonFilter, opts.AuditTaskNames)); err != nil {
 		return err
 	}
-	return executeInstallToWithSymlinkConsents(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks, opts.SymlinkConsents)
+	return executeInstallToWithSymlinkConsents(ctx, w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks, opts.SymlinkConsents)
 }
 
 // createdTask pairs a scheduler.TaskSpec created in Pass A with the
@@ -3638,7 +3642,7 @@ type intentWriteStep func() (rollback func(), err error)
 // mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
 // false and keep the reconcile.
 func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool) error {
-	return executeInstallToWithSymlinkConsents(w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
+	return executeInstallToWithSymlinkConsents(context.Background(), w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
 }
 
 // InstallClientRollbackIncompleteError is returned (via failAfterRollback) when a
@@ -3688,7 +3692,7 @@ func (e *InstallForwardCommittedError) Error() string {
 
 func (e *InstallForwardCommittedError) Unwrap() error { return e.cause }
 
-func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
+func executeInstallToWithSymlinkConsents(ctx context.Context, w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
 	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
 	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
 	// runs — the daemons live in supervisor-intent.json and the supervisor
@@ -3727,7 +3731,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// needsScheduler.
 	var sch scheduler.Scheduler
 	if actions.scheduler {
-		s, serr := newScheduler()
+		s, serr := newSchedulerContext(ctx)
 		if serr != nil {
 			return fmt.Errorf("scheduler: %w", serr)
 		}
@@ -4507,6 +4511,13 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 		}
 		return nil, err
 	}
+	// The legacy factory remains a test seam. Production binds the complete
+	// list/stop/run sequence to this operation, not a new Background lifetime.
+	sch, err = scheduler.BindContext(ctx, sch)
+	if err != nil {
+		return results, err
+	}
+
 	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
 		if supervisorHandled && restartSchedulerUnavailableError(err) {
@@ -4518,6 +4529,9 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 	wsByTask := workspaceTasksByName()
 	installed := installedServerNameSet()
 	for _, t := range tasks {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue
@@ -4753,6 +4767,13 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 		}
 		return nil, err
 	}
+	// The legacy factory remains a test seam. Production binds the complete
+	// list/stop/run sequence to this operation, not a new Background lifetime.
+	sch, err = scheduler.BindContext(ctx, sch)
+	if err != nil {
+		return results, err
+	}
+
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
 		if supervisorHandled && restartSchedulerUnavailableError(err) {
@@ -4763,6 +4784,9 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 	ports := manifestPortMap("")
 	wsByTask := workspaceTasksByName()
 	for _, t := range tasks {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		normalized := strings.TrimPrefix(t.Name, "\\")
 		if !isHubDaemonSchedulerTaskName(normalized) {
 			continue

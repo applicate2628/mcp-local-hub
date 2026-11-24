@@ -289,7 +289,11 @@ func (a *API) registerOneLanguageSupervised(
 	capturedPriorXML := priorXML
 	capturedPort := port
 	legacyTaskTouched := false
+	var schedulerOutcomeUnknown error
 	transaction.AddCompensation("restore supervised legacy task "+capturedTaskName, func() error {
+		if schedulerOutcomeUnknown != nil {
+			return fmt.Errorf("scheduler inverse refused after unconfirmed mutation: %w", schedulerOutcomeUnknown)
+		}
 		if !legacyTaskTouched {
 			return nil
 		}
@@ -301,7 +305,7 @@ func (a *API) registerOneLanguageSupervised(
 		}
 		if len(capturedPriorXML) > 0 {
 			if importErr := sch.ImportXML(capturedTaskName, capturedPriorXML); importErr != nil {
-				joined = errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
+				return errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
 			}
 			if runErr := sch.Run(capturedTaskName); runErr != nil {
 				joined = errors.Join(joined, fmt.Errorf("restart prior task %s: %w", capturedTaskName, runErr))
@@ -323,6 +327,9 @@ func (a *API) registerOneLanguageSupervised(
 		legacyTaskTouched = true
 	}
 	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
+		if errors.Is(err, scheduler.ErrMutationOutcomeUnknown) {
+			schedulerOutcomeUnknown = err
+		}
 		return registeredLanguageResult{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
 	}
 
@@ -983,12 +990,12 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 // Observed inputs are original invocation-local owner objects, never capsule
 // fields or a serialized fence that constructs mutation/retirement authority.
 type scopedSupervisorIntentPublication struct {
-	ctx context.Context
-	prior *SupervisorIntentFile
-	invocation *PreparedSerenaConsumerInvocation
-	lease *StateFileObservedLease
-	beforeSHA string
-	freshCommit *SupervisorFileMutationObservation
+	ctx            context.Context
+	prior          *SupervisorIntentFile
+	invocation     *PreparedSerenaConsumerInvocation
+	lease          *StateFileObservedLease
+	beforeSHA      string
+	freshCommit    *SupervisorFileMutationObservation
 	freshCommitSHA string
 }
 
@@ -1013,12 +1020,18 @@ func prepareScopedSupervisorIntentRemoval(prior, desired *SupervisorIntentFile, 
 	observed := remove && (prior.Version == 2 || proposal.Version == 2)
 	before := make(map[string]SupervisorDaemon, len(prior.Daemons))
 	after := make(map[string]SupervisorDaemon, len(proposal.Daemons))
-	for _, row := range prior.Daemons { before[row.TaskName] = row }
-	for _, row := range proposal.Daemons { after[row.TaskName] = row }
+	for _, row := range prior.Daemons {
+		before[row.TaskName] = row
+	}
+	for _, row := range proposal.Daemons {
+		after[row.TaskName] = row
+	}
 	for _, rows := range []map[string]SupervisorDaemon{before, after} {
 		for task, row := range rows {
 			binding, err := preparedSerenaDescriptorBinding(row)
-			if err != nil { return nil, false, false, err }
+			if err != nil {
+				return nil, false, false, err
+			}
 			if binding != nil && !reflect.DeepEqual(before[task], after[task]) {
 				observed = true
 			}
@@ -1032,15 +1045,21 @@ func publishScopedSupervisorIntentRemovalLockHeld(path string, desired *Supervis
 		return errors.New("SERENA_PARSED_REPLACEMENT_INPUT_MISSING")
 	}
 	var input scopedSupervisorIntentPublication
-	if len(received) == 1 { input = received[0] }
+	if len(received) == 1 {
+		input = received[0]
+	}
 	prior := input.prior
 	if prior == nil {
 		var err error
 		prior, _, err = readSupervisorIntentForMerge(path)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 	}
 	proposal, remove, needsObserved, err := prepareScopedSupervisorIntentRemoval(prior, desired, removeFileIfEmpty)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if needsObserved || input.invocation != nil {
 		if input.ctx == nil || input.invocation == nil || input.lease == nil || input.invocation.io.IntentPath != path || !preparedSerenaDigest(input.beforeSHA) {
 			return errors.New("SERENA_PARSED_REPLACEMENT_INPUT_MISSING")
@@ -1059,7 +1078,9 @@ func publishScopedSupervisorIntentRemovalLockHeld(path string, desired *Supervis
 		if prior.Version != 1 || proposal.Version != 1 || proposal.SerenaPreparedConsumers != nil {
 			return errors.New("SERENA_PARSED_RESTORATION_OWNER_MISSING")
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) { return err }
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		return nil
 	}
 	proposal.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)

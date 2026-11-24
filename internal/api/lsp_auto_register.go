@@ -24,6 +24,10 @@ var loadLSPRegisterManifestFn = loadLSPRegisterManifest
 
 const lspExistingProxyProbeTimeout = 500 * time.Millisecond
 
+// Restoration is a separate obligation after a known task mutation. Its whole
+// sequence receives one budget, including the existing bounded proxy cleanup.
+const lspLegacyTaskRestoreTimeout = 15 * time.Second
+
 // EnsureLSPRegistered idempotently creates the supervised workspace-proxy row
 // for one (workspaceKey, language) tuple without writing any client configs.
 // The per-tuple lock spans registry write, supervisor intent write, reconcile,
@@ -157,7 +161,7 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 			return finishFailure(prior, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err))
 		}
 		if !owned {
-			if sch, schErr := newScheduler(); schErr == nil {
+			if sch, schErr := newSchedulerContext(ctx); schErr == nil {
 				var legacyXML []byte
 				if xml, xerr := sch.ExportXML(prior.TaskName); xerr == nil {
 					legacyXML = xml
@@ -167,9 +171,19 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 				if len(legacyXML) > 0 {
 					capturedXML := legacyXML
 					legacyTaskTouched := false
+					var schedulerOutcomeUnknown error
 					transaction.AddCompensation("restore promoted legacy LSP task "+prior.TaskName, func() error {
+						if schedulerOutcomeUnknown != nil {
+							return fmt.Errorf("scheduler inverse refused after unconfirmed mutation: %w", schedulerOutcomeUnknown)
+						}
 						if !legacyTaskTouched {
 							return nil
+						}
+						cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lspLegacyTaskRestoreTimeout)
+						defer cancel()
+						cleanupScheduler, bindErr := scheduler.BindContext(cleanupCtx, sch)
+						if bindErr != nil {
+							return labeledTransactionError("compensation", "bind legacy LSP restoration "+prior.TaskName, bindErr)
 						}
 						var restoreErr error
 						if prior.Port > 0 {
@@ -182,18 +196,19 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 								),
 							)
 						}
-						restoreErr = errors.Join(
-							restoreErr,
-							labeledTransactionError("compensation", "import legacy LSP task "+prior.TaskName, sch.ImportXML(prior.TaskName, capturedXML)),
-							labeledTransactionError("compensation", "run restored legacy LSP task "+prior.TaskName, sch.Run(prior.TaskName)),
-						)
-						return restoreErr
+						if importErr := cleanupScheduler.ImportXML(prior.TaskName, capturedXML); importErr != nil {
+							return errors.Join(restoreErr, labeledTransactionError("compensation", "import legacy LSP task "+prior.TaskName, importErr))
+						}
+						return errors.Join(restoreErr, labeledTransactionError("compensation", "run restored legacy LSP task "+prior.TaskName, cleanupScheduler.Run(prior.TaskName)))
 					})
 					legacyTaskTouched = true
 					if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
 						return finishFailure(prior, err)
 					}
 					if derr := sch.Delete(prior.TaskName); derr != nil && !errors.Is(derr, scheduler.ErrTaskNotFound) {
+						if errors.Is(derr, scheduler.ErrMutationOutcomeUnknown) {
+							schedulerOutcomeUnknown = derr
+						}
 						return finishFailure(prior, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr))
 					}
 				} else if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {

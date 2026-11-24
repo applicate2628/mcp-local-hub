@@ -57,7 +57,7 @@ type TaskStatus struct {
 	// Windows preserves the signed 32-bit native code without normalization.
 	// Sources without runtime data may use -1; it can also be a native code.
 	LastResult int
-	NextRun    string // human-readable, backend-specific
+	NextRun    string // observed local calendar time; empty means observed none for runtime snapshots
 	Owner      string // backend-specific task owner/account, if available
 }
 
@@ -81,6 +81,11 @@ var ErrTaskNotRunning = errors.New("scheduler: task not running")
 var ErrPermissionDenied = errors.New("scheduler: permission denied")
 var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
 var ErrUnavailable = errors.New("scheduler: unavailable")
+
+// ErrMutationOutcomeUnknown means the executor could not establish whether a
+// dispatched mutation took effect. It is never evidence of absence and must not
+// cause replay, deletion, or XML replacement as automatic compensation.
+var ErrMutationOutcomeUnknown = errors.New("scheduler: mutation outcome unknown")
 
 // WindowsUsersEquivalent compares a Task Scheduler Run As User value against
 // the current user's short username. Task Scheduler may qualify the stored

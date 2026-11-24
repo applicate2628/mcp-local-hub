@@ -112,7 +112,7 @@ func TestWindowsListContextPreservesStoppedContext(t *testing.T) {
 func TestTaskStatusFromCOMUsesNumericStateOnly(t *testing.T) {
 	var lastResult int32
 	for _, name := range []string{"English running", "Выполняется"} {
-		status, err := taskStatusFromCOM(schedulerCOMTask{Name: name, State: 4, LastResult: &lastResult})
+		status, err := taskStatusFromCOM(schedulerCOMTask{Name: name, State: 4, LastResult: &lastResult, NextRun: new(string)})
 		if err != nil || status.RuntimeState != TaskRuntimeRunning {
 			t.Fatalf("name=%q status=%#v err=%v", name, status, err)
 		}

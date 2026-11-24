@@ -193,7 +193,7 @@ func runSchedulerOwnerSIDFixture(t *testing.T, request schedulerCOMRequest, task
 	}
 	fixture := `$script:ownerFixtures='` + strings.ReplaceAll(string(fixtureJSON), "'", "''") + `'|ConvertFrom-Json;
 $script:ownerTasks=@($script:ownerFixtures|ForEach-Object{
- $task=[pscustomobject]@{Name=[string]$_.name;State=3;Enabled=$true;LastTaskResult=0;Xml=[string]$_.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId=[string]$_.owner}}}
+ $task=[pscustomobject]@{Name=[string]$_.name;State=3;Enabled=$true;LastTaskResult=0;NextRunTime=[DateTime]::FromOADate(0);Xml=[string]$_.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId=[string]$_.owner}}}
  $task|Add-Member ScriptMethod Run {param($args);[Console]::Error.WriteLine('fixture-run');return [pscustomobject]@{InstanceGuid='fixture'}}
  $task|Add-Member ScriptMethod Stop {param($flags);throw 'unexpected fixture Stop'}
  $task

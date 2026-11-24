@@ -33,6 +33,7 @@ type productPairTaskFake struct {
 	discarded    bool
 	closeErr     error
 	inventoryErr error
+	rewriteErr   error
 	restoreErr   error
 }
 
@@ -54,7 +55,7 @@ func productPairTestGracefulLifecycle() *windowsProductPairLifecycleHooks {
 }
 func (f *productPairTaskFake) RewriteCommand() error {
 	*f.order = append(*f.order, "tasks-rewrite")
-	return nil
+	return f.rewriteErr
 }
 func (f *productPairTaskFake) VerifyRuntime() error {
 	*f.order = append(*f.order, "tasks-readback")
@@ -385,6 +386,60 @@ func TestWindowsProductTxnPredecisionFaultRestoresProductTasksLegacyAndReceipt(t
 		if step == "publish-product" {
 			t.Fatalf("predecision fault published committed event: %v", order)
 		}
+	}
+}
+
+func TestWindowsProductTxnUnknownTaskRewritePreservesWholeRecoveryDomain(t *testing.T) {
+	txn, paths, order := newProductTxnFixture(t)
+	tasks := txn.Opts.Tasks.(*productPairTaskFake)
+	cause := errors.Join(scheduler.ErrMutationOutcomeUnknown, context.DeadlineExceeded)
+	tasks.rewriteErr = &scheduler.EntrypointTaskPartialProgressError{Cause: cause}
+	priorReceipt := filepath.Join(paths.stateDir, UpgradeReceiptSchemaV2+".json")
+	writePairFixture(t, priorReceipt, []byte("prior-v2-receipt"))
+	journalPath := filepath.Join(paths.stateDir, WindowsProductRecoveryFileLeafV3)
+	var journalBefore []byte
+	txn.Opts.Deps.Fault = func(stage WindowsProductStage) error {
+		if stage == WindowsProductStageProductReadBack {
+			var err error
+			journalBefore, err = os.ReadFile(journalPath)
+			return err
+		}
+		return nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	_, err := txn.Run(ctx)
+	var partial *scheduler.EntrypointTaskPartialProgressError
+	if ctx.Err() != nil || !errors.Is(err, scheduler.ErrMutationOutcomeUnknown) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrWindowsProductRecoveryPending) || !errors.As(err, &partial) {
+		t.Fatalf("live coordinator lost the unconfirmed task cause/recovery domain: ctx=%v err=%v", ctx.Err(), err)
+	}
+	// Product inverse precedes Tasks.RestoreImport in the real coordinator.
+	// Retaining the promoted bytes proves the guard runs before either inverse.
+	assertPairFile(t, paths.product, []byte("new-product"))
+	assertPairFile(t, paths.legacy, []byte("legacy-windowless"))
+	assertPairFile(t, priorReceipt, []byte("prior-v2-receipt"))
+	if tasks.restored || tasks.discarded || !tasks.closed {
+		t.Fatalf("unknown task outcome restored/discarded recovery or leaked its lock: %+v", tasks)
+	}
+	journalAfter, readErr := os.ReadFile(journalPath)
+	if readErr != nil || len(journalBefore) == 0 || !bytes.Equal(journalBefore, journalAfter) {
+		t.Fatalf("prepared recovery journal changed or vanished: %v", readErr)
+	}
+	journal, decodeErr := decodeWindowsProductRecoveryJournalV3(journalAfter)
+	if decodeErr != nil || journal.Phase != WindowsProductRecoveryPrepared || journal.Tasks.StoreRoot == "" {
+		t.Fatalf("unconfirmed task lost its prepared recovery descriptor: journal=%+v err=%v", journal, decodeErr)
+	}
+	rewriteReached := false
+	for _, step := range *order {
+		if step == "tasks-rewrite" {
+			rewriteReached = true
+		}
+		if step == "tasks-restore" || step == "tasks-readback" || step == "publish-product" {
+			t.Fatalf("unconfirmed rewrite triggered an inverse or further promotion: %v", *order)
+		}
+	}
+	if !rewriteReached {
+		t.Fatalf("fixture never reached task mutation: %v", *order)
 	}
 }
 

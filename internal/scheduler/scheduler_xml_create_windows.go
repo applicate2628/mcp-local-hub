@@ -3,7 +3,6 @@
 package scheduler
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,7 +33,7 @@ func (w *windowsScheduler) CreateXMLIfAbsent(name string, rawXML []byte) error {
 	if !hasContent {
 		return fmt.Errorf("%w: empty task XML", ErrTaskCorrupt)
 	}
-	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{
+	response, err := schedulerCOM(w.operationContext(), schedulerCOMRequest{
 		Operation:  "create_xml_if_absent",
 		Name:       name,
 		XMLUTF16LE: prepared,

@@ -375,6 +375,25 @@ func newEntrypointTaskBackendFake(tasks map[string][]byte, owner string) *entryp
 	return &entrypointTaskBackendFake{tasks: copyTasks, owners: owners, failImportFor: map[string]error{}}
 }
 
+func (f *entrypointTaskBackendFake) ListContext(ctx context.Context, prefix string) ([]TaskStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.List(prefix)
+}
+func (f *entrypointTaskBackendFake) ExportXMLContext(ctx context.Context, name string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return f.ExportXML(name)
+}
+func (f *entrypointTaskBackendFake) ImportXMLContext(ctx context.Context, name string, body []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return f.ImportXML(name, body)
+}
+
 func (f *entrypointTaskBackendFake) List(prefix string) ([]TaskStatus, error) {
 	var statuses []TaskStatus
 	for name := range f.tasks {

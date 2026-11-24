@@ -19,6 +19,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/scheduler"
 )
 
 const (
@@ -1291,6 +1292,12 @@ func (t *WindowsProductTxn) SettleGUIOwnedStop(receipt windowsProductQuiescenceR
 }
 
 func (t *WindowsProductTxn) rollback(trigger error) error {
+	if errors.Is(trigger, scheduler.ErrMutationOutcomeUnknown) {
+		// Task XML may already name the promoted Product. An unconfirmed task
+		// mutation grants no authority to undo any member of that same bundle.
+		// Retain the prepared journal and exact recovery store for its owner.
+		return errors.Join(trigger, fmt.Errorf("%w: task mutation outcome is unconfirmed; retain Windows product recovery", ErrWindowsProductRecoveryPending))
+	}
 	o, p := t.Opts, t.prepared
 	var restoreErrs []error
 	if p.successorForwardOwned {

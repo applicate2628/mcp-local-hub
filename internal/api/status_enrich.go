@@ -310,10 +310,11 @@ func deriveState(raw string, alive bool, nextRun string) string {
 	return raw
 }
 
-// hasFutureTrigger returns true when schtasks reports a concrete next-run
-// timestamp. Empty string or the literal "N/A" both mean "no upcoming
-// trigger" (e.g. logon-triggered daemon tasks that only fire at user
-// logon — schtasks emits "N/A" for NextRun in that case).
+// hasFutureTrigger projects an already validated next-run observation. Windows
+// supplies local calendar time without a UTC marker; empty means an observed
+// absence of a calendar forecast (for example a logon-only task). The legacy
+// "N/A" value remains compatible. Unknown Windows observations fail upstream;
+// they are never successful empty snapshots. This helper does not predict time.
 func hasFutureTrigger(nextRun string) bool {
 	s := strings.TrimSpace(nextRun)
 	return s != "" && !strings.EqualFold(s, "N/A")

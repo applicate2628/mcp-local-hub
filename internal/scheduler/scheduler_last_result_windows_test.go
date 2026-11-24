@@ -47,7 +47,7 @@ func TestSchedulerCOMLastResultMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			task := decodeLastResultCOMTask(t, fmt.Sprintf(
-				`{"name":"fixture","state":%d,"owner":"DOMAIN\\alice","last_result":%d}`,
+				`{"name":"fixture","state":%d,"owner":"DOMAIN\\alice","next_run":"","last_result":%d}`,
 				tc.state, tc.result))
 			status, err := taskStatusFromCOM(task)
 			if err != nil {
@@ -66,8 +66,8 @@ func TestSchedulerCOMLastResultRejectsMissingOrUnknown(t *testing.T) {
 		json string
 	}{
 		{"missing-result", `{"name":"fixture","state":3}`},
-		{"null-result", `{"name":"fixture","state":3,"last_result":null}`},
-		{"unknown-state-with-result", `{"name":"fixture","state":99,"last_result":0}`},
+		{"null-result", `{"name":"fixture","state":3,"next_run":"","last_result":null}`},
+		{"unknown-state-with-result", `{"name":"fixture","state":99,"next_run":"","last_result":0}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if status, err := taskStatusFromCOM(decodeLastResultCOMTask(t, tc.json)); !errors.Is(err, ErrUnavailable) {
@@ -90,7 +90,7 @@ func TestSchedulerCOMLastResultRejectsInvalidJSON(t *testing.T) {
 		{"below-signed-minimum", `-2147483649`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := `{"ok":true,"task":{"name":"fixture","state":3,"last_result":` + tc.value + `}}`
+			raw := `{"ok":true,"task":{"name":"fixture","state":3,"next_run":"","last_result":` + tc.value + `}}`
 			var response schedulerCOMResponse
 			if err := json.Unmarshal([]byte(raw), &response); err == nil {
 				t.Fatalf("invalid last_result accepted: %s", raw)
@@ -109,12 +109,12 @@ func TestSchedulerCOMLastResultPublicQueries(t *testing.T) {
 	}{
 		{
 			name: "status-preserves-signed-result", operation: "status",
-			json: `{"ok":true,"task":{"name":"fixture","state":3,"owner":"DOMAIN\\alice","last_result":-2147024894}}`,
+			json: `{"ok":true,"task":{"name":"fixture","state":3,"owner":"DOMAIN\\alice","next_run":"","last_result":-2147024894}}`,
 			want: []int{-2147024894},
 		},
 		{
 			name: "list-preserves-each-result", operation: "list",
-			json: `{"ok":true,"tasks":[{"name":"fixture-zero","state":3,"owner":"S-1-5-21-1","last_result":0},{"name":"fixture-error","state":4,"owner":"S-1-5-21-1","last_result":87},{"name":"fixture-never-run","state":3,"owner":"S-1-5-21-1","last_result":267011}]}`,
+			json: `{"ok":true,"tasks":[{"name":"fixture-zero","state":3,"owner":"S-1-5-21-1","next_run":"","last_result":0},{"name":"fixture-error","state":4,"owner":"S-1-5-21-1","next_run":"","last_result":87},{"name":"fixture-never-run","state":3,"owner":"S-1-5-21-1","next_run":"","last_result":267011}]}`,
 			want: []int{0, 87, 267011},
 		},
 		{
@@ -124,7 +124,7 @@ func TestSchedulerCOMLastResultPublicQueries(t *testing.T) {
 		},
 		{
 			name: "list-rejects-null-without-partial-results", operation: "list",
-			json:      `{"ok":true,"tasks":[{"name":"fixture-good","state":3,"owner":"S-1-5-21-1","last_result":87},{"name":"fixture-null","state":3,"owner":"S-1-5-21-1","last_result":null}]}`,
+			json:      `{"ok":true,"tasks":[{"name":"fixture-good","state":3,"owner":"S-1-5-21-1","next_run":"","last_result":87},{"name":"fixture-null","state":3,"owner":"S-1-5-21-1","next_run":"","last_result":null}]}`,
 			wantError: true,
 		},
 	} {
@@ -281,7 +281,7 @@ func runLastResultCOMScriptFixture(t *testing.T, powerShell string, request sche
 	// property getter, row construction, and catch block remain unchanged.
 	const fixtureBody = `
 $script:fixtureTasks=@(foreach($row in $script:lastResultFixture.tasks){
- $task=[pscustomobject]@{Name=[string]$row.name;State=3;Xml=[string]$script:lastResultFixture.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}};FixtureResult=$row.value;FixtureMode=[string]$row.mode}
+ $task=[pscustomobject]@{Name=[string]$row.name;State=3;NextRunTime=[DateTime]::FromOADate(0);Xml=[string]$script:lastResultFixture.xml;Definition=[pscustomobject]@{Principal=[pscustomobject]@{UserId='S-1-5-21-1'}};FixtureResult=$row.value;FixtureMode=[string]$row.mode}
  if($row.mode -cne 'missing'){
   $task|Add-Member ScriptProperty LastTaskResult {
    [Console]::Error.WriteLine('fixture-last-result:'+ $this.Name)

@@ -166,7 +166,7 @@ func captureUpgradeGUITaskActions(ctx context.Context, target string) ([]upgrade
 	if len(refs) == 0 {
 		return nil, errors.New("no exact-owned Product task actions were found")
 	}
-	sch, err := scheduler.New()
+	sch, err := scheduler.NewContext(ctx)
 	if err != nil {
 		return nil, err
 	}
