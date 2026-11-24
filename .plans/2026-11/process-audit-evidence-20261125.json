@@ -1,0 +1,87 @@
+{
+  "schema": "audit-native-evidence-v1",
+  "pr": 628,
+  "base": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+  "source_sha256": {
+    "internal/process/run_strictly_contained_windows_test.go": "d1bbca38fac0fbc8253b739c6a3046e861334404a95c1210f0bd0a975eaceb6d"
+  },
+  "status": "FOCUSED_PASS",
+  "checks": [
+    {
+      "command": [
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit": 0,
+      "seconds": 0.1504115000134334,
+      "original_reaped": true,
+      "tree_active_zero": true,
+      "handles_closed": true,
+      "readers_joined": true,
+      "quiescence": "complete",
+      "stdout_sha256": "75fd8ecdbb86f2040f916b97c750e849cc9d6dc81fceb43b21e256122d9330f9",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "-w",
+        "internal/process/run_strictly_contained_windows_test.go"
+      ],
+      "exit": 0,
+      "seconds": 0.09013090003281832,
+      "original_reaped": true,
+      "tree_active_zero": true,
+      "handles_closed": true,
+      "readers_joined": true,
+      "quiescence": "complete",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "diff",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 0.20479729998623952,
+      "original_reaped": true,
+      "tree_active_zero": true,
+      "handles_closed": true,
+      "readers_joined": true,
+      "quiescence": "complete",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "2m",
+        "./internal/process",
+        "-run",
+        "^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$"
+      ],
+      "exit": 0,
+      "seconds": 3.7326534999883734,
+      "original_reaped": true,
+      "tree_active_zero": true,
+      "handles_closed": true,
+      "readers_joined": true,
+      "quiescence": "complete",
+      "stdout_sha256": "b25f8327b5f5bb1bb8e0e28fe516f5462d1ad4438b413fe94aa20fdce9ae9192",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "controller": {
+    "controller_exit_code": 0,
+    "original_controller_reaped": true,
+    "controller_capture_handles_closed": true,
+    "seconds": 4.466983399994206,
+    "receipt_sha256": "31f641030b8c498c4cf4595e49fd73131e74b8cf3a8f823c58368bcaa262a8e9"
+  },
+  "test_log": "=== RUN   TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow\n=== RUN   TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow/fast_original_handle_signal\n=== RUN   TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow/expired_before_observation\n--- PASS: TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow (0.27s)\n    --- PASS: TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow/fast_original_handle_signal (0.13s)\n    --- PASS: TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow/expired_before_observation (0.14s)\nPASS\nok  \tmcp-local-hub/internal/process\t0.409s\n",
+  "scope": "Deterministic algorithm proof-window branches plus original native root handle signal; not a real-time 50ms performance assertion or a native post-termination Job accounting proof. No production change. Full gates not run on this owner head.",
+  "history": "Earlier focused PASS on scheduler base892fa was preliminary only; production process files differ. This run uses exact #628 basee7fee."
+}
