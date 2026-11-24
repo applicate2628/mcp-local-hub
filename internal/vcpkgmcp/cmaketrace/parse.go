@@ -141,6 +141,11 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 
 		raw, n, tooLong, err := readLine(ctx, br, lim.MaxLineBytes)
 		consumed += int64(n)
+		// A read failure is not a successful bounded read. Preserve it even
+		// when the same read also crosses a byte or line ceiling.
+		if err != nil && !errors.Is(err, io.EOF) {
+			return parseResult{}, err
+		}
 		if consumed > lim.MaxTraceBytes {
 			res.hitByteLimit = true
 			return res, nil
@@ -156,10 +161,6 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 			}
 			continue
 		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			return parseResult{}, err
-		}
-
 		if stop := res.consumeLine(raw, lim.MaxParsedRecords, lim.MaxRetainedRecordBytes); stop {
 			return res, nil
 		}
