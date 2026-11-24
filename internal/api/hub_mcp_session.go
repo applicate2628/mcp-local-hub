@@ -86,6 +86,7 @@ const (
 // SessionStoreOpts configures bound + sweep tuning. Zero values get
 // production defaults (16 / 256 / 30min / 60s).
 type SessionStoreOpts struct {
+	StdioSessions HubStdioSessions
 	MaxPerClient  int
 	MaxGlobal     int
 	IdleTimeout   time.Duration
@@ -126,6 +127,10 @@ type DaemonFailure struct {
 // per-hub state — failures from one session never bleed into
 // another.
 type hubSession struct {
+	stdioSessions        HubStdioSessions
+	stdioLifetime        context.Context
+	stdioCancel          context.CancelFunc
+	stdioCredential      *hubStdioCredential // immutable digest captured after front authentication
 	ClientSessionID      string
 	ScopeKey             string
 	InstanceID           string // hub instance id admitted at initialize; used for stable response metadata
@@ -209,6 +214,13 @@ func (s *hubSession) markStalePort(port int) bool {
 }
 
 func (s *hubSession) tracksDaemonPort(port int) bool {
+	if s.SnapshotAtInit != nil {
+		for ref := range s.SnapshotAtInit.sessionLocalEndpoints {
+			if ref.Port == port {
+				return false
+			}
+		}
+	}
 	if port == 0 {
 		return false
 	}
@@ -365,6 +377,9 @@ func (s *hubSession) RemoveInFlight(key requestIDKey) {
 func (s *hubSession) markDeleteStarted() {
 	s.mu.Lock()
 	s.deleteStarted = true
+	if s.stdioCancel != nil {
+		s.stdioCancel()
+	}
 	s.mu.Unlock()
 }
 
@@ -372,6 +387,9 @@ func (s *hubSession) markDeleteStartedAndSnapshotDaemonSessions() map[canonicalD
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deleteStarted = true
+	if s.stdioCancel != nil {
+		s.stdioCancel()
+	}
 	daemonSessions := make(map[canonicalDaemonRef]daemonInitState, len(s.InitSuccesses))
 	for ref, dsid := range s.InitSuccesses {
 		proto := s.DaemonProtoVer[ref]
@@ -522,6 +540,7 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 	}
 	now := s.now()
 	sess := &hubSession{
+		stdioSessions:    s.opts.StdioSessions,
 		ClientSessionID:  id,
 		ScopeKey:         client,
 		ProtocolVersion:  protoVer,
@@ -531,6 +550,9 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 		InFlightRequests: map[requestIDKey]inflightEntry{},
 		InitAt:           now,
 		LastUsedAt:       now,
+	}
+	if s.opts.StdioSessions != nil {
+		sess.stdioLifetime, sess.stdioCancel = context.WithCancel(s.sweepCtx)
 	}
 	s.sessions[id] = sess
 	s.perClient[client]++

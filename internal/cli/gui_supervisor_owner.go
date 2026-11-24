@@ -87,8 +87,9 @@ type supervisorCreationSnapshot struct {
 type supervisorAttemptReceiver func(supervisorCreationSnapshot) error
 
 type supervisorCreatorOperations struct {
-	capturePeer   func(*os.Process, api.SupervisorLockOwner) (api.SupervisorProcessIdentityV1, error)
-	settleUnbound func(*supervisorOwner) error
+	capturePeer    func(*os.Process, api.SupervisorLockOwner) (api.SupervisorProcessIdentityV1, error)
+	settleUnbound  func(*supervisorOwner) error
+	observeControl func(context.Context, SupervisorControlExpectation, api.SupervisorLockOwner, api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error)
 }
 
 func (s supervisorCreationSnapshot) diagnosticFields() map[string]any {
@@ -201,6 +202,9 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 	}
 	if operations.settleUnbound == nil {
 		operations.settleUnbound = (*supervisorOwner).settleUnboundCreator
+	}
+	if operations.observeControl == nil {
+		operations.observeControl = observeGUISupervisorControl
 	}
 	attempt := &supervisorCreationAttempt{receive: receive}
 	var owner *supervisorOwner
@@ -337,15 +341,65 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 	if captureErr != nil {
 		return nil, errors.Join(captureErr, operations.settleUnbound(owner))
 	}
-	deadline := time.Now().Add(waitFor)
-	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		current, bindErr := observeCreatedSupervisorControl(probeCtx, expected, original, peer, func(candidate api.SupervisorLockOwner) error {
-			return validateCreatedSupervisorNativeControl(expected, candidate)
+	return owner.waitForControl(ctx, expected, peer, waitFor, operations)
+}
+
+// observeGUISupervisorControl returns either the original generation or a live
+// competitor only after the same native/IPC/current-owner proof. A different
+// sidecar alone is not evidence that the freshly created child lost the race.
+func observeGUISupervisorControl(ctx context.Context, expected SupervisorControlExpectation, original api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
+	observe := func(candidate api.SupervisorLockOwner, candidatePeer api.SupervisorProcessIdentityV1) (api.SupervisorLockOwner, error) {
+		return observeCreatedSupervisorControl(ctx, expected, candidate, candidatePeer, func(owner api.SupervisorLockOwner) error {
+			return validateCreatedSupervisorNativeControl(ctx, expected, owner)
 		}, api.ReadSupervisorLockOwner)
-		cancel()
-		attempt.publish(func(s *supervisorCreationSnapshot) { s.Cause = errors.Join(s.Cause, bindErr) })
+	}
+	current, bindErr := observe(original, peer)
+	if !errors.Is(bindErr, errSupervisorControlGenerationChanged) {
+		return current, bindErr
+	}
+	winner, err := api.ReadSupervisorLockOwner(filepath.Join(expected.StateDir, "supervisor.lock"))
+	if err != nil || winner == original {
+		return api.SupervisorLockOwner{}, errors.Join(bindErr, err)
+	}
+	winnerPeer, err := api.ObserveSupervisorProcessIdentityV1(winner.PID)
+	if err != nil {
+		return api.SupervisorLockOwner{}, errors.Join(bindErr, err)
+	}
+	current, err = observe(winner, winnerPeer)
+	if err != nil {
+		return api.SupervisorLockOwner{}, errors.Join(bindErr, err)
+	}
+	return current, nil
+}
+
+// waitForControl retains the creator and its sole Wait while publication is
+// pending. Native identity queries and IPC probes share the readiness deadline;
+// file/OS calls keep their native semantics. Cleanup still receives the original
+// child through the existing exit monitor rather than abandoning custody.
+func (owner *supervisorOwner) waitForControl(ctx context.Context, expected SupervisorControlExpectation, peer api.SupervisorProcessIdentityV1, waitFor time.Duration, operations supervisorCreatorOperations) (*supervisorOwner, error) {
+	proc, original := owner.proc, owner.createdGeneration
+	readyCtx, stopWaiting := context.WithTimeout(ctx, waitFor)
+	defer stopWaiting()
+	for {
+		current, bindErr := operations.observeControl(readyCtx, expected, original, peer)
+		owner.attempt.publish(func(s *supervisorCreationSnapshot) { s.Cause = errors.Join(s.Cause, bindErr) })
 		if bindErr == nil {
+			if current != original {
+				// Only an authenticated live competitor can make this child a
+				// singleton loser. Settle our retained creator, never winner.PID.
+				if settleErr := operations.settleUnbound(owner); settleErr != nil {
+					return nil, settleErr
+				}
+				// Receiving the original Wait may take time. Do not adopt a
+				// generation which disappeared or changed during that receive.
+				confirmed, err := operations.observeControl(readyCtx, expected, original, peer)
+				if err != nil || confirmed != current {
+					return nil, errors.Join(errSupervisorControlGenerationChanged, err)
+				}
+				// Exit evidence stays on this owner; the winner grants no custody.
+				owner.proc = nil
+				return owner, nil
+			}
 			proof := &supervisorControlProof{creator: proc, expected: expected, owner: current, peer: peer}
 			proof.originalOutcome = func() (bool, error) {
 				select {
@@ -365,29 +419,6 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 			owner.spawned = true
 			return owner, nil
 		}
-		if errors.Is(bindErr, errSupervisorControlGenerationChanged) {
-			// Another owner is DATA until this exact created loser is settled.
-			if settleErr := operations.settleUnbound(owner); settleErr != nil {
-				return nil, errors.Join(bindErr, settleErr)
-			}
-			winner, readErr := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
-			if readErr != nil || winner == original {
-				return nil, errors.Join(bindErr, readErr)
-			}
-			winnerPeer, peerErr := api.ObserveSupervisorProcessIdentityV1(winner.PID)
-			if peerErr != nil {
-				return nil, errors.Join(bindErr, peerErr)
-			}
-			if _, err := observeCreatedSupervisorControl(ctx, expected, winner, winnerPeer, func(candidate api.SupervisorLockOwner) error {
-				return validateCreatedSupervisorNativeControl(expected, candidate)
-			}, api.ReadSupervisorLockOwner); err != nil {
-				return nil, errors.Join(bindErr, err)
-			}
-			// Original child exit evidence remains on the same owner. Clearing
-			// its retained (now reaped) proc conveys no control over the winner.
-			owner.proc = nil
-			return owner, nil
-		}
 		if ctx.Err() != nil {
 			return nil, errors.Join(ctx.Err(), bindErr, operations.settleUnbound(owner))
 		}
@@ -396,15 +427,17 @@ func ensureSupervisorRunningWithOperations(ctx context.Context, mcphubBin string
 			return nil, errors.Join(bindErr, owner.exitResult.exitErr, errors.New("created supervisor exited before control binding"))
 		default:
 		}
-		if !errors.Is(bindErr, os.ErrNotExist) && !errors.Is(bindErr, api.ErrSupervisorIPCUnavailable) && !errors.Is(bindErr, context.DeadlineExceeded) {
+		if !errors.Is(bindErr, errSupervisorControlGenerationChanged) && !errors.Is(bindErr, os.ErrNotExist) && !errors.Is(bindErr, api.ErrSupervisorIPCUnavailable) && !errors.Is(bindErr, context.DeadlineExceeded) {
 			return nil, errors.Join(bindErr, operations.settleUnbound(owner))
 		}
-		if time.Now().After(deadline) {
-			return nil, errors.Join(fmt.Errorf("supervisor owner: original PID %d control not ready within %s; stderr: %s", proc.Pid, waitFor, strings.TrimSpace(stderrBuf.String())), bindErr, operations.settleUnbound(owner))
+		if readyCtx.Err() != nil {
+			return nil, errors.Join(fmt.Errorf("supervisor owner: original PID %d control not ready within %s; stderr: %s", proc.Pid, waitFor, strings.TrimSpace(owner.stderrBuf.String())), bindErr, readyCtx.Err(), operations.settleUnbound(owner))
 		}
 		select {
 		case <-ctx.Done():
 			return nil, errors.Join(ctx.Err(), bindErr, operations.settleUnbound(owner))
+		case <-readyCtx.Done():
+			continue
 		case <-time.After(supervisorReadyPollInterval):
 		}
 	}

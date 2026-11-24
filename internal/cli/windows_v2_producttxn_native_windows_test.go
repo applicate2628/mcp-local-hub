@@ -548,6 +548,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 		"launcher_last_predecision_inverse",
 		"current_inverse_after_intent_failure",
 		"clean_install_rolled_back_preflight",
+		"clean_install_selective_rollback_archives_only_changed_originals",
 		"clean_install_archive_batch",
 		"clean_install_archive_batch_interrupted",
 		"retained_runtime_requires_native_witness",
@@ -647,6 +648,27 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			if inverse || pretransferClose || exactCleanupSlots || retainedRuntime || cleanInstall || phase == "current_inverse_after_intent_failure" {
 				prior = v2TxnSeedPrior(t, input, dst, seed)
 			}
+			selectiveClean := phase == "clean_install_selective_rollback_archives_only_changed_originals"
+			if selectiveClean {
+				// Keep the installed runtime and Launcher. Only Product and its
+				// matching identity manifest differ from the incoming bundle.
+				body := append(mustReadFile(t, dst.ProductPath), []byte("fixture original Product")...)
+				if err := os.WriteFile(dst.ProductPath, body, 0600); err != nil {
+					t.Fatal(err)
+				}
+				identity, err := binaryadmission.ParseWindowsProductIdentityV2(mustReadFile(t, dst.IdentityPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				identity.SHA256 = v2TxnFixtureDigest(body)
+				raw, err := json.Marshal(identity)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(dst.IdentityPath, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if inverse {
 				if err := os.WriteFile(convertedReceiptPath, []byte("retained fixture receipt"), 0600); err != nil {
 					t.Fatal(err)
@@ -654,7 +676,7 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 			}
 			firstWriteAbsent := phase == "upgrade_full_selector_first_write_absent"
 			var stage *binaryadmission.StagedWindowsCanonicalEntrySetV2
-			if firstWriteAbsent {
+			if firstWriteAbsent || selectiveClean {
 				carrier, stageErr := stageCurrentEntryBundleForUpgrade(ctx, source, dst.CanonicalEntryPath)
 				txn.Opts.EntryBundle, err = carrier, stageErr
 				if carrier != nil {
@@ -689,6 +711,10 @@ func TestWindowsV2ProductTxnNativeEntryBundle(t *testing.T) {
 				if member.Member == stagedSnapshot.ProductRelativePath {
 					txn.Opts.StagedProduct = filepath.Join(target, filepath.FromSlash(member.File.Path))
 				}
+			}
+			if selectiveClean && (!txn.Opts.EntryBundle.selective || len(stagedFiles) != 2 ||
+				stagedFiles[stagedSnapshot.IdentityRelativePath].Member != stagedSnapshot.IdentityRelativePath) {
+				t.Fatal("fixture did not issue exactly the changed Product and identity while retaining the runtime")
 			}
 			if _, recorded := stagedFiles[stagedSnapshot.ProductRelativePath]; !recorded {
 				t.Fatal("Product stage member unavailable")

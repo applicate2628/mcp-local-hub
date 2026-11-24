@@ -279,15 +279,27 @@ func resetSerenaStopReadCache() {
 }
 
 // SetTestStatusFn overrides the StatusContext source so cross-package
-// tests can inject deterministic []DaemonStatus rows without spinning
-// up Task Scheduler. The watchdog driver consumes both Status() and
-// StatusContext via the same seam (statusContextSrcFn).
+// tests can inject deterministic []DaemonStatus rows into the context wrapper.
+// Status() and Scan() use the separate statusInternalDialFn source below.
 //
 // Returns a restore function that resets the seam.
 func SetTestStatusFn(fn func() ([]DaemonStatus, error)) (restore func()) {
 	orig := statusContextSrcFn
 	statusContextSrcFn = fn
 	return func() { statusContextSrcFn = orig }
+}
+
+// SetStatusInternalDialForTest replaces the existing Supervisor observation
+// used by Status, Scan and statusReadinessSnapshot. It grants no process or
+// transport authority; cross-package tests still use the real projection.
+func SetStatusInternalDialForTest(fn func(context.Context) ([]DaemonStatus, error)) (restore func()) {
+	if !testing.Testing() || fn == nil {
+		panic("api.SetStatusInternalDialForTest requires a test binary and observation function")
+	}
+	original := statusInternalDialFn
+	statusInternalDialFn = fn
+	var once sync.Once
+	return func() { once.Do(func() { statusInternalDialFn = original }) }
 }
 
 // SetTestRestartContextFn overrides the general-purpose ctx-aware

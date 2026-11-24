@@ -29,6 +29,7 @@ const (
 type HubListener struct {
 	srv            *http.Server
 	store          *api.HubSessionStore
+	stdio          *hubStdioSessions
 	reload         *api.InternalReloadHandler
 	endpoint       api.HubEndpoint
 	listenerCancel context.CancelFunc
@@ -66,6 +67,7 @@ type HubListenerOptions struct {
 	// settle its native bind guard before the caller waits for Serve.
 	BindExisting                       func(context.Context, func() error) (*api.HubMcpBindResult, error)
 	Lifetime                           context.Context
+	PrepareStdio                       HubStdioPreparation
 	PreservePortOnReloadHandlerFailure bool
 	ReloadHandler                      func(context.Context) (*api.InternalReloadHandler, error)
 	HealthProbeInterval                time.Duration
@@ -166,9 +168,28 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 		})
 	}
 
+	lifetime := opts.Lifetime
+	if lifetime == nil {
+		lifetime = ctx
+	}
+	listenerCtx, listenerCancel := context.WithCancel(lifetime)
+	var private *hubStdioSessions
+	if strict && opts.PrepareStdio != nil {
+		var err error
+		private, err = prepareHubStdioSessions(listenerCtx, a, opts.PrepareStdio)
+		if err != nil {
+			listenerCancel()
+			// Preparation has created no child: HTTP admission is still closed.
+			return failUnservedHubStart(ctx, res, errors.Join(err, private.Close(ctx)))
+		}
+	}
 	// Step 9 — set up mux + serve. Session store is per-listener so
 	// a future "stop hub mode" path can tear down sessions cleanly.
-	store := api.NewHubSessionStore(api.SessionStoreOpts{})
+	var sessionOptions api.SessionStoreOpts
+	if private != nil {
+		sessionOptions.StdioSessions = private
+	}
+	store := api.NewHubSessionStore(sessionOptions)
 	handler := api.NewHubMcpHandler(store)
 	handler.SetEndpoint(ep)
 	// codex bot phase4 r5 P2 closure on PR #158: control-token
@@ -182,6 +203,8 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 		reload, reloadErr = opts.ReloadHandler(ctx)
 	}
 	if reloadErr != nil {
+		listenerCancel()
+		reloadErr = errors.Join(reloadErr, private.Close(ctx))
 		_ = ln.Close()
 		store.Close()
 		// codex bot phase4 r8 P2 closure on PR #158: roll back the
@@ -281,8 +304,9 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	// directly with empty-body 404, matching every other gate-2
 	// path-shape failure surface.
 	listener := &HubListener{
-		store: store, reload: reload, endpoint: ep, strict: strict,
-		serveDone: make(chan struct{}), watchersDone: make(chan struct{}),
+		store: store, stdio: private, reload: reload, endpoint: ep, strict: strict,
+		listenerCancel: listenerCancel,
+		serveDone:      make(chan struct{}), watchersDone: make(chan struct{}),
 		requestsDone: make(chan struct{}), admitting: !strict,
 	}
 	muxedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -305,12 +329,6 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	})
 
 	listener.srv = newHubMcpHTTPServer(muxedHandler)
-	lifetime := opts.Lifetime
-	if lifetime == nil {
-		lifetime = ctx
-	}
-	listenerCtx, listenerCancel := context.WithCancel(lifetime)
-	listener.listenerCancel = listenerCancel
 	listener.alive.Store(true)
 
 	// Share the same supervisor status observations as existing API consumers.
@@ -599,6 +617,9 @@ func (c *HubListener) advanceOriginalRetirement(ctx context.Context) api.RouteAg
 	if err := c.store.CloseContext(ctx); err != nil {
 		return report("original Hub session sweeper", err)
 	}
+	if err := c.stdio.Close(ctx); err != nil {
+		return report("original Hub private stdio providers", err)
+	}
 	if err := c.reload.ShutdownOriginal(ctx); err != nil {
 		return report("original Hub reload file", err)
 	}
@@ -660,6 +681,7 @@ func (c *HubListener) shutdown(parentCtx context.Context) (retErr error) {
 	if c.store != nil {
 		c.store.Close()
 	}
+	retErr = errors.Join(retErr, c.stdio.Close(shutCtx))
 	if c.reload != nil {
 		// codex bot phase4 r10 P1 closure on PR #158: pass shutCtx
 		// (the 5s shutdown budget) so the reload-token flock

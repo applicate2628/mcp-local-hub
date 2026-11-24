@@ -9,6 +9,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const SCRATCH = path.join(ROOT, ".scratch");
 const WINIO_LICENSE = ["third_party", "go-winio", "LICENSE"];
+const FLOCK_LICENSE = ["third_party", "gofrs-flock", "LICENSE"];
 
 function withScratch(prefix, fn) {
   fs.mkdirSync(SCRATCH, { recursive: true });
@@ -36,9 +37,11 @@ function prepareGeneratorFixture(fixtureRoot, projectContract = (contract) => co
 
 function generateFixture(fixtureRoot, projectContract = (contract) => contract) {
   const npmDir = prepareGeneratorFixture(fixtureRoot, projectContract);
-  const fixtureLicense = path.join(fixtureRoot, ...WINIO_LICENSE);
-  fs.mkdirSync(path.dirname(fixtureLicense), { recursive: true });
-  fs.copyFileSync(path.join(ROOT, ...WINIO_LICENSE), fixtureLicense);
+  for (const relative of [WINIO_LICENSE, FLOCK_LICENSE]) {
+    const fixtureLicense = path.join(fixtureRoot, ...relative);
+    fs.mkdirSync(path.dirname(fixtureLicense), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, ...relative), fixtureLicense);
+  }
   const result = spawnSync(process.execPath, [path.join(npmDir, "generate-platform-packages.js")], {
     cwd: fixtureRoot,
     encoding: "utf8",
@@ -47,15 +50,20 @@ function generateFixture(fixtureRoot, projectContract = (contract) => contract) 
   return npmDir;
 }
 
-function assertWinIOLicense(npmDir) {
-  const original = fs.readFileSync(path.join(ROOT, ...WINIO_LICENSE));
+function assertBundledLicenses(npmDir) {
   const readme = fs.readFileSync(path.join(npmDir, "packages", "win32-x64", "README.md"));
-  const notice = Buffer.concat([
-    Buffer.from("The Windows Product includes go-winio under the MIT License.\n\n```text\n"),
-    original,
-    Buffer.from("```\n"),
-  ]);
-  assert.ok(readme.includes(notice), "Windows Product README must contain the original WinIO license bytes");
+  for (const [relative, component, license] of [
+    [WINIO_LICENSE, "go-winio", "MIT"],
+    [FLOCK_LICENSE, "gofrs-flock", "BSD-3-Clause"],
+  ]) {
+    const original = fs.readFileSync(path.join(ROOT, ...relative));
+    const notice = Buffer.concat([
+      Buffer.from(`The Windows Product includes ${component} under the ${license} License.\n\n` + "```text\n"),
+      original,
+      Buffer.from("```\n"),
+    ]);
+    assert.ok(readme.includes(notice), `Windows Product README must contain the original ${component} license bytes`);
+  }
 }
 
 test("generator rejects a missing or invalid WinIO license before creating packages", () => {
@@ -82,6 +90,31 @@ test("generator rejects a missing or invalid WinIO license before creating packa
   }
 });
 
+test("generator rejects a missing or invalid flock license before creating packages", () => {
+  for (const license of [null, Buffer.from([0xff])]) {
+    withScratch("npm-platform-flock-license-preflight-", (fixtureRoot) => {
+      const npmDir = prepareGeneratorFixture(fixtureRoot);
+      const winio = path.join(fixtureRoot, ...WINIO_LICENSE);
+      fs.mkdirSync(path.dirname(winio), { recursive: true });
+      fs.copyFileSync(path.join(ROOT, ...WINIO_LICENSE), winio);
+      if (license !== null) {
+        const flock = path.join(fixtureRoot, ...FLOCK_LICENSE);
+        fs.mkdirSync(path.dirname(flock), { recursive: true });
+        fs.writeFileSync(flock, license);
+      }
+      const result = spawnSync(process.execPath, [path.join(npmDir, "generate-platform-packages.js")], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      assert.notStrictEqual(result.status, 0);
+      assert.match(result.stderr, license === null
+        ? /ENOENT[^\n]*gofrs-flock[\\/]LICENSE/
+        : /gofrs-flock LICENSE must contain valid UTF-8 text/);
+      assert.strictEqual(fs.existsSync(path.join(npmDir, "packages")), false);
+    });
+  }
+});
+
 test("generator emits the waiting entry and complete nested Product projection", () => {
   withScratch("npm-platform-generator-", (fixtureRoot) => {
     const npmDir = generateFixture(fixtureRoot);
@@ -101,7 +134,7 @@ test("generator emits the waiting entry and complete nested Product projection",
       "bin/mcphub-product/runtimes/",
       "README.md",
     ]);
-    assertWinIOLicense(npmDir);
+    assertBundledLicenses(npmDir);
   });
 });
 
@@ -124,7 +157,7 @@ test("generator preserves the legacy V1 package projection for a schema 3 regist
       "bin/windows-product-identity.json",
       "README.md",
     ]);
-    assertWinIOLicense(npmDir);
+    assertBundledLicenses(npmDir);
   });
 });
 

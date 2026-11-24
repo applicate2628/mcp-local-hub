@@ -154,6 +154,8 @@ func observeCreatedSupervisorControl(ctx context.Context, expected SupervisorCon
 		return api.SupervisorLockOwner{}, err
 	}
 	if owner != original {
+		// Publication can still describe a previous process. This mismatch is
+		// observation only, not proof that a live competitor won the singleton.
 		return api.SupervisorLockOwner{}, errSupervisorControlGenerationChanged
 	}
 	if err := validateNative(owner); err != nil {

@@ -1672,15 +1672,47 @@ func withRolledBackCurrentEntry(req windowsProductRecoveryRequest, allowSettled 
 	if err != nil {
 		return err
 	}
+	// Members verifies the whole bank, including the retained canonical files.
+	// Only an issued staged original can enter the archive and discard plan.
+	present := make(map[string]binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, len(members))
 	for _, member := range members {
-		if member.File.Path == member.Member {
-			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("rolled-back successor still occupies its canonical final"))
+		present[member.Member] = member
+	}
+	var changed []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2
+	for _, row := range s.journal.EntryBundle.Bundle.Members {
+		if row.Staged == nil {
+			continue
 		}
+		member, ok := present[row.Member]
+		if !ok {
+			// Acquisition checked all issued locations against this very journal
+			// and admits absence only for an exact cleanup intent or readback.
+			index := currentCleanupIndex(s.journal.EntryBundle, "unused-successor", row.Member)
+			if index < 0 {
+				return ErrWindowsProductRecoveryIdentity
+			}
+			cleanup := s.journal.EntryBundle.Cleanup[index]
+			if cleanup.Purpose != binaryadmission.WindowsCanonicalRecoveryRollbackCleanupV2 ||
+				cleanup.State != "discard_intent" && cleanup.State != "absence_received" {
+				return ErrWindowsProductRecoveryIdentity
+			}
+			continue
+		}
+		if member.File.Path == row.Member || member.File.Path != row.Staged.File.Path &&
+			(row.SuccessorAsideRelative == nil || member.File.Path != *row.SuccessorAsideRelative) {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("rolled-back successor is outside its issued stage or aside"))
+		}
+		want := *row.Staged
+		want.File.Path = member.File.Path // The issued stage and aside share the exact original parent.
+		if member != want {
+			return ErrWindowsProductRecoveryIdentity
+		}
+		changed = append(changed, member)
 	}
 	if err := s.ValidateOriginalRecovery(ctx); err != nil {
 		return err
 	}
-	return use(s, prior, successor, store, members)
+	return use(s, prior, successor, store, changed)
 }
 func currentRollbackRecoveryPurpose(j windowsProductRecoveryJournalV3) windowsCanonicalRecoveryPurpose {
 	if j.EntryBundle != nil {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
@@ -18,6 +19,21 @@ const (
 	IsolatedStdioHub
 	IsolatedStdioDiscovery
 )
+
+// IsolatedStdioAuthorization is issued by the protected front, never decoded
+// from a header. Session is the original front-session lifetime, not the
+// lifetime of one HTTP request. Its identity and cancellation bind all private
+// operations, including late initialization, to that exact front session.
+type IsolatedStdioAuthorization struct {
+	Role    IsolatedStdioRole
+	Session context.Context
+}
+
+func (a IsolatedStdioAuthorization) valid() bool {
+	return (a.Role == IsolatedStdioHub || a.Role == IsolatedStdioDiscovery) &&
+		a.Session != nil && reflect.TypeOf(a.Session).Comparable() &&
+		a.Session.Done() != nil && a.Session.Err() == nil
+}
 
 // IsolatedStdioLimits is one qualified listener generation's allocation.
 // Its issuer takes account of the launcher tree as well as the provider.
@@ -46,7 +62,7 @@ type IsolatedStdioSessions struct {
 	launch    *StdioLaunchContext
 	cfg       HostConfig
 	limits    IsolatedStdioLimits
-	authorize func(*http.Request) IsolatedStdioRole
+	authorize func(*http.Request) IsolatedStdioAuthorization
 	protocol  *StdioHost
 
 	mu           sync.Mutex
@@ -62,7 +78,8 @@ type isolatedStdioSession struct {
 	owner        *IsolatedStdioSessions
 	host         *StdioHost
 	sid          string
-	role         IsolatedStdioRole
+	grant        IsolatedStdioAuthorization
+	stopSession  func() bool
 	version      string
 	sequence     uint64
 	initializeID isolatedStdioID
@@ -86,7 +103,7 @@ type isolatedStdioSession struct {
 func (s *StdioLaunchContext) NewIsolatedStdioSessions(
 	cfg HostConfig,
 	limits IsolatedStdioLimits,
-	authorize func(*http.Request) IsolatedStdioRole,
+	authorize func(*http.Request) IsolatedStdioAuthorization,
 ) (*IsolatedStdioSessions, error) {
 	// Only Windows currently supplies the existing at-create native owner.
 	if s.valid() != nil || s.ctx.Err() != nil || s.ctx.Done() == nil ||
@@ -117,8 +134,9 @@ func (p *IsolatedStdioSessions) HTTPHandler() http.Handler {
 	return mux
 }
 
-func (p *IsolatedStdioSessions) allowed(request *http.Request, role IsolatedStdioRole) bool {
-	return !p.closed && p.launch.ctx.Err() == nil && p.authorize(request) == role
+func (p *IsolatedStdioSessions) allowed(request *http.Request, grant IsolatedStdioAuthorization) bool {
+	current := p.authorize(request)
+	return !p.closed && p.launch.ctx.Err() == nil && current.valid() && current == grant
 }
 
 func (p *IsolatedStdioSessions) serveMCP(w http.ResponseWriter, r *http.Request) {
@@ -126,9 +144,8 @@ func (p *IsolatedStdioSessions) serveMCP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	p.mu.Lock()
-	role := p.authorize(r)
-	allowed := !p.closed && p.launch.ctx.Err() == nil &&
-		(role == IsolatedStdioHub || role == IsolatedStdioDiscovery)
+	grant := p.authorize(r)
+	allowed := !p.closed && p.launch.ctx.Err() == nil && grant.valid()
 	p.mu.Unlock()
 	if !allowed {
 		http.Error(w, "protected provider unavailable", http.StatusForbidden)
@@ -145,14 +162,14 @@ func (p *IsolatedStdioSessions) serveMCP(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if post.method == "initialize" {
-			p.initialize(w, r, role, post)
+			p.initialize(w, r, grant, post)
 			return
 		}
-		s := p.current(w, r, role, version, false)
+		s := p.current(w, r, grant, version, false)
 		if s == nil {
 			return
 		}
-		if role == IsolatedStdioDiscovery && post.method != "notifications/initialized" && post.method != "tools/list" {
+		if grant.Role == IsolatedStdioDiscovery && post.method != "notifications/initialized" && post.method != "tools/list" {
 			http.Error(w, "method forbidden for discovery session", http.StatusForbidden)
 			return
 		}
@@ -160,16 +177,16 @@ func (p *IsolatedStdioSessions) serveMCP(w http.ResponseWriter, r *http.Request)
 		defer cancel()
 		s.host.handleParsedPOST(w, r.WithContext(ctx), post)
 	case http.MethodGet:
-		s := p.current(w, r, role, version, false)
+		s := p.current(w, r, grant, version, false)
 		if s != nil {
-			if role != IsolatedStdioHub {
+			if grant.Role != IsolatedStdioHub {
 				http.Error(w, "stream forbidden for discovery session", http.StatusForbidden)
 				return
 			}
 			s.host.serveStdioSSE(w, r)
 		}
 	case http.MethodDelete:
-		if p.current(w, r, role, version, true) != nil {
+		if p.current(w, r, grant, version, true) != nil {
 			w.WriteHeader(http.StatusNoContent)
 		}
 	default:
@@ -177,7 +194,7 @@ func (p *IsolatedStdioSessions) serveMCP(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (p *IsolatedStdioSessions) current(w http.ResponseWriter, r *http.Request, role IsolatedStdioRole, version string, retire bool) *isolatedStdioSession {
+func (p *IsolatedStdioSessions) current(w http.ResponseWriter, r *http.Request, grant IsolatedStdioAuthorization, version string, retire bool) *isolatedStdioSession {
 	sid := r.Header.Get("Mcp-Session-Id")
 	if sid == "" {
 		http.Error(w, "missing session id", http.StatusBadRequest)
@@ -185,7 +202,7 @@ func (p *IsolatedStdioSessions) current(w http.ResponseWriter, r *http.Request, 
 	}
 	p.mu.Lock()
 	s := p.sessions[sid]
-	if s == nil || s.version == "" || s.role != role || !s.activeLocked() || !p.allowed(r, role) {
+	if s == nil || s.version == "" || s.grant != grant || !s.activeLocked() || !p.allowed(r, grant) {
 		p.mu.Unlock()
 		http.Error(w, "unknown session id", http.StatusNotFound)
 		return nil
@@ -204,7 +221,7 @@ func (p *IsolatedStdioSessions) current(w http.ResponseWriter, r *http.Request, 
 	return s
 }
 
-func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Request, role IsolatedStdioRole, post stdioPOST) {
+func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Request, grant IsolatedStdioAuthorization, post stdioPOST) {
 	id, ok := stdioPrivateID(post.msg["id"], p.limits.MaxIDBytes)
 	if !ok ||
 		r.Header.Get("Mcp-Session-Id") != "" || string(post.msg["jsonrpc"]) != `"2.0"` {
@@ -212,7 +229,7 @@ func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	p.mu.Lock()
-	if !p.allowed(r, role) || r.Context().Err() != nil {
+	if !p.allowed(r, grant) || r.Context().Err() != nil {
 		p.mu.Unlock()
 		http.Error(w, "protected provider unavailable", http.StatusForbidden)
 		return
@@ -240,15 +257,16 @@ func (p *IsolatedStdioSessions) initialize(w http.ResponseWriter, r *http.Reques
 	startCtx, cancel := context.WithTimeout(r.Context(), p.limits.Startup)
 	p.nextSequence++
 	s := &isolatedStdioSession{
-		owner: p, host: host, sid: sid, role: role, sequence: p.nextSequence, startCtx: startCtx, cancelStart: cancel,
+		owner: p, host: host, sid: sid, grant: grant, sequence: p.nextSequence, startCtx: startCtx, cancelStart: cancel,
 		initializeID: id,
-		launchDone: make(chan struct{}), initDone: make(chan struct{}), leaseChanged: make(chan struct{}, 1),
+		launchDone:   make(chan struct{}), initDone: make(chan struct{}), leaseChanged: make(chan struct{}, 1),
 		revoked: make(chan struct{}), receiptDone: make(chan struct{}), written: make(chan struct{}, 1),
 		requests: make(map[isolatedStdioID]*isolatedStdioOperation),
 	}
 	host.private, host.stderrMode, host.testStdout = s, stdioStderrPrivate, nil
 	p.sessions[sid] = s
 	p.reserved += p.limits.TreeCost
+	s.stopSession = context.AfterFunc(grant.Session, s.retire)
 	p.mu.Unlock()
 
 	go s.run()
@@ -274,7 +292,7 @@ func (s *isolatedStdioSession) publish(w http.ResponseWriter, r *http.Request, p
 	p := s.owner
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !s.activeLocked() || s.version != "" || s.startCtx.Err() != nil || !p.allowed(r, s.role) {
+	if !s.activeLocked() || s.version != "" || s.startCtx.Err() != nil || !p.allowed(r, s.grant) {
 		return false
 	}
 	s.version = protocol
@@ -285,6 +303,10 @@ func (s *isolatedStdioSession) publish(w http.ResponseWriter, r *http.Request, p
 
 func (s *isolatedStdioSession) activeLocked() bool {
 	if !s.stopDeadline.IsZero() {
+		return false
+	}
+	if s.grant.Session.Err() != nil {
+		s.retireLocked(time.Now())
 		return false
 	}
 	select {
@@ -350,6 +372,7 @@ func (s *isolatedStdioSession) run() {
 	}
 	p.mu.Unlock()
 
+	s.stopSession()
 	// A canceled startup still owns any native result acquired on its
 	// original launch. The reserved slot remains held until that call returns.
 	<-s.launchDone
@@ -393,6 +416,19 @@ func (p *IsolatedStdioSessions) Retirement(sid string) *IsolatedStdioRetirement 
 		return &IsolatedStdioRetirement{s: s}
 	}
 	return nil
+}
+
+// Retirements captures existing original receipt holders without exposing
+// private session identifiers or acquiring another process handle. Capturing
+// does not revoke sessions; a holder remains usable after its row is retired.
+func (p *IsolatedStdioSessions) Retirements() []*IsolatedStdioRetirement {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := make([]*IsolatedStdioRetirement, 0, len(p.sessions))
+	for _, session := range p.sessions {
+		result = append(result, &IsolatedStdioRetirement{s: session})
+	}
+	return result
 }
 
 type IsolatedStdioRetirement struct{ s *isolatedStdioSession }

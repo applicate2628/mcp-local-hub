@@ -1,0 +1,564 @@
+{
+  "schema": "pr671-scoped-remediation-evidence-v1",
+  "pr": 671,
+  "base_commit": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+  "snapshot_kind": "local combined changes above the pinned PR head; no commit or release qualification inferred",
+  "scope": [
+    "WL-01",
+    "WL-02",
+    "CP-05",
+    "P04"
+  ],
+  "windows_source_sha256": {
+    "internal/api/hub_mcp_aggregator.go": "816fcdcc543a97cd004265851244b1b4280c380b48bf310f1567b8b4f0a53bb1",
+    "internal/api/hub_mcp_handler.go": "ed2721a2a4aadf0971165971ae0fd079fe7163f4d6dfa93c29fcfc6250c3cdb6",
+    "internal/api/hub_mcp_resolver.go": "294e53f25767f26e7576cd2a881e4d41d902e520d265e69a5eb8ab790ce7e2b4",
+    "internal/api/hub_mcp_session.go": "da98460c9a2147724d2085e1c2683643172bd76da215cd4a6246f87033f1046a",
+    "internal/api/hub_mcp_stdio.go": "ed0f5c76bbfd5eaba50a36afbe3c23d4c28a624515efc7201171fe48632c09e6",
+    "internal/api/hub_mcp_stdio_test.go": "224443d3eef39a2113b696abd6374e40c45388935896aa3749dd35965e492600",
+    "internal/api/testhooks.go": "e70b1a58dfa13fe9c613b1cb57a517dbdc91a8fe63ab0cf5877f200e99a36874",
+    "internal/cli/gui_supervisor_owner.go": "9ea31f168b8180efdb9ec6a50aa71f47f495d150916ff3752d8460c1b880e4c9",
+    "internal/cli/gui_supervisor_owner_control_test.go": "022355964adbdc941c1d7cff81bbef52abff8c727eb7f3c1b5c154d44e29ea10",
+    "internal/cli/gui_supervisor_owner_other.go": "3986dee256a38b9a018408ed64b7ddfb80444f3017d8bcdac34807cbd9005990",
+    "internal/cli/gui_supervisor_restart_windows.go": "0a6238391d556c159a5988a021b0ee0e4bd3e66ed6ab1637f7560d47e56a3a1d",
+    "internal/cli/route_aggregate_windows.go": "5e091fae7122721f1501a0584f047137f99fd1ce5277d05e65d1f2874fcab828",
+    "internal/cli/route_stdio.go": "8a3c0f5ef3fd5df2b370260d1f540c8ee45a566b80a879053388a8a4e26ce204",
+    "internal/cli/supervisor_launch.go": "6e5d0336e0a109db80cf391a2532b31d08a192616a9337e5c54bd2f8ae89c074",
+    "internal/cli/supervisor_launch_windows.go": "08e146bf7ced7e22f45d913d280d640f3b38a8216839ea501d149990989b168f",
+    "internal/cli/windows_canonical_entry_recovery_windows.go": "f819eb19df0f5813165c62c7774816f8fc7406307c61abe2e92beaa1075802d4",
+    "internal/cli/windows_v2_producttxn_native_windows_test.go": "e6d80f14d33d0d2d074fb5a8338e4a73c598c1ae6af9304de5fb0224686ef583",
+    "internal/daemon/isolated_stdio.go": "d59c3881b41f5e3e1913e44f39d8a4d51ff71f2834abadf564ed5b982ac9164d",
+    "internal/daemon/isolated_stdio_windows_test.go": "38c86539658e6a3c2e2838464689f3ee70d859577b9a2483556333bf9ff5d117",
+    "internal/daemon/isolated_stdio_write.go": "aa92d9d501a38a8c4b466fc83a43e21758a1a297936dbbb058b2f0ae36b0e1da",
+    "internal/mcproute/hub_listener.go": "03993826e571e6ebf0d4c33735ef3a9fae7493818451a3c78b58a49200f56b37",
+    "internal/mcproute/hub_stdio.go": "88b50b50daa973aee836627018302be9cdada677e273ad20c6ecf95bb5f2fe7b",
+    "internal/mcproute/hub_stdio_windows_test.go": "c5a0d3dcd0fa49eb6021b5e920b73740ab7c9f638c5619502b528ae763e586be"
+  },
+  "registry": {
+    "path": "windows-product-artifacts.json",
+    "sha256": "5e979049615428188bc345c1f08e1e58a10a3d29e498d41abec98cd05b91839f",
+    "run4_linker_input_matches_exact_file_bytes": true,
+    "normal_build_source": "build.ps1 CurrentWindowsPackage branch",
+    "qualification": "same registry input mechanism; build.ps1 and the installed Product were not executed by these fixtures"
+  },
+  "receipts": [
+    {
+      "id": "windows-run-3",
+      "overall_result": "FAIL",
+      "receipt_local_copy_sha256": "d51a3d74747ce75a0eb9e5a3642b41e1b3941b310fce1432ff2690131495cc04",
+      "root_receiving_local_copy_sha256": "63833fbe33978620c9dc2897f87e13e2a938d29e9d9e205033c10edcdbc8e776",
+      "controller": {
+        "controller_exit_code": 1,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 91.41625190002378
+      },
+      "recorded_remote_receipt_sha256": "e12395c623b4edb491bcf03616e5a29ae7aaf02b87d3620e131ebfdb93bc2956",
+      "receipt_byte_identity": "remote hash reproduced by CRLF serialization of this local JSON",
+      "commands_quiescent": true
+    },
+    {
+      "id": "windows-run-4",
+      "overall_result": "PASS",
+      "receipt_local_copy_sha256": "30e5248b8339a5cc0b2f79af2545be7cd0f53cd47c447ff41bbdc87349a7bbee",
+      "root_receiving_local_copy_sha256": "a133b8d2b9aee9a825793341604dafaaef430e4c742712e78734718bc429833d",
+      "controller": {
+        "controller_exit_code": 0,
+        "original_controller_reaped": true,
+        "controller_capture_handles_closed": true,
+        "seconds": 10.644543499976862
+      },
+      "recorded_remote_receipt_sha256": "5b969cf0e8ff5bfab19e84981487da5a0294cdc7e367d99c3bb32c30dcf8aa7c",
+      "receipt_byte_identity": "local serialized copy has different bytes; remote hash not reproduced here",
+      "commands_quiescent": true
+    }
+  ],
+  "checks": {
+    "registered_private_route": {
+      "command": [
+        "go",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/mcproute",
+        "-run",
+        "^TestRegisteredHubStdioSessionsIsolateAndRetireOriginalProviders$"
+      ],
+      "result": "PASS",
+      "exit_code": 0,
+      "go_package_seconds": 14.323,
+      "command_elapsed_seconds": 29.42922530003125,
+      "test_case_seconds": 12.82,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "stdout_sha256": "8f26e6a404847583f35ba499e7eb4c54858523fbf05684f2b113807c1a80ceca",
+      "stdout": "=== RUN   TestRegisteredHubStdioSessionsIsolateAndRetireOriginalProviders\n--- PASS: TestRegisteredHubStdioSessionsIsolateAndRetireOriginalProviders (12.82s)\nPASS\nok  \tmcp-local-hub/internal/mcproute\t14.323s\n",
+      "source_input_set": "windows_source_sha256",
+      "source_inputs_match_reviewed_snapshot": true,
+      "completion": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "stdout": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "stdin_mode": "null",
+        "lifecycle_state": "CLOSED"
+      }
+    },
+    "isolated_owner_regressions": {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/daemon",
+        "-run",
+        "^TestOwnedIsolatedStdio"
+      ],
+      "result": "PASS",
+      "exit_code": 0,
+      "go_package_seconds": 5.407,
+      "command_elapsed_seconds": 16.577921299962327,
+      "test_case_seconds": null,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "stdout_sha256": "df9544ab994e15b4dd73d7bb667f6c4a717b6167594d26756b18b7c1957db75c",
+      "stdout": "ok  \tmcp-local-hub/internal/daemon\t5.407s\n",
+      "source_input_set": "windows_source_sha256",
+      "source_inputs_match_reviewed_snapshot": true,
+      "completion": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "stdout": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "stdin_mode": "null",
+        "lifecycle_state": "CLOSED"
+      }
+    },
+    "gui_original_control": {
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/cli",
+        "-run",
+        "^TestGUISupervisor(NativeControl|Control)"
+      ],
+      "result": "PASS",
+      "exit_code": 0,
+      "go_package_seconds": 0.47,
+      "command_elapsed_seconds": 21.889285899989773,
+      "test_case_seconds": null,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "stdout_sha256": "af5614708ec553e0e3ee55e2405f8f49286b5b6cf5932b46c003de38f8c66e49",
+      "stdout": "ok  \tmcp-local-hub/internal/cli\t0.470s\n",
+      "source_input_set": "windows_source_sha256",
+      "source_inputs_match_reviewed_snapshot": true,
+      "completion": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "stdout": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "stdin_mode": "null",
+        "lifecycle_state": "CLOSED"
+      }
+    },
+    "selective_rollback_initial_missing_registry": {
+      "command": [
+        "go",
+        "test",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/cli",
+        "-run",
+        "^TestWindowsV2ProductTxnNativeEntryBundle$/^clean_install_selective_rollback_archives_only_changed_originals$"
+      ],
+      "result": "FAIL",
+      "exit_code": 1,
+      "go_package_seconds": 0.622,
+      "command_elapsed_seconds": 23.03763470001286,
+      "test_case_seconds": 0.0,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "stdout_sha256": "855c4897c575b16af86e2793255967b52d85e3401a24840a87dee9b9a5a9cd8c",
+      "stdout": "=== RUN   TestWindowsV2ProductTxnNativeEntryBundle\n    windows_v2_producttxn_native_windows_test.go:539: compiled current Windows Product registry is missing\n--- FAIL: TestWindowsV2ProductTxnNativeEntryBundle (0.00s)\nFAIL\nFAIL\tmcp-local-hub/internal/cli\t0.622s\nFAIL\n",
+      "source_input_set": "windows_source_sha256",
+      "source_inputs_match_reviewed_snapshot": true,
+      "completion": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 1,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "stdout": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "stdin_mode": "null",
+        "lifecycle_state": "CLOSED"
+      }
+    },
+    "selective_rollback_with_registry": {
+      "command": [
+        "go",
+        "test",
+        "-ldflags=-X=mcp-local-hub/internal/binaryadmission.compiledWindowsProductRegistryBase64=<base64-of-windows-product-artifacts.json>",
+        "-v",
+        "-count=1",
+        "-timeout",
+        "5m",
+        "./internal/cli",
+        "-run",
+        "^TestWindowsV2ProductTxnNativeEntryBundle$/^clean_install_selective_rollback_archives_only_changed_originals$"
+      ],
+      "result": "PASS",
+      "exit_code": 0,
+      "go_package_seconds": 4.19,
+      "command_elapsed_seconds": 10.291031500033569,
+      "test_case_seconds": 3.81,
+      "work_deadline_exceeded": false,
+      "cleanup_deadline_exceeded": false,
+      "stdout_sha256": "513f3559cdccc885cf3456ae20a646ef9ee64d037b5d612ada26f67e443a6ee1",
+      "stdout": "=== RUN   TestWindowsV2ProductTxnNativeEntryBundle\n=== RUN   TestWindowsV2ProductTxnNativeEntryBundle/clean_install_selective_rollback_archives_only_changed_originals\n--- PASS: TestWindowsV2ProductTxnNativeEntryBundle (3.81s)\n    --- PASS: TestWindowsV2ProductTxnNativeEntryBundle/clean_install_selective_rollback_archives_only_changed_originals (3.81s)\nPASS\nok  \tmcp-local-hub/internal/cli\t4.190s\n",
+      "source_input_set": "windows_source_sha256_plus_registry",
+      "source_inputs_match_reviewed_snapshot": true,
+      "completion": {
+        "schema": "ordinary-original-native-io-completion-v1",
+        "native": {
+          "direct_exit_code": 0,
+          "direct_reaped": true,
+          "active_zero": true,
+          "job_terminated": false,
+          "handles_closed": true,
+          "issues": []
+        },
+        "stdout": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "stderr": {
+          "acquired": true,
+          "worker_complete": true,
+          "eof": true,
+          "pipe_close_returned": true,
+          "capture_close_returned": true,
+          "error": null
+        },
+        "original_owner_retained": true,
+        "original_readers_joined": true,
+        "stdin_mode": "null",
+        "lifecycle_state": "CLOSED"
+      }
+    },
+    "npm_local_suite_run1": {
+      "schema": "npm-local-test-evidence-v1",
+      "source_base": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "cwd_role": "repository/npm",
+      "started_utc": "2026-11-24T23:18:36.043161+00:00",
+      "versions": {
+        "node": "v24.22.3",
+        "npm": "11.19.1"
+      },
+      "exit_code": 1,
+      "elapsed_seconds": 5.505557587996009,
+      "timed_out": false,
+      "stdout_sha256": "b7939f78c5cc56218822fe98f8041202caa96d8b2973006a0ed1ff137afd27f1",
+      "stderr_sha256": "9aac3da9a7039a99c345545c32f286aa65c358d571bfce7e00d94625d095c829",
+      "source_sha256_before": {
+        "npm/README.md": "054c0a99c884a5a6a702c4325882d5d35f28344bc869a61d071afe18b30b2d40",
+        "npm/bin/cli.js": "68bcb290d7c1ec59aebeb46b48979f00256ad0407f555ddf84d6a3331038c16d",
+        "npm/generate-platform-packages.js": "9ad920b31d5de8c458a3523e10f10bec261b5d8787e786033813c8e248eedffc",
+        "npm/generate-platform-packages.sh": "88e8565a17cababa033e1d8540ab8a26ee22744ccd9bb32cd693662e5946fe60",
+        "npm/lib/platform-binary.js": "c62f1aa0ccc1d33e58dc77b02b6b76337e07246427d4c3b3401672f4f46d9533",
+        "npm/package.json": "95c96e4ed6c43c45ba5b2d427bb0ca4ccf1abc4dd8e36a3b1fc9c7fedb876bc4",
+        "npm/packages/win32-x64/README.md": "68fee9e91f0647fa6d6e9e46ce5ee570180f10ff924cf838195f9c37b8f62f8f",
+        "npm/packages/win32-x64/bin/.gitkeep": "60faf27a79c2580fb82a407f87ba8c1097aac73ada8454efaab7212e691932ac",
+        "npm/packages/win32-x64/package.json": "be6b0fe0af5dbbe06db481d1da15126b48fbc1d50b13ad3e809da72e9536fc26",
+        "npm/platform-packages.test.js": "38adffbb23caebb3435d3dbbd98cb424304ef777e6a7e68f52cd435b139d80b2",
+        "npm/postinstall.test.js": "612d058d25a8f93342c5e6cff5dfd80fb87190c68c025cca7efac10ef1e251a4",
+        "npm/scripts/postinstall.js": "95b809f5f81271042f091937650f335d2a62ddfca3bc8bb4a440274137d6b811",
+        "npm/sync-version.js": "5d24aefde92e5e938ffb2d5c39df56eef92e58d91dcbccaafd0ffc1790978406",
+        "npm/sync-version.sh": "4434f07f3aa9cb0f901d1c3dc227fa66232ba961b97017f8cf62d8fa54087cd3",
+        "npm/sync-version.test.js": "e23f5fe4fdd9ad6e3a7c3ad0ee958e2ce552ae13191e32616d035ef96c37b857",
+        "third_party/go-winio/LICENSE": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409",
+        "third_party/gofrs-flock/LICENSE": "f4c7b0fbdba9660126feab6388ceed10ff744b2c772a63132f64f9ab2ee5fa29",
+        "windows-product-artifacts.json": "5e979049615428188bc345c1f08e1e58a10a3d29e498d41abec98cd05b91839f"
+      },
+      "source_sha256_after": {
+        "npm/README.md": "054c0a99c884a5a6a702c4325882d5d35f28344bc869a61d071afe18b30b2d40",
+        "npm/bin/cli.js": "68bcb290d7c1ec59aebeb46b48979f00256ad0407f555ddf84d6a3331038c16d",
+        "npm/generate-platform-packages.js": "9ad920b31d5de8c458a3523e10f10bec261b5d8787e786033813c8e248eedffc",
+        "npm/generate-platform-packages.sh": "88e8565a17cababa033e1d8540ab8a26ee22744ccd9bb32cd693662e5946fe60",
+        "npm/lib/platform-binary.js": "c62f1aa0ccc1d33e58dc77b02b6b76337e07246427d4c3b3401672f4f46d9533",
+        "npm/package.json": "95c96e4ed6c43c45ba5b2d427bb0ca4ccf1abc4dd8e36a3b1fc9c7fedb876bc4",
+        "npm/packages/win32-x64/README.md": "68fee9e91f0647fa6d6e9e46ce5ee570180f10ff924cf838195f9c37b8f62f8f",
+        "npm/packages/win32-x64/bin/.gitkeep": "60faf27a79c2580fb82a407f87ba8c1097aac73ada8454efaab7212e691932ac",
+        "npm/packages/win32-x64/package.json": "be6b0fe0af5dbbe06db481d1da15126b48fbc1d50b13ad3e809da72e9536fc26",
+        "npm/platform-packages.test.js": "38adffbb23caebb3435d3dbbd98cb424304ef777e6a7e68f52cd435b139d80b2",
+        "npm/postinstall.test.js": "612d058d25a8f93342c5e6cff5dfd80fb87190c68c025cca7efac10ef1e251a4",
+        "npm/scripts/postinstall.js": "95b809f5f81271042f091937650f335d2a62ddfca3bc8bb4a440274137d6b811",
+        "npm/sync-version.js": "5d24aefde92e5e938ffb2d5c39df56eef92e58d91dcbccaafd0ffc1790978406",
+        "npm/sync-version.sh": "4434f07f3aa9cb0f901d1c3dc227fa66232ba961b97017f8cf62d8fa54087cd3",
+        "npm/sync-version.test.js": "e23f5fe4fdd9ad6e3a7c3ad0ee958e2ce552ae13191e32616d035ef96c37b857",
+        "third_party/go-winio/LICENSE": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409",
+        "third_party/gofrs-flock/LICENSE": "f4c7b0fbdba9660126feab6388ceed10ff744b2c772a63132f64f9ab2ee5fa29",
+        "windows-product-artifacts.json": "5e979049615428188bc345c1f08e1e58a10a3d29e498d41abec98cd05b91839f"
+      },
+      "source_unchanged": true,
+      "scope": "existing local npm tests; no install, release pack, publish or Product execution; one test performs fixture npm pack",
+      "closure_scope": "original npm test process returned; capture files closed; no native Windows Product/Job qualification claimed",
+      "result": "FAIL",
+      "tests": 19,
+      "passed": 18,
+      "failed": 1,
+      "platform_packages_subgroup": {
+        "tests": 12,
+        "passed": 12,
+        "failed": 0,
+        "evidence": "the first twelve cases of the captured npm test output",
+        "limits": "fixture pack and mocked Windows launcher checks; no actual release Product payload qualified"
+      },
+      "failure": {
+        "path": "npm/postinstall.test.js",
+        "line": 138,
+        "cause": "expectation uses the old identity path and omits the V4 runtime payload; current checked-in platform package uses nested identity and runtime files",
+        "source_changed_by_this_run": false
+      },
+      "receipt_local_copy_sha256": "0aaabc48348d838a40f0777f13742ca0e80f7a93e72c59f9795f06d73acb2793",
+      "stdout_redacted": "\n> mcp-local-hub@0.4.66 test\n> node --test sync-version.test.js postinstall.test.js platform-packages.test.js\n\n✔ generator rejects a missing or invalid WinIO license before creating packages (283.052015ms)\n✔ generator rejects a missing or invalid flock license before creating packages (183.372601ms)\n✔ generator emits the waiting entry and complete nested Product projection (76.833923ms)\n✔ generator preserves the legacy V1 package projection for a schema 3 registry (138.169499ms)\n✔ generator, meta manifest, and runtime lookup expose only the shipped Windows x64 target (99.220506ms)\n✔ generator rejects a stale generated target directory (217.104168ms)\n✔ npm pack includes the nested Windows x64 runtime and excludes unlisted payloads (1341.869254ms)\n✔ Windows artifact contract freezes filenames, roles, sources, subsystems, and metadata policy (0.618944ms)\n✔ generator refuses a swapped or incomplete Windows entry set (927.987867ms)\n✔ platform binary owner names the Windows identity manifest without changing POSIX (0.518035ms)\n✔ npm shim preserves real child argv, stdout, stderr, and exit status (1309.83203ms)\n✔ deferred hosts reject even when an older platform package is available (248.60633ms)\n✔ npm delivery never promotes the native product into a second installation (170.981709ms)\n✖ Windows platform payload has the launcher, nested product, and identity manifest with no bin owner (2.457271ms)\n✔ npm launcher preserves argv and inherited stdio without console policy (91.331264ms)\n✔ --check passes on a plain X.Y.Z in sync (169.373872ms)\n✔ --check ACCEPTS a prerelease authority version (0.5.0-beta.1) whose quad core is in sync (137.22696ms)\n✔ --inject on a prerelease authority version writes the numeric quad + full string into build scripts (189.626382ms)\n✔ --check still FAILS when a version has no parseable X.Y.Z core (90.018097ms)\nℹ tests 19\nℹ suites 0\nℹ pass 18\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5051.494526\n\n✖ failing tests:\n\ntest at postinstall.test.js:135:1\n✖ Windows platform payload has the launcher, nested product, and identity manifest with no bin owner (2.457271ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n    [\n      'README.md',\n      'bin/mcphub-product/mcphub.exe',\n  +   'bin/mcphub-product/runtime-payload.json',\n  +   'bin/mcphub-product/runtimes/',\n  +   'bin/mcphub-product/windows-product-identity.json',\n      'bin/mcphub.exe',\n  -   'bin/windows-product-identity.json'\n    ]\n  \n      at TestContext.<anonymous> (<repository>/npm/postinstall.test.js:138:12)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1402:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)\n      at Test.postRun (node:internal/test_runner/test:1542:19)\n      at Test.run (node:internal/test_runner/test:1467:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [ 'README.md', 'bin/mcphub-product/mcphub.exe', 'bin/mcphub-product/runtime-payload.json', 'bin/mcphub-product/runtimes/', 'bin/mcphub-product/windows-product-identity.json', 'bin/mcphub.exe' ],\n    expected: [ 'README.md', 'bin/mcphub-product/mcphub.exe', 'bin/mcphub.exe', 'bin/windows-product-identity.json' ],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n",
+      "stderr": "npm warn Unknown env config \"http-proxy\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\n",
+      "history_status": "retained pre-correction result",
+      "metadata_amendment": "Clarified pack scope after reading the captured test names; original command/output/result and source hashes are unchanged."
+    },
+    "npm_local_suite_run2": {
+      "schema": "npm-local-test-evidence-v1",
+      "run": 2,
+      "source_base": "09dc07e01d1a3236ab5f45f384e11fe2f9dfd30d",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "cwd_role": "repository/npm",
+      "started_utc": "2026-11-24T23:23:17.880720+00:00",
+      "versions": {
+        "node": "v24.22.3",
+        "npm": "11.19.1"
+      },
+      "exit_code": 0,
+      "elapsed_seconds": 4.538429917003668,
+      "timed_out": false,
+      "stdout_sha256": "a04e8dbdba6fd8e01d77a26c3afb8cab979a5ca09d51d1df4b0459ae94a1767b",
+      "stderr_sha256": "9aac3da9a7039a99c345545c32f286aa65c358d571bfce7e00d94625d095c829",
+      "source_sha256_before": {
+        "npm/README.md": "054c0a99c884a5a6a702c4325882d5d35f28344bc869a61d071afe18b30b2d40",
+        "npm/bin/cli.js": "68bcb290d7c1ec59aebeb46b48979f00256ad0407f555ddf84d6a3331038c16d",
+        "npm/generate-platform-packages.js": "9ad920b31d5de8c458a3523e10f10bec261b5d8787e786033813c8e248eedffc",
+        "npm/generate-platform-packages.sh": "88e8565a17cababa033e1d8540ab8a26ee22744ccd9bb32cd693662e5946fe60",
+        "npm/lib/platform-binary.js": "c62f1aa0ccc1d33e58dc77b02b6b76337e07246427d4c3b3401672f4f46d9533",
+        "npm/package.json": "95c96e4ed6c43c45ba5b2d427bb0ca4ccf1abc4dd8e36a3b1fc9c7fedb876bc4",
+        "npm/packages/win32-x64/README.md": "68fee9e91f0647fa6d6e9e46ce5ee570180f10ff924cf838195f9c37b8f62f8f",
+        "npm/packages/win32-x64/bin/.gitkeep": "60faf27a79c2580fb82a407f87ba8c1097aac73ada8454efaab7212e691932ac",
+        "npm/packages/win32-x64/package.json": "be6b0fe0af5dbbe06db481d1da15126b48fbc1d50b13ad3e809da72e9536fc26",
+        "npm/platform-packages.test.js": "38adffbb23caebb3435d3dbbd98cb424304ef777e6a7e68f52cd435b139d80b2",
+        "npm/postinstall.test.js": "70979d28eb134f28bd4cabad8d71b67b8096cdbbea43676cecbf7ac97e4df2d7",
+        "npm/scripts/postinstall.js": "95b809f5f81271042f091937650f335d2a62ddfca3bc8bb4a440274137d6b811",
+        "npm/sync-version.js": "5d24aefde92e5e938ffb2d5c39df56eef92e58d91dcbccaafd0ffc1790978406",
+        "npm/sync-version.sh": "4434f07f3aa9cb0f901d1c3dc227fa66232ba961b97017f8cf62d8fa54087cd3",
+        "npm/sync-version.test.js": "e23f5fe4fdd9ad6e3a7c3ad0ee958e2ce552ae13191e32616d035ef96c37b857",
+        "third_party/go-winio/LICENSE": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409",
+        "third_party/gofrs-flock/LICENSE": "f4c7b0fbdba9660126feab6388ceed10ff744b2c772a63132f64f9ab2ee5fa29",
+        "windows-product-artifacts.json": "5e979049615428188bc345c1f08e1e58a10a3d29e498d41abec98cd05b91839f"
+      },
+      "source_sha256_after": {
+        "npm/README.md": "054c0a99c884a5a6a702c4325882d5d35f28344bc869a61d071afe18b30b2d40",
+        "npm/bin/cli.js": "68bcb290d7c1ec59aebeb46b48979f00256ad0407f555ddf84d6a3331038c16d",
+        "npm/generate-platform-packages.js": "9ad920b31d5de8c458a3523e10f10bec261b5d8787e786033813c8e248eedffc",
+        "npm/generate-platform-packages.sh": "88e8565a17cababa033e1d8540ab8a26ee22744ccd9bb32cd693662e5946fe60",
+        "npm/lib/platform-binary.js": "c62f1aa0ccc1d33e58dc77b02b6b76337e07246427d4c3b3401672f4f46d9533",
+        "npm/package.json": "95c96e4ed6c43c45ba5b2d427bb0ca4ccf1abc4dd8e36a3b1fc9c7fedb876bc4",
+        "npm/packages/win32-x64/README.md": "68fee9e91f0647fa6d6e9e46ce5ee570180f10ff924cf838195f9c37b8f62f8f",
+        "npm/packages/win32-x64/bin/.gitkeep": "60faf27a79c2580fb82a407f87ba8c1097aac73ada8454efaab7212e691932ac",
+        "npm/packages/win32-x64/package.json": "be6b0fe0af5dbbe06db481d1da15126b48fbc1d50b13ad3e809da72e9536fc26",
+        "npm/platform-packages.test.js": "38adffbb23caebb3435d3dbbd98cb424304ef777e6a7e68f52cd435b139d80b2",
+        "npm/postinstall.test.js": "70979d28eb134f28bd4cabad8d71b67b8096cdbbea43676cecbf7ac97e4df2d7",
+        "npm/scripts/postinstall.js": "95b809f5f81271042f091937650f335d2a62ddfca3bc8bb4a440274137d6b811",
+        "npm/sync-version.js": "5d24aefde92e5e938ffb2d5c39df56eef92e58d91dcbccaafd0ffc1790978406",
+        "npm/sync-version.sh": "4434f07f3aa9cb0f901d1c3dc227fa66232ba961b97017f8cf62d8fa54087cd3",
+        "npm/sync-version.test.js": "e23f5fe4fdd9ad6e3a7c3ad0ee958e2ce552ae13191e32616d035ef96c37b857",
+        "third_party/go-winio/LICENSE": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409",
+        "third_party/gofrs-flock/LICENSE": "f4c7b0fbdba9660126feab6388ceed10ff744b2c772a63132f64f9ab2ee5fa29",
+        "windows-product-artifacts.json": "5e979049615428188bc345c1f08e1e58a10a3d29e498d41abec98cd05b91839f"
+      },
+      "source_unchanged": true,
+      "changed_inputs_since_run1": [
+        "npm/postinstall.test.js"
+      ],
+      "change": "only exact expected V4 payload entries and test description; no production behavior or package manifest change",
+      "scope": "existing local npm tests; no install, release pack, publish or Product execution; one test performs fixture npm pack",
+      "closure_scope": "original npm test process returned; capture files closed; no native Windows Product/Job qualification claimed",
+      "result": "PASS",
+      "tests": 19,
+      "passed": 19,
+      "failed": 0,
+      "node_test_duration_seconds": 4.172383138,
+      "platform_packages_subgroup": {
+        "tests": 12,
+        "passed": 12,
+        "failed": 0,
+        "limits": "fixture npm pack and simulated Windows launcher checks; no actual release Product payload qualified"
+      },
+      "receipt_local_copy_sha256": "cc3fae2f4680584e22507ff7990921031a37e8690ed3e86c2dd265f4d2d43e6f",
+      "stdout": "\n> mcp-local-hub@0.4.66 test\n> node --test sync-version.test.js postinstall.test.js platform-packages.test.js\n\n✔ generator rejects a missing or invalid WinIO license before creating packages (256.224588ms)\n✔ generator rejects a missing or invalid flock license before creating packages (217.368221ms)\n✔ generator emits the waiting entry and complete nested Product projection (98.460828ms)\n✔ generator preserves the legacy V1 package projection for a schema 3 registry (110.523951ms)\n✔ generator, meta manifest, and runtime lookup expose only the shipped Windows x64 target (85.818262ms)\n✔ generator rejects a stale generated target directory (188.608663ms)\n✔ npm pack includes the nested Windows x64 runtime and excludes unlisted payloads (918.377326ms)\n✔ Windows artifact contract freezes filenames, roles, sources, subsystems, and metadata policy (0.34957ms)\n✔ generator refuses a swapped or incomplete Windows entry set (1012.012451ms)\n✔ platform binary owner names the Windows identity manifest without changing POSIX (0.666016ms)\n✔ npm shim preserves real child argv, stdout, stderr, and exit status (668.896294ms)\n✔ deferred hosts reject even when an older platform package is available (406.706844ms)\n✔ npm delivery never promotes the native product into a second installation (148.146142ms)\n✔ Windows platform payload has the launcher, nested product, identity, and runtime with no bin owner (0.844479ms)\n✔ npm launcher preserves argv and inherited stdio without console policy (123.695602ms)\n✔ --check passes on a plain X.Y.Z in sync (150.846063ms)\n✔ --check ACCEPTS a prerelease authority version (0.5.0-beta.1) whose quad core is in sync (141.871844ms)\n✔ --inject on a prerelease authority version writes the numeric quad + full string into build scripts (221.229448ms)\n✔ --check still FAILS when a version has no parseable X.Y.Z core (111.280188ms)\nℹ tests 19\nℹ suites 0\nℹ pass 19\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 4172.383138\n",
+      "stderr": "npm warn Unknown env config \"http-proxy\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\n"
+    }
+  },
+  "history": [
+    {
+      "event": "two earlier registered-route fixture attempts failed while supplying the StatusContext seam",
+      "evidence_kind": "coordinator history plus independent source call-graph review; their raw receipts are outside this compact evidence set",
+      "correction": "Scan calls Status, which observes statusInternalDialFn; the fixture now supplies SetStatusInternalDialForTest before starting the listener",
+      "not_claimed": "installed Product regression or successful older test result"
+    },
+    {
+      "event": "run3 selective rollback failed before the subtest because the compiled current Product registry was absent",
+      "evidence_kind": "captured run3 stdout and receipt",
+      "correction": "run4 supplied the exact registry bytes with the same linker variable used by the normal build.ps1 current-package path",
+      "not_claimed": "Product execution or bypassed admission"
+    },
+    {
+      "event": "earlier checkpoint reported 12/12 local npm PASS",
+      "evidence_kind": "coordinator checkpoint only; no raw stdout was retained there",
+      "current_evidence": "run1 captured all 12 platform cases PASS and full-suite 18/19; run2 passed 19/19 after the authorized test-only V4 projection correction"
+    },
+    {
+      "event": "full npm test run1 exposed the old postinstall payload projection expectation",
+      "evidence_kind": "retained stdout, exit code, runtime and source hashes",
+      "correction": "only npm/postinstall.test.js test description and exact expected file list were changed; nested identity plus runtime payload and directory; no weaker subset assertion",
+      "result": "run2 PASS 19/19, same production source inputs; the full original failed run is retained"
+    }
+  ],
+  "independent_testhook_review": {
+    "verdict": "no confirmed defect in this specific hook and current serial fixture usage",
+    "sources": [
+      "internal/api/testhooks.go:292-302",
+      "internal/api/install.go:1051-1111",
+      "internal/api/scan.go:2366-2377",
+      "internal/mcproute/hub_stdio_windows_test.go:160-208"
+    ],
+    "reason": "test-binary and non-nil guards; correct existing observation seam; sync.Once restore; installed before listener startup and restored through t.Cleanup after deferred original retirement; no current parallel test usage",
+    "limits": "package-global mutable seam is for serialized fixtures; this review does not qualify arbitrary concurrent or out-of-order restore use, installed Supervisor IPC, or full Product admission"
+  },
+  "limits": [
+    "Windows command receipts prove their retained runner process, Job and capture settlement; the product/provider receipts asserted by tests are separate facts. An exit code or HTTP 204 alone is not tree closure.",
+    "GUI tests are focused native-control and deterministic readiness regressions; they do not prove installed GUI startup or absence of visible consoles in the shipped Product.",
+    "Selective rollback uses synthetic fixture files and retained native file identities; it is not an actual Product installation or rollback rehearsal.",
+    "The registered route uses real Windows test children, token rows and manifest bindings but substitutes provider launch and protected-bind qualification inputs.",
+    "The shipped Sequential Thinking manifest is unchanged; session-local enablement through install/reconcile/restore is not implemented or qualified by this change.",
+    "Project enrollment/rebind helpers remain unconnected. Two registered front sessions do not qualify project-specific enrollment.",
+    "The real pinned provider, real release npm pack and exact final installed Product have not been qualified. The npm suite includes a fixture npm pack only.",
+    "Local receipt copies are summarized and hashed as received; run4 remote receipt byte identity is not established from the local serialization.",
+    "No remote calls, new Windows native tests, Product execution, production edits, package publish or merge occurred while preparing these public documents. Two explicitly authorized local npm test runs and one exact test expectation correction were performed."
+  ]
+}

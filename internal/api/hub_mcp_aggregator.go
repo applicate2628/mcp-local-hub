@@ -194,7 +194,7 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			sid, negotiated, err := initializeDaemonSession(ctx, hubDaemonRequest{ref: ref, scope: sess.ScopeKey}, protoVer)
+			sid, negotiated, err := initializeDaemonSession(ctx, sess.daemonRequest(ref, false), protoVer)
 			results[i] = initResult{ref: ref, sessionID: sid, negotiatedProto: negotiated, err: err}
 		}()
 	}
@@ -209,8 +209,8 @@ func AggregateInitialize(ctx context.Context, sess *hubSession, reqID json.RawMe
 		sess.DaemonProtoVer = make(map[canonicalDaemonRef]string)
 	}
 	for _, r := range results {
-		if r.err == nil && (sess.deleteStarted || !LoadResolverSnapshot().allowsOrdinaryBinding(sess.ScopeKey, r.ref)) {
-			deleteUncachedDaemonSession(r.ref, r.sessionID, r.negotiatedProto)
+		if r.err == nil && (sess.deleteStarted || !sess.allowsDaemonBinding(LoadResolverSnapshot(), r.ref)) {
+			deleteUncachedDaemonSession(sess.daemonRequest(r.ref, true), r.sessionID, r.negotiatedProto)
 			r.err = errHubDaemonAdmission
 		}
 		if r.err != nil {
@@ -257,7 +257,7 @@ func initializeDaemonSession(ctx context.Context, target hubDaemonRequest, proto
 	// request's response on a background-ctx timeout. The DELETE runs on a
 	// detached goroutine with its own bounded ctx (independent of the caller's
 	// ctx, which is about to return) — best-effort by contract.
-	deleteUncachedDaemonSession(target.ref, sid, negotiated)
+	deleteUncachedDaemonSession(target, sid, negotiated)
 	return "", "", fmt.Errorf("notifications/initialized: %w", notifyErr)
 }
 
@@ -326,14 +326,14 @@ func AggregateToolsList(ctx context.Context, sess *hubSession, reqID json.RawMes
 		allowEmptyKnown = strings.HasPrefix(sess.ScopeKey, GroupScopeKeyPrefix) && liveParticipants == 0 && len(successes) == 0 && len(initFailures) == 0 && snapshotKnowsScope(current, sess.ScopeKey)
 	}
 
-	results := fanOutToolsList(ctx, sess.ScopeKey, successes)
+	results := fanOutToolsList(ctx, sess, successes)
 	// Re-read only the visibility filter from the latest published resolver
 	// snapshot. The fan-out bindings above stay from the captured inputs, but a
 	// tools_hidden republish only narrows what enters result.tools and RouteMap;
 	// it never routes a tool to a daemon that was not already queried.
 	hiddenSnapshot := LoadResolverSnapshot()
 	for i := range results {
-		if results[i].err == nil && !hiddenSnapshot.allowsOrdinaryBinding(sess.ScopeKey, results[i].ref) {
+		if results[i].err == nil && !sess.allowsDaemonBinding(hiddenSnapshot, results[i].ref) {
 			results[i].err = errHubDaemonAdmission
 			results[i].tools = nil
 		}
@@ -478,7 +478,7 @@ type daemonInitState struct {
 // Each successes entry carries the daemon's negotiated MCP protocol
 // version (codex bot r17 P1 closure on PR #157); postToolsList uses
 // it as the MCP-Protocol-Version header.
-func fanOutToolsList(ctx context.Context, scope string, successes map[canonicalDaemonRef]daemonInitState) []listResult {
+func fanOutToolsList(ctx context.Context, sess *hubSession, successes map[canonicalDaemonRef]daemonInitState) []listResult {
 	results := make([]listResult, 0, len(successes))
 	var resultsMu sync.Mutex
 
@@ -493,7 +493,7 @@ func fanOutToolsList(ctx context.Context, scope string, successes map[canonicalD
 			defer func() { <-sem }()
 			subCtx, cancel := context.WithTimeout(ctx, PerDaemonListTimeout)
 			defer cancel()
-			tools, err := postToolsList(subCtx, hubDaemonRequest{ref: ref, scope: scope}, state.SessionID, state.ProtocolVersion)
+			tools, err := postToolsList(subCtx, sess.daemonRequest(ref, false), state.SessionID, state.ProtocolVersion)
 			r := listResult{ref: ref, err: err}
 			if err == nil {
 				r.tools = nameSpaceTools(ref, tools)
@@ -873,7 +873,7 @@ func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, p
 	current := LoadResolverSnapshot()
 	if current != nil && current != sess.SnapshotAtInit {
 		liveRef, stillBound := liveDaemonBinding(current, sess.ScopeKey, canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port})
-		if !stillBound || !current.allowsOrdinaryEndpoint(liveRef) {
+		if !stillBound || !sess.allowsDaemonBinding(current, liveRef) {
 			body, mErr := buildJSONRPCError(clientReqID, -32601, "tool moved out of scope; reinitialize session", nil)
 			return resolvedCallTarget{errBody: body}, mErr
 		}
@@ -982,7 +982,7 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 	// codex bot r17 P1 closure on PR #157: tools/call uses the
 	// DAEMON-NEGOTIATED protocol version, not the session-level
 	// requested one.
-	body, err := postToolsCall(subCtx, hubDaemonRequest{ref: canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}, scope: sess.ScopeKey}, daemonSID, daemonProto, daemonReqID, rewrittenParams)
+	body, err := postToolsCall(subCtx, sess.daemonRequest(canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}, false), daemonSID, daemonProto, daemonReqID, rewrittenParams)
 	if err != nil {
 		// Hot-swap (a) self-heal: ONLY on a transport failure (the daemon was
 		// restarted out from under the cached session — the request never
@@ -1035,7 +1035,7 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 		StartedAt:       time.Now(),
 	})
 
-	target := hubDaemonRequest{ref: canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}, scope: s.ScopeKey}
+	target := s.daemonRequest(canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}, false)
 	body, callErr := postToolsCall(ctx, target, sid, proto, retryReqID, params)
 	if callErr != nil {
 		return nil, false // hard count 1 — never retry again
@@ -1224,6 +1224,11 @@ func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitSt
 }
 
 func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef canonicalDaemonRef) (daemonInitState, error) {
+	if _, private := s.privateEndpoint(daemonRef); private {
+		// Recreating a stateful provider silently loses the conversation. The
+		// front must open a new session after its original provider has retired.
+		return daemonInitState{}, errHubDaemonAdmission
+	}
 	s.mu.Lock()
 	protoVer := s.ProtocolVersion
 	s.mu.Unlock()
@@ -1251,7 +1256,7 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 			flightGen = st.generation
 			st.mu.Unlock()
 		}
-		sid, negotiated, err := initializeDaemonSession(context.Background(), hubDaemonRequest{ref: daemonRef, scope: s.ScopeKey}, protoVer)
+		sid, negotiated, err := initializeDaemonSession(context.Background(), s.daemonRequest(daemonRef, false), protoVer)
 		if err != nil {
 			return nil, err
 		}
@@ -1265,7 +1270,7 @@ func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef ca
 		// is in progress the result is not cacheable → best-effort DELETE it.
 		proto, cacheErr := s.cacheReinitResult(daemonRef, sid, negotiated, protoVer, flightGen)
 		if cacheErr != nil {
-			deleteUncachedDaemonSession(daemonRef, sid, proto)
+			deleteUncachedDaemonSession(s.daemonRequest(daemonRef, true), sid, proto)
 			return nil, cacheErr
 		}
 		return initResult{sid: sid, proto: proto}, nil
@@ -1310,7 +1315,7 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 		s.mu.Unlock()
 		return proto, errHubSessionDeletedDuringReinit
 	}
-	if !LoadResolverSnapshot().allowsOrdinaryBinding(s.ScopeKey, daemonRef) {
+	if !s.allowsDaemonBinding(LoadResolverSnapshot(), daemonRef) {
 		s.mu.Unlock()
 		return proto, errHubDaemonAdmission
 	}
@@ -1351,11 +1356,12 @@ func sameDaemonIdentity(a, b canonicalDaemonRef) bool {
 	return a.Server == b.Server && a.Daemon == b.Daemon
 }
 
-func deleteUncachedDaemonSession(daemonRef canonicalDaemonRef, sid, proto string) {
+func deleteUncachedDaemonSession(target hubDaemonRequest, sid, proto string) {
+	target.captured = true
 	go func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), PerDaemonInitTimeout)
 		defer cleanupCancel()
-		_ = bestEffortDeleteDaemonSession(cleanupCtx, daemonRef, sid, proto)
+		_ = deleteHubDaemonSession(cleanupCtx, target, sid, proto)
 	}()
 }
 
@@ -1421,7 +1427,7 @@ func ForwardCancellation(ctx context.Context, sess *hubSession, clientReqID json
 	}
 	subCtx, cancel := context.WithTimeout(ctx, PerDaemonInitTimeout)
 	defer cancel()
-	_ = postCancellation(subCtx, entry.DaemonRef, entry.DaemonSessionID, proto, entry.DaemonRequestID)
+	_ = postCancellation(subCtx, sess.daemonRequest(entry.DaemonRef, true), entry.DaemonSessionID, proto, entry.DaemonRequestID)
 }
 
 // liveDaemonBinding returns the current binding for the stable
@@ -1519,10 +1525,20 @@ type hubDaemonRequest struct {
 	ref      canonicalDaemonRef
 	scope    string
 	captured bool // cancellation and retirement keep their exact owned endpoint
+	session  *hubSession
 }
 
 func (t hubDaemonRequest) allowed() bool {
 	snapshot := LoadResolverSnapshot()
+	if endpoint, private := t.session.privateEndpoint(t.ref); private {
+		if t.session.stdioSessions == nil || t.session.stdioLifetime == nil || t.session.stdioLifetime.Err() != nil || !t.session.stdioSessions.Allows(endpoint) {
+			return false
+		}
+		if t.captured {
+			return endpoint.Server == t.ref.Server && endpoint.Daemon == t.ref.Daemon && endpoint.Port == t.ref.Port
+		}
+		return t.session.allowsDaemonBinding(snapshot, t.ref)
+	}
 	if t.captured {
 		return snapshot.allowsOrdinaryEndpoint(t.ref)
 	}
@@ -1565,7 +1581,11 @@ func (t *hubDaemonTransport) RoundTrip(req *http.Request) (*http.Response, error
 // The original Client policy controls timeouts and redirect count. Each actual
 // hop still needs current authority at the same origin before transport.
 func doHubDaemonRequest(req *http.Request, target hubDaemonRequest, timeout time.Duration) (*http.Response, error) {
-	transport := &hubDaemonTransport{target: target, scheme: req.URL.Scheme, host: req.URL.Host, transport: http.DefaultTransport}
+	var backend http.RoundTripper = http.DefaultTransport
+	if endpoint, private := target.session.privateEndpoint(target.ref); private {
+		backend = hubStdioTransport{session: target.session, endpoint: endpoint, target: target}
+	}
+	transport := &hubDaemonTransport{target: target, scheme: req.URL.Scheme, host: req.URL.Host, transport: backend}
 	client := &http.Client{Timeout: timeout, Transport: transport}
 	resp, err := client.Do(req)
 	switch {
@@ -1773,10 +1793,8 @@ func postInitialize(ctx context.Context, target hubDaemonRequest, protoVer strin
 // so we can re-emit it verbatim in the merged list (preserves any
 // extension fields).
 //
-// The outbound JSON-RPC id is hard-coded to 2: a fresh HTTP connection
-// is opened per call and the daemon response id is not validated —
-// the hub-generated id used downstream by the aggregator is the
-// session-level client_session_id, not this internal id.
+// Each page receives a fresh hub-generated JSON-RPC id. A provider session
+// spans HTTP requests and can reject any id already used in that session.
 // The paginated tools/list drain is bounded THREE ways so a compliant
 // small-page daemon is never falsely cut off yet a buggy or hostile one cannot
 // exhaust the hub (bot PR #517 review + fable F3):
@@ -1818,7 +1836,14 @@ func postToolsList(ctx context.Context, target hubDaemonRequest, daemonSID, prot
 		if page >= maxToolsListPages {
 			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway pagination)", maxToolsListPages)
 		}
-		req := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+		// A provider session survives pages and repeated discovery requests.
+		// Each request needs its own downstream ID, including private sessions
+		// whose lifetime fence rejects reuse even after a response has arrived.
+		requestID, err := generateDaemonRequestID()
+		if err != nil {
+			return nil, fmt.Errorf("allocate tools/list request id: %w", err)
+		}
+		req := map[string]any{"jsonrpc": "2.0", "id": requestID, "method": "tools/list"}
 		// Send params.cursor whenever a cursor is PRESENT — including the empty
 		// string, which is a valid opaque MCP token (bot PR #517 r2). The first
 		// page has no cursor at all, so params is omitted only there.
@@ -1916,7 +1941,7 @@ func postToolsCall(ctx context.Context, target hubDaemonRequest, daemonSID, prot
 
 // postCancellation sends a notifications/cancelled to a daemon.
 // Best-effort: errors are swallowed by the caller.
-func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string, daemonReqID json.RawMessage) error {
+func postCancellation(ctx context.Context, target hubDaemonRequest, daemonSID, protoVer string, daemonReqID json.RawMessage) error {
 	envelope := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -1937,7 +1962,7 @@ func postCancellation(ctx context.Context, ref canonicalDaemonRef, daemonSID, pr
 	// daemon emitting text/event-stream by default (common with
 	// streamable endpoints) doesn't trip the readSSEResponse error
 	// path. codex bot r16 P1 closure on PR #157.
-	if _, _, err := doDaemonPost(ctx, hubDaemonRequest{ref: ref, captured: true}, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
+	if _, _, err := doDaemonPost(ctx, target, body, daemonSID, protoVer, PerDaemonInitTimeout, false); err != nil {
 		return err
 	}
 	return nil

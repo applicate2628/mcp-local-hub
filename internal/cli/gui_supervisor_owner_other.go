@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"time"
@@ -41,7 +42,13 @@ func captureGUISupervisorGeneration(proc *os.Process) (api.SupervisorLockOwner, 
 	return api.SupervisorLockOwner{PID: proc.Pid, StartedAt: started.UTC().Format(time.RFC3339Nano)}, nil
 }
 
-func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectation, owner api.SupervisorLockOwner) error {
+func validateCreatedSupervisorNativeControl(ctx context.Context, expected SupervisorControlExpectation, owner api.SupervisorLockOwner) error {
+	if ctx == nil {
+		return errors.New("supervisor native control requires context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := process.VerifyPIDIdentity(process.PIDIdentityProof{PID: owner.PID, StartedAt: owner.StartedAt, ExecutablePath: expected.ProductPath}); err != nil {
 		return err
 	}
@@ -59,5 +66,5 @@ func validateCreatedSupervisorNativeControl(expected SupervisorControlExpectatio
 	if digest != expected.ProductSHA256 {
 		return errors.New("created supervisor executable identity changed")
 	}
-	return nil
+	return ctx.Err()
 }
