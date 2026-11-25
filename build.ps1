@@ -23,7 +23,12 @@
 
 param(
     [switch]$PrintPlanJson,
+    [switch]$PrepareCLIPrivatePreparationInputs,
+    [ValidateSet("default", "test_state_path_env")]
+    [string]$PrivateCLIPreparationLane = "default",
     [switch]$TestStateIsolatedProduct,
+    [switch]$CurrentStateIsolatedTestProduct,
+    [switch]$CanonicalEntryCommandTestProduct,
     [ValidateSet("amd64", "arm64")]
     [string]$WindowsTargetArch,
     [string]$OutputDirectory = "bin",
@@ -36,6 +41,40 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$privateTestBuild = [bool]($TestStateIsolatedProduct -or $CurrentStateIsolatedTestProduct)
+
+if ($PSBoundParameters.ContainsKey("PrivateCLIPreparationLane") -and -not $PrepareCLIPrivatePreparationInputs) {
+    throw "PrivateCLIPreparationLane requires private preparation inputs"
+}
+if ($CurrentStateIsolatedTestProduct -and -not $CurrentWindowsPackage) {
+    throw "CurrentStateIsolatedTestProduct requires CurrentWindowsPackage"
+}
+if ($PrepareCLIPrivatePreparationInputs) {
+    if ($TestStateIsolatedProduct -or $CurrentStateIsolatedTestProduct -or $CurrentWindowsPackage -or $CanonicalEntryCommandTestProduct) {
+        throw "Private CLI compiler inputs are a separate publisher-test role"
+    }
+    if (@("default", "test_state_path_env") -cnotcontains $PrivateCLIPreparationLane -or $WindowsTargetArch -cne "amd64") {
+        throw "Private CLI inputs require the exact default/state lane and WindowsTargetArch amd64"
+    }
+    foreach ($operand in @("SourceSnapshotPath", "OutputDirectory")) {
+        if (-not $PSBoundParameters.ContainsKey($operand) -or
+            [string]$PSBoundParameters[$operand] -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') {
+            throw "Private CLI inputs require an explicit absolute $operand"
+        }
+    }
+}
+if ($PrepareCLIPrivatePreparationInputs -or $CurrentStateIsolatedTestProduct) {
+    if (-not [string]::IsNullOrWhiteSpace($env:GOFLAGS) -and $env:GOFLAGS -cne "-mod=readonly") {
+        throw "Private current builds refuse ambient Go compiler overrides"
+    }
+    if (-not $PSBoundParameters.ContainsKey("OutputDirectory") -or
+        $OutputDirectory -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$))') {
+        throw "Private current builds require an explicit absolute output directory"
+    }
+    if (Test-Path -LiteralPath $OutputDirectory) {
+        throw "Private current build output must be a fresh directory"
+    }
+}
 
 if ($CurrentWindowsPackage) {
     if ($TestStateIsolatedProduct) {
@@ -72,6 +111,9 @@ $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $releaseTupleSupplied = -not [string]::IsNullOrWhiteSpace($ReleaseVersion) -or
     -not [string]::IsNullOrWhiteSpace($ReleaseCommit) -or
     -not [string]::IsNullOrWhiteSpace($ReleaseBuildDate)
+if ($CanonicalEntryCommandTestProduct -and -not $TestStateIsolatedProduct) {
+    throw "CanonicalEntryCommandTestProduct requires TestStateIsolatedProduct"
+}
 if ($TestStateIsolatedProduct -and $releaseTupleSupplied) {
     throw "TestStateIsolatedProduct does not accept release metadata"
 }
@@ -95,6 +137,9 @@ if ($TestStateIsolatedProduct) {
         throw "TestStateIsolatedProduct OutputDirectory must be strictly beneath $testScratchRoot"
     }
     $OutputDirectory = $testOutputDirectory
+    if (Test-Path -LiteralPath $OutputDirectory) {
+        throw "TestStateIsolatedProduct output must be a fresh directory"
+    }
 }
 if ([string]::IsNullOrWhiteSpace($WindowsTargetArch) -and $releaseTupleSupplied) {
     throw "ReleaseVersion, ReleaseCommit, and ReleaseBuildDate require WindowsTargetArch"
@@ -180,6 +225,29 @@ if (($contract.schemaVersion -ne 3 -and $contract.schemaVersion -ne 4) -or @($co
 if ($contract.schemaVersion -eq 3 -and $contract.PSObject.Properties.Name -ccontains "runtimePayload") {
     throw "Windows schema3 registry cannot contain a current runtime extension"
 }
+function New-WindowsVersionResourceConfiguration {
+    param([Collections.IDictionary]$VersionInfo)
+    $templatePath = Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json"
+    $config = Get-Content -Raw -LiteralPath $templatePath | ConvertFrom-Json
+    $config.IconPath = (Join-Path $PSScriptRoot "cmd/mcphub/mcphub.ico")
+    $config.FixedFileInfo.FileVersion.Major = [int]$versionCore[0]
+    $config.FixedFileInfo.FileVersion.Minor = [int]$versionCore[1]
+    $config.FixedFileInfo.FileVersion.Patch = [int]$versionCore[2]
+    $config.FixedFileInfo.FileVersion.Build = 0
+    $config.FixedFileInfo.ProductVersion.Major = [int]$versionCore[0]
+    $config.FixedFileInfo.ProductVersion.Minor = [int]$versionCore[1]
+    $config.FixedFileInfo.ProductVersion.Patch = [int]$versionCore[2]
+    $config.FixedFileInfo.ProductVersion.Build = 0
+    $config.StringFileInfo.FileVersion = "$($versionCore[0]).$($versionCore[1]).$($versionCore[2]).0"
+    foreach ($entry in $VersionInfo.GetEnumerator()) {
+        if ($config.StringFileInfo.PSObject.Properties.Name -contains $entry.Key) {
+            $config.StringFileInfo.($entry.Key) = $entry.Value
+        } else {
+            $config.StringFileInfo | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value
+        }
+    }
+    return $config
+}
 $entrySetBuildID = [Guid]::NewGuid().ToString("N")
 $productRelativePath = [string]$registryProducts[0].filename
 $entryRelativePath = [string]$registryLaunchers[0].filename
@@ -191,14 +259,16 @@ $templateComments = [string](Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-
 $bundleBuild = [bool]$CurrentWindowsPackage
 $runtimePlan = $null
 $compiledWindowsProductRegistryBase64 = $null
-if ($bundleBuild) {
+if ($bundleBuild -or $PrepareCLIPrivatePreparationInputs) {
     if ($contract.schemaVersion -ne 4 -or $null -eq $publisherSource -or
         $contract.runtimePayload.schema -cne "hub-runtime-payload-v1" -or
         $contract.runtimePayload.filename -cne "mcphub-product/runtime-payload.json" -or
         (@($contract.runtimePayload.releaseDescriptors) -join ',') -cne "runtimes/python/release.yaml,runtimes/uv/release.yaml") {
-        throw "CurrentWindowsPackage requires the prepared Windows V4 runtime registry"
+        throw "Current Product and private CLI inputs require the prepared Windows V4 runtime registry"
     }
     $compiledWindowsProductRegistryBase64 = [Convert]::ToBase64String($contractBytes)
+}
+if ($bundleBuild) {
     $runtimeProductDirectory = [IO.Path]::GetDirectoryName($productRelativePath)
     $runtimeOutput = [IO.Path]::GetFullPath((Join-Path $outDir $runtimeProductDirectory))
     $runtimeRelativePath = [IO.Path]::GetFileName([string]$contract.runtimePayload.filename)
@@ -238,13 +308,19 @@ if ($bundleBuild) {
     }
 }
 
+$canonicalCommandTestPackage = "./internal/cli"
+$canonicalCommandFixtureName = "windows-canonical-command-test-fixture.json"
 $artifacts = @(
     foreach ($artifact in $contract.artifacts) {
         if ($artifact.subsystem -notin @(2, 3)) {
             throw "unsupported PE subsystem $($artifact.subsystem) for role $($artifact.role)"
         }
         $flags = @()
-        if ($artifact.role -eq "product") {
+        $artifactSource = [string]$artifact.source
+        if ($CanonicalEntryCommandTestProduct -and $artifact.role -ceq "product") {
+            $artifactSource = $canonicalCommandTestPackage
+        }
+        if ($artifact.role -eq "product" -and -not $CanonicalEntryCommandTestProduct) {
             $flags += "-X main.version=$version"
             $flags += "-X main.commit=$commit"
             $flags += "-X main.buildDate=$buildDate"
@@ -255,7 +331,7 @@ $artifacts = @(
         if ($artifact.role -ceq "launcher") {
             $flags += "-X main.productRelativePath=$productRelativePath"
             $flags += "-X main.publicEntrySetBuildID=$entrySetBuildID"
-        } elseif ($artifact.role -ceq "product") {
+        } elseif ($artifact.role -ceq "product" -and -not $CanonicalEntryCommandTestProduct) {
             $flags += "-X main.entrySetBuildID=$entrySetBuildID"
             $flags += "-X main.expectedCanonicalEntrySHA256=$unreceivedEntryHash"
             $flags += "-X main.canonicalEntryReverseProjection=$canonicalEntryReverseProjection"
@@ -297,7 +373,7 @@ $artifacts = @(
         [ordered]@{
             role = [string]$artifact.role
             filename = [string]$artifact.filename
-            source = [string]$artifact.source
+            source = $artifactSource
             subsystem = [int]$artifact.subsystem
             productMetadata = [bool]$artifact.productMetadata
             npmPayload = [bool]$artifact.npmPayload
@@ -327,6 +403,85 @@ $expectedMachine = if ($effectiveWindowsTargetArch -eq "arm64") { 0xaa64 } else 
 $resourceGeneratorArgs = @("-64")
 if ($effectiveWindowsTargetArch -eq "arm64") {
     $resourceGeneratorArgs += "-arm"
+}
+if ($PrepareCLIPrivatePreparationInputs) {
+    # Restore the original explicit compiler-DATA producer. Actual image,
+    # publisher, namespace and native admission remain receiving operations.
+    $inputDirectory = [IO.Path]::GetFullPath($outDir)
+    $inputParent = Get-Item -LiteralPath (Split-Path -Parent $inputDirectory) -Force -ErrorAction Stop
+    if (-not $inputParent.PSIsContainer -or ($inputParent.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Private CLI input parent must be an ordinary directory"
+    }
+    $testVersionInfo = [ordered]@{}
+    foreach ($entry in $productArtifacts[0].versionInfo.GetEnumerator()) { $testVersionInfo[$entry.Key] = $entry.Value }
+    $testVersionInfo.SpecialBuild = "mcphub-role-v1;role=publisher-test"
+    $testVersionInfo.InternalName = "mcphub-cli-publisher-test"
+    $testVersionInfo.OriginalFilename = "cli.test.exe"
+    $privateCLIInputTags = @()
+    if ($PrivateCLIPreparationLane -ceq "test_state_path_env") { $privateCLIInputTags = @("test_state_path_env") }
+    $testFlags = @("-H windowsgui",
+        "-X mcp-local-hub/internal/buildinfo.version=$version",
+        "-X mcp-local-hub/internal/buildinfo.commit=$commit",
+        "-X mcp-local-hub/internal/buildinfo.date=$buildDate",
+        "-X mcp-local-hub/internal/buildinfo.publisherSourceEpoch=$($publisherSource.source_epoch)",
+        "-X mcp-local-hub/internal/binaryadmission.compiledWindowsProductRegistryBase64=$compiledWindowsProductRegistryBase64") -join " "
+    $inputData = [ordered]@{
+        schema = "windows-cli-publisher-test-inputs-v1"
+        purpose = "private-serena-migration-integration"
+        prepared = $false
+        sourceRoot = [IO.Path]::GetFullPath($PSScriptRoot)
+        sourceSnapshotPath = $SourceSnapshotPath
+        publisherSource = [ordered]@{
+            source_epoch = [string]$publisherSource.source_epoch
+            source_snapshot_sha256 = [string]$publisherSource.source_snapshot_sha256
+            file_count = [int]$publisherSource.file_count
+        }
+        package = "./internal/cli"
+        goEntrypoint = "mcp-local-hub/internal/cli.test"
+        role = "publisher-test"
+        subsystem = 2
+        machine = $expectedMachine
+        windowsTargetArch = $effectiveWindowsTargetArch
+        version = $version
+        commit = $commit
+        buildDate = $buildDate
+        buildTags = @($privateCLIInputTags)
+        ldflags = $testFlags
+        stagedResource = "internal/cli/zz_publisher_test_versioninfo.syso"
+        resourcePath = Join-Path $inputDirectory "cli-publisher-test.syso"
+        resourceSHA256 = $null
+        resourceConfigurationPath = Join-Path $inputDirectory "cli-publisher-test.json"
+        versionInfo = $testVersionInfo
+    }
+    if ($PrintPlanJson) { $inputData | ConvertTo-Json -Depth 6; exit 0 }
+    New-Item -ItemType Directory -Path $inputDirectory -ErrorAction Stop | Out-Null
+    $config = New-WindowsVersionResourceConfiguration -VersionInfo $testVersionInfo
+    [IO.File]::WriteAllText($inputData.resourceConfigurationPath,
+        ($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    Push-Location -LiteralPath $PSScriptRoot
+    try {
+        & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 @resourceGeneratorArgs -o $inputData.resourcePath $inputData.resourceConfigurationPath
+        if ($LASTEXITCODE -ne 0) { throw "Private CLI VERSIONINFO generation failed with exit $LASTEXITCODE" }
+    } finally { Pop-Location }
+    $resource = Get-Item -LiteralPath $inputData.resourcePath -Force -ErrorAction Stop
+    if ($resource.PSIsContainer -or $resource.Length -le 0 -or ($resource.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Private CLI VERSIONINFO output must be a nonempty ordinary file"
+    }
+    $afterSource = Get-VerifiedPublisherSourceInput
+    if ($afterSource.source_epoch -cne $publisherSource.source_epoch -or
+        $afterSource.source_snapshot_sha256 -cne $publisherSource.source_snapshot_sha256 -or
+        [int]$afterSource.file_count -ne [int]$publisherSource.file_count) {
+        throw "PUBLISHER_SOURCE_EPOCH_MISMATCH: private CLI resource generation changed Source"
+    }
+    $inputData.resourceSHA256 = (Get-FileHash -LiteralPath $inputData.resourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $inputData.prepared = $true
+    $inputJSON = $inputData | ConvertTo-Json -Depth 6
+    [IO.File]::WriteAllText((Join-Path $inputDirectory "cli-publisher-test-inputs.json"),
+        ($inputJSON + [char]10), (New-Object Text.UTF8Encoding($false)))
+    # Retain both compiler inputs and failure residue for the original owner's
+    # exact-path receiving and trash disposition. No test or Product runs here.
+    Write-Output $inputJSON
+    exit 0
 }
 $identityRelativePath = [string]$contract.identityManifest.filename
 $identitySchema = "windows-product-identity-v1"
@@ -384,12 +539,15 @@ $buildTags = @()
 if ($null -ne $publisherSource) {
     $entrySetAdmissionCommand.argv += @("--expected-source-epoch", [string]$publisherSource.source_epoch)
 }
-if ($TestStateIsolatedProduct) {
+if ($TestStateIsolatedProduct -or $CurrentStateIsolatedTestProduct) {
     $buildTags = @("test_state_path_env")
 }
+$canonicalCommandFixturePath = if ($CanonicalEntryCommandTestProduct) {
+    [IO.Path]::GetFullPath((Join-Path $outDir $canonicalCommandFixtureName))
+} else { $null }
 $plan = [ordered]@{
     schemaVersion = 3
-    testOnly = [bool]$TestStateIsolatedProduct
+    testOnly = [bool]($TestStateIsolatedProduct -or $CurrentStateIsolatedTestProduct)
     buildTags = @($buildTags)
     version = $version
     commit = $commit
@@ -404,6 +562,15 @@ $plan = [ordered]@{
     canonicalEntry = [ordered]@{ entryRelativePath = $entryRelativePath; productRelativePath = $productRelativePath; identityRelativePath = $identityRelativePath; reverseProjection = $canonicalEntryReverseProjection; expectedCanonicalEntrySHA256 = $null; received = $false; buildOrder = @("launcher", "product") }
     entrySetAdmissionCommand = $entrySetAdmissionCommand
     retiredOutputFiles = $retiredOutputFiles
+}
+if ($CanonicalEntryCommandTestProduct) {
+    $plan.canonicalEntryCommandTestProduct = $true
+    $plan.testProductPackage = $canonicalCommandTestPackage
+    $plan.canonicalCommandFixture = $canonicalCommandFixturePath
+}
+if ($CurrentStateIsolatedTestProduct) {
+    $plan.currentStateIsolatedTestProduct = $true
+    $plan.canonicalRuntimeActorFixture = [IO.Path]::GetFullPath((Join-Path $outDir "private-serena-runtime-product.json"))
 }
 if ($null -ne $publisherSource) {
     $plan.publisherSource = [ordered]@{
@@ -420,18 +587,28 @@ if ($PrintPlanJson) {
     exit 0
 }
 
+if ($CanonicalEntryCommandTestProduct -and (Test-Path -LiteralPath $canonicalCommandFixturePath)) {
+    throw "Canonical command fixture output must not already exist: $canonicalCommandFixturePath"
+}
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
 }
 foreach ($retiredFilename in $retiredOutputFiles) {
     $retiredPath = Join-Path $outDir $retiredFilename
     if (Test-Path -LiteralPath $retiredPath) {
+        if ($privateTestBuild) { throw "Unexpected retired output in fresh private test build" }
         Remove-Item -LiteralPath $retiredPath -Force
     }
 }
 $identityManifestPath = Join-Path $outDir $identityRelativePath
 if (Test-Path -LiteralPath $identityManifestPath) {
+    if ($privateTestBuild) { throw "Unexpected identity output in fresh private test build" }
     Remove-Item -LiteralPath $identityManifestPath -Force
+}
+$privateBuildRetained = $null
+if ($privateTestBuild) {
+    $privateBuildRetained = Join-Path $outDir "retained-build-inputs"
+    New-Item -ItemType Directory -Path $privateBuildRetained -ErrorAction Stop | Out-Null
 }
 
 $resourceScratch = Join-Path (Join-Path $PSScriptRoot ".scratch") "windows-versioninfo-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -444,13 +621,14 @@ $hadGOFLAGS = Test-Path Env:GOFLAGS
 $priorGOFLAGS = $env:GOFLAGS
 if ($TestStateIsolatedProduct) {
     $env:GOFLAGS = ""
+} elseif ($CurrentStateIsolatedTestProduct) {
+    $env:GOFLAGS = "-mod=readonly"
 }
 $builderPrimaryError = $null
 $builderPrimaryExitCode = $null
 $builderPrimaryExitStage = $null
 try {
     New-Item -ItemType Directory -Force -Path $resourceScratch | Out-Null
-    $templatePath = Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json"
     foreach ($artifact in $orderedArtifacts) {
         if ($artifact.productMetadata) {
             if (-not $plan.canonicalEntry.received -or
@@ -476,29 +654,13 @@ try {
                 throw "Entry comments encoder response shape changed"
             }
             $artifact.versionInfo.Comments = [string]$encoded.comments
-            $config = Get-Content -Raw -LiteralPath $templatePath | ConvertFrom-Json
-            $config.IconPath = (Join-Path $PSScriptRoot "cmd/mcphub/mcphub.ico")
-            $config.FixedFileInfo.FileVersion.Major = [int]$versionCore[0]
-            $config.FixedFileInfo.FileVersion.Minor = [int]$versionCore[1]
-            $config.FixedFileInfo.FileVersion.Patch = [int]$versionCore[2]
-            $config.FixedFileInfo.FileVersion.Build = 0
-            $config.FixedFileInfo.ProductVersion.Major = [int]$versionCore[0]
-            $config.FixedFileInfo.ProductVersion.Minor = [int]$versionCore[1]
-            $config.FixedFileInfo.ProductVersion.Patch = [int]$versionCore[2]
-            $config.FixedFileInfo.ProductVersion.Build = 0
-            $config.StringFileInfo.FileVersion = "$($versionCore[0]).$($versionCore[1]).$($versionCore[2]).0"
-            foreach ($entry in $artifact.versionInfo.GetEnumerator()) {
-                if ($config.StringFileInfo.PSObject.Properties.Name -contains $entry.Key) {
-                    $config.StringFileInfo.($entry.Key) = $entry.Value
-                } else {
-                    $config.StringFileInfo | Add-Member -NotePropertyName $entry.Key -NotePropertyValue $entry.Value
-                }
-            }
+            $config = New-WindowsVersionResourceConfiguration -VersionInfo $artifact.versionInfo
             $resourceJson = Join-Path $resourceScratch "$($artifact.role).json"
             [IO.File]::WriteAllText($resourceJson, ($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
             $commandDir = Join-Path $PSScriptRoot ($artifact.source -replace '^\./', '')
             $resourcePath = Join-Path $commandDir "zz_product_versioninfo.syso"
             if (Test-Path -LiteralPath $resourcePath) {
+                if ($privateTestBuild) { throw "Private test Product resource output must be fresh" }
                 Remove-Item -LiteralPath $resourcePath -Force
             }
             $generatedResources += $resourcePath
@@ -518,8 +680,12 @@ try {
         }
         $outFile = Join-Path $outDir $artifact.filename
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outFile) | Out-Null
-        $buildArgs = @("build", "-trimpath")
-        if ($TestStateIsolatedProduct -and $artifact.role -eq "product") {
+        $buildArgs = if ($CanonicalEntryCommandTestProduct -and $artifact.role -ceq "product") {
+            @("test", "-c", "-trimpath")
+        } else {
+            @("build", "-trimpath")
+        }
+        if (($TestStateIsolatedProduct -and $artifact.role -eq "product") -or $CurrentStateIsolatedTestProduct) {
             $buildArgs += @("-tags", $buildTags[0])
         }
         if (-not [string]::IsNullOrWhiteSpace($artifact.ldflags)) {
@@ -557,7 +723,7 @@ try {
         if ($hadGOARCH) { $env:GOARCH = $priorGOARCH } elseif (Test-Path Env:GOARCH) { Remove-Item Env:GOARCH -ErrorAction Stop }
     } catch { $builderCleanupErrors.Add($_.Exception) }
     try {
-        if ($TestStateIsolatedProduct) {
+        if ($TestStateIsolatedProduct -or $CurrentStateIsolatedTestProduct) {
             if ($hadGOFLAGS) { $env:GOFLAGS = $priorGOFLAGS } elseif (Test-Path Env:GOFLAGS) { Remove-Item Env:GOFLAGS -ErrorAction Stop }
         }
     } catch { $builderCleanupErrors.Add($_.Exception) }
@@ -569,6 +735,11 @@ try {
         @{ Path = $resourceScratch; Directory = $true }
     )
     foreach ($cleanupTarget in $cleanupTargets) {
+        if ($privateTestBuild -and ($null -ne $builderPrimaryError -or $null -ne $builderPrimaryExitCode -or $builderCleanupErrors.Count -gt 0)) {
+            # A failed private build leaves the same original resource/scratch
+            # paths intact for receiving. It does not authorize disposition.
+            continue
+        }
         $cleanupAbsolute = $null
         try {
             $sourceAbsolute = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -613,6 +784,12 @@ try {
                         }
                         if (-not $knownJSON) { throw "PUBLISHER_SOURCE_TABLE_INVALID: unowned scratch leaf" }
                     }
+                }
+                if ($privateTestBuild) {
+                    $retainedPath = Join-Path $privateBuildRetained ([IO.Path]::GetFileName($cleanupAbsolute))
+                    if (Test-Path -LiteralPath $retainedPath) { throw "Private build retained-input destination already exists" }
+                    Move-Item -LiteralPath $cleanupAbsolute -Destination $retainedPath -ErrorAction Stop
+                } elseif ($cleanupTarget.Directory) {
                     Remove-Item -LiteralPath $cleanupAbsolute -Recurse -Force -ErrorAction Stop
                 } else { Remove-Item -LiteralPath $cleanupAbsolute -Force -ErrorAction Stop }
             }
@@ -699,6 +876,7 @@ if ($bundleBuild) {
     $identityManifestPath,
     $identityLine + [char]10,
     (New-Object Text.UTF8Encoding($false)))
+$identityHash = (Get-FileHash -LiteralPath $identityManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 $entrySetValidatorArgs = @($entrySetAdmissionCommand.argv)
 $entrySetRows = @(& go @entrySetValidatorArgs)
@@ -709,7 +887,7 @@ if ($entrySetResult.schema -cne "windows-canonical-entry-build-observation-v1" -
     $entrySetResult.build_id -cne $entrySetBuildID -or
     $entrySetResult.canonical_entry_sha256 -cne $plan.canonicalEntry.expectedCanonicalEntrySHA256 -or
     $entrySetResult.product_sha256 -cne $candidateHash -or
-    $entrySetResult.identity_sha256 -cne (Get-FileHash -LiteralPath $identityManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()) {
+    $entrySetResult.identity_sha256 -cne $identityHash) {
     throw "Actual portable entry-set observation does not match this original build"
 }
 if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$publisherSource.source_epoch) {
@@ -718,7 +896,7 @@ if ($null -ne $publisherSource -and $entrySetResult.source_epoch -cne [string]$p
 foreach ($artifact in $artifacts) {
     $outFile = Join-Path $outDir $artifact.filename
     if (-not (Test-Path -LiteralPath $outFile -PathType Leaf)) {
-        Write-Error "$outFile missing after build — check Defender exclusions (see INSTALL.md)."
+        Write-Error "$outFile missing after build - check Defender exclusions (see INSTALL.md)."
         exit 1
     }
 }
@@ -733,10 +911,58 @@ $expectedExecutables = @($artifacts | ForEach-Object { $_.filename } | Sort-Obje
 if (-not [string]::Equals(($mcpHubExecutables -join [char]0), ($expectedExecutables -join [char]0), [StringComparison]::Ordinal)) {
     throw "Windows output must contain exactly the registry's CUI and GUI executable paths"
 }
+if ($CanonicalEntryCommandTestProduct) {
+    if (Test-Path -LiteralPath $canonicalCommandFixturePath) {
+        throw "Canonical command fixture output appeared before issuance"
+    }
+    $fixtureInput = [ordered]@{
+        product_root = [IO.Path]::GetFullPath($outDir)
+        source_epoch = ""
+        product_version = $version
+        build_id = $entrySetBuildID
+        reverse_projection = $canonicalEntryReverseProjection
+        canonical_entry_sha256 = $plan.canonicalEntry.expectedCanonicalEntrySHA256
+        product_sha256 = $candidateHash
+        identity_sha256 = $identityHash
+    }
+    [IO.File]::WriteAllText(
+        $canonicalCommandFixturePath,
+        (($fixtureInput | ConvertTo-Json -Compress) + [char]10),
+        (New-Object Text.UTF8Encoding($false)))
+}
+if ($CurrentStateIsolatedTestProduct) {
+    if (Test-Path -LiteralPath $plan.canonicalRuntimeActorFixture) {
+        throw "Current native actor fixture appeared before complete build issuance"
+    }
+    $runtimeActorInput = [ordered]@{
+        entry_set = [ordered]@{
+            product_root = [IO.Path]::GetFullPath($outDir)
+            source_epoch = [string]$publisherSource.source_epoch
+            product_version = $version
+            build_id = $entrySetBuildID
+            reverse_projection = $canonicalEntryReverseProjection
+            canonical_entry_sha256 = $plan.canonicalEntry.expectedCanonicalEntrySHA256
+            product_sha256 = $candidateHash
+            identity_sha256 = $identityHash
+        }
+        runtime_payload_sha256 = $runtimePayloadSHA256
+    }
+    [IO.File]::WriteAllText($plan.canonicalRuntimeActorFixture,
+        (($runtimeActorInput | ConvertTo-Json -Depth 6 -Compress) + [char]10),
+        (New-Object Text.UTF8Encoding($false)))
+}
 if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
     Write-Host "==> Product VERSIONINFO resources:"
     foreach ($artifact in $productArtifacts) {
         (Get-Item (Join-Path $outDir $artifact.filename)).VersionInfo | Format-List ProductVersion,PrivateBuild,SpecialBuild,InternalName,OriginalFilename
     }
+}
+if ($CanonicalEntryCommandTestProduct) { Write-Host "canonicalCommandFixture=$canonicalCommandFixturePath" }
+if ($privateTestBuild) {
+    # Only the complete builder success makes its generated inputs disposable.
+    # Postcompile Source/admission/fixture failures retain them outside trash.
+    $privateBuildTrash = Join-Path $outDir "trash"
+    if (Test-Path -LiteralPath $privateBuildTrash) { throw "Private test build trash destination already exists" }
+    Move-Item -LiteralPath $privateBuildRetained -Destination $privateBuildTrash -ErrorAction Stop
 }
 Write-Host "==> Done. Complete canonical entry-set build observation passed; identity manifest=$identityManifestPath version=$version commit=$commit buildDate=$buildDate."

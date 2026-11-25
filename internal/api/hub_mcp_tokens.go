@@ -595,7 +595,7 @@ func currentHubProjectEnrollment(scope, token string, receiving hubProjectRebind
 	}
 	e, ok := p.projects.Groups[hubProjectGroupKey(group)]
 	current := p.tokens.Tokens[scope]
-	if !ok || e.Group != group || !e.matchesEpoch(receiving.Epoch) || e.Project != receiving.Project ||
+	if !ok || e.Revoked || e.Group != group || !e.matchesEpoch(receiving.Epoch) || e.Project != receiving.Project ||
 		e.Revision != receiving.Revision || e.AttachmentPlan != receiving.AttachmentPlan ||
 		e.AttachmentReceipt == "" || e.AttachmentReceipt != receiving.AttachmentReceipt ||
 		!e.matchesCredential(current) || subtle.ConstantTimeCompare([]byte(current), []byte(token)) != 1 {

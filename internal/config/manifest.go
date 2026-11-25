@@ -412,69 +412,12 @@ func parseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool
 	if lookup == nil {
 		return nil, fmt.Errorf("manifest environment lookup is required")
 	}
-	raw, readErr := io.ReadAll(r)
-	if readErr != nil {
-		return nil, fmt.Errorf("read manifest: %w", readErr)
-	}
-	var m ServerManifest
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&m); err != nil {
-		return nil, fmt.Errorf("yaml decode: %w", err)
-	}
-	// Second pass to detect key presence (yaml.v3 collapses
-	// `headers:` / `headers: null` / `headers: {}` into the same
-	// Go value when decoded into a struct field).
-	var keyed map[string]any
-	if err := yaml.Unmarshal(raw, &keyed); err != nil {
-		return nil, fmt.Errorf("yaml decode (keyed pass): %w", err)
-	}
-	// yaml.v3 skips a field's UnmarshalYAML hook for explicit null. The
-	// existing keyed pass retains declaration presence and the transport gate.
-	daemons, _ := keyed["daemons"].([]any)
-	for _, daemon := range daemons {
-		fields, _ := daemon.(map[string]any)
-		if value, present := fields["mcp_stdio_state"]; present {
-			if value == nil || m.Transport != TransportStdioBridge {
-				return nil, ErrInvalidDaemonMCPStdioState
-			}
-		}
-	}
-	_, urlMentioned := keyed["url"]
-	_, headersMentioned := keyed["headers"]
-	// Reject remote-http-only keys mentioned under non-remote
-	// transports. Done HERE (parse time) rather than in Validate()
-	// because Validate's input is a Go struct that has already
-	// lost the key-presence info. The transport-scoped field-gate
-	// errors from Validate() still cover programmatic callers that
-	// construct a ServerManifest directly (with non-zero URL or
-	// non-nil Headers); this guard adds the YAML-level signal.
-	if m.Transport != TransportRemoteHTTP {
-		if urlMentioned {
-			return nil, fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q; remove the url: key)", m.Name, m.Transport)
-		}
-		if headersMentioned {
-			return nil, fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key)", m.Name, m.Transport)
-		}
-	}
-	// Symmetric guard (codex bot r9 P2 closure on PR #169): reject
-	// local-subprocess keys mentioned under transport=remote-http.
-	// The Go-struct Validate() can only spot non-zero values, so
-	// `command:` (bare) / `command: null` / `command: ""` would
-	// otherwise pass; same for `base_args:` / `env:` / `daemons:`.
-	// Key-presence detection requires the YAML-level second pass.
-	if m.Transport == TransportRemoteHTTP {
-		for _, k := range []string{
-			"command", "base_args", "base_args_template", "env", "env_forward_local",
-			"daemons", "languages", "port_pool", "idle_timeout_min",
-		} {
-			if _, mentioned := keyed[k]; mentioned {
-				return nil, fmt.Errorf("manifest %s: transport=remote-http rejects %s: (no local subprocess / no per-daemon port; remove the %s key)", m.Name, k, k)
-			}
-		}
+	m, err := DecodeManifestBeforeEnvironment(r)
+	if err != nil {
+		return nil, err
 	}
 	if beforeExpansion != nil {
-		if err := beforeExpansion(&m); err != nil {
+		if err := beforeExpansion(m); err != nil {
 			return nil, err
 		}
 	}
@@ -511,6 +454,80 @@ func parseManifestWithEnvironment(r io.Reader, lookup func(string) (string, bool
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
+	}
+	return m, nil
+}
+
+// DecodeManifestBeforeEnvironment returns typed YAML before expansion. It
+// returns the populated fields alongside recoverable YAML type errors and
+// key-presence errors.
+// Call ParseManifest for full validation and expansion.
+func DecodeManifestBeforeEnvironment(r io.Reader) (*ServerManifest, error) {
+	raw, readErr := io.ReadAll(r)
+	if readErr != nil {
+		return nil, fmt.Errorf("read manifest: %w", readErr)
+	}
+	var m ServerManifest
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&m); err != nil {
+		decodeErr := fmt.Errorf("yaml decode: %w", err)
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			return &m, decodeErr
+		}
+		return nil, decodeErr
+	}
+	// Second pass to detect key presence (yaml.v3 collapses
+	// `headers:` / `headers: null` / `headers: {}` into the same
+	// Go value when decoded into a struct field).
+	var keyed map[string]any
+	if err := yaml.Unmarshal(raw, &keyed); err != nil {
+		return &m, fmt.Errorf("yaml decode (keyed pass): %w", err)
+	}
+	// yaml.v3 skips a field's UnmarshalYAML hook for explicit null. The
+	// existing keyed pass retains declaration presence and the transport gate.
+	daemons, _ := keyed["daemons"].([]any)
+	for _, daemon := range daemons {
+		fields, _ := daemon.(map[string]any)
+		if value, present := fields["mcp_stdio_state"]; present {
+			if value == nil || m.Transport != TransportStdioBridge {
+				return &m, ErrInvalidDaemonMCPStdioState
+			}
+		}
+	}
+	_, urlMentioned := keyed["url"]
+	_, headersMentioned := keyed["headers"]
+	// Reject remote-http-only keys mentioned under non-remote
+	// transports. Done HERE (parse time) rather than in Validate()
+	// because Validate's input is a Go struct that has already
+	// lost the key-presence info. The transport-scoped field-gate
+	// errors from Validate() still cover programmatic callers that
+	// construct a ServerManifest directly (with non-zero URL or
+	// non-nil Headers); this guard adds the YAML-level signal.
+	if m.Transport != TransportRemoteHTTP {
+		if urlMentioned {
+			return &m, fmt.Errorf("manifest %s: url is only valid with transport=remote-http (got transport=%q; remove the url: key)", m.Name, m.Transport)
+		}
+		if headersMentioned {
+			return &m, fmt.Errorf("manifest %s: headers is only valid with transport=remote-http (got transport=%q; remove the headers: key)", m.Name, m.Transport)
+		}
+	}
+	// Symmetric guard (codex bot r9 P2 closure on PR #169): reject
+	// local-subprocess keys mentioned under transport=remote-http.
+	// The Go-struct Validate() can only spot non-zero values, so
+	// `command:` (bare) / `command: null` / `command: ""` would
+	// otherwise pass; same for `base_args:` / `env:` / `daemons:`.
+	// Key-presence detection requires the YAML-level second pass.
+	if m.Transport == TransportRemoteHTTP {
+		for _, k := range []string{
+			"command", "base_args", "base_args_template", "env", "env_forward_local",
+			"daemons", "languages", "port_pool", "idle_timeout_min",
+		} {
+			if _, mentioned := keyed[k]; mentioned {
+				return &m, fmt.Errorf("manifest %s: transport=remote-http rejects %s: (no local subprocess / no per-daemon port; remove the %s key)", m.Name, k, k)
+			}
+		}
 	}
 	return &m, nil
 }

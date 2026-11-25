@@ -745,6 +745,9 @@ func selectGlobalInstallExecutionPhase(m *config.ServerManifest, plan *Plan, dae
 }
 
 func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer, symlinkConsents []ResolvedSymlinkConsent) error {
+	if plan.sessionLocal != nil {
+		return a.materializeSessionLocalInstall(ctx, m, plan, daemonFilter, dryRun, w, symlinkConsents)
+	}
 	ownedBackend := plan.ownedBackendInstall
 	// Phase F: a global manifest's daemon lifecycle is owned by
 	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global

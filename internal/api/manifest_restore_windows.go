@@ -21,6 +21,9 @@ func (a *API) manifestRestoreExactInWithAdoptLeaseHeldWithGate(dir, name, yaml s
 	if err := checkManifestName(name); err != nil || isEmbeddedManifestName(name) {
 		return restoreFailure("ATTACH_MANIFEST_CANDIDATE_MISMATCH", err)
 	}
+	if err := checkGuardedManifestMutation(nil, []byte(yaml)); err != nil {
+		return restoreFailure("ATTACH_MANIFEST_PROTECTED_LIFECYCLE", err)
+	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) != 0 {
 		return restoreFailure("ATTACH_MANIFEST_CANDIDATE_MISMATCH", errors.New("manifest validation failed"))
 	}
@@ -54,6 +57,9 @@ func restoreExactManifestNoReplaceWithLinkFn(dir, name string, raw []byte, befor
 }
 
 func restoreExactManifestNoReplaceWithGateAndLink(dir, name string, raw []byte, beforeLink func(), gate func() error, linkFn func(string, string) error) error {
+	if err := checkGuardedManifestMutation(nil, raw); err != nil {
+		return restoreFailure("ATTACH_MANIFEST_PROTECTED_LIFECYCLE", err)
+	}
 	serverDir := filepath.Join(dir, name)
 	final := filepath.Join(serverDir, "manifest.yaml")
 	if _, err := os.Lstat(final); err == nil {

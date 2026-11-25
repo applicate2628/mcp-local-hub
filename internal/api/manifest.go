@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/secrets"
@@ -459,6 +462,13 @@ func (a *API) ManifestCreate(name, yaml string) (err error) {
 	if err := checkManifestName(name); err != nil {
 		return err
 	}
+	dir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return fmt.Errorf("manifest create: %w", err)
+	}
+	if err := preflightGuardedManifestCreate(dir, name, yaml); err != nil {
+		return err
+	}
 	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, name)
 	if leaseErr != nil || !acquired {
 		if leaseErr == nil {
@@ -471,7 +481,7 @@ func (a *API) ManifestCreate(name, yaml string) (err error) {
 			err = errors.Join(err, fmt.Errorf("manifest create: release per-manifest lease for %q: %w", name, unlockErr))
 		}
 	}()
-	return a.manifestCreateWithAdoptLeaseHeld(name, yaml)
+	return a.manifestCreateInWithAdoptLeaseHeld(dir, name, yaml)
 }
 
 // manifestCreateWithAdoptLeaseHeld is the canonical-dir write used by callers
@@ -485,6 +495,9 @@ func (a *API) manifestCreateWithAdoptLeaseHeld(name, yaml string) error {
 }
 
 func (a *API) manifestCreateInWithAdoptLeaseHeld(dir, name, yaml string) error {
+	if err := preflightGuardedManifestCreate(dir, name, yaml); err != nil {
+		return err
+	}
 	return runManifestMutationUnderVaultLock(name, func() error {
 		return a.ManifestCreateIn(dir, name, yaml)
 	})
@@ -537,10 +550,111 @@ var ErrManifestNameEmbedded = errors.New("manifest name collides with a shipped 
 // the contextual path retained by ManifestCreateIn's wrapped error.
 var ErrManifestNameExists = errors.New("manifest name already exists")
 
-// ManifestCreateIn is the tempdir-capable form of ManifestCreate.
-func (a *API) ManifestCreateIn(dir, name, yaml string) error {
-	if err := checkManifestName(name); err != nil {
+// ErrGuardedManifestLifecycle is returned when an ordinary manifest write
+// would change the set of fixed session-local daemon descriptors.
+var ErrGuardedManifestLifecycle = errors.New("session-local daemon descriptor changes require the protected lifecycle")
+
+type guardedManifestDescriptor struct {
+	server string
+	daemon string
+	port   int
+}
+
+func guardedManifestDescriptors(raw []byte) (map[guardedManifestDescriptor]struct{}, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	m, err := config.DecodeManifestBeforeEnvironment(bytes.NewReader(raw))
+	if m == nil {
+		return nil, err
+	}
+	var guarded map[guardedManifestDescriptor]struct{}
+	if m.Transport == config.TransportStdioBridge {
+		for _, daemon := range m.Daemons {
+			if daemon.MCPStdioState == config.MCPStdioStateSessionLocal {
+				if guarded == nil {
+					guarded = make(map[guardedManifestDescriptor]struct{})
+				}
+				guarded[guardedManifestDescriptor{server: m.Name, daemon: daemon.Name, port: daemon.Port}] = struct{}{}
+			}
+		}
+	}
+	return guarded, err
+}
+
+func checkGuardedManifestMutation(before, after []byte) error {
+	prior, priorErr := guardedManifestDescriptors(before)
+	next, nextErr := guardedManifestDescriptors(after)
+	if nextErr != nil {
+		if len(prior) != 0 || len(next) != 0 {
+			return ErrGuardedManifestLifecycle
+		}
+		// Existing candidate validation owns malformed ordinary replacements.
+		return nil
+	}
+	if priorErr != nil && len(prior) == 0 {
+		// Preserve legacy repair and deletion of undecodable files.
+		// An undecodable preimage cannot authorize a guarded replacement.
+		if len(next) == 0 {
+			return nil
+		}
+		return ErrGuardedManifestLifecycle
+	}
+	if !maps.Equal(prior, next) {
+		return ErrGuardedManifestLifecycle
+	}
+	var typeErr *yaml.TypeError
+	if len(prior) != 0 && errors.As(priorErr, &typeErr) && !guardedManifestIdentitiesDecodable(before) {
+		return ErrGuardedManifestLifecycle
+	}
+	return nil
+}
+
+// Partially decoded declarations can require a refusal. Allowing a repair
+// that preserves the guarded set also requires proof that the identity
+// fields decoded successfully, including any legitimate defaults.
+func guardedManifestIdentitiesDecodable(raw []byte) bool {
+	var manifest struct {
+		Name      string      `yaml:"name"`
+		Transport string      `yaml:"transport"`
+		Daemons   []yaml.Node `yaml:"daemons"`
+	}
+	if err := yaml.Unmarshal(raw, &manifest); err != nil {
+		return false
+	}
+	for _, daemon := range manifest.Daemons {
+		var mode struct {
+			State config.MCPStdioState `yaml:"mcp_stdio_state"`
+		}
+		if err := daemon.Decode(&mode); err != nil {
+			return false
+		}
+		if mode.State == config.MCPStdioStateSessionLocal {
+			var endpoint struct {
+				Name string `yaml:"name"`
+				Port int    `yaml:"port"`
+			}
+			if err := daemon.Decode(&endpoint); err != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func preflightGuardedManifestCreate(dir, name, yaml string) error {
+	if err := checkGuardedManifestMutation(nil, []byte(yaml)); err != nil {
+		if _, targetErr := manifestCreateTarget(dir, name); targetErr != nil {
+			return targetErr
+		}
 		return err
+	}
+	return nil
+}
+
+func manifestCreateTarget(dir, name string) (string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
 	}
 	// Embed-vs-disk precedence gate, BEFORE the disk-stat guard: refuse creating
 	// a disk manifest under a shipped (embedded) server name. Because install
@@ -550,11 +664,23 @@ func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	// isEmbeddedManifestName is override-symmetric, so hermetic tests that set
 	// MCPHUB_MANIFEST_DIR_OVERRIDE (embed FS bypassed) are unaffected.
 	if isEmbeddedManifestName(name) {
-		return fmt.Errorf("manifest %q collides with a shipped (built-in) server; the shipped manifest is what installs, so a disk manifest under this name would be silently ignored — pick a different name (e.g. %q) to save a customized copy: %w", name, name+"-custom", ErrManifestNameEmbedded)
+		return "", fmt.Errorf("manifest %q collides with a shipped (built-in) server; the shipped manifest is what installs, so a disk manifest under this name would be silently ignored — pick a different name (e.g. %q) to save a customized copy: %w", name, name+"-custom", ErrManifestNameEmbedded)
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("manifest %q already exists at %s; use edit instead: %w", name, target, ErrManifestNameExists)
+		return "", fmt.Errorf("manifest %q already exists at %s; use edit instead: %w", name, target, ErrManifestNameExists)
+	}
+	return target, nil
+}
+
+// ManifestCreateIn is the tempdir-capable form of ManifestCreate.
+func (a *API) ManifestCreateIn(dir, name, yaml string) error {
+	target, err := manifestCreateTarget(dir, name)
+	if err != nil {
+		return err
+	}
+	if err := checkGuardedManifestMutation(nil, []byte(yaml)); err != nil {
+		return err
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
@@ -582,7 +708,10 @@ func (a *API) ManifestEdit(name, yaml string) error {
 	if err != nil {
 		return fmt.Errorf("manifest edit: %w", err)
 	}
+	target := filepath.Join(dir, name, "manifest.yaml")
 	return a.withCanonicalManifestMutation(name, func() error {
+		return checkManifestEditPreimage(target, name, yaml, "")
+	}, func() error {
 		return a.ManifestEditIn(dir, name, yaml)
 	})
 }
@@ -593,8 +722,8 @@ func (a *API) ManifestEditIn(dir, name, yaml string) error {
 		return err
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
-	if _, err := os.Stat(target); err != nil {
-		return fmt.Errorf("manifest %q does not exist; use create instead", name)
+	if err := checkManifestEditPreimage(target, name, yaml, ""); err != nil {
+		return err
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
@@ -790,6 +919,20 @@ func parseManifestForName(name string, data []byte) (*config.ServerManifest, err
 // used by Force Save which re-reads at save-time.
 var ErrManifestHashMismatch = errors.New("manifest hash mismatch: file changed on disk since it was loaded")
 
+func checkManifestEditPreimage(target, name, yaml, expectedHash string) error {
+	current, err := os.ReadFile(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("manifest %q does not exist; use create instead", name)
+		}
+		return fmt.Errorf("manifest edit: read %q: %w", name, err)
+	}
+	if expectedHash != "" && ManifestHashContent(current) != expectedHash {
+		return ErrManifestHashMismatch
+	}
+	return checkGuardedManifestMutation(current, []byte(yaml))
+}
+
 // ManifestEditInWithHash replaces an existing manifest atomically via
 // tmp-file-plus-rename. If the on-disk content hash diverged from
 // expectedHash (non-empty), returns ErrManifestHashMismatch without
@@ -802,14 +945,8 @@ func (a *API) ManifestEditInWithHash(dir, name, yaml, expectedHash string) (newH
 		return "", err
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
-	current, err := os.ReadFile(target)
-	if err != nil {
-		return "", fmt.Errorf("manifest %q does not exist; use create instead", name)
-	}
-	if expectedHash != "" {
-		if got := ManifestHashContent(current); got != expectedHash {
-			return "", ErrManifestHashMismatch
-		}
+	if err := checkManifestEditPreimage(target, name, yaml, expectedHash); err != nil {
+		return "", err
 	}
 	if warnings := a.validateManifestForStorageName(name, yaml); len(warnings) > 0 {
 		return "", fmt.Errorf("manifest has validation errors: %s", strings.Join(warnings, "; "))
@@ -867,8 +1004,11 @@ func (a *API) ManifestEditWithHash(name, yaml, expectedHash string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("manifest edit with hash: %w", err)
 	}
+	target := filepath.Join(dir, name, "manifest.yaml")
 	var newHash string
 	err = a.withCanonicalManifestMutation(name, func() error {
+		return checkManifestEditPreimage(target, name, yaml, expectedHash)
+	}, func() error {
 		var mutateErr error
 		newHash, mutateErr = a.ManifestEditInWithHash(dir, name, yaml, expectedHash)
 		return mutateErr
@@ -888,6 +1028,8 @@ func (a *API) ManifestDelete(name string) error {
 		return fmt.Errorf("manifest delete: %w", err)
 	}
 	return a.withCanonicalManifestMutation(name, func() error {
+		return checkManifestDeletePreimage(filepath.Join(dir, name), name)
+	}, func() error {
 		return a.ManifestDeleteIn(dir, name)
 	})
 }
@@ -908,10 +1050,24 @@ func (a *API) ManifestDeleteIn(dir, name string) error {
 	if parent := filepath.Dir(target); parent != cleanDir {
 		return fmt.Errorf("manifest delete: resolved path %q escapes manifest dir %q", target, cleanDir)
 	}
-	if _, err := os.Stat(target); err != nil {
-		return fmt.Errorf("manifest %q does not exist", name)
+	if err := checkManifestDeletePreimage(target, name); err != nil {
+		return err
 	}
 	return os.RemoveAll(target)
+}
+
+func checkManifestDeletePreimage(dir, name string) error {
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("manifest %q does not exist", name)
+	}
+	current, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
+	if os.IsNotExist(err) {
+		return nil // Keep the ordinary cleanup of incomplete manifest directories.
+	}
+	if err != nil {
+		return fmt.Errorf("manifest delete: read %q: %w", name, err)
+	}
+	return checkGuardedManifestMutation(current, nil)
 }
 
 const manifestVaultMutationBusyFailureID = "E_MANIFEST_MUTATION_BUSY"
@@ -945,7 +1101,10 @@ func runManifestMutationUnderVaultLock(name string, mutate func() error) error {
 // withCanonicalManifestMutation extends the PR-owned same-name mutation lease
 // with the vault reference transaction. It preserves manifestMutationLeaseOwner
 // and acquireAdoptLeaseForApply as the sole lease/migration owners.
-func (a *API) withCanonicalManifestMutation(name string, mutate func() error) (err error) {
+func (a *API) withCanonicalManifestMutation(name string, preflight, mutate func() error) (err error) {
+	if err := preflight(); err != nil {
+		return err
+	}
 	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, name)
 	if leaseErr != nil || !acquired {
 		if leaseErr == nil {
@@ -958,6 +1117,11 @@ func (a *API) withCanonicalManifestMutation(name string, mutate func() error) (e
 			err = errors.Join(err, fmt.Errorf("manifest mutation: release per-manifest lease for %q: %w", name, unlockErr))
 		}
 	}()
+	// Re-read under the adoption lease before allowing the vault lock to
+	// create its file. The mutation rechecks at the storage boundary too.
+	if err := preflight(); err != nil {
+		return err
+	}
 	return runManifestMutationUnderVaultLock(name, mutate)
 }
 
@@ -975,18 +1139,33 @@ func (a *API) manifestDeleteUnderLease(name string) error {
 }
 
 func (a *API) manifestDeleteInUnderLease(dir, name string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	if err := checkManifestDeletePreimage(filepath.Join(dir, name), name); err != nil {
+		return err
+	}
 	return runManifestMutationUnderVaultLock(name, func() error {
 		return a.ManifestDeleteIn(dir, name)
 	})
 }
 
 func (a *API) manifestDeleteInWithHashUnderLease(dir, name, expectedHash string) error {
+	if _, err := checkManifestHashDeletePreimage(dir, name, expectedHash); err != nil {
+		return err
+	}
 	return runManifestMutationUnderVaultLock(name, func() error {
 		return a.ManifestDeleteInWithHash(dir, name, expectedHash)
 	})
 }
 
 func (a *API) manifestEditInWithHashUnderLease(dir, name, yaml, expectedHash string) (newHash string, err error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
+	if err := checkManifestEditPreimage(filepath.Join(dir, name, "manifest.yaml"), name, yaml, expectedHash); err != nil {
+		return "", err
+	}
 	err = runManifestMutationUnderVaultLock(name, func() error {
 		var mutateErr error
 		newHash, mutateErr = a.ManifestEditInWithHash(dir, name, yaml, expectedHash)
@@ -1050,32 +1229,43 @@ var ErrManifestHashRequired = errors.New("manifest delete refused: a non-empty e
 // the delete, retried with the same (non-empty) provenance hash, finds the
 // manifest already gone and completes rather than failing. Because there is no
 // manifest.yaml to hash, no ungated delete can occur, so the no-op is
-// fail-closed-safe. ManifestDeleteIn itself is unchanged.
+// fail-closed-safe.
 func (a *API) ManifestDeleteInWithHash(dir, name, expectedHash string) error {
-	if err := checkManifestName(name); err != nil {
+	target, err := checkManifestHashDeletePreimage(dir, name, expectedHash)
+	if err != nil || target == "" {
 		return err
+	}
+	return os.RemoveAll(target)
+}
+
+func checkManifestHashDeletePreimage(dir, name, expectedHash string) (string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
 	}
 	// Fail-closed empty-hash gate — see the POLARITY note above. MUST precede
 	// the file read so a blank hash can never reach the delete.
 	if expectedHash == "" {
-		return ErrManifestHashRequired
+		return "", ErrManifestHashRequired
 	}
 	// Path-escape guard carried over verbatim from ManifestDeleteIn (defense in
 	// depth; checkManifestName already rejects separators).
 	target := filepath.Join(dir, name)
 	cleanDir := filepath.Clean(dir)
 	if parent := filepath.Dir(target); parent != cleanDir {
-		return fmt.Errorf("manifest delete: resolved path %q escapes manifest dir %q", target, cleanDir)
+		return "", fmt.Errorf("manifest delete: resolved path %q escapes manifest dir %q", target, cleanDir)
 	}
 	current, err := os.ReadFile(filepath.Join(target, "manifest.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // absent → idempotent no-op (resume-safe; see doc)
+			return "", nil // absent → idempotent no-op (resume-safe; see doc)
 		}
-		return fmt.Errorf("manifest delete: read %q for hash gate: %w", name, err)
+		return "", fmt.Errorf("manifest delete: read %q for hash gate: %w", name, err)
 	}
 	if got := ManifestHashContent(current); got != expectedHash {
-		return ErrManifestHashMismatch
+		return "", ErrManifestHashMismatch
 	}
-	return os.RemoveAll(target)
+	if err := checkGuardedManifestMutation(current, nil); err != nil {
+		return "", err
+	}
+	return target, nil
 }

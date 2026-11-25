@@ -104,6 +104,53 @@ func (p *hubStdioSessions) Close(ctx context.Context) error {
 	return result
 }
 
+func (p *hubStdioSessions) CaptureRetirement(session context.Context, endpoint api.HubStdioEndpoint) (func(context.Context) error, error) {
+	if !p.Allows(endpoint) {
+		return nil, daemon.ErrIsolatedStdioUnavailable
+	}
+	receipt := p.providers[endpoint].RetirementForSession(session)
+	if receipt == nil {
+		return nil, daemon.ErrIsolatedStdioUnavailable
+	}
+	return func(ctx context.Context) error {
+		settled, err := receipt.Await(ctx)
+		if !settled.Complete() {
+			return errors.Join(err, daemon.ErrIsolatedStdioUnavailable)
+		}
+		return err
+	}, nil
+}
+
+// Capture under every original provider's admission gate after authority was
+// revoked. An old credential cannot reserve a later row. The original receipt
+// retains its front lifetime even after public SID deletion, so retry cannot
+// mistake a missing HubSessionStore row for native settlement.
+func (p *hubStdioSessions) AwaitRevokedSessions(ctx context.Context, revoked func(context.Context) (bool, error)) error {
+	var result error
+	for _, provider := range p.providers {
+		for _, original := range provider.Retirements() {
+			selected, err := revoked(original.Session())
+			if err != nil {
+				result = errors.Join(result, err)
+				continue
+			}
+			if !selected {
+				continue
+			}
+			if original.Session() == nil || original.Session().Err() == nil {
+				result = errors.Join(result, daemon.ErrIsolatedStdioUnavailable)
+				continue
+			}
+			receipt, err := original.Await(ctx)
+			if !receipt.Complete() {
+				err = errors.Join(err, daemon.ErrIsolatedStdioUnavailable)
+			}
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
 // Only bounded POST/DELETE responses cross this private in-process boundary.
 // It is deliberately not mounted on a socket and does not accept GET streams.
 type hubStdioResponse struct {

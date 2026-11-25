@@ -179,6 +179,10 @@ func frozenInstallMutationReceipt(plan *Plan, opts InstallOpts) InstallMutationR
 	for _, task := range plan.SchedulerTasks {
 		appendTask(task.Name)
 	}
+	if plan.sessionLocal != nil {
+		// Observe the actual reused backend. No provider descriptor was written.
+		appendTask(plan.sessionLocal.Route.TaskName)
+	}
 	return receipt
 }
 

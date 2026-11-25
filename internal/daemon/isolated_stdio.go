@@ -398,7 +398,7 @@ func (s *isolatedStdioSession) run() {
 		s.receipt.PrivateStderrBytes, s.receipt.PrivateStderrEOF, s.receipt.PrivateStderrReadFailed, s.receipt.StdoutReadFailed, s.receipt.StdoutProtocolInvalid)
 	p.mu.Lock()
 	close(s.receiptDone)
-	if !s.receipt.Pending {
+	if s.receipt.Complete() {
 		p.reserved -= p.limits.TreeCost
 		delete(p.sessions, s.sid)
 	}
@@ -418,6 +418,19 @@ func (p *IsolatedStdioSessions) Retirement(sid string) *IsolatedStdioRetirement 
 	return nil
 }
 
+// RetirementForSession borrows the receipt for the original front lifetime.
+// It creates no process, no handle and no retirement authority of its own.
+func (p *IsolatedStdioSessions) RetirementForSession(session context.Context) *IsolatedStdioRetirement {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, s := range p.sessions {
+		if s.grant.Session == session {
+			return &IsolatedStdioRetirement{s: s}
+		}
+	}
+	return nil
+}
+
 // Retirements captures existing original receipt holders without exposing
 // private session identifiers or acquiring another process handle. Capturing
 // does not revoke sessions; a holder remains usable after its row is retired.
@@ -432,6 +445,16 @@ func (p *IsolatedStdioSessions) Retirements() []*IsolatedStdioRetirement {
 }
 
 type IsolatedStdioRetirement struct{ s *isolatedStdioSession }
+
+// Session is the original front lifetime, not a process identifier or a new
+// capability. The composing listener uses it to match its own authenticated
+// scope when receiving revocation, including after a front SID was deleted.
+func (r *IsolatedStdioRetirement) Session() context.Context {
+	if r == nil || r.s == nil {
+		return nil
+	}
+	return r.s.grant.Session
+}
 
 func (r *IsolatedStdioRetirement) Await(ctx context.Context) (StdioHostSettlement, error) {
 	if r == nil || r.s == nil || ctx == nil {

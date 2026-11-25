@@ -277,6 +277,8 @@ func CanonicalAutostartEntrypoint() (string, error) {
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type Plan struct {
+	sessionLocal             *sessionLocalInstallTarget
+	manifestHash             string
 	runtimeProduct           *InstallParsedManifestBypass
 	ownedBackendInstall      *managedBackendInstallOperation
 	projectAttachment        *projectClientAttachmentPlan
@@ -377,6 +379,7 @@ type ClientUpdatePlan struct {
 
 // InstallOpts controls an install invocation.
 type InstallOpts struct {
+	sessionLocal               *sessionLocalInstallTarget
 	requireExistingStdioBridge bool
 	ProjectClientRollback      *InstallProjectClientRollback
 	ProjectClientCreate        *InstallProjectClientCreate
@@ -611,7 +614,7 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 		return err
 	}
 	authorityRequest := CanonicalAtAdmission()
-	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+	if (IsSerenaServer(m.Name) || len(selectedSessionLocalDaemons(m, opts.DaemonFilter)) != 0) && installOptsMayWriteClients(opts) {
 		var targetErr error
 		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
 		if targetErr != nil {
@@ -619,6 +622,10 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 		}
 	}
 	// 2. Preflight.
+	opts.sessionLocal, err = a.resolveSessionLocalInstallTarget(ctx, m, opts)
+	if err != nil {
+		return err
+	}
 	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
@@ -668,6 +675,9 @@ func (a *API) installFrozenPlanCoreWithManagedDeps(ctx context.Context, m *confi
 	frozen := frozenInstallMutationReceipt(plan, opts)
 	defer func() {
 		frozen.ClientConfigSettlements = append([]ClientConfigSettlementV1(nil), plan.clientConfigSettlements...)
+		if plan.sessionLocal != nil && plan.sessionLocal.legacyRemovalCommitted {
+			frozen.Committed = true
+		}
 		if !opts.DryRun && err == nil {
 			frozen.Committed = true
 		}
@@ -884,6 +894,7 @@ func (a *API) installUsingEmbedFirstWithReceipt(opts InstallOpts, receipt func(I
 // re-fixed per site.
 func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
 	return BuildPlanOpts{
+		sessionLocal:           opts.sessionLocal,
 		DaemonFilter:           opts.DaemonFilter,
 		ClientsInclude:         opts.ClientsInclude,
 		IncludeAllClients:      opts.IncludeAllClients,
@@ -925,12 +936,16 @@ func (a *API) installFromManifestDirWithAdoptLeaseHeld(opts InstallOpts, manifes
 		return err
 	}
 	authorityRequest := CanonicalAtAdmission()
-	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+	if (IsSerenaServer(m.Name) || len(selectedSessionLocalDaemons(m, opts.DaemonFilter)) != 0) && installOptsMayWriteClients(opts) {
 		var targetErr error
 		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
 		if targetErr != nil {
 			return fmt.Errorf("resolve client routing target: %w", targetErr)
 		}
+	}
+	opts.sessionLocal, err = a.resolveSessionLocalInstallTarget(context.Background(), m, opts)
+	if err != nil {
+		return err
 	}
 	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
@@ -950,6 +965,7 @@ func bindPlanSupervisorIntentManifestHash(plan *Plan, manifestHash string) {
 	for i := range plan.SupervisorIntent {
 		plan.SupervisorIntent[i].manifestHash = manifestHash
 	}
+	plan.manifestHash = manifestHash
 	plan.supervisorIntentHashesBound = true
 }
 
@@ -968,7 +984,7 @@ func (a *API) installPlanCoreWithRoutingTargetLease(
 }
 
 func (a *API) withInstallRoutingTargetLease(ctx context.Context, m *config.ServerManifest, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, run func() error) error {
-	if opts.DryRun || !IsSerenaServer(m.Name) || !installOptsMayWriteClients(opts) {
+	if opts.DryRun || (!IsSerenaServer(m.Name) && opts.sessionLocal == nil) || !installOptsMayWriteClients(opts) {
 		return run()
 	}
 	return a.WithClientRoutingAuthorityLease(ctx, authorityRequest, func(ClientRoutingTarget) error {
@@ -2272,6 +2288,7 @@ func uninstallSchedulerTasksForServer(server string) (scheduler.Scheduler, []sch
 
 // BuildPlanOpts controls plan-time filtering.
 type BuildPlanOpts struct {
+	sessionLocal        *sessionLocalInstallTarget
 	runtimeProduct      *InstallParsedManifestBypass
 	ProjectClientCreate *InstallProjectClientCreate
 	DaemonFilter        string
@@ -2328,6 +2345,9 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		SkipClientConfigWrites: opts.SkipClientConfigWrites,
 	}); err != nil {
 		return nil, err
+	}
+	if len(selectedSessionLocalDaemons(m, opts.DaemonFilter)) != 0 {
+		return buildSessionLocalInstallPlan(m, opts)
 	}
 	// G6 remote-http branch (sub-PR 2): no daemons, no scheduler
 	// tasks, no per-daemon ports. Bind URL + expanded Headers

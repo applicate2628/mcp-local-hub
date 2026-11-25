@@ -262,6 +262,11 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			add("external-port-range", fmt.Sprintf("port %d (%s)", d.Port, d.Name), fmt.Sprintf("daemon %s/%s: port %d is outside the valid range 1..65535", m.Name, d.Name, d.Port), "Set a valid free fixed port (1..65535) for this daemon in the manifest.", false)
 			continue
 		}
+		// A private provider keeps this number only as its registered identity;
+		// its original stdio owner binds no per-provider TCP socket.
+		if m.Transport == config.TransportStdioBridge && d.MCPStdioState == config.MCPStdioStateSessionLocal {
+			continue
+		}
 		if preflightPortInUse(d.Port) && !portHeldByOurDaemonForPortArm(d.Port, m.Name, d.Name, false) {
 			add("external-port-free", fmt.Sprintf("port %d (%s)", d.Port, d.Name), fmt.Sprintf("port %d already in use (needed for daemon %s/%s)", d.Port, m.Name, d.Name), "Free the port or change the daemon port in the manifest.", false)
 		}

@@ -213,6 +213,52 @@ func TestRegisteredHubStdioSessionsIsolateAndRetireOriginalProviders(t *testing.
 		t.Fatal(err)
 	}
 	endpoint := listener.Endpoint()
+	t.Run("control admission receives original provider before publication", func(t *testing.T) {
+		control, err := api.ReadHubMcpControlToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		providers := api.LoadResolverSnapshot().SessionLocalStdioEndpoints()
+		if len(providers) != 1 {
+			t.Fatalf("prepared providers: %d", len(providers))
+		}
+		body, err := json.Marshal(api.HubStdioAdmissionRequest{Endpoint: providers[0], Scope: "claude-code", Probe: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/internal/reload-tokens", endpoint.Port), bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("X-Mcphub-Control-Token", control)
+		r.Header.Set("X-Mcphub-Control-Operation", "stdio-admission-v1")
+		r.Header.Set("X-Mcphub-Instance-Id", endpoint.InstanceID)
+		client := &http.Client{Timeout: 30 * time.Second}
+		response, err := client.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("native private admission: %d", response.StatusCode)
+		}
+		// The actual HTTP control path awaits Complete(), including the native
+		// tree and all stream receipts. It must release its reservation before
+		// the two subsequent registered client sessions acquire theirs.
+		for _, provider := range listener.stdio.providers {
+			if len(provider.Retirements()) != 0 {
+				t.Fatal("admission returned with original provider custody outstanding")
+			}
+		}
+		select {
+		case pid := <-eof:
+			if pid <= 0 {
+				t.Fatal("admission fixture did not report its own PID")
+			}
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		}
+	})
 	client := &http.Client{Timeout: 10 * time.Second}
 	request := func(scope, sid, method, body string) (int, string, []byte) {
 		t.Helper()

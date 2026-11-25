@@ -552,7 +552,7 @@ func (s *HubSessionStore) Create(client, protoVer string, snap *ResolverSnapshot
 		LastUsedAt:       now,
 	}
 	if s.opts.StdioSessions != nil {
-		sess.stdioLifetime, sess.stdioCancel = context.WithCancel(s.sweepCtx)
+		sess.stdioLifetime, sess.stdioCancel = context.WithCancel(context.WithValue(s.sweepCtx, hubStdioFrontContextKey{}, sess))
 	}
 	s.sessions[id] = sess
 	s.perClient[client]++

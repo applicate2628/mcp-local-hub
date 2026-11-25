@@ -252,6 +252,11 @@ func StartHubListener(ctx context.Context, a *api.API, opts HubListenerOptions) 
 	}
 
 	mux := http.NewServeMux()
+	if strict && private != nil {
+		reload.StdioAdmission = handler.AdmitSessionLocalStdio
+		reload.ProjectScopeSettlement = handler.ReceiveProjectScopeSettlement
+		reload.StdioInstanceID = ep.InstanceID
+	}
 	// /clients/ catches everything under /clients/<id>/mcp; the
 	// handler's path parser validates the trailing /mcp + the client
 	// id (gate 2). Sourced from api.HubClientPrefix — the single owner

@@ -6,8 +6,10 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
+	"time"
 
 	"mcp-local-hub/internal/config"
 )
@@ -47,18 +49,113 @@ type HubStdioSessions interface {
 	RoundTrip(*http.Request, context.Context, HubStdioEndpoint, func() bool) (*http.Response, error)
 }
 
-type hubStdioCredential struct{ digest [sha256.Size]byte }
+type hubStdioCredential struct {
+	digest  [sha256.Size]byte
+	project *hubProjectRebindReceiving
+}
+
+// Carried only by the lifetime created in HubSessionStore. The original
+// provider retains this value until its own receipt is complete, even after
+// the public SID has been deleted. It is never supplied by an HTTP caller.
+type hubStdioFrontContextKey struct{}
+
+type hubStdioRetirementCapture interface {
+	CaptureRetirement(context.Context, HubStdioEndpoint) (func(context.Context) error, error)
+}
+
+// AdmitSessionLocalStdio belongs to the original front/session owner. The
+// caller has already passed its independent control-token gate. A positive
+// probe is returned only after initialize, tools/list and the original native
+// process/stream receipt; DELETE/HTTP acknowledgement is not settlement.
+func (h *HubMcpHandler) AdmitSessionLocalStdio(ctx context.Context, request HubStdioAdmissionRequest) (resultErr error) {
+	snapshot := LoadResolverSnapshot()
+	endpoint := request.Endpoint
+	ref := canonicalDaemonRef{Server: endpoint.Server, Daemon: endpoint.Daemon, Port: endpoint.Port}
+	if snapshot == nil || snapshot.sessionLocalEndpoints[ref] != endpoint || endpoint.Configuration == "" || !h.sessions.allowsEndpoint(snapshot, ref) {
+		return errHubDaemonAdmission
+	}
+	if !request.Probe {
+		return nil
+	}
+	if !isSupportedClient(request.Scope) || !slices.Contains(snapshot.Bindings[request.Scope], ref) {
+		return errHubDaemonAdmission
+	}
+	current := liveTokenTable.Load()
+	if current == nil || current.guarded(request.Scope) || !isLowerHex64(current.tokens.Tokens[request.Scope]) {
+		return errHubDaemonAdmission
+	}
+	capture, ok := h.sessions.opts.StdioSessions.(hubStdioRetirementCapture)
+	if !ok {
+		return errHubDaemonAdmission
+	}
+	session, err := h.sessions.Create(request.Scope, hubProtocolVersionFallback, snapshot)
+	if err != nil {
+		return err
+	}
+	session.mu.Lock()
+	session.InstanceID = h.currentInstanceID()
+	session.stdioCredential = &hubStdioCredential{digest: sha256.Sum256([]byte(current.tokens.Tokens[request.Scope]))}
+	session.IntendedParticipants = []canonicalDaemonRef{ref}
+	session.mu.Unlock()
+	defer func() {
+		// Capture before cancellation can remove a completely settled row.
+		await, captureErr := capture.CaptureRetirement(session.stdioLifetime, endpoint)
+		h.sessions.Delete(session.ClientSessionID)
+		if captureErr != nil {
+			resultErr = errors.Join(resultErr, captureErr)
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		resultErr = errors.Join(resultErr, await(cleanup))
+	}()
+	if _, err := AggregateInitialize(ctx, session, json.RawMessage(`1`)); err != nil {
+		return err
+	}
+	session.mu.Lock()
+	initialized := len(session.InitSuccesses) == 1 && len(session.InitFailures) == 0
+	session.mu.Unlock()
+	if !initialized {
+		return errHubDaemonAdmission
+	}
+	body, err := AggregateToolsList(ctx, session, json.RawMessage(`2`), h.currentInstanceID())
+	if err != nil {
+		return err
+	}
+	var reply struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			Tools json.RawMessage `json:"tools"`
+			Meta  struct {
+				Hub struct {
+					Failures []json.RawMessage `json:"partialFailures"`
+				} `json:"mcphub"`
+			} `json:"_meta"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(body, &reply) != nil || len(reply.Error) != 0 || len(reply.Result.Tools) == 0 || len(reply.Result.Meta.Hub.Failures) != 0 {
+		return errHubDaemonAdmission
+	}
+	return nil
+}
 
 func (s *hubSession) stdioCredentialCurrent() bool {
 	if s.stdioCredential == nil {
 		return false
 	}
 	current := liveTokenTable.Load()
-	if current != nil && !current.guarded(s.ScopeKey) {
+	if current != nil {
 		token := current.tokens.Tokens[s.ScopeKey]
 		digest := sha256.Sum256([]byte(token))
 		if token != "" && subtle.ConstantTimeCompare(digest[:], s.stdioCredential.digest[:]) == 1 {
-			return true
+			if s.stdioCredential.project != nil {
+				_, ok := currentHubProjectEnrollment(s.ScopeKey, token, *s.stdioCredential.project)
+				if ok {
+					return true
+				}
+			} else if !current.guarded(s.ScopeKey) {
+				return true
+			}
 		}
 	}
 	// The old credential cannot retain a usable private conversation after

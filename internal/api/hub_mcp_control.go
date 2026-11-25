@@ -17,7 +17,11 @@
 //   - Constant-time token compare via subtle.ConstantTimeCompare; the
 //     64-hex shape gate precedes the compare to keep the timing path
 //     identical between "wrong shape" and "wrong value".
-//   - Body is ignored. Reload is global; no parameters.
+//   - Without X-Mcphub-Control-Operation the body is ignored and reload is
+//     global. The protected listener additionally accepts two strict, bounded
+//     POST bodies: stdio-admission-v1 and project-scope-settlement-v1. They
+//     require its current instance id and its original owner callbacks. Their
+//     204 response follows receiving, never just dispatch or DELETE.
 //   - Rate-limit: a 2nd valid reload within 5s of the previous
 //     SUCCESSFUL reload returns 429 with `Retry-After: 5`. Failed-auth
 //     attempts do NOT count toward cooldown. Concurrent valid requests
@@ -42,6 +46,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,6 +80,11 @@ type InternalReloadHandler struct {
 	// request handler's reads.
 	controlTok atomic.Pointer[string]
 	original   *hubRouteReloadOwner
+	// Set before serving by the original protected listener only. The ordinary
+	// GUI listener has no authority to admit private provider processes.
+	StdioAdmission         func(context.Context, HubStdioAdmissionRequest) error
+	ProjectScopeSettlement func(context.Context, HubProjectScopeSettlementRequest) error
+	StdioInstanceID        string
 }
 
 // NewInternalReloadHandler generates a fresh control token via
@@ -245,6 +255,38 @@ func (h *InternalReloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		_ = LogHubMcpEvent("warn", "internal-reload-rejected", map[string]any{
 			"reason": "unauth",
 		})
+		return
+	}
+	if operation := r.Header.Get("X-Mcphub-Control-Operation"); operation != "" {
+		if (operation != "stdio-admission-v1" && operation != "project-scope-settlement-v1") || r.Method != http.MethodPost || h.StdioAdmission == nil ||
+			r.Header.Get("X-Mcphub-Instance-Id") != h.StdioInstanceID || h.StdioInstanceID == "" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 2049))
+		if operation == "project-scope-settlement-v1" {
+			var request HubProjectScopeSettlementRequest
+			if err != nil || len(body) > 2048 || decodeProjectAttachmentJSON(body, &request) != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if h.ProjectScopeSettlement == nil || h.ProjectScopeSettlement(r.Context(), request) != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request HubStdioAdmissionRequest
+		if err != nil || len(body) > 2048 || decodeProjectAttachmentJSON(body, &request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if err := h.StdioAdmission(r.Context(), request); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

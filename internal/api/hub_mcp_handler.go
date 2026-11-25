@@ -227,8 +227,10 @@ func (h *HubMcpHandler) checkTokenAndInstanceID(w http.ResponseWriter, r *http.R
 	// both kinds (clients via EnsureHubTokens, groups via
 	// EnsureGroupTokens), so the compare is kind-agnostic.
 	if ConstantTimeCompareToken(scopeKey, tok) != 1 {
-		w.WriteHeader(http.StatusUnauthorized)
-		return false
+		if _, ok := h.projectTokenReceiving(r.Context(), scopeKey, tok); !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return false
+		}
 	}
 	// Gate 5: instance id match. Constant-time compare against the
 	// published endpoint's InstanceID. An empty currentInstanceID
@@ -626,6 +628,15 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	var project *hubProjectRebindReceiving
+	if table := liveTokenTable.Load(); table != nil && table.guarded(scopeKey) {
+		received, ok := h.projectTokenReceiving(r.Context(), scopeKey, r.Header.Get("X-Mcphub-Hub-Token"))
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		project = &received
+	}
 	sess, err := h.sessions.Create(scopeKey, negotiatedVersion, snap)
 	if err != nil {
 		if errors.Is(err, ErrSessionCapExceeded) {
@@ -639,7 +650,7 @@ func (h *HubMcpHandler) handleInitialize(w http.ResponseWriter, r *http.Request,
 	sess.mu.Lock()
 	sess.InstanceID = r.Header.Get("X-Mcphub-Instance-Id")
 	if sess.stdioSessions != nil {
-		sess.stdioCredential = &hubStdioCredential{digest: sha256.Sum256([]byte(r.Header.Get("X-Mcphub-Hub-Token")))}
+		sess.stdioCredential = &hubStdioCredential{digest: sha256.Sum256([]byte(r.Header.Get("X-Mcphub-Hub-Token"))), project: project}
 	}
 	sess.mu.Unlock()
 

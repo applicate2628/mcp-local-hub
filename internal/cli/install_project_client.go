@@ -8,7 +8,7 @@ import (
 )
 
 func parseInstallProjectClientControls(cmd *cobra.Command, server, daemon, clientFlag string, dry, all, allClients, reconcileHub, reconcileFront, rollback, upgrade, check, noClient bool, root, entry, policy string, create bool, digest string) (*api.InstallProjectClientCreate, error) {
-	names := []string{"project-client-root", "project-client-entry", "project-client-policy-source", "create-project-client", "project-client-plan-sha256"}
+	names := []string{"project-client-root", "project-client-entry", "project-client-policy-source", "create-project-client", "project-client-plan-sha256", "project-client-group"}
 	anyControl := false
 	for _, name := range names {
 		anyControl = anyControl || cmd.Flags().Changed(name)
@@ -20,6 +20,9 @@ func parseInstallProjectClientControls(cmd *cobra.Command, server, daemon, clien
 		return nil, fmt.Errorf("PROJECT_CLIENT_INVALID: prospective attachment controls require one explicit server, daemon and codex-cli client")
 	}
 	c := &api.InstallProjectClientCreate{ProjectRoot: root, LogicalEntryName: entry, PolicySource: policy, ApplyCreate: create, ExpectedPlanSHA256: digest}
+	if cmd.Flags().Lookup("project-client-group") != nil {
+		c.Group, _ = cmd.Flags().GetString("project-client-group")
+	}
 	if err := api.ValidateInstallProjectClientCreate(api.InstallOpts{Server: server, DaemonFilter: daemon, ClientsInclude: []string{"codex-cli"}, DryRun: dry, ProjectClientCreate: c}); err != nil {
 		return nil, err
 	}
@@ -30,7 +33,7 @@ func parseInstallProjectClientRollbackControls(cmd *cobra.Command, dry, all, all
 	if all || allClients || reconcileHub || reconcileFront || rollback || upgrade || check || noClient {
 		return nil, fmt.Errorf("PROJECT_CLIENT_INVALID: rollback controls are exclusive")
 	}
-	for _, name := range []string{"server", "daemon", "clients", "project-client-policy-source", "create-project-client", "project-client-plan-sha256"} {
+	for _, name := range []string{"server", "daemon", "clients", "project-client-policy-source", "create-project-client", "project-client-plan-sha256", "project-client-group"} {
 		if cmd.Flags().Changed(name) {
 			return nil, fmt.Errorf("PROJECT_CLIENT_INVALID: rollback conflicts with %s", name)
 		}

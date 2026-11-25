@@ -22,6 +22,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -31,6 +32,7 @@ import (
 
 // HubReconcileOpts toggles the gate direction.
 type HubReconcileOpts struct {
+	privateAdmitted bool
 	// GateOn=true emits the ON-transition plan (one AddReplace
 	// `mcphub-hub` per client with non-empty bindings + a Remove for
 	// every previously-installed per-(server, client) entry).
@@ -116,6 +118,9 @@ func BuildHubReconcilePlan(
 	// could still slip through. Fail loud here rather than emit a plan
 	// where the per-server Remove deletes the just-written aggregate.
 	for i := range manifests {
+		if (!opts.GateOn || !opts.privateAdmitted) && len(selectedSessionLocalDaemons(&manifests[i], "")) != 0 {
+			return nil, ErrSessionLocalInstallUnavailable
+		}
 		if manifests[i].Name == hubReconcileAggregateEntryName {
 			return nil, fmt.Errorf("manifest name %q collides with the reserved hub-aggregate entry name; rename the manifest before reconciling", hubReconcileAggregateEntryName)
 		}
@@ -332,6 +337,36 @@ func BuildHubReconcilePlan(
 		}
 	}
 	return plan, nil
+}
+
+// BuildAdmittedHubReconcilePlan keeps private descriptors behind the same
+// original front and protocol/retirement admission as per-server install.
+// The caller holds the routing lease before the Hub mutation lease through
+// apply; dry runs perform only the descriptor/owner checks.
+func (a *API) BuildAdmittedHubReconcilePlan(ctx context.Context, manifests []config.ServerManifest, endpoint HubEndpoint, tokens HubTokenTable, opts HubReconcileOpts, dryRun bool) ([]ClientUpdatePlan, error) {
+	for i := range manifests {
+		m := &manifests[i]
+		if len(selectedSessionLocalDaemons(m, "")) == 0 {
+			continue
+		}
+		if !opts.GateOn {
+			return nil, ErrSessionLocalInstallUnavailable
+		}
+		installOpts := InstallOpts{Server: m.Name, DryRun: dryRun}
+		target, err := a.resolveSessionLocalInstallTarget(ctx, m, installOpts)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil || target.Endpoint != endpoint {
+			return nil, ErrSessionLocalInstallUnavailable
+		}
+		plan := &Plan{sessionLocal: target, supervisorIntentHashesBound: true}
+		if err := a.verifySessionLocalInstallTarget(ctx, m, plan, installOpts, !dryRun); err != nil {
+			return nil, err
+		}
+	}
+	opts.privateAdmitted = true
+	return BuildHubReconcilePlan(manifests, endpoint, tokens, opts)
 }
 
 // ApplyHubReconcileInOrder applies the plan per spec §"Crash-safe
