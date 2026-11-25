@@ -30,16 +30,30 @@ func TestRuntimeImageErrorsReachTimerFanoutAndDryRunWithoutMutation(t *testing.T
 	t.Cleanup(SetTestCanonicalMcphubPath(""))
 	root := hardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(root))
+	// Even an admitted Product must reject an occupied singleton whose owner
+	// sidecar cannot be decoded. Keep the original quiet lease for all calls.
+	lockPath := filepath.Join(root, "supervisor.lock")
+	lock, err := AcquireSupervisorLockQuiet(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(lock.Release)
+	ownerPath := lockPath + ".owner.json"
+	ownerBefore := []byte(`{"pid":`)
+	if err := os.WriteFile(ownerPath, ownerBefore, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m := globalTwoDaemonManifest()
 	m.WeeklyRefresh = true
 	assertImageError := func(err error) {
 		t.Helper()
 		var imageErr *RuntimeProductImageError
-		if !errors.As(err, &imageErr) || imageErr.Cause == nil {
-			t.Fatalf("IMAGE-ERROR lost admission cause: %v", err)
+		var syntaxErr *json.SyntaxError
+		if !errors.As(err, &imageErr) || !errors.As(imageErr.Cause, &syntaxErr) || !strings.Contains(imageErr.Cause.Error(), "read runtime product owner") {
+			t.Fatalf("IMAGE-ERROR lost the invalid owner-sidecar cause: %v", err)
 		}
 	}
-	_, err := mergeServerWeeklyRefreshTimer(m, "", nil)
+	_, err = mergeServerWeeklyRefreshTimer(m, "", nil)
 	assertImageError(err)
 	workspace := &config.ServerManifest{Name: "image-error-workspace", Kind: config.KindWorkspaceScoped, DaemonTemplate: &config.DaemonTemplate{}}
 	_, err = serenaOrPlanDaemons(workspace, nil, "", []WorkspaceEntry{{WorkspacePath: root, Language: SerenaLanguageSentinel}}, "", io.Discard)
@@ -53,6 +67,9 @@ func TestRuntimeImageErrorsReachTimerFanoutAndDryRunWithoutMutation(t *testing.T
 	}
 	if _, err := os.Stat(filepath.Join(root, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("failed image admission mutated intent: %v", err)
+	}
+	if ownerAfter, err := os.ReadFile(ownerPath); err != nil || !bytes.Equal(ownerAfter, ownerBefore) {
+		t.Fatalf("failed image admission changed the occupied owner's sidecar: %v", err)
 	}
 }
 
@@ -1865,11 +1882,8 @@ func TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken(t *test
 }
 
 // TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches
-// is the in-gate Crux-3 guard: a token minted from a lock whose leaf does NOT
-// match the gate's own stateDir/supervisor.lock is REJECTED — the gate treats it
-// as no-bypass, the probe runs, and the spec-bearing write REFUSES. This folds
-// the path-mismatch check INTO the gate so a misconfigured Phase-2 call site
-// (wrong resolver) cannot silently re-open the split-brain.
+// requires runtime-image preflight to reject a token from another state root
+// before a spec-bearing write can reach the install gate.
 func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatches(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -1887,7 +1901,7 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatc
 	// Mint a token from a lock on a DIFFERENT leaf (a sibling temp dir). Its
 	// .path does not equal the gate's stateDir/supervisor.lock, so the identity
 	// check must reject it.
-	otherDir := t.TempDir()
+	otherDir := hardenedTempDir(t)
 	otherLk, err := AcquireSupervisorLock(filepath.Join(otherDir, "supervisor.lock"))
 	if err != nil {
 		t.Fatalf("acquire mismatched supervisor lock: %v", err)
@@ -1905,25 +1919,35 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatc
 	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
-	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("mismatched bypass setup touched %s before install: %v", leaf, statErr)
+		}
+	}
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: otherLk.AllowSpecBearingWriteBypass(),
 	})
-	if err == nil {
-		t.Fatal("expected §7.1 refuse when the bypass token's lock leaf mismatches the gate path, got nil")
+	var admissionErr *AdmissionError
+	if intentPath != "" || !errors.As(err, &admissionErr) || admissionErr.ID != "canonical-mcphub" ||
+		admissionErr.Reason != "E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory" {
+		t.Fatalf("invalid bypass preflight classification: path=%q error=%v", intentPath, err)
 	}
-	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
-		t.Errorf("refuse error %q missing the gate signature (path-mismatch token must NOT bypass)", err.Error())
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("refused bypass touched %s: %v", leaf, statErr)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 || len(f.deleteNames) != 0 || len(f.importNames) != 0 {
+		t.Fatalf("refused bypass mutated scheduler: create=%d run=%d delete=%v import=%v", f.createCount, f.runCount, f.deleteNames, f.importNames)
 	}
 }
 
 // TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased
-// proves the identity check verifies the lock is STILL HELD, not merely that the
-// handle once existed. A token minted from a matching lock that is then released
-// (Release() nils .fl) is stale and must be REJECTED — the gate falls through to
-// the probe and refuses.
+// requires runtime-image preflight to reject a previously held token. Reacquiring
+// the same path must not restore authority to the released original token.
 func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyReleased(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
 	preparePreflightBinaryChecks(t)
@@ -1959,17 +1983,24 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyRele
 	m := serenaTemplateManifest()
 	a := NewAPI()
 	var buf bytes.Buffer
-	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
 		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: token, // stale: minted then released
 	})
-	if err == nil {
-		t.Fatal("expected §7.1 refuse when the bypass token's lock was already released, got nil")
+	var admissionErr *AdmissionError
+	if intentPath != "" || !errors.As(err, &admissionErr) || admissionErr.ID != "canonical-mcphub" ||
+		admissionErr.Reason != "E_RUNTIME_PRODUCT_IMAGE: runtime product supervisor exclusion is absent, released, or belongs to another state directory" {
+		t.Fatalf("invalid bypass preflight classification: path=%q error=%v", intentPath, err)
 	}
-	if !strings.Contains(err.Error(), "refusing to write spec-bearing") {
-		t.Errorf("refuse error %q missing the gate signature (released token must NOT bypass)", err.Error())
+	for _, leaf := range []string{supervisorIntentFileLeaf, supervisorIntentFileLeaf + supervisorIntentLockSuffix, SupervisorEventLogFileLeaf} {
+		if _, statErr := os.Stat(filepath.Join(stateDir, leaf)); !os.IsNotExist(statErr) {
+			t.Fatalf("refused bypass touched %s: %v", leaf, statErr)
+		}
+	}
+	if f.createCount != 0 || f.runCount != 0 || len(f.deleteNames) != 0 || len(f.importNames) != 0 {
+		t.Fatalf("refused bypass mutated scheduler: create=%d run=%d delete=%v import=%v", f.createCount, f.runCount, f.deleteNames, f.importNames)
 	}
 }
 
@@ -2591,46 +2622,44 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	}
 
 	var order []string
-	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	var completedPIDs []int
+	captures := make(map[string]*removedStopFixture, 2)
+	installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+		order = append(order, "capture")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		current, err := ReadSupervisorIntent(intentPath)
+		if err != nil || current.FindSupervisorDaemonByTaskName(task) == nil {
+			t.Fatalf("capture followed descriptor removal: task=%s error=%v", task, err)
+		}
+		pid := map[string]int{alphaTask: 4243, betaTask: 4244}[task]
+		wantPort := map[string]int{alphaTask: 9321, betaTask: 9322}[task]
+		if pid == 0 || port != wantPort || captures[task] != nil {
+			t.Fatalf("unexpected original capture: task=%s port=%d", task, port)
+		}
+		capture := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+			order = append(order, "complete")
+			assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+			current, err := ReadSupervisorIntent(intentPath)
+			if task != betaTask || err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+				t.Fatalf("cleanup did not receive only the committed removal: task=%s error=%v", task, err)
+			}
+			completedPIDs = append(completedPIDs, pid)
+			result := forceStopClosedFixture(task, port)
+			result.Target.PID = pid
+			return result, nil
+		}}
+		captures[task] = capture
+		return capture, nil
+	})
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 		order = append(order, "nudge")
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+		current, err := ReadSupervisorIntent(intentPath)
+		if err != nil || current.FindSupervisorDaemonByTaskName(betaTask) != nil || current.FindSupervisorDaemonByTaskName(alphaTask) == nil || current.FindSupervisorDaemonByTaskName(otherTask) == nil {
+			t.Fatalf("nudge preceded committed removal or lost a retained row: %v", err)
+		}
 		return ReconcileResponse{}, nil
 	}))
-
-	var killPorts []int
-	origForceKill := forceKillByPortFn
-	origLookup := lookupPortPID
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		order = append(order, "kill-port")
-		killPorts = append(killPorts, port)
-		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
-		return portKillNoListener, nil
-	}
-	lookupPortPID = func(port int) (int, bool, error) {
-		if port != 9322 {
-			t.Fatalf("lookupPortPID port = %d, want 9322", port)
-		}
-		return 0, false, nil
-	}
-	t.Cleanup(func() {
-		forceKillByPortFn = origForceKill
-		lookupPortPID = origLookup
-	})
-
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
-
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(ctx context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
-		return []DaemonStatus{{TaskName: betaTask, PID: 4244, State: "Running"}}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
 
 	m := &config.ServerManifest{
 		Name:          "demo",
@@ -2661,17 +2690,22 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			t.Fatalf("removed daemon %s survived merged intent: %+v", betaTask, written.Daemons)
 		}
 	}
-	// The captured supervisor-reported PID (4244) is killed first. The
-	// descriptor port is only polled for release; it must not fall through to a
-	// blind port kill because the removed row's port may already be reused.
-	if len(killPorts) != 0 {
-		t.Fatalf("forceKillByPortFn ports = %v, want none after the PID kill", killPorts)
+	// This mapping fixture completes the captured original beta descriptor.
+	// installRemovedPrepareFixture seals numerical PID/port fallbacks; native
+	// closure is covered by the separate original-owner Windows fixture.
+	if len(completedPIDs) != 1 || completedPIDs[0] != 4244 {
+		t.Fatalf("completed original fixture PIDs = %v, want exactly [4244]", completedPIDs)
 	}
-	if len(killedPIDs) != 1 || killedPIDs[0] != 4244 {
-		t.Fatalf("PID kills = %v, want exactly [4244]", killedPIDs)
+	if !reflect.DeepEqual(order, []string{"capture", "capture", "nudge", "complete"}) {
+		t.Fatalf("capture/nudge/complete order = %v", order)
 	}
-	if len(order) != 3 || order[0] != "ipc-status" || order[1] != "nudge" || order[2] != "kill-pid" {
-		t.Fatalf("ipc/reconcile/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if len(captures) != 2 {
+		t.Fatalf("captured %d original rows, want 2", len(captures))
+	}
+	for _, capture := range captures {
+		if capture.closed != 1 {
+			t.Fatalf("capture close count = %d, want 1", capture.closed)
+		}
 	}
 	if _, ok := written.Stops[betaTask]; ok {
 		t.Fatalf("removed daemon %s retained a dangling stop entry: %+v", betaTask, written.Stops)
