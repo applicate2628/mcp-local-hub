@@ -5,7 +5,8 @@
 1. [Scope](#scope)
 2. [Reviewed contract](#reviewed-contract)
 3. [Evidence and limits](#evidence-and-limits)
-4. [Remaining acceptance](#remaining-acceptance)
+4. [Native follow-up received by Root](#native-follow-up-received-by-root)
+5. [Remaining acceptance](#remaining-acceptance)
 
 ## Scope
 
@@ -29,6 +30,18 @@ The existing server idle timeout remains sixty seconds. If a transaction outlive
 
 The two checked-in negative patches are test inputs, not active source. Their exact `.gitattributes` entries preserve unified-diff context bytes; normal Go whitespace checks remain enabled.
 
+## Native follow-up received by Root
+
+Source commit `7f0155b44ddfddb14067b1b867de0ea9a4d315c7` retained all fifteen frozen source digests. The positive API command observed **13 root PASS and 2 root FAIL**. Both failures were existing workspace callers returning `SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE` before the intended mutation; they remain unverified until current preparation inputs are issued. They were not skipped or converted into passing fixtures.
+
+The separate CLI command passed **13 root tests**, with the one non-Windows-only platform test skipped on Windows. `TestForceStopAuthenticatedWindowsPipeOriginalCompletion` passed all three real-pipe scenarios in 5.97 s: explicit, removed-client-first and removed-reconcile-first. The whole CLI test package took 6.734 s; command compilation/startup are separately recorded, not included in that package duration. This is isolated source/native evidence, not installed-Product acceptance.
+
+Each negative patch was then applied independently. Sending preparation through the old destructive opcode caused one action and the named preparation assertion to fail. Removing the reconcile-original guard caused the named forbidden PID-reacquisition assertion to fail. Each Go command exited 1 as required. Both patches were reversed and the positive source tree was verified clean afterward.
+
+All four controllers and all 22 command owners were received with original root reaped, native Job active count zero, handles closed, capture EOF/closure and original readers joined. Exact receipt and export digests are in `force-stop-removed-native-20261125.json`; complete redacted command streams are maintained by existing coordination PR #664 in `integration-audit-20261125/native-continuation-evidence.json`.
+
+The dependent ARA-01 caller in existing PR #671 subsequently passed its focused API, registered-route and owned-stdio fixtures on the composed Source. Two separate causal regressions demonstrated that ignoring original completion or discarding a pending receipt after public SID deletion is detected; exact positive source was restored and the affected roots passed. The full records are `ara01-reviewed-positive-2` and `ara01-causal-negative-1` in coordination evidence. Those results qualify the caller fixtures; real pinned-provider/Product migration remains a separate acceptance boundary.
+
 ## Remaining acceptance
 
-Run the frozen positive Windows commands and each causal negative patch separately; retain original controller, child, Job, reader and capture completion evidence. Then test the ARA-01 caller against the composed source. Native execution and installed-Product migration acceptance are not claimed by this static review.
+Retest the two workspace callers with actual current preparation inputs and run the mandatory whole-repository gates. The original native test process and its modeled port inventory are not an installed Product or a different-user adversary. Native results above do not establish full integration, deployment readiness or a new Codex approval on the eventual published head.

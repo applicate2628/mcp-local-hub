@@ -1,0 +1,68 @@
+{
+  "schema": "mcphub-wl04-removal-native-observations-v1",
+  "source_commit": "7f0155b44ddfddb14067b1b867de0ea9a4d315c7",
+  "source_manifest_sha256": "49040a6a0e8023d58f6fa879d22de41c4427ced62cfc9996d1e424c2f91622c5",
+  "api": {
+    "root_pass": 13,
+    "root_fail": 2,
+    "prerequisite": "SERENA_PREPARATION_ASSEMBLY_UNAVAILABLE"
+  },
+  "cli": {
+    "root_pass": 13,
+    "root_skip": 1,
+    "skip_reason": "non-Windows-only platform contract",
+    "real_named_pipe_scenarios": 3,
+    "package_seconds": 6.734
+  },
+  "negative_controls": {
+    "required_exit_codes": [
+      1,
+      1
+    ],
+    "named_assertions_received": true,
+    "positive_source_restored": true
+  },
+  "runs": [
+    {
+      "id": "wl04-removal-stage-1",
+      "source_head": "c730cae455ef84d226ac5323953d9e7209b4016e",
+      "controller_status": "PASS",
+      "receipt_sha256": "279e1a2672bb90758208f46e71e6f3f89a8f51924f08e9f877805c58e834b5c0",
+      "private_export_sha256": "4d76825675df8ff0dc1af26b12cfe391c0b4ae795e469e1bc0ab2c0e673d4fb3",
+      "commands": 5,
+      "original_controller_reaped": true,
+      "controller_captures_closed": true
+    },
+    {
+      "id": "wl04-removal-positive-1",
+      "source_head": "7f0155b44ddfddb14067b1b867de0ea9a4d315c7",
+      "controller_status": "FAIL",
+      "receipt_sha256": "3d5700a84eee288004987f2672b14b10389b2b346644439468fa349e6010d7a1",
+      "private_export_sha256": "e0f2b526f05e45b0c502cbcdb647c64a5f1be985bde983e717ef85287b1ff995",
+      "commands": 4,
+      "original_controller_reaped": true,
+      "controller_captures_closed": true
+    },
+    {
+      "id": "wl04-removal-cli-1",
+      "source_head": "7f0155b44ddfddb14067b1b867de0ea9a4d315c7",
+      "controller_status": "PASS",
+      "receipt_sha256": "78cb5746a4cc145c5bcabc15f21425135dca3db03213ba04d66ac2656fdb3bb1",
+      "private_export_sha256": "a2724244d5e57e8fb87d7ccbe91dfd01926c2fe317c8a91cdf2fef8369bff68d",
+      "commands": 3,
+      "original_controller_reaped": true,
+      "controller_captures_closed": true
+    },
+    {
+      "id": "wl04-removal-negative-1",
+      "source_head": "7f0155b44ddfddb14067b1b867de0ea9a4d315c7",
+      "controller_status": "PASS",
+      "receipt_sha256": "0198b1420db2a130d85d6fe8e6c3229bd5588557b5bbbe007578160b1f142947",
+      "private_export_sha256": "a26d8c845d34baaaddb0f3afa71f7ec2489e1211738ed3b14bcf6a3ccd58a1d9",
+      "commands": 10,
+      "original_controller_reaped": true,
+      "controller_captures_closed": true
+    }
+  ],
+  "scope": "Original source/native command observations. No installed-Product, full-gate or current-head Codex approval claim."
+}
