@@ -38,7 +38,7 @@ func (a *API) PrepareSerenaParsedInstall(ctx context.Context, m *config.ServerMa
 	if a == nil || m == nil || !IsSerenaServer(m.Name) || m.Kind != config.KindWorkspaceScoped || m.DaemonTemplate == nil {
 		return nil, errors.New("SERENA_PARSED_PREPARATION_SCOPE_INVALID")
 	}
-	if opts.DryRun || opts.SupervisorLockBypass.lk != nil || opts.SerenaPreparedBinding != nil || opts.SerenaPreparedInvocation != nil {
+	if opts.DryRun || opts.SupervisorLockBypass.supplied() || opts.SerenaPreparedBinding != nil || opts.SerenaPreparedInvocation != nil {
 		return nil, errors.New("SERENA_PARSED_PREPARATION_REQUIRES_UNLOCKED_CALLER")
 	}
 	if opts.Workspaces == nil || !preparedSerenaDigest(opts.ManifestHash) {
@@ -106,6 +106,51 @@ func (a *API) PrepareSerenaParsedInstall(ctx context.Context, m *config.ServerMa
 	return &PreparedSerenaParsedInstall{api: a, owner: owner, manifest: &frozen, manifestSHA: opts.ManifestHash, policy: policy, request: request, binding: binding, record: record}, nil
 }
 
+// ObserveConsumerLaunch observes the installed descriptor and current consumer
+// environment using this original preparation's frozen manifest and policy.
+// The returned launch still requires the existing Ready consumer admission.
+func (prepared *PreparedSerenaParsedInstall) ObserveConsumerLaunch(ctx context.Context, task string) (*PreparedSerenaLaunchObservation, error) {
+	if prepared == nil || prepared.api == nil {
+		return nil, errors.New("SERENA_PARSED_PREPARATION_MISSING")
+	}
+	return prepared.api.observePreparedSerenaLaunch(ctx, task, prepared)
+}
+
+func (prepared *PreparedSerenaParsedInstall) validateConsumerLaunchSource(ctx context.Context, a *API) error {
+	if prepared == nil || a == nil || ctx == nil || prepared.api != a || prepared.owner == nil || prepared.manifest == nil {
+		return errors.New("SERENA_PARSED_PREPARATION_MISSING")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	owner, err := a.PreparedSerenaConsumerOwner()
+	if err != nil || owner != prepared.owner {
+		return errors.Join(err, errors.New("SERENA_PARSED_PREPARATION_OWNER_DRIFT"))
+	}
+	if a.serenaPrivatePublisher != nil {
+		if err := a.serenaPrivatePublisher.validateOrigin(ctx); err != nil {
+			return err
+		}
+	}
+	policySHA, err := prepared.policy.IdentitySHA256()
+	if err != nil || !preparedSerenaDigest(prepared.manifestSHA) || prepared.manifestSHA != prepared.request.ManifestSHA256 || policySHA != prepared.request.PolicySHA256 {
+		return errors.Join(err, errors.New("SERENA_PARSED_PREPARATION_SOURCE_DRIFT"))
+	}
+	return ctx.Err()
+}
+
+func (prepared *PreparedSerenaParsedInstall) consumerLaunchManifest() (*config.ServerManifest, error) {
+	raw, err := json.Marshal(prepared.manifest)
+	if err != nil {
+		return nil, err
+	}
+	var frozen config.ServerManifest
+	if err = json.Unmarshal(raw, &frozen); err != nil {
+		return nil, err
+	}
+	return &frozen, nil
+}
+
 // WithConsumerInvocation retains the exact final workspace selection through
 // the install callback and observed closure. Its context stays live until all
 // original mutation observations have received their resource closes. A
@@ -115,8 +160,23 @@ func (prepared *PreparedSerenaParsedInstall) WithConsumerInvocation(ctx context.
 	if prepared == nil || ctx == nil || run == nil {
 		return errors.New("SERENA_PARSED_PREPARATION_MISSING"), nil
 	}
+	if prepared.api != nil && prepared.api.serenaPrivatePublisher != nil {
+		bounded, cancel, err := prepared.api.serenaPrivatePublisher.boundedContext(ctx, prepared.api)
+		if err != nil {
+			return err, nil
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	work, cancel := context.WithDeadline(ctx, prepared.request.WorkDeadline)
 	defer cancel()
+	if prepared.api != nil && prepared.api.serenaPrivatePublisher != nil {
+		// Receive this after the invocation close below. Revocation after a
+		// completed callback is finalization failure, not a pre-commit result.
+		defer func() {
+			cleanupErr = errors.Join(cleanupErr, prepared.api.serenaPrivatePublisher.validateOrigin(work))
+		}()
+	}
 	invocation, err := prepared.acquireConsumerInvocation(work, workspaces, bypass)
 	if err != nil {
 		return err, nil
@@ -163,7 +223,7 @@ func (prepared *PreparedSerenaParsedInstall) acquireConsumerInvocation(work cont
 		}
 	}
 	var runtimeProduct *InstallParsedManifestBypass
-	if bypass.lk != nil {
+	if bypass.supplied() {
 		runtimeProduct = &bypass
 	}
 	image, err := resolveInstallRuntimeProduct(runtimeProduct)

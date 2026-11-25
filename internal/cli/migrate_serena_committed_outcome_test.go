@@ -71,11 +71,13 @@ func TestMigrateSerenaInstallPathPreservesCommittedOutcome(t *testing.T) {
 				if ctx.Err() != nil {
 					t.Fatalf("operation cancellation escaped into supervisor continuation: %v", ctx.Err())
 				}
-				_, release, err := realInterlockAcquire()
+				interlock, err := realInterlockAcquire(ctx)
+				if interlock != nil {
+					err = errors.Join(err, interlock.close())
+				}
 				if err != nil {
 					t.Fatalf("supervisor continuation still holds the quiet lock: %v", err)
 				}
-				release()
 				return nil
 			})()
 

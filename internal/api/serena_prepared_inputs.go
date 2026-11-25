@@ -38,6 +38,7 @@ type SerenaPreparationInputs struct {
 	Policy                                            SerenaPreparationPolicyV2
 	EnvironmentProjectionSHA256                       string
 	execution                                         SerenaPreparationEnvironment
+	cacheSeed                                         *privateSerenaCacheSeed
 	uvVersionProbe, pythonFindProbe, interpreterProbe *preparedSerenaCommandResult
 	qualifiedUV, qualifiedInterpreter                 PreparedSerenaFile
 	source                                            SerenaPreparationEnvironmentSource

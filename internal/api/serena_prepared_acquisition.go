@@ -18,6 +18,7 @@ type preparedSerenaAcquisition struct {
 	generation, attempt                   *SerenaOwnedTree
 	roots                                 PreparedSerenaOwnedRoots
 	buildConstraint                       *preparedSerenaBuildConstraint
+	cacheMaterialization                  *privateSerenaCacheSeedMaterialization
 	started, acquiring                    bool
 	generationAttempted, attemptAttempted bool
 }
@@ -79,6 +80,12 @@ func (a *preparedSerenaAcquisition) acquireRoots(ctx context.Context, r Prepared
 	if err == nil && a.inputs.execution.buildConstraint {
 		a.buildConstraint, err = acquirePreparedSerenaBuildConstraint(ctx, a.attempt)
 	}
+	if err == nil && a.inputs.cacheSeed != nil {
+		err = materializePrivateSerenaCacheSeed(ctx, a)
+		if err != nil {
+			err = errors.Join(err, errors.New("SERENA_PRIVATE_CACHE_SEED_MATERIALIZATION_FAILED"))
+		}
+	}
 	return roots, err
 }
 
@@ -86,6 +93,7 @@ func (a *preparedSerenaAcquisition) closeOriginalRoots() (retErr error) {
 	if a == nil {
 		return nil
 	}
+	retErr = errors.Join(retErr, a.cacheMaterialization.closeOriginal())
 	for _, tree := range []*SerenaOwnedTree{a.attempt, a.generation} {
 		if tree == nil {
 			continue
@@ -116,6 +124,10 @@ func (a *preparedSerenaAcquisition) install(ctx context.Context, r PreparedSeren
 	if a.started || a.acquiring || a.generation == nil || a.attempt == nil || a.roots != roots {
 		a.mu.Unlock()
 		return installed, errors.New("SERENA_PREPARED_INSTALL_ACQUISITION_UNQUALIFIED")
+	}
+	if a.inputs.cacheSeed != nil && (a.cacheMaterialization == nil || !a.cacheMaterialization.success) {
+		a.mu.Unlock()
+		return installed, errors.New("SERENA_PRIVATE_CACHE_SEED_MATERIALIZATION_INCOMPLETE")
 	}
 	a.started = true
 	a.mu.Unlock()

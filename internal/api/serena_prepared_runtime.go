@@ -557,6 +557,14 @@ func (o *PreparedSerenaRuntimeOwner) RetireUnused(ctx context.Context, r Prepare
 	if o == nil || o.effects == nil {
 		return errors.New("SERENA_CONSUMER_ONLY_RETIREMENT_UNAVAILABLE")
 	}
+	if private := o.privatePublisherOwner(); private != nil {
+		bounded, cancel, bindErr := private.boundedContext(ctx, private.api)
+		if bindErr != nil {
+			return bindErr
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	releaseIntent, err := o.effects.LockIntentOperation(ctx)
 	if err != nil {
 		return err

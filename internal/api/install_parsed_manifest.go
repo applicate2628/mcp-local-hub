@@ -237,7 +237,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// Before the pre-flight intent write and before any mutation, so a missing
 	// command or unresolved secret: ref fails fast.
 	var runtimeProduct *InstallParsedManifestBypass
-	if opts.SupervisorLockBypass.lk != nil {
+	if opts.SupervisorLockBypass.supplied() {
 		runtimeProduct = &opts.SupervisorLockBypass
 	}
 	scope := scopeForPreflight("")
@@ -343,7 +343,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 				return "", err
 			}
 			if invocation == nil {
-				if opts.SupervisorLockBypass.lk != nil || opts.SerenaPreparedBinding != nil {
+				if opts.SupervisorLockBypass.supplied() || opts.SerenaPreparedBinding != nil {
 					return "", errors.New("SERENA_PARSED_PREACQUIRED_INVOCATION_REQUIRED")
 				}
 				tasks := make([]string, 0, len(live))

@@ -31,6 +31,7 @@ type API struct {
 	preparedSerenaOwner              *PreparedSerenaRuntimeOwner
 	serenaPreparationAssembly        SerenaPreparationAssembly
 	serenaPreparationPublication     *PreparedSerenaPublicationOwner
+	serenaPrivatePublisher           *privateSerenaPublisherOwner
 	state                            *State
 	bus                              *EventBus
 

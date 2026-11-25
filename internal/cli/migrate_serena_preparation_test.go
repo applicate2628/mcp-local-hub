@@ -82,9 +82,9 @@ func TestMigrateSerenaPreparationFailurePrecedesReapAndRetainsRegistry(t *testin
 				t.Fatal("preparation refusal reached start")
 				return nil
 			})()
-			defer stubAcquireInterlock(t, func() (*api.SupervisorLock, func(), error) {
+			defer stubAcquireInterlock(t, func(context.Context) (*migrateSerenaInterlock, error) {
 				t.Fatal("preparation refusal acquired supervisor exclusion")
-				return nil, nil, nil
+				return nil, nil
 			})()
 			defer stubInstall(t, func(context.Context, *api.API, *config.ServerManifest, api.InstallParsedManifestOpts) (string, error) {
 				t.Fatal("preparation refusal reached intent install")

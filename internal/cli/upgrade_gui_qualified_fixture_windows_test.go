@@ -72,7 +72,15 @@ func loadWindowsCanonicalEntryFixture(t *testing.T, requiredEnv string) *windows
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		t.Fatalf("fixture input must be one JSON object: %v", err)
 	}
-	input := f.Input
+	return receiveWindowsCanonicalEntryFixture(t, f.Input)
+}
+
+// Shared receiving keeps the original build binding, public observer, exact
+// artifact hashes and native file acquisition identical for both fixture roles.
+func receiveWindowsCanonicalEntryFixture(t *testing.T, input windowsCanonicalEntryFixtureInput) *windowsCanonicalEntryFixture {
+	t.Helper()
+	f := &windowsCanonicalEntryFixture{Input: input}
+	var err error
 	testProduct, testProductSet := os.LookupEnv("MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT")
 	if testProductSet && testProduct != "1" {
 		t.Fatal("MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT must be 1 when supplied")

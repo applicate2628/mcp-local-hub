@@ -52,6 +52,14 @@ func (a *API) PreparedSerenaConsumerOwnerObserved(ctx context.Context, launch *P
 	if a == nil || launch == nil || launch.api != a {
 		return nil, errors.New("SERENA_COLD_LAUNCH_SOURCE_MISMATCH")
 	}
+	if a.serenaPrivatePublisher != nil {
+		bounded, cancel, err := a.serenaPrivatePublisher.boundedContext(ctx, a)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		ctx = bounded
+	}
 	if err := launch.validateSource(ctx); err != nil {
 		return nil, err
 	}
@@ -110,7 +118,7 @@ func (a *API) PreparedSerenaConsumerOwnerObserved(ctx context.Context, launch *P
 	if err != nil {
 		return nil, err
 	}
-	owner := &PreparedSerenaRuntimeOwner{consumer: &preparedSerenaConsumerCoordinator{root: launch.root, intentPath: launch.intentPath, sourceEpoch: launch.epoch, publication: publication, runtimeIdentity: reads.identity.runtimeRoot, recovered: recovered}}
+	owner := &PreparedSerenaRuntimeOwner{consumer: &preparedSerenaConsumerCoordinator{root: launch.root, intentPath: launch.intentPath, sourceEpoch: launch.epoch, publication: publication, runtimeIdentity: reads.identity.runtimeRoot, recovered: recovered, privatePublisher: a.serenaPrivatePublisher}}
 	a.preparedSerenaMu.Lock()
 	if a.preparedSerenaOwner != nil && a.preparedSerenaOwner != owner {
 		a.preparedSerenaMu.Unlock()
@@ -136,7 +144,7 @@ func (o *PreparedSerenaRuntimeOwner) InspectReady(ctx context.Context, request P
 			record = PreparedSerenaRuntimeRecord{}
 		}
 	}()
-	err = scope.receiveBody(ctx, nil, func(preparedSerenaIntentConsumerEffects) error { record = scope.record; return nil })
+	err = scope.receiveBody(ctx, nil, func(context.Context, preparedSerenaIntentConsumerEffects) error { record = scope.record; return nil })
 	return record, err
 }
 

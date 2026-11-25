@@ -18,6 +18,7 @@ type PreparedSerenaConsumerInvocationRequest struct {
 	preparation         *serenaPreparationContext
 }
 type PreparedSerenaConsumerInvocation struct {
+	privateContextReleases                                                                    []context.CancelFunc
 	mu                                                                                        sync.Mutex
 	owner                                                                                     *PreparedSerenaRuntimeOwner
 	request                                                                                   PreparedSerenaConsumerInvocationRequest
@@ -67,6 +68,20 @@ func (o *PreparedSerenaRuntimeOwner) AcquireConsumerInvocation(ctx context.Conte
 	if o == nil || ctx == nil || ctx.Err() != nil || !preparedSerenaID(r.OperationID) || len(r.ExpectedDescriptors) == 0 {
 		return nil, errors.New("SERENA_CONSUMER_INVOCATION_INPUT_INVALID")
 	}
+	var privateCancel context.CancelFunc
+	if private := o.privatePublisherOwner(); private != nil {
+		bounded, cancel, err := private.boundedContext(ctx, private.api)
+		if err != nil {
+			return nil, err
+		}
+		privateCancel = cancel
+		ctx = bounded
+	}
+	defer func() {
+		if scope == nil && privateCancel != nil {
+			privateCancel()
+		}
+	}()
 	end, finite := ctx.Deadline()
 	if !finite {
 		return nil, errors.New("SERENA_CONSUMER_INVOCATION_DEADLINE_REQUIRED")
@@ -103,6 +118,9 @@ func (o *PreparedSerenaRuntimeOwner) AcquireConsumerInvocation(ctx context.Conte
 		return nil, err
 	}
 	scope = &PreparedSerenaConsumerInvocation{owner: o, request: r, requestSHA: sha, deadline: end, publication: original.publication}
+	if privateCancel != nil {
+		scope.privateContextReleases = append(scope.privateContextReleases, privateCancel)
+	}
 	defer func() {
 		if retErr != nil {
 			scope.primary = retErr
@@ -192,16 +210,77 @@ func (o *PreparedSerenaRuntimeOwner) AcquireConsumerInvocation(ctx context.Conte
 	}
 	return scope, scope.Validate(ctx, o, r)
 }
+// Effect observations retain their exact context until the invocation has
+// received every original close. Stopping a local callback is not that close.
+func (s *PreparedSerenaConsumerInvocation) privateEffectContext(ctx context.Context) (context.Context, error) {
+	if s == nil {
+		return nil, errors.New("SERENA_CONSUMER_INVOCATION_MISSING")
+	}
+	private := s.owner.privatePublisherOwner()
+	if private == nil {
+		return ctx, nil
+	}
+	bounded, cancel, err := private.boundedContext(ctx, private.api)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.sealed || s.finalizing || s.close != nil || s.primary != nil || s.entered != 0 {
+		s.mu.Unlock()
+		cancel()
+		return nil, errors.New("SERENA_CONSUMER_INVOCATION_CLOSED_PARTIAL_OR_BUSY")
+	}
+	s.privateContextReleases = append(s.privateContextReleases, cancel)
+	s.mu.Unlock()
+	return bounded, nil
+}
+
+func (s *PreparedSerenaConsumerInvocation) releasePrivateContextsIfComplete() {
+	s.mu.Lock()
+	if s.close == nil || !s.close.view.Complete || s.close.view.Pending || s.close.view.Error != nil {
+		s.mu.Unlock()
+		return
+	}
+	releases := s.privateContextReleases
+	s.privateContextReleases = nil
+	s.mu.Unlock()
+	for _, release := range releases {
+		release()
+	}
+}
+
 func (s *PreparedSerenaConsumerInvocation) Validate(ctx context.Context, owner *PreparedSerenaRuntimeOwner, r PreparedSerenaConsumerInvocationRequest) error {
 	if err := s.beginCall(ctx, owner, r); err != nil {
 		return err
 	}
 	defer s.leave()
-	return s.validateSources(ctx)
+	private := owner.privatePublisherOwner()
+	if private != nil {
+		bounded, cancel, err := private.boundedContext(ctx, private.api)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		ctx = bounded
+	}
+	err := s.validateSources(ctx)
+	if private != nil {
+		err = errors.Join(err, private.validateOrigin(ctx))
+	}
+	return err
 }
 func (s *PreparedSerenaConsumerInvocation) beginCall(ctx context.Context, owner *PreparedSerenaRuntimeOwner, r PreparedSerenaConsumerInvocationRequest) error {
 	if s == nil || ctx == nil || ctx.Err() != nil || owner != s.owner {
 		return errors.New("SERENA_CONSUMER_INVOCATION_SOURCE_INVALID")
+	}
+	if private := owner.privatePublisherOwner(); private != nil {
+		if err := private.validateOrigin(ctx); err != nil {
+			return err
+		}
+		end, _ := ctx.Deadline()
+		if end.After(s.deadline) {
+			return errors.New("SERENA_PRIVATE_PUBLISHER_CONSUMER_CONTEXT_OUT_OF_BOUND")
+		}
 	}
 	sha, err := consumerInvocationRequestSHA(r)
 	if err != nil || sha != s.requestSHA || r.Environment != s.request.Environment || r.preparation != s.request.preparation {
@@ -259,7 +338,11 @@ func (s *PreparedSerenaConsumerInvocation) leave() {
 		s.finalize()
 	}
 }
-func (s *PreparedSerenaConsumerInvocation) receiveBody(ctx context.Context, borrowed *StateFileObservedLease, run func(preparedSerenaIntentConsumerEffects) error) (err error) {
+func (s *PreparedSerenaConsumerInvocation) receiveBody(ctx context.Context, borrowed *StateFileObservedLease, run func(context.Context, preparedSerenaIntentConsumerEffects) error) (err error) {
+	ctx, err = s.privateEffectContext(ctx)
+	if err != nil {
+		return err
+	}
 	if err = s.enter(ctx); err != nil {
 		return err
 	}
@@ -290,11 +373,27 @@ func (s *PreparedSerenaConsumerInvocation) receiveBody(ctx context.Context, borr
 	if err = s.revalidateExcluded(ctx); err != nil {
 		return err
 	}
-	return run(s.io)
+	err = run(ctx, s.io)
+	if private := s.owner.privatePublisherOwner(); private != nil {
+		err = errors.Join(err, private.validateOrigin(ctx))
+	}
+	return err
 }
-func (s *PreparedSerenaConsumerInvocation) WithIntentLockHeld(ctx context.Context, heldIntent *StateFileObservedLease, run func() error) (err error) {
+// WithIntentLockHeld preserves the opaque callback API. Internal effect bodies
+// use withIntentLockHeldContext so their actual I/O receives the bound context.
+func (s *PreparedSerenaConsumerInvocation) WithIntentLockHeld(ctx context.Context, heldIntent *StateFileObservedLease, run func() error) error {
+	if run == nil {
+		return errors.New("SERENA_CONSUMER_HELD_INTENT_INPUT_MISSING")
+	}
+	return s.withIntentLockHeldContext(ctx, heldIntent, func(context.Context) error { return run() })
+}
+func (s *PreparedSerenaConsumerInvocation) withIntentLockHeldContext(ctx context.Context, heldIntent *StateFileObservedLease, run func(context.Context) error) (err error) {
 	if s == nil || heldIntent == nil || run == nil {
 		return errors.New("SERENA_CONSUMER_HELD_INTENT_INPUT_MISSING")
+	}
+	ctx, err = s.privateEffectContext(ctx)
+	if err != nil {
+		return err
 	}
 	if err = s.Validate(ctx, s.owner, s.request); err != nil {
 		return err
@@ -303,7 +402,7 @@ func (s *PreparedSerenaConsumerInvocation) WithIntentLockHeld(ctx context.Contex
 		return err
 	}
 	err = heldIntent.Borrow(ctx, s.io.IntentPath, func() error {
-		return s.receiveBody(ctx, heldIntent, func(preparedSerenaIntentConsumerEffects) error { return run() })
+		return s.receiveBody(ctx, heldIntent, func(work context.Context, _ preparedSerenaIntentConsumerEffects) error { return run(work) })
 	})
 	// Only the fresh package scope belongs to this receiver. The original
 	// intent owner and acquiring caller receive their own closes afterward.
@@ -318,6 +417,21 @@ func (s *PreparedSerenaConsumerInvocation) ReceiveIntentClose(proof *StateFileLe
 	if s == nil || s.borrowedIntent == nil {
 		return errors.New("SERENA_CONSUMER_BORROWED_INTENT_MISSING")
 	}
+	if s.owner.privatePublisherOwner() != nil {
+		s.mu.Lock()
+		complete := s.close != nil && s.close.view.Complete && !s.close.view.Pending && s.close.view.Error == nil
+		original := s.intentClose
+		s.mu.Unlock()
+		if complete {
+			if proof != original {
+				return errors.New("SERENA_CONSUMER_INTENT_CLOSE_FOREIGN_REENTRY")
+			}
+			// These exact original closes were received before their context
+			// links were released. Replay the historical proof only.
+			return proof.Validate(s.borrowedIntent)
+		}
+	}
+	defer s.releasePrivateContextsIfComplete()
 	var receivingErr error
 	for _, mutation := range s.heldMutations {
 		receivingErr = errors.Join(receivingErr, mutation.observation.ReceiveLeaseClose(proof))
@@ -512,6 +626,7 @@ func (s *PreparedSerenaConsumerInvocation) finalize() {
 	s.close = &PreparedSerenaConsumerInvocationCloseObservation{owner: s, view: v}
 	s.cleanup = err
 	s.mu.Unlock()
+	s.releasePrivateContextsIfComplete()
 }
 func (p *PreparedSerenaConsumerInvocationCloseObservation) Snapshot() PreparedSerenaConsumerInvocationCloseSnapshot {
 	if p == nil {

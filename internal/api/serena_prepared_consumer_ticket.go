@@ -121,8 +121,8 @@ func (o *PreparedSerenaRuntimeOwner) RegisterPendingConsumer(ctx context.Context
 		}
 		err = errors.Join(err, closeErr)
 	}()
-	err = scope.receiveBody(ctx, nil, func(store preparedSerenaIntentConsumerEffects) error {
-		registration, writeErr := store.registerPreparedConsumer(ctx, binding, r.ExpectedDescriptor)
+	err = scope.receiveBody(ctx, nil, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		registration, writeErr := store.registerPreparedConsumer(work, binding, r.ExpectedDescriptor)
 		if registration != nil {
 			ticket = &PreparedConsumerTicket{owner: o, binding: binding, descriptor: r.ExpectedDescriptor, entrypoint: scope.record.EntrypointIdentity, intentGeneration: registration.generation, registration: registration, readyBinding: r.Binding, environment: environment}
 		}
@@ -146,11 +146,11 @@ func (t *PreparedConsumerTicket) ValidateBeforeCreate(ctx context.Context, comma
 	if err := ValidatePreparedSerenaEnvironment(preparedSerenaEnvironmentMap(environment)); err != nil {
 		return err
 	}
-	return t.owner.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-		if err := store.validatePreparedConsumerPending(ctx, t); err != nil {
+	return t.owner.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		if err := store.validatePreparedConsumerPending(work, t); err != nil {
 			return err
 		}
-		return revalidatePreparedSerenaFile(ctx, t.entrypoint)
+		return revalidatePreparedSerenaFile(work, t.entrypoint)
 	})
 }
 func (t *PreparedConsumerTicket) Binding() (PreparedConsumerBindingV1, error) {
@@ -173,11 +173,11 @@ func (t *PreparedConsumerTicket) SelectedEntrypoint(ctx context.Context) (file P
 	if t == nil || t.owner == nil || t.registrationClose == nil || t.registrationClose.Validate(t.registrationClose.owner) != nil {
 		return file, errors.New("SERENA_PREPARED_ENTRYPOINT_TICKET_UNQUALIFIED")
 	}
-	err = t.owner.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-		if err := store.validatePreparedConsumerPending(ctx, t); err != nil {
+	err = t.owner.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		if err := store.validatePreparedConsumerPending(work, t); err != nil {
 			return err
 		}
-		if err := revalidatePreparedSerenaFile(ctx, t.entrypoint); err != nil {
+		if err := revalidatePreparedSerenaFile(work, t.entrypoint); err != nil {
 			return err
 		}
 		file = t.entrypoint
@@ -229,8 +229,8 @@ func (o *PreparedSerenaRuntimeOwner) BindOriginalConsumerStart(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	return o.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-		return store.bindPreparedConsumerStart(ctx, t, received)
+	return o.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		return store.bindPreparedConsumerStart(work, t, received)
 	})
 }
 func (o *PreparedSerenaRuntimeOwner) ConfirmCurrentConsumer(ctx context.Context, t *PreparedConsumerTicket, expected SupervisorDaemon) error {
@@ -241,8 +241,8 @@ func (o *PreparedSerenaRuntimeOwner) ConfirmCurrentConsumer(ctx context.Context,
 	if err != nil || sha != t.binding.DescriptorSHA256 {
 		return errors.Join(err, errors.New("SERENA_PREPARED_CONSUMER_DESCRIPTOR_DRIFT"))
 	}
-	return o.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-		return store.confirmPreparedConsumer(ctx, t, expected)
+	return o.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		return store.confirmPreparedConsumer(work, t, expected)
 	})
 }
 func (o *PreparedSerenaRuntimeOwner) ReceivePreparedConsumerTerminal(ctx context.Context, t *PreparedConsumerTicket, e PreparedConsumerTerminalEvidence) (*PreparedConsumerTerminalReceipt, error) {
@@ -278,16 +278,16 @@ func (o *PreparedSerenaRuntimeOwner) FinishPendingConsumer(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		return o.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-			return store.finishPreparedConsumerNoChild(ctx, t, received)
+		return o.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+			return store.finishPreparedConsumerNoChild(work, t, received)
 		})
 	}
 	received, err := o.ReceivePreparedConsumerTerminal(ctx, t, e)
 	if err != nil {
 		return err
 	}
-	return o.withPreparedConsumerExclusions(ctx, t, func(store preparedSerenaIntentConsumerEffects) error {
-		return store.finishPreparedConsumer(ctx, t, received)
+	return o.withPreparedConsumerExclusions(ctx, t, func(work context.Context, store preparedSerenaIntentConsumerEffects) error {
+		return store.finishPreparedConsumer(work, t, received)
 	})
 }
 
@@ -303,7 +303,7 @@ func (o *PreparedSerenaRuntimeOwner) ReceivePreparedConsumerNoChildRelease(ctx c
 	}
 	return &PreparedConsumerNoChildReleaseReceipt{ticket: t, source: e}, nil
 }
-func (o *PreparedSerenaRuntimeOwner) withPreparedConsumerExclusions(ctx context.Context, t *PreparedConsumerTicket, run func(preparedSerenaIntentConsumerEffects) error) (err error) {
+func (o *PreparedSerenaRuntimeOwner) withPreparedConsumerExclusions(ctx context.Context, t *PreparedConsumerTicket, run func(context.Context, preparedSerenaIntentConsumerEffects) error) (err error) {
 	if t == nil || t.owner != o || ctx == nil {
 		return errors.New("SERENA_PREPARED_TICKET_UNAVAILABLE")
 	}

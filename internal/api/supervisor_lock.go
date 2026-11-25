@@ -456,19 +456,17 @@ func supervisorRunningUnderStateDirWithOwnerReader(
 // the held lock is THEIR OWN handle, not a foreign supervisor, so the gate's
 // fail-closed refuse is a false positive for them specifically.
 //
-// The single field is UNEXPORTED, so no code outside package api can forge a
-// non-nil token: the ONLY way to obtain one with a non-nil lk is to hold a real
-// *SupervisorLock (returned by AcquireSupervisorLock) and call
-// AllowSpecBearingWriteBypass on it. The zero value (lk == nil) is "no bypass"
-// and is the default for every existing call site. The gate re-verifies
-// IDENTITY at use time (lk still held AND lk.path == the gate's own
-// supervisor.lock path), so even a real-but-mismatched or already-released token
-// is rejected — see InstallParsedManifestOpts.SupervisorLockBypass.
-//
-// It wraps a *POINTER* to the lock (not a value): SupervisorLock holds a
-// *flock.Flock, never a value lock, so copying this token (e.g. via an opts
-// copy) is safe and go vet's copylocks does not fire.
-type InstallParsedManifestBypass struct{ lk *SupervisorLock }
+// Both fields are unexported. The legacy SupervisorLock issuer and the observed
+// lease's entered WithSupervisorLockBypass callback are the two issuing paths.
+// A zero token carries neither form and grants no bypass. The gate rechecks the
+// exact state path and held original owner; an observed permit additionally
+// expires with its own entered borrow and cannot revive in a later borrow.
+// Quiet observed reservations do not mint a token through the legacy issuer.
+// Only pointers are copied with options, never the lock or the permit's atomics.
+type InstallParsedManifestBypass struct {
+	lk       *SupervisorLock
+	observed *supervisorInstallBorrow
+}
 
 // AllowSpecBearingWriteBypass mints the capability token that lets the holder of
 // THIS live lock bypass InstallParsedManifest's §7.1 spec-bearing write gate.
