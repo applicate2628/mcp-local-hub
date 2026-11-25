@@ -1,0 +1,143 @@
+{
+  "schema": "closed-v9-four-resource-retirement-plan-v1",
+  "status": "ROOT_REVIEWED_READY",
+  "task": "<TASK>",
+  "issuer": "<TASK>\\closed-v9-retirement-inputs-v1\\retire_closed_v9_resources_v1.py",
+  "evidence_root": "<TASK>\\closed-v9-retirement-v1",
+  "trash_root": "<TASK>\\trash",
+  "trash_bucket": "<TASK>\\trash\\closed-full-v9-20261124-v1",
+  "directories_precreated_by_root": true,
+  "script_creates_directories": false,
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "closed_run": "<TASK>\\runs\\literal-final-v9",
+  "active_consumer_run": "<TASK>\\runs\\literal-final-v10",
+  "active_evidence_parents": [
+    "<TASK_WORKSPACE>\\d10",
+    "<TASK_WORKSPACE>\\s10"
+  ],
+  "controls": {
+    "full_parent": {
+      "path": "<TASK>\\literal-final-v9-launch.json",
+      "sha256": "f19530c79d1c396a2631895b3b3fa90ef5eb992e4ab20a0ba6f6125eff86a622"
+    },
+    "full_receipt": {
+      "path": "<TASK>\\runs\\literal-final-v9\\receipt.json",
+      "sha256": "e61b7c3873cf395e3592182134e69d0235f4a7eaf8471ef14fc7409075b29ee4"
+    },
+    "old_data_parent": {
+      "path": "<TASK>\\serena-evidence-rebinding-v10-launch.json",
+      "sha256": "a353dcc7b650356265e9ea2c989f73ac55c494c1647a5aa2caf1a709f522ae4a"
+    },
+    "old_data_receipt": {
+      "path": "<TASK>\\runs\\serena-evidence-rebinding-v9\\rebinding.json",
+      "sha256": "8b54204046a7bdf06cb242439de7a3e27bd0031c2c468851871bf7448d7859d6"
+    },
+    "current_data_parent": {
+      "path": "<TASK>\\serena-evidence-rebinding-v11-launch.json",
+      "sha256": "4c13140b07773caa3e521665437b3761fe8659c0f2f3ea4e870f35045311e7d8"
+    },
+    "current_data_receipt": {
+      "path": "<TASK>\\runs\\serena-evidence-rebinding-v10\\rebinding.json",
+      "sha256": "5d80f7d0fb66925dbc5166d21baf288c59d8256aaabddc93279ddd5233dbcb09"
+    },
+    "current_grant": {
+      "path": "<TASK>\\final-gates-v13-root\\retained-input-access.json",
+      "sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18"
+    },
+    "current_manifest": {
+      "path": "<TASK>\\final-gates-v13-root\\actual-manifest.json",
+      "sha256": "efd14d898b2e6032dfb77c914b49a9114083c7eb29235ca8f6f893daacd4ee02"
+    },
+    "cache_bootstrap": {
+      "path": "<TASK>\\runs\\literal-final-v9\\cache-bootstrap.json",
+      "sha256": "cd59dcae3601bda12df6114e1da4279cf2ebfe220abba1e807ecb7633b17ff58"
+    }
+  },
+  "identity_helper": {
+    "path": "<TASK>\\final-gates-v10-fresh\\private_run_scope.py",
+    "sha256": "1625254b763ba987fc65b3b9b3205cd85ad019d4f2492495ae8a1c68ee490d12"
+  },
+  "python": {
+    "path": "<USERPROFILE>\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+    "sha256": "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+  },
+  "resources": [
+    {
+      "name": "seed-modules",
+      "source": "<TASK>\\runs\\literal-final-v9\\seed-modules",
+      "kind": "cache",
+      "creation_identity": {
+        "device": 15424946169900087391,
+        "inode": 4503599635287173
+      },
+      "native_identity": {
+        "volume_serial": 275429471,
+        "file_index": 4503599635287173
+      },
+      "require_empty": false
+    },
+    {
+      "name": "isolated-build-cache",
+      "source": "<TASK>\\runs\\literal-final-v9\\isolated-build-cache",
+      "kind": "cache",
+      "creation_identity": {
+        "device": 15424946169900087391,
+        "inode": 844424938048647
+      },
+      "native_identity": {
+        "volume_serial": 275429471,
+        "file_index": 844424938048647
+      },
+      "require_empty": false
+    },
+    {
+      "name": "d9",
+      "source": "<TASK_WORKSPACE>\\d9",
+      "kind": "evidence_parent",
+      "role": "default",
+      "creation_identity": {
+        "volume_serial": 275429471,
+        "file_index": 1688849868178195
+      },
+      "native_identity": {
+        "volume_serial": 275429471,
+        "file_index": 1688849868178195
+      },
+      "require_empty": true
+    },
+    {
+      "name": "s9",
+      "source": "<TASK_WORKSPACE>\\s9",
+      "kind": "evidence_parent",
+      "role": "state",
+      "creation_identity": {
+        "volume_serial": 275429471,
+        "file_index": 562949961335573
+      },
+      "native_identity": {
+        "volume_serial": 275429471,
+        "file_index": 562949961335573
+      },
+      "require_empty": true
+    }
+  ],
+  "reviewed_active_composition": {
+    "local_review": "<RECOVERY>/security-review/v13-final-path-pin-gate.json",
+    "review_sha256": "b5b6c34d533729d4d88531b7eb5ed0a0625479cecbe3ae2f6a86dbfdb892c827",
+    "manifest_sha256": "efd14d898b2e6032dfb77c914b49a9114083c7eb29235ca8f6f893daacd4ee02",
+    "finding": "The reviewed full-v10 call chain uses only its own fresh caches and d10/s10; closed-v9 controls are provenance only. This is not a scan of live handles."
+  },
+  "scope": {
+    "only_rename_four_listed_directories": true,
+    "no_cache_content_reads_or_hashes": true,
+    "no_raw_capture_reads": true,
+    "no_held_area_reads": true,
+    "no_delete_or_copy": true,
+    "no_replace": true,
+    "no_acl_mutation": true,
+    "no_tests_or_subprocesses": true,
+    "no_cleanup_of_evidence_or_recovery": true,
+    "no_rollback": true
+  },
+  "recovery": "Each source has one PREPARED then MOVED JSONL journal outside trash. A failure stops immediately; already moved objects remain at their verified destination. No automatic retry or rollback."
+}

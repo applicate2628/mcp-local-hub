@@ -1,0 +1,82 @@
+{
+  "schema": "independent-closed-v9-retirement-review-v1",
+  "status": "PASS",
+  "scope": "read-only review of pinned v2 delta, qualification, receipt and all four journals; no additional native operation",
+  "script_sha256": "40ecbc3c44811ab92d167601d0716fd9ae9d49afb9062a17b19a1cf75cafce24",
+  "plan_sha256": "78b8cc17e2060014733014357ee60b1475eb3a4ede07bd152f10f32ca6d9055e",
+  "receipt_sha256": "7158a28705eb6d923ea0aa3b14664dc30a85974695f5b742702c54eb3978bc84",
+  "qualification_sha256": "66a0cd65c7f01c59eeaea90bfdedac0e94dddf3184940c2f842ced4dae0f6d6a",
+  "v1_failure_sha256": "64c94738e02244872d5540d6b99d828fd6e0cafc7d97225f3d6920afc0f97623",
+  "qualification_events": [
+    {
+      "form": "relative_root_handle",
+      "error": "OSError(87, 'rename original directory without replacement: The parameter is incorrect.')"
+    },
+    {
+      "form": "absolute_existing_target",
+      "error": "OSError(183, 'absolute original-directory rename: Cannot create a file when that file already exists.')",
+      "both_unchanged": true
+    },
+    {
+      "form": "absolute_new_target",
+      "same_original_identity": true,
+      "source_absent": true
+    }
+  ],
+  "qualification_original_handles_closed": true,
+  "moves": [
+    {
+      "name": "seed-modules",
+      "journal_sha256": "6e764e5b2f1786ff63b529e2d5f61cdc04ff52ed5bad6c1d3b401bd199bbc1c4",
+      "phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "same_original_identity": true,
+      "source_absent": true,
+      "empty_required": false,
+      "journal_outside_trash": true
+    },
+    {
+      "name": "isolated-build-cache",
+      "journal_sha256": "52c39a3a42be6eedf276c2174a703a735bbffe00b00da0fd91c4845b11b8144b",
+      "phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "same_original_identity": true,
+      "source_absent": true,
+      "empty_required": false,
+      "journal_outside_trash": true
+    },
+    {
+      "name": "d9",
+      "journal_sha256": "bde1e13f207d4e2f078befd803ca2ecbd11965534b39867c63f9dfce715656dd",
+      "phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "same_original_identity": true,
+      "source_absent": true,
+      "empty_required": true,
+      "journal_outside_trash": true
+    },
+    {
+      "name": "s9",
+      "journal_sha256": "faa491c5039ee6f9fde6fecdbaa882bd6bc4438c523aa9302cd28c09af3410e1",
+      "phases": [
+        "PREPARED",
+        "MOVED"
+      ],
+      "same_original_identity": true,
+      "source_absent": true,
+      "empty_required": true,
+      "journal_outside_trash": true
+    }
+  ],
+  "all_bound_control_paths_outside_trash": true,
+  "delete_copy_replace_or_acl_change": false,
+  "raw_captures_or_cache_contents_read": false,
+  "original_failure_rewritten": false,
+  "parent_terminal_exit_source": "root original tool return: exit 0, 10.25 seconds; not inferred from inner receipt"
+}

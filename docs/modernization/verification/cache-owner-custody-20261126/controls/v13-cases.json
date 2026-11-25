@@ -1,0 +1,102 @@
+{
+  "schema": "runtime-custody-composition-probe-v1",
+  "status": "PASS",
+  "loading": {
+    "full_driver_imported": true,
+    "full_load_owner_runtime_called": true,
+    "ast_extraction": false,
+    "inputs": {
+      "run_literal_go_gate_ready_v1.py": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+      "literal_go_exec_adapter_ready_v1.py": "83b0f13017a65d4a2753d10b26c04c9e0b44f3d301ba638b5c8f4fabd0d84dba",
+      "run_partitioned_go_gate_full_v1.py": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+      "qualified_windows_products_consumer_v1.py": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+      "receive_fresh_full_inputs_v1.py": "d1f22787c5241a9972289e707e620fdb06729144c87f784062e79a6d3ea8890a",
+      "private_run_scope.py": "e1796e716f457af234dfc1061c917ce7d177852da537210d76d66bbf8936949a"
+    },
+    "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "one_command_wrapper_per_run": true,
+    "root_issuer_import_idempotent": true,
+    "actual_source_data_received": true,
+    "actual_retained_grant_received": true,
+    "actual_scope_binding_received": true,
+    "actual_scope_paths": {
+      "runs": "<TASK>\\runs",
+      "artifacts": "<TASK>\\native-consumer-source-v3\\.scratch"
+    },
+    "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "source_file_count": 3508,
+    "retained_grant_sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18",
+    "source_compatibility": {
+      "schema": "reviewed-product-test-source-compatibility-v1",
+      "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+      "source_file_count": 3508,
+      "changed_paths": [
+        "internal/api/adopt_codex_transport_test.go",
+        "internal/api/adopt_deadopt_lifecycle_test.go",
+        "internal/api/adopt_h4_summary_signal_test.go",
+        "internal/api/adopt_lease_namespace_windows_test.go",
+        "internal/api/adopt_lease_owner_test.go",
+        "internal/api/adopt_mcpcompat_test.go",
+        "internal/api/adopt_project_plan_test.go",
+        "internal/api/adopt_test.go",
+        "internal/cli/adopt_mcpcompat_test.go",
+        "internal/cli/adopt_test.go",
+        "internal/cli/gui_force_test.go"
+      ],
+      "changed_file_count": 11,
+      "unchanged_path_count": 3497,
+      "unchanged_non_test_paths": true,
+      "unchanged_non_test_path_count": 2012,
+      "delta_map": {
+        "path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+        "sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234"
+      },
+      "source_update_admission": {
+        "path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+        "sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998"
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": "begin-registration-before-first-command",
+      "status": "PASS",
+      "registered_same_actual_run": true,
+      "native_commands": 0,
+      "original_error_preserved": true
+    },
+    {
+      "case": "outer-run-finalization-retains-original-workers",
+      "status": "PASS",
+      "actual_run_retained_until_original_join": true,
+      "physical_receiving_calls": 1,
+      "failure_immutable": true,
+      "raw_unmeasured": true,
+      "successor_refused": true,
+      "original_error_preserved": true,
+      "original_native": {
+        "direct_exit_code": 0,
+        "direct_reaped": true,
+        "active_zero": true,
+        "job_terminated": false,
+        "handles_closed": true,
+        "issues": []
+      },
+      "physical_proof_sha256": "90df47f25797a7f5ad305b2a27cf5cbedc53d3fad092932c3e3b837d521b7967"
+    }
+  ],
+  "native_windows_owner": true,
+  "synthetic_substitutions": [
+    "private scope acquisition",
+    "environment acquisition",
+    "Run cache constructor binding",
+    "first receipt update exception",
+    "one original Thread join exception and release barrier",
+    "execute_gate reduced to the one lifecycle boundary"
+  ],
+  "source_or_cache_commands_executed": false,
+  "full_regression_executed": false,
+  "old_unknown_reclassified": false,
+  "all_original_probe_workers_joined": true
+}

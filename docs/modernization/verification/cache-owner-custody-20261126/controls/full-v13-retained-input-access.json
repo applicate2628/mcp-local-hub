@@ -1,0 +1,210 @@
+{
+  "schema": "root-retained-full-inputs-access-v2",
+  "status": "PASS",
+  "consumer_run": "<TASK>\\runs\\literal-final-v10",
+  "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "original_gate_status": "FAIL",
+  "original_custody_state": "UNKNOWN",
+  "allowed_readonly_resources": {
+    "product_bundle": {
+      "path": "<TASK>\\runs\\product-final-v7\\product",
+      "kind": "tree"
+    },
+    "product_fixture": {
+      "path": "<TASK>\\runs\\product-final-v7\\actual-fixture.json",
+      "kind": "file"
+    },
+    "product_resource": {
+      "path": "<TASK>\\runs\\product-final-v7\\resources\\product-versioninfo.syso",
+      "kind": "file"
+    },
+    "default_export": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\source",
+      "kind": "tree"
+    },
+    "default_snapshot": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\source-snapshot.json",
+      "kind": "file"
+    },
+    "default_image": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\actual-incoming-cli.test.exe",
+      "kind": "file"
+    },
+    "default_testmain": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\actual-generated-testmain.go",
+      "kind": "file"
+    },
+    "default_fixture": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\migration-product-fixture.json",
+      "kind": "file"
+    },
+    "default_issuance": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\compiler-inputs\\cli-publisher-test-inputs.json",
+      "kind": "file"
+    },
+    "state_export": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\source",
+      "kind": "tree"
+    },
+    "state_snapshot": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\source-snapshot.json",
+      "kind": "file"
+    },
+    "state_image": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\actual-incoming-cli.test.exe",
+      "kind": "file"
+    },
+    "state_testmain": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\actual-generated-testmain.go",
+      "kind": "file"
+    },
+    "state_fixture": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\migration-product-fixture.json",
+      "kind": "file"
+    },
+    "state_issuance": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\compiler-inputs\\cli-publisher-test-inputs.json",
+      "kind": "file"
+    }
+  },
+  "allowed_identity_bound_execution": {
+    "default_image": {
+      "path": "<TASK>\\runs\\serena-default-final-v7\\actual-incoming-cli.test.exe",
+      "sha256": "6ce9b7d907be54845576d4883431766100176a411ad80cf5dd82aa4a51193610",
+      "cwd": "<TASK>\\runs\\serena-default-final-v7\\source\\internal\\cli",
+      "evidence_parent": "<TASK_WORKSPACE>\\d10"
+    },
+    "state_image": {
+      "path": "<TASK>\\runs\\serena-state-final-v7\\actual-incoming-cli.test.exe",
+      "sha256": "e567ed9df2bc8e72cf02f1ec8d0abd04461c900469e186581b87a372733ce033",
+      "cwd": "<TASK>\\runs\\serena-state-final-v7\\source\\internal\\cli",
+      "evidence_parent": "<TASK_WORKSPACE>\\s10"
+    }
+  },
+  "evidence_roots": {
+    "default": "<TASK_WORKSPACE>\\d10",
+    "state": "<TASK_WORKSPACE>\\s10"
+  },
+  "evidence_prerequisites": {
+    "original_default": "<TASK>\\d7"
+  },
+  "forbidden_resources": {
+    "prior_source": "<TASK>\\native-consumer-source-v1",
+    "prior_module_cache": "<TASK>\\runs\\serena-default-final-v4\\seed-modules",
+    "prior_build_cache": "<TASK>\\runs\\serena-default-final-v4\\isolated-build-cache"
+  },
+  "conditions": {
+    "original_artifact_owners_closed": true,
+    "later_unresolved_work_confined_to_new_run_copies": true,
+    "default_and_state_migration_not_started": true,
+    "evidence_parents_unused": true,
+    "no_prior_source_or_cache_reuse": true,
+    "old_status_not_rewritten": true,
+    "identity_bound_images_original_and_closed": true,
+    "execution_confined_to_original_migration_bridge": true,
+    "per_case_writable_environment": true,
+    "retained_artifacts_never_modified": true,
+    "reviewed_test_only_source_delta": true,
+    "unchanged_product_and_serena_source": true
+  },
+  "reviewed_controls": {
+    "<TASK>\\runs\\literal-final-v7\\receipt.json": "41bbc26ed49ef9b7923b3c3cd2eefdf84b1f409ae0ae8d4035ec8a4bc27d5131",
+    "<TASK>\\literal-final-v7-launch.json": "f22aa31121eee2f078317752df2b906fceb7d1165b78ea930c2d1d4a8df4faf3",
+    "<TASK>\\runs\\x6d9108ff9d42\\receipt.json": "56ac98783e2765c03afa346c66e396e8afa8f3ef94bf0413523361e507197482",
+    "<TASK>\\runs\\product-final-v7\\receipt.json": "aacceb890e09f68b86b1e095b70cd86fd787a4993a5795acf28a8a153a6d68e0",
+    "<TASK>\\product-final-v7-launch.json": "4b430b6bcef955a9d5aca66179516f141bd0cf648dd4cf900e913a115298a87b",
+    "<TASK>\\runs\\product-final-v7\\root-receiving.json": "ed7a22d687884ad934f354d57b7d12c4d6c4a7b4aa2e238d55632240f318796b",
+    "<TASK>\\runs\\product-final-v7-finalization\\root-receiving.json": "2260f6ca380d87b24ae2b6c5778cf9ac7818f5e4100c484ac3de512efcd9a8b7",
+    "<TASK>\\product-finalization-v7-launch.json": "89d06616d6f41be1671d5b86ff9c3584c0e9b09198ad511bfb64d7b2af81e07b",
+    "<TASK>\\serena-default-final-v7-launch.json": "13926e54eaaff95ff9e9eef468b071155f62974becb573a13ecc171a85d568c3",
+    "<TASK>\\runs\\serena-default-final-v7\\root-receiving.json": "60f196da9fc01340e27aa4e4efa95b531d337bc0ed24ba98a4f0982cf81ca98f",
+    "<TASK>\\serena-default-receiving-v7-launch.json": "55fef2b2bbbe74df7ec00079037f584c15062823da3afcb8f5b5dc0d00352d37",
+    "<TASK>\\runs\\serena-default-rebinding-v8\\rebinding.json": "4dc3b14b353e4953db58666aea534931f29cd7ff0ccb45dbd57a33c88794504e",
+    "<TASK>\\serena-default-rebinding-v8-launch.json": "6818eca5e558796f6a98a92bf648f09c747b1034fa2e367c25432aa6da2ec7f4",
+    "<TASK>\\runs\\serena-default-final-v7\\receipt.json": "52db335b6386f335911f21afc1aa5c84c0daf9b7daa6fdd5eb16a52e00af1cfd",
+    "<TASK>\\runs\\serena-state-final-v7\\receipt.json": "958fa516ff54e797a7237838ef1fb5466cb1a4abcab6a63171860a3d56839b74",
+    "<TASK>\\runs\\serena-state-final-v7\\root-receiving.json": "d9028965d82599de2b87c0d46d6dcb984f98a481cafa1cfcdbdb7d853951d21d",
+    "<TASK>\\serena-state-final-v7-launch.json": "cef889a5fb952302e5e822d5311c07ea18b2b2c8ebfd6b64ab942c20edc49861",
+    "<TASK>\\runs\\native-consumer-headless-v10\\receipt.json": "2f7ce0b6228a3a64f7b6739f181307f6487bbfa0aa5d69459c88e3e91aabc616",
+    "<TASK>\\runs\\native-consumer-headless-v10\\root-receiving.json": "3354db3bcc94d58cb8db3e5450107fac8234a76af685d646a3a455ff7bdd8d65",
+    "<TASK>\\native-consumer-headless-v10-launch.json": "afb94014272b8eba02979878be7d3df8c4f41767684eee16bed5eba794b93ee6",
+    "<TASK>\\native-consumer-headless-receiving-v10-launch.json": "fe69d162dda94bf76913a365434bb0be703908135d3b3dd0566ac7bfccfb25e1",
+    "<TASK>\\runs\\x034ff70e2629\\receipt.json": "9572ca80a1d2b7b8d30a116734ee0d2475331c76ad74dd57d69c3bdb0d43dd9e",
+    "<TASK>\\runs\\xeb8683dc447d\\receipt.json": "e6cde929a484aea0626703f048395c2f63ff95193f1555d386fad533d815d6a3",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.started.json": "596363b4af17774df5affe642f8f2bb38b23416135107ed789f054f37683e53b",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\872b7082b11f7ce627d2c1d6595c6b627f9daecabdc2a1ace9642adca5435ad0.started.json": "faee805499be746bb68cfa18eb376be0ccd418267884506a6931f2a6f8b3bdee",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\ea5f24423e7778ac11fd281982d9d2f8bcca104f6e8249a8f32b58b736c6ebd5.started.json": "110a966d722b71566c6131d074f2ab8c0f0b513e995a7129d7ad0aa376379998",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.completed.json": "144747825c080eb17ace63a6fb3e47e951e1a54af4f03533732f69865904e14f",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\872b7082b11f7ce627d2c1d6595c6b627f9daecabdc2a1ace9642adca5435ad0.completed.json": "b9c9b46ae4f94d105a58431f49fdf5725505dcf291778fd690bfc5e29d7a5f4d",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\ea5f24423e7778ac11fd281982d9d2f8bcca104f6e8249a8f32b58b736c6ebd5.completed.json": "d4c838830fddc489632bcb875cb4a245406cab0c41c90428a0e303a826566a3a",
+    "<TASK>\\runs\\literal-final-v7\\unsafe-stop.json": "6f7ef2719d5e1cf2b0d5c0fe128a14284d9575bb4860a5995eb556db51a61678"
+  },
+  "scope_notes": [
+    "Root review accepts this exact resource-specific scope using the closed original artifact controls, new test-only source admission and independent closed-v8 receiving. New evidence parents must still be created exclusively and received by the DATA issuer; the final runtime and unchanged full commands remain separately qualified.",
+    "The UNKNOWN custody status of literal-final-v7 and x6d9108ff9d42 is immutable; no held captures or forbidden source/cache contents are admitted.",
+    "Later unresolved work confinement is asserted only relative to these retained immutable resources; it does not release literal7 source-v1 or caches.",
+    "Original Product entry-set native file acquisition and PE/hash inspection are read-only; main canonical/attach execution uses the new complete Product copy.",
+    "Direct original-path execution is permitted only for the two exact publisher-test images by the unchanged original migration bridge, with original export cwd.",
+    "Source exports, issuance, testmain, image bytes and fixtures remain immutable; new m* case children under d10/s10 receive all child state, cache, temporary data and captures.",
+    "d7 is only an original unused evidence prerequisite and receives no new case writes.",
+    "Positive Product compiled-artifact and source-finalization admissions retain the original Product builder FAIL; build-only image receipt is not runtime consumer qualification.",
+    "The closed-v8 receipt preserves its FAIL; its 19 outer commands, 270 nested commands and 193 exact nested receipt digests were received independently. The earlier literal-final-v7 UNKNOWN is unchanged.",
+    "Only eleven reviewed _test.go files differ between new TestSource aca81a1743ccfbf3e10902769a9b071eb911919e and retained Product/Serena source 3ebe335a2f666a5279d7fafc31a6f4dc3feedff4. All 3497 other tracked inputs are identical; Product identity is not relabeled.",
+    "No previous regression module/build caches are admitted to this new run. This PASS is a resource-access review result, not full regression or runtime acceptance.",
+    "Full attempt v9 closed all seven native commands and readers before any literal command or test. Its original FAIL is retained. Existing source-v2 .scratch create was refused with ERROR_ALREADY_EXISTS; no existing ACL change occurred. This successor uses Source-v3 and admits no v9 cache or evidence-parent reuse."
+  ],
+  "root_review": {
+    "reviewer": "/root",
+    "independent_resource_review": [
+      "/root/integration_review",
+      "/root/regression_evidence",
+      "/root/owner_contract"
+    ],
+    "reviewed_utc": "2026-11-24T17:39:01.847241+00:00",
+    "prior_resource_grant": {
+      "path": "<TASK>\\final-gates-v10-fresh\\retained-input-access.json",
+      "sha256": "285bab99b9d842c8b321fc7b025e8d7c706f5c19ab557932245888b07f323d8a"
+    },
+    "new_test_source_controls_received": true,
+    "source_full_map_file_count": 3508,
+    "reviewed_changed_test_paths": 11,
+    "closed_v8_original_controls_received": true,
+    "full_runtime_qualified": false,
+    "new_evidence_parent_native_receiving": "REQUIRED_IN_DATA_ISSUER",
+    "runtime_reviewed_scope": "V12/v9 stopped closed before literal commands due to stale artifact scope constant; V13 requires corrected scope binding before effects and a new native composition probe. Source-v3 was unchanged; fresh caches and fresh d10/s10 parents are required.",
+    "closed_latest_source_consumer": {
+      "parent": {
+        "path": "<TASK>\\literal-final-v9-launch.json",
+        "sha256": "f19530c79d1c396a2631895b3b3fa90ef5eb992e4ab20a0ba6f6125eff86a622"
+      },
+      "receipt": {
+        "path": "<TASK>\\runs\\literal-final-v9\\receipt.json",
+        "sha256": "e61b7c3873cf395e3592182134e69d0235f4a7eaf8471ef14fc7409075b29ee4"
+      }
+    }
+  },
+  "preparation_run": "<TASK>\\runs\\serena-evidence-rebinding-v10",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "source_update_admission": {
+    "path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+    "sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998"
+  },
+  "delta_map": {
+    "path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+    "sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234"
+  },
+  "closed_failure_admission": {
+    "path": "<TASK>\\runs\\literal-v8-closed-receiving-v3\\root-receiving.json",
+    "sha256": "1cbfb1663f188322dcd047c8a3a4fde3125c2507f4892f1a3d27938b2ac5392c"
+  },
+  "closed_preparation_attempt": {
+    "parent": {
+      "path": "<TASK>\\literal-final-v9-launch.json",
+      "sha256": "f19530c79d1c396a2631895b3b3fa90ef5eb992e4ab20a0ba6f6125eff86a622"
+    },
+    "receipt": {
+      "path": "<TASK>\\runs\\literal-final-v9\\receipt.json",
+      "sha256": "e61b7c3873cf395e3592182134e69d0235f4a7eaf8471ef14fc7409075b29ee4"
+    }
+  }
+}

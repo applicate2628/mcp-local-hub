@@ -1,0 +1,767 @@
+"""DATA reception for the optional, original-issued migration14 literal lanes.
+
+No process is launched here. A receipt is evidence from an original owner, never
+an authority constructor. The caller must receive whole-phase native/IO closure
+before invoking receive_nested; missing evidence is failure, never permission.
+"""
+import datetime
+import hashlib
+import json
+import re
+from pathlib import Path
+
+REVIEW_COMPLETE = True
+if REVIEW_COMPLETE is not True:
+    raise RuntimeError("disabled DATA helper: root review and final builder pin required")
+
+CLI = "mcp-local-hub/internal/cli"
+PURPOSE = "private-serena-migration-integration"
+INPUT_ENV = "MCPHUB_PRIVATE_SERENA_MIGRATION_INPUT"
+INPUT_SHA_ENV = INPUT_ENV + "_SHA256"
+CASE_ENV = "MCPHUB_PRIVATE_SERENA_MIGRATION_CASE_CONFIG"
+WORK = Path('<TASK>')
+SHORT_ROOT = Path(r"<TASK_WORKSPACE>")
+PRODUCT_SOURCE_COMMIT = "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4"
+PRIVATE_BUILDS = {
+    'serena-default-final-v7': ("default", WORK / 'd7'),
+    'serena-state-final-v7': ("test_state_path_env", SHORT_ROOT / 's8'),
+}
+BUILD_WRAPPERS = {
+    'serena-default-final-v7': (WORK / 'final-gates-v7/private_serena_migration_build_seed_v1.py', '8d065f8280c07033bd2c1152ac27250d847e18f3579eabd2e91894bf9e97ed51'),
+    'serena-state-final-v7': (WORK / 'final-gates-v9/private_serena_migration_build_seed_v1.py', 'd49421b46d97352078a93f5251cd9e3193469a794cc1a8abfda4c2aa9149b39e'),
+}
+REBINDING_ROOT = WORK / 'runs/serena-evidence-rebinding-v10'
+REBINDING = REBINDING_ROOT / 'rebinding.json'
+REBINDING_SHA = '5d80f7d0fb66925dbc5166d21baf288c59d8256aaabddc93279ddd5233dbcb09'
+REBINDING_PARENT = WORK / 'serena-evidence-rebinding-v11-launch.json'
+REBINDING_PARENT_SHA = '4c13140b07773caa3e521665437b3761fe8659c0f2f3ea4e870f35045311e7d8'
+REBOUND_PARENTS = {'default': SHORT_ROOT / 'd10', 'state': SHORT_ROOT / 's10'}
+REBOUND_NAMES = {'default': 'migration-default-input.json', 'state': 'migration-state-input.json'}
+REBOUND_BUILDS = {'default': 'serena-default-final-v7', 'state': 'serena-state-final-v7'}
+ROOTS = (
+    ("TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds", 1, ()),
+    ("TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite", 1, ()),
+    ("TestMigrateSerena_DrivesSupervisorRestart", 1, (
+        "reap_fires_BEFORE_the_intent_write;_start_fires_AFTER",
+        "fail-loud_when_the_prior_supervisor_cannot_be_reaped_—_intent_NOT_written")),
+    ("TestMigrateSerena_NilSpecRowsHealedBeforeSpawn", 1, ()),
+    ("TestMigrateSerena_LiveSupervisor_ReapClearsTheGateBeforeWrite", 1, ()),
+    ("TestMigrateSerena_StartFailureAfterIntentCommit_DoesNotRollBackRegistry", 1, ()),
+    ("TestMigrateSerena_PostCommitReconcileReadyTimeout_ExitsZeroWithWarning", 1, ()),
+    ("TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud", 2, ("dead_supervisor", "undeterminable_probe")),
+    ("TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts", 1, ()),
+    ("TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent", 1, ()),
+    ("TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart", 1, ()),
+    ("TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut", 1, ()),
+    ("TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate", 1, ()),
+    ("TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow", 1, ()),
+)
+NATIVE_CONSUMER_CASE = "TestMigrateSerena_CallsInstallParsedManifest_NotDiskWrite"
+NATIVE_CONSUMER_SCHEMA = "private-serena-native-consumer-v1"
+HEX64 = re.compile(r"[0-9a-f]{64}")
+ARTIFACTS = ("image", "product_fixture", "catalog", "uv", "uvx", "python", "issuance_receipt")
+
+
+def require(condition, reason):
+    if not condition:
+        raise RuntimeError(reason)
+
+
+def digest(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def object_value(raw):
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            require(key not in value, "duplicate original JSON field: " + key)
+            value[key] = item
+        return value
+    value = json.loads(raw, object_pairs_hook=unique)
+    require(isinstance(value, dict), "one original JSON object required")
+    return value
+
+
+def read_original(core, path, limit=2 << 20, expected=None):
+    path = core.ordinary(path, False)
+    with path.open("rb") as handle:
+        raw = handle.read(limit + 1)
+    require(len(raw) <= limit, "original evidence exceeds its bound: " + str(path))
+    if expected is not None:
+        require(HEX64.fullmatch(expected) and digest(raw) == expected, "original evidence digest differs: " + str(path))
+    return raw
+
+
+def accept_build_metadata(core, root, commit, lane=None):
+    """Only original terminal metadata is read on an unknown-prior path."""
+    root = core.ordinary(root, True)
+    require(root.parent == core.RUNS, "original build must be one retained private run")
+    path = root / "receipt.json"
+    product_donor = core.receive_product_donor(root) if lane is None else None
+    raw = product_donor["raw"] if product_donor is not None else read_original(core, path, 16 << 20)
+    value = object_value(raw)
+    expected_schema = "qualified-windows-products-run-v1" if lane is None else "private-serena-migration-build-wrapper-v3"
+    require(value.get("schema") == expected_schema and value.get("run") == str(root),
+            "original completed build metadata required")
+    if lane is None:
+        acceptance = product_donor.get("acceptance", {})
+        snapshot = product_donor.get("snapshot", {})
+        postconditions = product_donor.get("postconditions", {})
+        require(value == product_donor["value"] and value.get("status") == "FAIL"
+                and acceptance.get("schema") == "regression-resume-compiled-artifacts-receiving-v2"
+                and acceptance.get("status") == "PASS" and acceptance.get("original_status") == "FAIL"
+                and acceptance.get("source_snapshot") == snapshot
+                and acceptance.get("artifact_postconditions") == postconditions
+                and postconditions == {"tracked_source_unchanged": True, "source_restored": True,
+                                       "original_inputs_unchanged": True, "resource_tool_proxy_unchanged": True}
+                and all(item is True for item in postconditions.values())
+                and snapshot == value.get("source_before") and snapshot.get("head") == commit
+                and isinstance(snapshot.get("files"), dict) and len(snapshot["files"]) == core.SOURCE_COUNT,
+                "explicit compiled-artifact acceptance and restored source required; original FAIL is preserved")
+    else:
+        require(value.get("status") == "PASS", "original completed private build metadata required")
+        for key in ("source_unchanged", "original_inputs_unchanged"):
+            require(value.get(key) is True, "original build completion missing: " + key)
+    require(value.get("commands_quiescent") is True, "original build completion missing: commands_quiescent")
+    commands, quiet = value.get("commands", []), value.get("command_quiescence", {})
+    states = quiet.get("commands", [])
+    require(quiet.get("complete") is True and commands and len(commands) == len(states),
+            "original build command closure is incomplete")
+    for command, state in zip(commands, states):
+        require(state.get("state") == "complete" and state.get("direct_exit_known") is True
+                and type(command.get("exit_code")) is int and command.get("quiescence_state") == "complete"
+                and Path(command.get("stdout", "")).name == state.get("name", "") + ".stdout.txt",
+                "original build command has no matching terminal observation")
+    if lane is None:
+        require(len(commands) == 19 and all(command["exit_code"] == 0 for command in commands),
+                "all 19 original Product commands must have succeeded before compiled-artifact receiving")
+    else:
+        snapshot = value.get("source_before", {}).get("snapshot", {})
+    require(snapshot.get("head") == commit, "original build source commit differs")
+    if lane is not None:
+        case = PRIVATE_BUILDS.get(root.name)
+        require(lane in ("default", "state") and case is not None
+                and case[0] == ("test_state_path_env" if lane == "state" else "default"),
+                "original private build name/lane is outside the reviewed table")
+        require(value.get("lane") == ("test_state_path_env" if lane == "state" else "default")
+                and value.get("mode") in ("build-only", "pre-effect") and value.get("prior_build_completed") is True,
+                "original private builder mode/lane/prior completion differs")
+        for key in ("export_unchanged", "actual_product_unchanged"):
+            require(value.get(key) is True, "original private build final receiving incomplete: " + key)
+        require(all(value.get(key) == "NOT_RUN" for key in ("preparation", "installation", "migration_tests")),
+                "build fixture must precede migration runtime effects")
+        wrapper, wrapper_sha = BUILD_WRAPPERS[root.name]
+        require(isinstance(wrapper_sha, str) and HEX64.fullmatch(wrapper_sha)
+                and value.get("input_files", {}).get(str(wrapper)) == wrapper_sha,
+                "private fixture was not issued by its reviewed original build wrapper")
+    return {"root": root, "path": path, "raw": raw, "value": value, "snapshot": snapshot,
+            "product_donor": product_donor}
+
+
+def receive_priors(core, args):
+    pairs = {phase: (getattr(args, "migration_" + phase + "_input", None),
+                     getattr(args, "migration_" + phase + "_sha256", None)) for phase in ("default", "state")}
+    present = [bool(item) for pair in pairs.values() for item in pair]
+    require(not any(present) or all(present), "supply both complete explicit migration lane input pairs")
+    # Reviewed test-only changes do not reidentify the unchanged Product/Serena donor.
+    product = accept_build_metadata(core, args.build_run, PRODUCT_SOURCE_COMMIT)
+    private = {}
+    if all(present):
+        for phase, (path, expected) in pairs.items():
+            require(HEX64.fullmatch(expected), "migration input requires exact lowercase SHA256")
+            original = accept_rebound_metadata(core, Path(path), expected, args.commit, phase)
+            require(original["snapshot"] == product["snapshot"], "private lane and Product source snapshots differ")
+            private[phase] = original
+        require(private["default"]["root"] != private["state"]["root"], "private lane build roots must be distinct")
+    return product, private
+
+
+def receive_fixture(core, original):
+    if "rebound" in original:
+        return receive_rebound_fixture(core, original)
+    value, root = original["value"], original["root"]
+    case = PRIVATE_BUILDS.get(root.name)
+    require(case is not None and value.get("lane") == case[0],
+            "original fixture build name/lane is outside the reviewed table")
+    evidence_parent = case[1]
+    raw = read_original(core, original["input_path"], 1 << 20, original["input_sha256"])
+    fixture = object_value(raw)
+    fields = {"schema", "purpose", "source_root", "source_epoch", "source_commit", "test_state_path_env",
+              "evidence_parent", "cache_seed", *ARTIFACTS}
+    issued = value["compiler_input_data"]
+    require(set(fixture) == fields and fixture.get("schema") == "private-serena-migration-input-v1"
+            and fixture.get("purpose") == PURPOSE, "original migration input schema/purpose differs")
+    require(fixture.get("source_root") == str(root / "source") == issued.get("sourceRoot")
+            and fixture.get("source_commit") == original["snapshot"]["head"] == issued.get("commit")
+            and fixture.get("source_epoch") == value["publisher_source"]["source_epoch"]
+            and HEX64.fullmatch(fixture["source_epoch"]), "original source/issuer binding differs")
+    tagged = value["lane"] == "test_state_path_env"
+    require(fixture.get("test_state_path_env") is tagged and issued.get("buildTags") == (["test_state_path_env"] if tagged else [])
+            and issued.get("purpose") == PURPOSE and issued.get("role") == "publisher-test",
+            "original explicit issuer lane/role differs")
+    require(fixture["image"] == value["original_exec"]["retained_image"]
+            and fixture["product_fixture"] == value["product_fixture"]
+            and all(fixture[key] == value["external_operands"][key] for key in ("uv", "uvx", "python")),
+            "original retained image/Product/tool operands differ")
+    require(fixture["catalog"]["path"] == str(root / "source/servers/serena/manifest.yaml")
+            and fixture["issuance_receipt"]["path"] == str(root / "compiler-inputs/cli-publisher-test-inputs.json")
+            and fixture["evidence_parent"] == str(evidence_parent), "original export/issuer/evidence paths differ")
+    creation = value.get("evidence_parent_creation", {})
+    created = creation.get("directories", [])
+    require(creation.get("scope") == str(evidence_parent)
+            and creation.get("existing_objects_mutated") is False
+            and creation.get("recursive_acl_operations") is False and len(created) == 1
+            and created[0].get("path") == str(evidence_parent)
+            and created[0].get("created_exclusively") is True and created[0].get("dacl_protected") is True,
+            "original short evidence root was not independently created private")
+    require(all(issued.get("publisherSource", {}).get(key) == value["publisher_source"].get(key)
+                for key in ("source_epoch", "source_snapshot_sha256", "file_count"))
+            and issued.get("sourceSnapshotPath") == str(root / "source-snapshot.json"),
+            "original issuer Source snapshot binding differs")
+    pins = {str(original["path"]): digest(original["raw"]), str(original["input_path"]): digest(raw)}
+    cache_seed, seed_inputs = core.receive_seed_package_inputs()
+    require(fixture.get("cache_seed") == value.get("cache_seed") == cache_seed
+            and value.get("cache_seed_input_files") == seed_inputs
+            and all(value.get("input_files", {}).get(path) == pin for path, pin in seed_inputs.items()),
+            "original builder did not retain the exact closed seed package inputs")
+    pins.update(seed_inputs)
+    snapshot_digest = value["publisher_source"]["source_snapshot_sha256"]
+    read_original(core, root / "source-snapshot.json", 64 << 20, snapshot_digest)
+    pins[str(root / "source-snapshot.json")] = snapshot_digest
+    for name in ARTIFACTS:
+        artifact = fixture[name]
+        require(set(artifact) == {"path", "sha256"} and HEX64.fullmatch(artifact["sha256"]),
+                "exact original artifact pair required")
+        read_original(core, artifact["path"], 64 << 20, artifact["sha256"])
+        pins[artifact["path"]] = artifact["sha256"]
+    issuer_raw = read_original(core, fixture["issuance_receipt"]["path"], 1 << 20, fixture["issuance_receipt"]["sha256"])
+    require(object_value(issuer_raw) == issued, "original issuer DATA changed after build")
+    main = value["original_exec"]["retained_testmain"]
+    read_original(core, main["path"], 8 << 20, main["sha256"])
+    pins[main["path"]] = main["sha256"]
+    require(core.tree(root / "source") == value["source_export_before"], "original retained Source export changed")
+    parent = core.ordinary(fixture["evidence_parent"], True)
+    require(not list(parent.iterdir()), "migration evidence parent is not fresh and empty")
+    return {"input": {"path": str(original["input_path"]), "sha256": original["input_sha256"]},
+            "fixture": fixture, "issuer": issued, "input_files": pins, "source_export": value["source_export_before"],
+            "evidence_parent_initially_empty": True}
+
+
+def receive_focused_fixture(core, original):
+    """Receive a separately issued focused DATA input without rewriting its original."""
+    if "rebound" in original:
+        require(original["rebound"]["role"] == "focused", "focused rebound role differs")
+        return receive_rebound_fixture(core, original)
+    root, value = original["root"], original["value"]
+    require(root.name == 'serena-default-final-v7' and value.get("lane") == "default",
+            "focused native consumer requires the one original default publisher")
+    published = value.get("focused_migration_input", {})
+    require(original["input_path"] == root / "migration-focused-input.json"
+            and published.get("path") == str(original["input_path"])
+            and published.get("sha256") == original["input_sha256"],
+            "focused input was not published by the original closed builder")
+    full = value.get("migration_input", {})
+    require(full.get("path") == str(root / "migration-input.json")
+            and HEX64.fullmatch(full.get("sha256", "")), "original reserved full-lane input is absent")
+    full_original = dict(original, input_path=Path(full["path"]), input_sha256=full["sha256"])
+    lane = receive_fixture(core, full_original)
+    raw = read_original(core, original["input_path"], 1 << 20, original["input_sha256"])
+    fixture = object_value(raw)
+    parent = WORK / 'f7'
+    require(fixture == dict(lane["fixture"], evidence_parent=str(parent))
+            and fixture["evidence_parent"] != lane["fixture"]["evidence_parent"],
+            "focused DATA must differ only by its independently created evidence parent")
+    creation = value.get("focused_evidence_parent_creation", {})
+    created = creation.get("directories", [])
+    require(creation.get("scope") == str(parent) and creation.get("existing_objects_mutated") is False
+            and creation.get("recursive_acl_operations") is False and len(created) == 1
+            and created[0].get("path") == str(parent) and created[0].get("created_exclusively") is True
+            and created[0].get("dacl_protected") is True, "focused evidence parent lacks original private creation")
+    parent = core.ordinary(parent, True)
+    require(not list(parent.iterdir()), "focused evidence parent is not fresh and empty")
+    pins = dict(lane["input_files"])
+    pins[str(original["input_path"])] = digest(raw)
+    return dict(lane, input={"path": str(original["input_path"]), "sha256": original["input_sha256"]},
+                fixture=fixture, input_files=pins, reserved_full_input=lane["input"],
+                reserved_full_evidence_parent=lane["fixture"]["evidence_parent"])
+
+
+
+def accept_rebound_metadata(core, path, expected, test_commit, role):
+    """Receive both original build identities and the fresh, closed DATA issuer."""
+    require(role in REBOUND_PARENTS and Path(path) == REBINDING_ROOT / REBOUND_NAMES[role]
+            and isinstance(expected, str) and HEX64.fullmatch(expected), "one exact rebound DATA input required")
+    require(all(isinstance(pin, str) and HEX64.fullmatch(pin) for pin in
+                (REBINDING_SHA, REBINDING_PARENT_SHA)), "rebound DATA is disabled until actual closed record pins exist")
+    original = accept_build_metadata(core, WORK / 'runs' / REBOUND_BUILDS[role], PRODUCT_SOURCE_COMMIT, role)
+    full = original['value'].get('migration_input', {})
+    require(full.get('path') == str(original['root'] / 'migration-input.json')
+            and HEX64.fullmatch(full.get('sha256', '')), "original reserved full input is missing")
+    parent_raw = read_original(core, REBINDING_PARENT, 64 << 10, REBINDING_PARENT_SHA)
+    parent = object_value(parent_raw)
+    require(parent.get('schema') == 'serena-evidence-rebinding-parent-v2'
+            and parent.get('state') == 'received' and type(parent.get('exit_code')) is int
+            and parent['exit_code'] == 0 and parent.get('terminal_exit_received') is True
+            and parent.get('parent_capture_files_closed') is True and parent.get('deadline_exceeded') is False
+            and 'launcher_error' not in parent and parent.get('child_status') == 'PASS'
+            and parent.get('output_controls_received') is True
+            and parent.get('original_receipt_sha256') == REBINDING_SHA,
+            'original rebound DATA parent/captures did not close')
+    raw = read_original(core, REBINDING, 2 << 20, REBINDING_SHA)
+    value = object_value(raw)
+    receiver = core.source_receiver()
+    lanes = value.get('lanes', {})
+    require(value.get('schema') == 'private-serena-evidence-rebinding-v2'
+            and value.get('status') == 'PASS' and value.get('run') == str(REBINDING_ROOT)
+            and value.get('source_commit') == PRODUCT_SOURCE_COMMIT and value.get('test_source_commit') == test_commit
+            and value.get('source_snapshot') == original['snapshot'] and set(lanes) == set(REBOUND_PARENTS)
+            and lanes[role] == {'original_build': {'path': str(original['path']), 'sha256': digest(original['raw'])},
+                               'original_input': {'path': full['path'], 'sha256': full['sha256']},
+                               'source_epoch': original['value']['publisher_source']['source_epoch']}
+            and value.get('retained_input_access') == receiver.RETAINED_ADMISSION
+            and value.get('source_update_admission') == {'path': receiver.TEST_SOURCE_ADMISSION['root_path'],
+                                                        'sha256': receiver.TEST_SOURCE_ADMISSION['root_sha256']}
+            and value.get('delta_map') == {'path': receiver.TEST_SOURCE_ADMISSION['delta_map_path'],
+                                          'sha256': receiver.TEST_SOURCE_ADMISSION['delta_map_sha256']}
+            and value.get('source_unchanged') is True and value.get('original_inputs_unchanged') is True
+            and value.get('source_check') == 'pinned-source-v3-and-update-metadata-plus-original-exports'
+            and value.get('consumer_source_tree_read') is False
+            and value.get('original_evidence_parents_unchanged_and_empty') is True
+            and value.get('prior_status') == 'FAIL' and value.get('prior_status_rewritten') is False
+            and type(value.get('commands_executed')) is int and value['commands_executed'] == 0
+            and all(value.get(key) is False for key in ('artifact_recompiled', 'tests_executed',
+                       'go_executed', 'installation_attempted', 'qualification_passed', 'ready_issued',
+                       'shared_cache_accessed', 'cache_contents_accessed', 'new_cache_handoff_issued',
+                       'old_scope_access_issued')),
+            'new DATA binding must preserve original Product/Serena identity and failure provenance')
+    outputs = value.get('outputs', {})
+    require(set(outputs) == set(REBOUND_PARENTS) and parent.get('outputs') == outputs,
+            'both independent rebound inputs and their closed parent are required')
+    for name, evidence_parent in REBOUND_PARENTS.items():
+        row = outputs[name]
+        require(set(row) == {'path', 'sha256', 'evidence_parent'}
+                and row['path'] == str(REBINDING_ROOT / REBOUND_NAMES[name])
+                and isinstance(row['sha256'], str) and HEX64.fullmatch(row['sha256'])
+                and row['evidence_parent'] == str(evidence_parent), 'rebound output path/pin differs')
+    require(outputs[role]['path'] == str(path) and outputs[role]['sha256'] == expected,
+            'caller input differs from the closed new DATA issuer')
+    original.update(input_path=Path(full['path']), input_sha256=full['sha256'],
+        rebound={'role': role, 'value': value, 'raw': raw,
+                 'input': {'path': str(path), 'sha256': expected},
+                 'control_pins': {str(REBINDING): REBINDING_SHA, str(REBINDING_PARENT): REBINDING_PARENT_SHA}})
+    return original
+
+
+def receive_rebound_parent(core, value, role):
+    parent = REBOUND_PARENTS[role]
+    creation = value.get('evidence_parent_creation', {}).get(role, {})
+    created = creation.get('directories', [])
+    require(creation.get('scope') == str(parent) and creation.get('existing_objects_mutated') is False
+            and creation.get('recursive_acl_operations') is False and len(created) == 1
+            and created[0].get('path') == str(parent) and created[0].get('created_exclusively') is True
+            and created[0].get('dacl_protected') is True,
+            'rebound evidence parent lacks original exclusive protected creation')
+    parent = core.ordinary(parent, True)
+    scope = core.scope_helper()
+    with scope.open_directory(parent) as original_directory:
+        identity = scope.directory_identity(original_directory)
+        security = scope.security_receipt(original_directory, creation['token']['user_sid'])
+        require(all(created[0].get(key) == item for key, item in {**identity, **security}.items()),
+                'rebound evidence parent identity/security changed')
+        require(not list(parent.iterdir()), 'rebound evidence parent is not fresh and empty')
+    return parent
+
+
+def receive_rebound_fixture(core, original):
+    """Exact one-field transform; the original full d7/s8 fixtures remain unused."""
+    rebound = original['rebound']
+    base_original = {key: value for key, value in original.items() if key != 'rebound'}
+    # Retain all original full fixture checks, including its unused parent.
+    lane = receive_fixture(core, base_original)
+    value, role = rebound['value'], rebound['role']
+    pins = dict(lane['input_files'])
+    pins.update(rebound['control_pins'])
+    require(all(value.get('input_files', {}).get(path) == pin for path, pin in lane['input_files'].items()),
+            'rebound issuer did not retain every original lane input pin')
+    row = value['outputs'][role]
+    raw = read_original(core, row['path'], 1 << 20, row['sha256'])
+    fixture = object_value(raw)
+    require(fixture == dict(lane['fixture'], evidence_parent=str(REBOUND_PARENTS[role])),
+            'rebound fixture must differ from original full input only by evidence_parent')
+    receive_rebound_parent(core, value, role)
+    pins[row['path']] = row['sha256']
+    return dict(lane, input=rebound['input'], fixture=fixture, input_files=pins,
+                evidence_rebinding={'path': str(REBINDING), 'sha256': REBINDING_SHA,
+                                    'original_input': value['lanes'][role]['original_input'], 'role': role})
+
+
+def require_fresh_parent(core, lane):
+    parent = core.ordinary(lane["fixture"]["evidence_parent"], True)
+    require(lane.get("evidence_parent_initially_empty") is True and not list(parent.iterdir()),
+            "migration lane evidence parent was already used before its original invocation")
+
+
+def time_ns(value):
+    match = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)", value)
+    require(match is not None, "original absolute deadline must be RFC3339")
+    base = datetime.datetime.fromisoformat(match[1] + ("+00:00" if match[3] == "Z" else match[3]))
+    return int(base.timestamp()) * 1000000000 + int((match[2] or "").ljust(9, "0") or "0")
+
+
+def duration_ns(value):
+    units = {"h": 3600000000000, "m": 60000000000, "s": 1000000000,
+             "ms": 1000000, "us": 1000, "µs": 1000, "ns": 1}
+    parts = re.findall(r"(\d+)(?:\.(\d+))?(ms|us|µs|ns|h|m|s)", value)
+    require(parts and "".join(a + ("." + b if b else "") + u for a, b, u in parts) == value,
+            "original test timeout is not a positive Go duration")
+    total = 0
+    for whole, fraction, unit in parts:
+        scale = units[unit]
+        require(not fraction or (int(fraction) * scale) % (10 ** len(fraction)) == 0,
+                "original duration has sub-nanosecond precision")
+        total += int(whole) * scale + (int(fraction) * scale // (10 ** len(fraction)) if fraction else 0)
+    require(0 < total <= 300000000000, "original child timeout exceeds unchanged five-minute bound")
+    return total
+
+
+def raw_ledger(raw, root):
+    name, _, subtests = root
+    counts = {test: {"runs": 0, "passes": 0, "fails": 0, "skips": 0}
+              for test in (name, *(name + "/" + sub for sub in subtests))}
+    suite_pass = 0
+    prefixes = (("=== RUN   ", "runs"), ("--- PASS: ", "passes"), ("--- FAIL: ", "fails"), ("--- SKIP: ", "skips"))
+    for frame in raw.split(b"\x16")[1:]:
+        require(b"\n" in frame, "truncated original test2json control frame")
+        line = frame.split(b"\n", 1)[0].decode("utf-8", "strict").strip()
+        require(line != "FAIL", "original nested suite failed")
+        if line == "PASS":
+            suite_pass += 1
+            continue
+        for prefix, action in prefixes:
+            if line.startswith(prefix):
+                test = line[len(prefix):]
+                if action != "runs":
+                    test = test.rsplit(" (", 1)[0]
+                require(test in counts, "foreign nested test: " + test)
+                row = counts[test]
+                require(action == "runs" or row["runs"] == 1, "nested terminal has no original RUN")
+                row[action] += 1
+                require(row["runs"] <= 1 and row["passes"] + row["fails"] + row["skips"] <= 1,
+                        "duplicate nested RUN or terminal")
+                break
+    require(suite_pass == 1 and all(row == {"runs": 1, "passes": 1, "fails": 0, "skips": 0} for row in counts.values()),
+            "missing, skipped or failed fixed nested test")
+    return counts
+
+
+def native_complete(record):
+    identity, native, streams = record.get("root_identity", {}), record.get("native", {}), record.get("io", {})
+    require(record.get("native_complete") is True and record.get("io_complete") is True
+            and record.get("custody_retained") is False and record.get("root_wait_known") is True
+            and type(record.get("root_exit_code")) is int and record["root_exit_code"] == 0 and identity.get("Known") is True
+            and type(identity.get("PID")) is int and identity["PID"] > 0
+            and type(identity.get("NativeBirthFILETIME")) is int and identity["NativeBirthFILETIME"] > 0,
+            "nested original native/IO/root completion is absent")
+    require(native.get("RootIdentity") == identity and native.get("RootWaitKnown") is True
+            and type(native.get("RootExitCode")) is int and native["RootExitCode"] == 0 and native.get("NoChildKnown") is False
+            and native.get("HandlesClosed") is True and native.get("FinalActive") == 0
+            and native["Error"] is None
+            and (native.get("OriginalJobExited") is True or
+                 (native.get("MembersExited") is True and native.get("AccountingKnown") is True)),
+            "nested original native snapshot differs from its receiving")
+    for key in ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite"):
+        slot = streams.get(key, {})
+        require(slot.get("Acquired") is True and slot.get("CloseAttempted") is True
+                and slot.get("Closed") is True and slot["CloseError"] is None, "nested original pipe close incomplete")
+    for key in ("Stdout", "Stderr"):
+        stream = streams.get(key, {})
+        require(stream.get("WorkerStarted") is True and stream.get("WorkerComplete") is True
+                and stream.get("EOF") is True and stream["Error"] is None
+                and stream.get("LimitExceeded") is False, "nested original IO worker incomplete")
+    return identity
+
+
+def _consumer_object(value, fields, optional=()):
+    required, allowed = set(fields), set(fields) | set(optional)
+    require(type(value) is dict and required <= set(value) <= allowed,
+            "native consumer DATA fields differ from the fixed wire schema")
+    return value
+
+
+def _consumer_hash(value):
+    return type(value) is str and HEX64.fullmatch(value) is not None
+
+
+def _consumer_id(value):
+    return type(value) is str and re.fullmatch(r"[a-z0-9-]{1,128}", value) is not None
+
+
+def _consumer_integer(value, minimum, maximum):
+    return type(value) is int and minimum <= value <= maximum
+
+
+def _consumer_go_json_sha(value):
+    # Match encoding/json for the concrete, ordered DATA structs below.
+    text = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    for char, escaped in (("<", r"\u003c"), (">", r"\u003e"), ("&", r"\u0026"),
+                          ("\u2028", r"\u2028"), ("\u2029", r"\u2029")):
+        text = text.replace(char, escaped)
+    return digest(text.encode("utf-8"))
+
+
+def receive_native_consumer(value, fixture):
+    """DATA predicates only; object_value must decode the original wire bytes.
+
+    Original typed protocol/native/IO validators run in the original publisher.
+    This receiver cannot reconstruct those authorities from the DTO.
+    """
+    record = _consumer_object(value, (
+        "schema", "ready", "confirmed", "terminal", "protocol", "native", "io",
+        "io_receipt_sha256", "order", "complete"))
+    require(record["schema"] == NATIVE_CONSUMER_SCHEMA and record["complete"] is True,
+            "native consumer receiving is absent/incomplete")
+    ready = _consumer_object(record["ready"], (
+        "schema", "request_identity_sha256", "generation_id", "record_sha256",
+        "source_sha256", "interpreter_sha256", "entrypoint_sha256", "resolution_sha256"))
+    require(ready["schema"] == "serena-prepared-runtime-ref-v1"
+            and _consumer_id(ready["generation_id"])
+            and all(_consumer_hash(ready[key]) for key in (
+                "request_identity_sha256", "record_sha256", "source_sha256",
+                "interpreter_sha256", "entrypoint_sha256", "resolution_sha256"))
+            and ready["source_sha256"] == fixture["source_epoch"]
+            and ready["interpreter_sha256"] == fixture["python"]["sha256"],
+            "native consumer Ready/source/interpreter binding differs")
+    binding_fields = (
+        "operation_id", "task_name", "consumer_kind", "package_request_identity_sha256",
+        "generation_id", "ready_record_sha256", "source_sha256", "entrypoint_sha256",
+        "descriptor_sha256", "disposition", "start_disposition", "native_binding",
+        "closure_receipt_sha256")
+    confirmed, terminal = (_consumer_object(record[key], binding_fields)
+                           for key in ("confirmed", "terminal"))
+    for binding, disposition in ((confirmed, "confirmed"), (terminal, "terminal")):
+        native_binding = _consumer_object(binding["native_binding"], (
+            "creator_operation_id", "pid", "native_birth_filetime", "native_identity_sha256"))
+        require(_consumer_id(binding["operation_id"]) and _consumer_id(binding["generation_id"])
+                and type(binding["task_name"]) is str and binding["task_name"]
+                and binding["consumer_kind"] == "workspace" and binding["disposition"] == "current"
+                and binding["start_disposition"] == disposition
+                and all(_consumer_hash(binding[key]) for key in (
+                    "package_request_identity_sha256", "ready_record_sha256",
+                    "source_sha256", "entrypoint_sha256", "descriptor_sha256"))
+                and native_binding["creator_operation_id"] == binding["operation_id"]
+                and _consumer_integer(native_binding["pid"], 1, (1 << 32) - 1)
+                and _consumer_integer(native_binding["native_birth_filetime"], 1, (1 << 64) - 1)
+                and _consumer_hash(native_binding["native_identity_sha256"]),
+                "native consumer current binding/native identity is invalid")
+    require(confirmed["closure_receipt_sha256"] is None
+            and _consumer_hash(terminal["closure_receipt_sha256"]),
+            "native consumer confirmed/terminal closure state differs")
+    expected_terminal = dict(confirmed)
+    expected_terminal.update(start_disposition="terminal",
+                             closure_receipt_sha256=terminal["closure_receipt_sha256"])
+    require(expected_terminal == terminal
+            and all(confirmed[left] == ready[right] for left, right in (
+                ("package_request_identity_sha256", "request_identity_sha256"),
+                ("generation_id", "generation_id"), ("ready_record_sha256", "record_sha256"),
+                ("source_sha256", "source_sha256"), ("entrypoint_sha256", "entrypoint_sha256"))),
+            "native consumer immutable Ready/binding tuple differs")
+    protocol = _consumer_object(record["protocol"], (
+        "qualification_id", "host_start_sha256", "endpoint_sha256", "receipt_sha256"))
+    require(_consumer_id(protocol["qualification_id"])
+            and all(_consumer_hash(protocol[key]) for key in (
+                "host_start_sha256", "endpoint_sha256", "receipt_sha256")),
+            "native consumer protocol receipt/binding is invalid")
+    native = _consumer_object(record["native"], (
+        "RootIdentity", "NoChildKnown", "RootWaitKnown", "RootExitCode", "TerminalAction",
+        "MembersExited", "AccountingKnown", "InitialTotal", "FinalActive",
+        "CapturedMemberPIDs", "HandlesClosed", "Error"), ("OriginalJobExited",))
+    identity_fields = ("Known", "PID", "StartedAt", "NativeBirthFILETIME")
+    identity = _consumer_object(native["RootIdentity"], identity_fields)
+    bound = confirmed["native_binding"]
+    require(identity["Known"] is True and type(identity["StartedAt"]) is str
+            and _consumer_integer(identity["PID"], 1, (1 << 32) - 1)
+            and _consumer_integer(identity["NativeBirthFILETIME"], 1, (1 << 64) - 1)
+            and identity["PID"] == bound["pid"]
+            and identity["NativeBirthFILETIME"] == bound["native_birth_filetime"]
+            and native["NoChildKnown"] is False and native["RootWaitKnown"] is True
+            and _consumer_integer(native["RootExitCode"], -(1 << 63), (1 << 63) - 1)
+            and native["TerminalAction"] == "request-succeeded"
+            and type(native["MembersExited"]) is bool and type(native["AccountingKnown"]) is bool
+            and ("OriginalJobExited" not in native or native["OriginalJobExited"] is True)
+            and (native.get("OriginalJobExited") is True or
+                 (native["MembersExited"] is True and native["AccountingKnown"] is True))
+            and _consumer_integer(native["InitialTotal"], 0, (1 << 32) - 1)
+            and type(native["FinalActive"]) is int and native["FinalActive"] == 0
+            and native["HandlesClosed"] is True and native["Error"] is None,
+            "native consumer original identity/owned stop is incomplete")
+    members = native["CapturedMemberPIDs"]
+    require(members is None or type(members) is list
+            and all(_consumer_integer(pid, 0, (1 << 32) - 1) for pid in members),
+            "native consumer member snapshot type differs")
+    identity_sha = _consumer_go_json_sha({key: identity[key] for key in identity_fields})
+    require(identity_sha == bound["native_identity_sha256"] == protocol["host_start_sha256"],
+            "native consumer original host identity digest differs")
+    order = _consumer_object(record["order"], (
+        "ProtocolReceived", "OwnedActionStarted", "OwnedActionCompleted",
+        "ResourcesClosed", "OwnedActionReceiptSHA256"))
+    require(all(_consumer_integer(order[key], 1, (1 << 64) - 1) for key in (
+                "ProtocolReceived", "OwnedActionStarted", "OwnedActionCompleted", "ResourcesClosed"))
+            and order["ProtocolReceived"] < order["OwnedActionStarted"]
+            < order["OwnedActionCompleted"] < order["ResourcesClosed"]
+            and _consumer_hash(order["OwnedActionReceiptSHA256"]),
+            "native consumer protocol/owned-stop/closure chronology differs")
+    slots = ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite")
+    workers = ("Stdout", "Stderr")
+    streams = _consumer_object(record["io"], (*slots, *workers))
+    ordered_io = {}
+    for name in slots:
+        fields = ("Acquired", "CloseAttempted", "Closed", "CloseError")
+        slot = _consumer_object(streams[name], fields)
+        require(slot["Acquired"] is True and slot["CloseAttempted"] is True
+                and slot["Closed"] is True and slot["CloseError"] is None,
+                "native consumer original pipe close is incomplete")
+        ordered_io[name] = {key: slot[key] for key in fields}
+    for name in workers:
+        fields = ("WorkerStarted", "WorkerComplete", "EOF", "Bytes", "Limit", "LimitExceeded", "Error")
+        stream = _consumer_object(streams[name], fields)
+        require(stream["WorkerStarted"] is True and stream["WorkerComplete"] is True
+                and stream["EOF"] is True and stream["LimitExceeded"] is False and stream["Error"] is None
+                and _consumer_integer(stream["Bytes"], 0, (1 << 63) - 1)
+                and _consumer_integer(stream["Limit"], 0, (1 << 63) - 1),
+                "native consumer original IO worker is incomplete")
+        ordered_io[name] = {key: stream[key] for key in fields}
+    io_sha = _consumer_go_json_sha({"Schema": "http-host-original-io-v1", "IO": ordered_io,
+                                   "LogClosed": True, "RequestsJoined": True})
+    require(_consumer_hash(record["io_receipt_sha256"]) and io_sha == record["io_receipt_sha256"],
+            "native consumer original IO receipt digest differs")
+    return {"operation_id": confirmed["operation_id"], "task_name": confirmed["task_name"],
+            "generation_id": confirmed["generation_id"], "root_identity": identity,
+            "protocol_receipt_sha256": protocol["receipt_sha256"],
+            "closure_receipt_sha256": terminal["closure_receipt_sha256"],
+            "io_receipt_sha256": record["io_receipt_sha256"]}
+
+
+def receive_operation_consumer(name, operation, fixture):
+    if name != NATIVE_CONSUMER_CASE:
+        require("native_consumer" not in operation,
+                "native consumer evidence is forbidden outside its one fixed case")
+        return None
+    require(all(type(operation.get(key)) is int and operation[key] == 1
+                for key in ("prepare_calls", "nonempty_prepare_calls", "install_calls"))
+            and ("driver_error" not in operation or operation["driver_error"] == "")
+            and "native_consumer" in operation,
+            "fixed native consumer case requires exactly one original preparation/install")
+    return receive_native_consumer(operation["native_consumer"], fixture)
+
+
+def receive_nested(core, lane, outer, outer_complete):
+    return _receive_nested(core, lane, outer, outer_complete, ROOTS, "literal-private-migration-receiving-v2")
+
+
+def receive_focused(core, lane, outer, outer_complete):
+    require(outer.get("package") == CLI and outer.get("phase") == "default"
+            and outer.get("focused_case") == NATIVE_CONSUMER_CASE
+            and lane["fixture"].get("test_state_path_env") is False,
+            "one fixed default native consumer invocation required")
+    return _receive_nested(core, lane, outer, outer_complete,
+                           ((NATIVE_CONSUMER_CASE, 1, ()),), "private-serena-native-focused-receiving-v1")
+
+
+def _receive_nested(core, lane, outer, outer_complete, roots, schema):
+    """Only after the caller received the whole original CLI/native/IO boundary."""
+    require(outer_complete is True and outer.get("native_custody_settled") is True
+            and outer.get("commands_quiescent") is True, "whole original CLI/native/IO closure required before nested reads")
+    fixture, artifact = lane["fixture"], lane["input"]
+    parent = core.ordinary(fixture["evidence_parent"], True)
+    directories = sorted(parent.iterdir())
+    require(lane.get("evidence_parent_initially_empty") is True and len(directories) == len(roots),
+            "exact original fresh, unreused migration directory count required")
+    expected = {row[0]: row for row in roots}
+    accepted = {}
+    for directory in directories:
+        core.ordinary(directory, True)
+        require(re.fullmatch(r"m[0-9]+", directory.name), "unexpected nested evidence entry")
+        receipt_path = directory / "receipt.json"
+        receipt_raw = read_original(core, receipt_path)
+        receipt = object_value(receipt_raw)
+        name = receipt.get("root")
+        require(name in expected and name not in accepted, "foreign or duplicate nested migration root")
+        require(receipt.get("schema") == "private-serena-migration-parent-v1"
+                and receipt.get("complete") is True and receipt.get("inputs_unchanged") is True
+                and receipt.get("input_sha256") == artifact["sha256"]
+                and not receipt.get("original_error") and not receipt.get("ledger_error"),
+                "nested original parent did not complete successfully")
+        identity = native_complete(receipt)
+        config_raw = read_original(core, directory / "case.json", 16 << 10)
+        config = object_value(config_raw)
+        require(config == receipt.get("config") and config.get("schema") == "private-serena-migration-case-v1"
+                and config.get("root") == name and config.get("input") == artifact
+                and config.get("directory") == str(directory), "nested original invocation binding differs")
+        argv = config.get("args", [])
+        require(len(argv) == 5 and argv[:3] == ["-test.paniconexit0", "-test.v=test2json", "-test.count=1"]
+                and argv[4] == "-test.run=^" + name + "$" and argv[3].startswith("-test.timeout="),
+                "nested original fixed selector/argv differs")
+        duration_ns(argv[3][len("-test.timeout="):])
+        work_end, parent_end, cleanup_end = (time_ns(config[key]) for key in ("work_end", "parent_end", "cleanup_end"))
+        require(parent_end - work_end == 11000000000 and parent_end - cleanup_end == 1000000000,
+                "nested original deadline/cleanup reserve differs")
+        build = config.get("parent_build", {})
+        actual_build = outer.get("build_info", {})
+        require(all(build.get(key) == actual_build.get(key) for key in ("GoVersion", "Path", "Settings")),
+                "nested original parent compiler metadata differs")
+        product = receipt.get("parent_product", {})
+        require(product.get("role") == "product" and product.get("sha256") == outer.get("executed_sha256")
+                and product.get("commit") == fixture["source_commit"], "nested parent is not this actual outer Product image")
+        child_raw = read_original(core, directory / "child.json", 16 << 10)
+        child = object_value(child_raw)
+        native, image = child.get("native", {}), child.get("image", {})
+        require(child == receipt.get("child") and child.get("schema") == "private-serena-migration-child-v2"
+                and child.get("complete") is True and child.get("root") == name
+                and child.get("input_sha256") == artifact["sha256"] and time_ns(child["work_end"]) == work_end
+                and native.get("pid") == identity["PID"] and native.get("native_birth_filetime") == identity["NativeBirthFILETIME"],
+                "nested child self/native observation differs from original owner identity")
+        require(HEX64.fullmatch(image.get("image_identity_sha256", ""))
+                and image.get("image_sha256") == fixture["image"]["sha256"]
+                and image.get("source_epoch") == fixture["source_epoch"] and image.get("commit") == fixture["source_commit"]
+                and image.get("version") == lane["issuer"]["version"] and image.get("build_date") == lane["issuer"]["buildDate"]
+                and image.get("machine") == 0x8664 and image.get("subsystem") == 2 and image.get("resources_closed") is True,
+                "nested original current image/Source receiving differs")
+        for key in ("native_image_path_sha256", "principal_sid_sha256", "native_capture_sha256"):
+            require(HEX64.fullmatch(native.get(key, "")), "nested original native fingerprint is absent")
+        root = expected[name]
+        operations, seeds = child.get("operations", []), child.get("seeds", [])
+        require(len(operations) == root[1] == len(seeds), "nested original preparation/consumer count differs")
+        native_receiving = None
+        for index, operation in enumerate(operations):
+            test = name + ("/" + root[2][index] if root[2] else "")
+            require(operation.get("test") == test and operation.get("original_operation_complete") is True
+                    and type(operation.get("prepare_calls")) is int and type(operation.get("nonempty_prepare_calls")) is int
+                    and operation["prepare_calls"] >= operation["nonempty_prepare_calls"] >= 1
+                    and operation.get("install_calls") == 1 and operation.get("intent_path")
+                    and all(not operation.get(key) for key in ("constructor_error", "prepare_error", "install_error", "cleanup_error")),
+                    "nested original positive preparation/consumer did not complete")
+            native_receiving = receive_operation_consumer(name, operation, fixture)
+            # A late driver error is the original test's subject, not an install failure.
+            seed = seeds[index]
+            require(Path(seed["path"]).is_relative_to(directory), "nested seed is outside its original case")
+            read_original(core, seed["path"], 1 << 20, seed["sha256"])
+        for stream in ("stdout", "stderr"):
+            path = directory / (stream + ".log")
+            require(receipt.get(stream) == str(path), "nested original capture path differs")
+            require(HEX64.fullmatch(receipt.get(stream + "_sha256", "")), "nested original capture digest absent")
+            raw = read_original(core, path, 16 << 20, receipt[stream + "_sha256"])
+            if stream == "stdout":
+                require(raw_ledger(raw, root) == receipt.get("tests"), "nested raw fixed ledger differs from original receiving")
+        accepted[name] = {"receipt": str(receipt_path), "sha256": digest(receipt_raw),
+                          "config_sha256": digest(config_raw), "child_sha256": digest(child_raw),
+                          "root_identity": identity, "preparations": root[1], "tests": receipt["tests"],
+                          "native_consumer": native_receiving}
+    require(set(accepted) == set(expected), "nested migration root inventory incomplete")
+    native_count = sum(value["native_consumer"] is not None for value in accepted.values())
+    require(native_count == 1, "one fixed post-Ready native consumer must be received per lane")
+    return {"schema": schema, "passed": True, "input": artifact,
+            "root_count": len(accepted), "preparation_count": sum(row[1] for row in roots),
+            "native_consumer_count": native_count,
+            "subtest_count": sum(len(row[2]) for row in roots), "records": accepted,
+            "scope": "received original nested evidence after whole native/IO closure; no new authority"}

@@ -1,0 +1,276 @@
+{
+  "schema": "native-final-literal-parent-v1",
+  "state": "received",
+  "prior_controls": {
+    "<TASK>\\serena-default-final-v7-launch.json": "13926e54eaaff95ff9e9eef468b071155f62974becb573a13ecc171a85d568c3",
+    "<TASK>\\serena-state-final-v7-launch.json": "cef889a5fb952302e5e822d5311c07ea18b2b2c8ebfd6b64ab942c20edc49861",
+    "<TASK>\\serena-default-receiving-v7-launch.json": "55fef2b2bbbe74df7ec00079037f584c15062823da3afcb8f5b5dc0d00352d37",
+    "<TASK>\\serena-state-receiving-v10-launch.json": "5caee81e31b26f10fd981c865463375a36665691612c5d718133f7970881d340",
+    "<TASK>\\runs\\serena-default-final-v7\\receipt.json": "52db335b6386f335911f21afc1aa5c84c0daf9b7daa6fdd5eb16a52e00af1cfd",
+    "<TASK>\\runs\\serena-state-final-v7\\receipt.json": "958fa516ff54e797a7237838ef1fb5466cb1a4abcab6a63171860a3d56839b74",
+    "<TASK>\\runs\\serena-default-final-v7\\root-receiving.json": "60f196da9fc01340e27aa4e4efa95b531d337bc0ed24ba98a4f0982cf81ca98f",
+    "<TASK>\\runs\\serena-state-final-v7\\root-receiving.json": "d9028965d82599de2b87c0d46d6dcb984f98a481cafa1cfcdbdb7d853951d21d",
+    "<TASK>\\runs\\serena-evidence-rebinding-v10\\rebinding.json": "5d80f7d0fb66925dbc5166d21baf288c59d8256aaabddc93279ddd5233dbcb09",
+    "<TASK>\\serena-evidence-rebinding-v11-launch.json": "4c13140b07773caa3e521665437b3761fe8659c0f2f3ea4e870f35045311e7d8"
+  },
+  "migration_inputs": {
+    "default": {
+      "path": "<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-default-input.json",
+      "sha256": "d98da468cdcf5b7f1b0a8e245a906d50a50b8ff7e221330e784ef993e33aa7ed"
+    },
+    "state": {
+      "path": "<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-state-input.json",
+      "sha256": "328e666d1f6bb22c344857749449b40d3003a4dc59336744888e2b78f6989580"
+    }
+  },
+  "source_admission": {
+    "base": {
+      "root_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\root-receiving.json",
+      "root_sha256": "0215f8f67a4dcca2f44f4832e3c3012c8192786f9508f027eccaa2e703cfac11",
+      "original_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\receipt.json",
+      "original_sha256": "eb014bc75f5cebec1c5f8fc1acb0faae319430690468ae7fe59b8385bbd7c526",
+      "parent_path": "<TASK>\\native-consumer-source-v3-launch.json",
+      "parent_sha256": "524f95d8a5c2e8ee3cf1ca651e5ba674eb641679fb79d6582a71693499b85661",
+      "snapshot_path": "<TASK>\\runs\\native-consumer-source-admission-v3\\source-after.json",
+      "snapshot_sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+      "issuer_path": "<TASK>\\native-consumer-source-inputs-v3\\issue_native_consumer_source_v3.py",
+      "issuer_sha256": "e0a970255ad947c829ab67c5e3cb3c48ec7d857cc18363fe73bc8d83710776d2"
+    },
+    "update": {
+      "root_path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+      "root_sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998",
+      "original_path": "<TASK>\\runs\\test-source-update-v1\\receipt.json",
+      "original_sha256": "f73b8435d423cae532cc4d0d38a7b83be2bbda1464a30efa47c62e49164a3b08",
+      "parent_path": "<TASK>\\test-source-update-v1-launch.json",
+      "parent_sha256": "0b3cdb2d90f19f7972ad3f40af0cd54a34c2ab257ddccae9aa22b1f76829520e",
+      "before_path": "<TASK>\\runs\\test-source-update-v1\\source-before.json",
+      "before_sha256": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+      "snapshot_path": "<TASK>\\runs\\test-source-update-v1\\source-after.json",
+      "snapshot_sha256": "afe857956e9596133a6e4a1dfbea31f81112c8277c41bf3a1524157bee9e0dc1",
+      "issuer_path": "<TASK>\\test-source-update-inputs-v1\\issue_test_source_update_v1.py",
+      "issuer_sha256": "8adf48ae2b5672bc194859b43c0d52dde5cb798e127701283d63df00a028bee9",
+      "delta_map_path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+      "delta_map_sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234",
+      "patch_path": "<TASK>\\test-source-update-inputs-v1\\test-source.patch",
+      "patch_sha256": "f361229184be36c3d7b7e1be106036c2a03216d4bf8506f45795d188be4a98cf"
+    }
+  },
+  "guard_admission": {
+    "path": "<OWNER_V3>\\native-owner-qualification\\root-receiving.json",
+    "sha256": "87fe6b959cc726b6116080ef0eca863d8d6f415f362123d8dbe65c9765da3747",
+    "record": {
+      "schema": "root-owner-custody-native-qualification-v1",
+      "status": "PASS",
+      "controller_exit_code": 0,
+      "original_controller_reaped": true,
+      "controller_capture_handles_closed": true,
+      "seconds": 5.8465998000174295,
+      "diagnostic": null,
+      "receipt_sha256": "956e537fe69e7d710028630ab1bb07e7e52572b9344cdb2f2b1d221dae6ba92e",
+      "inputs": {
+        "guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+        "run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551",
+        "qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+        "qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691"
+      },
+      "scope": "actual new guard/RootInvocation/broker; synthetic tool output; installed Go metadata read-only",
+      "consumer_timeout_probe": "deterministic consumer-only monotonic expiry injection; not measured real355s latency",
+      "full_regression_executed": false,
+      "serena_qualification_repeated": false,
+      "old_unknown_reclassified": false
+    },
+    "input_files": {
+      "<OWNER_V3>\\native-owner-qualification\\root-receiving.json": "87fe6b959cc726b6116080ef0eca863d8d6f415f362123d8dbe65c9765da3747",
+      "<OWNER_V3>\\native-owner-qualification\\cases\\receipt.json": "956e537fe69e7d710028630ab1bb07e7e52572b9344cdb2f2b1d221dae6ba92e",
+      "<OWNER_V3>\\native-owner-qualification\\launch.json": "c9d6d4b126a452a4de58cf63122fa79b1b0829828b0206a44b839d014a2cc2d0",
+      "<OWNER_V3>\\guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "<OWNER_V3>\\literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+      "<OWNER_V3>\\run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551",
+      "<OWNER_V3>\\qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+      "<OWNER_V3>\\qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691",
+      "<OWNER_V3>\\qualify_owner_custody_windows.py": "fa9677454c6c91baa63990168c4350f832f303cc5c2ea304c81c872570cc9d21"
+    }
+  },
+  "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "migration_rebinding": {
+    "path": "<TASK>\\runs\\serena-evidence-rebinding-v10\\rebinding.json",
+    "sha256": "5d80f7d0fb66925dbc5166d21baf288c59d8256aaabddc93279ddd5233dbcb09"
+  },
+  "migration_rebinding_parent": {
+    "path": "<TASK>\\serena-evidence-rebinding-v11-launch.json",
+    "sha256": "4c13140b07773caa3e521665437b3761fe8659c0f2f3ea4e870f35045311e7d8"
+  },
+  "retained_input_access": {
+    "path": "<TASK>\\final-gates-v13-root\\retained-input-access.json",
+    "sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18"
+  },
+  "fresh_input_files": {
+    "<TASK>\\runs\\native-consumer-source-admission-v3\\root-receiving.json": "0215f8f67a4dcca2f44f4832e3c3012c8192786f9508f027eccaa2e703cfac11",
+    "<TASK>\\runs\\native-consumer-source-admission-v3\\receipt.json": "eb014bc75f5cebec1c5f8fc1acb0faae319430690468ae7fe59b8385bbd7c526",
+    "<TASK>\\native-consumer-source-v3-launch.json": "524f95d8a5c2e8ee3cf1ca651e5ba674eb641679fb79d6582a71693499b85661",
+    "<TASK>\\runs\\native-consumer-source-admission-v3\\source-after.json": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+    "<TASK>\\native-consumer-source-inputs-v3\\issue_native_consumer_source_v3.py": "e0a970255ad947c829ab67c5e3cb3c48ec7d857cc18363fe73bc8d83710776d2",
+    "<TASK>\\runs\\test-source-update-v1\\root-receiving.json": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998",
+    "<TASK>\\runs\\test-source-update-v1\\receipt.json": "f73b8435d423cae532cc4d0d38a7b83be2bbda1464a30efa47c62e49164a3b08",
+    "<TASK>\\test-source-update-v1-launch.json": "0b3cdb2d90f19f7972ad3f40af0cd54a34c2ab257ddccae9aa22b1f76829520e",
+    "<TASK>\\runs\\test-source-update-v1\\source-before.json": "671d60c8f1e96de28eb616b9e7aeacccae50d00359ab27a59418bea61648ee16",
+    "<TASK>\\runs\\test-source-update-v1\\source-after.json": "afe857956e9596133a6e4a1dfbea31f81112c8277c41bf3a1524157bee9e0dc1",
+    "<TASK>\\test-source-update-inputs-v1\\issue_test_source_update_v1.py": "8adf48ae2b5672bc194859b43c0d52dde5cb798e127701283d63df00a028bee9",
+    "<TASK>\\test-source-update-inputs-v1\\delta-map.json": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234",
+    "<TASK>\\test-source-update-inputs-v1\\test-source.patch": "f361229184be36c3d7b7e1be106036c2a03216d4bf8506f45795d188be4a98cf",
+    "<TASK>\\final-gates-v13-root\\retained-input-access.json": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18",
+    "<TASK>\\runs\\literal-v8-closed-receiving-v3\\root-receiving.json": "1cbfb1663f188322dcd047c8a3a4fde3125c2507f4892f1a3d27938b2ac5392c",
+    "<TASK>\\runs\\literal-v8-closed-receiving-v3\\observation.json": "48c23efa6b31bc1d9600ae4ddc419c7b953333dfdd0d0280028b2da4b03c9828",
+    "<TASK>\\literal-final-v8-launch.json": "bfc88a56aa611c136a246a1d3451200d660c97307985139a5afbdf12403969d6",
+    "<TASK>\\closed-v8-inputs-v3\\receive_closed_v8.py": "47ae3a86398a17bb929b167e2b77fdca800ae0ed3d5d17bb9453a96f15d7e899",
+    "<TASK>\\literal-final-v9-launch.json": "f19530c79d1c396a2631895b3b3fa90ef5eb992e4ab20a0ba6f6125eff86a622",
+    "<TASK>\\runs\\literal-final-v9\\receipt.json": "e61b7c3873cf395e3592182134e69d0235f4a7eaf8471ef14fc7409075b29ee4",
+    "<TASK>\\runs\\literal-final-v7\\receipt.json": "41bbc26ed49ef9b7923b3c3cd2eefdf84b1f409ae0ae8d4035ec8a4bc27d5131",
+    "<TASK>\\literal-final-v7-launch.json": "f22aa31121eee2f078317752df2b906fceb7d1165b78ea930c2d1d4a8df4faf3",
+    "<TASK>\\runs\\x6d9108ff9d42\\receipt.json": "56ac98783e2765c03afa346c66e396e8afa8f3ef94bf0413523361e507197482",
+    "<TASK>\\runs\\product-final-v7\\receipt.json": "aacceb890e09f68b86b1e095b70cd86fd787a4993a5795acf28a8a153a6d68e0",
+    "<TASK>\\product-final-v7-launch.json": "4b430b6bcef955a9d5aca66179516f141bd0cf648dd4cf900e913a115298a87b",
+    "<TASK>\\runs\\product-final-v7\\root-receiving.json": "ed7a22d687884ad934f354d57b7d12c4d6c4a7b4aa2e238d55632240f318796b",
+    "<TASK>\\runs\\product-final-v7-finalization\\root-receiving.json": "2260f6ca380d87b24ae2b6c5778cf9ac7818f5e4100c484ac3de512efcd9a8b7",
+    "<TASK>\\product-finalization-v7-launch.json": "89d06616d6f41be1671d5b86ff9c3584c0e9b09198ad511bfb64d7b2af81e07b",
+    "<TASK>\\serena-default-final-v7-launch.json": "13926e54eaaff95ff9e9eef468b071155f62974becb573a13ecc171a85d568c3",
+    "<TASK>\\runs\\serena-default-final-v7\\root-receiving.json": "60f196da9fc01340e27aa4e4efa95b531d337bc0ed24ba98a4f0982cf81ca98f",
+    "<TASK>\\serena-default-receiving-v7-launch.json": "55fef2b2bbbe74df7ec00079037f584c15062823da3afcb8f5b5dc0d00352d37",
+    "<TASK>\\runs\\serena-default-rebinding-v8\\rebinding.json": "4dc3b14b353e4953db58666aea534931f29cd7ff0ccb45dbd57a33c88794504e",
+    "<TASK>\\serena-default-rebinding-v8-launch.json": "6818eca5e558796f6a98a92bf648f09c747b1034fa2e367c25432aa6da2ec7f4",
+    "<TASK>\\runs\\serena-default-final-v7\\receipt.json": "52db335b6386f335911f21afc1aa5c84c0daf9b7daa6fdd5eb16a52e00af1cfd",
+    "<TASK>\\runs\\serena-state-final-v7\\receipt.json": "958fa516ff54e797a7237838ef1fb5466cb1a4abcab6a63171860a3d56839b74",
+    "<TASK>\\runs\\serena-state-final-v7\\root-receiving.json": "d9028965d82599de2b87c0d46d6dcb984f98a481cafa1cfcdbdb7d853951d21d",
+    "<TASK>\\serena-state-final-v7-launch.json": "cef889a5fb952302e5e822d5311c07ea18b2b2c8ebfd6b64ab942c20edc49861",
+    "<TASK>\\runs\\native-consumer-headless-v10\\receipt.json": "2f7ce0b6228a3a64f7b6739f181307f6487bbfa0aa5d69459c88e3e91aabc616",
+    "<TASK>\\runs\\native-consumer-headless-v10\\root-receiving.json": "3354db3bcc94d58cb8db3e5450107fac8234a76af685d646a3a455ff7bdd8d65",
+    "<TASK>\\native-consumer-headless-v10-launch.json": "afb94014272b8eba02979878be7d3df8c4f41767684eee16bed5eba794b93ee6",
+    "<TASK>\\native-consumer-headless-receiving-v10-launch.json": "fe69d162dda94bf76913a365434bb0be703908135d3b3dd0566ac7bfccfb25e1",
+    "<TASK>\\runs\\x034ff70e2629\\receipt.json": "9572ca80a1d2b7b8d30a116734ee0d2475331c76ad74dd57d69c3bdb0d43dd9e",
+    "<TASK>\\runs\\xeb8683dc447d\\receipt.json": "e6cde929a484aea0626703f048395c2f63ff95193f1555d386fad533d815d6a3",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.started.json": "596363b4af17774df5affe642f8f2bb38b23416135107ed789f054f37683e53b",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\872b7082b11f7ce627d2c1d6595c6b627f9daecabdc2a1ace9642adca5435ad0.started.json": "faee805499be746bb68cfa18eb376be0ccd418267884506a6931f2a6f8b3bdee",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\ea5f24423e7778ac11fd281982d9d2f8bcca104f6e8249a8f32b58b736c6ebd5.started.json": "110a966d722b71566c6131d074f2ab8c0f0b513e995a7129d7ad0aa376379998",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\20de3352b54d310a0063823babc07f6d961a1e915d68b24be476bfdf404cb70e.completed.json": "144747825c080eb17ace63a6fb3e47e951e1a54af4f03533732f69865904e14f",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\872b7082b11f7ce627d2c1d6595c6b627f9daecabdc2a1ace9642adca5435ad0.completed.json": "b9c9b46ae4f94d105a58431f49fdf5725505dcf291778fd690bfc5e29d7a5f4d",
+    "<TASK>\\runs\\literal-final-v7\\invocations-default\\ea5f24423e7778ac11fd281982d9d2f8bcca104f6e8249a8f32b58b736c6ebd5.completed.json": "d4c838830fddc489632bcb875cb4a245406cab0c41c90428a0e303a826566a3a",
+    "<TASK>\\runs\\literal-final-v7\\unsafe-stop.json": "6f7ef2719d5e1cf2b0d5c0fe128a14284d9575bb4860a5995eb556db51a61678"
+  },
+  "cache_bootstrap_contract": {
+    "consumer_run": "<TASK>\\runs\\literal-final-v10",
+    "module_cache": "<TASK>\\runs\\literal-final-v10\\seed-modules",
+    "build_cache": "<TASK>\\runs\\literal-final-v10\\isolated-build-cache",
+    "module_proxy": "<TASK>\\imports\\go-proxy",
+    "created_exclusively": true,
+    "empty_at_creation": true,
+    "predecessor_cache_authority": false
+  },
+  "prior_source_or_cache_access_issued": false,
+  "expected_literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "root_independent_review": "ROOT_AND_INDEPENDENT_STATIC_REVIEW",
+  "composition_qualification": {
+    "root": {
+      "path": "<TASK>\\composition-qualification-v2\\native-composition-probe\\root-receiving.json",
+      "sha256": "bca138548ff08ad9fa15736ef5fb71fc25c45084d3a12262aa2dae7a1219d856"
+    },
+    "cases": {
+      "path": "<TASK>\\composition-qualification-v2\\native-composition-probe\\cases\\receipt.json",
+      "sha256": "e18d3acec9fd75d2d7b6d8eb104ab6d920e12a2fb623618df4dd4b1e4dc9fa1d"
+    },
+    "runner": {
+      "path": "<TASK>\\composition-qualification-v2\\qualify_runtime_custody.py",
+      "sha256": "a6d5ec713719a1cc7a069072d51f77241a82c28b21427cbbc219567a5ce4830e"
+    }
+  },
+  "runner_sha256": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+  "cwd": "<TASK>",
+  "argv": [
+    "<USERPROFILE>\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "<TASK>\\final-gates-v13-root\\run_literal_go_gate_ready_v1.py",
+    "--name",
+    "literal-final-v10",
+    "--commit",
+    "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "--build-run",
+    "<TASK>\\runs\\product-final-v7",
+    "--migration-default-input",
+    "<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-default-input.json",
+    "--migration-default-sha256",
+    "d98da468cdcf5b7f1b0a8e245a906d50a50b8ff7e221330e784ef993e33aa7ed",
+    "--migration-state-input",
+    "<TASK>\\runs\\serena-evidence-rebinding-v10\\migration-state-input.json",
+    "--migration-state-sha256",
+    "328e666d1f6bb22c344857749449b40d3003a4dc59336744888e2b78f6989580"
+  ],
+  "helper_manifest": {
+    "path": "<TASK>\\final-gates-v13-root\\actual-manifest.json",
+    "sha256": "efd14d898b2e6032dfb77c914b49a9114083c7eb29235ca8f6f893daacd4ee02"
+  },
+  "retained_helper_manifest": {
+    "path": "<TASK>\\final-gates-v8\\actual-manifest.json",
+    "sha256": "622d9d26fb0c20e49bd7ca23c03d5df3f056fdb592504b432748c159e96dccba"
+  },
+  "launcher_cwd_observed": "<TASK>",
+  "outer_diagnostic_seconds": 4800,
+  "deadline_exceeded": false,
+  "terminal_exit_received": true,
+  "parent_capture_files_closed": true,
+  "stdout": "<TASK>\\literal-final-v10-launch.stdout",
+  "stderr": "<TASK>\\literal-final-v10-launch.stderr",
+  "encoding": "UTF-8",
+  "newlines": "LF",
+  "original_pid": 262952,
+  "exit_code": 1,
+  "seconds": 2295.1359646999917,
+  "child_status": "FAIL",
+  "commands_quiescent": true,
+  "command_count": 19,
+  "failure": null,
+  "candidate_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "child_schema": "literal-go-prepush-gate-v1",
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "product_test_source_compatibility": {
+    "schema": "reviewed-product-test-source-compatibility-v1",
+    "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "source_file_count": 3508,
+    "changed_paths": [
+      "internal/api/adopt_codex_transport_test.go",
+      "internal/api/adopt_deadopt_lifecycle_test.go",
+      "internal/api/adopt_h4_summary_signal_test.go",
+      "internal/api/adopt_lease_namespace_windows_test.go",
+      "internal/api/adopt_lease_owner_test.go",
+      "internal/api/adopt_mcpcompat_test.go",
+      "internal/api/adopt_project_plan_test.go",
+      "internal/api/adopt_test.go",
+      "internal/cli/adopt_mcpcompat_test.go",
+      "internal/cli/adopt_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "changed_file_count": 11,
+    "unchanged_path_count": 3497,
+    "unchanged_non_test_paths": true,
+    "unchanged_non_test_path_count": 2012,
+    "delta_map": {
+      "path": "<TASK>\\test-source-update-inputs-v1\\delta-map.json",
+      "sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234"
+    },
+    "source_update_admission": {
+      "path": "<TASK>\\runs\\test-source-update-v1\\root-receiving.json",
+      "sha256": "8b04a4902ca7d08e6d6acd27ec0a765a0ea859ea2d3ffb3a90545f0fa8bc5998"
+    }
+  },
+  "literal_pre_push_commands_passed": false,
+  "original_receipt_sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b"
+}

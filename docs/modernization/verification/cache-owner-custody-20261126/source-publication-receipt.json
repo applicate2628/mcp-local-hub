@@ -1,0 +1,108 @@
+{
+  "schema": "existing-pr-source-publication-v1",
+  "source_scope": "reviewed 36-root incidental test-port projection; public full gates NOT_RUN",
+  "pull_requests": [
+    {
+      "pr": 665,
+      "parent": "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+      "tree": "40d07b68f025f08d40ed16ea8a5a94243d8e3a9e",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "ref_update": {
+        "success": true
+      },
+      "force": false
+    },
+    {
+      "pr": 666,
+      "parent": "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+      "tree": "13793cd5b5097a3b2ac1d80e409d218f8b616274",
+      "commit": "50d94a7854d98b31e2c29e35e06cefedc1a2d496",
+      "ref_update": {
+        "success": true
+      },
+      "force": false
+    }
+  ],
+  "readback": [
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_codex_transport_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602",
+      "git_blob": "332b49f17cc30d558a0d3c59b602b3625dcd09bc",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346",
+      "git_blob": "36279734c2f6be64dc81e60c2f8d0d01ed8ce68f",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_h4_summary_signal_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4",
+      "git_blob": "229619d7b027df355e38e0805a3be4c7f0d9c930",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_lease_namespace_windows_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "a95638abca1b51a45bf30cfcdd72f165f3fa5e2ac71d6985f468a0fcbcbd121e",
+      "git_blob": "f3d7b2a593d093ff21c92ee8a947283ab18bb42c",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_lease_owner_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7",
+      "git_blob": "a0f540b4d982eeef4696fa90318de3ecbc993d6d",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_mcpcompat_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9",
+      "git_blob": "6f336ba8b7b5d9fbb87e43387d3aff464c3b1c48",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_project_plan_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7",
+      "git_blob": "74b312a793fa54c51c94f52ca768d4b5d02dd5d3",
+      "bytes_match": true
+    },
+    {
+      "pr": 665,
+      "path": "internal/api/adopt_test.go",
+      "commit": "03719d32a13a20f3254eccc148684efae3c3287a",
+      "sha256": "35a732e5c96b2f881f8bfc149008f2ebc6873fe7971ea637cb313fbbb1111aa8",
+      "git_blob": "08b88a3e12d4e1a60238e0f76325d5dc7e967246",
+      "bytes_match": true
+    },
+    {
+      "pr": 666,
+      "path": "internal/cli/adopt_mcpcompat_test.go",
+      "commit": "50d94a7854d98b31e2c29e35e06cefedc1a2d496",
+      "sha256": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b",
+      "git_blob": "403eefdea619e4df0b57d56d22b618293d20b699",
+      "bytes_match": true
+    },
+    {
+      "pr": 666,
+      "path": "internal/cli/adopt_test.go",
+      "commit": "50d94a7854d98b31e2c29e35e06cefedc1a2d496",
+      "sha256": "011bacb2b6b85f5f92a283d3b56cca55cc4e97354da70889a761d7206c599fe0",
+      "git_blob": "cbf5a0e603c7fb98233d275557c36b25da16abb8",
+      "bytes_match": true
+    }
+  ]
+}

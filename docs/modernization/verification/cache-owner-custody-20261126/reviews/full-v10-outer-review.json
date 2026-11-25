@@ -1,0 +1,255 @@
+{
+  "schema": "independent-full-v10-outer-control-review-v1",
+  "status": "PASS_WITH_ORIGINAL_FULL_FAIL",
+  "review_scope": "19 aggregate outer rows and phase/issuer bindings; independent nested original-owner receiving belongs to regression_evidence",
+  "original_receipt_sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b",
+  "original_parent_sha256": "3812d74a5a4b9d02eabae0a05a67ba7bb3dd79a729b40d91d29e05d0fbf6e7cb",
+  "original_status": "FAIL",
+  "parent_exit_code": 1,
+  "parent_seconds": 2295.1359646999917,
+  "parent_terminal_exit_received": true,
+  "parent_capture_files_closed": true,
+  "commands_received": 19,
+  "ordinary_original_native_io_closed": 17,
+  "phase_settlements_received": 2,
+  "original_owner_receipt_pointers": 130,
+  "original_issuer_joined": true,
+  "original_invocations_retained": 66,
+  "phases": [
+    {
+      "phase": "default",
+      "expected_started_completed_received_equal": true,
+      "count": 64,
+      "passed_adapters": 62,
+      "failed_adapters": 2,
+      "native_custody_settled": true,
+      "original_replay_binding_count": 64,
+      "raw_stream_bindings": 62,
+      "metadata_only_fail_replays": [
+        "mcp-local-hub/internal/api",
+        "mcp-local-hub/internal/cli"
+      ],
+      "nested_receipts_independently_read_in_this_review": false
+    },
+    {
+      "phase": "state",
+      "expected_started_completed_received_equal": true,
+      "count": 2,
+      "passed_adapters": 0,
+      "failed_adapters": 2,
+      "native_custody_settled": true,
+      "original_replay_binding_count": 2,
+      "raw_stream_bindings": 2,
+      "metadata_only_fail_replays": [],
+      "nested_receipts_independently_read_in_this_review": false
+    }
+  ],
+  "commands": [
+    {
+      "name": "head-before",
+      "exit_code": 0,
+      "seconds": 0.06763070001034066,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "9316112b0bec4f6827f3391ffc08d416379e9f009f6cc7ee1eca690a9f5f5971",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-files-before",
+      "exit_code": 0,
+      "seconds": 0.22833139999420382,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "769d0a752d868936b995d121e697f6453d27dc7627eb10fdc970f49efc341b1d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "status-before",
+      "exit_code": 0,
+      "seconds": 0.4743374999961816,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "packages-literal-default",
+      "exit_code": 0,
+      "seconds": 31.0076124999905,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "11d8bd1fd43625544955355715ab03dc23efe873d6acec6e5bb09c8039710f34",
+      "stderr_sha256": "0843448a25198ae1f96dfe6c4d9f8541f3ee50ef5d962f3325584071b6fad922"
+    },
+    {
+      "name": "packages-literal-state",
+      "exit_code": 0,
+      "seconds": 0.1872459999867715,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "deae668098c52da3ad7c0c99fd7628295301392e52c42e1c7d1f948cc4b6b051",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "compile-literal-contained",
+      "exit_code": 0,
+      "seconds": 99.19186479999917,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "compile-literal-job",
+      "exit_code": 0,
+      "seconds": 10.874924400006421,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "compile-literal-namespace",
+      "exit_code": 0,
+      "seconds": 9.03984319997835,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "compile-literal-validator",
+      "exit_code": 0,
+      "seconds": 3.9570792999875266,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "compile-literal-canonical",
+      "exit_code": 0,
+      "seconds": 9.312955699977465,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "resolve-original-test2json",
+      "exit_code": 0,
+      "seconds": 2.497368100011954,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "8c73a7318536da6ca173707d6dcd55f629a0d09bcbedd6b7e097e57a9a1db37b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "head-after-tool-preparation",
+      "exit_code": 0,
+      "seconds": 0.06873759999871254,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "9316112b0bec4f6827f3391ffc08d416379e9f009f6cc7ee1eca690a9f5f5971",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-files-after-tool-preparation",
+      "exit_code": 0,
+      "seconds": 0.07762820000061765,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "769d0a752d868936b995d121e697f6453d27dc7627eb10fdc970f49efc341b1d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "literal-build",
+      "exit_code": 0,
+      "seconds": 83.0828390000097,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "literal-vet",
+      "exit_code": 0,
+      "seconds": 139.27612070000032,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "literal-default",
+      "exit_code": 1,
+      "seconds": 1148.33,
+      "closed": true,
+      "closure_basis": "phase settlement bound to original replay and owner receipt pointers",
+      "stdout_sha256": "4c63a29430ef4421c9cdfc7f859f6f4c3d0b2eccec060f7c2b6a6945856c0002",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "literal-state",
+      "exit_code": 1,
+      "seconds": 730.021,
+      "closed": true,
+      "closure_basis": "phase settlement bound to original replay and owner receipt pointers",
+      "stdout_sha256": "26988de89e550a9abbdb85603c739d8e5843643d403c80e1a39a490eb3c7603e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "head-after",
+      "exit_code": 0,
+      "seconds": 0.1062814999895636,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "9316112b0bec4f6827f3391ffc08d416379e9f009f6cc7ee1eca690a9f5f5971",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-files-after",
+      "exit_code": 0,
+      "seconds": 0.12290620000567287,
+      "closed": true,
+      "closure_basis": "original native and I/O closed",
+      "stdout_sha256": "769d0a752d868936b995d121e697f6453d27dc7627eb10fdc970f49efc341b1d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "preserved": {
+    "source_unchanged": true,
+    "original_inputs_unchanged": true,
+    "actual_product_unchanged": true,
+    "private_migration_exports_unchanged": true
+  },
+  "literal_commands": [
+    "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+    "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+  ],
+  "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+  "test_source_file_count": 3508,
+  "product_test_source_compatibility": {
+    "schema": "reviewed-product-test-source-compatibility-v1",
+    "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "source_file_count": 3508,
+    "changed_paths": [
+      "internal/api/adopt_codex_transport_test.go",
+      "internal/api/adopt_deadopt_lifecycle_test.go",
+      "internal/api/adopt_h4_summary_signal_test.go",
+      "internal/api/adopt_lease_namespace_windows_test.go",
+      "internal/api/adopt_lease_owner_test.go",
+      "internal/api/adopt_mcpcompat_test.go",
+      "internal/api/adopt_project_plan_test.go",
+      "internal/api/adopt_test.go",
+      "internal/cli/adopt_mcpcompat_test.go",
+      "internal/cli/adopt_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "changed_file_count": 11,
+    "unchanged_path_count": 3497,
+    "unchanged_non_test_paths": true,
+    "unchanged_non_test_path_count": 2012
+  }
+}
