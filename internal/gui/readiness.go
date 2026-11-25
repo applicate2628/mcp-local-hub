@@ -153,7 +153,7 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	warnings, strictErr := api.NewAPI().ManifestValidateMode(req.YAML, api.ValidateModeStrict)
+	warnings, strictErr := s.api.ManifestValidateMode(req.YAML, api.ValidateModeStrict)
 	for _, warning := range warnings {
 		blockers = append(blockers, api.ReadinessRequirement{
 			Name:   "manifest validation",

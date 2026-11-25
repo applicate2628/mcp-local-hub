@@ -24519,20 +24519,6 @@ entries:
       remove_by: "2027-03-31"
       reason: Application-service construction and mutable seams migrate to the composition root.
       max_metric: 7
-    - fingerprint: cc68fe497a44fc407ce7f681869f0d00050279095bb9db4a9ec0635c1fa6cbea
-      kind: api_construction
-      location:
-        path: internal/gui/readiness.go
-        symbol: '*Server.readinessDraft'
-        line: 156
-      evidence: mcp-local-hub/internal/api.NewAPI
-      metric: 1
-      message: constructor mcp-local-hub/internal/api.NewAPI is called outside its allowed composition paths
-      owner: gui-adapter
-      work_package: WP-11B
-      remove_by: "2027-03-31"
-      reason: GUI handlers become thin adapters over process-scoped application services.
-      max_metric: 1
     - fingerprint: cc6ee29053bafccccd2a0dd7bb1007ced2856ca02884ac96200064080af24069
       kind: mutable_global
       location:
