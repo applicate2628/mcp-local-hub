@@ -82,7 +82,7 @@ compiler inputs для двух private lanes и отдельный текущи
 | Causal control: игнорировать ошибку исходного завершения | `8ef17fa77c03eb326faf748502ff038e0ed699cd` плюс явно записанная регрессия в отдельной копии | Ожидаемый exit 1; `lost-complete` и `root-only` обнаружили `incomplete original closure admitted private provider` [2] |
 | Causal control: принять отсутствие SID как успешное завершение | Та же отдельная копия с другой записанной регрессией | Ожидаемый exit 1; тест обнаружил `pending receipt acknowledged` [2] |
 | Восстановленные исходники после двух causal controls | `8ef17fa77c03eb326faf748502ff038e0ed699cd`, обе регрессии сняты, чистота проверена | Оба корневых теста PASS; миграция прошла все 7 подслучаев [2] |
-| Producer controls5: разбор PowerShell 7.7.0, DATA и реальный linker | `464fb1079517177fa8b5b3db590ccfe7d1093404` | PASS; GUI subsystem=2, CUI subsystem=3, одинаковые хеши в двух путях сборки; точные producer input hashes совпадают с таблицей выше [3] |
+| Producer controls5: разбор PowerShell 7.7.0, DATA и реальный linker | `464fb1079517177fa8b5b3db590ccfe7d1093404` | PASS; GUI subsystem=2, CUI subsystem=3; внутри каждого варианта хеш совпадает в двух путях сборки, между GUI и CUI хеши различаются; точные producer input hashes совпадают с таблицей выше [3] |
 
 **NOT_RUN в этом локальном кандидате:** выпуск Product, нативные проверки и
 полные literal Go gates. Root ведёт отдельный выпуск на integration `464fb107…`;
