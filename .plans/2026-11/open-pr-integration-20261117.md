@@ -61,6 +61,15 @@ go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./interna
 Повторно прочитаны и применены три профильных навыка для восстановления: Git workflow — точные preimages и отсутствие дублирования; code review — assertions, совместимость и жизненный цикл; documentation — границы доказательств и сохранение истории. Они уже использовались командой и не увеличивают прежний счётчик навыков. Новых платных ревью и запусков CI в этом восстановлении не было.
 <!-- cache-owner-custody-checkpoint-20261126:end -->
 
+<!-- startup-observation-20261126:start -->
+<a id="startup-observation-20261126"></a>
+### Наблюдение запуска: дополнение 26.11.2026, МСК
+
+**Отдельный диагностический проход — PASS; полный v10 сохраняет FAIL.** На свежей копии того же закрытого default API-образа получены все 12 core-отметок и 21 Windows child-отметка, а также точный inventory 3523 тестов и одного benchmark; suite не исполнялся. Сборка наблюдаемого controller заняла 50,442 с, весь диагностический parent — 65,074 с, inventory controller — 1,703 с. Скобка вокруг `CreateProcess` и сохранения исходных handles составила 0,9668389 с; это не чистая длительность Windows API. Физическая карта ACA Source из 3508 файлов и донорский bundle неизменны; временные отметки добавлены только в controller через отдельный диагностический overlay.
+
+Прежняя задержка owner-start → native birth около 27,9665 с **не воспроизведена**; в новом проходе сопоставимый интервал составил 0,9858517 с. Причина старого отказа и его исправление не установлены. Исходные owners/captures закрыты, окончательные result/parent имеют PASS; исходный command log остаётся RUNNING как журнал двух завершённых команд и не переписывается. Это наблюдение не является квалификацией performance-кандидата, повторением Serena или PASS обязательной регрессии. [Подробное наблюдение и границы измерения](../../docs/modernization/verification/cache-owner-custody-20261126/startup-observation-20261126.md), [производная проекция с SHA и всеми отметками](../../docs/modernization/verification/cache-owner-custody-20261126/startup-observation-20261126.json). Четыре оставшихся этапа и REVIEW_PENDING внешнего ревью сохраняются.
+<!-- startup-observation-20261126:end -->
+
 
 
 <!-- cache-validation-checkpoint-20261124:start -->
