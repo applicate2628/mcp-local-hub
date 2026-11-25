@@ -70,6 +70,17 @@ go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./interna
 Прежняя задержка owner-start → native birth около 27,9665 с **не воспроизведена**; в новом проходе сопоставимый интервал составил 0,9858517 с. Причина старого отказа и его исправление не установлены. Исходные owners/captures закрыты, окончательные result/parent имеют PASS; исходный command log остаётся RUNNING как журнал двух завершённых команд и не переписывается. Это наблюдение не является квалификацией performance-кандидата, повторением Serena или PASS обязательной регрессии. [Подробное наблюдение и границы измерения](../../docs/modernization/verification/cache-owner-custody-20261126/startup-observation-20261126.md), [производная проекция с SHA и всеми отметками](../../docs/modernization/verification/cache-owner-custody-20261126/startup-observation-20261126.json). Четыре оставшихся этапа и REVIEW_PENDING внешнего ревью сохраняются.
 <!-- startup-observation-20261126:end -->
 
+<!-- provider-helper-qualification-20261126:start -->
+<a id="provider-helper-qualification-20261126"></a>
+### Квалификация provider helper: дополнение 26.11.2026, МСК
+
+**Адресная квалификация двух тестовых изменений — PASS: 3/3 provider-теста, 0 SKIP.** Проверены образы helper, принадлежащие активному корню `TestMain` и переиспользуемые по архитектуре; существующие вызовы создания, ожидания и очистки отдельных child сохранены. Состав — частный ACA Source с двумя точными test-only overlay replacements, без изменения физических 3508 файлов и без новой квалификации Product/Serena. Сборка тестового API-образа заняла 155,445 с, три сценария — 56,810 с, вся операция — 222,105 с. Все пять native-команд завершились с exit 0; получены исходный tree closure, EOF/закрытие потоков и присоединение 11 I/O workers. Source, входы, образы и идентичности свежих cache неизменны.
+
+Четыре отдельных child и две сборки архитектур 386/AMD64 следуют из проверенного кода и трёх PASS; отдельного журнала их PID/образов нет. Ускорение относительно сопоставимого запуска не измерялось, прежний отказ 30-секундной подготовки этим проходом не воспроизводился. **Полный v10 остаётся FAIL**, mandatory argv/сроки и REVIEW_PENDING внешнего ревью сохранены. [Описание квалификации и границ вывода](../../docs/modernization/verification/cache-owner-custody-20261126/provider-helper-qualification-20261126.md), [производная проекция с exact pins и ledger](../../docs/modernization/verification/cache-owner-custody-20261126/provider-helper-qualification-20261126.json). Следующий этап — приём фактической новой source/runtime композиции и обе обязательные полные команды.
+
+Двухфайловое изменение опубликовано в #665 на [`d30326c099ced46984cee38d4455498d3209a967`](https://github.com/applicate2628/mcp-local-hub/commit/d30326c099ced46984cee38d4455498d3209a967); независимое Git-чтение подтвердило оба after-image. Полная регрессия этого публичного head не выполнялась; адресный PASS частной композиции на него не переносится.
+<!-- provider-helper-qualification-20261126:end -->
+
 
 
 <!-- cache-validation-checkpoint-20261124:start -->
