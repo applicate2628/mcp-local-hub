@@ -12,6 +12,10 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
+// apiTestMainRoot owns immutable fixtures shared by tests only while m.Run is
+// active. Their lifetime ends with the existing package-root cleanup below.
+var apiTestMainRoot string
+
 // TestMain installs the supervisor IPC test-pipe discriminator for the whole
 // internal/api test binary. Without it, SupervisorIPCAddress resolves the
 // kernel-authoritative user SID first (supervisor_ipc_address_windows.go) and
@@ -268,7 +272,9 @@ func TestMain(m *testing.M) {
 	// internal/clients/config_path_sandbox_audit.go.
 	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
 
+	apiTestMainRoot = tmp
 	code := m.Run()
+	apiTestMainRoot = ""
 
 	if escapes := auditRestore(); escapes > 0 && code == 0 {
 		code = 1

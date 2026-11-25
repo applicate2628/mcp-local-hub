@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -598,19 +599,42 @@ type ownedProviderWorkingDirectoryHelper struct {
 	exited bool
 }
 
+var ownedProviderWorkingDirectoryHelperImages struct {
+	sync.Mutex
+	byArch map[string]string
+}
+
 func buildOwnedProviderWorkingDirectoryHelper(t *testing.T) string {
 	return buildOwnedProviderWorkingDirectoryHelperForArch(t, runtime.GOARCH)
 }
 
 func buildOwnedProviderWorkingDirectoryHelperForArch(t *testing.T, arch string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "provider-cwd-helper-"+arch+".exe")
+	if apiTestMainRoot == "" {
+		t.Fatal("owned provider helper requires the active TestMain fixture root")
+	}
+	ownedProviderWorkingDirectoryHelperImages.Lock()
+	defer ownedProviderWorkingDirectoryHelperImages.Unlock()
+	if path := ownedProviderWorkingDirectoryHelperImages.byArch[arch]; path != "" {
+		return path
+	}
+	// A completed test must not remove an image still needed by another test.
+	// TestMain owns this directory; each invocation still creates a fresh child.
+	dir, err := os.MkdirTemp(apiTestMainRoot, "provider-cwd-helper-"+arch+"-")
+	if err != nil {
+		t.Fatalf("create owned provider helper build directory: %v", err)
+	}
+	path := filepath.Join(dir, "provider-cwd-helper-"+arch+".exe")
 	cmd := exec.Command("go", "build", "-ldflags=-H=windowsgui", "-o", path, "./testdata/provider-cwd-helper")
 	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")
 	process.HideToolConsole(cmd)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build owned provider helper: %v\n%s", err, output)
 	}
+	if ownedProviderWorkingDirectoryHelperImages.byArch == nil {
+		ownedProviderWorkingDirectoryHelperImages.byArch = make(map[string]string)
+	}
+	ownedProviderWorkingDirectoryHelperImages.byArch[arch] = path
 	return path
 }
 
