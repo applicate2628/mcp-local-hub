@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -346,11 +347,29 @@ type supervisorPeerSenderFixtureConfig struct {
 	Owner    api.SupervisorLockOwner
 	Deadline time.Time
 	StateDir string
+	ReadyAt  int // optional sequence of status replies for bound readiness tests
+	OwnLock  bool
+}
+
+type supervisorPeerFixtureChild struct {
+	dir   string
+	peer  api.SupervisorProcessIdentityV1
+	input func() error
 }
 
 func startSupervisorPeerSenderFixture(t *testing.T, ctx context.Context, deadline time.Time) (string, api.SupervisorProcessIdentityV1) {
 	t.Helper()
-	stateDir := apitest.HardenedTempDir(t)
+	child := startBoundStatusChild(t, ctx, deadline, 0)
+	return child.dir, child.peer
+}
+
+func startBoundStatusChild(t *testing.T, ctx context.Context, deadline time.Time, readyAt int) *supervisorPeerFixtureChild {
+	t.Helper()
+	return startBoundStatusChildAt(t, ctx, deadline, readyAt, apitest.HardenedTempDir(t), false)
+}
+
+func startBoundStatusChildAt(t *testing.T, ctx context.Context, deadline time.Time, readyAt int, stateDir string, ownLock bool) *supervisorPeerFixtureChild {
+	t.Helper()
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
 	address := api.SupervisorIPCAddress(stateDir)
 	if !strings.HasPrefix(address, `\\.\pipe\mcphub-supervisor-test-`) {
@@ -371,8 +390,9 @@ func startSupervisorPeerSenderFixture(t *testing.T, ctx context.Context, deadlin
 	if err := cmd.Start(); err != nil {
 		t.Fatal(errors.Join(err, input.Close()))
 	}
+	child := &supervisorPeerFixtureChild{dir: stateDir, input: sync.OnceValue(input.Close)}
 	t.Cleanup(func() {
-		closeErr := input.Close()
+		closeErr := child.input()
 		if err := errors.Join(closeErr, cmd.Wait()); err != nil {
 			t.Errorf("original sender helper settlement: %v", err)
 		}
@@ -385,7 +405,7 @@ func startSupervisorPeerSenderFixture(t *testing.T, ctx context.Context, deadlin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(input).Encode(supervisorPeerSenderFixtureConfig{Owner: owner, Deadline: deadline, StateDir: stateDir}); err != nil {
+	if err := json.NewEncoder(input).Encode(supervisorPeerSenderFixtureConfig{Owner: owner, Deadline: deadline, StateDir: stateDir, ReadyAt: readyAt, OwnLock: ownLock}); err != nil {
 		t.Fatal(err)
 	}
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -396,7 +416,8 @@ func startSupervisorPeerSenderFixture(t *testing.T, ctx context.Context, deadlin
 			if string(raw) != address {
 				t.Fatal("original helper pipe discriminator changed")
 			}
-			return stateDir, peer
+			child.peer = peer
+			return child
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
@@ -431,6 +452,16 @@ func TestSupervisorPeerSenderChild(t *testing.T) {
 	address := api.SupervisorIPCAddress(stateDir)
 	if !strings.HasPrefix(address, `\\.\pipe\mcphub-supervisor-test-`) {
 		t.Fatal("sender child refuses non-test pipe")
+	}
+	if config.OwnLock {
+		lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Release()
+		if lock.Owner() != config.Owner {
+			t.Fatal("child's actual lock owner differs from creator generation")
+		}
 	}
 	listener, err := winio.ListenPipe(address, &winio.PipeConfig{})
 	if err != nil {
@@ -470,6 +501,7 @@ func TestSupervisorPeerSenderChild(t *testing.T) {
 	if err := os.Rename(ready+".pending", ready); err != nil {
 		t.Fatal(err)
 	}
+	statusCount := 0
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -490,25 +522,59 @@ func TestSupervisorPeerSenderChild(t *testing.T) {
 			})
 		}
 		mu.Lock()
-		closeCurrent = closeConn
 		if stopping {
+			mu.Unlock()
 			closeConn()
+			return
 		}
+		closeCurrent = closeConn
 		mu.Unlock()
 		err = conn.SetDeadline(config.Deadline)
 		if err == nil {
 			err = (&SupervisorIPCListener{pid: config.Owner.PID, startedAt: config.Owner.StartedAt}).WriteHello(conn)
 		}
 		var request api.IPCRequest
+		marked, requestStarted := false, false
 		if err == nil {
-			err = json.NewDecoder(conn).Decode(&request)
+			reader := bufio.NewReader(conn)
+			first, peekErr := reader.Peek(1)
+			requestStarted = len(first) != 0
+			err = peekErr
+			if err == nil && first[0] == api.OperatorAggregateStatusMarker {
+				marked = true
+				_, err = reader.Discard(1)
+			}
+			if err == nil {
+				err = json.NewDecoder(reader).Decode(&request)
+			}
 		}
 		if err == nil {
 			var result any
 			switch request.Cmd {
 			case "status":
-				result = map[string]any{"state": "running", "daemons": []any{}}
+				status := map[string]any{"state": "running", "daemons": []any{}}
+				if config.ReadyAt > 0 {
+					statusCount++
+					status["reconcile_ready"] = statusCount >= config.ReadyAt
+					err = os.WriteFile(filepath.Join(stateDir, fmt.Sprintf("status-%d", statusCount)), []byte(request.Cmd), 0600)
+				}
+				result = status
+			case "quiesce-timers":
+				if !config.OwnLock || request.Args["timeout_ms"] != float64(5000) {
+					err = errors.New("unexpected original sender quiesce")
+				} else {
+					err = os.WriteFile(filepath.Join(stateDir, "aggregate-quiesce-observed"), []byte(request.Cmd), 0600)
+				}
+				result = map[string]any{"still_running": []any{}}
+			case api.SupervisorAggregateStatusCommand:
+				if !marked || !config.OwnLock {
+					err = errors.New("aggregate fixture requires a marked request and occupied singleton")
+				}
+				result = api.RouteAggregateStatus{Ownership: api.RouteAggregateOwned, Effective: "ready", Generation: 1, Revision: 1}
 			case "exit":
+				if config.OwnLock {
+					err = os.WriteFile(filepath.Join(stateDir, "aggregate-exit-observed"), []byte(request.Cmd), 0600)
+				}
 				if request.Args["graceful"] != true || request.Args["timeout_ms"] != float64(5000) {
 					err = errors.New("original sender fixture received changed exit operands")
 				}
@@ -523,8 +589,11 @@ func TestSupervisorPeerSenderChild(t *testing.T) {
 		closeConn()
 		mu.Lock()
 		closeCurrent = nil
+		stoppedBeforeRequest := stopping && !requestStarted
 		mu.Unlock()
-		if err != nil {
+		// Local go-winio close cancels pending pipe I/O with ErrFileClosed.
+		if err != nil && !(config.OwnLock && !requestStarted && supervisorPeerSenderDisconnected(err)) &&
+			!(stoppedBeforeRequest && errors.Is(err, winio.ErrFileClosed)) {
 			t.Error(err)
 		}
 	}

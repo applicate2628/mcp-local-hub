@@ -73,6 +73,43 @@ type HubRouteEndpointSelection struct {
 func (s HubRouteEndpointSelection) Endpoint() HubEndpoint { return s.endpoint.HubEndpoint }
 func (s HubRouteEndpointSelection) Witness() string       { return s.endpoint.TransactionID }
 
+// OriginalIdentity identifies the protected endpoint file selected by H.
+func (s HubRouteEndpointSelection) OriginalIdentity() ConfigParentDirectoryIdentityV1 {
+	return s.leaf.identity
+}
+
+// OriginalSHA256 identifies the exact protected endpoint bytes selected by H.
+func (s HubRouteEndpointSelection) OriginalSHA256() string {
+	if !s.leaf.present {
+		return ""
+	}
+	digest := sha256.Sum256(s.leaf.data)
+	return hex.EncodeToString(digest[:])
+}
+
+// HubRouteReloadSelection retains a previously published fixed reload object for
+// comparison. Its observation grants neither authorization nor deletion rights.
+type HubRouteReloadSelection struct{ leaf hubRouteLeaf }
+
+func (s HubRouteReloadSelection) Matches(other HubRouteReloadSelection) bool {
+	return s.leaf.present && s.leaf.matches(other.leaf)
+}
+
+func (s *HubRouteState) ObserveReloadToken() (selected HubRouteReloadSelection, err error) {
+	err = s.use(func(c *hubRouteStateCore) error {
+		leaf, err := c.native.read(hubMcpControlTokenFileLeaf, hubRouteReloadLimit)
+		if err != nil {
+			return err
+		}
+		if !leaf.present || len(leaf.data) != 65 || leaf.data[64] != '\n' || !isLowerHex64(string(leaf.data[:64])) {
+			return errHubRouteStateUnavailable
+		}
+		selected.leaf = leaf
+		return nil
+	})
+	return selected, err
+}
+
 func (s HubRouteEndpointSelection) AuthoritySHA256() string {
 	return hubRouteProjection("hub-mcp-endpoint-authority-v1", struct {
 		Port       int    `json:"port"`

@@ -523,6 +523,10 @@ func renderReadinessReport(w io.Writer, rep *api.ReadinessReport) (blocked bool)
 // must invoke the reconciler explicitly; without this entry point
 // the Phase 5 Settings toggle would be a no-op.
 func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
+	// Direct callers may bypass Cobra's Execute context initialization.
+	if cmd.Context() == nil {
+		cmd.SetContext(context.Background())
+	}
 	a := api.NewAPIWithSerenaPreparation(newSerenaPreparationAssembly())
 	if dryRun {
 		return runReconcileHubModeHeld(cmd, dryRun, a)

@@ -70,11 +70,19 @@ type windowsCanonicalEntryMemberJournalV2 = binaryadmission.WindowsCanonicalEntr
 type windowsCanonicalEntryDirectoryJournalV2 = binaryadmission.WindowsCanonicalEntryMemberDirectoryRecordV2
 
 type windowsCanonicalEntryDispositionV2 struct {
-	State                string  `json:"state"`
-	Transferred          bool    `json:"transferred"`
-	OriginalOwnerPending bool    `json:"original_owner_pending"`
-	DispositionPending   bool    `json:"disposition_pending"`
-	CloseError           *string `json:"close_error"`
+	State                string                    `json:"state"`
+	Transferred          bool                      `json:"transferred"`
+	OriginalOwnerPending bool                      `json:"original_owner_pending"`
+	DispositionPending   bool                      `json:"disposition_pending"`
+	CloseError           *string                   `json:"close_error"`
+	CloseOwner           *windowsProductCloseOwner `json:"close_owner,omitempty"`
+}
+
+// A close fault can outlive its recovery command. This diagnostic identifies
+// that command's native lifetime. It grants no file or process effect authority.
+type windowsProductCloseOwner struct {
+	PID       uint32    `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 type windowsCanonicalEntryMoveRecordV2 = binaryadmission.WindowsCanonicalEntryMemberMoveRecordV2
@@ -353,8 +361,14 @@ func (e *windowsCanonicalEntrySetJournalV2) UnmarshalJSON(raw []byte) error {
 			return err
 		}
 	}
-	if _, err := object(b["disposition"], false, "state", "transferred", "original_owner_pending", "disposition_pending", "close_error"); err != nil {
+	disposition, err := canonicalCurrentObjectWithOptional(b["disposition"], "close_owner", "state", "transferred", "original_owner_pending", "disposition_pending", "close_error")
+	if err != nil {
 		return err
+	}
+	if owner := disposition["close_owner"]; owner != nil {
+		if _, err := canonicalCurrentObject(owner, "pid", "started_at"); err != nil {
+			return err
+		}
 	}
 	array := func(raw json.RawMessage) ([]json.RawMessage, error) {
 		if len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' {
@@ -1422,10 +1436,63 @@ func (t *WindowsProductTxn) settleUnpublishedCurrentPreparation(transferred bool
 	return errors.Join(inspectErr, cleanupErr, closeCurrentEntryOwners(t.Opts.EntryBundle))
 }
 
+// No move intent and no successor startup can precede a task rewrite for a
+// nonempty changed cohort. An unreaped PREPARED transaction is also untouched.
+func untouchedServingPreparation(j windowsProductRecoveryJournalV3) bool {
+	return j.PriorServingAggregate != nil && j.Phase == WindowsProductRecoveryPrepared &&
+		j.EntryBundle != nil && len(j.EntryBundle.Moves) == 0 &&
+		(j.Quiescence == nil || len(j.EntryBundle.Bundle.Members) != 0)
+}
+
+func verifyServingRollbackReceipts(receipts windowsProductRecoveryReceiptsV3, read func(string) ([]byte, error)) error {
+	for _, receipt := range []windowsProductPairRecoveryReceipt{receipts.V3, receipts.V2} {
+		raw, err := read(receipt.Path)
+		if !receipt.PriorPresent && windowsProductJournalCleanAbsence(err) {
+			continue
+		}
+		if !receipt.PriorPresent || err != nil || !bytes.Equal(raw, receipt.PriorBytes) {
+			return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("prior Product receipt changed before rollback"), err)
+		}
+	}
+	return nil
+}
+
+func verifyUntouchedServingPreparation(j windowsProductRecoveryJournalV3, tasks WindowsProductTaskTxn, read func(string) ([]byte, error), hash func(string) (string, error)) error {
+	if err := verifyServingRollbackReceipts(j.Receipts, read); err != nil {
+		return err
+	}
+	verifier, ok := tasks.(interface{ VerifyRestored() error })
+	if !ok {
+		return errors.New("original prepared Task owner required")
+	}
+	if err := verifier.VerifyRestored(); err != nil {
+		return err
+	}
+	legacy := j.LegacyWindowless
+	digest, err := hash(legacy.Target)
+	if !legacy.PriorPresent && windowsProductJournalCleanAbsence(err) {
+		return nil
+	}
+	if !legacy.PriorPresent || err != nil || digest != legacy.PriorSHA256 {
+		return errors.Join(ErrWindowsProductRecoveryIdentity, errors.New("prepared legacy preimage changed"), err)
+	}
+	return nil
+}
+
 func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
 	o, p := t.Opts, t.prepared
 	e := p.journal.EntryBundle
 	ctx := context.WithoutCancel(o.Context)
+	untouched := untouchedServingPreparation(p.journal)
+	if untouched {
+		if err := verifyUntouchedServingPreparation(p.journal, o.Tasks, p.deps.ReadReceipt, p.deps.HashFile); err != nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+		}
+	} else if p.journal.PriorServingAggregate != nil {
+		if err := verifyServingRollbackReceipts(p.journal.Receipts, p.deps.ReadReceipt); err != nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+		}
+	}
 	e.Bundle.Disposition.State = "rollback-pending"
 	// The common rollback owner has settled the exact successor before entering.
 	keys := currentPromotionOrder(e, false)
@@ -1457,15 +1524,19 @@ func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
 	if err := errors.Join(o.EntryBundle.prior.VerifyUnchanged(ctx), o.EntryBundle.original.VerifyUnchanged(ctx)); err != nil {
 		return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
 	}
-	if err := o.Tasks.RestoreImport(); err != nil {
-		return errors.Join(trigger, fmt.Errorf("%w: restore exact task XML: %w", ErrWindowsProductPairRecoveryRollback, err))
-	}
-	if err := restoreLegacyWindowlessPreimage(p, o.LegacyWindowlessPath); err != nil {
-		return errors.Join(trigger, err)
-	}
-	for _, snapshot := range []productPairFileSnapshot{p.receiptV3Prior, p.receiptV2Prior} {
-		if err := restoreProductPairFile(snapshot); err != nil {
+	if !untouched {
+		if err := o.Tasks.RestoreImport(); err != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: restore exact task XML: %w", ErrWindowsProductPairRecoveryRollback, err))
+		}
+		if err := restoreLegacyWindowlessPreimage(p, o.LegacyWindowlessPath); err != nil {
 			return errors.Join(trigger, err)
+		}
+	}
+	if p.journal.PriorServingAggregate == nil {
+		for _, snapshot := range []productPairFileSnapshot{p.receiptV3Prior, p.receiptV2Prior} {
+			if err := restoreProductPairFile(snapshot); err != nil {
+				return errors.Join(trigger, err)
+			}
 		}
 	}
 	if e.PriorRuntime != nil {
@@ -1485,7 +1556,7 @@ func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
 			if err := p.deps.RecoverPriorSettlement(p.journal); err != nil {
 				return errors.Join(trigger, err)
 			}
-		} else if p.journal.PriorFleetReaped && view != nil && p.deps.RestartPrior != nil {
+		} else if p.journal.PriorServingAggregate == nil && p.journal.PriorFleetReaped && view != nil && p.deps.RestartPrior != nil {
 			artifact := view.Artifact()
 			launch, err := p.deps.RestartPrior(artifact.Path)
 			if err != nil {
@@ -1531,10 +1602,41 @@ func (t *WindowsProductTxn) rollbackCurrentEntryBundle(trigger error) error {
 	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
 		return errors.Join(trigger, err)
 	}
+	if p.journal.PriorServingAggregate != nil {
+		if t.transferAggregateRollback == nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending)
+		}
+		if err := t.transferAggregateRollback(ctx, p.lastJournalBytes); err != nil {
+			return errors.Join(trigger, ErrWindowsProductRecoveryPending, err)
+		}
+		return &productMaterialRollbackError{cause: trigger}
+	}
 	if err := p.deps.RemoveRecoveryJournal(filepath.Join(o.StateDir, WindowsProductRecoveryFileLeafV3)); err != nil {
 		return errors.Join(trigger, err)
 	}
 	return fmt.Errorf("%w; exact current Windows cohort rollback completed", trigger)
+}
+
+// The initiating error remains visible when material rollback succeeded. Any
+// separate cleanup failure still inhibits post-release restoration this run.
+type productMaterialRollbackError struct{ cause error }
+
+func (e *productMaterialRollbackError) Error() string {
+	return fmt.Sprintf("%v; Product material rollback completed", e.cause)
+}
+func (e *productMaterialRollbackError) Unwrap() error { return e.cause }
+func soleMaterialRollbackError(err error) bool {
+	switch e := err.(type) {
+	case *productMaterialRollbackError:
+		return true
+	case interface{ Unwrap() []error }:
+		causes := e.Unwrap()
+		return len(causes) == 1 && soleMaterialRollbackError(causes[0])
+	case interface{ Unwrap() error }:
+		return soleMaterialRollbackError(e.Unwrap())
+	default:
+		return false
+	}
 }
 
 func currentEntrySetReceipt(j windowsProductRecoveryJournalV3) *windowsCanonicalEntrySetReceiptV2 {
@@ -2897,6 +2999,12 @@ func validateCanonicalEntryBundleJournal(j windowsProductRecoveryJournalV3) erro
 	}
 	if err := binaryadmission.ValidateWindowsCanonicalEntrySetSnapshotV2(e.Expected); err != nil {
 		return err
+	}
+	if d := e.Bundle.Disposition; d.CloseOwner != nil {
+		if !d.OriginalOwnerPending || d.CloseError == nil || *d.CloseError == "" || !servingAggregateRollbackJournal(j) ||
+			d.CloseOwner.PID == 0 || d.CloseOwner.StartedAt.IsZero() || d.CloseOwner.StartedAt.Nanosecond()%100 != 0 {
+			return errors.New("invalid serving rollback close-owner diagnostic")
+		}
 	}
 	if !e.Bundle.Disposition.Transferred || e.Bundle.Disposition.State == "staged" {
 		return errors.New("current published journal has no transferred disposition")

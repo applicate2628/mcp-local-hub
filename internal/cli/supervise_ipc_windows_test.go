@@ -64,7 +64,8 @@ func TestSuperviseIPC_ListenerDACL(t *testing.T) {
 			t.Fatalf("pipe live DACL mask mismatch for %s: got %s want %s", trustee, gotMask, wantMask)
 		}
 	}
-	if strings.Contains(sddl, "BA") {
+	// The descriptor owner can be BA without granting it a DACL entry.
+	if _, grantsAdministrators := gotACEs["BA"]; grantsAdministrators {
 		t.Fatalf("pipe DACL must NOT include BuiltinAdministrators (v13 Q11): %s", sddl)
 	}
 }

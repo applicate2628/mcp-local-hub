@@ -62,6 +62,9 @@ func newWindowsProductTxnWith(
 	if err := validateWindowsProductJournalOperation(req.Context, req.JournalAllowance); err != nil {
 		return nil, err
 	}
+	if err := refuseAggregateRollback(req.StateDir); err != nil {
+		return nil, err
+	}
 	if req.journalReadEvidence == nil {
 		req.journalReadEvidence = &windowsProductJournalReadEvidence{}
 	}

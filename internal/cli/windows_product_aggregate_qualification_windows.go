@@ -26,10 +26,17 @@ type productAggregateQualification struct {
 	namespace      *api.WindowsProductStateNamespace
 	endpoint       api.HubRouteEndpointSelection
 	restart        *gui.HandoffMarkerRecord
+	live           *priorAggregateProcesses
+	serving        *windowsProductPriorServingAggregateV1
+	reload         api.HubRouteReloadSelection
 	prepared       *windowsProductPreparedTxn
 	priorReceipt   productPairFileSnapshot
 	priorSelection api.HubRouteQualification
 	next           api.HubRouteQualification
+}
+
+func sameOriginalAggregateEndpoint(a, b api.HubRouteEndpointSelection) bool {
+	return a.OriginalIdentity() == b.OriginalIdentity() && a.OriginalSHA256() == b.OriginalSHA256()
 }
 
 func reserveAbsentPriorAggregate(ctx context.Context, stateDir, priorPath string, prior *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1, namespace *api.WindowsProductStateNamespace) (gui.OwnedSingleInstanceLease, *productAggregateQualification, error) {
@@ -68,10 +75,21 @@ func reserveAbsentPriorAggregate(ctx context.Context, stateDir, priorPath string
 				if err != nil {
 					return err
 				}
-				if observed && (q.endpoint.Endpoint() != endpoint.Endpoint() || q.endpoint.Witness() != endpoint.Witness()) {
+				if observed && !sameOriginalAggregateEndpoint(q.endpoint, endpoint) {
 					return errors.New("protected Hub endpoint changed during Product reservation")
 				}
-				if err := proveProductAggregateVacancy(ctx, h, endpoint.Endpoint()); err != nil {
+				pid, bound, err := api.LoopbackPortOwnerPIDContext(ctx, endpoint.Endpoint().Port)
+				if err != nil {
+					return err
+				}
+				if observed && bound != (q.serving != nil) {
+					return errors.New("prior aggregate occupancy changed during GUI reservation")
+				}
+				if bound {
+					if err := q.observeServing(ctx, h, endpoint, prior, pid); err != nil {
+						return err
+					}
+				} else if err := h.CheckReloadTokenAbsent(); err != nil {
 					return err
 				}
 				// Retain exact native identity and raw bytes from the post-acquisition
@@ -90,7 +108,7 @@ func reserveAbsentPriorAggregate(ctx context.Context, stateDir, priorPath string
 		if errors.As(err, &reservation) {
 			namespace.RetainAfterUnconfirmedRelease(reservation.reservationRelease)
 		}
-		return lease, nil, errors.Join(errors.New("original aggregate GUI reservation unavailable"), err)
+		return lease, nil, errors.Join(errors.New("original aggregate GUI reservation unavailable"), err, q.live.close())
 	}
 	return lease, q, nil
 }
@@ -154,6 +172,31 @@ func proveProductAggregateVacancy(ctx context.Context, h *api.HubRouteState, end
 	return h.CheckReloadTokenAbsent()
 }
 
+// Check the original selection after the prior fleet has settled. The Product
+// owner calls this after persisting quiescence and before moving any file.
+func (q *productAggregateQualification) beforePromotion(ctx context.Context) error {
+	if q.prepared == nil || q.prepared.journal.Quiescence == nil {
+		return errors.New("prior aggregate has no durable Product quiescence")
+	}
+	if err := q.live.receiveExit(ctx); err != nil {
+		return err
+	}
+	if err := q.proveGUIAbsent(ctx); err != nil {
+		return err
+	}
+	marker, err := readQuiescentAggregateGUIRestartBound(ctx, q.stateDir, q.namespace)
+	if err != nil || !sameAggregateGUIRestart(q.restart, marker) {
+		return errors.Join(errors.New("prior GUI restart changed before Product promotion"), err)
+	}
+	return q.namespace.WithHubRouteState(ctx, func(h *api.HubRouteState) error {
+		actual, err := h.ReadEndpoint()
+		if err != nil || !sameOriginalAggregateEndpoint(actual, q.endpoint) {
+			return errors.Join(errors.New("original Hub endpoint changed before Product promotion"), err)
+		}
+		return proveProductAggregateVacancy(ctx, h, actual.Endpoint())
+	})
+}
+
 // Called only by the existing post-Prepare callback. All inputs have already
 // been retained/read back by the real Product owner; no H or settings I/O runs.
 func (q *productAggregateQualification) capturePrepared(txn *WindowsProductTxn) error {
@@ -196,6 +239,18 @@ func (q *productAggregateQualification) capturePrepared(txn *WindowsProductTxn) 
 				return err
 			}
 			old = api.HubRouteQualification{TransactionID: r.TransactionID, SuccessorSHA256: oldSucc, ScopeSHA256: oldScope}
+		}
+	}
+	if q.serving != nil {
+		if old.TransactionID != q.priorSelection.TransactionID || old.ScopeSHA256 != q.priorSelection.ScopeSHA256 ||
+			old.SuccessorSHA256 != q.priorSelection.SuccessorSHA256 || old.TransactionID != q.serving.PriorTransactionID || fmt.Sprintf("%x", sha256.Sum256(p.receiptV3Prior.body)) != q.serving.PriorReceiptSHA256 ||
+			j.PriorServingAggregate == nil || *j.PriorServingAggregate != *q.serving || j.PreSettlement == nil || j.PreSettlement.Supervisor.Generation == nil {
+			return errors.New("prepared Product does not own the selected prior serving aggregate")
+		}
+		old = q.priorSelection
+		generation := j.PreSettlement.Supervisor.Generation
+		if generation.PID != q.serving.Supervisor.PID || generation.StartedAt != q.serving.Supervisor.StartedAt {
+			return errors.New("prepared prior Supervisor differs from serving aggregate owner")
 		}
 	}
 	q.prepared = p
@@ -274,7 +329,7 @@ func (q *productAggregateQualification) beforeDecision(ctx context.Context, writ
 				return errors.Join(errors.New("native prior Product receipt changed before aggregate decision"), err)
 			}
 			current, err := h.ReadEndpoint()
-			if err != nil || current.Endpoint() != q.endpoint.Endpoint() || current.Witness() != q.endpoint.Witness() {
+			if err != nil || !sameOriginalAggregateEndpoint(current, q.endpoint) {
 				return errors.Join(errors.New("protected Hub endpoint changed before Product decision"), err)
 			}
 			if err := proveProductAggregateVacancy(bounded, h, current.Endpoint()); err != nil {
@@ -288,6 +343,9 @@ func (q *productAggregateQualification) beforeDecision(ctx context.Context, writ
 				held, present, err := h.ReadQualification(previous.TransactionID)
 				if err != nil {
 					return err
+				}
+				if q.serving != nil && (!present || held != previous) {
+					return errors.New("original serving aggregate qualification changed before Product decision")
 				}
 				if witness != "" && !present {
 					return errors.New("protected Hub endpoint witness has no applicable prior qualification")

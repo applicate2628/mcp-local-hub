@@ -27,6 +27,7 @@ type productStateNamespaceNative struct {
 	closed                 bool
 	closeErr, errorPending error
 	beforeLockCreate       func(string) error // controlled fixture collision
+	afterRollbackRename    func() error       // injected late native result
 }
 
 func openProductStateNamespace(ctx context.Context, path string) (*WindowsProductStateNamespace, error) {

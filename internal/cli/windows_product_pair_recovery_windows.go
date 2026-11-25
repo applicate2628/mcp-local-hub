@@ -64,6 +64,7 @@ type windowsProductPairRecoveryDeps struct {
 }
 
 type windowsProductRecoveryRequest struct {
+	transferAggregateRollback  func(context.Context, []byte) error
 	JournalAllowance           WindowsProductJournalAllowance
 	journalReadEvidence        *windowsProductJournalReadEvidence
 	AcquireSuccessorQuiescence func(context.Context, windowsProductRecoveryJournalV3, binaryadmission.WindowsCanonicalRecoverySourceV2, *binaryadmission.WindowsCanonicalEntryRecoverySetV2) (*windowsProductSuccessorQuiescence, error)
@@ -172,6 +173,9 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 	if !cleanAbsolutePath(req.StateDir) || !cleanAbsolutePath(req.ProductPath) || !cleanAbsolutePath(req.LegacyWindowlessPath) {
 		return nil, fmt.Errorf("%w: state and canonical product paths are required", ErrWindowsProductRecoveryIdentity)
 	}
+	if err := refuseAggregateRollback(req.StateDir); err != nil {
+		return nil, err
+	}
 	if req.RequirePriorSettlementOnSettledRollback && !validLowerHexSHA256(req.ExpectedJournalSHA256) {
 		return nil, fmt.Errorf("%w: pending command requires an admitted V3 journal digest", ErrWindowsProductRecoveryIdentity)
 	}
@@ -240,6 +244,14 @@ func reconcileWindowsProductRecovery(req windowsProductRecoveryRequest) (result 
 			return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch: %w", ErrWindowsProductRecoveryIdentity, err)
 		}
 		return nil, fmt.Errorf("%w: V3 journal schema or resolved target mismatch", ErrWindowsProductRecoveryIdentity)
+	}
+	if servingAggregateRollbackJournal(journal) {
+		if err := verifyCurrentCommitCloseOwnerEnded(req.Context, journal.EntryBundle.Bundle.Disposition); err != nil {
+			return nil, err
+		}
+	}
+	if journal.PriorServingAggregate != nil && windowsProductPriorRecoveryPending(journal) && req.transferAggregateRollback == nil {
+		return nil, fmt.Errorf("%w: serving prior requires ordinary aggregate rollback recovery", ErrWindowsProductRecoveryPending)
 	}
 	if req.RequireCurrentHeadlessUpgrade {
 		if journal.EntryBundle == nil || journal.Mode != WindowsProductPairModeUpgrade ||

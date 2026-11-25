@@ -4,6 +4,7 @@ package gui
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -33,21 +34,23 @@ func TestStartDetachedSupervisorTolerant_SuccessReturnsStarted(t *testing.T) {
 }
 
 // TestStartDetachedSupervisorTolerant_NonAccessDeniedError_NotRetried asserts
-// that a spawn failure that is NOT ERROR_ACCESS_DENIED (a nonexistent binary
-// fails the CreateProcess path lookup) propagates immediately — neither the
-// breakaway-cleared retry nor the minimal-flag retry must mask it.
+// that a non-ACCESS_DENIED spawn failure propagates without either fallback.
+// A containing native Job can reject breakaway before checking the image path,
+// so an absent executable alone cannot select this error-classification branch.
 func TestStartDetachedSupervisorTolerant_NonAccessDeniedError_NotRetried(t *testing.T) {
 	bad := filepath.Join(t.TempDir(), "missing", "mcphub-nope.exe")
-	calls := 0
+	calls, starts := 0, 0
 	build := func() *exec.Cmd { calls++; return exec.Command(bad) }
-	_, err := startDetachedSupervisorTolerant(build, processowner.BreakawayOptional)
-	if err == nil {
-		t.Fatal("expected a spawn error for a nonexistent binary")
+	startErr := os.NewSyscallError("CreateProcess", windows.ERROR_FILE_NOT_FOUND)
+	_, err := startDetachedSupervisorTolerantWithStart(build, processowner.BreakawayOptional, func(*exec.Cmd) error {
+		starts++
+		return startErr
+	})
+	if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+		t.Fatalf("original non-ACCESS_DENIED spawn error lost: %v", err)
 	}
-	// build() should fire exactly once: the initial attempt. A non-
-	// ACCESS_DENIED error must short-circuit BEFORE any retry rebuild.
-	if calls != 1 {
-		t.Fatalf("non-ACCESS_DENIED error must not trigger a retry rebuild; build() called %d times (want 1)", calls)
+	if calls != 1 || starts != 1 {
+		t.Fatalf("non-ACCESS_DENIED error must not retry; build calls=%d start calls=%d, want one each", calls, starts)
 	}
 }
 

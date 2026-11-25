@@ -465,7 +465,7 @@ func (s *windowsCanonicalJournalRecoverySource) discardArchivedCurrentOriginals(
 			row.State = "discard_intent"
 		}
 	}
-	if err := s.persistCurrentWithArchive(next, verified); err != nil {
+	if err := s.persistCurrentWithArchive(next, verified, s.deps); err != nil {
 		return err
 	}
 	var results []binaryadmission.WindowsCanonicalEntryMoveResultV1
@@ -520,7 +520,10 @@ func retireRolledBackForCleanInstall(req windowsProductRecoveryRequest, namespac
 		return err
 	}
 	d := boundWindowsProductRecoveryDefaults(req)
-	_, oldV3 := d.readJournalContext(ctx, filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3))
+	if err := refuseAggregateRollback(req.StateDir); err != nil {
+		return err
+	}
+	oldRaw, oldV3 := d.readJournalContext(ctx, filepath.Join(req.StateDir, WindowsProductRecoveryFileLeafV3))
 	if windowsProductJournalCleanAbsence(oldV3) {
 		_, oldLegacy := d.readJournalContext(ctx, filepath.Join(req.StateDir, WindowsProductPairRecoveryFileLeaf))
 		if !windowsProductJournalCleanAbsence(oldLegacy) {
@@ -532,6 +535,10 @@ func retireRolledBackForCleanInstall(req windowsProductRecoveryRequest, namespac
 	}
 	if oldV3 != nil {
 		return oldV3
+	}
+	active, err := decodeWindowsProductRecoveryJournalV3(oldRaw)
+	if err != nil || active.PriorServingAggregate != nil {
+		return errors.Join(ErrWindowsProductRecoveryPending, err, errors.New("clean install cannot retire a prior aggregate obligation"))
 	}
 	if namespace == nil {
 		var err error

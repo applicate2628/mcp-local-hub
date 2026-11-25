@@ -369,6 +369,15 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	if opts.WindowsProduct != nil {
 		defer func() { retErr = errors.Join(retErr, opts.WindowsProduct.Close()) }()
 	}
+	if txn := opts.WindowsProduct; txn != nil && txn.Opts.PriorServingAggregate != nil {
+		// Material rollback must run before the enclosing native banks close.
+		// The prior's serving duty is completed after the Product fence releases.
+		defer func() {
+			if retErr != nil && !productRunEntered && txn.prepareError == nil && txn.prepared != nil && len(txn.prepared.lastJournalBytes) != 0 {
+				retErr = txn.rollback(retErr)
+			}
+		}()
+	}
 	callerQuiesceTimeoutMs := opts.QuiesceTimeoutMs
 	callerExitTimeoutMs := opts.ExitTimeoutMs
 
@@ -492,6 +501,11 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 				return fmt.Errorf("report prepared Product before lifecycle mutation: %w", err)
 			}
 		}
+		if p := opts.WindowsProduct.prepared; p != nil && untouchedServingPreparation(p.journal) {
+			if err := verifyUntouchedServingPreparation(p.journal, opts.WindowsProduct.Opts.Tasks, p.deps.ReadReceipt, p.deps.HashFile); err != nil {
+				return errors.Join(ErrWindowsProductRecoveryPending, err)
+			}
+		}
 		if retainedInitial != nil {
 			settled, err := settleRetainedGenerationFromObservation(ctx, opts, lifecycle, handoffTimeout, retainedInitial)
 			if err != nil {
@@ -507,7 +521,11 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// settlement and rollback because those are transaction-specific.
 	var pairReap *windowsProductPairReapRecorder
 	if !pairKnownAbsent && !pairRetainedSettled {
-		if opts.priorRuntime != nil {
+		if pinned, ok := opts.Deps.(originalPriorReapVerifier); ok {
+			if err := pinned.verifyOriginalPriorReap(ctx, opts.StateDir, opts.priorRuntime, pairObservation); err != nil {
+				return err
+			}
+		} else if opts.priorRuntime != nil {
 			lifecycle := opts.WindowsProductPairLifecycle
 			if lifecycle == nil || lifecycle.Retained == nil || lifecycle.Retained.HoldSupervisor == nil {
 				return errors.New("original prior supervisor hold unavailable")
@@ -767,6 +785,12 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
 	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
+}
+
+// Only a reap owner retaining the original Supervisor can supply this check.
+// That owner receives the handle's close before Product promotion.
+type originalPriorReapVerifier interface {
+	verifyOriginalPriorReap(context.Context, string, *binaryadmission.WindowsCanonicalEntryPriorRuntimeV1, *windowsProductQuiescenceObservationV1) error
 }
 
 type windowsProductPairReapRecorder struct {
@@ -1203,6 +1227,9 @@ func retainedGenerationPreSettlement(observation retainedGenerationObservationV1
 
 func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {
 	if opts.requirePriorAbsent {
+		return trigger
+	}
+	if opts.WindowsProduct != nil && opts.WindowsProduct.Opts.PriorServingAggregate != nil {
 		return trigger
 	}
 	launch, err := opts.Deps.StartSupervisor(opts.BinaryPath)

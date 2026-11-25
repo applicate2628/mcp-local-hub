@@ -65,6 +65,13 @@ func (f *v2TxnFixtureTasks) RestoreImport() error {
 	return nil
 }
 
+func (f *v2TxnFixtureTasks) VerifyRestored() error {
+	if f.currentXML != f.priorXML {
+		return errors.New("fixture Task differs from original XML")
+	}
+	return nil
+}
+
 func (f *v2TxnFixtureTasks) Close() error {
 	f.closes++
 	return nil
@@ -196,13 +203,19 @@ func v2TxnSeedPrior(t *testing.T, src, dst binaryadmission.WindowsCanonicalEntry
 
 func v2TxnFixtureIdentity(t *testing.T, path string) binaryadmission.WindowsCanonicalEntryFileIdentityV2 {
 	t.Helper()
-	f, err := os.Open(path)
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Query metadata without conflicting with the original owner's DELETE
+	// access. This observation neither writes nor changes its sharing policy.
+	h, err := windows.CreateFile(name, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var info windows.ByHandleFileInformation
-	observeErr := windows.GetFileInformationByHandle(windows.Handle(f.Fd()), &info)
-	if err := errors.Join(observeErr, f.Close()); err != nil {
+	observeErr := windows.GetFileInformationByHandle(h, &info)
+	if err := errors.Join(observeErr, windows.CloseHandle(h)); err != nil {
 		t.Fatal(err)
 	}
 	if info.NumberOfLinks != 1 || info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
@@ -1634,6 +1647,7 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	input, seed, _ := v2TxnFixtureInput(t)
 	for _, tc := range []struct {
 		name                 string
+		failure              string
 		changedIdentity      bool
 		changedProduct       bool
 		changedLauncher      bool
@@ -1641,6 +1655,13 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 		changedAttrs         bool
 	}{
 		{name: "all_equal"},
+		{name: "aggregate_veto_before_promotion", changedProduct: true, failure: "aggregate-veto"},
+		{name: "serving_rollback_before_reap", changedProduct: true, failure: "serving-before-reap"},
+		{name: "serving_rollback_prepared_v3_drift", changedProduct: true, failure: "serving-drift-v3"},
+		{name: "serving_rollback_prepared_v2_appeared", changedProduct: true, failure: "serving-drift-v2"},
+		{name: "serving_rollback_prepared_task_drift", changedProduct: true, failure: "serving-drift-task"},
+		{name: "serving_rollback_after_promotion", changedProduct: true, failure: "serving-after-promotion"},
+		{name: "serving_rollback_live_lender", changedProduct: true, failure: "serving-lender"},
 		{name: "identity_bytes_changed", changedIdentity: true},
 		{name: "product_and_identity_changed", changedProduct: true},
 		{name: "launcher_product_and_identity_changed", changedLauncher: true, changedProduct: true},
@@ -1738,7 +1759,7 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 			carrier, err := stageCurrentEntryBundleForUpgrade(ctx, source, dst.CanonicalEntryPath)
 			if carrier != nil {
 				t.Cleanup(func() {
-					if err := carrier.Close(); err != nil {
+					if err := carrier.Close(); err != nil && !(tc.failure == "serving-lender" && strings.Contains(err.Error(), "requires settled child borrowers")) {
 						t.Error(err)
 					}
 				})
@@ -1828,7 +1849,7 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 				}
 			}
 			if tc.changedProduct || tc.changedLauncher || tc.changedLauncherAttrs {
-				v2TxnRunSelectiveUpgrade(t, input, seed, opts, preflight, arm.Bundle.Retained, members, priorIDs)
+				v2TxnRunSelectiveUpgrade(t, input, seed, opts, preflight, arm.Bundle.Retained, members, priorIDs, tc.failure)
 				return
 			}
 			if err := carrier.Close(); err != nil {
@@ -1850,12 +1871,13 @@ func TestWindowsV2ProductTxnSelectivePlan(t *testing.T) {
 	}
 }
 
-func v2TxnRunSelectiveUpgrade(t *testing.T, input binaryadmission.WindowsCanonicalEntrySetTargetsV2, seed binaryadmission.WindowsCanonicalEntrySetSnapshotV2, opts WindowsProductTxnOpts, preflight windowsProductPairPreflightV1, witness *windowsCanonicalEntryRetainedRuntimeV2, staged []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, priorIDs map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2) {
+func v2TxnRunSelectiveUpgrade(t *testing.T, input binaryadmission.WindowsCanonicalEntrySetTargetsV2, seed binaryadmission.WindowsCanonicalEntrySetSnapshotV2, opts WindowsProductTxnOpts, preflight windowsProductPairPreflightV1, witness *windowsCanonicalEntryRetainedRuntimeV2, staged []binaryadmission.WindowsCanonicalEntryMemberEvidenceV2, priorIDs map[string]binaryadmission.WindowsCanonicalEntryFileIdentityV2, failure string) {
 	t.Helper()
 	state := apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(state))
 	tasks := &v2TxnFixtureTasks{root: apitest.HardenedDir(t, filepath.Join(state, "tasks")), currentXML: "<Task>fixture prior</Task>"}
 	opts.StateDir, opts.Tasks, opts.JournalAllowance = state, tasks, productJournalFixtureAllowance()
+	opts.Deps.PublishCommitted = windowsProductEventPublisher(state)
 	opts.ReceiptV3Path, opts.ReceiptV2Path = filepath.Join(state, UpgradeReceiptSchemaV3+".json"), filepath.Join(state, UpgradeReceiptSchemaV2+".json")
 	opts.FrozenPorts = []windowsProductIntentPortV1{}
 	opts.PreSettlement = &windowsProductQuiescenceObservationV1{
@@ -1872,6 +1894,14 @@ func v2TxnRunSelectiveUpgrade(t *testing.T, input binaryadmission.WindowsCanonic
 	}
 	txn := &WindowsProductTxn{Opts: opts, constructorStore: tasks}
 	journalPath := filepath.Join(state, WindowsProductRecoveryFileLeafV3)
+	if failure == "aggregate-veto" {
+		v2TxnAssertAggregateBeforePromotion(t, txn, receipt, journalPath, priorIDs)
+		return
+	}
+	if strings.HasPrefix(failure, "serving-") {
+		v2TxnAssertServingRollback(t, txn, seed, receipt, journalPath, failure)
+		return
+	}
 	var prepared, settled windowsProductRecoveryJournalV3
 	txn.Opts.Deps.WriteRecoveryJournal = func(name string, raw []byte) error {
 		j, err := decodeWindowsProductRecoveryJournalV3(raw)

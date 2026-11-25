@@ -134,7 +134,7 @@ func TestWindowsProductBoundNamespaceOwners(t *testing.T) {
 			return err
 		}
 		bounded, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		err := api.NewAPI().WithSavedHubEndpointGateBoundIn(bounded, settings, scope, func(bool) error { t.Error("bound preferences bypassed legacy holder"); return nil })
+		err := scope.WithSavedHubEndpointGateIn(bounded, settings, func(bool) error { t.Error("bound preferences bypassed legacy holder"); return nil })
 		cancel()
 		if releaseErr := settingsOld.Unlock(); releaseErr != nil {
 			return releaseErr
@@ -150,7 +150,7 @@ func TestWindowsProductBoundNamespaceOwners(t *testing.T) {
 		if _, err := os.Stat(foreignSettings + ".lock"); !os.IsNotExist(err) {
 			t.Fatalf("foreign settings path had an effect: %v", err)
 		}
-		return api.NewAPI().WithSavedHubEndpointGateBoundIn(t.Context(), settings, scope, func(enabled bool) error {
+		return scope.WithSavedHubEndpointGateIn(t.Context(), settings, func(enabled bool) error {
 			if !enabled {
 				t.Error("bound owner did not see saved ON")
 			}

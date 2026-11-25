@@ -233,30 +233,30 @@ func TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias(t *testing.T) {
 		t.Fatalf("project config changed during apply:\nwant %q\n got %q", projectBytes, projectAfterApply)
 	}
 
+	if !bytes.Contains(globalAfter, []byte("enabled = false")) || bytes.Contains(globalAfter, []byte("startup_timeout_sec")) {
+		t.Fatalf("relocation changed the source policy:\n%s", globalAfter)
+	}
+	// This bare install did not retain a source-provenance receipt. Its
+	// policy-preserving alias cannot authorize a later repeat by shape alone.
+	// Receipt-bound repeats are covered by the Adopt lifecycle tests.
 	repeatPlan, err := BuildPlanWithOpts(m, BuildPlanOpts{
 		IncludeAllClients: true,
 		CodexProjectRoot:  projectRoot,
 		CodexWorkingDir:   workingDir,
 	})
-	if err != nil {
-		t.Fatalf("repeat BuildPlanWithOpts: %v", err)
-	}
-	if len(repeatPlan.ClientUpdates) != 1 || repeatPlan.ClientUpdates[0].EntryName != "serena-latest-mcphub" {
-		t.Fatalf("repeat plan did not retain frozen target: %+v", repeatPlan.ClientUpdates)
-	}
-	var repeatOutput bytes.Buffer
-	if err := executeInstallToWithSymlinkConsents(&repeatOutput, m, repeatPlan, 0, false, nil, true, true, nil); err != nil {
-		t.Fatalf("repeat execute frozen Codex plan: %v", err)
+	if repeatPlan != nil || !errors.Is(err, clients.ErrCodexTargetNameConflict) {
+		t.Fatalf("unproven repeat plan=%#v error=%v, want target conflict", repeatPlan, err)
 	}
 	globalAfterRepeat, err := os.ReadFile(globalPath)
 	if err != nil {
-		t.Fatalf("read global config after repeat: %v", err)
+		t.Fatalf("read global config after refused repeat: %v", err)
 	}
 	if !bytes.Equal(globalAfterRepeat, globalAfter) {
-		t.Fatalf("repeat changed settled global config:\nwant %q\n got %q", globalAfter, globalAfterRepeat)
+		t.Fatalf("refused repeat changed settled global config:\nwant %q\n got %q", globalAfter, globalAfterRepeat)
 	}
-	if !strings.Contains(repeatOutput.String(), "already configured") {
-		t.Fatalf("repeat result is not explicit: %q", repeatOutput.String())
+	projectAfterRepeat, err := os.ReadFile(projectPath)
+	if err != nil || !bytes.Equal(projectAfterRepeat, projectBytes) {
+		t.Fatalf("refused repeat changed project config: %v\nwant %q\n got %q", err, projectBytes, projectAfterRepeat)
 	}
 }
 
