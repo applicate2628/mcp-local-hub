@@ -1,0 +1,2 @@
+# Preserve the exact executed control patch; unified-diff context has a prefix.
+gate-fixtures-failure-control-20261125.patch -text whitespace=-blank-at-eol,-space-before-tab

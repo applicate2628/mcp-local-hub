@@ -1,0 +1,242 @@
+diff --git a/internal/api/adopt_lease_namespace_windows_test.go b/internal/api/adopt_lease_namespace_windows_test.go
+index bc49ccc7810e27dc97731d8a107ea072e889ac63..374e43cc05b880ef3d8a6d62ce27485361201269 100644
+--- a/internal/api/adopt_lease_namespace_windows_test.go
++++ b/internal/api/adopt_lease_namespace_windows_test.go
+@@ -706,6 +706,7 @@ func TestAdoptLeaseNamespaceMigrationRefusesExplicitBroadDACLAndBusyNamespace(t
+ 			t.Fatal(err)
+ 		}
+ 		applyFileDACLWithAuthUsersReadACE(t, namespace)
++		setNamespaceFixtureCurrentUserOwner(t, namespace, true)
+ 		before := windowsSDDLForTest(t, namespace)
+ 		report, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true})
+ 		if err == nil || report.State != AdoptLeaseNamespaceRefused || report.ReasonID != AdoptLeaseReasonNamespaceDACLRefused {
+@@ -732,6 +733,7 @@ func TestAdoptLeaseNamespaceMigrationRefusesExplicitBroadDACLAndBusyNamespace(t
+ }
+ 
+ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnapshot bool) (string, string, string) {
++	t.Helper()
+ 	statePathsHelper(t)
+ 	stateDir := filepath.Join(t.TempDir(), "state")
+ 	if err := os.Mkdir(stateDir, 0o700); err != nil {
+@@ -763,6 +765,7 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
+ 		},
+ 	}
+ 	applyProtectedDACLFromEntries(t, stateDir, entries)
++	setNamespaceFixtureCurrentUserOwner(t, stateDir, true)
+ 	root := openDirHandleNoReparseForTest(t, stateDir)
+ 	if err := verifyWindowsDACLFromHandle(root); err != nil {
+ 		_ = windows.CloseHandle(root)
+@@ -774,12 +777,14 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
+ 	if err := os.Mkdir(namespace, 0o700); err != nil {
+ 		t.Fatalf("create inherited namespace: %v", err)
+ 	}
++	setNamespaceFixtureCurrentUserOwner(t, namespace, true)
+ 	var firstLease string
+ 	for _, leaf := range leaves {
+ 		path := filepath.Join(namespace, leaf)
+ 		if err := os.WriteFile(path, nil, 0o600); err != nil {
+ 			t.Fatalf("create inherited lease %s: %v", leaf, err)
+ 		}
++		setNamespaceFixtureCurrentUserOwner(t, path, false)
+ 		if firstLease == "" {
+ 			firstLease = path
+ 		}
+@@ -789,6 +794,7 @@ func seedRecognizedLegacyLeaseNamespace(t *testing.T, leaves []string, safeSnaps
+ 		if err := os.Mkdir(snapshot, 0o700); err != nil {
+ 			t.Fatalf("create snapshot sibling: %v", err)
+ 		}
++		setNamespaceFixtureCurrentUserOwner(t, snapshot, true)
+ 		h := openWindowsPathForNamespaceTest(t, snapshot, windows.READ_CONTROL|windows.WRITE_DAC, true)
+ 		if err := setRestrictiveDACL(h); err != nil {
+ 			_ = windows.CloseHandle(h)
+@@ -824,10 +830,12 @@ func seedRecognizedLegacyStateRoot(t *testing.T, leaves []string) (string, strin
+ 			Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_WELL_KNOWN_GROUP, TrusteeValue: windows.TrusteeValueFromSID(authUsers)}},
+ 	}
+ 	applyProtectedDACLFromEntries(t, parent, entries)
++	setNamespaceFixtureCurrentUserOwner(t, parent, true)
+ 	stateRoot := filepath.Join(parent, "state")
+ 	if err := os.Mkdir(stateRoot, 0o700); err != nil {
+ 		t.Fatal(err)
+ 	}
++	setNamespaceFixtureCurrentUserOwner(t, stateRoot, true)
+ 	daemonStateRootOverride = stateRoot
+ 	root := openDirHandleNoReparseForTest(t, stateRoot)
+ 	legacy, err := windowsDACLIsRecognizedInheritedLegacy(root)
+@@ -839,12 +847,14 @@ func seedRecognizedLegacyStateRoot(t *testing.T, leaves []string) (string, strin
+ 	if err := os.Mkdir(namespace, 0o700); err != nil {
+ 		t.Fatal(err)
+ 	}
++	setNamespaceFixtureCurrentUserOwner(t, namespace, true)
+ 	var firstLease string
+ 	for _, leaf := range leaves {
+ 		path := filepath.Join(namespace, leaf)
+ 		if err := os.WriteFile(path, nil, 0o600); err != nil {
+ 			t.Fatal(err)
+ 		}
++		setNamespaceFixtureCurrentUserOwner(t, path, false)
+ 		if firstLease == "" {
+ 			firstLease = path
+ 		}
+@@ -852,6 +862,45 @@ func seedRecognizedLegacyStateRoot(t *testing.T, leaves []string) (string, strin
+ 	return stateRoot, namespace, firstLease
+ }
+ 
++// Legacy admission requires the process token's user as owner, independently
++// of the DACL grantees. Set only the owner of an object just created by this
++// fixture; receive its actual owner and unchanged DACL through the same handle.
++func setNamespaceFixtureCurrentUserOwner(t *testing.T, path string, directory bool) {
++	t.Helper()
++	current, err := currentUserSID()
++	if err != nil {
++		t.Fatalf("fixture current user SID: %v", err)
++	}
++	h := openWindowsPathForNamespaceTest(t, path, windows.READ_CONTROL|windows.WRITE_OWNER, directory)
++	defer func() {
++		if err := windows.CloseHandle(h); err != nil {
++			t.Errorf("close fixture owner handle for %s: %v", filepath.Base(path), err)
++		}
++	}()
++	before, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
++	if err != nil {
++		t.Fatalf("read fixture DACL before owner setup: %v", err)
++	}
++	beforeSDDL := before.String()
++	if beforeSDDL == "" {
++		t.Fatal("fixture DACL before owner setup has no SDDL representation")
++	}
++	if err := windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, current, nil, nil, nil); err != nil {
++		t.Fatalf("set current user as fixture owner for %s: %v", filepath.Base(path), err)
++	}
++	owned, err := stateFileOwnerIsCurrentUser(h)
++	if err != nil || !owned {
++		t.Fatalf("fixture owner for %s must be the current process user: owned=%t err=%v", filepath.Base(path), owned, err)
++	}
++	after, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
++	if err != nil {
++		t.Fatalf("read fixture DACL after owner setup: %v", err)
++	}
++	if after.String() != beforeSDDL {
++		t.Fatalf("setting fixture owner changed DACL for %s", filepath.Base(path))
++	}
++}
++
+ func openDirHandleNoReparseForTest(t *testing.T, path string) windows.Handle {
+ 	t.Helper()
+ 	h, err := openDirHandleNoReparse(path)
+diff --git a/internal/cli/adopt_test.go b/internal/cli/adopt_test.go
+index 0cdd27c31a69d591e0a99ca1db162e4bbb822fb2..786c5ba7f1c3a8c7fefef5481cb108878bb68856 100644
+--- a/internal/cli/adopt_test.go
++++ b/internal/cli/adopt_test.go
+@@ -143,7 +143,9 @@ API_KEY = "` + fixtureKey + `"
+ 	cmd := NewRootCmd()
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli", "--port", "9313"})
++	// Keep the real planner and secret canary while letting its normal allocator
++	// choose an available port instead of requiring a particular host socket.
++	cmd.SetArgs([]string{"adopt", "mui-dry-cli", "--client", "codex-cli"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("adopt dry-run: %v\n%s", err, out.String())
+ 	}
+@@ -221,10 +223,22 @@ args = ["version"]
+ 		t.Fatalf("seed codex config: %v", err)
+ 	}
+ 
+-	cmd := NewRootCmd()
++	// Exercise the real namespace preflight after a valid plan is supplied.
++	// Port allocation is outside this refusal oracle and must not preempt it.
++	buildPlan := func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
++		return &api.AdoptPlan{
++			EntryName:        opts.EntryName,
++			SourceClient:     opts.Client,
++			ManifestName:     opts.EntryName,
++			Port:             opts.Port,
++			AdoptClients:     []string{opts.Client},
++			TargetEntryNames: map[string]string{opts.Client: opts.EntryName},
++		}, nil
++	}
++	cmd := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, buildPlan)
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli", "--port", "9314"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9314"})
+ 	err := cmd.Execute()
+ 	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-unavailable action=leave-unchanged" {
+ 		t.Fatalf("dry-run error=%v, want typed state-root refusal", err)
+diff --git a/internal/daemonrecovery/recovery_test.go b/internal/daemonrecovery/recovery_test.go
+index f9a05012c078d8d5410a68048c6daf134d0329f8..a2d70c7608e706ec60dabac7d21185e0d388bf11 100644
+--- a/internal/daemonrecovery/recovery_test.go
++++ b/internal/daemonrecovery/recovery_test.go
+@@ -1287,9 +1287,26 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
+ 		t.Fatalf("hold audit flock: %v", err)
+ 	}
+ 	locked := true
++	done := make(chan struct{})
++	var executeErr error
++	returned := false
++	observed := false
+ 	defer func() {
+ 		if locked {
+-			_ = auditLock.Unlock()
++			if err := auditLock.Unlock(); err != nil {
++				t.Errorf("release audit flock during cleanup: %v", err)
++			}
++		}
++		// Release the original flock before joining this Execute call, even
++		// after Fatal. The package deadline bounds a genuinely stuck owner;
++		// TempDir cleanup must not run while that owner can still write.
++		<-done
++		if !observed {
++			if !returned {
++				t.Error("recovery exited without an execution result during cleanup")
++			} else if executeErr != nil {
++				t.Errorf("recovery completion during cleanup: %v", executeErr)
++			}
+ 		}
+ 	}()
+ 
+@@ -1308,10 +1325,10 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
+ 		close(respawnDispatched)
+ 		return api.RespawnResult{Success: true}, nil
+ 	}
+-	done := make(chan error, 1)
+ 	go func() {
+-		_, executeErr := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+-		done <- executeErr
++		defer close(done)
++		_, executeErr = ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
++		returned = true
+ 	}()
+ 
+ 	select {
+@@ -1320,7 +1337,11 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
+ 		t.Fatal("respawn was not dispatched while the post-commit audit flock was held")
+ 	}
+ 	select {
+-	case executeErr := <-done:
++	case <-done:
++		observed = true
++		if !returned {
++			t.Fatal("recovery exited without an execution result")
++		}
+ 		if executeErr != nil {
+ 			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
+ 		}
+diff --git a/internal/sonnet/server_test.go b/internal/sonnet/server_test.go
+index 1175390b724f066ba34a7832b87dfaa25e746b3b..2c4f2a320b01d83cca1a2944736cd934cf272a93 100644
+--- a/internal/sonnet/server_test.go
++++ b/internal/sonnet/server_test.go
+@@ -1207,6 +1207,13 @@ func TestRunStorePersistsAppendOnlyGenerationSnapshots(t *testing.T) {
+ 	projectRoot := writeProject(t)
+ 	storeRoot := t.TempDir()
+ 	s := NewServer(testConfig(storeRoot, &fakeDriver{}))
++	defer func() {
++		// Fatal must still join this original owner before TempDir cleanup.
++		// A stuck owner remains subject to the package test deadline.
++		if err := s.Close(context.Background()); err != nil {
++			t.Errorf("owner cleanup: %v", err)
++		}
++	}()
+ 	started, err := s.Start(context.Background(), StartRequest{ProjectRoot: projectRoot, ProjectFile: "sample.son", TimeoutSeconds: 10})
+ 	if err != nil {
+ 		t.Fatal(err)

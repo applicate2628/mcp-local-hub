@@ -1,0 +1,62 @@
+{
+  "schema": "mcphub-coordination-followup-review-v1",
+  "date": "2026-11-25",
+  "scope": "Four test fixture files and coordination evidence in existing PR664; this is not full Product acceptance or external Codex approval.",
+  "source_checkpoint": "c730cae455ef84d226ac5323953d9e7209b4016e",
+  "source_tree": "0c42ea39f241077cb6a9e1a64efe6d1e0a726751",
+  "code_sha256": {
+    "internal/api/adopt_lease_namespace_windows_test.go": "a0fa50cc479fea4af11a265683c705d7fb08c9610d1f0a056dbd7d68d6bdd006",
+    "internal/cli/adopt_test.go": "eac83468591d6a55ffc0adf33cc2e1f97ad6cba3addaf6ee5d0663c3b1c56114",
+    "internal/daemonrecovery/recovery_test.go": "3c81d261650236f977cd0bfbe27e162502e1ef625601d2c1a9b7eea3ac07aa35",
+    "internal/sonnet/server_test.go": "cb99d153da56f9a5f6e6dd171d6ea2f189ccc0f8d9135b68ff633b7a3e60106c"
+  },
+  "diff": {
+    "files": 4,
+    "additions": 99,
+    "deletions": 8,
+    "production_changes": false,
+    "assertion_deadlines_increased": false
+  },
+  "own_review": {
+    "reviewer": "Root",
+    "status": "PASS_WITH_RECORDED_OPEN_ACCEPTANCE",
+    "checks": [
+      "Code/conditions/consequences read directly; positive bytes match native c730 inputs",
+      "Recovery close(done) synchronizes result fields; unlock occurs before join; Goexit distinguished from nil error",
+      "Sonnet original Close observed on success and fatal path; source lease lifecycle reviewed",
+      "Owner-only Windows fixture operation uses same handle, reads actual owner, verifies unchanged DACL",
+      "CLI original redaction planner remains exercised; namespace refusal uses existing plan seam",
+      "All 29 source artifact entries verified by bytes and SHA256; current Markdown links and JSON validated",
+      "Historical failed gates and exact scope retained; no full PASS transfer"
+    ]
+  },
+  "independent_review": {
+    "reviewer": "Windows lifecycle review agent",
+    "status": "PASS_IN_SCOPE_NO_BLOCKERS",
+    "checks": [
+      "Four source files match c730; 99 additions and 8 deletions",
+      "Recovery synchronization and original-owner cleanup order reviewed",
+      "Sonnet repeat Close and cancellation control reviewed",
+      "29 source artifacts and preserved 37-step prefix plus stage38 digests verified without rerunning replay",
+      "43 command records and 86 stream records consistent with CLOSED/EOF/join/handles and redacted text digests",
+      "Unix example paths traced to literal privacy-canary fixtures; no current machine path identified"
+    ]
+  },
+  "remaining": [
+    "Full 14af default and tagged FAIL",
+    "c730 full gates NOT_RUN",
+    "Normal recovery one-second timing FAIL; phase/cause UNKNOWN",
+    "Product/user-flow qualification outstanding",
+    "Exact new-head external Codex review NOT_CONFIRMED"
+  ],
+  "post_review_publication_redaction": {
+    "scope": "Only public test-log projection, its hash and narrative; four Go files and source replay artifacts unchanged",
+    "reason": "Installed publication gate rejected synthetic password/home-path canaries in one stdout JSON field",
+    "checks": [
+      "Original private receipt and stream hashes preserved",
+      "New redacted text digests recomputed",
+      "Failure gate receipt retained",
+      "Installed scanner and gate not modified or bypassed"
+    ]
+  }
+}
