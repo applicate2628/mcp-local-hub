@@ -1909,6 +1909,9 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	removalScope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
+	removalCaptures := prepareUninstallSupervisorCaptures(m.Name, removalScope, report)
+	defer closeUninstallSupervisorCaptures(removalCaptures, report)
 	// Task 10 plan §65: BEFORE deleting tasks, mark each as
 	// Desired=stopped + Reason=uninstalled and append a
 	// server-uninstalled audit entry. Audit / intent failures are
@@ -1936,7 +1939,8 @@ func (a *API) Uninstall(server string) (*UninstallReport, error) {
 	// supervisor to reconcile so the now-descriptorless daemon is terminated
 	// promptly instead of being respawned forever. Best-effort: a cleanup
 	// failure is a warning, never a hard error — uninstall is idempotent.
-	a.removeServerFromSupervisorIntentBestEffortForManifest(m, report)
+	changed, removed, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), m.Name, removalScope, false)
+	a.finishRemovedSupervisorTargets(m.Name, changed, removed, removalCaptures, removeErr, report)
 	// Remove client entries — but ONLY entries that are unambiguously
 	// hub-managed. PR #94's check was too permissive: it treated any
 	// loopback HTTP URL as hub-managed, so a user's own MCP server
@@ -2157,6 +2161,9 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	if err != nil {
 		return nil, err
 	}
+	removalScope := retiredManifestUninstallScope()
+	removalCaptures := prepareUninstallSupervisorCaptures(server, removalScope, report)
+	defer closeUninstallSupervisorCaptures(removalCaptures, report)
 	// Task 10 plan §65: same uninstall intent + audit recording as
 	// the manifest-backed path.
 	retiredTaskNames := make([]string, 0, len(tasks))
@@ -2176,7 +2183,8 @@ func (a *API) uninstallWithoutManifest(server string) (*UninstallReport, error) 
 	// v0.6 Phase F (bot PR #288 F1): also clear any supervisor-intent
 	// descriptor rows / timer / stops a retired server still owns and nudge
 	// reconcile — same symmetric cleanup as the manifest-backed path.
-	a.removeServerFromSupervisorIntentBestEffort(server, report)
+	changed, removed, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), server, removalScope, false)
+	a.finishRemovedSupervisorTargets(server, changed, removed, removalCaptures, removeErr, report)
 	for name, client := range clients.AllClients() {
 		if client == nil || !client.Exists() {
 			continue

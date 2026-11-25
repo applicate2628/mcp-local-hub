@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -19,6 +20,7 @@ type forceStopLoopRequest struct {
 	ctx     context.Context
 	command api.ForceStopCommandV1
 	reply   chan api.ForceStopResultV1
+	removal *forceStopRemovalCapture
 }
 
 func handleForceStop(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
@@ -29,6 +31,9 @@ func handleForceStop(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	}
 	if err == nil {
 		err = api.ValidateForceStopCommandV1(command)
+	}
+	if err == nil && ((req.Cmd == "force_stop") != (command.RemovalPhase == "")) {
+		err = errors.New("removal phases require the force_stop_removed verb")
 	}
 	if err != nil {
 		return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: api.ForceStopInvalidRequest, Message: err.Error()}, Final: true})
@@ -41,7 +46,7 @@ func handleForceStop(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// does not issue a second action or transfer custody to the client.
 	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), daemonCreatorTerminalObservationBudget)
 	defer cancel()
-	result := ctrl.postForceStop(ctx, command)
+	result := ctrl.postForceStopWithRemoval(ctx, command, deps.forceStopRemoval)
 	return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, OK: true, Result: result, Final: true})
 }
 
@@ -51,11 +56,15 @@ func forceStopRefusal(command api.ForceStopCommandV1, reason string, cause error
 }
 
 func (c *supervisorController) postForceStop(ctx context.Context, command api.ForceStopCommandV1) api.ForceStopResultV1 {
+	return c.postForceStopWithRemoval(ctx, command, nil)
+}
+
+func (c *supervisorController) postForceStopWithRemoval(ctx context.Context, command api.ForceStopCommandV1, removal *forceStopRemovalCapture) api.ForceStopResultV1 {
 	if c == nil || c.eventLoop == nil || c.tracker == nil {
 		return forceStopRefusal(command, api.ForceStopOwnerUnavailable, errors.New("Supervisor controller is unavailable"))
 	}
 	reply := make(chan api.ForceStopResultV1, 1)
-	request := forceStopLoopRequest{ctx: ctx, command: command, reply: reply}
+	request := forceStopLoopRequest{ctx: ctx, command: command, reply: reply, removal: removal}
 	if err := c.eventLoop.PostCtx(ctx, api.LoopEvent{Kind: evForceStop, Body: map[string]any{forceStopRequestBodyKey: request}}); err != nil {
 		return forceStopRefusal(command, api.ForceStopControllerBusy, err)
 	}
@@ -73,6 +82,35 @@ func (c *supervisorController) postForceStop(ctx context.Context, command api.Fo
 // never posts a synthetic exit or restart: the original waiter remains the
 // only publisher. Concurrent lifecycle requests cannot retarget this action.
 func (c *supervisorController) forceStopOnLoop(ctx context.Context, command api.ForceStopCommandV1) api.ForceStopResultV1 {
+	return c.forceStopWithRemovalOnLoop(ctx, command, nil)
+}
+
+// This slot belongs to one authenticated IPC connection. It is a reference to
+// the existing creator record, not native authority reconstructed from a tuple.
+// The record already survives tracker retirement. Closing an unused slot only
+// releases that reference; it neither terminates nor changes running intent.
+type forceStopRemovalCapture struct {
+	mu      sync.Mutex
+	closed  bool
+	records *daemonCreatorRecords
+	owner   *supervisorController
+	entry   *daemonCreatorOperation
+	target  api.ForceStopTargetV1
+}
+
+func (capture *forceStopRemovalCapture) close() {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	capture.closed = true
+	if capture.entry != nil {
+		capture.records.mu.Lock()
+		capture.entry.removalRetainers--
+		capture.records.mu.Unlock()
+		capture.entry = nil
+	}
+}
+
+func (c *supervisorController) forceStopWithRemovalOnLoop(ctx context.Context, command api.ForceStopCommandV1, capture *forceStopRemovalCapture) api.ForceStopResultV1 {
 	if err := api.ValidateForceStopCommandV1(command); err != nil {
 		return forceStopRefusal(command, api.ForceStopInvalidRequest, err)
 	}
@@ -85,59 +123,128 @@ func (c *supervisorController) forceStopOnLoop(ctx context.Context, command api.
 	if c.daemonCreators == nil {
 		return forceStopRefusal(command, api.ForceStopOwnerUnavailable, errors.New("this Supervisor has no original daemon creators"))
 	}
+	if command.RemovalPhase != "" {
+		if capture == nil {
+			return forceStopRefusal(command, api.ForceStopOwnerUnavailable, errors.New("removal requires the original connection's capture"))
+		}
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		if capture.closed || (capture.entry != nil && (capture.target != command.Target || capture.owner != c)) {
+			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("removal capture is closed or belongs to another original generation"))
+		}
+		if command.RemovalPhase == api.ForceStopRetainRemoved {
+			if capture.entry == nil {
+				operation, refusal := c.selectForceStopOperation(command, true)
+				if refusal != nil {
+					return *refusal
+				}
+				capture.records, capture.owner, capture.entry, capture.target = c.daemonCreators, c, operation, command.Target
+			}
+			return api.ForceStopResultV1{ProtocolVersion: 1, Target: command.Target,
+				State: api.ForceStopRetained, Reason: api.ForceStopRetained, Action: "not-requested", PortState: "not_observed"}
+		}
+		if capture.entry == nil {
+			return forceStopRefusal(command, api.ForceStopOwnerUnavailable, errors.New("removal was not captured before descriptor mutation on this connection"))
+		}
+		if c.intentCache == nil {
+			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.New("current descriptor snapshot is unavailable"))
+		}
+		if _, present := c.intentCache.LookupCanonical(command.Target.TaskName); present {
+			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("descriptor is still present or reappeared; removal cleanup refused"))
+		}
+		if c.reapIntentReader == nil {
+			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.New("fresh descriptor reader is unavailable"))
+		}
+		fresh, err := c.reapIntentReader()
+		if err != nil || fresh == nil {
+			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.Join(err, errors.New("fresh removal observation is unavailable")))
+		}
+		if fresh.FindSupervisorDaemonByTaskName(command.Target.TaskName) != nil {
+			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("descriptor reappeared on disk; removal cleanup refused"))
+		}
+		if err := ctx.Err(); err != nil {
+			return forceStopRefusal(command, api.ForceStopControllerBusy, err)
+		}
+		// The preceding reconcile must have observed the removal. Never select
+		// the current tracker, a fresh peer, or another record by task name here.
+		c.daemonCreators.mu.Lock()
+		capture.entry.forceStopRequested = true
+		c.daemonCreators.mu.Unlock()
+		return c.completeForceStopOperation(ctx, command, capture.entry)
+	}
+	operation, refusal := c.selectForceStopOperation(command, false)
+	if refusal != nil {
+		return *refusal
+	}
+	return c.completeForceStopOperation(ctx, command, operation)
+}
+
+func (c *supervisorController) selectForceStopOperation(command api.ForceStopCommandV1, retainRemoved bool) (*daemonCreatorOperation, *api.ForceStopResultV1) {
+	refuse := func(reason string, cause error) (*daemonCreatorOperation, *api.ForceStopResultV1) {
+		result := forceStopRefusal(command, reason, cause)
+		return nil, &result
+	}
 	// Exact duplicates join the retained result even after the tracker advances
 	// to a successor. They never select the successor or repeat a native action.
 	operation, repeated := c.daemonCreators.forceStopOperation(command.Target)
-	if !repeated {
+	if !repeated || retainRemoved {
 		if c.tracker == nil || c.intentCache == nil || (c.graceful != nil && c.graceful.InProgress()) {
-			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.New("Supervisor is unavailable or draining"))
+			return refuse(api.ForceStopControllerBusy, errors.New("Supervisor is unavailable or draining"))
 		}
 		if err := c.tracker.StopSettlementIntegrityError(); err != nil {
-			return forceStopRefusal(command, api.ForceStopControllerBusy, err)
+			return refuse(api.ForceStopControllerBusy, err)
 		}
 		if _, pending := c.tracker.StopSettlementReceipt(command.Target.TaskName); pending {
-			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.New("terminal stop settlement is already in progress"))
+			return refuse(api.ForceStopControllerBusy, errors.New("terminal stop settlement is already in progress"))
 		}
 		state, present := c.GetSMState(command.Target.TaskName)
 		if !present || state != api.StRunning {
-			return forceStopRefusal(command, api.ForceStopNotRunning, fmt.Errorf("task is not a running creator generation (state %s)", state))
+			return refuse(api.ForceStopNotRunning, fmt.Errorf("task is not a running creator generation (state %s)", state))
 		}
 		descriptor, found := c.intentCache.LookupCanonical(command.Target.TaskName)
 		if !found || descriptor == nil {
-			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("task is absent from current intent"))
+			return refuse(api.ForceStopGenerationChanged, errors.New("task is absent from current intent"))
 		}
 		port, _ := api.EffectiveDaemonPort(*descriptor)
 		if port != command.Target.ExpectedPort {
-			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("task descriptor port changed"))
+			return refuse(api.ForceStopGenerationChanged, errors.New("task descriptor port changed"))
 		}
 		if c.daemonIntent != nil {
 			stop := c.daemonIntent.Lookup(command.Target.TaskName)
 			if active, _ := stop.IsActiveStop(time.Now().UTC()); active {
-				return forceStopRefusal(command, api.ForceStopIntentStopped, errors.New("task has an active stopped intent"))
+				return refuse(api.ForceStopIntentStopped, errors.New("task has an active stopped intent"))
 			}
 		}
 		entry, found := c.tracker.Get(command.Target.TaskName)
 		if !found || !forceStopTargetMatchesEntry(command.Target, entry) {
-			return forceStopRefusal(command, api.ForceStopGenerationChanged, errors.New("runtime generation changed since status"))
+			return refuse(api.ForceStopGenerationChanged, errors.New("runtime generation changed since status"))
 		}
 		c.daemonCreators.mu.Lock()
 		unsupported := operation != nil && operation.unsupported
 		available := operation != nil && operation.owner != nil && !operation.unsupported && !operation.starting
 		otherTermination := available && operation.otherTerminationSelected
 		if available && !otherTermination {
-			operation.forceStopRequested = true
+			if retainRemoved {
+				operation.removalRetainers++
+			} else {
+				operation.forceStopRequested = true
+			}
 		}
 		c.daemonCreators.mu.Unlock()
 		if unsupported {
-			return forceStopRefusal(command, api.ForceStopUnsupported, errors.New("this generation has no native original creator capability"))
+			return refuse(api.ForceStopUnsupported, errors.New("this generation has no native original creator capability"))
 		}
 		if !available {
-			return forceStopRefusal(command, api.ForceStopOwnerUnavailable, errors.New("original creator was not retained for this generation"))
+			return refuse(api.ForceStopOwnerUnavailable, errors.New("original creator was not retained for this generation"))
 		}
 		if otherTermination {
-			return forceStopRefusal(command, api.ForceStopControllerBusy, errors.New("another lifecycle path already selected termination for this generation"))
+			return refuse(api.ForceStopControllerBusy, errors.New("another lifecycle path already selected termination for this generation"))
 		}
 	}
+	return operation, nil
+}
+
+func (c *supervisorController) completeForceStopOperation(ctx context.Context, command api.ForceStopCommandV1, operation *daemonCreatorOperation) api.ForceStopResultV1 {
 	terminal, err := c.daemonCreators.completeTerminal(ctx, operation, operation.owner.TerminateCreatorAndWait)
 	result := api.ForceStopResultV1{ProtocolVersion: command.ProtocolVersion, Target: command.Target,
 		State: api.ForceStopIncomplete, Reason: api.ForceStopClosureIncomplete, Action: "not-requested", PortState: "not_observed"}
@@ -227,6 +334,7 @@ func guardForceStopTermination(records *daemonCreatorRecords, next terminationOu
 		if records != nil {
 			records.mu.Lock()
 			var operation *daemonCreatorOperation
+			joinRemoval := false
 			for _, candidate := range records.operations {
 				if canonicalSupervisorTaskName(candidate.task) != expected.CanonicalTaskName {
 					continue
@@ -234,6 +342,12 @@ func guardForceStopTermination(records *daemonCreatorRecords, next terminationOu
 				matches := expected.Valid && candidate.pid == expected.PID && candidate.generation == expected.PIDGeneration && candidate.startedAt.UTC().Format(time.RFC3339Nano) == expected.StartedAt
 				if candidate.forceStopRequested && (!expected.Valid || matches) {
 					operation = candidate
+				} else if matches && candidate.removalRetainers > 0 {
+					// A removal caller retained this exact original before its
+					// descriptor commit. Reconcile uses the same original stop
+					// owner; it must not reopen the observed PID in the legacy path.
+					candidate.forceStopRequested = true
+					operation, joinRemoval = candidate, true
 				} else if matches {
 					// Startup reconciliation also calls this closure off the FIFO.
 					// Reserve that selection before releasing the record lock so
@@ -248,6 +362,11 @@ func guardForceStopTermination(records *daemonCreatorRecords, next terminationOu
 			}
 			records.mu.Unlock()
 			if operation != nil {
+				if joinRemoval {
+					ctx, cancel := context.WithTimeout(context.Background(), daemonCreatorTerminalObservationBudget)
+					terminal, err = records.completeTerminal(ctx, operation, operation.owner.TerminateCreatorAndWait)
+					cancel()
+				}
 				if expected.Valid && terminal != nil && terminal.Closure() != nil && err == nil {
 					return terminationOutcome{Kind: terminationOutcomeAlreadyExited, Expected: expected}
 				}

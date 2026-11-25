@@ -192,6 +192,7 @@ func TestMain(m *testing.M) {
 	prevTaskkillTree := taskkillProcessTreeByPIDFn
 	prevStopForceKillPID := stopForceKillPIDFn
 	prevSupervisorForceStop := supervisorForceStopFn
+	prevPrepareSupervisorRemovedStop := prepareSupervisorRemovedStopFn
 	prevSnapshotProcesses := snapshotProcessesFn
 	prevFrozenStdioBridgeAdmission := frozenStdioBridgeAdmissionFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
@@ -232,6 +233,9 @@ func TestMain(m *testing.M) {
 	}
 	supervisorForceStopFn = func(context.Context, string, int) (ForceStopResultV1, error) {
 		return ForceStopResultV1{}, ErrSupervisorIPCUnavailable
+	}
+	prepareSupervisorRemovedStopFn = func(context.Context, string, int) (supervisorRemovedStop, error) {
+		return nil, ErrSupervisorIPCUnavailable
 	}
 	// CleanupLogWatchers shells out to wmic/ps through snapshotProcessesFn, then
 	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
@@ -287,6 +291,7 @@ func TestMain(m *testing.M) {
 	taskkillProcessTreeByPIDFn = prevTaskkillTree
 	stopForceKillPIDFn = prevStopForceKillPID
 	supervisorForceStopFn = prevSupervisorForceStop
+	prepareSupervisorRemovedStopFn = prevPrepareSupervisorRemovedStop
 	snapshotProcessesFn = prevSnapshotProcesses
 	frozenStdioBridgeAdmissionFn = prevFrozenStdioBridgeAdmission
 	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {

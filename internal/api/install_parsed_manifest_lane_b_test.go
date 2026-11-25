@@ -81,26 +81,30 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	}
 
 	var order []string
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
+	var completedPIDs []int
+	var captures []*removedStopFixture
+	installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+		order = append(order, "capture")
 		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-		return []DaemonStatus{
-			{TaskName: `\mcp-local-hub-demo-alpha`, PID: 4101, State: "Running"},
-			{TaskName: `\mcp-local-hub-demo-beta`, PID: 4102, State: "Running"},
-			{TaskName: `\mcp-local-hub-other-default`, PID: 4999, State: "Running"},
-		}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	var killedPIDs []int
-	origPID := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPID })
+		pid := map[string]int{seed.Daemons[0].TaskName: 4101, seed.Daemons[1].TaskName: 4102}[task]
+		if pid == 0 {
+			t.Fatalf("captured unrelated task %s", task)
+		}
+		stop := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+			order = append(order, "complete")
+			assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+			current, err := ReadSupervisorIntent(intentPath)
+			if err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+				t.Fatalf("cleanup preceded descriptor removal: %v", err)
+			}
+			completedPIDs = append(completedPIDs, pid)
+			result := forceStopClosedFixture(task, port)
+			result.Target.PID = pid
+			return result, nil
+		}}
+		captures = append(captures, stop)
+		return stop, nil
+	})
 
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 		order = append(order, "nudge")
@@ -110,11 +114,16 @@ func TestRemoveServerFromSupervisorIntentBestEffort_KillsRemovedDaemonsAfterNudg
 	report := &UninstallReport{}
 	NewAPI().removeServerFromSupervisorIntentBestEffort("demo", report)
 
-	if !reflect.DeepEqual(killedPIDs, []int{4101, 4102}) {
-		t.Fatalf("killed PIDs = %v, want [4101 4102] for the removed demo rows only", killedPIDs)
+	if !reflect.DeepEqual(completedPIDs, []int{4101, 4102}) {
+		t.Fatalf("completed original fixture PIDs = %v, want [4101 4102] for the removed demo rows only", completedPIDs)
 	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid", "kill-pid"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid kill-pid]", order)
+	if !reflect.DeepEqual(order, []string{"capture", "capture", "nudge", "complete", "complete"}) {
+		t.Fatalf("capture/nudge/complete order = %v, want [capture capture nudge complete complete]", order)
+	}
+	for _, capture := range captures {
+		if capture.closed != 1 {
+			t.Fatalf("capture close count=%d", capture.closed)
+		}
 	}
 	if len(report.TaskDeleteWarns) != 0 {
 		t.Fatalf("unexpected uninstall warnings: %v", report.TaskDeleteWarns)
@@ -143,48 +152,33 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 	}
 
 	var order []string
-	origStatus := supervisorIPCStatusFn
-	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		order = append(order, "ipc-status")
+	var completedPIDs []int
+	var captures []*removedStopFixture
+	installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
+		order = append(order, "capture")
 		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-		return []DaemonStatus{
-			{TaskName: priorRows[0].TaskName, PID: 5101, State: "Running"},
-			{TaskName: priorRows[1].TaskName, PID: 5102, State: "Running"},
-		}, nil
-	}
-	t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-	var killedPorts []int
-	origForceKill := forceKillByPortFn
-	origLookup := lookupPortPID
-	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
-		order = append(order, "kill-port")
-		killedPorts = append(killedPorts, port)
-		t.Fatalf("forceKillByPortFn called for port %d after successful PID kill", port)
-		return portKillKilled, nil
-	}
-	lookupPortPID = func(port int) (int, bool, error) {
-		return 0, false, nil
-	}
-	t.Cleanup(func() {
-		forceKillByPortFn = origForceKill
-		lookupPortPID = origLookup
+		pid := map[string]int{priorRows[0].TaskName: 5101, priorRows[1].TaskName: 5102}[task]
+		if pid == 0 {
+			t.Fatalf("unexpected capture %s", task)
+		}
+		stop := &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+			order = append(order, "complete")
+			assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+			current, err := ReadSupervisorIntent(intentPath)
+			if err != nil || current.FindSupervisorDaemonByTaskName(task) != nil {
+				t.Fatalf("cleanup preceded descriptor removal: %v", err)
+			}
+			completedPIDs = append(completedPIDs, pid)
+			result := forceStopClosedFixture(task, port)
+			result.Target.PID = pid
+			return result, nil
+		}}
+		captures = append(captures, stop)
+		return stop, nil
 	})
 
-	// Lane A inverted the kill preference: a captured supervisor-reported PID
-	// is killed FIRST (identity-gated, best-effort), and the port kill is only
-	// the no-PID-snapshot fallback. The IPC fake above reports PID 5101 for
-	// the dropped row, so the kill must arrive via stopForceKillPIDFn.
-	var killedPIDs []int
-	origPIDKill := stopForceKillPIDFn
-	stopForceKillPIDFn = func(pid int) error {
-		order = append(order, "kill-pid")
-		killedPIDs = append(killedPIDs, pid)
-		return nil
-	}
-	t.Cleanup(func() { stopForceKillPIDFn = origPIDKill })
-
 	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
+		assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
 		order = append(order, "nudge")
 		return ReconcileResponse{}, nil
 	}))
@@ -197,14 +191,16 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
 
-	if !reflect.DeepEqual(killedPIDs, []int{5101}) {
-		t.Fatalf("killed PIDs = %v, want [5101] for the dropped workspace row only", killedPIDs)
+	if !reflect.DeepEqual(completedPIDs, []int{5101}) {
+		t.Fatalf("completed original fixture PIDs = %v, want [5101] for the dropped workspace row only", completedPIDs)
 	}
-	if len(killedPorts) != 0 {
-		t.Fatalf("killed ports = %v, want none (PID-first kill must not fall through to the port path)", killedPorts)
+	for _, capture := range captures {
+		if capture.closed != 1 {
+			t.Fatalf("capture close count=%d", capture.closed)
+		}
 	}
-	if !reflect.DeepEqual(order, []string{"ipc-status", "nudge", "kill-pid"}) {
-		t.Fatalf("ipc/nudge/kill order = %v, want [ipc-status nudge kill-pid]", order)
+	if !reflect.DeepEqual(order, []string{"capture", "capture", "nudge", "complete"}) {
+		t.Fatalf("capture/nudge/complete order = %v, want [capture capture nudge complete]", order)
 	}
 }
 
@@ -236,20 +232,17 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 				t.Fatalf("seed supervisor-intent: %v", err)
 			}
 
-			origStatus := supervisorIPCStatusFn
-			supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+			var completedPIDs []int
+			var capture *removedStopFixture
+			installRemovedPrepareFixture(t, func(_ context.Context, task string, port int) (supervisorRemovedStop, error) {
 				assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
-				return []DaemonStatus{{TaskName: removedTask, PID: 6201, State: "Running"}}, nil
-			}
-			t.Cleanup(func() { supervisorIPCStatusFn = origStatus })
-
-			var killedPIDs []int
-			origPID := stopForceKillPIDFn
-			stopForceKillPIDFn = func(pid int) error {
-				killedPIDs = append(killedPIDs, pid)
-				return nil
-			}
-			t.Cleanup(func() { stopForceKillPIDFn = origPID })
+				capture = &removedStopFixture{complete: func(context.Context) (ForceStopResultV1, error) {
+					assertSupervisorIntentFlockAvailableDuringIPCStatus(t, stateDir)
+					completedPIDs = append(completedPIDs, 6201)
+					return forceStopClosedFixture(task, port), nil
+				}}
+				return capture, nil
+			})
 
 			t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
 				return ReconcileResponse{}, tc.nudgeErr
@@ -271,8 +264,11 @@ func TestInstallPlanCore_RemovedTargetKillDependsOnNudgeOutcome(t *testing.T) {
 				t.Fatalf("installPlanCore: %v", err)
 			}
 
-			if !reflect.DeepEqual(killedPIDs, tc.wantKill) {
-				t.Fatalf("killed PIDs = %v, want %v", killedPIDs, tc.wantKill)
+			if !reflect.DeepEqual(completedPIDs, tc.wantKill) {
+				t.Fatalf("completed original fixture PIDs = %v, want %v", completedPIDs, tc.wantKill)
+			}
+			if capture == nil || capture.closed != 1 {
+				t.Fatalf("capture not closed after result: %+v", capture)
 			}
 			out := buf.String()
 			hasWarn := strings.Contains(out, "warning:") &&

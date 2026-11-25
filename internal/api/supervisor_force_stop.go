@@ -33,6 +33,9 @@ const (
 	ForceStopClosureIncomplete = "FORCE_STOP_CLOSURE_INCOMPLETE"
 	ForceStopControllerBusy    = "FORCE_STOP_CONTROLLER_BUSY"
 	ForceStopInvalidRequest    = "FORCE_STOP_INVALID_REQUEST"
+	ForceStopRetained          = "retained"
+	ForceStopRetainRemoved     = "retain_removed"
+	ForceStopCompleteRemoved   = "complete_removed"
 )
 
 // ForceStopTargetV1 is an observation used to select one original creator in
@@ -50,6 +53,9 @@ type ForceStopTargetV1 struct {
 type ForceStopCommandV1 struct {
 	ProtocolVersion int               `json:"protocol_version"`
 	Target          ForceStopTargetV1 `json:"target"`
+	// RemovalPhase binds prepare/complete to one authenticated connection.
+	// Empty preserves the explicit force-stop contract and running intent.
+	RemovalPhase string `json:"removal_phase,omitempty"`
 }
 
 // ForceStopResultV1 describes the original generation, not its successor.
@@ -75,6 +81,9 @@ type ForceStopResultV1 struct {
 }
 
 func ValidateForceStopCommandV1(command ForceStopCommandV1) error {
+	if command.RemovalPhase != "" && command.RemovalPhase != ForceStopRetainRemoved && command.RemovalPhase != ForceStopCompleteRemoved {
+		return &IPCErr{Code: ForceStopInvalidRequest, Message: "unsupported force_stop removal phase"}
+	}
 	target := command.Target
 	started, err := time.Parse(time.RFC3339Nano, target.StartedAt)
 	if command.ProtocolVersion != 1 || target.TaskName == "" || target.TaskName != canonicalIntentTaskKey(target.TaskName) ||
@@ -90,7 +99,15 @@ func validateForceStopResult(command ForceStopCommandV1, result ForceStopResultV
 		return fmt.Errorf("force_stop response does not echo the requested generation")
 	}
 	switch result.State {
+	case ForceStopRetained:
+		if command.RemovalPhase != ForceStopRetainRemoved || result.Reason != ForceStopRetained || result.Error != "" ||
+			result.RootExited || result.TreeClosed || result.HandlesClosed || result.Action != "not-requested" || result.PortState != "not_observed" {
+			return fmt.Errorf("force_stop retained response does not prove a connection-bound capture")
+		}
 	case ForceStopClosed:
+		if command.RemovalPhase == ForceStopRetainRemoved {
+			return fmt.Errorf("force_stop preparation unexpectedly performed termination")
+		}
 		if !result.RootExited || !result.TreeClosed || !result.HandlesClosed || result.Error != "" || result.Reason != ForceStopClosed {
 			return fmt.Errorf("force_stop closed response lacks the original creator's complete terminal receipt")
 		}

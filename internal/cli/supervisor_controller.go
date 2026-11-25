@@ -2901,7 +2901,7 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		return
 	case evForceStop:
 		if request, ok := ev.Body[forceStopRequestBodyKey].(forceStopLoopRequest); ok {
-			request.reply <- c.forceStopOnLoop(request.ctx, request.command)
+			request.reply <- c.forceStopWithRemovalOnLoop(request.ctx, request.command, request.removal)
 		}
 		return
 	case evStopSettlementRecovery:

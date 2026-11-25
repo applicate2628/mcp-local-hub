@@ -428,6 +428,8 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 // handleIPCConn would obscure the contract; the bundle keeps the
 // dependency surface visible.
 type ipcDispatchDeps struct {
+	// Allocated only by the connection owner; never shared across connections.
+	forceStopRemoval *forceStopRemovalCapture
 	// The original singleton remains held until IPC handlers join on shutdown.
 	supervisorLock *api.SupervisorLock
 	stateDir       string
@@ -2172,6 +2174,8 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, tim
 // doesn't belong in the long-lived audit channel); just the verb + correlation id.
 func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	defer func() { _ = conn.Close() }()
+	deps.forceStopRemoval = &forceStopRemovalCapture{}
+	defer deps.forceStopRemoval.close()
 	reader := bufio.NewReader(conn)
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout))
@@ -2314,7 +2318,7 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		return handleExit(conn, req, deps)
 	case "respawn":
 		return handleRespawn(conn, req, deps)
-	case "force_stop":
+	case "force_stop", "force_stop_removed":
 		return handleForceStop(conn, req, deps)
 	case "reconcile":
 		// Phase A.3 (plan v10 §A.3, 2026-05-20): operator-triggered
@@ -3719,6 +3723,7 @@ type daemonCreatorOperation struct {
 	// join them. This completion cell preserves the sole waiter's exit publish.
 	terminalDone             chan struct{}
 	forceStopRequested       bool
+	removalRetainers         int
 	otherTerminationSelected bool
 	readinessDone            bool
 	readinessErr             error

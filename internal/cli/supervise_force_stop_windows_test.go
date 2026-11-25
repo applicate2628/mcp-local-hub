@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -80,6 +81,68 @@ func TestForceStopDuplicateRetainsIncompleteOriginalAfterSuccessor(t *testing.T)
 	second := controller.forceStopOnLoop(ctx, command)
 	if first != second || operation.terminalDone != done {
 		t.Fatalf("retry changed the original result or retargeted successor: first=%+v second=%+v", first, second)
+	}
+}
+
+// The zero native owner cannot prove closure. These causal refusals prove that
+// preparation itself has no effect and that removal cannot borrow another
+// connection, another descriptor, or a successor's retained operation.
+func TestForceStopRemovedCaptureAdmissionAndOriginalResult(t *testing.T) {
+	for _, mode := range []string{"not-prepared", "still-present", "disk-reappeared", "read-failed", "different-connection", "different-target", "closed", "original-after-successor"} {
+		t.Run(mode, func(t *testing.T) {
+			controller, original, command := forceStopControllerFixture()
+			capture := &forceStopRemovalCapture{}
+			defer capture.close()
+			if mode != "not-prepared" {
+				command.RemovalPhase = api.ForceStopRetainRemoved
+				result := controller.forceStopWithRemovalOnLoop(context.Background(), command, capture)
+				if result.State != api.ForceStopRetained || original.removalRetainers != 1 || original.forceStopRequested || original.terminalDone != nil {
+					t.Fatalf("preparation performed an action or lost original: %+v", result)
+				}
+			}
+			before, _ := controller.intentCache.LookupCanonical(command.Target.TaskName)
+			fresh := &api.SupervisorIntentFile{Version: 1}
+			controller.reapIntentReader = func() (*api.SupervisorIntentFile, error) { return fresh, nil }
+			if mode != "still-present" {
+				controller.intentCache.Refresh(fresh)
+			}
+			command.RemovalPhase = api.ForceStopCompleteRemoved
+			want := api.ForceStopGenerationChanged
+			switch mode {
+			case "not-prepared", "different-connection":
+				capture = &forceStopRemovalCapture{}
+				defer capture.close()
+				want = api.ForceStopOwnerUnavailable
+			case "disk-reappeared":
+				fresh = &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{*before}}
+			case "read-failed":
+				controller.reapIntentReader = func() (*api.SupervisorIntentFile, error) { return nil, errors.New("read failed") }
+				want = api.ForceStopControllerBusy
+			case "different-target":
+				command.Target.PIDGeneration++
+			case "closed":
+				capture.close()
+			case "original-after-successor":
+				// Original failure already belongs to its sole terminal cell.
+				// Reused numeric PID and a newer tracker/record must not replace it.
+				original.terminalDone = make(chan struct{})
+				close(original.terminalDone)
+				original.terminalErr = errors.New("original terminal failure")
+				started := original.startedAt.Add(time.Second)
+				generation := controller.tracker.MarkSpawned(command.Target.TaskName, command.Target.PID, started)
+				successor := &daemonCreatorOperation{task: original.task, pid: original.pid, generation: generation, startedAt: started, owner: &process.ProvisionalProcess{}}
+				controller.daemonCreators.operations = append(controller.daemonCreators.operations, successor)
+				result := controller.forceStopWithRemovalOnLoop(context.Background(), command, capture)
+				if result.State != api.ForceStopIncomplete || result.Error != original.terminalErr.Error() || result.Target != command.Target || successor.forceStopRequested || successor.terminalDone != nil {
+					t.Fatalf("cleanup lost original result or touched successor: %+v", result)
+				}
+				return
+			}
+			result := controller.forceStopWithRemovalOnLoop(context.Background(), command, capture)
+			if result.State != api.ForceStopRefused || result.Reason != want || original.forceStopRequested || original.terminalDone != nil {
+				t.Fatalf("refusal reached native effect: mode=%s result=%+v", mode, result)
+			}
+		})
 	}
 }
 

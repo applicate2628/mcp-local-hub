@@ -51,6 +51,7 @@ func TestTestMainSealsLiveFleetAndSlowSeams(t *testing.T) {
 	sealed("taskkillProcessTreeByPIDFn", taskkillProcessTreeByPIDFn, taskkillProcessTreeByPID)
 	sealed("stopForceKillPIDFn", stopForceKillPIDFn, stopForceKillSupervisorPIDTree)
 	sealed("supervisorForceStopFn", supervisorForceStopFn, DialSupervisorIPCForceStop)
+	sealed("prepareSupervisorRemovedStopFn", prepareSupervisorRemovedStopFn, prepareSupervisorRemovedStop)
 }
 
 // liveSeamSinkNames are the production functions whose presence in a package-var
@@ -65,6 +66,7 @@ var liveSeamSinkNames = map[string]bool{
 	"loopbackPortOwnerPID":           true, // netstat loopback owner lookup
 	"taskkillProcessTreeByPID":       true, // taskkill /T
 	"stopForceKillSupervisorPIDTree": true, // POSIX process-group SIGKILL
+	"prepareSupervisorRemovedStop":   true, // authenticated original-creator capture
 	"StartOwner":                     true, // autostart.StartOwner → schtasks /Run
 }
 

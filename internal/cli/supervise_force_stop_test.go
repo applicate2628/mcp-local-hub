@@ -113,6 +113,26 @@ func TestDaemonCreatorForceCanceledJoinKeepsOriginalResult(t *testing.T) {
 	})
 }
 
+func TestForceStopRemovalReconcileJoinsOriginalFailure(t *testing.T) {
+	started := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	cause := errors.New("original completion failure")
+	operation := &daemonCreatorOperation{task: `\mcp-local-hub-force-fixture-default`, pid: 4242, generation: 7, startedAt: started,
+		owner: &process.ProvisionalProcess{}, removalRetainers: 1, terminalDone: make(chan struct{}), terminalErr: cause}
+	close(operation.terminalDone)
+	records := &daemonCreatorRecords{operations: []*daemonCreatorOperation{operation}}
+	guard := guardForceStopTermination(records, func(api.SupervisorDaemon, terminationExpectedTuple) terminationOutcome {
+		t.Fatal("reconcile reacquired an observed PID instead of joining the retained original")
+		return terminationOutcome{}
+	})
+	expected := terminationExpectedTuple{CanonicalTaskName: operation.task, PID: operation.pid, StartedAt: started.Format(time.RFC3339Nano), PIDGeneration: operation.generation, Valid: true}
+	for i := 0; i < 2; i++ {
+		outcome := guard(api.SupervisorDaemon{TaskName: operation.task}, expected)
+		if !errors.Is(outcome.Cause, cause) || outcome.Kind != terminationOutcomeFailed || !operation.forceStopRequested || operation.otherTerminationSelected {
+			t.Fatalf("reconcile lost original failure: %+v", outcome)
+		}
+	}
+}
+
 func TestForceStopGuardSelectsOneTerminationPath(t *testing.T) {
 	started := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
 	target := api.ForceStopTargetV1{TaskName: `\mcp-local-hub-force-fixture-default`, PID: 4242, PIDGeneration: 7, StartedAt: started.Format(time.RFC3339Nano)}
