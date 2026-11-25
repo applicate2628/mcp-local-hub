@@ -503,7 +503,7 @@ func TestAdoptExecutedEventRequiresLeaseSettlement(t *testing.T) {
 command = "go"
 args = ["version"]
 `)
-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9364, Clients: []string{"codex-cli"}})
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), Clients: []string{"codex-cli"}})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}

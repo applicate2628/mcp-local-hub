@@ -23,7 +23,7 @@ args = ["version"]
 		EntryName:                       entry,
 		Client:                          "codex-cli",
 		ManifestName:                    entry,
-		Port:                            9368,
+		Port:                            nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05",
 	})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestAdoptWithoutLegacyProfileRemainsStrict(t *testing.T) {
 command = "go"
 args = ["version"]
 `)
-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9370})
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ tool_timeout_sec = 900
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9370,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -163,7 +164,7 @@ url = "http://127.0.0.1:9999/mcp"
 		EntryName:        entry,
 		Client:           "codex-cli",
 		ManifestName:     entry,
-		Port:             9371,
+		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot,
 		CodexWorkingDir:  projectRoot,
 	})
@@ -211,7 +212,7 @@ url = "http://127.0.0.1:9999/mcp"
 		EntryName:        entry,
 		Client:           "codex-cli",
 		ManifestName:     entry,
-		Port:             9372,
+		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		CodexProjectRoot: projectRoot,
 		CodexWorkingDir:  projectRoot,
 	})
@@ -226,7 +227,7 @@ url = "http://127.0.0.1:9999/mcp"
 	if err != nil || global == nil {
 		t.Fatalf("read relocated Codex target: entry=%#v err=%v", global, err)
 	}
-	if global.URL != "http://127.0.0.1:9372/mcp" {
+	if global.URL != fmt.Sprintf("http://127.0.0.1:%d/mcp", plan.Port) {
 		t.Fatalf("relocated URL = %q", global.URL)
 	}
 	if old, err := clients.AllClients()["codex-cli"].GetEntry(entry); err != nil || old != nil {
@@ -243,7 +244,7 @@ url = "http://127.0.0.1:9999/mcp"
 		EntryName:        entry,
 		Client:           "codex-cli",
 		ManifestName:     entry,
-		Port:             9372,
+		Port:             plan.Port,
 		CodexProjectRoot: projectRoot,
 		CodexWorkingDir:  projectRoot,
 	})

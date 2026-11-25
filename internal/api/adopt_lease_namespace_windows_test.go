@@ -83,7 +83,7 @@ args = ["version"]
 	beforeNames := readSortedNames(t, namespace)
 
 	if _, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9351,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	}); err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
@@ -107,7 +107,7 @@ args = ["version"]
 	beforeNames := readSortedNames(t, namespace)
 
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9356,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -138,7 +138,7 @@ command = "go"
 args = ["version"]
 `)
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9357,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -171,7 +171,7 @@ command = "go"
 args = ["version"]
 `)
 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9360,
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		})
 		if err != nil {
 			t.Fatalf("BuildAdoptPlan: %v", err)
@@ -206,7 +206,7 @@ command = "go"
 args = ["version"]
 `)
 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9358,
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		})
 		if err != nil {
 			t.Fatalf("BuildAdoptPlan: %v", err)
@@ -239,7 +239,7 @@ command = "go"
 args = ["version"]
 `)
 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9359,
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 		})
 		if err != nil {
 			t.Fatalf("BuildAdoptPlan: %v", err)
@@ -275,7 +275,7 @@ args = ["version"]
 	_, namespace, _ := seedRecognizedLegacyLeaseNamespace(t, []string{"existing.lease"}, false)
 
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9352,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -297,7 +297,7 @@ args = ["version"]
 	beforeRepeat := readSortedNames(t, namespace)
 
 	repeatPlan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9352,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: plan.Port,
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan repeat: %v", err)
@@ -331,7 +331,7 @@ args = ["version"]
 	t.Cleanup(func() { adoptLeaseNamespaceMigrationFailureHook = previous })
 
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9353,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -380,7 +380,7 @@ args = ["version"]
 	t.Cleanup(func() { adoptLeaseNamespaceMigrationFailureHook = previous })
 
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9354,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
@@ -479,7 +479,7 @@ args = ["version"]
 `)
 	stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, []string{"existing.lease"})
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
-		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9355,
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
