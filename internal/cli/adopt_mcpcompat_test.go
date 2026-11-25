@@ -42,7 +42,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {
 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9371", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
+	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("adopt: %v\n%s", err, out.String())
 	}
