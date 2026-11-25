@@ -245,6 +245,11 @@ func DialPipe(path string, timeout *time.Duration) (net.Conn, error) {
 	defer cancel()
 	conn, err := DialPipeContext(ctx, path)
 	if errors.Is(err, context.DeadlineExceeded) {
+		var acquired *PipeDialError
+		if errors.As(err, &acquired) {
+			// Preserve the original partial owner's close graph and both causes.
+			return conn, errors.Join(ErrTimeout, err)
+		}
 		return nil, ErrTimeout
 	}
 	return conn, err
@@ -273,26 +278,90 @@ func DialPipeAccess(ctx context.Context, path string, access uint32) (net.Conn, 
 	return DialPipeAccessImpLevel(ctx, path, access, PipeImpLevelAnonymous)
 }
 
+// PipeDialError retains the original handle owner when dial initialization
+// fails after CreateFile succeeds. Error alone, or a nil connection, does not
+// report closure; CloseResult receives the same original close observation.
+type PipeDialError struct {
+	self        *PipeDialError
+	owner       *win32File
+	receipt     *CloseReceipt
+	observerErr error
+	cause       error
+}
+
+func (e *PipeDialError) Error() string {
+	if e == nil || e.cause == nil {
+		return "winio: unissued pipe dial failure"
+	}
+	return e.cause.Error()
+}
+
+func (e *PipeDialError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// CloseResult never closes, retries, or rediscovers a handle. A zero, copied,
+// or substituted failure cannot issue the original owner's receipt.
+func (e *PipeDialError) CloseResult() (*CloseReceipt, error) {
+	if e == nil || e.self != e || e.owner == nil || e.receipt == nil {
+		return nil, errors.New("winio: original pipe dial close unavailable")
+	}
+	e.owner.wgLock.RLock()
+	same := e.owner.closing.Load() && e.owner.closeReceipt == e.receipt
+	e.owner.wgLock.RUnlock()
+	if !same {
+		return nil, errors.New("winio: original pipe dial close substituted")
+	}
+	return e.receipt, e.observerErr
+}
+
+// Keep the same metadata, initialization and original-close operations. The
+// package-local seams let tests fail after a real CreateFile without forging
+// a handle or adding another worker/timeout/cleanup controller.
+var (
+	pipeDialGetInfo   = getNamedPipeInfo
+	pipeDialInitFile  = (*win32File).initIOCompletion
+	pipeDialCloseFile = (*win32File).CloseObserved
+)
+
 // DialPipeAccessImpLevel attempts to connect to a named pipe by `path` with
 // `access` at `impLevel` until `ctx` cancellation or timeout. The other
 // DialPipe* implementations use PipeImpLevelAnonymous.
-func DialPipeAccessImpLevel(ctx context.Context, path string, access uint32, impLevel PipeImpLevel) (net.Conn, error) {
+func DialPipeAccessImpLevel(ctx context.Context, path string, access uint32, impLevel PipeImpLevel) (conn net.Conn, retErr error) {
 	var err error
 	var h windows.Handle
 	h, err = tryDialPipe(ctx, &path, fs.AccessMask(access), impLevel)
 	if err != nil {
 		return nil, err
 	}
+	// From this point there is exactly one original owner, including metadata
+	// and I/O initialization failures before a net.Conn can be returned.
+	f := &win32File{handle: h}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		receipt, observerErr := pipeDialCloseFile(f, ctx)
+		nativeErr, observed := receipt.NativeResult()
+		failure := &PipeDialError{owner: f, receipt: receipt, observerErr: observerErr, cause: errors.Join(retErr, observerErr, nativeErr)}
+		failure.self = failure
+		if !observed {
+			failure.cause = errors.Join(failure.cause, errors.New("winio: original pipe dial native close unobserved"))
+		}
+		retErr = failure
+	}()
 
 	var flags uint32
-	err = getNamedPipeInfo(h, &flags, nil, nil, nil)
+	err = pipeDialGetInfo(h, &flags, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := makeWin32File(h)
+	err = pipeDialInitFile(f)
 	if err != nil {
-		windows.Close(h)
 		return nil, err
 	}
 

@@ -13,6 +13,7 @@
 7. [Private controller H7742: Source и build](#private-controller-h7742-source-и-build)
 8. [Оставшаяся приёмка](#оставшаяся-приёмка)
 9. [Источники результатов](#источники-результатов)
+10. [Частичное открытие pipe: vendor follow-up](#частичное-открытие-pipe-vendor-follow-up)
 
 ## Состав и порядок включения
 
@@ -219,3 +220,49 @@ evidence records сохранены в рабочем архиве аудита
 12. Исторический `wave-upgrade-b01b496-1`: summary SHA-256 `80b1ba03c332fbf0fa60eee027584df91bed5db4669d9a1c4aad19e58a6fde92`, gates SHA-256 `663ac37a2370c2c80d7bf629daee62f040ea2542e3e80970f26a6432ec3f0334`.
 
 Новых PR или слияний этот перенос не создаёт. После согласованной публикации требуется точное чтение owner head; scoped receipts остаются привязанными к своим интеграционным исходникам.
+
+## Частичное открытие pipe: vendor follow-up
+
+Набор подготовлен поверх owner head `58bd738c0944cd2706a13bc96fea22ec5a422d45`. Это продолжение существующего #671; API-приёмка результата исходного соединения остаётся отдельным pinned overlay в #664 после #637, #659 и #671. В этот owner-набор входят только четыре vendor-пути из таблицы 7. Нового PR, механизма запуска или владельца native-процесса нет.
+
+Причина обнаружена в обычном error-return пути `DialPipeAccessImpLevel`: после успешного `CreateFile` ошибка чтения pipe metadata теряла исходный handle, а ошибка последующей инициализации отбрасывала результат его закрытия. Теперь сразу после `CreateFile` создаётся один исходный `win32File`. На промежуточном отказе он выполняет единственный `CloseObserved`; `PipeDialError.CloseResult` только принимает ту же квитанцию, сохраняя первичную ошибку и результат закрытия. Нулевое, скопированное или подменённое значение не выдаёт эту квитанцию.
+
+**Таблица 7. Узкий vendor-набор и проверяемое поведение.**
+
+| Путь в `third_party/go-winio/` | Изменение |
+|---|---|
+| `file.go` | Инициализация того же исходного объекта; uncertain handle хранится приватно в квитанции; `Fd` не выдаёт действующий handle после начала close |
+| `pipe.go` | Исходный owner до metadata; единственное observed close при normal-return отказе; timeout wrapper сохраняет совместимый `ErrTimeout` вместе с actual partial-close error graph |
+| `pipe_dial_close_observed_windows_test.go` | Три адресные регрессии: реальный post-open отказ metadata, управляемые точки отказа с тем же открытым handle и отказы до открытия; context API совместим с Go 1.21 |
+| `UPSTREAM.md` | Обновлённая граница локальной vendor-поправки и происхождение |
+
+Прежние callers `makeWin32File` сохраняют свою ответственность за error cleanup: автоматическое второе закрытие им не добавлено. Квитанция не предоставляет retry/reconnect/kill. Успешно принятое закрытие частично открытого ресурса остаётся обычным отказом; неизвестный либо неуспешный результат сохраняет исходный объект и причины для приёмки верхним владельцем.
+
+Первый scoped gate на integration `afdf474930da60080e9aa132a3a373fcf2009bab` завершился **BUILD FAIL / CLOSED** до выполнения vendor-тестов: retained module объявляет Go 1.21, а пять новых вызовов `testing.T.Context` требуют Go 1.24. Run `p02-coherent-afdf4-scoped-1` занял 52.095 s; receipt SHA-256 `c9d5b6c4a7e60e1df504abb3361487586fb24e1906fd6bbd8a7983051050ed50`. Этот FAIL сохранён.
+
+Исправление касается только нового test-файла: существующий шаблон `context.WithCancel(context.Background())` с `defer cancel()` сохраняет context до возврата root/subtest и отменяет его перед зарегистрированными cleanup. Предварительно отменённый контекст и прежняя истёкшая timeout-ветвь остаются отдельными негативными случаями. Assertions, исходное закрытие, версия модуля, vet и deadlines не менялись. Исходный vendor-патч и test-only поправка применяются последовательно [13–14].
+
+Root применил и форматировал согласованный Source `b6f82b3f531bb3eec197049167cdc5971b44e2b0`, tree `645ddcd88647b8c628ec966f037762886bd56b31`. Четыре итоговых vendor-файла независимо прочитаны; они совпадают с postimages publication manifest. Новый test-файл имеет SHA-256 `c48ebeb2e746927d1f536b3cf5f0f985599e4fc6a168f8dbe1eb912bd8d42d2e`. Source-apply run `p02-compile-fixture-source-1` принят CLOSED/PASS за 9.382942 s, receipt SHA-256 `f8ad51369da17a1c156825502d201d3272e9728b859f0dde5d18d1aa29a20fa1`; source apply не является native acceptance.
+
+**Адресный run `p02-coherent-b6f82-scoped-1` принят PASS / CLOSED на точном Source `b6f82b3…`.** Исходная receipt и пять полных JSONL stdout независимо прочитаны и хеш-проверены. Все десять original commands завершены с exit 0; native process/Job, handles и оба readers приняты закрытыми. Timeout и принудительного завершения не было. Controller занял 123.8721821 s; receipt SHA-256 `91d4dd78cca1e3c445c6330613f8bec3718216edf8cdc844210c14887e80f08a`.
+
+**Таблица 8. Полученные проверки согласованной композиции `b6f82b3…`.**
+
+| Выборка | Roots PASS / terminal PASS | Время команды, s | Результат |
+|---|---:|---:|---|
+| Vendor, новые dial tests и существующие close tests | 7 / 11 | 3.5447682 | PASS / CLOSED |
+| API, default | 109 / 135 | 30.6358586 | PASS / CLOSED |
+| API, `test_state_path_env` | 109 / 135 | 23.6797562 | PASS / CLOSED |
+| Router, default | 9 / 12 | 15.6682386 | PASS / CLOSED |
+| Router, `test_state_path_env` | 9 / 12 | 9.7948718 | PASS / CLOSED |
+| Windows CLI, `go test -c` | Тесты не исполнялись | 27.7024083 | Compile-only PASS / CLOSED |
+| Windows GUI, `go test -c` | Тесты не исполнялись | 12.0409485 | Compile-only PASS / CLOSED |
+
+Во всех пяти исполняемых выборках FAIL=0 и SKIP=0. API/router строки относятся к полной согласованной композиции и не присваивают эти файлы владельцу vendor. Windows CLI/GUI здесь только скомпилированы. Эти scoped-результаты не заменяют full literal gate, private prepared migration, live Serena или Product/P07 acceptance. Самостоятельный owner head #671 не исполнялся.
+
+Новые vendor roots: `TestPipeDialNativeMetadataRefusalClosesOriginal`, `TestPipeDialFailurePointsRetainOwnerAndAllCauses`, `TestPipeDialPreAcquireRefusalsHaveNoCloseOwner`. Первый использует реальный `CreateFile` и native metadata refusal на изолированном обычном файле; второй добавляет управляемые ошибки после реального открытия и единственного закрытия. Моделируемая ошибка close не является доказательством реального отказа Windows `CloseHandle`. Эти тесты не заменяют существующие named-pipe acceptance, приёмку native creator или same-run live Serena.
+
+Граница: normal-return ошибки после открытия, а не panic и не новые гарантии для unrelated listener/socket cleanup. Persisted schema, admission counts и старые результаты не изменены. Самостоятельная собираемость всего #671 до его прежних зависимостей не заявляется.
+
+13. `p02-pipe-dial-close.vendor.patch`, SHA-256 `a00dd7781f2b6958dd2441a278a4e9213f091ee56414eeb10afc602046873314`; исходный review manifest `p02-pipe-dial-close.manifest.json`, SHA-256 `f739437872796f05bfade2ad5bed6ebd746151974193d3d0fe2b7e813322f4ed`. Он также описывает отдельный API composition-тест, который не входит в эти четыре owner-файла.
+14. `p02-pipe-dial-go121.patch`, SHA-256 `22079cb28e703284ac3d286d7e3ed68ecdcb6b6fdf84f16d6337a4aed7ee5e59`; manifest `p02-pipe-dial-go121.manifest.json`, SHA-256 `5a82ad6a6ba0fbba26e51718a90ffdc3cf6333ed7801654e8cc552400f116a2d`.
