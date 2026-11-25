@@ -151,6 +151,67 @@ fn main() {
         fs::write(marker, report).expect("owned context report");
         return;
     }
+    #[cfg(windows)]
+    if mode == "console-probe" {
+        use windows_sys::Win32::{
+            System::{
+                Console::{AllocConsole, FreeConsole, GetConsoleWindow},
+                Threading::{GetStartupInfoW, STARTF_USESHOWWINDOW, STARTUPINFOW},
+            },
+            UI::WindowsAndMessaging::{IsWindowVisible, SW_HIDE},
+        };
+        // SAFETY: the native call fills this zeroed, writable startup structure.
+        let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        unsafe { GetStartupInfoW(&mut startup) };
+        // SAFETY: these observations concern only this original child process.
+        let initial = unsafe { GetConsoleWindow() };
+        let mut report = format!(
+            "console-probe-v1\n{} {} {} {}",
+            process::id(),
+            startup.dwFlags,
+            startup.wShowWindow,
+            initial as usize
+        );
+        // Refuse before any allocation when the original startup hide is absent.
+        let mut complete = startup.dwFlags & STARTF_USESHOWWINDOW != 0
+            && startup.wShowWindow == SW_HIDE as u16
+            && initial.is_null();
+        if complete {
+            // SAFETY: this child releases only its own console association.
+            // Establish AllocConsole's precondition; FreeConsole also succeeds
+            // when the process is already detached.
+            complete = unsafe { FreeConsole() } != 0;
+        }
+        if complete {
+            for _ in 0..2 {
+                // SAFETY: this child owns its console association. Never post-hide
+                // the observed window: visibility is measured before FreeConsole.
+                let allocated = unsafe { AllocConsole() };
+                let window = unsafe { GetConsoleWindow() };
+                let visible = unsafe { IsWindowVisible(window) };
+                let released = unsafe { FreeConsole() };
+                let after = unsafe { GetConsoleWindow() };
+                report.push_str(&format!(
+                    " {} {} {} {} {}",
+                    allocated, window as usize, visible, released, after as usize
+                ));
+                if allocated == 0
+                    || window.is_null()
+                    || visible != 0
+                    || released == 0
+                    || !after.is_null()
+                {
+                    complete = false;
+                    break;
+                }
+            }
+        }
+        fs::write(marker, report).expect("owned console observation report");
+        if !complete {
+            process::exit(94);
+        }
+        return;
+    }
     if mode == "stdio" || mode == "stdio-probe" {
         use std::io::{Read, Write};
         fs::write(&marker, b"reading").expect("owned readiness marker");
