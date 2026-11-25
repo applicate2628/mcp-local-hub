@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+	"golang.org/x/sys/windows"
 	"gopkg.in/yaml.v3"
 
 	"mcp-local-hub/internal/api"
@@ -126,13 +130,22 @@ func TestPrivateSerenaMigrationCompiledLaneMustMatchParent(t *testing.T) {
 
 func TestPrivateSerenaMigrationLedgerRequiresFixedSubtests(t *testing.T) {
 	roots, preparations, subtests := 0, 0, 0
+	outcomes := map[string]int{}
 	for _, root := range privateSerenaMigrationRoots {
 		roots++
 		preparations += root.Preparations
 		subtests += len(root.Subtests)
+		for index := 0; index < root.Preparations; index++ {
+			outcomes[root.outcome(index)]++
+		}
 	}
-	if roots != 14 || preparations != 15 || subtests != 4 {
+	if roots != 14 || preparations != 18 || subtests != 4 {
 		t.Fatalf("original mechanical inventory drifted: roots=%d preparations=%d subtests=%d", roots, preparations, subtests)
+	}
+	if !reflect.DeepEqual(outcomes, map[string]int{
+		privateSerenaMigrationInstalled: 15, privateSerenaMigrationAuditRefusal: 1, privateSerenaMigrationInterlockRefusal: 1, privateSerenaMigrationSpecRefusal: 1,
+	}) {
+		t.Fatalf("fixed operation outcomes drifted: %+v", outcomes)
 	}
 	root, err := privateSerenaMigrationRootFor("TestMigrateSerena_PostCommitTimeoutSupervisorNotAlive_FailsLoud")
 	if err != nil {
@@ -263,5 +276,66 @@ func TestPrivateSerenaMigrationManifestUsesOriginalCatalogPrefix(t *testing.T) {
 	}
 	if _, err := privateSerenaMigrationManifest(catalog, malformedManifestYAML); err == nil || !strings.Contains(err.Error(), "unlisted original") {
 		t.Fatalf("unlisted original DATA template accepted: %v", err)
+	}
+}
+
+// These are DATA/error-decision checks, not publisher or native proof.
+func TestPrivateSerenaMigrationExpectedAuditRefusalPreservesUnexpectedCauses(t *testing.T) {
+	original := &privateSerenaMigrationAuditFailure{}
+	install := errors.Join(fmt.Errorf("install audit: %w", original))
+	cleanup := errors.New("original invocation close failed")
+	for _, test := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"same-original", original, true},
+		{"wrapped-original", install, true},
+		{"different-injected-instance", &privateSerenaMigrationAuditFailure{}, false},
+		{"joined-close-failure", errors.Join(install, cleanup), false},
+		{"missing-original", cleanup, false},
+		{"missing-error", nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := privateSerenaMigrationOnlyCause(test.err, original); got != test.want {
+				t.Fatalf("same original audit cause only = %v, want %v: %v", got, test.want, test.err)
+			}
+		})
+	}
+	driver := errors.Join(install)
+	if !privateSerenaMigrationDriverInstallCause(driver, install) {
+		t.Fatal("original settled install refusal was not retained")
+	}
+	for _, err := range []error{errors.Join(install, cleanup), fmt.Errorf("%w; rollback also failed: %v", driver, cleanup)} {
+		if privateSerenaMigrationDriverInstallCause(err, install) {
+			t.Fatal("an additional cleanup/rollback failure became an expected audit refusal")
+		}
+	}
+}
+
+func TestPrivateSerenaMigrationForeignRefusalRequiresSettledBusyObservation(t *testing.T) {
+	original := flock.AcquisitionObservation{
+		Generation: 1, Attempted: true, Returned: true, FilesOpened: 1,
+		FileCloseAttempts: 1, FilesClosed: 1, AllocatedFilesClosed: true,
+		AcquireError: windows.ERROR_LOCK_VIOLATION,
+	}
+	if !privateSerenaMigrationForeignBusyAcquisition(original) {
+		t.Fatal("original settled busy acquisition was not retained")
+	}
+	for _, mutate := range []func(*flock.AcquisitionObservation){
+		func(a *flock.AcquisitionObservation) { a.Pending = true },
+		func(a *flock.AcquisitionObservation) { a.Error = errors.New("original opener close failed") },
+		func(a *flock.AcquisitionObservation) { a.FilesClosed = 0 },
+		func(a *flock.AcquisitionObservation) { a.AllocatedFilesClosed = false },
+		func(a *flock.AcquisitionObservation) { a.Held = true },
+		func(a *flock.AcquisitionObservation) {
+			a.AcquireError = errors.Join(windows.ERROR_LOCK_VIOLATION, errors.New("original close failed"))
+		},
+	} {
+		changed := original
+		mutate(&changed)
+		if privateSerenaMigrationForeignBusyAcquisition(changed) {
+			t.Fatal("an unexpected acquisition/close outcome became a busy refusal")
+		}
 	}
 }

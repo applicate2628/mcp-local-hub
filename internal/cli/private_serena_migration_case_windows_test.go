@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	gobuildinfo "debug/buildinfo"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"golang.org/x/sys/windows"
 
 	"mcp-local-hub/internal/api"
@@ -28,6 +30,7 @@ import (
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/scheduler"
 )
 
 type privateSerenaMigrationPin struct {
@@ -58,6 +61,7 @@ type privateSerenaMigrationCaseConfig struct {
 
 type privateSerenaMigrationOperation struct {
 	Test              string                              `json:"test"`
+	Outcome           string                              `json:"outcome"`
 	PrepareCalls      int                                 `json:"prepare_calls"`
 	NonemptyCalls     int                                 `json:"nonempty_prepare_calls"`
 	InstallCalls      int                                 `json:"install_calls"`
@@ -520,7 +524,7 @@ func runPrivateSerenaMigrationChild(t *testing.T, root privateSerenaMigrationRoo
 		t.Fatal(err)
 	}
 	record["child"] = child
-	if child.Schema != "private-serena-migration-child-v2" || !child.Complete || child.Root != root.Name ||
+	if child.Schema != "private-serena-migration-child-v3" || !child.Complete || child.Root != root.Name ||
 		child.InputSHA256 != artifact.SHA256 || !child.WorkEnd.Equal(workEnd) ||
 		int(child.Native.PID) != observed.RootIdentity.PID || child.Native.NativeBirthFILETIME != observed.RootIdentity.NativeBirthFILETIME ||
 		child.Native.NativeBirthFILETIME == 0 || child.Image.ImageSHA256 != loaded.Input.Image.SHA256 ||
@@ -533,9 +537,26 @@ func runPrivateSerenaMigrationChild(t *testing.T, root privateSerenaMigrationRoo
 		if len(root.Subtests) != 0 {
 			expectedTest += "/" + root.Subtests[i]
 		}
-		if operation.Test != expectedTest || !operation.OperationComplete || operation.NonemptyCalls < 1 || operation.InstallCalls != 1 || operation.IntentPath == "" ||
-			operation.ConstructorError != "" || operation.PrepareError != "" || operation.InstallError != "" || operation.CleanupError != "" {
-			t.Fatal("private migration original positive preparation/consumer did not complete")
+		if operation.Test != expectedTest || operation.Outcome != root.outcome(i) || !operation.OperationComplete ||
+			operation.PrepareCalls < operation.NonemptyCalls || operation.NonemptyCalls < 1 ||
+			operation.ConstructorError != "" || operation.PrepareError != "" || operation.CleanupError != "" {
+			t.Fatal("private migration original preparation/outcome receiving differs")
+		}
+		switch operation.Outcome {
+		case privateSerenaMigrationInstalled:
+			if operation.InstallCalls != 1 || operation.IntentPath == "" || operation.InstallError != "" {
+				t.Fatal("private migration original positive preparation/consumer did not complete")
+			}
+		case privateSerenaMigrationAuditRefusal, privateSerenaMigrationSpecRefusal:
+			if operation.InstallCalls != 1 || operation.IntentPath != "" || operation.InstallError == "" || operation.DriverError == "" {
+				t.Fatal("private migration original install refusal did not retain its install/driver errors")
+			}
+		case privateSerenaMigrationInterlockRefusal:
+			if operation.InstallCalls != 0 || operation.IntentPath != "" || operation.InstallError != "" || operation.DriverError == "" {
+				t.Fatal("private migration original pre-install refusal reached a consumer or lost its error")
+			}
+		default:
+			t.Fatal("private migration received an undeclared operation outcome")
 		}
 		if root.Name == privateSerenaNativeConsumerRoot {
 			if operation.PrepareCalls != 1 || operation.NonemptyCalls != 1 || operation.DriverError != "" {
@@ -723,7 +744,7 @@ func receivePrivateSerenaMigrationCase(t *testing.T, root privateSerenaMigration
 		privateSerenaMigrationFailStop(c, "child-current-image-validation", err)
 	}
 	c.frame = privateSerenaMigrationChildFrame{
-		Schema: "private-serena-migration-child-v2", Root: root.Name, InputSHA256: config.Input.SHA256, WorkEnd: workEnd,
+		Schema: "private-serena-migration-child-v3", Root: root.Name, InputSHA256: config.Input.SHA256, WorkEnd: workEnd,
 		Native: native.NativeSnapshot(), Image: image.Snapshot(), Operations: []privateSerenaMigrationOperation{}, Seeds: []privateSerenaMigrationArtifact{},
 	}
 	if c.frame.Image.ImageSHA256 != input.Image.SHA256 || c.frame.Image.SourceEpoch != input.SourceEpoch || !c.frame.Image.ResourcesClosed {
@@ -814,6 +835,11 @@ func (c *privateSerenaMigrationCase) SeedManifest(t *testing.T, directory, origi
 
 func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	t.Helper()
+	return c.run(t, output, nil)
+}
+
+func (c *privateSerenaMigrationCase) run(t *testing.T, output io.Writer, refusal *privateSerenaMigrationRefusal) error {
+	t.Helper()
 	if c == nil {
 		return runMigrateSerenaDynamicPool(context.Background(), output)
 	}
@@ -846,6 +872,11 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	expectedUVX, expectedErr := os.Stat(c.loaded.Input.UVX.Path)
 	if err != nil || uvxErr != nil || expectedErr != nil || !os.SameFile(actualUVX, expectedUVX) {
 		return errors.Join(errors.New("private migration uvx preflight differs from its pinned candidate"), err, uvxErr, expectedErr)
+	}
+	expectedOutcome := c.root.outcome(len(c.frame.Operations))
+	if expectedOutcome == "" || (refusal == nil && expectedOutcome != privateSerenaMigrationInstalled) ||
+		(refusal != nil && (refusal.outcome != expectedOutcome || expectedOutcome == privateSerenaMigrationInstalled)) {
+		privateSerenaMigrationFailStop(c, "undeclared-operation-outcome", errors.New("private migration operation differs from its fixed inventory"))
 	}
 	operation := privateSerenaMigrationOperation{Test: t.Name()}
 	c.frame.Operations = append(c.frame.Operations, operation)
@@ -882,6 +913,7 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	originalOperation := deps.newInstallOperation
 	var consumerOperation migrateSerenaInstallOperation
 	var installedWorkspaces []api.WorkspaceEntry
+	var originalInstallErr error
 	deps.newInstallOperation = func(a *api.API) (migrateSerenaInstallOperation, error) {
 		original, err := originalOperation(a)
 		// These original closures retain the prepared pointer and its
@@ -909,6 +941,7 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 				consumerOperation = original
 				installedWorkspaces = append([]api.WorkspaceEntry(nil), opts.Workspaces...)
 				path, installErr, cleanupErr := original.install(ctx, manifest, opts)
+				originalInstallErr = installErr
 				current.IntentPath = path
 				if installErr != nil {
 					current.InstallError = installErr.Error()
@@ -916,7 +949,8 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 				if cleanupErr != nil {
 					current.CleanupError = cleanupErr.Error()
 				}
-				if installErr != nil || cleanupErr != nil {
+				if cleanupErr != nil || (installErr != nil && (refusal == nil || (refusal.outcome != privateSerenaMigrationAuditRefusal && refusal.outcome != privateSerenaMigrationSpecRefusal) ||
+					!privateSerenaMigrationOnlyCause(installErr, refusal.cause))) {
 					c.blocked = errors.Join(installErr, cleanupErr)
 					privateSerenaMigrationFailStop(c, "original-consumer-install-close", c.blocked)
 				}
@@ -925,15 +959,46 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 		}, nil
 	}
 	driverErr := runMigrateSerenaDynamicPoolWithDeps(c.ctx, output, deps)
+	var interlockCloseErr *migrateSerenaInterlockCloseError
+	if errors.As(driverErr, &interlockCloseErr) {
+		c.blocked = driverErr
+		privateSerenaMigrationFailStop(c, "original-supervisor-interlock-close", driverErr)
+	}
 	if driverErr != nil {
 		current.DriverError = driverErr.Error()
 	}
 	current.OperationComplete = current.NonemptyCalls > 0 && current.InstallCalls == 1 && current.IntentPath != "" &&
 		current.ConstructorError == "" && current.PrepareError == "" && current.InstallError == "" && current.CleanupError == ""
-	if !current.OperationComplete {
-		c.blocked = errors.Join(driverErr, errors.New("private migration original positive operation did not receive its terminal install/close"))
-		privateSerenaMigrationFailStop(c, "unreceived-positive-operation", c.blocked)
+	if refusal != nil {
+		// The same original Prepare receives FinishPreparation, validates its close
+		// and binds this owner before returning. An unused prepared selection has
+		// no consumer to close; never invent an invocation just to accept a refusal.
+		owner, ownerErr := installer.PreparedSerenaConsumerOwner()
+		common := owner != nil && ownerErr == nil && current.NonemptyCalls > 0 && current.IntentPath == "" &&
+			current.ConstructorError == "" && current.PrepareError == "" && current.CleanupError == "" && refusal.cause != nil
+		switch refusal.outcome {
+		case privateSerenaMigrationAuditRefusal, privateSerenaMigrationSpecRefusal:
+			current.OperationComplete = common && current.InstallCalls == 1 && current.InstallError != "" &&
+				privateSerenaMigrationOnlyCause(originalInstallErr, refusal.cause) && privateSerenaMigrationDriverInstallCause(driverErr, originalInstallErr)
+			if refusal.outcome == privateSerenaMigrationSpecRefusal {
+				current.OperationComplete = current.OperationComplete && refusal.apiError != nil && originalInstallErr == refusal.apiError
+			}
+		case privateSerenaMigrationInterlockRefusal:
+			// Retain the exact returned acquisition error and the observed busy
+			// result; a matching diagnostic string never proves settled contention.
+			// A second wrapper would carry an unexpected outer rollback failure.
+			current.OperationComplete = common && current.InstallCalls == 0 && current.InstallError == "" &&
+				privateSerenaMigrationForeignBusyOwner(refusal.interlock) && privateSerenaMigrationInterlockClosed(refusal.interlock) &&
+				errors.Is(driverErr, refusal.cause) && errors.Unwrap(driverErr) == refusal.cause
+		default:
+			current.OperationComplete = false
+		}
 	}
+	if !current.OperationComplete {
+		c.blocked = errors.Join(driverErr, errors.New("private migration original operation did not receive its declared terminal outcome/close"))
+		privateSerenaMigrationFailStop(c, "unreceived-operation-outcome", c.blocked)
+	}
+	current.Outcome = expectedOutcome
 	if c.root.Name == privateSerenaNativeConsumerRoot {
 		if driverErr != nil || current.PrepareCalls != 1 || current.NonemptyCalls != 1 || len(installedWorkspaces) != 1 {
 			c.blocked = errors.Join(driverErr, errors.New("private migration native consumer requires its one original completed preparation and install"))
@@ -951,4 +1016,267 @@ func (c *privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	// Late supervisor/readiness errors are the original assertions' subject.
 	// The separate completed operation allows the second original table case.
 	return driverErr
+}
+
+// These declarations are test outcomes, never publication or cleanup authority.
+// Only the fixed inventory selects either refusal; original owners still issue
+// every preparation, invocation and close result used by run above.
+type privateSerenaMigrationRefusal struct {
+	outcome   string
+	cause     error
+	apiError  error
+	interlock *migrateSerenaInterlock
+}
+
+type privateSerenaMigrationAuditFailure struct{ original byte }
+
+func (*privateSerenaMigrationAuditFailure) Error() string {
+	return "private migration injected server-install audit failure"
+}
+
+// A second joined cause may be an original cleanup failure. Preserve and reject
+// it even when errors.Is would still find the expected injected audit failure.
+func privateSerenaMigrationOnlyCause(err, original error) bool {
+	return original != nil && privateSerenaMigrationSoleCause(err) == original
+}
+
+func privateSerenaMigrationSoleCause(err error) error {
+	for depth := 0; err != nil && depth < 32; depth++ {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			causes := joined.Unwrap()
+			if len(causes) != 1 {
+				return nil
+			}
+			err = causes[0]
+		} else if cause := errors.Unwrap(err); cause != nil {
+			err = cause
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+// This is DATA classification of the original one-attempt Windows observation.
+// A contender-close error, cancellation or another native cause is not busy.
+func privateSerenaMigrationForeignBusyAcquisition(a flock.AcquisitionObservation) bool {
+	return a.Generation != 0 && a.Attempted && a.Returned && !a.Held && !a.Pending && a.Error == nil &&
+		a.AcquireError == windows.ERROR_LOCK_VIOLATION && a.FilesOpened > 0 &&
+		a.FilesOpened == a.FileCloseAttempts && a.FilesOpened == a.FilesClosed && a.AllocatedFilesClosed
+}
+
+func privateSerenaMigrationForeignBusyOwner(interlock *migrateSerenaInterlock) bool {
+	return interlock != nil && interlock.original != nil &&
+		privateSerenaMigrationForeignBusyAcquisition(interlock.original.AcquisitionObservation())
+}
+
+func privateSerenaMigrationInterlockClosed(interlock *migrateSerenaInterlock) bool {
+	if interlock == nil || interlock.original == nil || interlock.closed == nil {
+		return false
+	}
+	a, closed := interlock.original.AcquisitionObservation(), interlock.closed.Snapshot()
+	if a.Held {
+		return interlock.closed.Validate(interlock.original) == nil
+	}
+	return closed.Generation == a.Generation && closed.AcquisitionReturned && closed.AllocatedFilesClosed && !closed.Pending && closed.Error == nil
+}
+
+func privateSerenaMigrationDriverInstallCause(driver, install error) bool {
+	if driver == nil || install == nil {
+		return false
+	}
+	if driver == install {
+		return true
+	}
+	joined, ok := driver.(interface{ Unwrap() []error })
+	if !ok {
+		return false
+	}
+	causes := joined.Unwrap()
+	return len(causes) == 1 && causes[0] == install
+}
+
+// VerifyRefusal adds one fresh operation after the existing positive body. Each
+// operation has its own namespace/API/preparation; no failed action is retried.
+func (c *privateSerenaMigrationCase) VerifyRefusal(t *testing.T, outcome string) {
+	t.Helper()
+	if c == nil || c.root.outcome(len(c.frame.Operations)) != outcome ||
+		(outcome != privateSerenaMigrationAuditRefusal && outcome != privateSerenaMigrationInterlockRefusal && outcome != privateSerenaMigrationSpecRefusal) {
+		t.Fatal("private migration refusal requires its fixed original case")
+	}
+	stateDir, manifestDir := c.Env(t)
+	manifestPath := c.SeedManifest(t, manifestDir, legacy2DaemonManifestYAML)
+	workspace := c.TempDir(t)
+	seedSerenaWorkspaceWithPort(t, workspace, 9150)
+	registryPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := make(map[string][]byte)
+	for _, path := range []string{manifestPath, registryPath} {
+		before[path], err = os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	if _, err := os.Stat(intentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("negative fixture requires an absent original intent: %v", err)
+	}
+
+	refusal := &privateSerenaMigrationRefusal{outcome: outcome}
+	audits := &recordingAuditWriter{}
+	if outcome == privateSerenaMigrationAuditRefusal {
+		refusal.cause = &privateSerenaMigrationAuditFailure{}
+		audits.failActions = map[string]error{api.AuditActionServerInstall: refusal.cause}
+	}
+	installRecordingAuditFromCLITest(t, audits)
+	schedulerCalls, installCalls, acquireCalls, reapCalls, startCalls, restoreCalls := 0, 0, 0, 0, 0, 0
+	var originalInterlock *migrateSerenaInterlock
+	var originalBypass api.InstallParsedManifestBypass
+	defer api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		schedulerCalls++
+		return nil, errors.New("negative workspace install must not acquire a scheduler")
+	})()
+	defer stubSupervisorRunning(t, func() (bool, error) { return false, nil })()
+	defer stubStartSupported(t, func() bool { return true })()
+	defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) { return &api.MigrateReport{}, nil })()
+	defer stubRestoreReconcile(t, func(*api.MigrateReport) error { restoreCalls++; return nil })()
+	defer stubReap(t, func(context.Context, io.Writer) error { reapCalls++; return nil })()
+	defer stubStart(t, func(context.Context, io.Writer) error { startCalls++; return nil })()
+	defer stubInstall(t, func(ctx context.Context, installer *api.API, manifest *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		installCalls++
+		if outcome != privateSerenaMigrationSpecRefusal {
+			return installer.InstallParsedManifest(ctx, manifest, opts)
+		}
+		if originalInterlock == nil || originalInterlock.closed != nil || opts.SerenaPreparedInvocation == nil ||
+			originalBypass == (api.InstallParsedManifestBypass{}) || opts.SupervisorLockBypass != originalBypass {
+			return "", errors.New("private API refusal lost its original held lock/token/prepared invocation")
+		}
+		// This is the only changed install input. The original prepared owner,
+		// admitted Product operand, context, workspace selection and held lock
+		// remain the same; missing authorization must reach the real API gate.
+		opts.SupervisorLockBypass = api.InstallParsedManifestBypass{}
+		path, apiErr := installer.InstallParsedManifest(ctx, manifest, opts)
+		refusal.apiError = apiErr
+		refusal.cause = privateSerenaMigrationSoleCause(apiErr)
+		return path, apiErr
+	})()
+	defer stubAcquireInterlock(t, func(ctx context.Context) (*migrateSerenaInterlock, error) {
+		acquireCalls++
+		interlock, acquireErr := realInterlockAcquire(ctx)
+		if outcome == privateSerenaMigrationSpecRefusal && interlock != nil && acquireErr == nil {
+			originalInterlock = interlock
+			borrowOriginal := interlock.borrow
+			interlock.borrow = func(ctx context.Context, body func(api.InstallParsedManifestBypass) error) error {
+				return borrowOriginal(ctx, func(token api.InstallParsedManifestBypass) error {
+					originalBypass = token
+					return body(token)
+				})
+			}
+		}
+		if outcome == privateSerenaMigrationInterlockRefusal && acquireErr != nil && privateSerenaMigrationForeignBusyOwner(interlock) {
+			refusal.cause, refusal.interlock = acquireErr, interlock
+		}
+		return interlock, acquireErr
+	})()
+
+	var foreign *api.SupervisorLock
+	if outcome == privateSerenaMigrationInterlockRefusal {
+		lockPath := filepath.Join(stateDir, "supervisor.lock")
+		lock, acquisition, acquireErr := api.AcquireSupervisorLockQuietObserved(c.Context(), lockPath)
+		foreign = lock
+		if acquireErr != nil || foreign == nil || !acquisition.Held {
+			privateSerenaMigrationFailStop(struct {
+				Case *privateSerenaMigrationCase
+				Lock *api.SupervisorLock
+			}{c, foreign}, "original-foreign-lock-acquisition", acquireErr)
+		}
+		defer func() {
+			closed, closeErr := foreign.ReleaseQuietObserved()
+			if closeErr != nil || !closed.Complete || closed.Pending || !closed.AllocatedFilesClosed || closed.Generation != acquisition.Generation {
+				privateSerenaMigrationFailStop(struct {
+					Case *privateSerenaMigrationCase
+					Lock *api.SupervisorLock
+				}{c, foreign}, "original-foreign-lock-close", closeErr)
+			}
+		}()
+	}
+
+	var output bytes.Buffer
+	err = c.run(t, &output, refusal)
+	if err == nil || !errors.Is(err, refusal.cause) {
+		t.Fatalf("expected the exact original %s cause, got %v (output=%s)", outcome, err, output.String())
+	}
+	if schedulerCalls != 0 || reapCalls != 0 || startCalls != 0 || acquireCalls != 1 || restoreCalls != 1 {
+		t.Fatalf("negative side effects: scheduler=%d reap=%d start=%d acquire=%d restore=%d", schedulerCalls, reapCalls, startCalls, acquireCalls, restoreCalls)
+	}
+	installAudits := 0
+	for _, entry := range audits.entries {
+		if entry.Action == api.AuditActionServerInstall {
+			installAudits++
+			if entry.Task != api.SerenaTaskNameForWorkspace(workspace) {
+				t.Fatalf("refused audit names another workspace: %+v", entry)
+			}
+		}
+	}
+	switch outcome {
+	case privateSerenaMigrationAuditRefusal:
+		var injected *privateSerenaMigrationAuditFailure
+		if !errors.As(err, &injected) || injected != refusal.cause || installCalls != 1 || installAudits != 1 {
+			t.Fatalf("audit refusal did not cross exactly one real prepared API install: install=%d audit=%d error=%v", installCalls, installAudits, err)
+		}
+	case privateSerenaMigrationInterlockRefusal:
+		if installCalls != 0 || installAudits != 0 {
+			t.Fatalf("foreign lock refusal reached install/audit: install=%d audit=%d", installCalls, installAudits)
+		}
+		if err := foreign.ValidateQuietObservedHeld(c.Context(), filepath.Join(stateDir, "supervisor.lock")); err != nil {
+			t.Fatalf("original foreign holder did not remain held through the refusal: %v", err)
+		}
+	case privateSerenaMigrationSpecRefusal:
+		if installCalls != 1 || installAudits != 0 || !privateSerenaMigrationInterlockClosed(originalInterlock) || refusal.apiError == nil || !errors.Is(err, refusal.apiError) {
+			t.Fatalf("API refusal lost its one real callback/error/original observed close: install=%d audit=%d error=%v", installCalls, installAudits, err)
+		}
+		for _, want := range []string{"refusing to write spec-bearing", "supervisor is running", "STOP the running supervisor", "§7.1"} {
+			if !strings.Contains(refusal.apiError.Error(), want) {
+				t.Fatalf("actual API refusal lost operator guidance %q: %v", want, refusal.apiError)
+			}
+		}
+		raw, readErr := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		refused := 0
+		for _, line := range bytes.Split(raw, []byte{'\n'}) {
+			if len(bytes.TrimSpace(line)) == 0 {
+				continue
+			}
+			var event api.SupervisorEvent
+			if err := json.Unmarshal(line, &event); err != nil {
+				t.Fatalf("decode actual supervisor event: %v", err)
+			}
+			if event.Event == "spec-bearing-write-allowed-under-caller-lock" {
+				t.Fatal("the zero-token API call unexpectedly received the positive bypass event")
+			}
+			if event.Event == "spec-bearing-install-refused" {
+				refused++
+				if event.SchemaVersion != api.SupervisorEventSchemaVersion || event.Source != "install" || event.Severity != api.SupervisorEventSeverityWarn ||
+					event.Body["server"] != "serena" || event.Body["reason"] != "supervisor-running" {
+					t.Fatalf("API refusal event names a different branch: %+v", event)
+				}
+			}
+		}
+		if refused != 1 {
+			t.Fatalf("actual API section 7.1 refusal events = %d, want exactly one", refused)
+		}
+	}
+	if _, err := os.Stat(intentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused operation changed the absent intent: %v", err)
+	}
+	for path, original := range before {
+		actual, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(actual, original) {
+			t.Fatalf("refused operation changed %s: %v", path, err)
+		}
+	}
 }

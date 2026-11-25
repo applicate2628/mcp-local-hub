@@ -44,3 +44,8 @@ func (*privateSerenaMigrationCase) Run(t *testing.T, output io.Writer) error {
 	t.Helper()
 	return runMigrateSerenaDynamicPool(context.Background(), output)
 }
+
+func (*privateSerenaMigrationCase) VerifyRefusal(t *testing.T, _ string) {
+	t.Helper()
+	t.Fatal("private Serena migration refusal qualification requires Windows")
+}

@@ -54,6 +54,7 @@ type privateSerenaMigrationRoot struct {
 	Name         string
 	Preparations int
 	Subtests     []string
+	Outcomes     []string
 }
 
 // This inventory is the original fourteen bodies, not a run-prefix selection.
@@ -75,9 +76,29 @@ var privateSerenaMigrationRoots = []privateSerenaMigrationRoot{
 	{Name: "TestMigrateSerena_NoRunningSupervisor_SkipsReap_WritesAndStarts", Preparations: 1},
 	{Name: "TestMigrateSerena_ConcurrentRegisterInWindow_AppearsInCommittedIntent", Preparations: 1},
 	{Name: "TestMigrateSerena_EmptyFirstSnapshot_WorkspaceRegisteredInWindow_RecomputesStart", Preparations: 1},
-	{Name: "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut", Preparations: 1},
+	{Name: "TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut", Preparations: 2, Outcomes: []string{privateSerenaMigrationInstalled, privateSerenaMigrationAuditRefusal}},
 	{Name: "TestMigrateSerena_EmptyFirstSnapshot_SupervisorRunning_LateReapClearsGate", Preparations: 1},
-	{Name: "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow", Preparations: 1},
+	{Name: "TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow", Preparations: 3, Outcomes: []string{privateSerenaMigrationInstalled, privateSerenaMigrationInterlockRefusal, privateSerenaMigrationSpecRefusal}},
+}
+
+const (
+	privateSerenaMigrationInstalled        = "installed"
+	privateSerenaMigrationAuditRefusal     = "audit-refused-before-intent"
+	privateSerenaMigrationInterlockRefusal = "foreign-lock-refused-before-install"
+	privateSerenaMigrationSpecRefusal      = "api-spec-bearing-refused-without-token"
+)
+
+func (root privateSerenaMigrationRoot) outcome(index int) string {
+	if index < 0 || index >= root.Preparations {
+		return ""
+	}
+	if len(root.Outcomes) == 0 {
+		return privateSerenaMigrationInstalled
+	}
+	if len(root.Outcomes) != root.Preparations {
+		return ""
+	}
+	return root.Outcomes[index]
 }
 
 func privateSerenaMigrationRootFor(name string) (privateSerenaMigrationRoot, error) {

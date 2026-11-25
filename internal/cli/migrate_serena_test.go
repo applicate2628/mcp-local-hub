@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/scheduler"
 )
 
 func TestLoadSerenaManifestForMigrateCarriesExactRawHash(t *testing.T) {
@@ -439,7 +441,8 @@ weekly_refresh: false
 `
 
 // alreadyMigratedManifestYAML is the dynamic-pool target shape (daemon_template
-// present, no daemons[]).
+// present, no daemons[]). Its explicit nondefault context distinguishes source
+// propagation from the legacy dynamic-pool fallback, codex.
 const alreadyMigratedManifestYAML = `name: serena
 kind: workspace-scoped
 transport: native-http
@@ -449,7 +452,7 @@ base_args:
   - git+https://example/serena
   - serena
 daemon_template:
-  context: codex
+  context: ide-assistant
   port_pool:
     start: 9150
     end: 9199
@@ -662,39 +665,46 @@ func stubStartSupported(t *testing.T, fn func() bool) func() {
 // host. realInterlockAcquire below is the canonical stub: it acquires the REAL
 // supervisor.lock on the gate's exact path (api.DaemonStateDir()), matching the
 // Windows production binding cross-platform.
-func stubAcquireInterlock(t *testing.T, fn func() (*api.SupervisorLock, func(), error)) func() {
+func stubAcquireInterlock(t *testing.T, fn func(context.Context) (*migrateSerenaInterlock, error)) func() {
 	t.Helper()
 	orig := acquireSupervisorInterlockFn
 	acquireSupervisorInterlockFn = fn
 	return func() { acquireSupervisorInterlockFn = orig }
 }
 
-// realInterlockAcquire is a cross-platform stand-in for the Windows production
-// interlock binding (defaultAcquireSupervisorInterlock): it acquires the REAL
-// supervisor.lock on the §7.1 gate's exact path — filepath.Join(
-// api.DaemonStateDir(), "supervisor.lock") — via the QUIET acquire (flock only,
-// NO owner-sidecar write, matching production after bot PR #276 finding 1) and
-// returns the handle plus an idempotent release. Using it as the acquire stub lets
-// the lock-semantics tests (a contender's direct AcquireSupervisorLock must fail
-// while held; the bypass token must pass the gate; a concurrent reap must read the
-// OLD supervisor's intact sidecar rather than the migrate's PID) run identically on
-// Windows and POSIX CI.
-func realInterlockAcquire() (*api.SupervisorLock, func(), error) {
+// realInterlockAcquire uses the production observed owner on Windows. POSIX
+// caller fixtures retain the historical quiet real-lock adapter, without a native
+// observed-close claim. Neither form overwrites the supervisor owner sidecar.
+func realInterlockAcquire(ctx context.Context) (*migrateSerenaInterlock, error) {
+	if runtime.GOOS == "windows" {
+		return defaultAcquireMigrateSerenaInterlock(ctx)
+	}
+	// Portable caller fixtures retain the historical real-lock adapter. The
+	// observed single-attempt native owner is Windows-only; these tests do not
+	// claim its native close proof on POSIX.
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return nil, func() {}, err
+		return nil, err
 	}
 	lock, err := api.AcquireSupervisorLockQuiet(filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
-		return nil, func() {}, err
+		return nil, err
 	}
 	released := false
-	return lock, func() {
-		if released {
-			return
-		}
-		released = true
-		lock.Release()
+	return &migrateSerenaInterlock{
+		borrow: func(ctx context.Context, body func(api.InstallParsedManifestBypass) error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return body(lock.AllowSpecBearingWriteBypass())
+		},
+		close: func() error {
+			if !released {
+				released = true
+				lock.Release()
+			}
+			return nil
+		},
 	}, nil
 }
 
@@ -772,6 +782,13 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 		return
 	}
 	stateDir, manifestDir := migrationCase.Env(t)
+	// Prepared workspace installation has no scheduler work. An unavailable
+	// backend must not be acquired just to commit the supervisor descriptors.
+	schedulerCalls := 0
+	defer api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		schedulerCalls++
+		return nil, errors.New("scheduler unavailable in prepared workspace install")
+	})()
 	// CATALOG is ALREADY dynamic-pool shape (daemon_template present, no
 	// daemons[]) → detectSerenaSourceState classifies it serenaSourceAlreadyMigrated.
 	migrationCase.SeedManifest(t, manifestDir, alreadyMigratedManifestYAML)
@@ -819,6 +836,10 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 		t.Fatalf("catalog-dynamic-pool + runtime-missing must PROCEED with the migration; got error: %v", err)
 	}
 
+	if schedulerCalls != 0 {
+		t.Errorf("scheduler factory calls = %d, want 0 for a prepared workspace install", schedulerCalls)
+	}
+
 	// The migration must have PROCEEDED: reconcile + reap + start all fired (the
 	// full cutover sequence), NOT a no-op.
 	if !reconcileInvoked || !reapInvoked || !startInvoked {
@@ -838,6 +859,17 @@ func TestMigrateSerena_CatalogDynamicPool_RuntimeLegacyMissing_Proceeds(t *testi
 	}
 	if !intent.HasRuntimeSpecRow() {
 		t.Errorf("cutover must write a spec-bearing serena intent for the registered workspace; got %+v", intent.Daemons)
+	}
+	// Receive the actual prepared spec from disk, retaining the nondefault
+	// source context declared by alreadyMigratedManifestYAML. The legacy
+	// RegistryDrift scenario separately retains the codex fallback oracle.
+	row := intent.FindSupervisorDaemonByTaskName(api.SerenaTaskNameForWorkspace(ws))
+	if row == nil || row.RuntimeSpec == nil {
+		t.Fatalf("prepared intent lacks the selected workspace runtime spec: %+v", row)
+	}
+	args := row.RuntimeSpec.ChildArgs
+	if len(args) < 2 || args[len(args)-2] != "--context" || args[len(args)-1] != "ide-assistant" {
+		t.Errorf("prepared child args must end with source context ide-assistant: %v", args)
 	}
 }
 
@@ -1580,6 +1612,13 @@ func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
 	// Seed a PRE-EXISTING supervisor-intent.json carrying a nil-spec serena
 	// row for the same workspace (the pre-RuntimeSpec on-disk state §7).
 	taskName := api.SerenaTaskNameForWorkspace(ws)
+	// A legacy workspace scheduler task may still exist. The prepared install
+	// must neither prune it nor create/run tasks before supervisor reconciliation.
+	legacyTask := scheduler.TaskStatus{Name: taskName}
+	sch := &upgradeRoutingFakeScheduler{tasks: []scheduler.TaskStatus{legacyTask}}
+	defer api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return sch, nil
+	})()
 	preIntent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{{
@@ -1641,6 +1680,13 @@ func TestMigrateSerena_NilSpecRowsHealedBeforeSpawn(t *testing.T) {
 	}
 	if !healed {
 		t.Fatal("expected at least one healed serena row with a fresh RuntimeSpec")
+	}
+	if sch.mutationCalls != 0 {
+		t.Errorf("scheduler mutation calls = %d, want 0 (no create/run/prune during prepared install)", sch.mutationCalls)
+	}
+	remaining, listErr := sch.List("mcp-local-hub-serena-")
+	if listErr != nil || !reflect.DeepEqual(remaining, []scheduler.TaskStatus{legacyTask}) {
+		t.Errorf("legacy workspace task changed during prepared install: tasks=%+v err=%v", remaining, listErr)
 	}
 	if !specBearingAtStart {
 		t.Errorf("the row must be healed BEFORE the supervisor start/spawn (was nil-spec at start time)")
@@ -2861,16 +2907,73 @@ func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
 	// CATALOG is still legacy — only the runtime intent says dynamic-pool.
 	migrationCase.SeedManifest(t, manifestDir, legacy2DaemonManifestYAML)
 
-	// Two serena workspaces in the CURRENT registry, both rooted at existing dirs.
+	// Two live registered workspaces have distinct allocated ports. A third
+	// registered path is already absent before preparation and must be warned
+	// about and excluded from the same prepared descriptor selection.
 	wsCovered := migrationCase.TempDir(t)
 	wsDrifted := migrationCase.TempDir(t)
-	seedSerenaWorkspace(t, wsCovered)
-	seedSerenaWorkspace(t, wsDrifted)
+	wsStale := filepath.Join(migrationCase.TempDir(t), "removed-workspace")
+	seedSerenaWorkspaceWithPort(t, wsCovered, 9150)
+	seedSerenaWorkspaceWithPort(t, wsDrifted, 9151)
+	seedSerenaWorkspaceWithPort(t, wsStale, 9152)
 
-	// Committed intent covers ONLY wsCovered → wsDrifted is registry drift (a
-	// workspace registered after the initial cutover, present in the registry but
-	// missing from the intent).
-	seedDynamicPoolIntentForWorkspaces(t, stateDir, wsCovered)
+	// Prior intent also covers a workspace no longer in the registry. One real
+	// prepared install must add wsDrifted, retain wsCovered, and drop wsDropped.
+	wsDropped := migrationCase.TempDir(t)
+	seedDynamicPoolIntentForWorkspaces(t, stateDir, wsCovered, wsDropped)
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	prior, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("read prior intent: %v", err)
+	}
+	coveredTask := api.SerenaTaskNameForWorkspace(wsCovered)
+	droppedTask := api.SerenaTaskNameForWorkspace(wsDropped)
+	sibling := api.SupervisorDaemon{
+		TaskName: "\\mcp-local-hub-other-default",
+		Server:   "other",
+		Daemon:   "default",
+		Command:  "other",
+		Port:     9128,
+	}
+	prior.Daemons = append(prior.Daemons, sibling)
+	disabled := false
+	targetTimer := api.MaintenanceTimer{
+		Name:    "\\mcp-local-hub-serena-weekly-refresh",
+		Kind:    "server-weekly-refresh",
+		Server:  "serena",
+		Command: "mcphub.exe",
+		Args:    []string{"restart", "--server", "serena"},
+		Enabled: &disabled,
+	}
+	siblingTimer := api.MaintenanceTimer{
+		Name:    "\\mcp-local-hub-other-weekly-refresh",
+		Kind:    "server-weekly-refresh",
+		Server:  "other",
+		Command: "mcphub.exe",
+		Args:    []string{"restart", "--server", "other"},
+	}
+	prior.MaintenanceTimers = []api.MaintenanceTimer{targetTimer, siblingTimer}
+	stop := api.DaemonIntent{Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop, UpdatedAt: time.Unix(1700000000, 0).UTC()}
+	prior.Stops = map[string]api.DaemonIntent{
+		coveredTask:      stop,
+		droppedTask:      stop,
+		sibling.TaskName: stop,
+	}
+	prior.LegacyStopWatermarks = map[string]api.DaemonIntent{
+		coveredTask:      stop,
+		droppedTask:      stop,
+		sibling.TaskName: stop,
+	}
+	// Seed the legacy data without normalizing it: the admitted install below
+	// must prune the removed row and normalize retained redundant watermarks.
+	if err := api.WriteStateFileAtomic(intentPath, prior); err != nil {
+		t.Fatalf("seed prior stop and watermark data: %v", err)
+	}
+
+	// Observe the existing audit append seam. These serialized DATA entries
+	// prove per-workspace emission; they do not qualify durable audit IO.
+	audits := &recordingAuditWriter{}
+	installRecordingAuditFromCLITest(t, audits)
 
 	// Model a HEALTHY supervisor: without the finding-#2 drift check this would
 	// short-circuit to the genuine no-op (the strongest proof the re-fanout is
@@ -2892,9 +2995,25 @@ func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
 	defer stubReap(t, func(ctx context.Context, w io.Writer) error { reapInvoked = true; return nil })()
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error { startInvoked = true; return nil })()
 
+	// Retain the two-workspace no-spawn and returned-path oracles from the
+	// former unprepared API fan-out test on this actual prepared install.
+	fanoutScheduler := &upgradeRoutingFakeScheduler{}
+	defer api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return fanoutScheduler, nil
+	})()
+	defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+		path, err := a.InstallParsedManifest(ctx, m, opts)
+		if err == nil && path != intentPath {
+			t.Errorf("prepared fan-out returned intent path %q, want %q", path, intentPath)
+		}
+		return path, err
+	})()
 	var buf bytes.Buffer
 	if err := migrationCase.Run(t, &buf); err != nil {
 		t.Fatalf("drift re-fanout must succeed; got error: %v (out=%s)", err, buf.String())
+	}
+	if fanoutScheduler.mutationCalls != 0 {
+		t.Errorf("prepared two-workspace fan-out mutated scheduler tasks: calls=%d", fanoutScheduler.mutationCalls)
 	}
 	// THE finding #2 guard: drift drives a re-fanout (install runs), NOT a no-op.
 	if !reconcileInvoked || !reapInvoked || !startInvoked {
@@ -2909,26 +3028,137 @@ func TestMigrateSerena_AlreadyMigrated_RegistryDrift_RefansOut(t *testing.T) {
 	}
 	// The committed intent now carries a daemon row for BOTH workspaces (the drifted
 	// one landed).
-	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
 		t.Fatalf("read re-fanned intent: %v", err)
 	}
-	want := map[string]bool{
-		api.SerenaTaskNameForWorkspace(wsCovered): false,
-		api.SerenaTaskNameForWorkspace(wsDrifted): false,
+	want := map[string]struct {
+		workspace string
+		port      int
+	}{
+		api.SerenaTaskNameForWorkspace(wsCovered): {workspace: wsCovered, port: 9150},
+		api.SerenaTaskNameForWorkspace(wsDrifted): {workspace: wsDrifted, port: 9151},
 	}
+	if len(intent.Daemons) != len(want)+1 {
+		t.Errorf("prepared fan-out rows = %d, want two Serena rows and exactly one retained sibling: %+v", len(intent.Daemons), intent.Daemons)
+	}
+	seen := make(map[string]bool)
 	for _, d := range intent.Daemons {
-		if d.Server == "serena" {
-			if _, ok := want[d.TaskName]; ok {
-				want[d.TaskName] = true
+		if d.Server != "serena" {
+			continue
+		}
+		expected, ok := want[d.TaskName]
+		if !ok {
+			t.Errorf("unexpected Serena task %q after re-fanout", d.TaskName)
+			continue
+		}
+		if seen[d.TaskName] {
+			t.Errorf("duplicate Serena task %q after re-fanout", d.TaskName)
+		}
+		seen[d.TaskName] = true
+		if d.Workspace != expected.workspace || d.Port != expected.port {
+			t.Errorf("task %q workspace/port = %q/%d, want %q/%d", d.TaskName, d.Workspace, d.Port, expected.workspace, expected.port)
+		}
+		spec := d.RuntimeSpec
+		if spec == nil {
+			t.Errorf("task %q has no prepared runtime spec", d.TaskName)
+			continue
+		}
+		if spec.SpecVersion != api.SerenaPreparedRuntimeSpecVersion || spec.PreparedRuntime == nil {
+			t.Errorf("task %q lacks its prepared runtime binding: %+v", d.TaskName, spec)
+		}
+		if spec.WorkspacePath != expected.workspace || spec.ExternalPort != expected.port ||
+			spec.UpstreamPort != expected.port+config.NativeHTTPInternalPortOffset {
+			t.Errorf("task %q runtime workspace/ports differ: %+v", d.TaskName, spec)
+		}
+		// This legacy source uses the dynamic-pool default context, codex.
+		n := len(spec.ChildArgs)
+		if n < 2 || spec.ChildArgs[n-2] != "--context" || spec.ChildArgs[n-1] != "codex" {
+			t.Errorf("task %q child args must end with --context codex: %v", d.TaskName, spec.ChildArgs)
+		}
+		projectArgs := 0
+		for i, arg := range spec.ChildArgs {
+			if arg != "--project" {
+				continue
+			}
+			projectArgs++
+			if i+1 >= n || spec.ChildArgs[i+1] != expected.workspace {
+				t.Errorf("task %q child project differs from its workspace: %v", d.TaskName, spec.ChildArgs)
 			}
 		}
+		if projectArgs != 1 {
+			t.Errorf("task %q has %d --project arguments, want one: %v", d.TaskName, projectArgs, spec.ChildArgs)
+		}
 	}
-	if !want[api.SerenaTaskNameForWorkspace(wsDrifted)] {
+	if len(seen) != len(want) {
+		t.Errorf("matched Serena tasks = %d, want %d", len(seen), len(want))
+	}
+	if !seen[api.SerenaTaskNameForWorkspace(wsDrifted)] {
 		t.Errorf("the drifted workspace %q must land in the re-fanned intent; daemons=%+v", wsDrifted, intent.Daemons)
 	}
-	if !want[api.SerenaTaskNameForWorkspace(wsCovered)] {
+	if !seen[api.SerenaTaskNameForWorkspace(wsCovered)] {
 		t.Errorf("the already-covered workspace %q must remain in the re-fanned intent; daemons=%+v", wsCovered, intent.Daemons)
+	}
+	if intent.FindSupervisorDaemonByTaskName(api.SerenaTaskNameForWorkspace(wsStale)) != nil {
+		t.Errorf("stale registered workspace %q survived the re-fanout", wsStale)
+	}
+	if !strings.Contains(buf.String(), "stale workspace") || !strings.Contains(buf.String(), filepath.Base(wsStale)) {
+		t.Errorf("missing operator-visible warning for stale workspace %q: %s", wsStale, buf.String())
+	}
+	auditCounts := make(map[string]int)
+	for _, entry := range audits.entries {
+		if entry.Action != api.AuditActionServerInstall {
+			continue
+		}
+		if _, ok := want[entry.Task]; !ok {
+			t.Errorf("server-install audit names a task outside the live Serena selection: %+v", entry)
+		}
+		auditCounts[entry.Task]++
+	}
+	for task := range want {
+		if auditCounts[task] != 1 {
+			t.Errorf("server-install audit entries for %q = %d, want one", task, auditCounts[task])
+		}
+	}
+	if len(intent.MaintenanceTimers) != 2 {
+		t.Errorf("maintenance timers = %d, want both prior timers: %+v", len(intent.MaintenanceTimers), intent.MaintenanceTimers)
+	}
+	timersByName := make(map[string]api.MaintenanceTimer)
+	for _, timer := range intent.MaintenanceTimers {
+		timersByName[timer.Name] = timer
+	}
+	for _, expected := range []api.MaintenanceTimer{targetTimer, siblingTimer} {
+		if actual, ok := timersByName[expected.Name]; !ok || !reflect.DeepEqual(actual, expected) {
+			t.Errorf("prior maintenance timer %q changed: got %+v, want %+v", expected.Name, actual, expected)
+		}
+	}
+	if timer := timersByName[targetTimer.Name]; timer.Enabled == nil || *timer.Enabled {
+		t.Errorf("target maintenance timer lost its explicit operator-disabled setting: %+v", timer)
+	}
+
+	if intent.FindSupervisorDaemonByTaskName(droppedTask) != nil {
+		t.Errorf("dropped workspace %q survived the re-fanout: %+v", wsDropped, intent.Daemons)
+	}
+	if got := intent.FindSupervisorDaemonByTaskName(sibling.TaskName); got == nil || !reflect.DeepEqual(*got, sibling) {
+		t.Errorf("sibling descriptor changed during Serena re-fanout: %+v", got)
+	}
+	if _, ok := intent.Stops[droppedTask]; ok {
+		t.Errorf("dropped workspace stop %q survived: %+v", droppedTask, intent.Stops)
+	}
+	for _, task := range []string{coveredTask, sibling.TaskName} {
+		if got, ok := intent.Stops[task]; !ok || !reflect.DeepEqual(got, stop) {
+			t.Errorf("retained stop %q changed: got %+v, want %+v", task, got, stop)
+		}
+	}
+	for _, task := range []string{droppedTask, coveredTask, sibling.TaskName} {
+		if _, ok := intent.LegacyStopWatermarks[task]; ok {
+			t.Errorf("removed or redundant legacy watermark %q survived: %+v", task, intent.LegacyStopWatermarks)
+		}
+	}
+	// This case receives the prepared intent write. Its modeled reap/start does
+	// not prove live-supervisor retained-removal completion in the same run.
+	if migrationCase != nil && !t.Failed() {
+		migrationCase.VerifyRefusal(t, "audit-refused-before-intent")
 	}
 }
 
@@ -3502,14 +3732,21 @@ func TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(t *test
 	// opts, which carries the bypass token) so the spec-bearing write commits.
 	concurrentAcquireBlocked := false
 	concurrentProbed := false
+	var installedPath string
 	restoreInstall := stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
 		concurrentProbed = true
+		running, _, probeErr := api.SupervisorRunningUnderStateDir(stateDir)
+		if probeErr != nil || !running {
+			t.Errorf("original held interlock must be observed as running before the prepared write: running=%v err=%v", running, probeErr)
+		}
 		if lk, acqErr := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock")); acqErr != nil {
 			concurrentAcquireBlocked = true
 		} else {
 			lk.Release() // should not happen; release so we don't wedge other tests
 		}
-		return a.InstallParsedManifest(ctx, m, opts)
+		var installErr error
+		installedPath, installErr = a.InstallParsedManifest(ctx, m, opts)
+		return installedPath, installErr
 	})
 	defer restoreInstall()
 	defer stubStart(t, func(ctx context.Context, w io.Writer) error { return nil })()
@@ -3517,6 +3754,9 @@ func TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(t *test
 	var buf bytes.Buffer
 	if err := migrationCase.Run(t, &buf); err != nil {
 		t.Fatalf("migrate must succeed (the bypass token clears the §7.1 gate under the caller's own lock); got error: %v (out=%s)", err, buf.String())
+	}
+	if want := filepath.Join(stateDir, "supervisor-intent.json"); installedPath == "" || installedPath != want {
+		t.Fatalf("prepared bypass returned intent path %q, want %q", installedPath, want)
 	}
 	if !concurrentProbed {
 		t.Fatal("the install seam must have run (the window-probe point)")
@@ -3536,6 +3776,12 @@ func TestMigrateSerena_Interlock_BlocksConcurrentSupervisorStartInWindow(t *test
 	// The audit log records the verified bypass.
 	if log := readInterlockEventsLog(t, stateDir); !strings.Contains(log, "spec-bearing-write-allowed-under-caller-lock") {
 		t.Errorf("expected the verified-bypass audit event; log=%s", log)
+	}
+	if migrationCase != nil && !t.Failed() {
+		migrationCase.VerifyRefusal(t, "foreign-lock-refused-before-install")
+		if !t.Failed() {
+			migrationCase.VerifyRefusal(t, "api-spec-bearing-refused-without-token")
+		}
 	}
 }
 
@@ -3638,9 +3884,9 @@ func TestMigrateSerena_Interlock_ReleasedOnRecoveryStartBranch(t *testing.T) {
 	defer stubSupervisorHealthy(t, func() (bool, error) { return false, nil })()
 	// If the interlock seam is ever called on this path, fail loud — the early
 	// recovery start must NOT acquire it.
-	defer stubAcquireInterlock(t, func() (*api.SupervisorLock, func(), error) {
+	defer stubAcquireInterlock(t, func(context.Context) (*migrateSerenaInterlock, error) {
 		t.Fatalf("the interlock must NOT be acquired on the early recovery-start branch (acquire is post-step-7)")
-		return nil, func() {}, nil
+		return nil, nil
 	})()
 	// The early recovery start must see NO interlock held (acquirable).
 	lockAcquirableInEarlyStart := false
@@ -3845,11 +4091,13 @@ func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) 
 		if installs != 1 {
 			t.Fatalf("start ran before the real intent commit: installs=%d", installs)
 		}
-		_, release, err := realInterlockAcquire()
+		interlock, err := realInterlockAcquire(ctx)
+		if interlock != nil {
+			err = errors.Join(err, interlock.close())
+		}
 		if err != nil {
 			t.Fatalf("handoff start still holds the migration interlock: %v", err)
 		}
-		release()
 		migrateSerenaHandoffWindowFn("reconcile-ready-retry")
 		return nil
 	})()
@@ -4157,12 +4405,16 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 				return tc.livenessAlive, tc.livenessErr
 			})()
 			var order []string
-			defer stubAcquireInterlock(t, func() (*api.SupervisorLock, func(), error) {
-				lock, release, err := realInterlockAcquire()
-				return lock, func() {
-					order = append(order, "interlock-release")
-					release()
-				}, err
+			defer stubAcquireInterlock(t, func(ctx context.Context) (*migrateSerenaInterlock, error) {
+				interlock, err := realInterlockAcquire(ctx)
+				if interlock != nil {
+					closeOriginal := interlock.close
+					interlock.close = func() error {
+						order = append(order, "interlock-release")
+						return closeOriginal()
+					}
+				}
+				return interlock, err
 			})()
 			defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) {
 				return &api.MigrateReport{}, nil
@@ -4182,11 +4434,13 @@ func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
 				if ctx.Err() != nil {
 					t.Fatalf("migration start received cancelled migration ctx: %v", ctx.Err())
 				}
-				_, release, lockErr := realInterlockAcquire()
+				interlock, lockErr := realInterlockAcquire(ctx)
+				if interlock != nil {
+					lockErr = errors.Join(lockErr, interlock.close())
+				}
 				if lockErr != nil {
 					t.Fatalf("postcommit start still holds the migration interlock: %v", lockErr)
 				}
-				release()
 				return tc.startErr
 			})()
 

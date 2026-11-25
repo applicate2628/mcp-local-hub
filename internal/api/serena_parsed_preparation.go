@@ -38,7 +38,7 @@ func (a *API) PrepareSerenaParsedInstall(ctx context.Context, m *config.ServerMa
 	if a == nil || m == nil || !IsSerenaServer(m.Name) || m.Kind != config.KindWorkspaceScoped || m.DaemonTemplate == nil {
 		return nil, errors.New("SERENA_PARSED_PREPARATION_SCOPE_INVALID")
 	}
-	if opts.DryRun || opts.SupervisorLockBypass.lk != nil || opts.SerenaPreparedBinding != nil || opts.SerenaPreparedInvocation != nil {
+	if opts.DryRun || opts.SupervisorLockBypass.supplied() || opts.SerenaPreparedBinding != nil || opts.SerenaPreparedInvocation != nil {
 		return nil, errors.New("SERENA_PARSED_PREPARATION_REQUIRES_UNLOCKED_CALLER")
 	}
 	if opts.Workspaces == nil || !preparedSerenaDigest(opts.ManifestHash) {
@@ -223,7 +223,7 @@ func (prepared *PreparedSerenaParsedInstall) acquireConsumerInvocation(work cont
 		}
 	}
 	var runtimeProduct *InstallParsedManifestBypass
-	if bypass.lk != nil {
+	if bypass.supplied() {
 		runtimeProduct = &bypass
 	}
 	image, err := resolveInstallRuntimeProduct(runtimeProduct)

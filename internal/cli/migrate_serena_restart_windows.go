@@ -118,39 +118,9 @@ func defaultMigrateSerenaStartSupported() bool {
 	return true
 }
 
-// defaultAcquireSupervisorInterlock is the Windows production binding for
-// acquireSupervisorInterlockFn. It acquires supervisor.lock on the EXACT leaf the
-// §7.1 install gate probes — filepath.Join(api.DaemonStateDir(), "supervisor.lock")
-// (install_parsed_manifest.go:342's gateLockPath resolver) — so the held-lock path
-// equals the gate-probed path and the typed bypass token (AllowSpecBearingWriteBypass)
-// passes the gate's IDENTITY check.
-//
-// It uses the QUIET acquire (api.AcquireSupervisorLockQuiet — flock only, NO
-// owner-sidecar write), NOT api.AcquireSupervisorLock (bot PR #276 finding 1). The
-// full acquire overwrites supervisor.lock.owner.json with THIS CLI process's PID;
-// the reap primitive (ForceKillSupervisor / QuiesceTimers / ExitGraceful) reads
-// that sidecar to choose the PID it taskkills / IPC-handshakes against, so a
-// sidecar-overwriting acquire makes a concurrent serena auto-register reap target
-// the migrate process instead of the old supervisor. The quiet acquire leaves the
-// sidecar pointing at the OLD supervisor (or absent), so every reap targets the
-// correct PID, while the flock still provides the reap→write→start mutual
-// exclusion. The quiet handle still has .fl + .path set, so it mints a valid §7.1
-// bypass token (the gate identity check needs only those, not the sidecar).
-//
-// HIGHEST-PRIORITY invariant: the path MUST be api.DaemonStateDir(), NOT
-// stateDirFunc(). stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE for the cli's own
-// audit-log path, but the §7.1 gate inside InstallParsedManifest resolves its
-// stateDir via api.DaemonStateDir(); a mismatch would acquire a DIFFERENT lock
-// leaf than the gate probes, so the gate's identity check would REJECT the bypass
-// (probe runs → fail-closed) and the migrate would re-open the very split-brain
-// this interlock prevents. (The Phase-1 in-gate path-mismatch guard is the
-// backstop, but the call site must still hard-code the right resolver.)
-//
-// It returns the live lock HANDLE (so the driver mints the bypass token) and an
-// IDEMPOTENT release closure (the driver calls release at multiple start sites; a
-// second call is a harmless no-op because (*SupervisorLock).Release() nils its
-// flock). A non-nil error means a foreign supervisor — or a concurrent serena
-// cutover — already holds the lock.
+// defaultAcquireSupervisorInterlock retains the existing auto-register callback
+// contract used by GUI wiring. That separate owner still uses legacy Release;
+// migration uses the observed adapter below. Both target the same quiet leaf.
 func defaultAcquireSupervisorInterlock() (*api.SupervisorLock, func(), error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
@@ -163,6 +133,43 @@ func defaultAcquireSupervisorInterlock() (*api.SupervisorLock, func(), error) {
 	var once sync.Once
 	release := func() { once.Do(lock.Release) }
 	return lock, release, nil
+}
+
+// defaultAcquireMigrateSerenaInterlock borrows the exact supervisor.lock.lock leaf
+// without writing the owner sidecar. The existing observed state-file lease owns
+// the single native attempt, any partial acquisition, entered borrow, close and
+// poison ledger. This adapter only carries that owner's results to the driver.
+func defaultAcquireMigrateSerenaInterlock(ctx context.Context) (*migrateSerenaInterlock, error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve state-dir for the supervisor.lock interlock: %w", err)
+	}
+	lease, acquireErr := api.TryAcquireStateFileObservedLease(ctx, filepath.Join(stateDir, "supervisor.lock"))
+	if lease == nil {
+		return nil, acquireErr
+	}
+	interlock := &migrateSerenaInterlock{original: lease}
+	interlock.borrow = func(ctx context.Context, body func(api.InstallParsedManifestBypass) error) error {
+		return lease.WithSupervisorLockBypass(ctx, stateDir, body)
+	}
+	interlock.close = func() error {
+		closed, closeErr := lease.CloseObserved()
+		interlock.closed = closed
+		if closed == nil {
+			return errors.Join(closeErr, errors.New("original supervisor interlock close observation missing"))
+		}
+		before, after := lease.AcquisitionObservation(), closed.Snapshot()
+		if before.Held {
+			return errors.Join(closeErr, closed.Validate(lease))
+		}
+		// A refused attempt may already have closed its allocated opener. It
+		// still returns the same original owner's one-shot close observation.
+		if after.Generation != before.Generation || !after.AcquisitionReturned || !after.AllocatedFilesClosed || after.Pending {
+			return errors.Join(closeErr, errors.New("partial supervisor interlock acquisition did not settle"))
+		}
+		return closeErr
+	}
+	return interlock, acquireErr
 }
 
 // defaultMigrateSerenaSupervisorHealthy is the Windows production health probe
